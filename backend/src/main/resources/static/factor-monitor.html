@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>因子计算进度监控</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'PingFang SC',sans-serif;background:#0a0e1a;color:#e2e8f0;min-height:100vh}
+        .header{background:linear-gradient(135deg,#111827,#0a0e1a);border-bottom:1px solid #1e293b;padding:16px 32px;display:flex;align-items:center;justify-content:space-between}
+        .header-left{display:flex;align-items:center;gap:14px}
+        .header h1{font-size:20px;font-weight:600;background:linear-gradient(90deg,#38bdf8,#818cf8);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+        .live-dot{width:8px;height:8px;background:#22c55e;border-radius:50%;animation:pulse 1.5s infinite}
+        @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+        .header-right{display:flex;align-items:center;gap:14px}
+        .time{color:#64748b;font-size:13px}
+        select,button{background:#1e293b;border:1px solid #334155;color:#e2e8f0;padding:5px 12px;border-radius:6px;font-size:13px;cursor:pointer}
+        select:hover,button:hover{border-color:#38bdf8}
+        .container{padding:20px 32px;max-width:1440px;margin:0 auto}
+        .stats-row{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:20px}
+        .stat-card{background:#111827;border:1px solid #1e293b;border-radius:10px;padding:16px;transition:border-color .3s}
+        .stat-card:hover{border-color:#38bdf8}
+        .stat-label{color:#64748b;font-size:12px;margin-bottom:6px}
+        .stat-value{font-size:26px;font-weight:700}
+        .blue{color:#38bdf8}.green{color:#22c55e}.amber{color:#f59e0b}.purple{color:#a78bfa}
+        .stat-sub{color:#475569;font-size:11px;margin-top:4px}
+        .panels{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
+        .panel{background:#111827;border:1px solid #1e293b;border-radius:10px;padding:18px}
+        .panel-title{font-size:14px;font-weight:600;color:#94a3b8;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid #1e293b}
+        .chart-wrap{position:relative;height:200px}
+        table{width:100%;border-collapse:collapse}
+        th{text-align:left;color:#475569;font-size:11px;font-weight:500;padding:6px 10px;text-transform:uppercase;letter-spacing:.5px}
+        td{padding:8px 10px;font-size:13px;border-top:1px solid #111827}
+        tr:hover td{background:rgba(56,189,248,.04)}
+        .bar-bg{background:#1e293b;border-radius:4px;height:6px;width:100px;display:inline-block;vertical-align:middle;overflow:hidden}
+        .bar-fill{height:100%;border-radius:4px;transition:width .8s ease}
+        .badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:500}
+        .badge-run{background:rgba(34,197,94,.15);color:#22c55e;border:1px solid rgba(34,197,94,.3)}
+        .badge-wait{background:rgba(245,158,11,.15);color:#f59e0b;border:1px solid rgba(245,158,11,.3)}
+        .badge-done{background:rgba(56,189,248,.15);color:#38bdf8;border:1px solid rgba(56,189,248,.3)}
+        .log-panel{grid-column:1/-1}
+        .log-list{max-height:160px;overflow-y:auto;font-family:'Fira Code','Consolas',monospace;font-size:12px;color:#64748b}
+        .log-list::-webkit-scrollbar{width:5px}
+        .log-list::-webkit-scrollbar-thumb{background:#334155;border-radius:3px}
+        .log-entry{padding:3px 0}
+        .log-ts{color:#334155;margin-right:10px}
+        .conn-ok{color:#22c55e;font-size:12px}
+        .conn-err{color:#ef4444;font-size:12px}
+        .factor-code{font-weight:600;font-size:13px}
+        .date-text{color:#94a3b8;font-size:12px;font-family:'Fira Code',monospace}
+        .records-text{font-family:'Fira Code',monospace;color:#cbd5e1}
+        .pct-text{color:#64748b;font-size:11px;margin-left:6px}
+    </style>
+</head>
+<body>
+<div class="header">
+    <div class="header-left">
+        <div class="live-dot"></div>
+        <h1>因子计算进度监控</h1>
+    </div>
+    <div class="header-right">
+        <span class="time" id="clock"></span>
+        <select id="interval" onchange="resetTimer()">
+            <option value="5000">5s</option>
+            <option value="10000" selected>10s</option>
+            <option value="30000">30s</option>
+            <option value="60000">60s</option>
+        </select>
+        <button onclick="refresh()">刷新</button>
+        <span id="conn" class="conn-ok">● 已连接</span>
+    </div>
+</div>
+<div class="container">
+    <div class="stats-row">
+        <div class="stat-card">
+            <div class="stat-label">总记录数</div>
+            <div class="stat-value blue" id="sTotal">--</div>
+            <div class="stat-sub" id="sTargetHint">目标 ~1,637万</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">计算中</div>
+            <div class="stat-value green" id="sRun">--</div>
+            <div class="stat-sub">/ 10 核心因子</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">已完成</div>
+            <div class="stat-value blue" id="sDone">--</div>
+            <div class="stat-sub">进度 ≥ 305 交易日</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">写入速度</div>
+            <div class="stat-value purple" id="sSpd">--</div>
+            <div class="stat-sub">条/秒</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">预计剩余</div>
+            <div class="stat-value amber" id="sEta">--</div>
+            <div class="stat-sub" id="sEtaSub">等待数据...</div>
+        </div>
+    </div>
+    <div class="panels">
+        <div class="panel">
+            <div class="panel-title">📈 数据量趋势</div>
+            <div class="chart-wrap"><canvas id="chart"></canvas></div>
+        </div>
+        <div class="panel">
+            <div class="panel-title">📊 因子详情</div>
+            <table>
+                <thead><tr><th>因子</th><th>类型</th><th>记录数</th><th>交易日</th><th>最新日期</th><th>进度</th><th>状态</th></tr></thead>
+                <tbody id="tbody"></tbody>
+            </table>
+        </div>
+        <div class="panel log-panel">
+            <div class="panel-title">📋 刷新日志</div>
+            <div class="log-list" id="logs"><div class="log-entry">等待数据...</div></div>
+        </div>
+    </div>
+</div>
+
+<script>
+const FACTORS = [
+    {code:'MOM20',name:'20日动量',type:'技术',c:'#38bdf8'},
+    {code:'MOM60',name:'60日动量',type:'技术',c:'#38bdf8'},
+    {code:'VOL20',name:'20日波动率',type:'技术',c:'#38bdf8'},
+    {code:'RSI14',name:'14日RSI',type:'技术',c:'#38bdf8'},
+    {code:'MACD',name:'MACD',type:'技术',c:'#38bdf8'},
+    {code:'SIZE',name:'市值因子',type:'技术',c:'#a78bfa'},
+    {code:'FIN_ROE',name:'净资产收益率',type:'财务',c:'#22c55e'},
+    {code:'FIN_REVENUE_YOY',name:'营收同比',type:'财务',c:'#22c55e'},
+    {code:'FIN_NET_PROFIT_YOY',name:'净利润同比',type:'财务',c:'#22c55e'},
+    {code:'FIN_EARNINGS_YIELD',name:'盈利收益率',type:'财务',c:'#22c55e'},
+];
+const TARGET_DAYS = 310;
+const TARGET_STOCKS = 5280;
+let FULL_PER_FACTOR = TARGET_DAYS * TARGET_STOCKS; // 动态调整
+let TARGET_TOTAL = FULL_PER_FACTOR * 10;
+
+// 动态确定 API base（兼容从 8080 或 3000 访问）
+const API = 'http://localhost:8081/api'; // 独立 Python 监控 API，绕过 Spring 后端避免连接池争用
+
+let timer=null, speedSamples=[], const SPEED_WINDOW=6;
+
+// === Chart ===
+const chart = new Chart(document.getElementById('chart').getContext('2d'), {
+    type:'line',
+    data:{labels:[],datasets:[
+        {label:'总记录(万)',data:[],borderColor:'#38bdf8',backgroundColor:'rgba(56,189,248,.08)',fill:true,tension:.4,pointRadius:2,borderWidth:2},
+        {label:'计算中',data:[],borderColor:'#22c55e',backgroundColor:'transparent',tension:.4,pointRadius:2,borderWidth:2,yAxisID:'y1'}
+    ]},
+    options:{
+        responsive:true,maintainAspectRatio:false,
+        interaction:{intersect:false,mode:'index'},
+        plugins:{legend:{labels:{color:'#64748b',font:{size:10}}}},
+        scales:{
+            x:{ticks:{color:'#334155',font:{size:9}},grid:{color:'#111827'}},
+            y:{position:'left',ticks:{color:'#38bdf8',font:{size:9},callback:v=>(v/10000).toFixed(0)+'万'},grid:{color:'#111827'},beginAtZero:true},
+            y1:{position:'right',ticks:{color:'#22c55e',font:{size:9}},grid:{display:false},min:0,max:10}
+        }
+    }
+});
+
+// === Helpers ===
+function fmt(n){ return n>=10000?(n/10000).toFixed(1)+'万':n.toLocaleString() }
+
+function pct(cnt){ return Math.min(100, cnt/FULL_PER_FACTOR*100) }
+
+function bar(p,c){ return `<div class="bar-bg"><div class="bar-fill" style="width:${p}%;background:${c}"></div></div><span class="pct-text">${p.toFixed(0)}%</span>` }
+
+// === Fetch ===
+async function fetchData(){
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 120000); // 120s timeout for large table GROUP BY
+    const r = await fetch(`${API}/factors/monitor`, { signal: controller.signal });
+    clearTimeout(timeout);
+    const j = await r.json();
+    if(j.code!==200) throw new Error(j.message);
+    return j.data; // {totalRecords, factors:[{factorCode,recordCount,earliestDate,latestDate,tradingDays,stockCount},...]}
+}
+
+// === Render ===
+function render(data){
+    const total = data.totalRecords || 0;
+    const rawFactors = data.factors || [];
+    // Build map: factor_code -> stats
+    const map = {};
+    rawFactors.forEach(f => { map[f.factor_code] = f; });
+
+    // 动态校准：用已完成因子的最大记录数作为 FULL_PER_FACTOR
+    let maxDone = 0;
+    rawFactors.forEach(f => {
+        if (f.days && f.days >= TARGET_DAYS - 5 && f.cnt > maxDone) maxDone = f.cnt;
+    });
+    if (maxDone > 0) {
+        FULL_PER_FACTOR = maxDone;
+        TARGET_TOTAL = FULL_PER_FACTOR * 10;
+    }
+
+    let running=0, done=0;
+    const tbody = document.getElementById('tbody');
+    tbody.innerHTML = '';
+
+    FACTORS.forEach(f => {
+        const s = map[f.code] || {};
+        const cnt = s.cnt || 0;
+        const days = s.days || 0;
+        const latest = s.max_date || null;
+        const p = pct(cnt);
+        // 判断完成：交易日数达标 OR 进度到99%（兼容两种基准）
+        const isRunning = cnt>0 && p<99 && days < TARGET_DAYS - 5;
+        const isDone = cnt>0 && (p>=99 || (days > 0 && days >= TARGET_DAYS - 5));
+        if(isRunning) running++;
+        if(isDone) done++;
+
+        const badge = isDone ? '<span class="badge badge-done">已完成</span>'
+                    : isRunning ? '<span class="badge badge-run">计算中</span>'
+                    : '<span class="badge badge-wait">排队中</span>';
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td class="factor-code" style="color:${f.c}">${f.code}</td>
+            <td style="color:#64748b">${f.type}</td>
+            <td class="records-text">${fmt(cnt)}</td>
+            <td class="records-text">${days}</td>
+            <td class="date-text">${latest||'--'}</td>
+            <td>${bar(p,f.c)}</td>
+            <td>${badge}</td>`;
+        tbody.appendChild(tr);
+    });
+
+    document.getElementById('sTotal').textContent = fmt(total);
+    document.getElementById('sRun').textContent = running;
+    document.getElementById('sDone').textContent = done;
+    document.getElementById('sTargetHint').textContent = '目标 ~' + fmt(TARGET_TOTAL);
+
+    // Speed & ETA — 滑动窗口平均，解决批量写入导致间歇性 0 的问题
+    const now = Date.now();
+    speedSamples.push({t: now, v: total});
+    if(speedSamples.length > SPEED_WINDOW) speedSamples.shift();
+    let spd = 0;
+    if(speedSamples.length >= 2){
+        const first = speedSamples[0], last = speedSamples[speedSamples.length-1];
+        const dt = (last.t - first.t) / 1000;
+        if(dt > 0) spd = Math.max(0, Math.round((last.v - first.v) / dt));
+    }
+    document.getElementById('sSpd').textContent = spd > 0 ? fmt(spd) : '0';
+    const rem = TARGET_TOTAL - total;
+    if(spd>0 && rem>0){
+        const sec = Math.round(rem/spd);
+        const mm = Math.floor(sec/60);
+        document.getElementById('sEta').textContent = mm>=60 ? Math.floor(mm/60)+'时'+(mm%60)+'分' : mm+'分';
+        document.getElementById('sEtaSub').textContent = '剩余 '+fmt(rem)+' 条';
+    } else {
+        document.getElementById('sEta').textContent = rem<=0?'✓':'--';
+        document.getElementById('sEtaSub').textContent = rem<=0?'全部完成!': spd===0?'数据写入中...':'等待数据...';
+    }
+
+    // Chart
+    const ts = new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    chart.data.labels.push(ts);
+    chart.data.datasets[0].data.push(total);
+    chart.data.datasets[1].data.push(running);
+    if(chart.data.labels.length>40){chart.data.labels.shift();chart.data.datasets[0].data.shift();chart.data.datasets[1].data.shift();}
+    chart.update('none');
+
+    addLog(`总计 ${fmt(total)} | 计算${running} 完成${done} | 速度 ${document.getElementById('sSpd').textContent}/s`);
+    document.getElementById('conn').innerHTML='<span class="conn-ok">● 已连接</span>';
+}
+
+function addLog(msg){
+    const el=document.getElementById('logs');
+    const ts=new Date().toLocaleTimeString('zh-CN');
+    const d=document.createElement('div');d.className='log-entry';
+    d.innerHTML=`<span class="log-ts">${ts}</span>${msg}`;
+    if(el.children.length===1&&el.children[0].textContent==='等待数据...')el.innerHTML='';
+    el.appendChild(d);el.scrollTop=el.scrollHeight;
+    while(el.children.length>60)el.removeChild(el.firstChild);
+}
+
+// === Timer ===
+async function refresh(){
+    try{const d=await fetchData();render(d);}
+    catch(e){document.getElementById('conn').innerHTML='<span class="conn-err">● 连接失败</span>';addLog('连接失败: '+e.message);}
+}
+function resetTimer(){if(timer)clearInterval(timer);timer=setInterval(refresh,parseInt(document.getElementById('interval').value));}
+
+// === Init ===
+function tick(){document.getElementById('clock').textContent=new Date().toLocaleString('zh-CN')}
+tick();setInterval(tick,1000);
+refresh();
+resetTimer();
+</script>
+</body>
+</html>

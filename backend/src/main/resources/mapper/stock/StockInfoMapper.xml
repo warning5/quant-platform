@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.quant.platform.stock.mapper.StockInfoMapper">
+
+    <!-- 插入或更新股票基本信息 -->
+    <insert id="insertOrUpdate" parameterType="com.quant.platform.stock.entity.StockInfo" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO stock_info (
+            code, symbol, name, market, industry, list_date, is_hs, is_st,
+            total_share, float_share, total_market_cap, float_market_cap, pe_ttm, pb,
+            create_time, update_time
+        ) VALUES (
+            #{code}, #{symbol}, #{name}, #{market}, #{industry}, #{listDate}, #{isHs}, #{isSt},
+            #{totalShare}, #{floatShare}, #{totalMarketCap}, #{floatMarketCap}, #{peTtm}, #{pb},
+            #{createTime}, #{updateTime}
+        )
+        ON DUPLICATE KEY UPDATE
+            name = VALUES(name),
+            market = VALUES(market),
+            industry = VALUES(industry),
+            list_date = VALUES(list_date),
+            is_hs = VALUES(is_hs),
+            is_st = VALUES(is_st),
+            total_share = VALUES(total_share),
+            float_share = VALUES(float_share),
+            total_market_cap = VALUES(total_market_cap),
+            float_market_cap = VALUES(float_market_cap),
+            pe_ttm = VALUES(pe_ttm),
+            pb = VALUES(pb),
+            update_time = VALUES(update_time)
+    </insert>
+
+</mapper>

@@ -1,0 +1,75 @@
+server:
+  port: 8080
+  servlet:
+    context-path: /api
+
+spring:
+  application:
+    name: quant-platform
+  # MySQL数据库配置
+  datasource:
+    url: jdbc:mysql://localhost:3306/stock?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&tinyInt1isBit=false
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    username: root
+    password: 123456
+    hikari:
+      maximum-pool-size: 30
+      minimum-idle: 5
+      connection-timeout: 60000
+      idle-timeout: 300000
+      max-lifetime: 600000
+  # JPA配置已移除，所有数据操作使用MyBatis-Plus
+  jackson:
+    time-zone: Asia/Shanghai
+    date-format: yyyy-MM-dd HH:mm:ss
+    serialization:
+      write-dates-as-timestamps: false
+
+# MyBatis-Plus配置
+mybatis-plus:
+  mapper-locations: classpath*:/mapper/**/*.xml
+  type-aliases-package: com.quant.platform.**.entity
+  global-config:
+    db-config:
+      id-type: auto
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+
+logging:
+  charset:
+    console: UTF-8
+    file: UTF-8
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+  level:
+    com.quant.platform: INFO
+    org.springframework.web: INFO
+
+quant:
+  backtest:
+    thread-pool-size: 4
+    max-concurrent-tasks: 10
+  factor:
+    script-timeout-seconds: 30
+    cache-size: 1000
+  aktools:
+    enabled: true  # 设置为true启用AKTools数据获取
+    domain: http://127.0.0.1:9090
+    base-url: http://127.0.0.1:9090/api/public/
+  data-update:
+    python-path: python  # Python 可执行文件路径
+    script-dir: C:/Users/warning5/WorkBuddy/Claw/update_data  # Python 脚本目录（绝对路径）
+    default-start-days: 3       # 默认从几天前开始更新
+
