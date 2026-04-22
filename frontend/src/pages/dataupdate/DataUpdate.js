@@ -999,7 +999,7 @@ function DataUpdate() {
       </Title>
 
       {/* ==================== 更新配置 Tabs ==================== */}
-      <Card size="small" style={{ marginBottom: 16 }} bodyStyle={{ padding: '12px 0 0' }}>
+      <Card size="small" style={{ marginBottom: 16 }} styles={{ body: { padding: '12px 0 0' } }}>
         <Tabs
           activeKey={activeTab}
           onChange={onTabChange}

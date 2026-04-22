@@ -257,6 +257,20 @@ public class DataUpdateService {
                 broadcastStatus(task);
                 log.info("[DataUpdate] 启动任务 {}: {}", taskId, cmd);
                 boolean ok = runSingleScript(taskId, task, cmd, marketLabel);
+                
+                // 单个市场执行失败时，尝试备用数据源（SH/SZ 支持 akshare 备用）
+                if (!ok && !"CANCELLED".equals(task.getStatus()) && ("SH".equals(m) || "SZ".equals(m))) {
+                    broadcastLog(taskId, "\n[WARN] Baostock 更新失败，尝试使用 akshare 作为备用数据源...");
+                    List<String> backupCmd = new ArrayList<>();
+                    backupCmd.add(pythonPath);
+                    backupCmd.add("-u");
+                    backupCmd.add("update_stock_daily_akshare.py");
+                    backupCmd.add("--market");
+                    backupCmd.add(m);
+                    addCommonArgs(backupCmd, request);
+                    ok = runSingleScript(taskId, task, backupCmd, marketLabel + " (备用)");
+                }
+                
                 if (!"CANCELLED".equals(task.getStatus())) {
                     task.setStatus(ok ? "SUCCESS" : "FAILED");
                     task.setProgress(100);
@@ -296,9 +310,9 @@ public class DataUpdateService {
         // 根据数据源决定更新哪些市场
         List<String[]> marketScripts = new ArrayList<>();
         if (!"BJ".equals(request.getMarket())) {
-            // BAOSTOCK 或 ALL → 更新沪市和深市
-            marketScripts.add(new String[]{"沪市", "update_stock_daily_baostock.py", "--market", "SH"});
-            marketScripts.add(new String[]{"深市", "update_stock_daily_baostock.py", "--market", "SZ"});
+            // BAOSTOCK 或 ALL → 更新沪市和深市，支持备用数据源
+            marketScripts.add(new String[]{"沪市", "update_stock_daily_baostock.py", "update_stock_daily_akshare.py", "--market", "SH"});
+            marketScripts.add(new String[]{"深市", "update_stock_daily_baostock.py", "update_stock_daily_akshare.py", "--market", "SZ"});
         }
         if (!"BAOSTOCK".equals(request.getSource())) {
             // 非 BAOSTOCK 独占 → 更新北交所
@@ -310,13 +324,42 @@ public class DataUpdateService {
             task.setCurrentStep(ms[0]);
             broadcastStatus(task);
             broadcastLog(taskId, "\n========== " + ms[0] + " ==========");
+            
+            // 尝试主数据源
             List<String> scriptCmd = new ArrayList<>();
             scriptCmd.add(pythonPath);
             scriptCmd.add("-u");  // 强制 unbuffered stdout
-            scriptCmd.add(ms[1]);
-            scriptCmd.addAll(Arrays.asList(ms).subList(2, ms.length));
+            scriptCmd.add(ms[1]);  // 主脚本 (Baostock)
+            // 找到 --market 参数的位置
+            int marketArgIndex = -1;
+            for (int i = 2; i < ms.length; i++) {
+                if ("--market".equals(ms[i])) {
+                    marketArgIndex = i;
+                    break;
+                }
+            }
+            if (marketArgIndex > 0) {
+                scriptCmd.add(ms[marketArgIndex]);      // --market
+                scriptCmd.add(ms[marketArgIndex + 1]);  // SH/SZ
+            }
             addCommonArgs(scriptCmd, request);
             boolean ok = runSingleScript(taskId, task, scriptCmd, ms[0]);
+            
+            // 主数据源失败且存在备用数据源时，尝试备用
+            if (!ok && ms.length > 2 && ms[2].endsWith("akshare.py")) {
+                broadcastLog(taskId, "\n[WARN] Baostock 更新失败，尝试使用 akshare 作为备用数据源...");
+                List<String> backupCmd = new ArrayList<>();
+                backupCmd.add(pythonPath);
+                backupCmd.add("-u");
+                backupCmd.add(ms[2]);  // 备用脚本 (akshare)
+                if (marketArgIndex > 0) {
+                    backupCmd.add(ms[marketArgIndex]);      // --market
+                    backupCmd.add(ms[marketArgIndex + 1]);  // SH/SZ
+                }
+                addCommonArgs(backupCmd, request);
+                ok = runSingleScript(taskId, task, backupCmd, ms[0] + " (备用)");
+            }
+            
             if (!ok) allSuccess = false;
         }
 
@@ -700,10 +743,11 @@ public class DataUpdateService {
             // stock_daily 中该市场记录数（通过代码前缀判断市场）
             LambdaQueryWrapper<StockDaily> dw = new LambdaQueryWrapper<>();
             switch (market) {
-                case "SH" -> dw.likeRight(StockDaily::getCode, "6");
+                case "SH" ->
+                        dw.and(w -> w.likeRight(StockDaily::getCode, "6").or().likeRight(StockDaily::getCode, "688").or().likeRight(StockDaily::getCode, "689"));
                 case "SZ" ->
                         dw.and(w -> w.likeRight(StockDaily::getCode, "0").or().likeRight(StockDaily::getCode, "3"));
-                case "BJ" -> dw.likeRight(StockDaily::getCode, "9");
+                case "BJ" -> dw.likeRight(StockDaily::getCode, "92");
             }
             long dailyCount = stockDailyMapper.selectCount(dw);
             m.put("dailyRecords", dailyCount);
@@ -711,28 +755,31 @@ public class DataUpdateService {
             // 该市场最新交易日
             LambdaQueryWrapper<StockDaily> mLW = new LambdaQueryWrapper<>();
             switch (market) {
-                case "SH" -> mLW.likeRight(StockDaily::getCode, "6");
+                case "SH" ->
+                        mLW.and(w -> w.likeRight(StockDaily::getCode, "6").or().likeRight(StockDaily::getCode, "688").or().likeRight(StockDaily::getCode, "689"));
                 case "SZ" ->
                         mLW.and(w -> w.likeRight(StockDaily::getCode, "0").or().likeRight(StockDaily::getCode, "3"));
-                case "BJ" -> mLW.likeRight(StockDaily::getCode, "9");
+                case "BJ" -> mLW.likeRight(StockDaily::getCode, "92");
             }
             mLW.orderByDesc(StockDaily::getTradeDate).last("LIMIT 1")
                     .select(StockDaily::getTradeDate);
             StockDaily mLatest = stockDailyMapper.selectOne(mLW);
             m.put("latestDate", mLatest != null ? mLatest.getTradeDate().toString() : "无数据");
 
-            // 该市场最新交易日的股票数
+            // 该市场最新交易日的股票数（使用COUNT DISTINCT去重，避免重复记录导致统计错误）
             if (mLatest != null) {
-                LambdaQueryWrapper<StockDaily> mCLW = new LambdaQueryWrapper<>();
-                mCLW.eq(StockDaily::getTradeDate, mLatest.getTradeDate());
-                switch (market) {
-                    case "SH" -> mCLW.likeRight(StockDaily::getCode, "6");
-                    case "SZ" ->
-                            mCLW.and(w -> w.likeRight(StockDaily::getCode, "0").or().likeRight(StockDaily::getCode, "3"));
-                    case "BJ" -> mCLW.likeRight(StockDaily::getCode, "9");
-                }
-                long latestDayCount = stockDailyMapper.selectCount(mCLW);
-                m.put("latestDayCount", latestDayCount);
+                String codePattern = switch (market) {
+                    case "SH" -> "(code LIKE '6%' OR code LIKE '688%' OR code LIKE '689%')";
+                    case "SZ" -> "(code LIKE '0%' OR code LIKE '3%')";
+                    case "BJ" -> "code LIKE '92%'";
+                    default -> "1=1";
+                };
+                String sql = String.format(
+                    "SELECT COUNT(DISTINCT code) FROM stock_daily WHERE trade_date = ? AND %s",
+                    codePattern
+                );
+                Long latestDayCount = jdbcTemplate.queryForObject(sql, Long.class, mLatest.getTradeDate());
+                m.put("latestDayCount", latestDayCount != null ? latestDayCount : 0);
             } else {
                 m.put("latestDayCount", 0);
             }

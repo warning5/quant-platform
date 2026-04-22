@@ -282,6 +282,7 @@ def get_latest_trade_date(conn, code):
 
 
 def main():
+    """主函数，成功返回0，失败返回1"""
     parser = argparse.ArgumentParser(description="使用 Baostock 获取真实股票历史数据")
     parser.add_argument(
         "--start-date",
@@ -351,7 +352,7 @@ def main():
     lg = bs.login()
     if lg.error_code != '0':
         print(f"[ERROR] Baostock 登录失败: {lg.error_msg}")
-        return
+        sys.exit(1)
     print("Baostock 登录成功")
 
     conn = get_db_connection()
@@ -454,6 +455,9 @@ def main():
         print(f"失败记录: {total_failed} 条")
         print(f"无数据: {total_no_data} 只")
         print("=" * 80)
+        
+        # 返回成功状态
+        return 0 if total_failed == 0 else 1
 
     finally:
         conn.close()
@@ -462,4 +466,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

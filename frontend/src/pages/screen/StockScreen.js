@@ -408,6 +408,32 @@ export default function StockScreen() {
     api.get('/screen/presets')
       .then(res => setPresets(res || []))
       .catch(() => {});
+
+    // 检查是否有从权重优化页面传来的配置
+    const savedConfig = localStorage.getItem('factorWeightConfig');
+    if (savedConfig) {
+      try {
+        const config = JSON.parse(savedConfig);
+        // 清除配置，避免重复加载
+        localStorage.removeItem('factorWeightConfig');
+        
+        // 应用配置
+        if (config.factors && config.factors.length > 0) {
+          setFactors(config.factors.map(f => ({
+            factorCode: f.code,
+            direction: 1,
+            weight: f.weight / 100, // 百分比转小数
+            filterOp: 'NONE',
+            filterValue: null,
+            outlierMethod: null,
+            normalizeMethod: null,
+          })));
+          message.success(`已加载「${config.name}」的因子权重配置`);
+        }
+      } catch (e) {
+        console.error('解析权重配置失败:', e);
+      }
+    }
   }, []);
 
   /* ── 选择预设组合 ─────────────────────────────────────────────── */
@@ -729,7 +755,7 @@ export default function StockScreen() {
           <Card
             title={<Space><StarOutlined /> 策略组合</Space>}
             style={{ marginBottom: 16 }}
-            bodyStyle={{ padding: '12px 16px 4px' }}
+            styles={{ body: { padding: '12px 16px 4px' } }}
           >
             <Row gutter={[12, 12]} align="middle">
               <Col flex="auto">
@@ -815,7 +841,7 @@ export default function StockScreen() {
               </Space>
             }
             style={{ marginBottom: 16 }}
-            bodyStyle={{ padding: '0 0 8px' }}
+            styles={{ body: { padding: '0 0 8px' } }}
           >
             {factors.length === 0 ? (
               <Empty description='选择预设组合或点击"添加因子"开始配置' style={{ padding: '32px 0' }} />
@@ -937,7 +963,7 @@ export default function StockScreen() {
           </Card>
 
           {/* ── 选股参数 ─────────────────────────────────────────── */}
-          <Card title="选股参数" style={{ marginBottom: 16 }} bodyStyle={{ padding: '16px 16px 4px' }}>
+          <Card title="选股参数" style={{ marginBottom: 16 }} styles={{ body: { padding: '16px 16px 4px' } }}>
             <Row gutter={[12, 12]}>
               <Col span={12}>
                 <div style={paramLabelStyle}>选股日期</div>

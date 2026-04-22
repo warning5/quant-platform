@@ -588,7 +588,7 @@ function FactorMonitor() {
       {/* 左列：趋势图+日志 / 右列：分类统计 */}
       <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
         <Col span={14}>
-          <Card size="small" title="📈 数据量趋势" bodyStyle={{ padding: '12px 16px' }}>
+          <Card size="small" title="📈 数据量趋势" styles={{ body: { padding: '12px 16px' } }}>
             <div style={{ height: 160 }}>
               {trendHistory.length > 1
                 ? <ReactECharts option={chartOption} style={{ height: '100%', width: '100%' }} />
@@ -624,7 +624,7 @@ function FactorMonitor() {
                 </Button>
               ) : null
             }
-            bodyStyle={{ padding: '8px 12px' }}
+            styles={{ body: { padding: '8px 12px' } }}
           >
             <div
               ref={logContainerRef}
@@ -662,7 +662,7 @@ function FactorMonitor() {
           </Card>
         </Col>
         <Col span={10}>
-          <Card size="small" title="📊 分类统计" bodyStyle={{ padding: '8px 16px' }}>
+          <Card size="small" title="📊 分类统计" styles={{ body: { padding: '8px 16px' } }}>
             {factorsLoading ? (
               <div style={{ textAlign: 'center', padding: '60px 0', color: '#bfbfbf' }}>
                 <SyncOutlined spin style={{ fontSize: 16, marginBottom: 8, display: 'block' }} />

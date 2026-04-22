@@ -58,6 +58,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ─── 子脚本映射 ─────────────────────────────────────────────
 BAOSTOCK_SCRIPT = os.path.join(SCRIPT_DIR, "update_stock_daily_baostock.py")
+AKSHARE_SCRIPT  = os.path.join(SCRIPT_DIR, "update_stock_daily_akshare.py")
 BJ_QQ_SCRIPT    = os.path.join(SCRIPT_DIR, "update_bj_stock_daily_qq.py")
 INFO_SCRIPT     = os.path.join(SCRIPT_DIR, "update_stock_info_daily.py")
 INDEX_SCRIPT    = os.path.join(SCRIPT_DIR, "update_index_daily_baostock.py")
@@ -115,7 +116,7 @@ def run_cmd(cmd, description):
 
 
 def run_baostock(market, start_date, end_date, extra_args):
-    """调用 Baostock 脚本更新 SH/SZ 日线"""
+    """调用 Baostock 脚本更新 SH/SZ 日线，失败时自动切换到 akshare"""
     if not os.path.exists(BAOSTOCK_SCRIPT):
         print(f"[ERROR] 找不到脚本: {BAOSTOCK_SCRIPT}")
         return False
@@ -125,7 +126,31 @@ def run_baostock(market, start_date, end_date, extra_args):
         cmd += ["--end-date", end_date]
     cmd += extra_args
 
-    return run_cmd(cmd, f"{market} 日线数据 (Baostock)")
+    ok = run_cmd(cmd, f"{market} 日线数据 (Baostock)")
+    
+    # Baostock 失败时自动切换到 akshare
+    if not ok:
+        print(f"\n[WARN] Baostock 更新失败，尝试使用 akshare 作为备用数据源...")
+        return run_akshare(market, start_date, end_date, extra_args)
+    
+    return ok
+
+
+def run_akshare(market, start_date, end_date, extra_args):
+    """调用 akshare 脚本更新 SH/SZ 日线（Baostock 备用）"""
+    if not os.path.exists(AKSHARE_SCRIPT):
+        print(f"[ERROR] 找不到脚本: {AKSHARE_SCRIPT}")
+        return False
+
+    cmd = [sys.executable, AKSHARE_SCRIPT, "--market", market, "--start-date", start_date]
+    if end_date:
+        cmd += ["--end-date", end_date]
+    
+    # akshare 不需要 --resume 参数，过滤掉
+    filtered_args = [arg for arg in extra_args if arg not in ['--resume']]
+    cmd += filtered_args
+
+    return run_cmd(cmd, f"{market} 日线数据 (akshare 备用)")
 
 
 def run_bj_qq(start_date, end_date, extra_args):

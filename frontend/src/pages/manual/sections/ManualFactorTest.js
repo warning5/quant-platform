@@ -404,6 +404,7 @@ export function ManualFactorCorrelation() {
       <Table
         size="small"
         bordered
+        rowKey="field"
         dataSource={[
           { field: 'factor_a', type: 'VARCHAR', desc: '因子代码 A' },
           { field: 'factor_b', type: 'VARCHAR', desc: '因子代码 B' },

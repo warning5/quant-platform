@@ -317,18 +317,37 @@ public class FactorWeightOptimizeService {
 
     /**
      * 计算有效前沿（30个点）
+     * 使用双目标优化：在风险和收益之间生成帕累托前沿
      */
     private List<Map<String, Object>> calcEfficientFrontier(double[] means, double[][] cov, int n, int points) {
-        double minRet = Arrays.stream(means).min().orElse(0);
-        double maxRet = Arrays.stream(means).max().orElse(1);
         List<Map<String, Object>> frontier = new ArrayList<>();
-
+        
+        // 计算全局最小方差组合（有效前沿的左端点）
+        double[] minVarWeights = minimizeVariance(cov, n);
+        double minVarReturn = dot(minVarWeights, means) * 252;
+        double minVarVol = Math.sqrt(Math.max(quadraticForm(minVarWeights, cov), 0) * 252);
+        
+        // 计算最大收益组合（有效前沿的右端点）
+        int maxRetIdx = 0;
+        for (int i = 1; i < n; i++) {
+            if (means[i] > means[maxRetIdx]) maxRetIdx = i;
+        }
+        double[] maxRetWeights = new double[n];
+        maxRetWeights[maxRetIdx] = 1.0;
+        double maxRetReturn = means[maxRetIdx] * 252;
+        double maxRetVol = Math.sqrt(Math.max(cov[maxRetIdx][maxRetIdx], 0) * 252);
+        
+        // 在最小方差和最大收益之间生成多个目标收益水平
         for (int k = 0; k < points; k++) {
-            double targetRet = minRet + (maxRet - minRet) * k / (points - 1);
-            // 最小化方差 subject to E[r]=targetRet, Σw=1, w≥0
-            double[] w = minVarianceGivenReturn(means, cov, n, targetRet);
+            double lambda = (double) k / (points - 1); // 0 到 1
+            // 在最小方差组合和最大收益组合之间插值目标收益
+            double targetRet = minVarReturn + (maxRetReturn - minVarReturn) * lambda;
+            
+            // 求解给定目标收益下的最小方差组合
+            double[] w = solveMinVarianceForTarget(means, cov, n, targetRet);
             double vol = Math.sqrt(Math.max(quadraticForm(w, cov), 0) * 252);
             double ret = dot(w, means) * 252;
+            
             Map<String, Object> point = new LinkedHashMap<>();
             point.put("return", round4(ret));
             point.put("volatility", round4(vol));
@@ -337,23 +356,56 @@ public class FactorWeightOptimizeService {
         }
         return frontier;
     }
-
-    private double[] minVarianceGivenReturn(double[] mu, double[][] cov, int n, double targetRet) {
+    
+    /**
+     * 求解全局最小方差组合
+     */
+    private double[] minimizeVariance(double[][] cov, int n) {
         double[] w = equalWeights(n);
-        // 拉格朗日松弛：梯度下降 + 惩罚项
-        double penaltyReturn = 100.0;
-        for (int iter = 0; iter < 2000; iter++) {
-            double ret = dot(w, mu);
+        double lr = 0.01;
+        for (int iter = 0; iter < 5000; iter++) {
             double[] grad = new double[n];
             for (int i = 0; i < n; i++) {
-                grad[i] = 2 * dotRow(cov[i], w) + 2 * penaltyReturn * (ret - targetRet) * mu[i];
+                grad[i] = 2 * dotRow(cov[i], w);
             }
-            double lr = 0.005;
             for (int i = 0; i < n; i++) {
                 w[i] -= lr * grad[i];
                 w[i] = Math.max(0, w[i]);
             }
             normalize(w);
+            if (iter > 0 && iter % 500 == 0) lr *= 0.9;
+        }
+        return w;
+    }
+
+    /**
+     * 求解给定目标收益下的最小方差组合
+     * 使用投影梯度法 + 惩罚项
+     */
+    private double[] solveMinVarianceForTarget(double[] mu, double[][] cov, int n, double targetRet) {
+        double[] w = equalWeights(n);
+        double lr = 0.005;
+        double penalty = 1000.0; // 强惩罚项确保收益约束
+        
+        for (int iter = 0; iter < 3000; iter++) {
+            double currentRet = dot(w, mu) * 252;
+            double retError = currentRet - targetRet;
+            
+            double[] grad = new double[n];
+            for (int i = 0; i < n; i++) {
+                // 方差梯度 + 收益约束惩罚梯度
+                double varGrad = 2 * dotRow(cov[i], w);
+                double retGrad = 2 * penalty * retError * mu[i] * 252;
+                grad[i] = varGrad + retGrad;
+            }
+            
+            for (int i = 0; i < n; i++) {
+                w[i] -= lr * grad[i];
+                w[i] = Math.max(0, w[i]); // 非负约束
+            }
+            normalize(w); // 权重和为1
+            
+            if (iter > 0 && iter % 500 == 0) lr *= 0.95;
         }
         return w;
     }
