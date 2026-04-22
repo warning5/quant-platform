@@ -1,0 +1,302 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+财务指标计算脚本
+从 stock_income / stock_balance / stock_cashflow 表的原始数据，
+计算 stock_financial_indicator 中无法直接采集的 16 个衍生指标。
+
+公式：
+  roa                          = 净利润(含少数) / 总资产平均 * 100
+  roic                         = (净利润+利息费用*(1-税率)) / (总权益+总负债-现金) * 100
+                                （利息费用≈财务费用；税率=所得税/利润总额）
+  revenue_yoy                  = (本期营业总收入-上年同期) / |上年同期| * 100
+  net_profit_yoy               = (本期净利润-上年同期) / |上年同期| * 100
+  operating_profit_yoy         = (本期营业利润-上年同期) / |上年同期| * 100
+  total_assets_yoy             = (本期总资产-上年同期) / |上年同期| * 100
+  total_equity_yoy             = (本期归属母公司权益-上年同期) / |上年同期| * 100
+  debt_to_equity_ratio         = 总负债 / 归属母公司权益 * 100
+  interest_coverage_ratio      = (利润总额+财务费用) / |财务费用|
+  accounts_receivable_turnover = 营业总收入 / 应收账款平均
+  total_assets_turnover        = 营业总收入 / 总资产平均
+  operating_cf_to_np           = 经营活动现金流净额 / |净利润(含少数)| * 100
+  operating_cf_to_debt         = 经营活动现金流净额 / 总负债 * 100
+  sales_cash_ratio             = 销售商品收到的现金 / 营业总收入 * 100
+  operating_revenue_per_share  = 营业总收入 / 总股本
+  bps                          = 归属母公司权益 / 总股本
+
+注意：
+  - 同比增长率需要上一年度同期数据
+  - 年化处理：一季报*4，中报*2，三季报*4/3
+  - 计算前需确保三大表数据已采集完成
+"""
+
+import sys
+import pymysql
+
+DB_CONFIG = {
+    'host': 'localhost',
+    'port': 3306,
+    'user': 'root',
+    'password': '123456',
+    'database': 'stock',
+    'charset': 'utf8mb4',
+    'cursorclass': pymysql.cursors.Cursor,
+}
+
+
+def get_conn():
+    return pymysql.connect(**DB_CONFIG)
+
+
+def annual_factor(report_date):
+    """年化系数：年报=1, 中报=2, 一季报=4, 三季报=4/3"""
+    month = int(report_date[4:6])
+    if month == 12:
+        return 1.0
+    elif month == 6:
+        return 2.0
+    elif month == 3:
+        return 4.0
+    elif month == 9:
+        return 4.0 / 3.0
+    return 1.0
+
+
+def safe_div(numerator, denominator, default=None):
+    """安全除法，分母为0返回None"""
+    if numerator is None or denominator is None or denominator == 0:
+        return default
+    return numerator / denominator
+
+
+def calc_yoy(current, previous):
+    """计算同比增长率(%)"""
+    if current is None or previous is None or previous == 0:
+        return None
+    return (current - previous) / abs(previous) * 100
+
+
+def to_float(v):
+    """将 Decimal 或其他类型转为 float"""
+    if v is None:
+        return None
+    return float(v)
+
+
+def main():
+    code_filter = sys.argv[1] if len(sys.argv) > 1 else None
+    conn = get_conn()
+    cur = conn.cursor()
+
+    # 获取所有 indicator 的 (code, report_date)
+    if code_filter:
+        cur.execute(
+            "SELECT code, report_date FROM stock_financial_indicator WHERE code = %s",
+            (code_filter,))
+    else:
+        cur.execute("SELECT code, report_date FROM stock_financial_indicator")
+    indicator_keys = cur.fetchall()
+    print(f"共 {len(indicator_keys)} 条 indicator 记录待计算")
+
+    # 加载 income 数据: key=(code,report_date)
+    print("加载 income 数据...")
+    cur.execute("SELECT code, report_date, total_revenue, operating_profit, "
+                "net_profit_incl_minority, total_profit, finance_expense, income_tax FROM stock_income")
+    income_data = {}
+    for r in cur.fetchall():
+        income_data[(r[0], r[1])] = {
+            'total_revenue': to_float(r[2]),
+            'operating_profit': to_float(r[3]),
+            'net_profit_incl_minority': to_float(r[4]),
+            'total_profit': to_float(r[5]),
+            'finance_expense': to_float(r[6]),
+            'income_tax': to_float(r[7]),
+        }
+
+    # 加载 balance 数据
+    print("加载 balance 数据...")
+    cur.execute("SELECT code, report_date, total_assets, total_liabilities, "
+                "total_equity, parent_equity, accounts_receivable, paid_in_capital "
+                "FROM stock_balance")
+    balance_data = {}
+    for r in cur.fetchall():
+        balance_data[(r[0], r[1])] = {
+            'total_assets': to_float(r[2]),
+            'total_liabilities': to_float(r[3]),
+            'total_equity': to_float(r[4]),
+            'parent_equity': to_float(r[5]),
+            'accounts_receivable': to_float(r[6]),
+            'paid_in_capital': to_float(r[7]),
+        }
+
+    # 加载 cashflow 数据
+    print("加载 cashflow 数据...")
+    cur.execute("SELECT code, report_date, net_operate_cf, cash_received_sales "
+                "FROM stock_cashflow")
+    cashflow_data = {}
+    for r in cur.fetchall():
+        cashflow_data[(r[0], r[1])] = {
+            'net_operate_cf': to_float(r[2]),
+            'cash_received_sales': to_float(r[3]),
+        }
+
+    print("开始计算...")
+    updated = 0
+    errors = 0
+
+    for code, report_date in indicator_keys:
+        inc = income_data.get((code, report_date), {})
+        bal = balance_data.get((code, report_date), {})
+        cf = cashflow_data.get((code, report_date), {})
+
+        total_revenue = inc.get('total_revenue')
+        operating_profit = inc.get('operating_profit')
+        net_profit = inc.get('net_profit_incl_minority')
+        total_profit = inc.get('total_profit')
+        finance_expense = inc.get('finance_expense')
+        income_tax = inc.get('income_tax')
+
+        total_assets = bal.get('total_assets')
+        total_liabilities = bal.get('total_liabilities')
+        total_equity = bal.get('total_equity')
+        parent_equity = bal.get('parent_equity')
+        accounts_receivable = bal.get('accounts_receivable')
+        paid_in_capital = bal.get('paid_in_capital')
+
+        net_operate_cf = cf.get('net_operate_cf')
+        cash_received_sales = cf.get('cash_received_sales')
+
+        af = annual_factor(report_date)
+
+        # ── 上年同期数据（用于同比增长率）──
+        prev_year_rd = str(int(report_date[:4]) - 1) + report_date[4:]
+        prev_inc = income_data.get((code, prev_year_rd), {})
+        prev_bal = balance_data.get((code, prev_year_rd), {})
+
+        prev_operating_profit = prev_inc.get('operating_profit')
+        prev_total_revenue = prev_inc.get('total_revenue')
+        prev_net_profit = prev_inc.get('net_profit_incl_minority')
+        prev_total_assets = prev_bal.get('total_assets')
+        prev_parent_equity = prev_bal.get('parent_equity')
+
+        # ── 计算各指标 ──
+
+        # 1. roa = 净利润 / 总资产平均 * 100（年化）
+        #    平均总资产 ≈ 期末总资产（简化，无期初数据时）
+        roa = safe_div(net_profit, total_assets, 0) * 100 * af if net_profit and total_assets else None
+
+        # 2. roic = (净利润 + 利息费用*(1-税率)) / (总权益 + 有息负债) * 100
+        #    简化：有息负债 ≈ 总负债 - 无息部分，这里用 总权益+总负债-现金 作为投入资本近似
+        #    更简化版本：用 EBIT / 投入资本
+        tax_rate = safe_div(income_tax, total_profit, 0) if income_tax and total_profit and total_profit != 0 else 0.25
+        ebit = (net_profit or 0) + (finance_expense or 0) * (1 - tax_rate)
+        invested_cap = (total_equity or 0) + (total_liabilities or 0) - (bal.get('cash_and_equivalents') or 0)
+        # 由于没加载 cash_and_equivalents，用总权益+总负债替代
+        invested_cap2 = (total_equity or 0) + (total_liabilities or 0)
+        roic = safe_div(ebit, invested_cap2, 0) * 100 * af if invested_cap2 else None
+        if roic is not None:
+            roic = round(roic, 4)
+
+        # 3. revenue_yoy
+        revenue_yoy = calc_yoy(total_revenue, prev_total_revenue)
+
+        # 4. net_profit_yoy
+        net_profit_yoy = calc_yoy(net_profit, prev_net_profit)
+
+        # 5. operating_profit_yoy
+        operating_profit_yoy = calc_yoy(operating_profit, prev_operating_profit)
+
+        # 4. total_assets_yoy
+        total_assets_yoy = calc_yoy(total_assets, prev_total_assets)
+
+        # 5. total_equity_yoy（用归属母公司权益）
+        total_equity_yoy = calc_yoy(parent_equity, prev_parent_equity)
+
+        # 6. debt_to_equity_ratio = 总负债 / 归属母公司权益 * 100
+        debt_to_equity_ratio = safe_div(total_liabilities, parent_equity, 0) * 100 if total_liabilities and parent_equity else None
+
+        # 7. interest_coverage_ratio = (利润总额 + 财务费用) / |财务费用|
+        if finance_expense and finance_expense != 0 and total_profit is not None:
+            interest_coverage_ratio = (total_profit + finance_expense) / abs(finance_expense)
+        else:
+            interest_coverage_ratio = None
+
+        # 8. accounts_receivable_turnover = 营收 / 应收账款平均（年化）
+        if total_revenue and accounts_receivable and accounts_receivable != 0:
+            accounts_receivable_turnover = total_revenue / accounts_receivable * af
+        else:
+            accounts_receivable_turnover = None
+
+        # 9. total_assets_turnover = 营收 / 总资产平均（年化）
+        if total_revenue and total_assets and total_assets != 0:
+            total_assets_turnover = total_revenue / total_assets * af
+        else:
+            total_assets_turnover = None
+
+        # 10. operating_cf_to_np = 经营现金流 / |净利润| * 100
+        if net_operate_cf is not None and net_profit and net_profit != 0:
+            operating_cf_to_np = net_operate_cf / abs(net_profit) * 100
+        else:
+            operating_cf_to_np = None
+
+        # 11. operating_cf_to_debt = 经营现金流 / 总负债 * 100
+        operating_cf_to_debt = safe_div(net_operate_cf, total_liabilities, 0) * 100 if net_operate_cf and total_liabilities else None
+
+        # 12. sales_cash_ratio = 销售收现 / 营收 * 100
+        sales_cash_ratio = safe_div(cash_received_sales, total_revenue, 0) * 100 if cash_received_sales and total_revenue else None
+
+        # 13. operating_revenue_per_share = 营收 / 总股本
+        operating_revenue_per_share = safe_div(total_revenue, paid_in_capital) if total_revenue and paid_in_capital else None
+
+        # 16. bps = 归母权益 / 总股本
+        bps = safe_div(parent_equity, paid_in_capital) if parent_equity and paid_in_capital else None
+
+        # 四舍五入
+        def r4(v):
+            return round(v, 4) if v is not None else None
+
+        updates = {
+            'roa': r4(roa),
+            'roic': r4(roic),
+            'revenue_yoy': r4(revenue_yoy),
+            'net_profit_yoy': r4(net_profit_yoy),
+            'operating_profit_yoy': r4(operating_profit_yoy),
+            'total_assets_yoy': r4(total_assets_yoy),
+            'total_equity_yoy': r4(total_equity_yoy),
+            'debt_to_equity_ratio': r4(debt_to_equity_ratio),
+            'interest_coverage_ratio': r4(interest_coverage_ratio),
+            'accounts_receivable_turnover': r4(accounts_receivable_turnover),
+            'total_assets_turnover': r4(total_assets_turnover),
+            'operating_cf_to_np': r4(operating_cf_to_np),
+            'operating_cf_to_debt': r4(operating_cf_to_debt),
+            'sales_cash_ratio': r4(sales_cash_ratio),
+            'operating_revenue_per_share': r4(operating_revenue_per_share),
+            'bps': r4(bps),
+        }
+
+        # 只更新非空的值
+        set_parts = []
+        vals = []
+        for col, val in updates.items():
+            if val is not None:
+                set_parts.append(f"{col} = %s")
+                vals.append(val)
+
+        if set_parts:
+            sql = f"UPDATE stock_financial_indicator SET {', '.join(set_parts)} WHERE code = %s AND report_date = %s"
+            vals.extend([code, report_date])
+            try:
+                cur.execute(sql, vals)
+                updated += 1
+            except Exception as e:
+                errors += 1
+                if errors <= 5:
+                    print(f"  ERR {code} {report_date}: {e}")
+
+    conn.commit()
+    conn.close()
+    print(f"\n计算完成: 更新 {updated} 条, 错误 {errors} 条")
+
+
+if __name__ == '__main__':
+    main()

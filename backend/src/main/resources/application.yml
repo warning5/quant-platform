@@ -70,6 +70,6 @@ quant:
     base-url: http://127.0.0.1:9090/api/public/
   data-update:
     python-path: python  # Python 可执行文件路径
-    script-dir: C:/Users/warning5/WorkBuddy/Claw/update_data  # Python 脚本目录（绝对路径）
+    script-dir: scripts  # Python 脚本目录（相对项目根目录）
     default-start-days: 3       # 默认从几天前开始更新
 

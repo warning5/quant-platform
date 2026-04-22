@@ -60,7 +60,7 @@ public class DataUpdateService {
     private final ConcurrentHashMap<String, DataUpdateTask> recentFinishedTasks = new ConcurrentHashMap<>();
     @Value("${quant.data-update.python-path:python}")
     private String pythonPath;
-    @Value("${quant.data-update.script-dir:../update_data}")
+    @Value("${quant.data-update.script-dir:scripts}")
     private String scriptDir;
     @Value("${quant.data-update.default-start-days:3}")
     private int defaultStartDays;
