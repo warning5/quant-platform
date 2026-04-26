@@ -2,18 +2,20 @@ package com.quant.platform.factor.engine;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.quant.platform.config.ClickHouseConfig;
 import com.quant.platform.factor.domain.FactorDefinition;
 import com.quant.platform.factor.domain.FactorTestReport;
 import com.quant.platform.factor.domain.FactorValue;
 import com.quant.platform.factor.mapper.FactorTestReportMapper;
 import com.quant.platform.factor.mapper.FactorValueMapper;
+import com.quant.platform.factor.service.ClickHouseFactorValueService;
 import com.quant.platform.financial.entity.StockFinancialIndicator;
 import com.quant.platform.financial.mapper.StockFinancialIndicatorMapper;
 import com.quant.platform.market.domain.MarketDailyBar;
 import com.quant.platform.market.service.MarketDataService;
+import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.scheduling.annotation.Async;
@@ -25,10 +27,11 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.concurrent.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.stream.Collectors;
 import java.util.stream.Collectors;
 
 /**
@@ -42,6 +45,7 @@ public class FactorComputeEngine {
 
     private final MarketDataService marketDataService;
     private final FactorValueMapper factorValueMapper;
+    private final ClickHouseFactorValueService clickHouseFactorValueService;
     private final FactorTestReportMapper testReportMapper;
     private final ScriptedFactorEngine scriptedEngine;
     private final SimpMessagingTemplate messagingTemplate;
@@ -51,10 +55,13 @@ public class FactorComputeEngine {
     private final Map<String, FactorCalculator> builtinCalculators = new HashMap<>();
     private final Map<String, FinancialFactorCalculator> financialCalculators = new HashMap<>();
 
+    @Resource
+    private ClickHouseConfig clickHouseConfig;
     // 自注入，用于内部调用时走代理（解决 @Transactional 自调用失效）
     @Lazy
-    @Autowired
+    @Resource
     private FactorComputeEngine self;
+
     {
         // 注册内置因子
         registerBuiltin(new BuiltinFactors.Momentum5Calculator());
@@ -185,21 +192,33 @@ public class FactorComputeEngine {
      * 计算因子值（时间区间 × 股票池）
      */
     @Async("backtestTaskExecutor")
-    public void computeFactor(FactorDefinition factor, LocalDate startDate, LocalDate endDate,
-                              List<String> symbols, Long reportId) {
+    public void computeFactor(FactorDefinition factor, LocalDate startDate, LocalDate endDate, List<String> symbols) {
         self.computeFactorSync(factor, startDate, endDate, symbols);
         sendProgress(factor.getFactorCode(), "DONE", 100, "因子计算完成");
     }
 
     /**
      * 查询指定因子已有数据的最新日期（用于增量续算）
+     * 优先从 ClickHouse 读取
+     *
      * @return 最新日期，无数据时返回 null
      */
     public LocalDate findLatestDate(String factorCode) {
+        // 优先从 ClickHouse 读取
+        if (clickHouseConfig.isEnabled()) {
+            try {
+                List<FactorValue> values = clickHouseFactorValueService.findByFactorCodeAndDateRange(factorCode, LocalDate.of(2000, 1, 1), LocalDate.now());
+                if (!values.isEmpty()) {
+                    return values.stream().map(FactorValue::getCalcDate).max(LocalDate::compareTo).orElse(null);
+                }
+            } catch (Exception e) {
+                log.warn("[ClickHouse] findLatestDate 查询失败，回退 MySQL: {}", e.getMessage());
+            }
+        }
+
+        // MySQL 回退
         LambdaQueryWrapper<FactorValue> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(FactorValue::getFactorCode, factorCode)
-                .orderByDesc(FactorValue::getCalcDate)
-                .last("LIMIT 1");
+        wrapper.eq(FactorValue::getFactorCode, factorCode).orderByDesc(FactorValue::getCalcDate).last("LIMIT 1");
         FactorValue latest = factorValueMapper.selectOne(wrapper);
         return latest != null ? latest.getCalcDate() : null;
     }
@@ -208,8 +227,7 @@ public class FactorComputeEngine {
      * 增量计算因子值（不清除旧数据，跳过已有日期，只算新日期）
      */
     @Async("backtestTaskExecutor")
-    public void computeFactorIncremental(FactorDefinition factor, LocalDate startDate, LocalDate endDate,
-                                          List<String> symbols) {
+    public void computeFactorIncremental(FactorDefinition factor, LocalDate startDate, LocalDate endDate, List<String> symbols) {
         String code = factor.getFactorCode();
 
         // 获取所有需要计算的交易日
@@ -217,40 +235,43 @@ public class FactorComputeEngine {
 
         // 过滤掉已有数据的日期（通过查 factor_value 中已存在的 calc_date）
         final Set<LocalDate> existingDates;
+        Set<LocalDate> dates;
         if (!tradingDates.isEmpty()) {
-            LambdaQueryWrapper<FactorValue> wrapper = new LambdaQueryWrapper<>();
-            wrapper.eq(FactorValue::getFactorCode, code)
-                    .ge(FactorValue::getCalcDate, tradingDates.get(0))
-                    .le(FactorValue::getCalcDate, tradingDates.get(tradingDates.size() - 1))
-                    .select(FactorValue::getCalcDate)
-                    .groupBy(FactorValue::getCalcDate);
-            existingDates = new HashSet<>(factorValueMapper.selectList(wrapper).stream()
-                    .map(FactorValue::getCalcDate)
-                    .toList());
+            // 优先从 ClickHouse 读取
+            if (clickHouseConfig.isEnabled()) {
+                try {
+                    List<FactorValue> values = clickHouseFactorValueService.findByFactorCodeAndDateRange(code, tradingDates.getFirst(), tradingDates.getLast());
+                    dates = values.stream().map(FactorValue::getCalcDate).collect(java.util.stream.Collectors.toSet());
+                } catch (Exception e) {
+                    log.warn("[ClickHouse] 增量计算已有日期查询失败，回退 MySQL: {}", e.getMessage());
+                    LambdaQueryWrapper<FactorValue> wrapper = new LambdaQueryWrapper<>();
+                    wrapper.eq(FactorValue::getFactorCode, code).ge(FactorValue::getCalcDate, tradingDates.getFirst()).le(FactorValue::getCalcDate, tradingDates.getLast()).select(FactorValue::getCalcDate).groupBy(FactorValue::getCalcDate);
+                    dates = new HashSet<>(factorValueMapper.selectList(wrapper).stream().map(FactorValue::getCalcDate).toList());
+                }
+            } else {
+                LambdaQueryWrapper<FactorValue> wrapper = new LambdaQueryWrapper<>();
+                wrapper.eq(FactorValue::getFactorCode, code).ge(FactorValue::getCalcDate, tradingDates.getFirst()).le(FactorValue::getCalcDate, tradingDates.getLast()).select(FactorValue::getCalcDate).groupBy(FactorValue::getCalcDate);
+                dates = new HashSet<>(factorValueMapper.selectList(wrapper).stream().map(FactorValue::getCalcDate).toList());
+            }
         } else {
-            existingDates = Collections.emptySet();
+            dates = Collections.emptySet();
         }
 
-        List<LocalDate> newDates = tradingDates.stream()
-                .filter(d -> !existingDates.contains(d))
-                .toList();
+        existingDates = dates;
+        List<LocalDate> newDates = tradingDates.stream().filter(d -> !existingDates.contains(d)).toList();
 
         if (newDates.isEmpty()) {
-            sendProgress(code, "DONE", 100, "增量计算：无新日期需要计算（已有数据到 " +
-                    (existingDates.isEmpty() ? "无" : Collections.max(existingDates)) + "）");
+            sendProgress(code, "DONE", 100, "增量计算：无新日期需要计算（已有数据到 " + (existingDates.isEmpty() ? "无" : Collections.max(existingDates)) + "）");
             return;
         }
 
-        log.info("[{}] incremental: total {} dates, {} new (skipping {} existing)",
-                code, tradingDates.size(), newDates.size(), existingDates.size());
+        log.info("[{}] incremental: total {} dates, {} new (skipping {} existing)", code, tradingDates.size(), newDates.size(), existingDates.size());
 
-        int totalDates  = newDates.size();
+        int totalDates = newDates.size();
         int totalStocks = symbols.size();
         long totalTasks = (long) totalDates * totalStocks;
 
-        sendProgress(code, "COMPUTING", 0,
-                String.format("[增量] 开始计算 [%s]，新增 %d 交易日 × %d 只股票 = %,d 条（跳过 %d 已有）",
-                        code, totalDates, totalStocks, totalTasks, existingDates.size()));
+        sendProgress(code, "COMPUTING", 0, String.format("[增量] 开始计算 [%s]，新增 %d 交易日 × %d 只股票 = %,d 条（跳过 %d 已有）", code, totalDates, totalStocks, totalTasks, existingDates.size()));
 
         // ── 并行参数 ──
         // 限制内部线程数避免多因子并行时耗尽数据库连接池（HikariCP 30连接，最多10因子并行）
@@ -300,19 +321,14 @@ public class FactorComputeEngine {
                 double speed = elapsed > 0 ? (double) datesCompleted.get() / elapsed * 1000 : 0;
                 int remaining = totalDates - datesCompleted.get();
                 long etaSec = speed > 0 ? (long) (remaining / speed) : 0;
-                sendProgress(code, "COMPUTING", pct,
-                        String.format("[增量] %d/%d 交易日 (%d%%) | 已写 %,d 行 | 速度 %.1f 日/s | 剩余约 %s",
-                                datesCompleted.get(), totalDates, pct,
-                                rowsInserted.get(), speed, formatEta(etaSec)));
+                sendProgress(code, "COMPUTING", pct, String.format("[增量] %d/%d 交易日 (%d%%) | 已写 %,d 行 | 速度 %.1f 日/s | 剩余约 %s", datesCompleted.get(), totalDates, pct, rowsInserted.get(), speed, formatEta(etaSec)));
             }
         }
 
         // ── 归一化（只对新日期做） ──
-        sendProgress(code, "COMPUTING", 91,
-                String.format("增量写入完成，%,d 条。开始归一化 %d 个新日期...", rowsInserted.get(), newDates.size()));
-        normalizeFactorValues(code, newDates.get(0), newDates.get(newDates.size() - 1), newDates);
-        sendProgress(code, "COMPUTING", 100,
-                String.format("[增量] 全部完成，新增 %,d 条", rowsInserted.get()));
+        sendProgress(code, "COMPUTING", 91, String.format("增量写入完成，%,d 条。开始归一化 %d 个新日期...", rowsInserted.get(), newDates.size()));
+        normalizeFactorValues(code, newDates);
+        sendProgress(code, "COMPUTING", 100, String.format("[增量] 全部完成，新增 %,d 条", rowsInserted.get()));
 
         log.info("[{}] incremental done: {} new dates, {} rows", code, totalDates, rowsInserted.get());
     }
@@ -322,33 +338,30 @@ public class FactorComputeEngine {
      * 优化：多线程并行（按日期分片）+ 批量写入（每批500条）
      */
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
-    public void computeFactorSync(FactorDefinition factor, LocalDate startDate, LocalDate endDate,
-                                   List<String> symbols) {
+    public void computeFactorSync(FactorDefinition factor, LocalDate startDate, LocalDate endDate, List<String> symbols) {
 
         // 先清除该时间段的旧数据
         log.info("Clearing existing factor values for [{}] between {} and {}", factor.getFactorCode(), startDate, endDate);
         self.deleteExistingValues(factor.getFactorCode(), startDate, endDate);
 
         List<LocalDate> tradingDates = marketDataService.getTradingDates(startDate, endDate);
-        int totalDates  = tradingDates.size();
+        int totalDates = tradingDates.size();
         int totalStocks = symbols.size();
         long totalTasks = (long) totalDates * totalStocks;
 
-        sendProgress(factor.getFactorCode(), "COMPUTING", 0,
-                String.format("开始计算 [%s]，共 %d 交易日 × %d 只股票 = %,d 条",
-                        factor.getFactorCode(), totalDates, totalStocks, totalTasks));
+        sendProgress(factor.getFactorCode(), "COMPUTING", 0, String.format("开始计算 [%s]，共 %d 交易日 × %d 只股票 = %,d 条", factor.getFactorCode(), totalDates, totalStocks, totalTasks));
 
         // ── 并行参数 ──────────────────────────────────────────────
         // 按交易日并行，限制线程数避免多因子并行时耗尽数据库连接池
-        int threads  = Math.min(Math.max(Runtime.getRuntime().availableProcessors() / 2, 2), 4);
+        int threads = Math.min(Math.max(Runtime.getRuntime().availableProcessors() / 2, 2), 4);
         ExecutorService pool = Executors.newFixedThreadPool(threads);
         log.info("[{}] Using {} threads", factor.getFactorCode(), threads);
 
         // ── 进度计数器 ────────────────────────────────────────────
-        AtomicInteger datesCompleted   = new AtomicInteger(0);
-        AtomicLong    rowsInserted     = new AtomicLong(0);
-        AtomicLong    startTimeMs      = new AtomicLong(System.currentTimeMillis());
-        int lastPushedPct              = -1;
+        AtomicInteger datesCompleted = new AtomicInteger(0);
+        AtomicLong rowsInserted = new AtomicLong(0);
+        AtomicLong startTimeMs = new AtomicLong(System.currentTimeMillis());
+        int lastPushedPct = -1;
 
         // ── 提交每个交易日为一个任务 ──────────────────────────────
         List<Future<List<FactorValue>>> futures = new ArrayList<>(totalDates);
@@ -387,23 +400,18 @@ public class FactorComputeEngine {
             int pct = Math.min((int) ((double) datesCompleted.get() / totalDates * 90), 90);
             if (pct > lastPushedPct || datesCompleted.get() % 10 == 0) {
                 lastPushedPct = pct;
-                long elapsed  = System.currentTimeMillis() - startTimeMs.get();
-                double speed  = elapsed > 0 ? (double) datesCompleted.get() / elapsed * 1000 : 0; // dates/sec
+                long elapsed = System.currentTimeMillis() - startTimeMs.get();
+                double speed = elapsed > 0 ? (double) datesCompleted.get() / elapsed * 1000 : 0; // dates/sec
                 int remaining = totalDates - datesCompleted.get();
-                long etaSec   = speed > 0 ? (long)(remaining / speed) : 0;
-                sendProgress(factor.getFactorCode(), "COMPUTING", pct,
-                        String.format("计算中 %d/%d 交易日 (%d%%) | 已写 %,d 行 | 速度 %.1f 日/s | 剩余约 %s",
-                                datesCompleted.get(), totalDates, pct,
-                                rowsInserted.get(), speed, formatEta(etaSec)));
+                long etaSec = speed > 0 ? (long) (remaining / speed) : 0;
+                sendProgress(factor.getFactorCode(), "COMPUTING", pct, String.format("计算中 %d/%d 交易日 (%d%%) | 已写 %,d 行 | 速度 %.1f 日/s | 剩余约 %s", datesCompleted.get(), totalDates, pct, rowsInserted.get(), speed, formatEta(etaSec)));
             }
         }
 
         // ── 归一化阶段 ────────────────────────────────────────────
-        sendProgress(factor.getFactorCode(), "COMPUTING", 91,
-                String.format("因子值写入完成，共 %,d 条。开始横截面归一化...", rowsInserted.get()));
-        normalizeFactorValues(factor.getFactorCode(), startDate, endDate, tradingDates);
-        sendProgress(factor.getFactorCode(), "COMPUTING", 100,
-                String.format("归一化完成，共处理 %d 个交易日，写入 %,d 条因子值", totalDates, rowsInserted.get()));
+        sendProgress(factor.getFactorCode(), "COMPUTING", 91, String.format("因子值写入完成，共 %,d 条。开始横截面归一化...", rowsInserted.get()));
+        normalizeFactorValues(factor.getFactorCode(), tradingDates);
+        sendProgress(factor.getFactorCode(), "COMPUTING", 100, String.format("归一化完成，共处理 %d 个交易日，写入 %,d 条因子值", totalDates, rowsInserted.get()));
 
         log.info("[{}] computation done: {} dates, {} rows", factor.getFactorCode(), totalDates, rowsInserted.get());
     }
@@ -429,13 +437,7 @@ public class FactorComputeEngine {
                 List<MarketDailyBar> history = marketDataService.getBarsBySymbol(symbol, histStart, date);
                 BigDecimal value = computeSingleValue(factor, symbol, date, history);
                 if (value != null) {
-                    FactorValue fv = FactorValue.builder()
-                            .factorCode(factor.getFactorCode())
-                            .symbol(symbol)
-                            .calcDate(date)
-                            .factorVal(value)
-                            .createdAt(now)
-                            .build();
+                    FactorValue fv = FactorValue.builder().factorCode(factor.getFactorCode()).symbol(symbol).calcDate(date).factorVal(value).createdAt(now).build();
                     results.add(fv);
                 }
             } catch (Exception e) {
@@ -453,31 +455,20 @@ public class FactorComputeEngine {
         FinancialFactorCalculator calculator = financialCalculators.get(factorCode);
         List<FactorValue> results = new ArrayList<>(symbols.size());
         LocalDateTime now = LocalDateTime.now();
-        int year = date.getYear();
-
         for (String symbol : symbols) {
             try {
                 // stock_financial_indicator.code 存储纯数字（如 000001），而 symbol 带后缀（如 000001.SZ）
                 String code = symbol.contains(".") ? symbol.substring(0, symbol.indexOf('.')) : symbol;
                 // 查询该股票 end_date <= calcDate 的最新一期年报（report_type=0 或年报）
                 LambdaQueryWrapper<StockFinancialIndicator> wrapper = new LambdaQueryWrapper<>();
-                wrapper.eq(StockFinancialIndicator::getCode, code)
-                        .le(StockFinancialIndicator::getEndDate, date)
-                        .orderByDesc(StockFinancialIndicator::getEndDate)
-                        .last("LIMIT 1");
+                wrapper.eq(StockFinancialIndicator::getCode, code).le(StockFinancialIndicator::getEndDate, date).orderByDesc(StockFinancialIndicator::getEndDate).last("LIMIT 1");
                 StockFinancialIndicator indicator = financialIndicatorMapper.selectOne(wrapper);
 
                 if (indicator == null) continue;
 
                 BigDecimal value = calculator.calculate(symbol, indicator);
                 if (value != null) {
-                    FactorValue fv = FactorValue.builder()
-                            .factorCode(factorCode)
-                            .symbol(symbol)
-                            .calcDate(date)
-                            .factorVal(value)
-                            .createdAt(now)
-                            .build();
+                    FactorValue fv = FactorValue.builder().factorCode(factorCode).symbol(symbol).calcDate(date).factorVal(value).createdAt(now).build();
                     results.add(fv);
                 }
             } catch (Exception e) {
@@ -487,7 +478,9 @@ public class FactorComputeEngine {
         return results;
     }
 
-    /** 格式化剩余时间：秒->分:秒 或 时:分 */
+    /**
+     * 格式化剩余时间：秒->分:秒 或 时:分
+     */
     private String formatEta(long seconds) {
         if (seconds <= 0) return "计算中";
         if (seconds < 60) return seconds + "秒";
@@ -501,8 +494,7 @@ public class FactorComputeEngine {
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
     public void deleteExistingValues(String factorCode, LocalDate startDate, LocalDate endDate) {
         LambdaQueryWrapper<FactorValue> deleteWrapper = new LambdaQueryWrapper<>();
-        deleteWrapper.eq(FactorValue::getFactorCode, factorCode)
-                .between(FactorValue::getCalcDate, startDate, endDate);
+        deleteWrapper.eq(FactorValue::getFactorCode, factorCode).between(FactorValue::getCalcDate, startDate, endDate);
         factorValueMapper.delete(deleteWrapper);
     }
 
@@ -515,12 +507,15 @@ public class FactorComputeEngine {
             try {
                 batchSave(values);
                 return;
-            } catch (org.springframework.dao.DeadlockLoserDataAccessException e) {
+            } catch (org.springframework.dao.PessimisticLockingFailureException e) {
                 log.warn("Deadlock on batch insert for [{}], attempt {}/{}", factorCode, attempt, maxRetries);
                 if (attempt == maxRetries) {
                     throw e;
                 }
-                try { Thread.sleep(500L * attempt); } catch (InterruptedException ignored) {}
+                try {
+                    Thread.sleep(500L * attempt);
+                } catch (InterruptedException ignored) {
+                }
             }
         }
     }
@@ -537,24 +532,23 @@ public class FactorComputeEngine {
         int batchSize = 500;
         for (int i = 0; i < values.size(); i += batchSize) {
             List<FactorValue> sub = values.subList(i, Math.min(i + batchSize, values.size()));
+            // 双写：MySQL + ClickHouse
             factorValueMapper.batchUpsert(sub);
+            clickHouseFactorValueService.batchUpsertToCH(sub);
         }
     }
 
     /**
      * 计算单个因子值
      */
-    private BigDecimal computeSingleValue(FactorDefinition factor, String symbol,
-                                           LocalDate calcDate, List<MarketDailyBar> history) {
+    private BigDecimal computeSingleValue(FactorDefinition factor, String symbol, LocalDate calcDate, List<MarketDailyBar> history) {
         if (factor.getFactorType() == FactorDefinition.FactorType.BUILTIN) {
             FactorCalculator calc = builtinCalculators.get(factor.getFactorCode());
             if (calc != null) {
                 return calc.calculate(symbol, calcDate, history, Map.of());
             }
-        } else if (factor.getFactorType() == FactorDefinition.FactorType.SCRIPTED
-                   && factor.getScriptCode() != null) {
-            return scriptedEngine.calculate(factor.getScriptCode(), factor.getFactorCode(),
-                    symbol, calcDate, history, Map.of());
+        } else if (factor.getFactorType() == FactorDefinition.FactorType.SCRIPTED && factor.getScriptCode() != null) {
+            return scriptedEngine.calculate(factor.getScriptCode(), factor.getFactorCode(), symbol, calcDate, history, Map.of());
         }
         return null;
     }
@@ -563,27 +557,40 @@ public class FactorComputeEngine {
      * 对因子值做横截面归一化（Z-Score + 百分位排名）
      * 优化：批量 updateById 替代逐行更新，并带速率进度
      */
-    private void normalizeFactorValues(String factorCode, LocalDate start, LocalDate end,
-                                        List<LocalDate> dates) {
+    private void normalizeFactorValues(String factorCode, List<LocalDate> dates) {
         int totalDates = dates.size();
         long normStart = System.currentTimeMillis();
 
         for (int di = 0; di < totalDates; di++) {
             LocalDate date = dates.get(di);
-            LambdaQueryWrapper<FactorValue> wrapper = new LambdaQueryWrapper<>();
-            wrapper.eq(FactorValue::getFactorCode, factorCode)
-                    .eq(FactorValue::getCalcDate, date)
-                    .orderByAsc(FactorValue::getSymbol);
-            List<FactorValue> values = factorValueMapper.selectList(wrapper);
+            // 优先从 ClickHouse 读取
+            List<FactorValue> values;
+            if (clickHouseConfig.isEnabled()) {
+                try {
+                    values = clickHouseFactorValueService.findByFactorCodeAndDate(factorCode, date);
+                    if (values.isEmpty()) {
+                        LambdaQueryWrapper<FactorValue> wrapper = new LambdaQueryWrapper<>();
+                        wrapper.eq(FactorValue::getFactorCode, factorCode).eq(FactorValue::getCalcDate, date).orderByAsc(FactorValue::getSymbol);
+                        values = factorValueMapper.selectList(wrapper);
+                    }
+                } catch (Exception e) {
+                    log.warn("[ClickHouse] normalize 因子值查询失败，回退 MySQL: {}", e.getMessage());
+                    LambdaQueryWrapper<FactorValue> wrapper = new LambdaQueryWrapper<>();
+                    wrapper.eq(FactorValue::getFactorCode, factorCode).eq(FactorValue::getCalcDate, date).orderByAsc(FactorValue::getSymbol);
+                    values = factorValueMapper.selectList(wrapper);
+                }
+            } else {
+                LambdaQueryWrapper<FactorValue> wrapper = new LambdaQueryWrapper<>();
+                wrapper.eq(FactorValue::getFactorCode, factorCode).eq(FactorValue::getCalcDate, date).orderByAsc(FactorValue::getSymbol);
+                values = factorValueMapper.selectList(wrapper);
+            }
             if (values.isEmpty()) continue;
 
-            double[] raw = values.stream()
-                    .mapToDouble(v -> v.getFactorVal().doubleValue())
-                    .toArray();
+            double[] raw = values.stream().mapToDouble(v -> v.getFactorVal().doubleValue()).toArray();
 
             int n = raw.length;
             double mean = Arrays.stream(raw).average().orElse(0);
-            double std  = Math.sqrt(Arrays.stream(raw).map(v -> (v - mean) * (v - mean)).average().orElse(1));
+            double std = Math.sqrt(Arrays.stream(raw).map(v -> (v - mean) * (v - mean)).average().orElse(1));
 
             // 百分位排名（避免 O(n²)，改用排序后映射）
             double[] sorted = raw.clone();
@@ -593,13 +600,13 @@ public class FactorComputeEngine {
                 int lo = lowerBound(sorted, raw[i]);
                 int hi = upperBound(sorted, raw[i]);
                 double avgRank = lo + (hi - lo) / 2.0; // 0-based 平均秩
-                pctRanks[i]    = n <= 1 ? 0.5 : avgRank / (n - 1);
+                pctRanks[i] = n <= 1 ? 0.5 : avgRank / (n - 1);
             }
 
             // 批量设值，收集后统一批量更新
             for (int i = 0; i < values.size(); i++) {
                 FactorValue fv = values.get(i);
-                double zScore  = std == 0 ? 0 : (raw[i] - mean) / std;
+                double zScore = std == 0 ? 0 : (raw[i] - mean) / std;
                 fv.setZScore(BigDecimal.valueOf(zScore).setScale(6, RoundingMode.HALF_UP));
                 fv.setRankValue(BigDecimal.valueOf(pctRanks[i]).setScale(6, RoundingMode.HALF_UP));
             }
@@ -615,31 +622,35 @@ public class FactorComputeEngine {
                 long elapsed = System.currentTimeMillis() - normStart;
                 double speed = elapsed > 0 ? (di + 1.0) / elapsed * 1000 : 0;
                 int remaining = totalDates - di - 1;
-                long etaSec   = speed > 0 ? (long)(remaining / speed) : 0;
-                int pct = 91 + (int)((double)(di + 1) / totalDates * 9);
-                sendProgress(factorCode, "COMPUTING", Math.min(pct, 99),
-                        String.format("归一化 %d/%d (%s) | 本日 %d 只 | 速度 %.1f 日/s | 剩余约 %s",
-                                di + 1, totalDates, date, n, speed, formatEta(etaSec)));
+                long etaSec = speed > 0 ? (long) (remaining / speed) : 0;
+                int pct = 91 + (int) ((double) (di + 1) / totalDates * 9);
+                sendProgress(factorCode, "COMPUTING", Math.min(pct, 99), String.format("归一化 %d/%d (%s) | 本日 %d 只 | 速度 %.1f 日/s | 剩余约 %s", di + 1, totalDates, date, n, speed, formatEta(etaSec)));
             }
         }
     }
 
-    /** 二分查找第一个 >= target 的下标（0-based） */
+    /**
+     * 二分查找第一个 >= target 的下标（0-based）
+     */
     private int lowerBound(double[] sorted, double target) {
         int lo = 0, hi = sorted.length;
         while (lo < hi) {
             int mid = (lo + hi) >>> 1;
-            if (sorted[mid] < target) lo = mid + 1; else hi = mid;
+            if (sorted[mid] < target) lo = mid + 1;
+            else hi = mid;
         }
         return lo;
     }
 
-    /** 二分查找第一个 > target 的下标（0-based） */
+    /**
+     * 二分查找第一个 > target 的下标（0-based）
+     */
     private int upperBound(double[] sorted, double target) {
         int lo = 0, hi = sorted.length;
         while (lo < hi) {
             int mid = (lo + hi) >>> 1;
-            if (sorted[mid] <= target) lo = mid + 1; else hi = mid;
+            if (sorted[mid] <= target) lo = mid + 1;
+            else hi = mid;
         }
         return lo;
     }
@@ -650,19 +661,26 @@ public class FactorComputeEngine {
      */
     @Async("backtestTaskExecutor")
     public void runFactorTest(FactorTestReport report, FactorDefinition factor) {
-        log.info("Running factor test for [{}], report id: {}, pool={}, freq={}",
-                factor.getFactorCode(), report.getId(), report.getStockPool(), report.getRebalanceFreq());
+        log.info("Running factor test for [{}], report id: {}, pool={}, freq={}", factor.getFactorCode(), report.getId(), report.getStockPool(), report.getRebalanceFreq());
 
         try {
             report.setStatus(FactorTestReport.TestStatus.RUNNING);
             testReportMapper.updateById(report);
 
             // ── 自动检查并计算因子值（无数据时同步计算，在异步线程内不影响HTTP） ──
-            long valueCount = factorValueMapper.selectCount(
-                    new LambdaQueryWrapper<FactorValue>()
-                            .eq(FactorValue::getFactorCode, factor.getFactorCode())
-                            .ge(FactorValue::getCalcDate, report.getStartDate())
-                            .le(FactorValue::getCalcDate, report.getEndDate()));
+            // 优先从 ClickHouse 读取
+            long valueCount = 0;
+            if (clickHouseConfig.isEnabled()) {
+                try {
+                    List<FactorValue> values = clickHouseFactorValueService.findByFactorCodeAndDateRange(factor.getFactorCode(), report.getStartDate(), report.getEndDate());
+                    valueCount = values.size();
+                } catch (Exception e) {
+                    log.warn("[ClickHouse] 因子值数量检查失败，回退 MySQL: {}", e.getMessage());
+                }
+            }
+            if (valueCount == 0) {
+                valueCount = factorValueMapper.selectCount(new LambdaQueryWrapper<FactorValue>().eq(FactorValue::getFactorCode, factor.getFactorCode()).ge(FactorValue::getCalcDate, report.getStartDate()).le(FactorValue::getCalcDate, report.getEndDate()));
+            }
             if (valueCount == 0) {
                 log.info("Factor [{}] has no values, computing before test...", factor.getFactorCode());
                 sendProgress(factor.getFactorCode(), "TEST_START", 1, "因子值不存在，正在自动计算...");
@@ -698,7 +716,7 @@ public class FactorComputeEngine {
             final int GROUP_COUNT = 5;
 
             // ── IC 序列 ──────────────────────────────────────────
-            List<Double> icList     = new ArrayList<>();
+            List<Double> icList = new ArrayList<>();
             List<Double> rankIcList = new ArrayList<>();
             List<Map<String, Object>> icSeriesData = new ArrayList<>();
 
@@ -707,22 +725,22 @@ public class FactorComputeEngine {
             List<double[]> groupDailyReturnsList = new ArrayList<>();
 
             // ── 净值序列 ─────────────────────────────────────────
-            double[] groupNavs  = new double[GROUP_COUNT];
+            double[] groupNavs = new double[GROUP_COUNT];
             Arrays.fill(groupNavs, 1.0);
             double benchmarkNav = 1.0;
 
-            List<Map<String, Object>> groupNavData     = new ArrayList<>();
+            List<Map<String, Object>> groupNavData = new ArrayList<>();
             List<Map<String, Object>> longShortNavData = new ArrayList<>();
 
             // ── 多空净值 ─────────────────────────────────────────
-            double lsTopNav    = 1.0;
+            double lsTopNav = 1.0;
             double lsBottomNav = 1.0;
-            double lsNetNav    = 1.0;
+            double lsNetNav = 1.0;
 
             // ── 用于计算主动指标 ─────────────────────────────────
-            List<Double> topGroupDailyList       = new ArrayList<>();  // 多头组日收益
-            List<Double> benchmarkDailyList      = new ArrayList<>();  // 基准日收益
-            List<Double> topActiveReturnList     = new ArrayList<>();  // 多头超额日收益
+            List<Double> topGroupDailyList = new ArrayList<>();  // 多头组日收益
+            List<Double> benchmarkDailyList = new ArrayList<>();  // 基准日收益
+            List<Double> topActiveReturnList = new ArrayList<>();  // 多头超额日收益
 
             int totalDays = dates.size() - 1;
             int processed = 0;
@@ -731,23 +749,36 @@ public class FactorComputeEngine {
                 LocalDate calcDate = dates.get(di);
                 LocalDate nextDate = dates.get(di + 1);
 
-                LambdaQueryWrapper<FactorValue> wrapper = new LambdaQueryWrapper<>();
-                wrapper.eq(FactorValue::getFactorCode, factor.getFactorCode())
-                        .eq(FactorValue::getCalcDate, calcDate)
-                        .orderByAsc(FactorValue::getSymbol);
-                List<FactorValue> factorValues = factorValueMapper.selectList(wrapper);
+                // 优先从 ClickHouse 读取
+                List<FactorValue> factorValues;
+                if (clickHouseConfig.isEnabled()) {
+                    try {
+                        factorValues = clickHouseFactorValueService.findByFactorCodeAndDate(factor.getFactorCode(), calcDate);
+                        if (factorValues.isEmpty()) {
+                            LambdaQueryWrapper<FactorValue> wrapper = new LambdaQueryWrapper<>();
+                            wrapper.eq(FactorValue::getFactorCode, factor.getFactorCode()).eq(FactorValue::getCalcDate, calcDate).orderByAsc(FactorValue::getSymbol);
+                            factorValues = factorValueMapper.selectList(wrapper);
+                        }
+                    } catch (Exception e) {
+                        log.warn("[ClickHouse] 因子值查询失败，回退 MySQL: {}", e.getMessage());
+                        LambdaQueryWrapper<FactorValue> wrapper = new LambdaQueryWrapper<>();
+                        wrapper.eq(FactorValue::getFactorCode, factor.getFactorCode()).eq(FactorValue::getCalcDate, calcDate).orderByAsc(FactorValue::getSymbol);
+                        factorValues = factorValueMapper.selectList(wrapper);
+                    }
+                } else {
+                    LambdaQueryWrapper<FactorValue> wrapper = new LambdaQueryWrapper<>();
+                    wrapper.eq(FactorValue::getFactorCode, factor.getFactorCode()).eq(FactorValue::getCalcDate, calcDate).orderByAsc(FactorValue::getSymbol);
+                    factorValues = factorValueMapper.selectList(wrapper);
+                }
 
                 // 按股票池过滤
                 if (!poolSymbols.isEmpty()) {
-                    factorValues = factorValues.stream()
-                            .filter(fv -> poolSymbols.contains(fv.getSymbol()))
-                            .toList();
+                    factorValues = factorValues.stream().filter(fv -> poolSymbols.contains(fv.getSymbol())).toList();
                 }
 
                 if (factorValues.size() < GROUP_COUNT * 2) {
                     log.warn("Skip date {}: factorValues={} < {}", calcDate, factorValues.size(), GROUP_COUNT * 2);
-                    sendProgress(factor.getFactorCode(), "TESTING", 10,
-                            String.format("[%s] 因子值不足，仅 %d 只（需至少 %d），跳过", calcDate, factorValues.size(), GROUP_COUNT * 2));
+                    sendProgress(factor.getFactorCode(), "TESTING", 10, String.format("[%s] 因子值不足，仅 %d 只（需至少 %d），跳过", calcDate, factorValues.size(), GROUP_COUNT * 2));
                     appendNavPoint(groupNavData, calcDate, groupNavs, benchmarkNav);
                     appendLsNavPoint(longShortNavData, calcDate, lsTopNav, lsBottomNav, lsNetNav);
                     // 数据不足时添加0收益到统计列表，保持数据一致性
@@ -766,20 +797,16 @@ public class FactorComputeEngine {
                     List<MarketDailyBar> curr = marketDataService.getBarsBySymbol(fv.getSymbol(), calcDate, calcDate);
                     List<MarketDailyBar> next = marketDataService.getBarsBySymbol(fv.getSymbol(), nextDate, nextDate);
                     if (!curr.isEmpty() && !next.isEmpty()) {
-                        double r = next.getFirst().getClose().doubleValue()
-                                / curr.getFirst().getClose().doubleValue() - 1;
+                        double r = next.getFirst().getClose().doubleValue() / curr.getFirst().getClose().doubleValue() - 1;
                         nextReturns.put(fv.getSymbol(), r);
                     }
                 }
 
-                List<FactorValue> valid = factorValues.stream()
-                        .filter(fv -> nextReturns.containsKey(fv.getSymbol()))
-                        .toList();
+                List<FactorValue> valid = factorValues.stream().filter(fv -> nextReturns.containsKey(fv.getSymbol())).toList();
 
                 if (valid.size() < GROUP_COUNT * 2) {
                     log.warn("Skip date {}: valid returns={} (total={}, nextReturns={})", calcDate, valid.size(), factorValues.size(), nextReturns.size());
-                    sendProgress(factor.getFactorCode(), "TESTING", 10,
-                            String.format("[%s] 下期行情数据不足，有效 %d 只（需至少 %d），跳过", calcDate, valid.size(), GROUP_COUNT * 2));
+                    sendProgress(factor.getFactorCode(), "TESTING", 10, String.format("[%s] 下期行情数据不足，有效 %d 只（需至少 %d），跳过", calcDate, valid.size(), GROUP_COUNT * 2));
                     appendNavPoint(groupNavData, calcDate, groupNavs, benchmarkNav);
                     appendLsNavPoint(longShortNavData, calcDate, lsTopNav, lsBottomNav, lsNetNav);
                     // 数据不足时添加0收益到统计列表，保持数据一致性
@@ -793,40 +820,34 @@ public class FactorComputeEngine {
                 }
 
                 // ── IC 计算 ──────────────────────────────────────
-                double[] fValues   = valid.stream().mapToDouble(fv -> fv.getFactorVal().doubleValue()).toArray();
-                double[] returns   = valid.stream().mapToDouble(fv -> nextReturns.get(fv.getSymbol())).toArray();
-                double[] rankVals  = valid.stream().mapToDouble(fv -> fv.getRankValue() == null ? 0 : fv.getRankValue().doubleValue()).toArray();
+                double[] fValues = valid.stream().mapToDouble(fv -> fv.getFactorVal().doubleValue()).toArray();
+                double[] returns = valid.stream().mapToDouble(fv -> nextReturns.get(fv.getSymbol())).toArray();
+                double[] rankVals = valid.stream().mapToDouble(fv -> fv.getRankValue() == null ? 0 : fv.getRankValue().doubleValue()).toArray();
 
-                double ic     = pearsonCorr(fValues, returns);
+                double ic = pearsonCorr(fValues, returns);
                 double rankIc = pearsonCorr(rankVals, returns);
 
-                if (!Double.isNaN(ic))     icList.add(ic);
+                if (!Double.isNaN(ic)) icList.add(ic);
                 if (!Double.isNaN(rankIc)) rankIcList.add(rankIc);
 
                 Map<String, Object> icPoint = new HashMap<>();
-                icPoint.put("date",   calcDate.toString());
-                icPoint.put("ic",     Double.isNaN(ic)     ? 0 : round4(ic));
+                icPoint.put("date", calcDate.toString());
+                icPoint.put("ic", Double.isNaN(ic) ? 0 : round4(ic));
                 icPoint.put("rankIc", Double.isNaN(rankIc) ? 0 : round4(rankIc));
                 icSeriesData.add(icPoint);
 
                 // ── 分组收益 ─────────────────────────────────────
-                List<FactorValue> sortedByFactor = valid.stream()
-                        .sorted(Comparator.comparingDouble(fv -> fv.getFactorVal().doubleValue()))
-                        .toList();
+                List<FactorValue> sortedByFactor = valid.stream().sorted(Comparator.comparingDouble(fv -> fv.getFactorVal().doubleValue())).toList();
                 int groupSize = sortedByFactor.size() / GROUP_COUNT;
 
                 double[] todayGroupRet = new double[GROUP_COUNT];
-                double   benchmarkRet  = valid.stream()
-                        .mapToDouble(fv -> nextReturns.getOrDefault(fv.getSymbol(), 0.0))
-                        .average().orElse(0);
+                double benchmarkRet = valid.stream().mapToDouble(fv -> nextReturns.getOrDefault(fv.getSymbol(), 0.0)).average().orElse(0);
 
                 for (int g = 0; g < GROUP_COUNT; g++) {
                     int from = g * groupSize;
-                    int to   = (g == GROUP_COUNT - 1) ? sortedByFactor.size() : (g + 1) * groupSize;
+                    int to = (g == GROUP_COUNT - 1) ? sortedByFactor.size() : (g + 1) * groupSize;
                     if (from >= to) continue;
-                    double gRet = sortedByFactor.subList(from, to).stream()
-                            .mapToDouble(fv -> nextReturns.getOrDefault(fv.getSymbol(), 0.0))
-                            .average().orElse(0);
+                    double gRet = sortedByFactor.subList(from, to).stream().mapToDouble(fv -> nextReturns.getOrDefault(fv.getSymbol(), 0.0)).average().orElse(0);
                     todayGroupRet[g] = gRet;
                     groupTotalReturns[g] += gRet;
                 }
@@ -845,9 +866,9 @@ public class FactorComputeEngine {
                 benchmarkNav *= (1 + benchmarkRet);
 
                 double bottomRet = todayGroupRet[0];
-                lsTopNav    *= (1 + topRet    - benchmarkRet);
+                lsTopNav *= (1 + topRet - benchmarkRet);
                 lsBottomNav *= (1 + bottomRet - benchmarkRet);
-                lsNetNav    *= (1 + topRet    - bottomRet);
+                lsNetNav *= (1 + topRet - bottomRet);
 
                 appendNavPoint(groupNavData, calcDate, groupNavs, benchmarkNav);
                 appendLsNavPoint(longShortNavData, calcDate, lsTopNav, lsBottomNav, lsNetNav);
@@ -857,10 +878,7 @@ public class FactorComputeEngine {
 
                 // 每期推送详细日志（IC + 分组收益 + 股票数）
                 StringBuilder detail = new StringBuilder();
-                detail.append(String.format("[%s] 股票:%d | IC:%.4f | RankIC:%.4f | 分组收益:",
-                        calcDate, valid.size(),
-                        Double.isNaN(ic) ? 0 : ic,
-                        Double.isNaN(rankIc) ? 0 : rankIc));
+                detail.append(String.format("[%s] 股票:%d | IC:%.4f | RankIC:%.4f | 分组收益:", calcDate, valid.size(), Double.isNaN(ic) ? 0 : ic, Double.isNaN(rankIc) ? 0 : rankIc));
                 for (int g = 0; g < GROUP_COUNT; g++) {
                     detail.append(String.format(" G%d:%.2f%%", g + 1, todayGroupRet[g] * 100));
                 }
@@ -874,34 +892,32 @@ public class FactorComputeEngine {
             if (!icList.isEmpty()) {
                 double icMean = avg(icList);
                 double icStdV = std(icList);
-                double icir   = icStdV == 0 ? 0 : icMean / icStdV;
-                long   posC   = icList.stream().filter(v -> v > 0).count();
+                double icir = icStdV == 0 ? 0 : icMean / icStdV;
+                long posC = icList.stream().filter(v -> v > 0).count();
 
                 report.setIcMean(bd(icMean));
                 report.setIcStd(bd(icStdV));
                 report.setIcir(bd(icir));
                 report.setIcPositiveRate(bd((double) posC / icList.size()));
 
-                int    n      = icList.size();
-                double tStat  = icStdV == 0 ? 0 : icMean / (icStdV / Math.sqrt(n));
+                int n = icList.size();
+                double tStat = icStdV == 0 ? 0 : icMean / (icStdV / Math.sqrt(n));
                 double pValue = tStatToPValue(tStat, n - 1);
                 report.setIcTStat(bd(tStat));
                 report.setIcPValue(bd(pValue));
-                sendProgress(factor.getFactorCode(), "TESTING", 96,
-                        String.format("IC统计完成，样本数%d | IC均值:%.4f | ICIR:%.4f | 正IC率:%.1f%% | t统计:%.2f | p值:%.4f",
-                                icList.size(), icMean, icir, (double) posC / icList.size() * 100, tStat, pValue));
+                sendProgress(factor.getFactorCode(), "TESTING", 96, String.format("IC统计完成，样本数%d | IC均值:%.4f | ICIR:%.4f | 正IC率:%.1f%% | t统计:%.2f | p值:%.4f", icList.size(), icMean, icir, (double) posC / icList.size() * 100, tStat, pValue));
             }
 
             if (!rankIcList.isEmpty()) {
                 double rIcMean = avg(rankIcList);
-                double rIcStd  = std(rankIcList);
+                double rIcStd = std(rankIcList);
                 report.setRankIcMean(bd(rIcMean));
                 report.setRankIcir(bd(rIcStd == 0 ? 0 : rIcMean / rIcStd));
             }
 
             // ── 汇总：分组收益 ───────────────────────────────────
             report.setGroupCount(GROUP_COUNT);
-            int tradingDays   = Math.max(processed, 1);
+            int tradingDays = Math.max(processed, 1);
             // 年化因子（每年有多少个调仓期）
             double annualFactor = getAnnualFactor(report.getRebalanceFreq(), tradingDays);
 
@@ -930,7 +946,7 @@ public class FactorComputeEngine {
                 // 主动年化收益（多头组超额日均收益 × 每年调仓期数）
                 double activeAnnual = avg(topActiveReturnList) * periodsPerYear;
                 // 主动年化波动率
-                double activeVol  = std(topActiveReturnList) * Math.sqrt(periodsPerYear);
+                double activeVol = std(topActiveReturnList) * Math.sqrt(periodsPerYear);
                 // 相对基准胜率：多头日收益 > 基准日收益的比例
                 long winDays = 0;
                 for (int i = 0; i < topGroupDailyList.size(); i++) {
@@ -948,17 +964,16 @@ public class FactorComputeEngine {
             List<Map<String, Object>> groupReturnData = new ArrayList<>();
             for (int g = 0; g < GROUP_COUNT; g++) {
                 Map<String, Object> gr = new HashMap<>();
-                gr.put("group",        "分组" + (g + 1));
+                gr.put("group", "分组" + (g + 1));
                 gr.put("annualReturn", round4(annualReturns[g]));
 
                 if (!groupDailyReturnsList.isEmpty()) {
                     final int gIdx = g;
-                    List<Double> gDaily = groupDailyReturnsList.stream()
-                            .map(arr -> arr[gIdx]).collect(Collectors.toList());
-                    double vol    = std(gDaily) * Math.sqrt(periodsPerYear);
+                    List<Double> gDaily = groupDailyReturnsList.stream().map(arr -> arr[gIdx]).collect(Collectors.toList());
+                    double vol = std(gDaily) * Math.sqrt(periodsPerYear);
                     double sharpe = vol == 0 ? 0 : annualReturns[g] / vol;
                     if (sharpe > bestSharpe) bestSharpe = sharpe;
-                    double maxDd  = calcMaxDrawdown(gDaily);
+                    double maxDd = calcMaxDrawdown(gDaily);
                     // 胜率：日收益 > 0 的比例
                     long winDays = gDaily.stream().filter(r -> r > 0).count();
                     double winRate = (double) winDays / gDaily.size();
@@ -968,11 +983,11 @@ public class FactorComputeEngine {
                     double benchmarkNavFinal = benchmarkNav;
                     double benchmarkAnnual = years <= 0 ? 0 : Math.pow(benchmarkNavFinal, 1.0 / years) - 1;
                     double excessReturn = annualReturns[g] - benchmarkAnnual;
-                    gr.put("volatility",   round4(vol));
-                    gr.put("sharpe",       round4(sharpe));
-                    gr.put("maxDrawdown",  round4(maxDd));
-                    gr.put("winRate",      round4(winRate));
-                    gr.put("calmar",       round4(calmar));
+                    gr.put("volatility", round4(vol));
+                    gr.put("sharpe", round4(sharpe));
+                    gr.put("maxDrawdown", round4(maxDd));
+                    gr.put("winRate", round4(winRate));
+                    gr.put("calmar", round4(calmar));
                     gr.put("excessReturn", round4(excessReturn));
                 }
                 groupReturnData.add(gr);
@@ -983,15 +998,13 @@ public class FactorComputeEngine {
 
             // 分组 IR + 多空显著性
             if (groupDailyReturnsList.size() > 1) {
-                List<Double> lsDailyList = groupDailyReturnsList.stream()
-                        .map(arr -> arr[GROUP_COUNT - 1] - arr[0])
-                        .collect(Collectors.toList());
-                double lsAvg  = avg(lsDailyList);
-                double lsStd  = std(lsDailyList);
+                List<Double> lsDailyList = groupDailyReturnsList.stream().map(arr -> arr[GROUP_COUNT - 1] - arr[0]).collect(Collectors.toList());
+                double lsAvg = avg(lsDailyList);
+                double lsStd = std(lsDailyList);
                 double groupIr = lsStd == 0 ? 0 : lsAvg / lsStd * Math.sqrt(periodsPerYear);
                 report.setGroupIr(bd(groupIr));
 
-                int    n2     = lsDailyList.size();
+                int n2 = lsDailyList.size();
                 double tStat2 = lsStd == 0 ? 0 : lsAvg / (lsStd / Math.sqrt(n2));
                 report.setLsPValue(bd(tStatToPValue(tStat2, n2 - 1)));
             }
@@ -1001,9 +1014,7 @@ public class FactorComputeEngine {
             for (int g = 0; g < GROUP_COUNT; g++) {
                 groupSummary.append(String.format(" G%d:%.2f%%", g + 1, annualReturns[g] * 100));
             }
-            groupSummary.append(String.format(" | 多空:%.2f%% | 单调性:%.4f",
-                    (annualReturns[GROUP_COUNT - 1] - annualReturns[0]) * 100,
-                    report.getMonotonicity() != null ? report.getMonotonicity().doubleValue() : 0));
+            groupSummary.append(String.format(" | 多空:%.2f%% | 单调性:%.4f", (annualReturns[GROUP_COUNT - 1] - annualReturns[0]) * 100, report.getMonotonicity() != null ? report.getMonotonicity().doubleValue() : 0));
             sendProgress(factor.getFactorCode(), "TESTING", 97, groupSummary.toString());
 
             report.setIcSeriesJson(objectMapper.writeValueAsString(icSeriesData));
@@ -1047,14 +1058,18 @@ public class FactorComputeEngine {
             Integer lastWeek = null;
             for (LocalDate d : allDates) {
                 int week = d.get(wf.weekOfWeekBasedYear());
-                if (!Integer.valueOf(week).equals(lastWeek)) { result.add(d); lastWeek = week; }
+                if (!Integer.valueOf(week).equals(lastWeek)) {
+                    result.add(d);
+                    lastWeek = week;
+                }
             }
         } else if ("MONTHLY".equalsIgnoreCase(freq)) {
             // 每月取第一个交易日
             Integer lastMonth = null;
             for (LocalDate d : allDates) {
                 if (!Integer.valueOf(d.getMonthValue()).equals(lastMonth)) {
-                    result.add(d); lastMonth = d.getMonthValue();
+                    result.add(d);
+                    lastMonth = d.getMonthValue();
                 }
             }
         }
@@ -1074,35 +1089,37 @@ public class FactorComputeEngine {
         java.util.Collections.sort(sorted);
         return switch (stockPool.toUpperCase()) {
             case "CSI300" -> new HashSet<>(sorted.subList(0, Math.min(300, sorted.size())));
-            case "CSI500" -> new HashSet<>(sorted.subList(Math.min(300, sorted.size()),
-                    Math.min(800, sorted.size())));
+            case "CSI500" -> new HashSet<>(sorted.subList(Math.min(300, sorted.size()), Math.min(800, sorted.size())));
             case "CSI800" -> new HashSet<>(sorted.subList(0, Math.min(800, sorted.size())));
-            case "CSI1000" -> new HashSet<>(sorted.subList(Math.min(800, sorted.size()),
-                    Math.min(1800, sorted.size())));
+            case "CSI1000" ->
+                    new HashSet<>(sorted.subList(Math.min(800, sorted.size()), Math.min(1800, sorted.size())));
             default -> Collections.emptySet();
         };
     }
 
-    /** 根据调仓频率和有效期数计算年化因子（每年有多少个调仓期） */
+    /**
+     * 根据调仓频率和有效期数计算年化因子（每年有多少个调仓期）
+     */
     private double getAnnualFactor(String freq, int periods) {
-        if (freq == null || "DAILY".equalsIgnoreCase(freq))   return 252.0 / periods;
-        if ("WEEKLY".equalsIgnoreCase(freq))                   return 52.0  / periods;
-        if ("MONTHLY".equalsIgnoreCase(freq))                  return 12.0  / periods;
+        if (freq == null || "DAILY".equalsIgnoreCase(freq)) return 252.0 / periods;
+        if ("WEEKLY".equalsIgnoreCase(freq)) return 52.0 / periods;
+        if ("MONTHLY".equalsIgnoreCase(freq)) return 12.0 / periods;
         return 252.0 / periods;
     }
 
-    /** 每年对应的调仓期数（用于年化波动率/IR等计算） */
+    /**
+     * 每年对应的调仓期数（用于年化波动率/IR等计算）
+     */
     private double getPeriodsPerYear(String freq) {
-        if (freq == null || "DAILY".equalsIgnoreCase(freq))   return 252.0;
-        if ("WEEKLY".equalsIgnoreCase(freq))                   return 52.0;
-        if ("MONTHLY".equalsIgnoreCase(freq))                  return 12.0;
+        if (freq == null || "DAILY".equalsIgnoreCase(freq)) return 252.0;
+        if ("WEEKLY".equalsIgnoreCase(freq)) return 52.0;
+        if ("MONTHLY".equalsIgnoreCase(freq)) return 12.0;
         return 252.0;
     }
 
     // ── 私有工具方法 ───────────────────────────────────────────────
 
-    private void appendNavPoint(List<Map<String, Object>> navData, LocalDate date,
-                                 double[] groupNavs, double benchmarkNav) {
+    private void appendNavPoint(List<Map<String, Object>> navData, LocalDate date, double[] groupNavs, double benchmarkNav) {
         Map<String, Object> pt = new LinkedHashMap<>();
         pt.put("date", date.toString());
         for (int g = 0; g < groupNavs.length; g++) {
@@ -1112,22 +1129,24 @@ public class FactorComputeEngine {
         navData.add(pt);
     }
 
-    private void appendLsNavPoint(List<Map<String, Object>> lsData, LocalDate date,
-                                   double top, double bottom, double net) {
+    private void appendLsNavPoint(List<Map<String, Object>> lsData, LocalDate date, double top, double bottom, double net) {
         Map<String, Object> pt = new LinkedHashMap<>();
-        pt.put("date",   date.toString());
-        pt.put("top",    round4(top));
+        pt.put("date", date.toString());
+        pt.put("top", round4(top));
         pt.put("bottom", round4(bottom));
-        pt.put("net",    round4(net));
+        pt.put("net", round4(net));
         lsData.add(pt);
     }
 
-    /** Pearson 相关系数，den==0 返回 NaN */
+    /**
+     * Pearson 相关系数，den==0 返回 NaN
+     */
     private double pearsonCorr(double[] x, double[] y) {
         int n = x.length;
         double sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0, sumY2 = 0;
         for (int i = 0; i < n; i++) {
-            sumX += x[i]; sumY += y[i];
+            sumX += x[i];
+            sumY += y[i];
             sumXY += x[i] * y[i];
             sumX2 += x[i] * x[i];
             sumY2 += y[i] * y[i];
@@ -1137,7 +1156,9 @@ public class FactorComputeEngine {
         return den == 0 ? Double.NaN : num / den;
     }
 
-    /** t统计量 → 双尾 p值（用正态近似 df > 30 时误差小） */
+    /**
+     * t统计量 → 双尾 p值（用正态近似 df > 30 时误差小）
+     */
     private double tStatToPValue(double t, int df) {
         if (df <= 0) return 1.0;
         // 使用正态近似：p ≈ 2 * (1 - Φ(|t|))
@@ -1147,22 +1168,25 @@ public class FactorComputeEngine {
         return Math.max(0, Math.min(1, p));
     }
 
-    /** 标准正态分布右尾概率 P(Z > x) */
+    /**
+     * 标准正态分布右尾概率 P(Z > x)
+     */
     private double normalCdfComplement(double x) {
         // 使用 Horner 近似（精度 ~1e-7）
         double t = 1.0 / (1.0 + 0.2316419 * x);
-        double poly = t * (0.319381530 + t * (-0.356563782
-                + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))));
+        double poly = t * (0.319381530 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))));
         double phi = Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI);
         return phi * poly;
     }
 
-    /** 最大回撤（基于日收益序列） */
+    /**
+     * 最大回撤（基于日收益序列）
+     */
     private double calcMaxDrawdown(List<Double> dailyReturns) {
         double nav = 1.0, peak = 1.0, maxDd = 0;
         for (double r : dailyReturns) {
-            nav  *= (1 + r);
-            peak  = Math.max(peak, nav);
+            nav *= (1 + r);
+            peak = Math.max(peak, nav);
             maxDd = Math.max(maxDd, (peak - nav) / peak);
         }
         return maxDd;
@@ -1174,7 +1198,7 @@ public class FactorComputeEngine {
 
     private double std(List<Double> list) {
         double mean = avg(list);
-        double var  = list.stream().mapToDouble(v -> (v - mean) * (v - mean)).average().orElse(0);
+        double var = list.stream().mapToDouble(v -> (v - mean) * (v - mean)).average().orElse(0);
         return Math.sqrt(var);
     }
 
@@ -1190,19 +1214,12 @@ public class FactorComputeEngine {
 
     private void sendProgress(String factorCode, String stage, int pct, String message) {
         try {
-            Map<String, Object> msg = Map.of("factorCode", factorCode, "stage", stage,
-                    "progress", pct, "message", message);
+            Map<String, Object> msg = Map.of("factorCode", factorCode, "stage", stage, "progress", pct, "message", message);
             messagingTemplate.convertAndSend("/topic/factor/" + factorCode, msg);
             // 同时广播到批量日志通道，供监控页面聚合展示
-            messagingTemplate.convertAndSend("/topic/factor/batch-log", Map.of(
-                    "type", "FACTOR_PROGRESS",
-                    "factorCode", factorCode,
-                    "stage", stage,
-                    "progress", pct,
-                    "message", message,
-                    "timestamp", LocalDateTime.now().toString()
-            ));
-        } catch (Exception ignored) {}
+            messagingTemplate.convertAndSend("/topic/factor/batch-log", Map.of("type", "FACTOR_PROGRESS", "factorCode", factorCode, "stage", stage, "progress", pct, "message", message, "timestamp", LocalDateTime.now().toString()));
+        } catch (Exception ignored) {
+        }
     }
 
     /**
@@ -1211,9 +1228,7 @@ public class FactorComputeEngine {
      */
     private Map<String, Object> computeFactorDecayAnalysis(List<Map<String, Object>> icSeriesData) {
         List<Map<String, Object>> decaySeries = new ArrayList<>();
-        double[] initialICs = icSeriesData.stream()
-                .mapToDouble(d -> ((Number) d.get("ic")).doubleValue())
-                .toArray();
+        double[] initialICs = icSeriesData.stream().mapToDouble(d -> ((Number) d.get("ic")).doubleValue()).toArray();
 
         double initialICMean = avg(Arrays.stream(initialICs).boxed().collect(Collectors.toList()));
         double initialICAbs = Math.abs(initialICMean);
@@ -1278,9 +1293,7 @@ public class FactorComputeEngine {
 
             if (periods.size() >= 3) {
                 // 对数变换: ln(IC(t)) = ln(IC(0)) - λ * t
-                List<Double> logICs = absICs.stream()
-                        .map(Math::log)
-                        .toList();
+                List<Double> logICs = absICs.stream().map(Math::log).toList();
 
                 // 线性回归拟合
                 double sumT = 0, sumLogIC = 0, sumTLogIC = 0, sumT2 = 0;

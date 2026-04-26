@@ -3,7 +3,7 @@
 """
 update_index_daily_baostock.py
 ================================
-使用 Baostock 获取指数日线数据，写入 stock_daily 表。
+使用 Baostock 获取指数日线数据，写入 stock_daily 表（通过 db_helper，支持 ClickHouse/MySQL）。
 
 与个股数据区分：
   - stock_info 表不包含指数记录，指数数据仅写入 stock_daily
@@ -21,7 +21,7 @@ update_index_daily_baostock.py
   - 中证红利 (000022.SH)
   - 国证2000 (399303.SZ)
 
-数据源: Baostock (免费，无需 token)
+数据源: Baostock (免费，无需 token)，备用: 腾讯证券
   指数代码格式: sh.000300 / sz.399006
 
 用法:
@@ -38,10 +38,14 @@ update_index_daily_baostock.py
   # 查看当前指数数据概况
   python update_index_daily_baostock.py --summary
 
-依赖: pip install pymysql baostock
+  # 切换数据库后端
+  DB_BACKEND=mysql python update_index_daily_baostock.py
+
+依赖: pip install pymysql clickhouse-connect baostock
 """
 
 import sys
+import os
 import time
 import re
 import json
@@ -49,8 +53,12 @@ import argparse
 from datetime import datetime, timedelta
 
 import requests
-import pymysql
 import baostock as bs
+
+# 切换到脚本目录，确保能 import db_helper
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from db_helper import StockDailyDB
+from db_config import get_backend_label
 
 # 腾讯证券接口（备用数据源，用于 Baostock 未收录的指数如科创50）
 QQ_FINANCE_URL = "https://proxy.finance.qq.com/ifzqgtimg/appstock/app/newfqkline/get"
@@ -58,18 +66,6 @@ QQ_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
     "Referer": "https://finance.qq.com/",
 }
-
-
-# ─── 数据库配置 ──────────────────────────────────────────────
-DB_CONFIG = dict(
-    host="localhost",
-    port=3306,
-    db="stock",
-    user="root",
-    password="123456",
-    charset="utf8mb4",
-    cursorclass=pymysql.cursors.DictCursor,
-)
 
 
 # ─── 内置指数列表 ────────────────────────────────────────────
@@ -92,7 +88,10 @@ INDEX_MAP = {idx[0]: idx for idx in BUILTIN_INDICES}
 
 
 def get_db_connection():
-    return pymysql.connect(**DB_CONFIG)
+    return StockDailyDB()
+
+
+
 
 
 def code_to_baostock(code):
@@ -207,60 +206,50 @@ def fetch_index_history(bs_code, start_date, end_date, max_retries=3):
                 return []
 
 
-def upsert_daily(conn, code, name, row):
-    """将一条指数日线数据写入 stock_daily 表。
-    
-    唯一索引 uk_code_name_date(code, name, trade_date) 确保指数与个股不冲突。
-    例如: (000001, 上证指数, 2024-01-01) 和 (000001, 平安银行, 2024-01-01) 可共存。
-    """
-    # row: [date, open, high, low, close, volume, amount, preclose, turn, pctChg]
-    date_str     = row[0]
-    open_price   = float(row[1]) if row[1] else None
-    high_price   = float(row[2]) if row[2] else None
-    low_price    = float(row[3]) if row[3] else None
-    close_price  = float(row[4]) if row[4] else None
-    volume       = int(float(row[5])) if row[5] else None
-    amount       = float(row[6]) if row[6] else None
-    pre_close    = float(row[7]) if row[7] else None
-    turnover_rate = float(row[8]) if row[8] else None
-    change_pct   = float(row[9]) if row[9] else None
+def build_row_dict(code, name, market, row):
+    """将 Baostock/腾讯 返回的原始 row 转换为 db_helper upsert_daily 接受的 dict。
 
-    # 涨跌额
+    row 格式: [date, open, high, low, close, volume, amount, preclose, turn, pctChg]
+    """
+    def _f(v): return float(v) if v not in (None, "", "null") else None
+    def _i(v): return int(float(v)) if v not in (None, "", "null") else None
+
+    date_str      = row[0]
+    open_price    = _f(row[1])
+    high_price    = _f(row[2])
+    low_price     = _f(row[3])
+    close_price   = _f(row[4])
+    volume        = _i(row[5])
+    amount        = _f(row[6])
+    pre_close     = _f(row[7])
+    turnover_rate = _f(row[8])
+    change_pct    = _f(row[9])
+
     change_amount = None
     if close_price is not None and pre_close is not None and pre_close != 0:
         change_amount = round(close_price - pre_close, 2)
 
-    sql = """
-        INSERT INTO stock_daily
-            (code, trade_date, name,
-             open_price, close_price, high_price, low_price, pre_close,
-             volume, amount, change_percent, change_amount, turnover_rate)
-        VALUES (%s, %s, %s,
-                %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s)
-        ON DUPLICATE KEY UPDATE
-            open_price     = VALUES(open_price),
-            close_price    = VALUES(close_price),
-            high_price     = VALUES(high_price),
-            low_price      = VALUES(low_price),
-            pre_close      = VALUES(pre_close),
-            volume         = VALUES(volume),
-            amount         = VALUES(amount),
-            change_percent = VALUES(change_percent),
-            change_amount  = VALUES(change_amount),
-            turnover_rate  = VALUES(turnover_rate)
-    """
-
-    with conn.cursor() as cur:
-        cur.execute(sql, (
-            code, date_str, name,
-            open_price, close_price, high_price, low_price, pre_close,
-            volume, amount, change_pct, change_amount, turnover_rate,
-        ))
+    return {
+        "code":          code,
+        "trade_date":    date_str,
+        "name":          name,
+        "open_price":    open_price,
+        "close_price":   close_price,
+        "high_price":    high_price,
+        "low_price":     low_price,
+        "pre_close":     pre_close,
+        "volume":        volume,
+        "amount":        amount,
+        "change_percent": change_pct,
+        "change_amount": change_amount,
+        "turnover_rate": turnover_rate,
+        "pe_ttm":        None,
+        "pb":            None,
+    }
 
 
-def process_index(conn, code, start_date, end_date, force=False):
-    """处理单个指数的数据更新"""
+def process_index(db, code, start_date, end_date, force=False):
+    """处理单个指数的数据更新（使用 db_helper）"""
     info = INDEX_MAP.get(code)
     if not info:
         print(f"  [SKIP] 未知指数代码: {code}")
@@ -268,28 +257,25 @@ def process_index(conn, code, start_date, end_date, force=False):
 
     code, name, market, bs_code = info
 
-    # 检查数据库中该指数的最新日期（通过 code + name 辅助区分指数和个股）
+    # 检查最新日期（通过 db_helper）
     if not force:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT MAX(trade_date) as max_date FROM stock_daily WHERE code = %s AND name = %s",
-                (code, name)
-            )
-            row = cur.fetchone()
-            if row and row["max_date"]:
-                db_max = row["max_date"]
-                if hasattr(db_max, "strftime"):
-                    next_day = db_max + timedelta(days=1)
-                    db_next = next_day.strftime("%Y-%m-%d")
-                else:
-                    db_next = (datetime.strptime(str(db_max), "%Y-%m-%d").date() + timedelta(days=1)).strftime("%Y-%m-%d")
-                if db_next > end_date:
-                    print(f"  [{code}] {name} 已是最新 ({db_max}), 跳过")
-                    return 0, 0
-                print(f"  [{code}] {name} | 数据库最新: {db_max}, 从 {db_next} 增量更新")
-                start_date = db_next
+        # 指数 code 在 stock_daily 中格式为 "sh.000001" / "sz.399006"
+        bs_style_code = bs_code  # 已经是 "sh.000001" 格式
+        latest_date = db.get_latest_date_by_code(bs_style_code)
+        if latest_date:
+            if hasattr(latest_date, 'strftime'):
+                db_next = (latest_date + timedelta(days=1)).strftime("%Y-%m-%d")
+                db_max_str = latest_date.strftime("%Y-%m-%d")
             else:
-                print(f"  [{code}] {name} | 无历史数据, 从 {start_date} 开始")
+                db_max_str = str(latest_date)
+                db_next = (datetime.strptime(db_max_str, "%Y-%m-%d").date() + timedelta(days=1)).strftime("%Y-%m-%d")
+            if db_next > end_date:
+                print(f"  [{code}] {name} 已是最新 ({db_max_str}), 跳过")
+                return 0, 0
+            print(f"  [{code}] {name} | 数据库最新: {db_max_str}, 从 {db_next} 增量更新")
+            start_date = db_next
+        else:
+            print(f"  [{code}] {name} | 无历史数据, 从 {start_date} 开始")
     else:
         print(f"  [{code}] {name} | 强制全量, 从 {start_date} 开始")
 
@@ -307,67 +293,58 @@ def process_index(conn, code, start_date, end_date, force=False):
         print(f"  [{code}] {name} | 无新增数据")
         return 0, 0
 
-    # 写入数据库
-    inserted = 0
-    for row in rows:
-        try:
-            upsert_daily(conn, code, name, row)
-            inserted += 1
-        except Exception as e:
-            print(f"    [ERROR] 写入失败 {row[0]}: {e}")
-            conn.rollback()
+    # 构建 dict 列表，通过 db_helper 写入（双写 MySQL+ClickHouse）
+    row_dicts = [build_row_dict(bs_code, name, market, r) for r in rows]
+    try:
+        inserted = db.upsert_daily(row_dicts)
+    except Exception as e:
+        print(f"    [ERROR] 写入失败: {e}")
+        return 0, len(rows)
 
-    conn.commit()
     print(f"  [{code}] {name} | 新增/更新 {inserted} 条 (共获取 {len(rows)} 条, 数据源: {source})")
     return inserted, len(rows)
 
 
 def show_summary():
     """显示指数数据概况"""
-    conn = get_db_connection()
+    db = StockDailyDB()
     try:
-        with conn.cursor() as cur:
-            # 获取所有内置指数的数据状况（通过 code + name 组合区分指数和个股）
-            print(f"\n{'=' * 65}")
-            print(f"  指数数据概况 (stock_daily 表)")
-            print(f"{'=' * 65}")
-            print(f"  {'代码':<12s} {'名称':<10s} {'记录数':>8s} {'起始日期':<12s} {'最新日期':<12s}")
-            print(f"  {'─' * 55}")
+        print(f"\n{'=' * 65}")
+        print(f"  指数数据概况 (stock_daily 表, 后端: {get_backend_label()})")
+        print(f"{'=' * 65}")
+        print(f"  {'代码':<12s} {'名称':<10s} {'记录数':>8s} {'起始日期':<12s} {'最新日期':<12s}")
+        print(f"  {'─' * 55}")
 
-            for code, name, market, _ in BUILTIN_INDICES:
-                cur.execute("""
-                    SELECT COUNT(*) as cnt,
-                           MIN(trade_date) as min_date,
-                           MAX(trade_date) as max_date
-                    FROM stock_daily
-                    WHERE code = %s AND name = %s
-                """, (code, name))
-                row = cur.fetchone()
-                cnt = row["cnt"]
-                if cnt > 0:
-                    min_d = str(row["min_date"])
-                    max_d = str(row["max_date"])
-                else:
-                    min_d = "—"
-                    max_d = "—"
-                print(f"  {code:<12s} {name:<10s} {cnt:>8,d} {min_d:<12s} {max_d:<12s}")
+        for code, name, market, bs_code in BUILTIN_INDICES:
+            # 使用 bs_code（如 sh.000001）查询
+            if db.backend == "clickhouse":
+                r = db.ch_client.query(
+                    f"SELECT count() as cnt, MIN(trade_date) as min_date, MAX(trade_date) as max_date "
+                    f"FROM {db.CH_TABLE} WHERE code = '{bs_code}'"
+                )
+                row = r.result_rows[0] if r.result_rows else (0, None, None)
+                cnt = row[0]
+                min_d = str(row[1]) if row[1] else "—"
+                max_d = str(row[2]) if row[2] else "—"
+            else:
+                import pymysql
+                with db.mysql_conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT COUNT(*) as cnt, MIN(trade_date) as min_date, MAX(trade_date) as max_date "
+                        "FROM stock_daily WHERE code = %s",
+                        (bs_code,)
+                    )
+                    row = cur.fetchone()
+                    cnt = row["cnt"]
+                    min_d = str(row["min_date"]) if row["min_date"] else "—"
+                    max_d = str(row["max_date"]) if row["max_date"] else "—"
 
-            # 总计
-            conditions = " OR ".join(["(code = %s AND name = %s)"] * len(BUILTIN_INDICES))
-            params = []
-            for idx in BUILTIN_INDICES:
-                params.extend([idx[0], idx[1]])
-            cur.execute(f"""
-                SELECT COUNT(*) as total FROM stock_daily
-                WHERE {conditions}
-            """, params)
-            total = cur.fetchone()["total"]
-            print(f"  {'─' * 55}")
-            print(f"  {'合计':<22s} {total:>8,d} 条")
-            print(f"{'=' * 65}\n")
+            print(f"  {code:<12s} {name:<10s} {cnt:>8,d} {min_d:<12s} {max_d:<12s}")
 
+        print(f"  {'─' * 55}")
+        print(f"{'=' * 65}\n")
     finally:
-        conn.close()
+        db.close()
 
 
 def resolve_date(date_str):
@@ -448,6 +425,7 @@ def main():
     print(f"\n{'#' * 65}")
     print(f"  指数日线数据更新 (Baostock)")
     print(f"  时间: {now_str}")
+    print(f"  数据库后端: {get_backend_label()}")
     print(f"{'#' * 65}")
     print(f"  日期范围: {start_date} ~ {end_date}")
     print(f"  指数数量: {len(codes)} 个")
@@ -460,7 +438,7 @@ def main():
         return 1
     print(f"  Baostock 登录成功\n")
 
-    conn = get_db_connection()
+    db = StockDailyDB()
     total_start = time.time()
     total_inserted = 0
     total_fetched = 0
@@ -470,7 +448,7 @@ def main():
             info = INDEX_MAP[code]
             print(f"  [{i}/{len(codes)}] 处理: {code}.{info[2]} {info[1]}")
 
-            inserted, fetched = process_index(conn, code, start_date, end_date, force=args.force)
+            inserted, fetched = process_index(db, code, start_date, end_date, force=args.force)
             total_inserted += inserted
             total_fetched += fetched
 
@@ -479,7 +457,7 @@ def main():
                 time.sleep(0.5)
 
     finally:
-        conn.close()
+        db.close()
         bs.logout()
 
     elapsed = time.time() - total_start

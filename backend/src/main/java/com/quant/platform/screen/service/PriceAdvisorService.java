@@ -5,8 +5,8 @@ import com.quant.platform.financial.entity.StockFinancialIndicator;
 import com.quant.platform.financial.mapper.StockFinancialIndicatorMapper;
 import com.quant.platform.stock.entity.StockDaily;
 import com.quant.platform.stock.entity.StockInfo;
-import com.quant.platform.stock.mapper.StockDailyMapper;
 import com.quant.platform.stock.mapper.StockInfoMapper;
+import com.quant.platform.stock.service.ClickHouseStockService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -24,7 +24,7 @@ import java.util.*;
 @RequiredArgsConstructor
 public class PriceAdvisorService {
 
-    private final StockDailyMapper stockDailyMapper;
+    private final ClickHouseStockService clickHouseStockService;
     private final StockFinancialIndicatorMapper financialIndicatorMapper;
     private final StockInfoMapper stockInfoMapper;
 
@@ -57,14 +57,9 @@ public class PriceAdvisorService {
         String code = symbol.contains(".") ? symbol.substring(0, symbol.indexOf('.')) : symbol;
         double techWeight = 1.0 - valuationWeight;
 
-        // 1. 加载近60日行情
+        // 1. 加载近120日行情
         LocalDate histStart = screenDate.minusDays(120);
-        List<StockDaily> history = stockDailyMapper.selectList(
-            new LambdaQueryWrapper<StockDaily>()
-                .eq(StockDaily::getCode, code)
-                .ge(StockDaily::getTradeDate, histStart)
-                .le(StockDaily::getTradeDate, screenDate)
-                .orderByAsc(StockDaily::getTradeDate));
+        List<StockDaily> history = clickHouseStockService.getStockDaily(code, histStart, screenDate);
 
         if (history.isEmpty()) return null;
 
@@ -267,10 +262,7 @@ public class PriceAdvisorService {
             if (peers.size() < 3) return 0;
 
             List<String> codes = peers.stream().map(StockInfo::getCode).toList();
-            List<StockDaily> dailyBars = stockDailyMapper.selectList(
-                new LambdaQueryWrapper<StockDaily>()
-                    .in(StockDaily::getCode, codes)
-                    .eq(StockDaily::getTradeDate, screenDate));
+            List<StockDaily> dailyBars = clickHouseStockService.getStockDailyBatch(codes, screenDate, screenDate);
 
             List<Double> values = dailyBars.stream()
                 .map(d -> "pb".equals(field) ? d.getPb() : d.getPeTtm())

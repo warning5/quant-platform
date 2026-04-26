@@ -1,12 +1,12 @@
 package com.quant.platform.dataupdate;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.quant.platform.stock.entity.StockDaily;
 import com.quant.platform.stock.entity.StockInfo;
-import com.quant.platform.stock.mapper.StockDailyMapper;
 import com.quant.platform.stock.mapper.StockInfoMapper;
+import com.quant.platform.stock.service.ClickHouseStockService;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
+import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -48,7 +48,7 @@ public class DataUpdateService {
     private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("HH:mm:ss");
     private final SimpMessagingTemplate messagingTemplate;
     private final StockInfoMapper stockInfoMapper;
-    private final StockDailyMapper stockDailyMapper;
+    private final ClickHouseStockService clickHouseStockService;
     private final JdbcTemplate jdbcTemplate;
     /**
      * 正在运行的任务
@@ -62,6 +62,11 @@ public class DataUpdateService {
     private String pythonPath;
     @Value("${quant.data-update.script-dir:scripts}")
     private String scriptDir;
+    /**
+     * -- GETTER --
+     *  获取当前活跃任务
+     */
+    @Getter
     @Value("${quant.data-update.default-start-days:3}")
     private int defaultStartDays;
     private Process currentProcess;
@@ -137,13 +142,6 @@ public class DataUpdateService {
         return activeTasks.get(taskId);
     }
 
-    /**
-     * 获取当前活跃任务
-     */
-    public int getDefaultStartDays() {
-        return defaultStartDays;
-    }
-
     public DataUpdateTask getCurrentTask() {
         return activeTasks.values().stream()
                 .filter(DataUpdateTask::isRunning)
@@ -179,7 +177,7 @@ public class DataUpdateService {
     /**
      * 取消任务
      */
-    public synchronized boolean cancelTask(String taskId) {
+        public synchronized boolean cancelTask(String taskId) {
         DataUpdateTask task = activeTasks.get(taskId);
         if (task == null || !task.isRunning()) return false;
 
@@ -304,24 +302,34 @@ public class DataUpdateService {
     private void executeAllMarkets(String taskId, DataUpdateRequest request) throws IOException, InterruptedException {
         DataUpdateTask task = activeTasks.get(taskId);
         broadcastLog(taskId, "========== 开始全部市场更新 ==========");
-        task.setTotalStocks(estimateTotalStocks(request));
+        // totalStocks 由各市场脚本日志动态更新，不再预估值
+        task.setProcessedStocks(0);
+        task.setTotalStocks(0);
         boolean allSuccess = true;
 
         // 根据数据源决定更新哪些市场
         List<String[]> marketScripts = new ArrayList<>();
+        String pool = request.getStockPool();
+        boolean hasPoolFilter = pool != null && !"ALL".equals(pool);
+
         if (!"BJ".equals(request.getMarket())) {
             // BAOSTOCK 或 ALL → 更新沪市和深市，支持备用数据源
             marketScripts.add(new String[]{"沪市", "update_stock_daily_baostock.py", "update_stock_daily_akshare.py", "--market", "SH"});
             marketScripts.add(new String[]{"深市", "update_stock_daily_baostock.py", "update_stock_daily_akshare.py", "--market", "SZ"});
         }
-        if (!"BAOSTOCK".equals(request.getSource())) {
-            // 非 BAOSTOCK 独占 → 更新北交所
+        // 指定股票池时只更新池内股票池（SH/SZ），跳过北交所
+        if (!"BAOSTOCK".equals(request.getSource()) && !hasPoolFilter) {
+            // 非 BAOSTOCK 独占且未指定股票池 → 更新北交所
             marketScripts.add(new String[]{"北交所", "update_bj_stock_daily_qq.py"});
         }
 
         for (String[] ms : marketScripts) {
             if ("CANCELLED".equals(task.getStatus())) break;
             task.setCurrentStep(ms[0]);
+            // 每个市场开始时重置进度，totalStocks 由脚本日志动态更新
+            task.setProcessedStocks(0);
+            task.setTotalStocks(0);
+            task.setProgress(0);
             broadcastStatus(task);
             broadcastLog(taskId, "\n========== " + ms[0] + " ==========");
             
@@ -386,9 +394,6 @@ public class DataUpdateService {
             broadcastStatus(task);
         }
 
-        // 保存市场前缀，parseProgress 中会保留
-        String marketPrefix = prefix;
-
         ProcessBuilder pb = new ProcessBuilder(cmd);
         File workDir = resolvedScriptDir != null ? new File(resolvedScriptDir) : new File(scriptDir);
         if (!workDir.exists() || !workDir.isDirectory()) {
@@ -397,6 +402,7 @@ public class DataUpdateService {
         pb.directory(workDir);
         pb.redirectErrorStream(true);
         pb.environment().put("PYTHONIOENCODING", "utf-8");
+        pb.environment().put("DB_BACKEND", "clickhouse");
         Process process = pb.start();
         currentProcess = process;
         // 进程已启动，不再覆盖 currentStep，保留市场前缀直到 parseProgress 更新
@@ -460,6 +466,12 @@ public class DataUpdateService {
         if (request.getDelay() != null && request.getDelay() > 0) {
             cmd.add("--delay");
             cmd.add(request.getDelay().toString());
+        }
+        // 股票池筛选
+        String pool = request.getStockPool();
+        if (pool != null && !"ALL".equals(pool)) {
+            cmd.add("--pool");
+            cmd.add(pool);
         }
     }
 
@@ -587,7 +599,7 @@ public class DataUpdateService {
                 int current = Integer.parseInt(m.group(1));
                 int total = Integer.parseInt(m.group(2));
                 task.setProcessedStocks(current);
-                task.setTotalStocks(Math.max(total, task.getTotalStocks()));
+                task.setTotalStocks(total);
                 task.setProgress((int) ((double) current / total * 100));
                 // 保留市场前缀
                 String stepCur = task.getCurrentStep();
@@ -706,21 +718,15 @@ public class DataUpdateService {
 
         // 总体统计
         long totalStocks = stockInfoMapper.selectCount(null);
-        long totalDailyRecords = stockDailyMapper.selectCount(null);
+        long totalDailyRecords = clickHouseStockService.getTotalDailyCount();
 
         // 最新交易日
-        LambdaQueryWrapper<StockDaily> latestW = new LambdaQueryWrapper<>();
-        latestW.orderByDesc(StockDaily::getTradeDate).last("LIMIT 1")
-                .select(StockDaily::getTradeDate);
-        StockDaily latestRecord = stockDailyMapper.selectOne(latestW);
-        String latestTradeDate = latestRecord != null ? latestRecord.getTradeDate().toString() : "无数据";
+        LocalDate latestRecord = clickHouseStockService.getLatestTradeDate();
+        String latestTradeDate = latestRecord != null ? latestRecord.toString() : "无数据";
 
         // 最早交易日
-        LambdaQueryWrapper<StockDaily> earliestW = new LambdaQueryWrapper<>();
-        earliestW.orderByAsc(StockDaily::getTradeDate).last("LIMIT 1")
-                .select(StockDaily::getTradeDate);
-        StockDaily earliestRecord = stockDailyMapper.selectOne(earliestW);
-        String earliestTradeDate = earliestRecord != null ? earliestRecord.getTradeDate().toString() : "无数据";
+        LocalDate earliestRecord = clickHouseStockService.getEarliestTradeDate();
+        String earliestTradeDate = earliestRecord != null ? earliestRecord.toString() : "无数据";
 
         Map<String, Object> overview = new LinkedHashMap<>();
         overview.put("totalStocks", totalStocks);
@@ -741,45 +747,40 @@ public class DataUpdateService {
             m.put("infoCount", infoCount);
 
             // stock_daily 中该市场记录数（通过代码前缀判断市场）
-            LambdaQueryWrapper<StockDaily> dw = new LambdaQueryWrapper<>();
-            switch (market) {
-                case "SH" ->
-                        dw.and(w -> w.likeRight(StockDaily::getCode, "6").or().likeRight(StockDaily::getCode, "688").or().likeRight(StockDaily::getCode, "689"));
-                case "SZ" ->
-                        dw.and(w -> w.likeRight(StockDaily::getCode, "0").or().likeRight(StockDaily::getCode, "3"));
-                case "BJ" -> dw.likeRight(StockDaily::getCode, "92");
-            }
-            long dailyCount = stockDailyMapper.selectCount(dw);
+            String codePattern = switch (market) {
+                case "SH" -> "(code LIKE '6%')";
+                case "SZ" -> "(code LIKE '0%' OR code LIKE '3%')";
+                case "BJ" -> "(code LIKE '92%')";
+                default -> "1=1";
+            };
+            long dailyCount = clickHouseStockService.getDailyCountByCodePrefix(codePattern);
             m.put("dailyRecords", dailyCount);
 
             // 该市场最新交易日
-            LambdaQueryWrapper<StockDaily> mLW = new LambdaQueryWrapper<>();
-            switch (market) {
-                case "SH" ->
-                        mLW.and(w -> w.likeRight(StockDaily::getCode, "6").or().likeRight(StockDaily::getCode, "688").or().likeRight(StockDaily::getCode, "689"));
-                case "SZ" ->
-                        mLW.and(w -> w.likeRight(StockDaily::getCode, "0").or().likeRight(StockDaily::getCode, "3"));
-                case "BJ" -> mLW.likeRight(StockDaily::getCode, "92");
+            String latestCodePattern = switch (market) {
+                case "SH" -> "(code LIKE '6%' OR code LIKE '688%' OR code LIKE '689%')";
+                case "SZ" -> "(code LIKE '0%' OR code LIKE '3%')";
+                case "BJ" -> "(code LIKE '92%')";
+                default -> "1=1";
+            };
+            LocalDate mLatestDate = null;
+            String latestDateSql = "SELECT MAX(trade_date) FROM stock_daily WHERE " + latestCodePattern;
+            Object latestObj = clickHouseStockService.queryForObject(latestDateSql);
+            if (latestObj != null) {
+                mLatestDate = LocalDate.parse(latestObj.toString());
             }
-            mLW.orderByDesc(StockDaily::getTradeDate).last("LIMIT 1")
-                    .select(StockDaily::getTradeDate);
-            StockDaily mLatest = stockDailyMapper.selectOne(mLW);
-            m.put("latestDate", mLatest != null ? mLatest.getTradeDate().toString() : "无数据");
+            m.put("latestDate", mLatestDate != null ? mLatestDate.toString() : "无数据");
 
             // 该市场最新交易日的股票数（使用COUNT DISTINCT去重，避免重复记录导致统计错误）
-            if (mLatest != null) {
-                String codePattern = switch (market) {
+            if (mLatestDate != null) {
+                String distinctPattern = switch (market) {
                     case "SH" -> "(code LIKE '6%' OR code LIKE '688%' OR code LIKE '689%')";
                     case "SZ" -> "(code LIKE '0%' OR code LIKE '3%')";
                     case "BJ" -> "code LIKE '92%'";
                     default -> "1=1";
                 };
-                String sql = String.format(
-                    "SELECT COUNT(DISTINCT code) FROM stock_daily WHERE trade_date = ? AND %s",
-                    codePattern
-                );
-                Long latestDayCount = jdbcTemplate.queryForObject(sql, Long.class, mLatest.getTradeDate());
-                m.put("latestDayCount", latestDayCount != null ? latestDayCount : 0);
+                long latestDayCount = clickHouseStockService.getDistinctCodeCount(mLatestDate, distinctPattern);
+                m.put("latestDayCount", latestDayCount);
             } else {
                 m.put("latestDayCount", 0);
             }
@@ -810,7 +811,7 @@ public class DataUpdateService {
             GROUP BY code, name
             ORDER BY code
             """;
-        List<Map<String, Object>> indices = jdbcTemplate.queryForList(indexSql);
+        List<Map<String, Object>> indices = clickHouseStockService.queryForList(indexSql);
         result.put("indices", indices);
 
         // 总记录数
@@ -819,7 +820,8 @@ public class DataUpdateService {
             WHERE code IN ('000001','000016','000022','000300','000688','000852','000905','399001','399006','399303')
               AND name IN ('上证指数','上证50','中证红利','沪深300','科创50','中证1000','中证500','深证成指','创业板指','国证2000')
             """;
-        long totalRecords = jdbcTemplate.queryForObject(totalSql, Long.class);
+        Object totalObj = clickHouseStockService.queryForObject(totalSql);
+        long totalRecords = totalObj != null ? ((Number) totalObj).longValue() : 0;
         result.put("totalRecords", totalRecords);
         result.put("indexCount", indices.size());
 
@@ -829,7 +831,7 @@ public class DataUpdateService {
             WHERE code IN ('000001','000016','000022','000300','000688','000852','000905','399001','399006','399303')
               AND name IN ('上证指数','上证50','中证红利','沪深300','科创50','中证1000','中证500','深证成指','创业板指','国证2000')
             """;
-        Object latest = jdbcTemplate.queryForObject(latestSql, Object.class);
+        Object latest = clickHouseStockService.queryForObject(latestSql);
         result.put("latestTradeDate", latest != null ? latest.toString() : null);
 
         return result;
@@ -861,7 +863,7 @@ public class DataUpdateService {
               AND code IN ('000001','000016','000022','000300','000688','000852','000905','399001','399006','399303')
               AND name IN ('上证指数','上证50','中证红利','沪深300','科创50','中证1000','中证500','深证成指','创业板指','国证2000')
             """;
-        List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, date.toString());
+        List<Map<String, Object>> rows = clickHouseStockService.queryForList(sql, date.toString());
         for (Map<String, Object> row : rows) {
             existingCodes.add(String.valueOf(row.get("code")));
         }
@@ -951,33 +953,23 @@ public class DataUpdateService {
     }
 
     /**
-     * 查询指定日期缺失的股票
+     * 查询指定日期缺失的股票（在 stock_info 中但不在 stock_daily 指定日期中的股票）
      */
     public List<Map<String, Object>> getMissingStocks(String date, String market) {
-        // 使用 SQL 直接查询：在 stock_info 中但不在 stock_daily 指定日期中的股票
-        // 这里简化处理，通过 Java 层查询
-        List<StockInfo> allStocks;
-        LambdaQueryWrapper<StockInfo> wrapper = new LambdaQueryWrapper<>();
-        if (market != null && !"ALL".equals(market)) {
-            wrapper.eq(StockInfo::getMarket, market);
-        }
-        allStocks = stockInfoMapper.selectList(wrapper);
+        // 使用 SQL 直接查询缺失股票
+        String marketCondition = "ALL".equals(market) ? "" : " AND si.market = '" + market + "'";
+        String sql = """
+            SELECT si.code, si.name, si.market
+            FROM stock_info si
+            WHERE si.market IN ('SH', 'SZ', 'BJ')
+            %s
+            AND si.code NOT IN (
+                SELECT code FROM stock_daily WHERE trade_date = '%s'
+            )
+            ORDER BY si.code
+            """.formatted(marketCondition, date);
 
-        // 查询该日期有数据的股票代码
-        Set<String> existingCodes = new HashSet<>();
-        // 通过 StockDailyMapper 查询（简化版，实际应用中可以用自定义 SQL）
-        // 这里返回空列表，前端会通过 API 获取实际数据
-        List<Map<String, Object>> missing = new ArrayList<>();
-
-        for (StockInfo stock : allStocks) {
-            missing.add(Map.of(
-                    "code", stock.getCode(),
-                    "name", stock.getName() != null ? stock.getName() : "",
-                    "market", stock.getMarket() != null ? stock.getMarket() : ""
-            ));
-        }
-
-        return missing;
+        return jdbcTemplate.queryForList(sql);
     }
 
     @PreDestroy

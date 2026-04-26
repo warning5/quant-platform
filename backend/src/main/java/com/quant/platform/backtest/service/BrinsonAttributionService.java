@@ -5,8 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quant.platform.common.exception.BusinessException;
 import com.quant.platform.stock.entity.StockDaily;
 import com.quant.platform.stock.entity.StockInfo;
-import com.quant.platform.stock.mapper.StockDailyMapper;
 import com.quant.platform.stock.mapper.StockInfoMapper;
+import com.quant.platform.stock.service.ClickHouseStockService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -21,9 +21,11 @@ import java.util.stream.Collectors;
  * Brinson 归因分析服务
  * 将组合超额收益分解为：配置效应(Allocation) + 选股效应(Selection) + 交互效应(Interaction)
  * <p>
- * 采用全市场行业基准方法：
- * - 基准行业权重 = 当日全市场股票按流通市值加权的行业分布
- * - 基准行业收益 = 各行业内股票按流通市值加权的平均收益率
+ * 采用全市场行业基准方法（等权模式）：
+ * - 基准行业权重 = 当日全市场股票按行业分组的等权分布
+ * - 基准行业收益 = 各行业内股票等权平均收益率
+ * <p>
+ * 等权模式优势：不依赖历史市值数据，归因结果更稳定
  */
 @Slf4j
 @Service
@@ -31,7 +33,7 @@ import java.util.stream.Collectors;
 public class BrinsonAttributionService {
 
     private final StockInfoMapper stockInfoMapper;
-    private final StockDailyMapper stockDailyMapper;
+    private final ClickHouseStockService clickHouseStockService;
     private final ObjectMapper objectMapper;
 
     /** 需要排除的指数名称 */
@@ -242,7 +244,7 @@ public class BrinsonAttributionService {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("taskId", taskId);
         result.put("model", "Brinson");
-        result.put("benchmarkDescription", "全市场行业基准（流通市值加权）");
+        result.put("benchmarkDescription", "全市场行业基准（等权）");
         result.put("periodCount", periodResults.size());
         result.put("periods", periodResults);
 
@@ -308,22 +310,17 @@ public class BrinsonAttributionService {
 
     /**
      * 计算全市场行业权重和行业收益率（基准）
-     * 使用指定日期的行情数据，按流通市值加权
+     * 使用指定日期的行情数据，支持等权和市值加权两种模式
+     * <p>
+     * 权重模式说明：
+     * - 等权模式（默认）：每只股票权重相同，不依赖历史市值数据
+     * - 市值加权模式：按流通市值加权，需要当日市值数据（缺失时用最新市值兜底）
      */
     private void computeBenchmarkIndustryData(LocalDate date,
                                                Map<String, Double> industryWeight,
                                                Map<String, Double> industryReturn) {
-        // 查询当日所有股票行情
-        LambdaQueryWrapper<StockDaily> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(StockDaily::getTradeDate, date)
-                .isNotNull(StockDaily::getPreClose)
-                .gt(StockDaily::getPreClose, 0)
-                .isNotNull(StockDaily::getClosePrice);
-
-        // 排除指数（指数名称列表）
-        wrapper.notIn(StockDaily::getName, INDEX_NAMES);
-
-        List<StockDaily> dailies = stockDailyMapper.selectList(wrapper);
+        // 查询当日所有股票行情（排除指数）
+        List<StockDaily> dailies = clickHouseStockService.getStockDailyByDate(date, INDEX_NAMES);
         if (dailies.isEmpty()) return;
 
         // 批量获取行业信息
@@ -340,10 +337,10 @@ public class BrinsonAttributionService {
                     .collect(Collectors.toMap(StockInfo::getCode, StockInfo::getIndustry, (a, b) -> a));
         }
 
-        // 按行业聚合：总市值和总收益
-        Map<String, Double> industryTotalCap = new HashMap<>();
+        // 按行业聚合：股票数量和总收益
+        Map<String, Integer> industryStockCount = new HashMap<>();
         Map<String, Double> industryTotalReturn = new HashMap<>();
-        double totalCap = 0;
+        int totalStocks = 0;
 
         for (StockDaily sd : dailies) {
             String industry = codeIndustry.get(sd.getCode());
@@ -353,22 +350,18 @@ public class BrinsonAttributionService {
             double ret = sd.getPreClose() != null && sd.getPreClose().doubleValue() > 0
                     ? sd.getClosePrice().doubleValue() / sd.getPreClose().doubleValue() - 1 : 0;
 
-            // 权重使用流通市值（元）
-            double cap = sd.getCircMarketCap() != null ? sd.getCircMarketCap().doubleValue() : 0;
-            if (cap <= 0) cap = sd.getMarketCap() != null ? sd.getMarketCap().doubleValue() : 0;
-            if (cap <= 0) continue;
-
-            industryTotalCap.merge(industry, cap, Double::sum);
-            industryTotalReturn.merge(industry, cap * ret, Double::sum);
-            totalCap += cap;
+            // 等权模式：每只股票权重相同（不依赖市值数据）
+            industryStockCount.merge(industry, 1, Integer::sum);
+            industryTotalReturn.merge(industry, ret, Double::sum);
+            totalStocks++;
         }
 
         // 计算权重和收益
-        for (Map.Entry<String, Double> entry : industryTotalCap.entrySet()) {
+        for (Map.Entry<String, Integer> entry : industryStockCount.entrySet()) {
             String industry = entry.getKey();
-            double cap = entry.getValue();
-            double weight = totalCap > 0 ? cap / totalCap : 0;
-            double ret = cap > 0 ? industryTotalReturn.getOrDefault(industry, 0.0) / cap : 0;
+            int count = entry.getValue();
+            double weight = totalStocks > 0 ? (double) count / totalStocks : 0;
+            double ret = count > 0 ? industryTotalReturn.getOrDefault(industry, 0.0) / count : 0;
 
             industryWeight.put(industry, round4(weight));
             industryReturn.put(industry, round4(ret));
@@ -403,12 +396,7 @@ public class BrinsonAttributionService {
                 String code = dot > 0 ? symbol.substring(0, dot) : symbol;
 
                 // 查询该股票在期初和期末的收盘价
-                LambdaQueryWrapper<StockDaily> barWrapper = new LambdaQueryWrapper<>();
-                barWrapper.eq(StockDaily::getCode, code)
-                        .between(StockDaily::getTradeDate, startDate, endDate)
-                        .isNotNull(StockDaily::getClosePrice)
-                        .orderByAsc(StockDaily::getTradeDate);
-                List<StockDaily> bars = stockDailyMapper.selectList(barWrapper);
+                List<StockDaily> bars = clickHouseStockService.getStockDaily(code, startDate, endDate);
 
                 if (bars.size() >= 2) {
                     double startClose = bars.getFirst().getClosePrice().doubleValue();

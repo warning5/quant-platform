@@ -15,6 +15,7 @@ import com.quant.platform.factor.mapper.FactorDefinitionMapper;
 import com.quant.platform.factor.mapper.FactorTestReportMapper;
 import com.quant.platform.factor.mapper.FactorValueMapper;
 import com.quant.platform.market.service.MarketDataService;
+import com.quant.platform.config.ClickHouseConfig;
 import com.quant.platform.stock.entity.StockInfo;
 import com.quant.platform.stock.mapper.StockInfoMapper;
 import lombok.RequiredArgsConstructor;
@@ -38,6 +39,8 @@ public class FactorService {
 
     private final FactorDefinitionMapper factorMapper;
     private final FactorValueMapper factorValueMapper;
+    private final ClickHouseFactorValueService clickHouseFactorValueService;
+    private final ClickHouseConfig clickHouseConfig;
     private final FactorTestReportMapper testReportMapper;
     private final FactorComputeEngine computeEngine;
     private final ScriptedFactorEngine scriptedEngine;
@@ -334,7 +337,7 @@ public class FactorService {
     public String triggerCompute(Long factorId, LocalDate startDate, LocalDate endDate) {
         FactorDefinition factor = getById(factorId);
         List<String> symbols = marketDataService.getAllSymbols();
-        computeEngine.computeFactor(factor, startDate, endDate, symbols, null);
+        computeEngine.computeFactor(factor, startDate, endDate, symbols);
         return factor.getFactorCode();
     }
 
@@ -382,7 +385,7 @@ public class FactorService {
                 log.info("[{}] incremental: existing data up to {}, computing from {}", code, latestDate, startDate);
                 computeEngine.computeFactorIncremental(factor, startDate, endDate, symbols);
             } else {
-                computeEngine.computeFactor(factor, startDate, endDate, symbols, null);
+                computeEngine.computeFactor(factor, startDate, endDate, symbols);
             }
             submitted.add(code);
         }
@@ -509,22 +512,49 @@ public class FactorService {
      * 获取因子时间序列值
      */
     public List<FactorValue> getFactorTimeSeries(String factorCode, String symbol,
-                                                   LocalDate start, LocalDate end) {
+                                                 LocalDate start, LocalDate end) {
+        // 优先从 ClickHouse 读取，失败时回退 MySQL
+        if (clickHouseConfig.isEnabled()) {
+            try {
+                List<FactorValue> result = clickHouseFactorValueService
+                        .findByFactorCodeAndDateRange(factorCode, start, end);
+                if (!result.isEmpty()) {
+                    return result.stream()
+                            .filter(fv -> fv.getSymbol().equals(symbol))
+                            .toList();
+                }
+            } catch (Exception e) {
+                log.warn("[ClickHouse] 因子时间序列查询失败，回退 MySQL: {}", e.getMessage());
+            }
+        }
         return factorValueMapper.findByFactorCodeAndSymbol(factorCode, symbol);
     }
 
     /**
      * 查询该因子有数据的股票列表（带名称），支持关键词搜索，最多返回 50 条
+     * 优先从 ClickHouse 读取
      */
     public List<Map<String, String>> getFactorSymbols(String factorCode, String keyword) {
-        // 1. 查 factor_value 表中该因子有哪些 symbol
-        LambdaQueryWrapper<FactorValue> fvWrapper = new LambdaQueryWrapper<>();
-        fvWrapper.select(FactorValue::getSymbol)
-                .eq(FactorValue::getFactorCode, factorCode)
-                .groupBy(FactorValue::getSymbol);
-        List<String> factorSymbols = factorValueMapper.selectList(fvWrapper).stream()
-                .map(FactorValue::getSymbol)
-                .toList();
+        // 1. 查 factor_value 表中该因子有哪些 symbol（优先 CH）
+        Set<String> factorSymbols;
+        if (clickHouseConfig.isEnabled()) {
+            try {
+                List<FactorValue> values = clickHouseFactorValueService
+                        .findByFactorCodeAndDateRange(factorCode, LocalDate.of(2000, 1, 1), LocalDate.now());
+                if (!values.isEmpty()) {
+                    factorSymbols = values.stream()
+                            .map(FactorValue::getSymbol)
+                            .collect(java.util.stream.Collectors.toSet());
+                } else {
+                    factorSymbols = getFactorSymbolsFromMySQL(factorCode);
+                }
+            } catch (Exception e) {
+                log.warn("[ClickHouse] 因子股票列表查询失败，回退 MySQL: {}", e.getMessage());
+                factorSymbols = getFactorSymbolsFromMySQL(factorCode);
+            }
+        } else {
+            factorSymbols = getFactorSymbolsFromMySQL(factorCode);
+        }
 
         if (factorSymbols.isEmpty()) {
             return List.of();
@@ -556,10 +586,38 @@ public class FactorService {
     }
 
     /**
+     * 从 MySQL 获取因子有数据的股票列表
+     */
+    private Set<String> getFactorSymbolsFromMySQL(String factorCode) {
+        LambdaQueryWrapper<FactorValue> fvWrapper = new LambdaQueryWrapper<>();
+        fvWrapper.select(FactorValue::getSymbol)
+                .eq(FactorValue::getFactorCode, factorCode)
+                .groupBy(FactorValue::getSymbol);
+        return factorValueMapper.selectList(fvWrapper).stream()
+                .map(FactorValue::getSymbol)
+                .collect(java.util.stream.Collectors.toSet());
+    }
+
+    /**
      * 获取某日因子截面数据（带股票名称），按因子值降序，分页返回
+     * 优先从 ClickHouse 读取
      */
     public Map<String, Object> getFactorCrossSection(String factorCode, LocalDate date, int page, int size) {
-        List<FactorValue> values = factorValueMapper.findByFactorCodeAndDate(factorCode, date);
+        // 优先从 ClickHouse 读取
+        List<FactorValue> values;
+        if (clickHouseConfig.isEnabled()) {
+            try {
+                values = clickHouseFactorValueService.findByFactorCodeAndDate(factorCode, date);
+                if (values.isEmpty()) {
+                    values = factorValueMapper.findByFactorCodeAndDate(factorCode, date);
+                }
+            } catch (Exception e) {
+                log.warn("[ClickHouse] 因子截面数据查询失败，回退 MySQL: {}", e.getMessage());
+                values = factorValueMapper.findByFactorCodeAndDate(factorCode, date);
+            }
+        } else {
+            values = factorValueMapper.findByFactorCodeAndDate(factorCode, date);
+        }
 
         // 批量查询股票名称：从 symbol（如 000001.SZ）中提取 code，关联 stock_info
         Set<String> allSymbols = values.stream()
@@ -648,8 +706,28 @@ public class FactorService {
             if (monitorCache != null && (System.currentTimeMillis() - monitorCacheTs) < MONITOR_CACHE_TTL) {
                 return monitorCache;
             }
-            long total = factorValueMapper.selectTotalCount();
-            List<Map<String, Object>> stats = factorValueMapper.selectFactorStats();
+            // 优先从 ClickHouse 读取
+            long total;
+            List<Map<String, Object>> stats;
+            if (clickHouseConfig.isEnabled()) {
+                try {
+                    total = clickHouseFactorValueService.selectTotalCount();
+                    if (total < 0) {
+                        total = factorValueMapper.selectTotalCount();
+                    }
+                    stats = clickHouseFactorValueService.selectFactorStats();
+                    if (stats.isEmpty()) {
+                        stats = factorValueMapper.selectFactorStats();
+                    }
+                } catch (Exception e) {
+                    log.warn("[ClickHouse] 监控数据查询失败，回退 MySQL: {}", e.getMessage());
+                    total = factorValueMapper.selectTotalCount();
+                    stats = factorValueMapper.selectFactorStats();
+                }
+            } else {
+                total = factorValueMapper.selectTotalCount();
+                stats = factorValueMapper.selectFactorStats();
+            }
             monitorCache = Map.of("totalRecords", total, "factors", stats);
             monitorCacheTs = System.currentTimeMillis();
             return monitorCache;

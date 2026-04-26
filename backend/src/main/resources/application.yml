@@ -46,6 +46,15 @@ springdoc:
     path: /swagger-ui.html
     tags-sorter: alpha
 
+# ClickHouse 配置
+clickhouse:
+  host: localhost
+  port: 8123
+  database: stock
+  username: default
+  password: clickhouse
+  enabled: true  # 是否启用 ClickHouse 优先查询
+
 logging:
   charset:
     console: UTF-8
@@ -72,4 +81,6 @@ quant:
     python-path: python  # Python 可执行文件路径
     script-dir: scripts  # Python 脚本目录（相对项目根目录）
     default-start-days: 3       # 默认从几天前开始更新
+
+
 

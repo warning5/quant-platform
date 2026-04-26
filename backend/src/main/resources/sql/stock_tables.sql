@@ -41,8 +41,6 @@ CREATE TABLE IF NOT EXISTS `stock_daily` (
     `change_percent` DECIMAL(10,4) COMMENT '涨跌幅（%）',
     `change_amount` DECIMAL(10,2) COMMENT '涨跌额（元）',
     `turnover_rate` DECIMAL(10,4) COMMENT '换手率（%）',
-    `market_cap` DECIMAL(20,2) COMMENT '总市值（元）',
-    `circ_market_cap` DECIMAL(20,2) COMMENT '流通市值（元）',
     `pe_ttm` DECIMAL(10,2) COMMENT '市盈率（TTM）',
     `pb` DECIMAL(10,2) COMMENT '市净率',
     `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -56,9 +54,7 @@ CREATE TABLE IF NOT EXISTS `stock_daily` (
 -- 为已有表补充新增字段（如果表已存在）
 ALTER TABLE `stock_daily`
     ADD COLUMN IF NOT EXISTS `symbol` VARCHAR(20) DEFAULT NULL COMMENT '股票代码（含市场标识，如000001.SZ）' AFTER `code`,
-    ADD COLUMN IF NOT EXISTS `pre_close` DECIMAL(10,2) COMMENT '昨收价' AFTER `low_price`,
-    ADD COLUMN IF NOT EXISTS `market_cap` DECIMAL(20,2) COMMENT '总市值（元）' AFTER `turnover_rate`,
-    ADD COLUMN IF NOT EXISTS `circ_market_cap` DECIMAL(20,2) COMMENT '流通市值（元）' AFTER `market_cap`;
+    ADD COLUMN IF NOT EXISTS `pre_close` DECIMAL(10,2) COMMENT '昨收价' AFTER `low_price`;
 
 -- 股票公司信息表
 CREATE TABLE IF NOT EXISTS `stock_company` (

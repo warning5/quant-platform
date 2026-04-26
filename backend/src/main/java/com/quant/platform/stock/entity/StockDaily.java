@@ -96,18 +96,6 @@ public class StockDaily implements Serializable {
     private BigDecimal turnoverRate;
 
     /**
-     * 总市值（元）
-     */
-    @TableField("market_cap")
-    private BigDecimal marketCap;
-
-    /**
-     * 流通市值（元）
-     */
-    @TableField("circ_market_cap")
-    private BigDecimal circMarketCap;
-
-    /**
      * 市盈率（TTM）
      */
     @TableField("pe_ttm")

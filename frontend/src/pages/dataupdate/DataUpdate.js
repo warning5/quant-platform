@@ -311,19 +311,19 @@ function DataUpdate() {
               if (msg.startTime !== undefined) t.startTime = msg.startTime;
               if (msg.endTime !== undefined) t.endTime = msg.endTime;
               if (msg.error !== undefined) t.error = msg.error;
-              if (msg.updateType !== undefined) t.updateType = msg.updateType;
+              t.updateType = ut;
               return t;
             });
           } else if (msg.type === 'DATA_UPDATE_LOG') {
-            // 日志根据 taskId 匹配到对应的 Tab
+            // 日志根据 updateType 匹配到对应的 Tab
+            const ut = msg.updateType || 'DAILY';
             const logEntry = {
               id: Date.now() + Math.random(),
               time: msg.time || dayjs().format('HH:mm:ss'),
               text: msg.line || '',
               taskId: msg.taskId,
             };
-            // 尝试根据 taskId 或当前任务匹配
-            const logUpdater = getLogUpdater(msg.updateType || 'DAILY');
+            const logUpdater = getLogUpdater(ut);
             logUpdater(prev => [...prev.slice(-499), logEntry]);
           }
         } catch (e) { /* ignore parse errors */ }
@@ -399,13 +399,13 @@ function DataUpdate() {
     connectWs();
     // 初始化时恢复各Tab最近的任务状态
     dataUpdateApi.getRecentTasks().then(res => {
-      if (res) {
+      if (res && Array.isArray(res)) {
         for (const t of res) {
-          const ut = t.updateType || t.request?.updateType || 'DAILY';
-          t.updateType = ut;
-          // 只恢复非 IDLE 状态
-          if (t.status && t.status !== 'IDLE') {
-            getTaskUpdater(ut)(t);
+          // 从 request 对象中获取 updateType，默认为 DAILY
+          const ut = t.request?.updateType || 'DAILY';
+          // 只恢复非 IDLE 状态且非 CANCELLED 状态的任务
+          if (t.status && t.status !== 'IDLE' && t.status !== 'CANCELLED') {
+            getTaskUpdater(ut)(prev => ({ ...prev, ...t, updateType: ut }));
           }
         }
       }
@@ -413,7 +413,7 @@ function DataUpdate() {
     fetchCoverage();
     fetchIndexCoverage();
     fetchDividendCoverage();
-    dataUpdateApi.getTradingDates(30).then(res => setTradingDates(res || [])).catch(() => {});
+    dataUpdateApi.getTradingDates(365).then(res => setTradingDates(res || [])).catch(() => {});
     dataUpdateApi.getMissingStats(dayjs().subtract(1, 'day').format('YYYY-MM-DD'))
       .then(res => setMissingStats(res)).catch(() => {});
     dataUpdateApi.getDefaultDates().then(res => {
@@ -885,8 +885,7 @@ function DataUpdate() {
         <Col>
           <Text>检查日期:</Text>
           <DatePicker value={missingIndexDate} onChange={d => setMissingIndexDate(d)}
-            allowClear={false} style={{ marginLeft: 8, width: 140 }}
-            disabledDate={d => !tradingDates.includes(d.format('YYYY-MM-DD'))} />
+            allowClear={false} style={{ marginLeft: 8, width: 140 }} />
         </Col>
         <Col>
           <Button type="primary" icon={<SearchOutlined />}
@@ -922,8 +921,7 @@ function DataUpdate() {
         <Col>
           <Text>检查日期:</Text>
           <DatePicker value={missingDate} onChange={d => setMissingDate(d)}
-            allowClear={false} style={{ marginLeft: 8, width: 140 }}
-            disabledDate={d => !tradingDates.includes(d.format('YYYY-MM-DD'))} />
+            allowClear={false} style={{ marginLeft: 8, width: 140 }} />
         </Col>
         <Col>
           <Text>市场:</Text>

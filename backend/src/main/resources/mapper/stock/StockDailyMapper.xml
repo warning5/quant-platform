@@ -6,11 +6,11 @@
     <insert id="insertOrUpdate" parameterType="com.quant.platform.stock.entity.StockDaily" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO stock_daily (
             code, trade_date, name, open_price, close_price, high_price, low_price, pre_close,
-            volume, amount, change_percent, change_amount, turnover_rate, market_cap, circ_market_cap, pe_ttm, pb,
+            volume, amount, change_percent, change_amount, turnover_rate, pe_ttm, pb,
             create_time, update_time
         ) VALUES (
             #{code}, #{tradeDate}, #{name}, #{openPrice}, #{closePrice}, #{highPrice}, #{lowPrice}, #{preClose},
-            #{volume}, #{amount}, #{changePercent}, #{changeAmount}, #{turnoverRate}, #{marketCap}, #{circMarketCap}, #{peTtm}, #{pb},
+            #{volume}, #{amount}, #{changePercent}, #{changeAmount}, #{turnoverRate}, #{peTtm}, #{pb},
             #{createTime}, #{updateTime}
         )
         ON DUPLICATE KEY UPDATE
@@ -25,8 +25,6 @@
             change_percent = VALUES(change_percent),
             change_amount = VALUES(change_amount),
             turnover_rate = VALUES(turnover_rate),
-            market_cap = VALUES(market_cap),
-            circ_market_cap = VALUES(circ_market_cap),
             pe_ttm = VALUES(pe_ttm),
             pb = VALUES(pb),
             update_time = VALUES(update_time)

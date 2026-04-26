@@ -99,22 +99,26 @@ public class MarketDailyBar implements Serializable {
     private BigDecimal amount;
 
     /**
-     * 总市值
-     */
-    @TableField("market_cap")
-    private BigDecimal marketCap;
-
-    /**
-     * 流通市值
-     */
-    @TableField("circ_market_cap")
-    private BigDecimal circMarketCap;
-
-    /**
      * 换手率
      */
     @TableField("turnover_rate")
     private BigDecimal turnoverRate;
+
+    /**
+     * 总市值（万元），非持久化字段。
+     * 由 MarketDataService.toMarketBar() 从 stock_info.total_market_cap 注入（元→万元）。
+     * 用于 SIZE 因子计算，不写入 stock_daily 表。
+     */
+    @TableField(exist = false)
+    private BigDecimal marketCap;
+
+    /**
+     * 流通市值（万元），非持久化字段。
+     * 由 MarketDataService.toMarketBar() 从 stock_info.total_market_cap 注入（元→万元）。
+     * stock_info 没有单独的流通市值，用总市值近似。
+     */
+    @TableField(exist = false)
+    private BigDecimal circMarketCap;
 
     /**
      * 创建时间

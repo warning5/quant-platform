@@ -46,11 +46,18 @@ ALL_FACTORS = ["MOM20", "MOM60", "VOL20", "TURN20", "SIZE", "RSI5", "BOLL_POS", 
 
 
 def load_stock_daily(conn):
-    """加载全部 stock_daily，按 code 分组，按 trade_date 排序"""
+    """加载全部 stock_daily，按 code 分组，按 trade_date 排序
+    市值因子(SIZE)从 stock_info.total_market_cap 获取（已移除 stock_daily.market_cap 字段）
+    """
     print("[1/4] 加载 stock_daily 数据...")
     cur = conn.cursor()
+
+    # 先加载 stock_info 的市值（单位：元，转为万元与历史保持一致）
+    cur.execute("SELECT code, total_market_cap FROM stock_info WHERE total_market_cap IS NOT NULL AND total_market_cap > 0")
+    info_mcap = {code: float(mcap) / 10000 for code, mcap in cur.fetchall()}  # 元→万元
+
     cur.execute("""
-        SELECT code, trade_date, close_price, turnover_rate, volume, market_cap
+        SELECT code, trade_date, close_price, turnover_rate, volume
         FROM stock_daily
         WHERE close_price IS NOT NULL AND close_price > 0
         ORDER BY code, trade_date
@@ -58,13 +65,13 @@ def load_stock_daily(conn):
     rows = cur.fetchall()
     # 按 code 分组
     data = defaultdict(list)
-    for code, td, close, turnover, vol, mcap in rows:
+    for code, td, close, turnover, vol in rows:
         data[code].append({
             "date": td,
             "close": float(close),
             "turnover": float(turnover) if turnover else 0.0,
             "volume": float(vol) if vol else 0.0,
-            "market_cap": float(mcap) if mcap else 0.0,
+            "market_cap": info_mcap.get(code, 0.0),  # 从 stock_info 获取（万元）
         })
     print(f"  加载 {len(rows):,} 条, {len(data)} 只股票")
     return data

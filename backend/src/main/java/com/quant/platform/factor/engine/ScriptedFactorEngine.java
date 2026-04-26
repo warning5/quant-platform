@@ -3,7 +3,6 @@ package com.quant.platform.factor.engine;
 import com.quant.platform.market.domain.MarketDailyBar;
 import groovy.lang.Binding;
 import groovy.lang.GroovyShell;
-import groovy.lang.Script;
 import lombok.extern.slf4j.Slf4j;
 import org.codehaus.groovy.control.CompilerConfiguration;
 import org.springframework.stereotype.Component;
@@ -12,8 +11,6 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
 
 /**
  * Groovy脚本因子计算引擎
@@ -23,7 +20,6 @@ import java.util.concurrent.TimeUnit;
 @Component
 public class ScriptedFactorEngine {
 
-    private final ConcurrentHashMap<String, Class<?>> scriptCache = new ConcurrentHashMap<>();
     private final CompilerConfiguration config;
 
     public ScriptedFactorEngine() {
@@ -55,20 +51,19 @@ public class ScriptedFactorEngine {
             binding.setVariable("bars", history);
             // 便捷访问
             if (!history.isEmpty()) {
-                binding.setVariable("bar", history.get(history.size() - 1));
-                binding.setVariable("close", history.get(history.size() - 1).getClose());
+                binding.setVariable("bar", history.getLast());
+                binding.setVariable("close", history.getLast().getClose());
                 binding.setVariable("n", history.size());
             }
 
             GroovyShell shell = new GroovyShell(binding, config);
             Object result = shell.evaluate(scriptCode);
 
-            if (result == null) return null;
-            if (result instanceof BigDecimal bd) return bd;
-            if (result instanceof Number num) {
-                return BigDecimal.valueOf(num.doubleValue());
-            }
-            return null;
+            return switch (result) {
+                case BigDecimal bd -> bd;
+                case Number num -> BigDecimal.valueOf(num.doubleValue());
+                case null, default -> null;
+            };
         } catch (Exception e) {
             log.warn("Script execution failed for factor [{}] symbol [{}]: {}", factorCode, symbol, e.getMessage());
             return null;

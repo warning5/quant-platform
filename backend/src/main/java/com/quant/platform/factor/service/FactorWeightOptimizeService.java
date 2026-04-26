@@ -14,12 +14,10 @@ import java.util.stream.Collectors;
 
 /**
  * 因子组合权重优化服务
- *
  * 支持三种优化方法：
  *  1. EQUAL           — 等权（基准）
  *  2. MARKOWITZ       — 均值-方差（最大化夏普比率）
  *  3. RISK_PARITY     — 风险平价（每个因子对组合风险的贡献相等）
- *
  * 输入：多个因子代码 + 日期范围（用 factor_value.rank_value 作为截面收益代理）
  * 输出：每个因子的推荐权重
  */

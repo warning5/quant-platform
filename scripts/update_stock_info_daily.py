@@ -145,8 +145,10 @@ def fetch_qq_batch(qq_codes: list, timeout: int = 10) -> dict:
                 name = fields[1].replace("\u3000", "").strip()  # 去掉全角空格
                 result[key] = {
                     "name":             name,
-                    "total_market_cap": to_float(fields[44], 1e8),   # 亿元 → 元
-                    "float_market_cap": to_float(fields[45], 1e8),   # 亿元 → 元
+                    # 腾讯字段: [44]=流通市值(亿元), [45]=总市值(亿元)
+                    # 交叉验证(601318/601398)：[44]/[45]比值≈流通/总股比，确认正确
+                    "total_market_cap": to_float(fields[45], 1e8),   # 总市值(亿元→元)
+                    "float_market_cap": to_float(fields[44], 1e8),   # 流通市值(亿元→元)
                     "pb":               to_float(fields[46]),         # 市净率（PB）
                     "pe_ttm":           to_float(fields[39]),         # PE TTM（滚动12个月）
                 }

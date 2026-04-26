@@ -7,6 +7,11 @@ update_bj_stock_daily_qq.py
 数据源: https://proxy.finance.qq.com/ifzqgtimg/appstock/app/newfqkline/get
 
 字段: 日期, 开盘, 收盘, 最高, 最低, 成交量, {}, 换手率, 成交额, ""
+
+存储后端: 通过 db_config.DB_BACKEND 切换 ClickHouse / MySQL
+估值字段: pe_ttm / pb 在插入时直接注入（腾讯实时快照）
+  - 北交所 pe_ttm/pb 来自腾讯实时行情，history 接口无历史估值
+  - 市值数据统一从 stock_info.total_market_cap 获取，不写入 stock_daily
 """
 
 import sys
@@ -17,18 +22,9 @@ import re
 from datetime import datetime, timedelta
 
 import requests
-import pymysql
 
-# ─── 数据库配置 ──────────────────────────────────────────────
-DB_CONFIG = dict(
-    host="localhost",
-    port=3306,
-    db="stock",
-    user="root",
-    password="123456",
-    charset="utf8mb4",
-    cursorclass=pymysql.cursors.DictCursor,
-)
+from db_config import get_backend_label
+from db_helper import StockDailyDB
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -37,47 +33,13 @@ HEADERS = {
 }
 
 
-def get_db_connection():
-    return pymysql.connect(**DB_CONFIG)
-
-
-def get_bj_stocks(conn, limit=0):
-    sql = "SELECT code, name, market FROM stock_info WHERE market = 'BJ' ORDER BY code"
-    if limit > 0:
-        sql += f" LIMIT {limit}"
-    with conn.cursor() as cur:
-        cur.execute(sql)
-        return [(row['code'], row['name'], row['market']) for row in cur.fetchall()]
-
-
-def get_latest_trade_date(conn, code):
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT MAX(trade_date) as max_date FROM stock_daily WHERE code = %s",
-            (code,)
-        )
-        result = cur.fetchone()
-        return result['max_date']
-
-
-def get_latest_trade_date_in_range(conn, code, start_date, end_date):
-    """获取指定日期范围内该股票的最新交易日期"""
-    with conn.cursor() as cur:
-        cur.execute(
-            """SELECT MAX(trade_date) as max_date 
-               FROM stock_daily 
-               WHERE code = %s AND trade_date BETWEEN %s AND %s""",
-            (code, start_date, end_date)
-        )
-        result = cur.fetchone()
-        return result['max_date']
+def get_bj_stocks(db, limit=0):
+    """从 stock_info 获取北交所股票列表"""
+    return db.get_stocks(market="BJ", limit=limit)
 
 
 def fetch_bj_stock_history_one(code, start_date, end_date):
-    """
-    单次请求获取北交所股票历史行情（最多640条）
-    返回 rows 列表或 None
-    """
+    """单次请求获取北交所股票历史行情（最多640条）"""
     url = "https://proxy.finance.qq.com/ifzqgtimg/appstock/app/newfqkline/get"
     start_str = start_date.strftime("%Y-%m-%d")
     end_str = end_date.strftime("%Y-%m-%d")
@@ -85,78 +47,59 @@ def fetch_bj_stock_history_one(code, start_date, end_date):
     params = {
         "_var": "kline_dayqfq",
         "param": f"bj{code},day,{start_str},{end_str},640,qfq",
-        "r": "0.1"
+        "r": "0.1",
     }
 
     try:
         r = requests.get(url, params=params, headers=HEADERS, timeout=15)
         r.raise_for_status()
-
-        # 去掉 JS 变量前缀
         text = re.sub(r'^kline_dayqfq=', '', r.text.strip())
         d = json.loads(text)
-
         if d.get('code') != 0:
             return None
-
         stock_data = d.get('data', {}).get(f'bj{code}', {})
-        # 优先使用 qfqday(前复权)，如果不存在则使用 day(原始数据)
         rows = stock_data.get('qfqday', []) or stock_data.get('day', [])
-
-        if not rows:
-            return None
-
-        return rows
-
-    except Exception as e:
+        return rows if rows else None
+    except Exception:
         return None
 
 
 def split_date_ranges(start_date, end_date, months=6):
-    """
-    将日期范围按月数切分为多个子段，确保每段不超过640个交易日。
-    每段6个月（约130个交易日），远低于640上限。
-    """
-    # 确保使用 date 类型
+    """将日期范围按月数切分，确保每段不超过640个交易日"""
     if hasattr(start_date, 'date'):
         start_date = start_date.date()
     if hasattr(end_date, 'date'):
         end_date = end_date.date()
 
+    # 单日查询直接返回，避免循环产生无效范围
+    if start_date == end_date:
+        return [(start_date, end_date)]
+
     ranges = []
     current = start_date
-    while current < end_date:
-        # 计算当前段的结束日期
+    while current <= end_date:
         year = current.year + (current.month + months - 1) // 12
         month = (current.month + months - 1) % 12 + 1
-        next_end = min(
-            datetime(year, month, 1).date() - timedelta(days=1),
-            end_date
-        )
+        next_end = min(datetime(year, month, 1).date() - timedelta(days=1), end_date)
         ranges.append((current, next_end))
         current = next_end + timedelta(days=1)
     return ranges
 
 
 def fetch_bj_stock_history(code, start_date, end_date):
-    """
-    自动分段获取北交所股票历史行情（突破640条限制）
-    字段顺序: 日期, 开盘, 收盘, 最高, 最低, 成交量(手), {}, 换手率(%), 成交额(万元), ""
-    """
+    """自动分段获取北交所股票历史行情"""
     date_ranges = split_date_ranges(start_date, end_date, months=6)
     all_rows = []
     seen_dates = set()
-
     for seg_start, seg_end in date_ranges:
         rows = fetch_bj_stock_history_one(code, seg_start, seg_end)
         if rows:
             for row in rows:
-                if row[0] not in seen_dates:
-                    seen_dates.add(row[0])
+                d = row[0]
+                if d not in seen_dates and seg_start <= datetime.strptime(d, "%Y-%m-%d").date() <= seg_end:
+                    seen_dates.add(d)
                     all_rows.append(row)
-            # 段间短延迟
             time.sleep(0.15)
-
     return all_rows if all_rows else None
 
 
@@ -178,81 +121,115 @@ def to_int(value):
         return None
 
 
-def insert_stock_daily(conn, code, name, market, rows):
+# ── 腾讯实时行情批量快照（内联，无外部依赖）──────────────────────────────
+_QQ_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Referer": "https://gu.qq.com/",
+}
+_QQ_MARKET_PREFIX = {"SH": "sh", "SZ": "sz", "BJ": "bj"}
+
+
+def _qq_parse_float(s):
+    if not s or s in ("-", "0.00", "0", ""):
+        return None
+    try:
+        v = float(s)
+        return v if v != 0.0 else None
+    except ValueError:
+        return None
+
+
+def fetch_qq_snapshot_batch(codes_markets, batch_size=100, delay=0.1):
     """
-    插入北交所日行情数据
-    腾讯数据格式: [日期, 开盘, 收盘, 最高, 最低, 成交量(手), {}, 换手率(%), 成交额(万元), ""]
+    腾讯实时行情批量获取（仅 pe_ttm / pb）。
+
+    参数:
+        codes_markets: [(code, market), ...]
+    返回:
+        {code: {"pe_ttm": float|None, "pb": float|None}}
+    """
+    result = {}
+    for i in range(0, len(codes_markets), batch_size):
+        batch = codes_markets[i: i + batch_size]
+        symbols = ",".join(f"{_QQ_MARKET_PREFIX.get(m, 'sz')}{c}" for c, m in batch)
+        try:
+            url = f"https://qt.gtimg.cn/q={symbols}"
+            r = requests.get(url, headers=_QQ_HEADERS, timeout=20)
+            r.encoding = "gbk"
+            for line in r.text.strip().split(";"):
+                if "~" not in line:
+                    continue
+                parts = line.split("~")
+                if len(parts) < 54:
+                    continue
+                stock_code = parts[2]
+                result[stock_code] = {
+                    "pe_ttm": _qq_parse_float(parts[53]),   # [53]=动态PE(TTM)
+                    "pb":     _qq_parse_float(parts[46]),   # [46]=PB
+                }
+        except Exception as e:
+            print(f"  [WARN] 腾讯快照批量请求失败: {e}")
+        if i + batch_size < len(codes_markets):
+            time.sleep(delay)
+    return result
+
+
+def build_daily_rows(db, code, name, market, rows, snapshot=None):
+    """将腾讯接口数据转换为 db_helper.upsert_daily() 需要的 row list
+
+    参数:
+        snapshot: {"pe_ttm": ..., "pb": ...}
+                  来自 fetch_qq_snapshot_batch() 批量获取
+                  腾讯快照只有当前值，北交所无历史百度估值，所以用快照值填所有日期
     """
     if not rows:
-        return 0, 0
+        return []
 
-    INSERT_SQL = """
-    INSERT INTO stock_daily
-    (code, name, trade_date, open_price, close_price,
-     high_price, low_price, pre_close, volume, amount, change_percent,
-     change_amount, turnover_rate, pe_ttm, pb, market_cap, circ_market_cap,
-     create_time, update_time)
-    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NULL, NULL, NULL, NULL, NOW(), NOW())
-    ON DUPLICATE KEY UPDATE
-        name = VALUES(name),
-        open_price = VALUES(open_price),
-        close_price = VALUES(close_price),
-        high_price = VALUES(high_price),
-        low_price = VALUES(low_price),
-        pre_close = VALUES(pre_close),
-        volume = VALUES(volume),
-        amount = VALUES(amount),
-        change_percent = VALUES(change_percent),
-        change_amount = VALUES(change_amount),
-        turnover_rate = VALUES(turnover_rate),
-        update_time = NOW()
-    """
+    first_date = rows[0][0]
+    prev_close = db.get_prev_close(code, first_date)
 
-    success = failed = 0
-    prev_close = None
+    # 腾讯快照值（北交所无历史估值，用当前值填所有交易日）
+    snap_pe = snapshot.get("pe_ttm") if snapshot else None
+    snap_pb = snapshot.get("pb") if snapshot else None
 
-    with conn.cursor() as cur:
-        for row in rows:
-            try:
-                # 字段: [日期, 开盘, 收盘, 最高, 最低, 成交量, {}, 换手率, 成交额, ""]
-                trade_date = row[0]
-                open_p = to_float(row[1])
-                close_p = to_float(row[2])
-                high_p = to_float(row[3])
-                low_p = to_float(row[4])
-                volume = to_int(row[5])  # 成交量（手）
-                # row[6] 是 {} 占位符，跳过
-                turnover = to_float(row[7]) if len(row) > 7 else None
-                amount = to_float(row[8]) if len(row) > 8 else None  # 万元
-                if amount is not None:
-                    amount = amount * 10000  # 转为元
+    result = []
+    for row in rows:
+        trade_date = row[0]
+        close_p = to_float(row[2])
 
-                # 计算涨跌幅和涨跌额
-                if prev_close is not None and prev_close != 0 and close_p is not None:
-                    change_pct = round((close_p - prev_close) / prev_close * 100, 2)
-                    change_amt = round(close_p - prev_close, 4)
-                else:
-                    change_pct = None
-                    change_amt = None
+        # 计算涨跌幅和涨跌额
+        if prev_close is not None and prev_close != 0 and close_p is not None:
+            change_pct = round((close_p - prev_close) / prev_close * 100, 2)
+            change_amt = round(close_p - prev_close, 4)
+        else:
+            change_pct = None
+            change_amt = None
 
-                values = (
-                    code, name, trade_date,
-                    open_p, close_p, high_p, low_p,
-                    prev_close, volume, amount,
-                    change_pct, change_amt, turnover
-                )
+        amount = to_float(row[8]) if len(row) > 8 else None
+        if amount is not None:
+            amount = amount * 10000  # 万元→元
 
-                cur.execute(INSERT_SQL, values)
-                prev_close = close_p  # 更新为当前收盘，供下次循环使用
-                success += 1
+        result.append({
+            "code": code,
+            "name": name,
+            "trade_date": trade_date,
+            "open_price": to_float(row[1]),
+            "close_price": close_p,
+            "high_price": to_float(row[3]),
+            "low_price": to_float(row[4]),
+            "pre_close": prev_close,
+            "volume": to_int(row[5]),
+            "amount": amount,
+            "change_percent": change_pct,
+            "change_amount": change_amt,
+            "turnover_rate": to_float(row[7]) if len(row) > 7 else None,
+            "pe_ttm": snap_pe,            # 腾讯快照当前值（北交所无历史）
+            "pb": snap_pb,                # 同上
+        })
 
-            except Exception as e:
-                failed += 1
-                if failed <= 3:
-                    print(f"  [ERROR] {code} 插入失败 {row[0] if row else '?'}: {e}")
+        prev_close = close_p
 
-    conn.commit()
-    return success, failed
+    return result
 
 
 def main():
@@ -264,47 +241,53 @@ def main():
     parser.add_argument("--batch-size", type=int, default=20, help="每批处理的股票数 (默认:20)")
     parser.add_argument("--delay", type=float, default=0.3, help="批次间延迟秒数 (默认:0.3)")
     parser.add_argument("--resume", action="store_true", help="断点续传(跳过已有数据的股票)")
+    parser.add_argument("--pool", type=str, default=None,
+                       choices=["SH300", "SZ50", "ZZ500", "ZZ1000", "STAR50"],
+                       help="股票池筛选 (SH300/SZ50/ZZ500/ZZ1000/STAR50)")
     args = parser.parse_args()
 
     end_date = datetime.strptime(args.end_date, "%Y-%m-%d").date() if args.end_date else datetime.now().date()
     start_date = datetime.strptime(args.start_date, "%Y-%m-%d").date()
 
     print("=" * 70)
-    print("北交所股票日线数据更新 (腾讯证券接口)")
+    print(f"北交所股票日线数据更新 (腾讯接口 → {get_backend_label()})")
     print("=" * 70)
+    print(f"存储后端: {get_backend_label()}")
     print(f"日期范围: {start_date} ~ {end_date}")
     print(f"批次大小: {args.batch_size}, 批次延迟: {args.delay}s, 断点续传: {args.resume}")
     print("-" * 70)
 
-    conn = get_db_connection()
+    db = StockDailyDB()
     start_time = time.time()
 
     try:
         # 获取股票列表
         if args.code:
-            with conn.cursor() as cur:
-                cur.execute("SELECT code, name, market FROM stock_info WHERE code = %s AND market = 'BJ'", (args.code,))
-                row = cur.fetchone()
-                stocks = [(row['code'], row['name'], row['market'])] if row else []
+            stocks = db.get_stocks(code=args.code, pool=args.pool)
+        elif args.pool:
+            # 股票池模式下，北交所不在任何 SH/SZ 池内，跳过
+            print(f"[跳过] 股票池 {args.pool} 不包含北交所股票")
+            db.close()
+            return 0
         else:
-            stocks = get_bj_stocks(conn, limit=args.limit)
+            stocks = get_bj_stocks(db, limit=args.limit)
 
         print(f"北交所股票总数: {len(stocks)} 只")
-
         if not stocks:
             print("未找到北交所股票，退出。")
             return
 
-        # 断点续传：按每只股票最早缺失日期确定实际 start_date
+        # 断点续传
         stock_start_dates = {}
         if args.resume and not args.code:
+            all_codes = [s[0] for s in stocks]
+            latest_in_range_map = db.get_latest_dates_in_range_batch(all_codes, start_date, end_date)
+            # end_date 可能是未来（如今天或周末），容忍 3 天误差
+            resume_cutoff = end_date - timedelta(days=3)
             for code, name, market in stocks:
-                # 检查指定日期范围内的最新数据，而非整体最新数据
-                latest_in_range = get_latest_trade_date_in_range(conn, code, start_date, end_date)
-                if latest_in_range and latest_in_range >= end_date:
-                    # 指定范围内已有完整数据，跳过
+                latest_in_range = latest_in_range_map.get(code)
+                if latest_in_range and latest_in_range >= resume_cutoff:
                     continue
-                # 实际起始 = max(请求start_date, 范围内最新日期+1天)
                 if latest_in_range:
                     actual_start = max(start_date, latest_in_range + timedelta(days=1))
                 else:
@@ -320,10 +303,15 @@ def main():
 
         print(f"待处理股票: {len(stocks)} 只")
 
+        # ── 批量预取腾讯快照（一次请求获取全部北交所股票的 pe_ttm / pb）──
+        print("  批量获取腾讯快照...")
+        codes_markets = [(c, "BJ") for c, n, m in stocks]
+        all_snapshots = fetch_qq_snapshot_batch(codes_markets, batch_size=100)
+        print(f"  快照获取完成: {len(all_snapshots)}/{len(stocks)} 只有数据\n")
+
         total_success = total_failed = total_no_data = 0
 
         for i, (code, name, market) in enumerate(stocks, 1):
-            # 确定该股票的实际起始日期
             if args.resume and code in stock_start_dates:
                 actual_start = stock_start_dates[code]
             else:
@@ -332,14 +320,17 @@ def main():
             rows = fetch_bj_stock_history(code, actual_start, end_date)
 
             if rows:
-                ok, fail = insert_stock_daily(conn, code, name, market, rows)
-                total_success += ok
-                total_failed += fail
+                # 直接从预取好的快照映射中取（无需逐只请求腾讯接口）
+                snapshot = all_snapshots.get(code, {})
+                daily_rows = build_daily_rows(db, code, name, market, rows, snapshot=snapshot)
+                n = db.upsert_daily(daily_rows)
+                total_success += n
+                total_failed += len(daily_rows) - n
                 if i % 10 == 0 or i <= 5:
                     elapsed = time.time() - start_time
                     speed = i / elapsed
                     eta = (len(stocks) - i) / speed if speed > 0 else 0
-                    print(f"[{i}/{len(stocks)}] {code} {name}: +{ok}条  "
+                    print(f"[{i}/{len(stocks)}] {code} {name}: +{n}条  "
                           f"速度:{speed:.1f}只/s  预计剩余:{eta/60:.1f}min")
             else:
                 total_no_data += 1
@@ -360,8 +351,23 @@ def main():
         print(f"无数据  : {total_no_data} 只")
         print("=" * 70)
 
+        # ─── 自动补全 change 字段（pre_close/change_percent/change_amount）───
+        # pe_ttm / pb 已在腾讯快照中获取，change 字段补全如下
+        if total_success > 0:
+            print(f"\n补全 change 字段（pre_close/change_percent/change_amount）...")
+            try:
+                from field_completer import complete_fields
+                # force_full_scan=True: 全量扫描所有缺失估值的股票，不限于本次更新的股票
+                n = complete_fields(db, code=args.code if args.code else None,
+                                    stock_list=None,
+                                    skip_valuation=False,
+                                    force_full_scan=(not args.code))
+                print(f"  补全完成: {n} 条")
+            except Exception as e:
+                print(f"  [WARN] change 字段补全异常（不影响日线数据）: {e}")
+
     finally:
-        conn.close()
+        db.close()
 
 
 if __name__ == '__main__':

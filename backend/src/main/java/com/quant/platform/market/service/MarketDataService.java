@@ -1,11 +1,10 @@
 package com.quant.platform.market.service;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.quant.platform.market.domain.MarketDailyBar;
 import com.quant.platform.stock.entity.StockDaily;
 import com.quant.platform.stock.entity.StockInfo;
-import com.quant.platform.stock.mapper.StockDailyMapper;
 import com.quant.platform.stock.mapper.StockInfoMapper;
+import com.quant.platform.stock.service.ClickHouseStockService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -18,16 +17,20 @@ import java.util.stream.Collectors;
 
 /**
  * 市场数据服务 - 适配层
+ * 所有 stock_daily 查询统一走 ClickHouseStockService（自动 CH/MySQL 切换）
  */
 @Slf4j
 @Service
 public class MarketDataService {
 
-    private final StockDailyMapper stockDailyMapper;
+    private final ClickHouseStockService clickHouseStockService;
     private final StockInfoMapper stockInfoMapper;
 
     /** code → market (SH/SZ/BJ) */
     private Map<String, String> codeMarketMap;
+
+    /** code → totalMarketCap (来自 stock_info 的最新市值，万元) */
+    private Map<String, BigDecimal> codeMarketCapMap;
 
     /** 指数代码 → 指数名称（用于区分指数和同代码个股，如 000001=上证指数 vs 平安银行） */
     private static final Map<String, String> INDEX_NAME_MAP = Map.ofEntries(
@@ -43,8 +46,8 @@ public class MarketDataService {
             Map.entry("399303", "国证2000")
     );
 
-    public MarketDataService(StockDailyMapper stockDailyMapper, StockInfoMapper stockInfoMapper) {
-        this.stockDailyMapper = stockDailyMapper;
+    public MarketDataService(ClickHouseStockService clickHouseStockService, StockInfoMapper stockInfoMapper) {
+        this.clickHouseStockService = clickHouseStockService;
         this.stockInfoMapper = stockInfoMapper;
     }
 
@@ -55,6 +58,16 @@ public class MarketDataService {
         codeMarketMap = all.stream()
                 .collect(Collectors.toMap(StockInfo::getCode, StockInfo::getMarket));
         log.info("[MarketDataService] 已加载 {} 只股票的 market 映射", codeMarketMap.size());
+
+        // 预加载最新市值数据（用于市值因子 SIZE 的兜底）
+        codeMarketCapMap = all.stream()
+                .filter(s -> s.getTotalMarketCap() != null)
+                .collect(Collectors.toMap(
+                        StockInfo::getCode,
+                        s -> s.getTotalMarketCap(),
+                        (v1, v2) -> v1  // 处理重复 key
+                ));
+        log.info("[MarketDataService] 已加载 {} 只股票的最新市值", codeMarketCapMap.size());
     }
 
     // ==================== 概览（轻量） ====================
@@ -68,7 +81,7 @@ public class MarketDataService {
      */
     public Map<String, Object> getOverviewSummary() {
         LocalDate today = LocalDate.now();
-        LocalDate latestDate = findLatestTradingDate(today.minusDays(30), today);
+        LocalDate latestDate = clickHouseStockService.getLatestTradingDate(today.minusDays(30), today);
         if (latestDate == null) {
             return Map.of(
                     "symbolCount", codeMarketMap.size(),
@@ -88,7 +101,7 @@ public class MarketDataService {
         }
 
         // SQL 聚合查询统计
-        Map<String, Object> stats = stockDailyMapper.selectOverviewStats(latestDate);
+        Map<String, Object> stats = clickHouseStockService.getOverviewStats(latestDate);
         long count = ((Number) stats.get("count")).longValue();
         long rises = ((Number) stats.getOrDefault("riseCount", 0)).longValue();
         long falls = ((Number) stats.getOrDefault("fallCount", 0)).longValue();
@@ -97,8 +110,8 @@ public class MarketDataService {
         BigDecimal totalAmount = new BigDecimal(stats.getOrDefault("totalAmount", "0").toString());
 
         // SQL 查询 Top20 涨幅 / Top20 跌幅
-        List<Map<String, Object>> topGainRows = stockDailyMapper.selectTopByPctChg(latestDate, 20, "DESC");
-        List<Map<String, Object>> topLossRows = stockDailyMapper.selectTopByPctChg(latestDate, 20, "ASC");
+        List<Map<String, Object>> topGainRows = clickHouseStockService.getTopByPctChg(latestDate, 20, "DESC");
+        List<Map<String, Object>> topLossRows = clickHouseStockService.getTopByPctChg(latestDate, 20, "ASC");
 
         List<MarketDailyBar> topGainers = topGainRows.stream()
                 .map(row -> rowToMarketBar(row)).collect(Collectors.toList());
@@ -123,85 +136,22 @@ public class MarketDataService {
         return result;
     }
 
-    /**
-     * 获取最新交易日日期（不拉全量数据）
-     */
-    private LocalDate findLatestTradingDate(LocalDate start, LocalDate end) {
-        LambdaQueryWrapper<StockDaily> wrapper = new LambdaQueryWrapper<>();
-        wrapper.between(StockDaily::getTradeDate, start, end)
-                .select(StockDaily::getTradeDate)
-                .orderByDesc(StockDaily::getTradeDate)
-                .last("LIMIT 1");
-        List<StockDaily> result = stockDailyMapper.selectList(wrapper);
-        return result.isEmpty() ? null : result.get(0).getTradeDate();
-    }
-
     // ==================== 截面数据（分页） ====================
 
     /**
      * 分页获取截面数据
      */
     public Map<String, Object> getCrossSectionPaged(LocalDate date, int page, int size, String keyword, String sortField, String sortOrder) {
-        LambdaQueryWrapper<StockDaily> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(StockDaily::getTradeDate, date);
+        Map<String, Object> pageResult = clickHouseStockService.getCrossSectionPaged(date, page, size, keyword, sortField, sortOrder);
 
-        // 关键词过滤（代码或名称）
-        if (keyword != null && !keyword.trim().isEmpty()) {
-            wrapper.and(w -> w
-                    .like(StockDaily::getCode, keyword.trim())
-                    .or()
-                    .like(StockDaily::getName, keyword.trim()));
-        }
-
-        // 排序
-        if (sortField != null && !sortField.isEmpty()) {
-            boolean asc = !"desc".equalsIgnoreCase(sortOrder);
-            switch (sortField) {
-                case "pctChg":
-                    if (asc) wrapper.orderByAsc(StockDaily::getChangePercent);
-                    else wrapper.orderByDesc(StockDaily::getChangePercent);
-                    break;
-                case "amount":
-                    if (asc) wrapper.orderByAsc(StockDaily::getAmount);
-                    else wrapper.orderByDesc(StockDaily::getAmount);
-                    break;
-                case "vol":
-                    if (asc) wrapper.orderByAsc(StockDaily::getVolume);
-                    else wrapper.orderByDesc(StockDaily::getVolume);
-                    break;
-                case "close":
-                    if (asc) wrapper.orderByAsc(StockDaily::getClosePrice);
-                    else wrapper.orderByDesc(StockDaily::getClosePrice);
-                    break;
-                case "turnoverRate":
-                    if (asc) wrapper.orderByAsc(StockDaily::getTurnoverRate);
-                    else wrapper.orderByDesc(StockDaily::getTurnoverRate);
-                    break;
-                default:
-                    wrapper.orderByAsc(StockDaily::getCode);
-            }
-        } else {
-            wrapper.orderByDesc(StockDaily::getChangePercent);
-        }
-
-        // 总数
-        Long total = stockDailyMapper.selectCount(wrapper);
-
-        // 分页
-        wrapper.last(String.format("LIMIT %d OFFSET %d", size, (page - 1) * size));
-        List<StockDaily> records = stockDailyMapper.selectList(wrapper);
-
+        @SuppressWarnings("unchecked")
+        List<StockDaily> records = (List<StockDaily>) pageResult.get("data");
         List<MarketDailyBar> data = records.stream()
                 .map(sd -> toMarketBar(sd, codeMarketMap.get(sd.getCode())))
                 .collect(Collectors.toList());
 
-        Map<String, Object> result = new HashMap<>();
-        result.put("total", total);
-        result.put("page", page);
-        result.put("size", size);
-        result.put("totalPages", (total + size - 1) / size);
-        result.put("data", data);
-        return result;
+        pageResult.put("data", data);
+        return pageResult;
     }
 
     // ==================== 原有接口 ====================
@@ -212,11 +162,8 @@ public class MarketDataService {
     public List<MarketDailyBar> getBarsBySymbol(String symbol, LocalDate startDate, LocalDate endDate) {
         String code = parseCode(symbol);
         String market = parseMarket(symbol);
-        LambdaQueryWrapper<StockDaily> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(StockDaily::getCode, code)
-                .between(StockDaily::getTradeDate, startDate, endDate)
-                .orderByAsc(StockDaily::getTradeDate);
-        return stockDailyMapper.selectList(wrapper).stream()
+        List<StockDaily> dailies = clickHouseStockService.getStockDaily(code, startDate, endDate);
+        return dailies.stream()
                 .map(sd -> toMarketBar(sd, market))
                 .collect(Collectors.toList());
     }
@@ -232,16 +179,16 @@ public class MarketDataService {
         String market = parseMarket(symbol);
         String indexName = INDEX_NAME_MAP.get(code);
 
-        LambdaQueryWrapper<StockDaily> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(StockDaily::getCode, code);
+        List<StockDaily> dailies = clickHouseStockService.getStockDaily(code, startDate, endDate);
+
         if (indexName != null) {
             // 指数：按 name 精确匹配，避免查到同代码个股
-            wrapper.eq(StockDaily::getName, indexName);
+            dailies = dailies.stream()
+                    .filter(sd -> indexName.equals(sd.getName()))
+                    .collect(Collectors.toList());
         }
-        wrapper.between(StockDaily::getTradeDate, startDate, endDate)
-                .orderByAsc(StockDaily::getTradeDate);
 
-        return stockDailyMapper.selectList(wrapper).stream()
+        return dailies.stream()
                 .map(sd -> toMarketBar(sd, market))
                 .collect(Collectors.toList());
     }
@@ -250,10 +197,8 @@ public class MarketDataService {
      * 获取某日所有股票数据（截面数据，排除指数）
      */
     public List<MarketDailyBar> getBarsAtDate(LocalDate date) {
-        LambdaQueryWrapper<StockDaily> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(StockDaily::getTradeDate, date)
-                .notIn(StockDaily::getName, INDEX_NAME_MAP.values());
-        return stockDailyMapper.selectList(wrapper).stream()
+        List<StockDaily> dailies = clickHouseStockService.getStockDailyByDate(date, INDEX_NAME_MAP.values());
+        return dailies.stream()
                 .map(sd -> toMarketBar(sd, codeMarketMap.get(sd.getCode())))
                 .collect(Collectors.toList());
     }
@@ -262,14 +207,7 @@ public class MarketDataService {
      * 获取所有交易日期
      */
     public List<LocalDate> getTradingDates(LocalDate start, LocalDate end) {
-        LambdaQueryWrapper<StockDaily> wrapper = new LambdaQueryWrapper<>();
-        wrapper.between(StockDaily::getTradeDate, start, end)
-                .select(StockDaily::getTradeDate)
-                .groupBy(StockDaily::getTradeDate)
-                .orderByAsc(StockDaily::getTradeDate);
-        return stockDailyMapper.selectList(wrapper).stream()
-                .map(StockDaily::getTradeDate)
-                .collect(Collectors.toList());
+        return clickHouseStockService.getTradingDates(start, end);
     }
 
     /**
@@ -287,7 +225,8 @@ public class MarketDataService {
      */
     public List<Map<String, String>> searchSymbols(String keyword, int limit) {
         String kw = (keyword != null) ? keyword.trim() : "";
-        LambdaQueryWrapper<StockInfo> wrapper = new LambdaQueryWrapper<>();
+        com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<StockInfo> wrapper =
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
         // 空关键词时返回前 N 只股票（按代码排序），有关键词时模糊搜索
         if (!kw.isEmpty()) {
             wrapper.and(w -> w.like(StockInfo::getCode, kw).or().like(StockInfo::getName, kw));
@@ -315,6 +254,18 @@ public class MarketDataService {
 
     private MarketDailyBar toMarketBar(StockDaily sd, String market) {
         String symbol = sd.getCode() + "." + (market != null ? market : "");
+
+        // 从 stock_info 获取最新市值（不再依赖 stock_daily 的市值字段）
+        BigDecimal marketCap = null;
+        BigDecimal circMarketCap = null;
+        BigDecimal fallbackCap = codeMarketCapMap.get(sd.getCode());
+        if (fallbackCap != null && fallbackCap.compareTo(BigDecimal.ZERO) > 0) {
+            // stock_info 存储的是元，转换为万元（除以 10000）
+            marketCap = fallbackCap.divide(BigDecimal.valueOf(10000), 4, RoundingMode.HALF_UP);
+            // 流通市值暂用总市值近似（stock_info 没有单独的流通市值字段）
+            circMarketCap = marketCap;
+        }
+
         return MarketDailyBar.builder()
                 .symbol(symbol)
                 .name(sd.getName())
@@ -328,8 +279,8 @@ public class MarketDataService {
                 .pctChg(sd.getChangePercent())
                 .vol(sd.getVolume() != null ? BigDecimal.valueOf(sd.getVolume()) : null)
                 .amount(sd.getAmount() != null ? sd.getAmount().divide(BigDecimal.valueOf(1000), 4, RoundingMode.HALF_UP) : null)
-                .marketCap(sd.getMarketCap())
-                .circMarketCap(sd.getCircMarketCap())
+                .marketCap(marketCap)
+                .circMarketCap(circMarketCap)
                 .turnoverRate(sd.getTurnoverRate())
                 .build();
     }

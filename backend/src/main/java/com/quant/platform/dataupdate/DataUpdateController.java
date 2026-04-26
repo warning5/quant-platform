@@ -1,12 +1,14 @@
 package com.quant.platform.dataupdate;
 
 import com.quant.platform.common.dto.ApiResponse;
-import com.quant.platform.stock.mapper.StockDailyMapper;
+import com.quant.platform.config.ClickHouseConfig;
+import com.quant.platform.stock.service.ClickHouseStockService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
@@ -23,8 +25,10 @@ import java.util.*;
 public class DataUpdateController {
 
     private final DataUpdateService dataUpdateService;
-    private final StockDailyMapper stockDailyMapper;
+    private final JdbcTemplate jdbcTemplate;
     private final com.quant.platform.stock.mapper.StockInfoMapper stockInfoMapper;
+    private final ClickHouseStockService clickHouseStockService;
+    private final ClickHouseConfig clickHouseConfig;
 
     @GetMapping("/default-dates")
     @Operation(summary = "获取默认更新日期范围")
@@ -146,14 +150,82 @@ public class DataUpdateController {
     public ApiResponse<Map<String, Object>> getMissingStats(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
 
+        // clickhouse.enabled = true  → 通过 ClickHouseStockService 查 ClickHouse
+        // clickhouse.enabled = false → 通过 JdbcTemplate 直接查 MySQL
+        // stock_info.code 和 stock_daily.code 均为纯数字（无 sh./sz./bj. 前缀）
+
         Map<String, Object> result = new LinkedHashMap<>();
         int totalMissing = 0;
 
+        // 1. 各市场 stock_info 股票总数（MySQL 始终走这里）
+        Map<String, Long> totalByMarket = new HashMap<>();
         for (String market : Arrays.asList("SH", "SZ", "BJ")) {
-            int count = queryMissingCount(date, market);
-            result.put(market, count);
-            totalMissing += count;
+            com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.quant.platform.stock.entity.StockInfo> w =
+                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
+            w.eq(com.quant.platform.stock.entity.StockInfo::getMarket, market);
+            Long total = stockInfoMapper.selectCount(w);
+            totalByMarket.put(market, total != null ? total : 0L);
         }
+
+        if (clickHouseConfig.isEnabled()) {
+            // ── ClickHouse 路径 ──────────────────────────────────────────
+            // ClickHouse 无 stock_info，所以：① 一次查出该日全部已有 codes
+            //                                   ② 用 codeToMarket 缓存映射区分市场
+            Set<String> existingCodes = new HashSet<>();
+            String chSql = "SELECT DISTINCT code FROM stock.stock_daily WHERE trade_date = '" + date + "'";
+            List<Map<String, Object>> rows = clickHouseStockService.queryForList(chSql);
+            for (Map<String, Object> row : rows) {
+                Object codeVal = row.get("code");
+                if (codeVal != null) existingCodes.add(codeVal.toString());
+            }
+
+            // 懒加载 code → market 映射（仅 ClickHouse 路径需要）
+            if (codeToMarket == null) {
+                codeToMarket = new HashMap<>();
+                com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.quant.platform.stock.entity.StockInfo> w =
+                        new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
+                w.select(com.quant.platform.stock.entity.StockInfo::getCode,
+                        com.quant.platform.stock.entity.StockInfo::getMarket);
+                for (com.quant.platform.stock.entity.StockInfo s : stockInfoMapper.selectList(w)) {
+                    if (s.getCode() != null && s.getMarket() != null) {
+                        codeToMarket.put(s.getCode(), s.getMarket());
+                    }
+                }
+            }
+
+            // 用 codeToMarket 将 existingCodes 按市场分组
+            Map<String, Integer> existingByMarket = new HashMap<>();
+            for (String m : Arrays.asList("SH", "SZ", "BJ")) existingByMarket.put(m, 0);
+            for (String code : existingCodes) {
+                String m = codeToMarket.get(code);
+                if (m != null && existingByMarket.containsKey(m)) {
+                    existingByMarket.put(m, existingByMarket.get(m) + 1);
+                }
+            }
+
+            for (String market : Arrays.asList("SH", "SZ", "BJ")) {
+                long total = totalByMarket.getOrDefault(market, 0L);
+                long existing = existingByMarket.getOrDefault(market, 0);
+                long missing = Math.max(0, total - existing);
+                result.put(market, missing);
+                totalMissing += (int) missing;
+            }
+        } else {
+            // ── MySQL 路径 ────────────────────────────────────────────────
+            for (String market : Arrays.asList("SH", "SZ", "BJ")) {
+                long total = totalByMarket.getOrDefault(market, 0L);
+                String mysqlSql = String.format(
+                    "SELECT COUNT(DISTINCT sd.code) FROM stock_daily sd " +
+                    "WHERE sd.trade_date = ? AND sd.code IN (" +
+                    "  SELECT si.code FROM stock_info si WHERE si.market = '%s')",
+                    market);
+                Long existing = jdbcTemplate.queryForObject(mysqlSql, Long.class, java.sql.Date.valueOf(date));
+                long missing = Math.max(0, total - existing);
+                result.put(market, (int) missing);
+                totalMissing += (int) missing;
+            }
+        }
+
         result.put("total", totalMissing);
         result.put("date", date.toString());
 
@@ -174,40 +246,49 @@ public class DataUpdateController {
      * 只匹配 stock_info 中的 code，排除指数（指数不在 stock_info 中）
      */
     private List<Map<String, Object>> queryMissingStocks(LocalDate date, String market) {
-        List<Map<String, Object>> missing = new ArrayList<>();
+        // clickhouse.enabled = true  → ClickHouse 查已有 codes
+        // clickhouse.enabled = false → MySQL 直接查已有 codes
 
-        // 先查 stock_info 中该市场所有股票的 codes（排除指数）
-        com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.quant.platform.stock.entity.StockInfo> infoWrapper =
+        // 1. stock_info 目标市场全部股票（MySQL，始终查询）
+        com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.quant.platform.stock.entity.StockInfo> wrapper =
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
-        if (market != null && !"ALL".equals(market)) {
-            infoWrapper.eq(com.quant.platform.stock.entity.StockInfo::getMarket, market);
+        if (!"ALL".equalsIgnoreCase(market)) {
+            wrapper.eq(com.quant.platform.stock.entity.StockInfo::getMarket, market);
         }
-        infoWrapper.select(com.quant.platform.stock.entity.StockInfo::getCode,
-                  com.quant.platform.stock.entity.StockInfo::getName,
-                  com.quant.platform.stock.entity.StockInfo::getMarket);
-        List<com.quant.platform.stock.entity.StockInfo> allStocks = stockInfoMapper.selectList(infoWrapper);
+        wrapper.select(
+                com.quant.platform.stock.entity.StockInfo::getCode,
+                com.quant.platform.stock.entity.StockInfo::getName,
+                com.quant.platform.stock.entity.StockInfo::getMarket);
+        List<com.quant.platform.stock.entity.StockInfo> allStocks = stockInfoMapper.selectList(wrapper);
 
-        if (allStocks.isEmpty()) return missing;
-
-        // 收集 stock_info 中的 codes
-        Set<String> infoCodes = new HashSet<>();
-        for (com.quant.platform.stock.entity.StockInfo s : allStocks) {
-            infoCodes.add(s.getCode());
-        }
-
-        // 查 stock_daily 中该日有数据的 codes（仅 stock_info 中的 code）
-        com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.quant.platform.stock.entity.StockDaily> dw =
-                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
-        dw.eq(com.quant.platform.stock.entity.StockDaily::getTradeDate, date)
-          .in(com.quant.platform.stock.entity.StockDaily::getCode, infoCodes)
-          .select(com.quant.platform.stock.entity.StockDaily::getCode);
-        List<com.quant.platform.stock.entity.StockDaily> existing = stockDailyMapper.selectList(dw);
+        // 2. 获取该日 stock_daily 中已有数据的 codes
         Set<String> existingCodes = new HashSet<>();
-        for (com.quant.platform.stock.entity.StockDaily d : existing) {
-            existingCodes.add(d.getCode());
+        if (clickHouseConfig.isEnabled()) {
+            String chSql = "SELECT DISTINCT code FROM stock.stock_daily WHERE trade_date = '" + date + "'";
+            List<Map<String, Object>> rows = clickHouseStockService.queryForList(chSql);
+            for (Map<String, Object> row : rows) {
+                Object codeVal = row.get("code");
+                if (codeVal != null) existingCodes.add(codeVal.toString());
+            }
+        } else {
+            String mysqlSql;
+            if ("ALL".equalsIgnoreCase(market)) {
+                mysqlSql = "SELECT DISTINCT sd.code FROM stock_daily sd WHERE sd.trade_date = ?";
+                jdbcTemplate.query(mysqlSql,
+                        (java.sql.ResultSet rs) -> existingCodes.add(rs.getString("code")),
+                        java.sql.Date.valueOf(date));
+            } else {
+                mysqlSql = "SELECT DISTINCT sd.code FROM stock_daily sd " +
+                        "JOIN stock_info si ON sd.code = si.code " +
+                        "WHERE sd.trade_date = ? AND si.market = ?";
+                jdbcTemplate.query(mysqlSql,
+                        (java.sql.ResultSet rs) -> existingCodes.add(rs.getString("code")),
+                        java.sql.Date.valueOf(date), market);
+            }
         }
 
-        // 差集 = stock_info 中有但 stock_daily 该日没有的
+        // 3. 差集 = stock_info 中有但 stock_daily 该日没有的
+        List<Map<String, Object>> missing = new ArrayList<>();
         for (com.quant.platform.stock.entity.StockInfo stock : allStocks) {
             if (!existingCodes.contains(stock.getCode())) {
                 Map<String, Object> m = new LinkedHashMap<>();
@@ -217,28 +298,15 @@ public class DataUpdateController {
                 missing.add(m);
             }
         }
-
         return missing;
     }
 
-    private int queryMissingCount(LocalDate date, String market) {
-        return queryMissingStocks(date, market).size();
-    }
-
     private List<String> getRecentTradingDates(int limit) {
-        // 用 SQL 获取最近有数据的交易日
-        com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.quant.platform.stock.entity.StockDaily> w =
-                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
-        w.groupBy(com.quant.platform.stock.entity.StockDaily::getTradeDate)
-         .orderByDesc(com.quant.platform.stock.entity.StockDaily::getTradeDate)
-         .last("LIMIT " + Math.min(limit, 100))
-         .select(com.quant.platform.stock.entity.StockDaily::getTradeDate);
-
-        List<com.quant.platform.stock.entity.StockDaily> list = stockDailyMapper.selectList(w);
-        List<String> dates = new ArrayList<>();
-        for (com.quant.platform.stock.entity.StockDaily d : list) {
-            dates.add(d.getTradeDate().toString());
-        }
-        return dates;
+        return clickHouseStockService.getRecentTradingDates(limit);
     }
+
+    // ── 辅助字段 ───────────────────────────────────────────────────
+
+    /** stock_info 全量 code → market 映射（ClickHouse 路径懒加载缓存） */
+    private volatile Map<String, String> codeToMarket;
 }
