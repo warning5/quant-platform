@@ -193,14 +193,21 @@ def build_daily_rows(db, code, name, market, rows, snapshot=None):
     snap_pb = snapshot.get("pb") if snapshot else None
 
     result = []
-    for row in rows:
+    for i, row in enumerate(rows):
         trade_date = row[0]
         close_p = to_float(row[2])
+
+        # 第一条记录：若 prev_close 为 None（DB 无前收），跳过本条，等 resume 补全
+        if i == 0 and prev_close is None:
+            print(f"  [SKIP] {code} {trade_date} prev_close=None，跳过首条，等 resume 补全")
+            if close_p is not None:
+                prev_close = close_p  # 为下一行提供 prev_close
+            continue
 
         # 计算涨跌幅和涨跌额
         if prev_close is not None and prev_close != 0 and close_p is not None:
             change_pct = round((close_p - prev_close) / prev_close * 100, 2)
-            change_amt = round(close_p - prev_close, 4)
+            change_amt = round(close_p - prev_close, 2)
         else:
             change_pct = None
             change_amt = None

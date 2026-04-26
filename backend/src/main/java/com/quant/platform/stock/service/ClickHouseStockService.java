@@ -493,6 +493,7 @@ public class ClickHouseStockService {
     }
 
     private Map<String, Object> getOverviewStatsFromClickHouse(LocalDate tradeDate) {
+        // 排除指数代码（sh.000xxx / sz.399xxx），只统计股票
         String sql = """
             SELECT
                 COUNT(*) AS count,
@@ -503,6 +504,8 @@ public class ClickHouseStockService {
                 ifNull(SUM(amount), 0) AS totalAmount
             FROM stock_daily
             WHERE trade_date = ?
+              AND code NOT LIKE 'sh.000%'
+              AND code NOT LIKE 'sz.399%'
             """;
 
         try (Connection conn = getConnection();
@@ -529,11 +532,13 @@ public class ClickHouseStockService {
     }
 
     private List<Map<String, Object>> getTopByPctChgFromClickHouse(LocalDate tradeDate, int limit, String order) {
+        // 排除指数代码（sh.000xxx / sz.399xxx）
         String orderClause = "ASC".equalsIgnoreCase(order) ? "ASC" : "DESC";
         String sql = """
             SELECT code, name, change_percent, close_price, volume, amount, turnover_rate
             FROM stock_daily
             WHERE trade_date = ? AND change_percent IS NOT NULL
+              AND code NOT LIKE 'sh.000%' AND code NOT LIKE 'sz.399%'
             ORDER BY change_percent """ + orderClause + " LIMIT ?";
 
         try (Connection conn = getConnection();
@@ -611,9 +616,10 @@ public class ClickHouseStockService {
     }
 
     private LocalDate getExtremeDateFromClickHouse(boolean isMax) {
+        // 排除指数代码（sh.000xxx / sz.399xxx），只统计股票
         String sql = isMax
-                ? "SELECT MAX(trade_date) FROM stock_daily"
-                : "SELECT MIN(trade_date) FROM stock_daily";
+                ? "SELECT MAX(trade_date) FROM stock_daily WHERE code NOT LIKE 'sh.000%' AND code NOT LIKE 'sz.399%'"
+                : "SELECT MIN(trade_date) FROM stock_daily WHERE code NOT LIKE 'sh.000%' AND code NOT LIKE 'sz.399%'";
         try (Connection conn = getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql);
              ResultSet rs = stmt.executeQuery()) {
@@ -796,8 +802,10 @@ public class ClickHouseStockService {
     }
 
     private LocalDate getExtremeDateFromMySQL(boolean isMax) {
+        // 排除指数代码（sh.000xxx / sz.399xxx），只统计股票
         LambdaQueryWrapper<StockDaily> wrapper = new LambdaQueryWrapper<>();
         wrapper.select(StockDaily::getTradeDate);
+        wrapper.apply("code NOT LIKE 'sh.000%' AND code NOT LIKE 'sz.399%'");
         if (isMax) wrapper.orderByDesc(StockDaily::getTradeDate);
         else wrapper.orderByAsc(StockDaily::getTradeDate);
         wrapper.last("LIMIT 1");

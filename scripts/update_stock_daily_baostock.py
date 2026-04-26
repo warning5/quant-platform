@@ -187,7 +187,7 @@ def build_daily_rows(db, code, name, market, df):
         # change_amount
         if pre_close_val is not None and close_price is not None:
             change_amount = round(close_price - pre_close_val, 2)
-        elif close_price and change_percent:
+        elif close_price is not None and change_percent is not None:
             change_amount = round(close_price * change_percent / 100, 2)
         else:
             change_amount = None

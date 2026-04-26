@@ -98,10 +98,17 @@ def build_daily_rows(db, code, name, market, df):
     prev_close = db.get_prev_close(code, first_date)
 
     rows = []
-    for _, row in df.iterrows():
+    for i, (_, row) in enumerate(df.iterrows()):
         close_p = row.get('close')
         if close_p is not None:
             close_p = float(close_p)
+
+        # 第一条记录：若 prev_close 为 None（DB 无前收），跳过本条，等 resume 补全
+        if i == 0 and prev_close is None:
+            print(f"  [SKIP] {code} {row['trade_date']} prev_close=None，跳过首条，等 resume 补全")
+            if close_p is not None:
+                prev_close = close_p
+            continue
 
         if prev_close is not None and prev_close != 0 and close_p is not None:
             change_pct = round((close_p - prev_close) / prev_close * 100, 2)

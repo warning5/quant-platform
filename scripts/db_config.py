@@ -42,7 +42,7 @@ CLICKHOUSE_CONFIG = dict(
     host="localhost",
     port=8123,
     username="default",
-    password="clickhouse",
+    password="123456",
     database="stock",
 )
 

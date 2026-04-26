@@ -467,7 +467,7 @@ class StockDailyDB:
         biz_cols = [
             "code", "trade_date", "name", "open_price", "close_price",
             "high_price", "low_price", "pre_close", "volume", "amount",
-            "change_percent", "change_amount", "turnover_rate",
+            "change_percent", "change_amount", "turn_over_rate",
             "pe_ttm", "pb",
         ]
 

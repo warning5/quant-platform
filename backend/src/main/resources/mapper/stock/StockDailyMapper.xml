@@ -30,7 +30,7 @@
             update_time = VALUES(update_time)
     </insert>
 
-    <!-- 获取指定日期的市场统计摘要（SQL聚合） -->
+    <!-- 获取指定日期的市场统计摘要（SQL聚合，排除指数） -->
     <select id="selectOverviewStats" resultType="java.util.Map">
         SELECT
             COUNT(*) AS count,
@@ -41,14 +41,18 @@
             IFNULL(SUM(amount), 0) AS totalAmount
         FROM stock_daily
         WHERE trade_date = #{tradeDate}
+          AND code NOT LIKE 'sh.000%'
+          AND code NOT LIKE 'sz.399%'
     </select>
 
-    <!-- 获取指定日期涨跌幅 Top/Bottom N -->
+    <!-- 获取指定日期涨跌幅 Top/Bottom N（排除指数） -->
     <select id="selectTopByPctChg" resultType="java.util.Map">
         SELECT code, name, change_percent, close_price, volume, amount, turnover_rate
         FROM stock_daily
         WHERE trade_date = #{tradeDate}
           AND change_percent IS NOT NULL
+          AND code NOT LIKE 'sh.000%'
+          AND code NOT LIKE 'sz.399%'
         ORDER BY change_percent
         <choose>
             <when test="order == 'ASC'">ASC</when>
