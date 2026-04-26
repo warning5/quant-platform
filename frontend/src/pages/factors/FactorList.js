@@ -82,15 +82,31 @@ export default function FactorList() {
     const status = factorStatus[record.factorCode];
     const valueCount = status?.valueCount ?? null;
     const testCount = status?.testCount ?? null;
+    const minDate = status?.minDate ?? null;
+    const maxDate = status?.maxDate ?? null;
 
     const items = [];
 
     if (valueCount !== null) {
       if (valueCount > 0) {
+        const dateRange = minDate && maxDate
+          ? `${minDate} ~ ${maxDate}`
+          : null;
+        // Tag 内展示日期跨度，同一年时只显示一次年份
+        const dateSpanLabel = minDate && maxDate ? (() => {
+          if (minDate === maxDate) return ` · ${minDate}`;
+          if (minDate.slice(0, 4) === maxDate.slice(0, 4)) {
+            return ` · ${minDate}~${maxDate.slice(5)}`;
+          }
+          return ` · ${minDate}~${maxDate}`;
+        })() : '';
+        const tooltipTitle = dateRange
+          ? `${valueCount.toLocaleString()} 条因子值\n${dateRange}`
+          : `${valueCount.toLocaleString()} 条因子值`;
         items.push(
-          <Tooltip key="v" title={`${valueCount.toLocaleString()} 条因子值`}>
+          <Tooltip key="v" title={tooltipTitle}>
             <Tag color="green" style={{ cursor: 'pointer' }}>
-              <Badge status="success" /> 因子值 {formatCount(valueCount)}
+              <Badge status="success" /> 因子值 {formatCount(valueCount)}{dateSpanLabel}
             </Tag>
           </Tooltip>
         );

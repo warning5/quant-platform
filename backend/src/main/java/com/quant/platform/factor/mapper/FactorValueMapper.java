@@ -89,6 +89,21 @@ public interface FactorValueMapper extends BaseMapper<FactorValue> {
     List<Map<String, Object>> selectFactorStats();
 
     /**
+     * 批量查询指定因子代码的计算日期范围（min/max calc_date）
+     * 用于因子列表页展示数据覆盖范围
+     */
+    @Select("<script>" +
+            "SELECT factor_code, MIN(calc_date) AS min_date, MAX(calc_date) AS max_date " +
+            "FROM factor_value " +
+            "WHERE factor_code IN " +
+            "<foreach collection='codes' item='c' open='(' separator=',' close=')'>" +
+            "#{c}" +
+            "</foreach>" +
+            " GROUP BY factor_code" +
+            "</script>")
+    List<Map<String, Object>> selectDateRangeByFactorCodes(@Param("codes") List<String> codes);
+
+    /**
      * 全表总记录数（不走 MyBatis-Plus 避免全量查询）
      */
     @Select("SELECT COUNT(*) FROM factor_value")

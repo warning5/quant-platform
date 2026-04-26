@@ -217,21 +217,43 @@ public class FactorService {
     }
 
     /**
-     * 批量查询因子计算状态（因子值数量 + 检测报告数量）
+     * 批量查询因子计算状态（因子值数量 + 检测报告数量 + 计算日期范围）
      */
     public Map<String, Map<String, Object>> batchGetFactorStatus(List<String> factorCodes) {
         if (factorCodes == null || factorCodes.isEmpty()) {
             return Map.of();
         }
         Map<String, Map<String, Object>> result = new java.util.HashMap<>();
+
+        // 1. 批量查询每个因子的值数量（逐个）
         for (String code : factorCodes) {
             long valueCount = factorValueMapper.selectCount(
                     new LambdaQueryWrapper<FactorValue>().eq(FactorValue::getFactorCode, code));
             long testCount = testReportMapper.selectCount(
                     new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<FactorTestReport>()
                             .eq(FactorTestReport::getFactorCode, code));
-            result.put(code, Map.of("valueCount", valueCount, "testCount", testCount));
+            java.util.Map<String, Object> entry = new java.util.HashMap<>();
+            entry.put("valueCount", valueCount);
+            entry.put("testCount", testCount);
+            result.put(code, entry);
         }
+
+        // 2. 批量查询日期范围（一条 SQL，IN 子句）
+        try {
+            List<Map<String, Object>> dateRanges = factorValueMapper.selectDateRangeByFactorCodes(factorCodes);
+            for (Map<String, Object> row : dateRanges) {
+                String code = (String) row.get("factor_code");
+                if (result.containsKey(code)) {
+                    Object minDate = row.get("min_date");
+                    Object maxDate = row.get("max_date");
+                    if (minDate != null) result.get(code).put("minDate", minDate.toString());
+                    if (maxDate != null) result.get(code).put("maxDate", maxDate.toString());
+                }
+            }
+        } catch (Exception e) {
+            log.warn("查询因子日期范围失败，忽略: {}", e.getMessage());
+        }
+
         return result;
     }
 
@@ -383,9 +405,21 @@ public class FactorService {
                     continue;
                 }
                 log.info("[{}] incremental: existing data up to {}, computing from {}", code, latestDate, startDate);
-                computeEngine.computeFactorIncremental(factor, startDate, endDate, symbols);
+                try {
+                    computeEngine.computeFactorIncremental(factor, startDate, endDate, symbols);
+                } catch (Exception e) {
+                    skipped.add(code + "(提交失败:" + e.getMessage().split("\\n")[0] + ")");
+                    log.warn("[{}] 提交增量计算失败: {}", code, e.getMessage());
+                    continue;
+                }
             } else {
-                computeEngine.computeFactor(factor, startDate, endDate, symbols);
+                try {
+                    computeEngine.computeFactor(factor, startDate, endDate, symbols);
+                } catch (Exception e) {
+                    skipped.add(code + "(提交失败:" + e.getMessage().split("\\n")[0] + ")");
+                    log.warn("[{}] 提交全量计算失败: {}", code, e.getMessage());
+                    continue;
+                }
             }
             submitted.add(code);
         }
@@ -690,47 +724,102 @@ public class FactorService {
 
     /**
      * 因子计算监控数据：各因子统计 + 全局总数
-     * 加 30 秒缓存，避免并发查询堆积导致数据库锁争用
+     * 使用 stale-while-revalidate 策略：缓存过期时立即返回旧数据，后台异步刷新
+     * 避免慢查询阻塞请求导致超时
      */
     private volatile Map<String, Object> monitorCache;
     private volatile long monitorCacheTs = 0;
-    private static final long MONITOR_CACHE_TTL = 30_000; // 30s
+    private static final long MONITOR_CACHE_TTL = 60_000; // 延长到 60s，减少刷新频率
+    private final java.util.concurrent.atomic.AtomicBoolean monitorRefreshing =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
+    // 后台刷新用的线程池（单线程，避免并发刷新）
+    private final java.util.concurrent.ExecutorService monitorRefreshExecutor =
+            java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "monitor-cache-refresh");
+                t.setDaemon(true);
+                return t;
+            });
+
+    /**
+     * 清除监控缓存（供 force=true 时调用）
+     */
+    public void clearMonitorCache() {
+        monitorCache = null;
+        monitorCacheTs = 0;
+        log.info("Monitor cache cleared");
+    }
 
     public Map<String, Object> getMonitorData() {
         long now = System.currentTimeMillis();
         Map<String, Object> cached = monitorCache;
+        log.info("[getMonitorData] enter, cached={}, age={}ms", cached != null ? "yes" : "null", cached != null ? (now - monitorCacheTs) : -1);
+
+        // 1. 缓存有效，直接返回（无锁，最快路径）
         if (cached != null && (now - monitorCacheTs) < MONITOR_CACHE_TTL) {
+            log.info("[getMonitorData] returning cached data");
             return cached;
         }
-        synchronized (this) {
-            if (monitorCache != null && (System.currentTimeMillis() - monitorCacheTs) < MONITOR_CACHE_TTL) {
-                return monitorCache;
-            }
-            // 优先从 ClickHouse 读取
-            long total;
-            List<Map<String, Object>> stats;
-            if (clickHouseConfig.isEnabled()) {
+
+        // 2. 缓存过期，提交后台刷新任务（不阻塞当前请求）
+        boolean submitted = false;
+        if (monitorRefreshing.compareAndSet(false, true)) {
+            submitted = true;
+            monitorRefreshExecutor.submit(() -> {
                 try {
-                    total = clickHouseFactorValueService.selectTotalCount();
-                    if (total < 0) {
-                        total = factorValueMapper.selectTotalCount();
-                    }
-                    stats = clickHouseFactorValueService.selectFactorStats();
-                    if (stats.isEmpty()) {
-                        stats = factorValueMapper.selectFactorStats();
-                    }
+                    Map<String, Object> fresh = loadMonitorDataFromDb();
+                    monitorCache = fresh;
+                    monitorCacheTs = System.currentTimeMillis();
+                    log.info("[MonitorRefresh] cache refreshed, totalRecords={}", fresh.get("totalRecords"));
                 } catch (Exception e) {
-                    log.warn("[ClickHouse] 监控数据查询失败，回退 MySQL: {}", e.getMessage());
+                    log.warn("[MonitorRefresh] failed: {}", e.getMessage());
+                } finally {
+                    monitorRefreshing.set(false);
+                }
+            });
+        }
+
+        // 3. 立即返回（有缓存返回缓存，没缓存返回空数据避免阻塞）
+        if (cached != null) {
+            log.info("[getMonitorData] returning stale cache (refresh submitted={})", submitted);
+            return cached;
+        }
+        // 极端情况：首次调用且刷新任务未完成，返回空数据
+        log.info("[getMonitorData] NO cache, returning empty data (refresh submitted={})", submitted);
+        return Map.of("totalRecords", 0L, "factors", java.util.Collections.emptyList());
+    }
+
+    /**
+     * 从 DB/CH 加载监控数据（抽出为独立方法，便于维护）
+     */
+    private Map<String, Object> loadMonitorDataFromDb() {
+        long start = System.currentTimeMillis();
+        if (clickHouseConfig.isEnabled()) {
+            try {
+                log.info("[loadMonitorData] trying ClickHouse...");
+                long t0 = System.currentTimeMillis();
+                long total = clickHouseFactorValueService.selectTotalCount();
+                log.info("[loadMonitorData] CH selectTotalCount cost={}ms, total={}", System.currentTimeMillis() - t0, total);
+                t0 = System.currentTimeMillis();
+                List<Map<String, Object>> stats = clickHouseFactorValueService.selectFactorStats();
+                log.info("[loadMonitorData] CH selectFactorStats cost={}ms, size={}", System.currentTimeMillis() - t0, stats.size());
+                // CH 查询失败或返回空时回退 MySQL
+                if (stats == null || stats.isEmpty()) {
                     total = factorValueMapper.selectTotalCount();
                     stats = factorValueMapper.selectFactorStats();
                 }
-            } else {
-                total = factorValueMapper.selectTotalCount();
-                stats = factorValueMapper.selectFactorStats();
+                log.info("[loadMonitorData] CH done, total cost={}ms", System.currentTimeMillis() - start);
+                return Map.of("totalRecords", total, "factors", stats);
+            } catch (Exception e) {
+                log.warn("[ClickHouse] 监控数据查询失败，回退 MySQL: {} (cost={}ms)", e.getMessage(), System.currentTimeMillis() - start);
             }
-            monitorCache = Map.of("totalRecords", total, "factors", stats);
-            monitorCacheTs = System.currentTimeMillis();
-            return monitorCache;
         }
+        log.info("[loadMonitorData] using MySQL...");
+        long t0 = System.currentTimeMillis();
+        long total = factorValueMapper.selectTotalCount();
+        log.info("[loadMonitorData] MySQL selectTotalCount cost={}ms", System.currentTimeMillis() - t0);
+        t0 = System.currentTimeMillis();
+        List<Map<String, Object>> stats = factorValueMapper.selectFactorStats();
+        log.info("[loadMonitorData] MySQL selectFactorStats cost={}ms, size={}, total cost={}ms", System.currentTimeMillis() - t0, stats.size(), System.currentTimeMillis() - start);
+        return Map.of("totalRecords", total, "factors", stats);
     }
 }

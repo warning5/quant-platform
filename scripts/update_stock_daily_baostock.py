@@ -284,6 +284,10 @@ def main():
         if args.pool:
             print(f"        股票池: {args.pool}")
 
+        # 计算 end_date 之前的最后一个实际交易日（供断点续传比较用）
+        actual_end_date = db.get_last_trading_day_before(end_date)
+        print(f"        实际期末交易日: {actual_end_date} (end_date={end_date})")
+
         # 断点续传（无论是否指定 pool，均在此处执行）
         if args.resume and not args.code:
             print("\n[2/4] 检查已有数据...")
@@ -295,11 +299,11 @@ def main():
             skipped = 0
             for code, name, market in stocks:
                 latest_date = code_latest_map.get(code)
-                if latest_date and latest_date >= end_date:
+                if latest_date and latest_date >= actual_end_date:
                     skipped += 1
                     continue
                 filtered_stocks.append((code, name, market))
-            print(f"        跳过: {skipped} 只(区间内已有最新数据 >= {end_date})")
+            print(f"        跳过: {skipped} 只(已有数据至实际期末 >= {actual_end_date})")
             print(f"        待更新: {len(filtered_stocks)} 只")
             stocks = filtered_stocks
 
@@ -332,7 +336,19 @@ def main():
                     except Exception as e:
                         print(f"[WARN] 重登异常: {e}")
 
-                df = fetch_stock_history(code, name, market, start_date, end_date)
+                # 断点续传：根据已有数据调整实际起始日期
+                actual_start = start_date
+                if args.resume:
+                    latest_date = code_latest_map.get(code)
+                    if latest_date is not None and latest_date < actual_end_date:
+                        actual_start = latest_date + timedelta(days=1)
+                        print(f"  [resume] {code} 已有数据至 {latest_date}，从 {actual_start} 开始补全")
+                    elif latest_date is not None and latest_date >= actual_end_date:
+                        # 该股票已完整，理论上不应进入此循环，防御性 continue
+                        print(f"  [resume] {code} 数据已完整({latest_date} >= {actual_end_date})，跳过")
+                        continue
+
+                df = fetch_stock_history(code, name, market, actual_start, end_date)
 
                 if df is not None and len(df) > 0:
                     rows = build_daily_rows(db, code, name, market, df)

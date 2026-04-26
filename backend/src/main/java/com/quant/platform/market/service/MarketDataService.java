@@ -64,7 +64,7 @@ public class MarketDataService {
                 .filter(s -> s.getTotalMarketCap() != null)
                 .collect(Collectors.toMap(
                         StockInfo::getCode,
-                        s -> s.getTotalMarketCap(),
+                        StockInfo::getTotalMarketCap,
                         (v1, v2) -> v1  // 处理重复 key
                 ));
         log.info("[MarketDataService] 已加载 {} 只股票的最新市值", codeMarketCapMap.size());
@@ -102,7 +102,6 @@ public class MarketDataService {
 
         // SQL 聚合查询统计
         Map<String, Object> stats = clickHouseStockService.getOverviewStats(latestDate);
-        long count = ((Number) stats.get("count")).longValue();
         long rises = ((Number) stats.getOrDefault("riseCount", 0)).longValue();
         long falls = ((Number) stats.getOrDefault("fallCount", 0)).longValue();
         long flats = ((Number) stats.getOrDefault("flatCount", 0)).longValue();
@@ -114,9 +113,9 @@ public class MarketDataService {
         List<Map<String, Object>> topLossRows = clickHouseStockService.getTopByPctChg(latestDate, 20, "ASC");
 
         List<MarketDailyBar> topGainers = topGainRows.stream()
-                .map(row -> rowToMarketBar(row)).collect(Collectors.toList());
+                .map(this::rowToMarketBar).collect(Collectors.toList());
         List<MarketDailyBar> topLosers = topLossRows.stream()
-                .map(row -> rowToMarketBar(row)).collect(Collectors.toList());
+                .map(this::rowToMarketBar).collect(Collectors.toList());
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("symbolCount", codeMarketMap.size());
@@ -169,8 +168,43 @@ public class MarketDataService {
     }
 
     /**
+     * 批量查询多只股票的行情数据（一次性查询，内存分组）
+     * 用于因子计算场景，替代逐只查询（5490 只 × N 天 = 数万次 DB 调用）
+     * @return Map<symbol, List<MarketDailyBar>> 按 symbol（带市场后缀）分组的行情数据
+     */
+    public Map<String, List<MarketDailyBar>> getBarsBatch(List<String> symbols, LocalDate startDate, LocalDate endDate) {
+        // 1. 解析 symbols -> codes（去重）
+        List<String> codes = symbols.stream()
+                .map(this::parseCode)
+                .distinct()
+                .collect(Collectors.toList());
+
+        // 2. 一次批量查询（代替 N 次单只查询）
+        List<StockDaily> allRows = clickHouseStockService.getStockDailyBatch(codes, startDate, endDate);
+
+        // 3. 按 code 分组（内存）
+        Map<String, List<StockDaily>> byCode = allRows.stream()
+                .collect(Collectors.groupingBy(StockDaily::getCode, Collectors.toList()));
+
+        // 4. 转换为 Map<symbol, List<MarketDailyBar>>
+        Map<String, List<MarketDailyBar>> result = new LinkedHashMap<>();
+        for (String sym : symbols) {
+            String code = parseCode(sym);
+            String market = parseMarket(sym);
+            if (market == null) market = codeMarketMap.getOrDefault(code, "");
+            List<StockDaily> rows = byCode.getOrDefault(code, List.of());
+            String finalMarket = market;
+            List<MarketDailyBar> bars = rows.stream()
+                    .map(sd -> toMarketBar(sd, finalMarket))
+                    .sorted(Comparator.comparing(MarketDailyBar::getTradeDate))
+                    .collect(Collectors.toList());
+            result.put(sym, bars);
+        }
+        return result;
+    }
+
+    /**
      * 获取单个标的在指定日期区间的K线（供回测引擎加载基准使用）
-     *
      * 自动识别指数代码：若 code 在 INDEX_NAME_MAP 中，则按 code + name 精确查询指数数据，
      * 避免与同代码个股混淆（如 000001 上证指数 vs 000001 平安银行）。
      */
@@ -185,7 +219,7 @@ public class MarketDataService {
             // 指数：按 name 精确匹配，避免查到同代码个股
             dailies = dailies.stream()
                     .filter(sd -> indexName.equals(sd.getName()))
-                    .collect(Collectors.toList());
+                    .toList();
         }
 
         return dailies.stream()
@@ -238,16 +272,6 @@ public class MarketDataService {
                         "name", s.getName() != null ? s.getName() : "",
                         "symbol", s.getCode() + "." + (s.getMarket() != null ? s.getMarket() : "")))
                 .collect(Collectors.toList());
-    }
-
-    /**
-     * 批量导入行情数据
-     * @deprecated 数据统一通过 stock_daily 写入
-     */
-    @Deprecated
-    public int importBars(List<MarketDailyBar> bars) {
-        log.warn("importBars is deprecated. Data should be written to stock_daily directly.");
-        return 0;
     }
 
     // ==================== 字段转换 ====================
@@ -312,5 +336,9 @@ public class MarketDataService {
     private String parseMarket(String symbol) {
         int dot = symbol.lastIndexOf('.');
         return dot > 0 ? symbol.substring(dot + 1) : null;
+    }
+
+    public int importBars(List<MarketDailyBar> bars) {
+        return 0;
     }
 }

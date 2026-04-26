@@ -353,6 +353,37 @@ class StockDailyDB:
                     result[row["code"]] = row["max_date"]
         return result
 
+    def get_last_trading_day_before(self, end_date):
+        """
+        返回 end_date 之前（含）的最后一个交易日。
+        直接查全表 MAX(trade_date) WHERE trade_date <= end_date，
+        不依赖特定指数是否有数据。
+        如果查不到，返回 end_date 本身（兜底）。
+        """
+        if self.backend == "clickhouse":
+            r = self.ch_client.query(
+                f"SELECT MAX(trade_date) AS d FROM {self.CH_TABLE} "
+                f"WHERE trade_date <= %(d)s",
+                parameters={"d": end_date},
+            )
+            if r.result_rows and r.result_rows[0][0]:
+                d = r.result_rows[0][0]
+                if isinstance(d, str):
+                    from datetime import datetime
+                    d = datetime.strptime(d, "%Y-%m-%d").date()
+                return d
+        else:
+            with self.mysql_conn.cursor() as cur:
+                cur.execute(
+                    "SELECT MAX(trade_date) FROM stock_daily "
+                    "WHERE trade_date <= %s",
+                    (end_date,),
+                )
+                row = cur.fetchone()
+                if row and row[0]:
+                    return row[0]
+        return end_date
+
     def has_daily_record(self, code, trade_date):
         """检查某股票某日是否已有记录"""
         # CH 表中代码不带前缀，需要规范化
@@ -636,7 +667,11 @@ class StockDailyDB:
         return total_fixed
 
     def _ch_fix_change(self, code=None, stock_list=None):
-        """ClickHouse: 补全 change 字段（INSERT 新版本，利用 ReplacingMergeTree 去重）"""
+        """ClickHouse: 补全 change 字段。
+
+        策略: 先 DELETE 该 code 全量数据，再重新 INSERT 全量（包含修复值）。
+        全量写入确保 (code, trade_date) 唯一，无重复。
+        """
         if code:
             codes = [code]
         elif stock_list:
@@ -654,7 +689,7 @@ class StockDailyDB:
 
         total_fixed = 0
         for c in codes:
-            # 读该 code 全部行，按 trade_date 排序
+            # Step 1: 读该 code 全部行（ORDER BY trade_date 保证连续计算正确）
             r = self.ch_client.query(
                 f"SELECT * FROM {self.CH_TABLE} WHERE code = %(code)s ORDER BY trade_date",
                 parameters={"code": c},
@@ -663,12 +698,14 @@ class StockDailyDB:
             if len(rows) < 2:
                 continue
 
-            # 解析列名（clickhouse_connect 返回 list of (name, type) 或 str list）
+            # 解析列名
             raw_cols = r.column_names
             col_names = [c[0] if isinstance(c, (list, tuple)) else c for c in raw_cols]
 
-            rows_to_reinsert = []
+            # Step 2: 计算修复值，并构造全量重新写入的行列表
+            rows_to_insert = []
             prev_close = None
+            fixed_count = 0
 
             for row in rows:
                 row_dict = {col_names[i]: row[i] for i in range(len(col_names))}
@@ -678,38 +715,55 @@ class StockDailyDB:
                 cur_pct = float(row_dict["change_percent"]) if row_dict.get("change_percent") else None
                 cur_amt = float(row_dict["change_amount"]) if row_dict.get("change_amount") else None
 
-                need = False
-                new_pre, new_pct, new_amt = prev_close, cur_pct, cur_amt
+                new_pre, new_pct, new_amt = cur_pre, cur_pct, cur_amt
 
                 if prev_close is not None and close_p is not None:
                     exp_pct = round((close_p - prev_close) / prev_close * 100, 2)
                     exp_amt = round(close_p - prev_close, 2)
                     if cur_pct is None or cur_pct == 0:
                         new_pct = exp_pct
-                        need = True
+                        fixed_count += 1
                     if cur_amt is None or cur_amt == 0:
                         new_amt = exp_amt
-                        need = True
+                        fixed_count += 1
                     if cur_pre is None or cur_pre == 0:
                         new_pre = prev_close
-                        need = True
+                        fixed_count += 1
 
-                if need:
-                    # 构造新版本 row dict，去掉 update_time 让 _ch_insert_rows 用当前时间
-                    new_dict = dict(row_dict)
-                    new_dict["pre_close"] = new_pre
-                    new_dict["change_percent"] = new_pct
-                    new_dict["change_amount"] = new_amt
-                    new_dict.pop("update_time", None)
-                    rows_to_reinsert.append(new_dict)
-                    total_fixed += 1
+                # 构造重新写入的行（只修改变动的字段，update_time 由 _ch_insert_rows 用当前时间填充）
+                new_dict = dict(row_dict)
+                new_dict["pre_close"] = new_pre
+                new_dict["change_percent"] = new_pct
+                new_dict["change_amount"] = new_amt
+                new_dict.pop("update_time", None)  # 触发 _ch_insert_rows 使用 now_dt
+                rows_to_insert.append(new_dict)
 
                 if close_p is not None:
                     prev_close = close_p
 
-            if rows_to_reinsert:
-                self._ch_insert_rows(rows_to_reinsert)
-                print(f"  [fix_change] {c}: 补全 {len(rows_to_reinsert)} 条")
+            if fixed_count > 0:
+                # Step 3: 先 DELETE 该 code 的所有旧数据
+                self.ch_client.command(
+                    f"ALTER TABLE {self.CH_TABLE} DELETE WHERE code = %(code)s",
+                    parameters={"code": c},
+                )
+                # 等待 mutation 完成（超时 120s）
+                for _ in range(120):
+                    r_check = self.ch_client.query(
+                        f"SELECT count() FROM {self.CH_TABLE} WHERE code = %(code)s",
+                        parameters={"code": c},
+                    )
+                    if r_check.result_rows[0][0] == 0:
+                        break
+                    time.sleep(1)
+                else:
+                    print(f"  [WARN] {c}: DELETE mutation 超时，跳过")
+                    continue
+
+                # Step 4: 重新 INSERT 全量行（包含修复值）
+                self._ch_insert_rows(rows_to_insert)
+                total_fixed += fixed_count
+                print(f"  [fix_change] {c}: 修复 {fixed_count} 个字段，DELETE 后重新写入 {len(rows_to_insert)} 条")
 
             time.sleep(0.01)
 

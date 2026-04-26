@@ -38,9 +38,9 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     @Bean(name = "backtestTaskExecutor")
     public ThreadPoolTaskExecutor backtestTaskExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(10);  // 允许10个因子同时并行计算
-        executor.setMaxPoolSize(10);
-        executor.setQueueCapacity(0);   // corePoolSize 满时直接拒绝（不应出现，因为=MaxPoolSize）
+        executor.setCorePoolSize(10);  // 核心10个线程
+        executor.setMaxPoolSize(20);    // 繁忙时最多20个线程
+        executor.setQueueCapacity(100);  // 超出线程数时进入队列排队，而非直接拒绝
         executor.setThreadNamePrefix("backtest-");
         executor.initialize();
         return executor;               // Spring 会在 destroy 时正确关闭

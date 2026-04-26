@@ -162,6 +162,10 @@ def main():
 
     db = StockDailyDB()
 
+    # 计算 end_date 之前的最后一个实际交易日（供断点续传比较用）
+    actual_end_date = db.get_last_trading_day_before(end_date.date())
+    print(f"        实际期末交易日: {actual_end_date} (end_date={end_date.date()})")
+
     try:
         if args.market == 'ALL':
             markets = ['SH', 'SZ']
@@ -188,7 +192,7 @@ def main():
             skipped = 0
             for code, name, market in all_stocks:
                 latest = latest_map.get(code)
-                if latest and latest >= end_date.date():
+                if latest and latest >= actual_end_date:
                     skipped += 1
                     continue
                 filtered.append((code, name, market))
@@ -208,7 +212,18 @@ def main():
 
         for i, (code, name, market) in enumerate(all_stocks, 1):
             try:
-                df = fetch_stock_history(code, market, start_date, end_date)
+                # 断点续传：根据已有数据调整实际起始日期
+                actual_start = start_date
+                if args.resume:
+                    latest_date = latest_map.get(code)
+                    if latest_date is not None and latest_date < actual_end_date:
+                        actual_start = latest_date + timedelta(days=1)
+                        if actual_start > actual_end_date:
+                            print(f"  [resume] {code} 数据已完整，跳过")
+                            continue
+                        print(f"  [resume] {code} 已有数据至 {latest_date}，从 {actual_start} 开始补全")
+
+                df = fetch_stock_history(code, market, actual_start, end_date)
                 if df is not None and not df.empty:
                     rows = build_daily_rows(db, code, name, market, df)
                     n = db.upsert_daily(rows)

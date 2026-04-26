@@ -7,6 +7,7 @@ import com.quant.platform.factor.domain.FactorValue;
 import com.quant.platform.factor.service.FactorCorrelationService;
 import com.quant.platform.factor.service.FactorService;
 import com.quant.platform.factor.service.FactorWeightOptimizeService;
+import com.quant.platform.factor.engine.FactorComputeEngine;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -23,6 +24,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 因子管理API
@@ -37,6 +39,7 @@ public class FactorController {
     private final FactorCorrelationService correlationService;
     private final FactorWeightOptimizeService factorWeightOptimizeService;
     private final SimpMessagingTemplate messagingTemplate;
+    private final FactorComputeEngine computeEngine;
 
     @GetMapping
     @Operation(summary = "查询因子列表（分页）")
@@ -57,20 +60,20 @@ public class FactorController {
         return ApiResponse.success(factorService.batchGetFactorStatus(codeList));
     }
 
-    @DeleteMapping("/{id}/values")
+    @DeleteMapping("/{id:\\d+}/values")
     @Operation(summary = "删除指定因子的所有因子值")
     public ApiResponse<Map<String, Object>> deleteValues(@PathVariable Long id) {
         int deleted = factorService.deleteFactorValues(id);
         return ApiResponse.success("已删除 " + deleted + " 条因子值", Map.of("deleted", deleted));
     }
 
-    @GetMapping("/{id}")
+    @GetMapping("/{id:\\d+}")
     @Operation(summary = "获取因子详情")
     public ApiResponse<FactorDefinition> getById(@PathVariable Long id) {
         return ApiResponse.success(factorService.getById(id));
     }
 
-    @GetMapping("/{id}/init")
+    @GetMapping("/{id:\\d+}/init")
     @Operation(summary = "因子详情页聚合初始化接口（详情+报告列表+值数量，一次 RTT）")
     public ApiResponse<Map<String, Object>> getFactorInit(@PathVariable Long id) {
         return ApiResponse.success(factorService.getFactorInit(id));
@@ -114,13 +117,16 @@ public class FactorController {
     }
 
     @PostMapping("/batch-compute")
-    @Operation(summary = "批量并行计算多个因子（每个因子在独立线程中执行）")
+    @Operation(summary = "批量并行计算多个因子（每个因子在独立线程中执行，最多8个）")
     public ApiResponse<Map<String, Object>> batchCompute(
             @RequestParam String factorCodes,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(defaultValue = "true") boolean incremental) {
         List<String> codeList = Arrays.asList(factorCodes.split(","));
+        if (codeList.size() > 8) {
+            return ApiResponse.error("最多同时计算 8 个因子，当前提交了 " + codeList.size() + " 个");
+        }
         Map<String, Object> result = factorService.triggerBatchCompute(codeList, startDate, endDate, incremental);
         return ApiResponse.success("批量计算任务已提交", result);
     }
@@ -220,8 +226,18 @@ public class FactorController {
 
     @GetMapping("/monitor")
     @Operation(summary = "因子计算监控数据（各因子统计+全局总数）")
-    public ApiResponse<Map<String, Object>> monitor() {
+    public ApiResponse<Map<String, Object>> monitor(
+            @RequestParam(defaultValue = "false") boolean force) {
+        if (force) {
+            factorService.clearMonitorCache();
+        }
         return ApiResponse.success(factorService.getMonitorData());
+    }
+
+    @GetMapping("/running")
+    @Operation(summary = "当前正在计算的因子代码列表")
+    public ApiResponse<Set<String>> running() {
+        return ApiResponse.success(computeEngine.getRunningFactorCodes());
     }
 
     @GetMapping("/ws-test")

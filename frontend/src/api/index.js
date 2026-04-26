@@ -53,6 +53,7 @@ export const factorApi = {
   },
   getAllDefinitions: () => api.get('/factors', { params: { page: 0, size: 200 } }),
   monitor: () => api.get('/factors/monitor'),
+  running: () => api.get('/factors/running'),
   batchCompute: (factorCodes, startDate, endDate, incremental = true) =>
     api.post('/factors/batch-compute', null, { params: { factorCodes: factorCodes.join(','), startDate, endDate, incremental } }),
   // P1: 因子组合权重优化

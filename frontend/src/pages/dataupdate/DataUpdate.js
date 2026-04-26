@@ -421,6 +421,10 @@ function DataUpdate() {
         form.setFieldsValue({
           dateRange: [dayjs(res.startDate), dayjs(res.endDate)]
         });
+        // 指数日线也用同一默认值
+        indexForm.setFieldsValue({
+          dateRange: [dayjs(res.startDate), dayjs(res.endDate)]
+        });
       }
     }).catch(() => {});
 

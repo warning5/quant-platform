@@ -799,15 +799,15 @@ public class DataUpdateService {
     public Map<String, Object> getIndexCoverage() {
         Map<String, Object> result = new LinkedHashMap<>();
 
-        // 各指数数据统计
+        // 各指数数据统计（CH 中 code 格式为 sh.000001 / sz.399006）
         String indexSql = """
             SELECT code, name,
                    COUNT(*) as record_count,
                    MIN(trade_date) as min_date,
                    MAX(trade_date) as max_date
             FROM stock_daily
-            WHERE code IN ('000001','000016','000022','000300','000688','000852','000905','399001','399006','399303')
-              AND name IN ('上证指数','上证50','中证红利','沪深300','科创50','中证1000','中证500','深证成指','创业板指','国证2000')
+            WHERE code IN ('sh.000001','sh.000016','sh.000022','sh.000300','sh.000688','sh.000852','sh.000905',
+                           'sz.399001','sz.399006','sz.399303')
             GROUP BY code, name
             ORDER BY code
             """;
@@ -817,8 +817,8 @@ public class DataUpdateService {
         // 总记录数
         String totalSql = """
             SELECT COUNT(*) as cnt FROM stock_daily
-            WHERE code IN ('000001','000016','000022','000300','000688','000852','000905','399001','399006','399303')
-              AND name IN ('上证指数','上证50','中证红利','沪深300','科创50','中证1000','中证500','深证成指','创业板指','国证2000')
+            WHERE code IN ('sh.000001','sh.000016','sh.000022','sh.000300','sh.000688','sh.000852','sh.000905',
+                           'sz.399001','sz.399006','sz.399303')
             """;
         Object totalObj = clickHouseStockService.queryForObject(totalSql);
         long totalRecords = totalObj != null ? ((Number) totalObj).longValue() : 0;
@@ -826,10 +826,11 @@ public class DataUpdateService {
         result.put("indexCount", indices.size());
 
         // 最新交易日（指数数据的最大 trade_date）
+        // CH 中 code 格式为 sh.000001 / sz.399001，需带上前缀查询
         String latestSql = """
             SELECT MAX(trade_date) FROM stock_daily
-            WHERE code IN ('000001','000016','000022','000300','000688','000852','000905','399001','399006','399303')
-              AND name IN ('上证指数','上证50','中证红利','沪深300','科创50','中证1000','中证500','深证成指','创业板指','国证2000')
+            WHERE code IN ('sh.000001','sh.000016','sh.000022','sh.000300','sh.000688','sh.000852','sh.000905',
+                           'sz.399001','sz.399006','sz.399303')
             """;
         Object latest = clickHouseStockService.queryForObject(latestSql);
         result.put("latestTradeDate", latest != null ? latest.toString() : null);
@@ -841,27 +842,27 @@ public class DataUpdateService {
      * 查询指定日期缺失数据的指数
      */
     public List<Map<String, Object>> getMissingIndices(LocalDate date) {
-        // 全部 10 个指数
+        // 全部 10 个指数，code 用 CH 存储格式（带 sh./sz. 前缀），name 仅用于展示
         List<Map<String, String>> allIndices = List.of(
-                Map.of("code", "000001", "name", "上证指数"),
-                Map.of("code", "000016", "name", "上证50"),
-                Map.of("code", "000022", "name", "中证红利"),
-                Map.of("code", "000300", "name", "沪深300"),
-                Map.of("code", "000688", "name", "科创50"),
-                Map.of("code", "000852", "name", "中证1000"),
-                Map.of("code", "000905", "name", "中证500"),
-                Map.of("code", "399001", "name", "深证成指"),
-                Map.of("code", "399006", "name", "创业板指"),
-                Map.of("code", "399303", "name", "国证2000")
+                Map.of("code", "sh.000001", "name", "上证指数"),
+                Map.of("code", "sh.000016", "name", "上证50"),
+                Map.of("code", "sh.000022", "name", "中证红利"),
+                Map.of("code", "sh.000300", "name", "沪深300"),
+                Map.of("code", "sh.000688", "name", "科创50"),
+                Map.of("code", "sh.000852", "name", "中证1000"),
+                Map.of("code", "sh.000905", "name", "中证500"),
+                Map.of("code", "sz.399001", "name", "深证成指"),
+                Map.of("code", "sz.399006", "name", "创业板指"),
+                Map.of("code", "sz.399303", "name", "国证2000")
         );
 
-        // 查该日期有数据的指数 code
+        // 查该日期有数据的指数 code（CH 中带 sh./sz. 前缀）
         Set<String> existingCodes = new HashSet<>();
         String sql = """
             SELECT DISTINCT code FROM stock_daily
             WHERE trade_date = ?
-              AND code IN ('000001','000016','000022','000300','000688','000852','000905','399001','399006','399303')
-              AND name IN ('上证指数','上证50','中证红利','沪深300','科创50','中证1000','中证500','深证成指','创业板指','国证2000')
+              AND code IN ('sh.000001','sh.000016','sh.000022','sh.000300','sh.000688','sh.000852','sh.000905',
+                           'sz.399001','sz.399006','sz.399303')
             """;
         List<Map<String, Object>> rows = clickHouseStockService.queryForList(sql, date.toString());
         for (Map<String, Object> row : rows) {

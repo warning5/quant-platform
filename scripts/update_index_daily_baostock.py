@@ -386,7 +386,7 @@ def main():
     )
 
     parser.add_argument("--start-date", type=str, default=None,
-                        help="开始日期 (默认: 数据库中该指数最新日期的次日, 若无则 2018-01-02)")
+                        help="开始日期 (默认: 数据库中该指数最新日期的次日, 若无则最近一年前)")
     parser.add_argument("--end-date", type=str, default=None,
                         help="结束日期 (默认: 今天)")
     parser.add_argument("--code", type=str, default=None,
@@ -400,7 +400,7 @@ def main():
 
     # ─── 解析日期 ───
     end_date = resolve_date(args.end_date) if args.end_date else datetime.now().strftime("%Y-%m-%d")
-    default_start = "2018-01-02"  # 指数历史较长，默认从 2018 年起
+    default_start = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")  # 默认最近一年
     start_date = resolve_date(args.start_date) if args.start_date else default_start
 
     # ─── 确定要更新的指数列表 ───

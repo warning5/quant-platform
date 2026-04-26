@@ -59,10 +59,27 @@ function FactorMonitor() {
   const [computeLoading, setComputeLoading] = useState(false);
   const [form] = Form.useForm();
   const [pageSize, setPageSize] = useState(20);
+  // 通过 WebSocket 消息跟踪正在计算的因子（解决 cnt=0 时无法判断 isRunning 的问题）
+  const [runningFactorCodes, setRunningFactorCodes] = useState(new Set());
+  // 存储 WebSocket 实时进度（key=factorCode, value=progress 0-100）
+  const [wsProgress, setWsProgress] = useState({});
+  // 存储每个因子的最新 etaSec（来自 WebSocket，用于准确的预计剩余时间）
+  // 用 useState 而非 useRef，确保更新时触发重渲染
+  const [factorEtaSecData, setFactorEtaSecData] = useState({});
+  // 🔍 监听 factorEtaSecData 变化，每次更新都打印到 Console
+  useEffect(() => {
+    console.log('[ETA] factorEtaSecData changed:', factorEtaSecData);
+  }, [factorEtaSecData]);
   const timerRef = useRef(null);
 
   // WebSocket 计算日志（原生 WebSocket + 手动 STOMP 协议）
-  const [computeLogs, setComputeLogs] = useState([]);
+  // 用 sessionStorage 持久化，刷新页面后日志不丢失
+  const [computeLogs, setComputeLogs] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('factor_compute_logs');
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
   const [wsConnected, setWsConnected] = useState(false);
   const wsRef = useRef(null);
   const logContainerRef = useRef(null);
@@ -79,6 +96,11 @@ function FactorMonitor() {
 
   // 保持 pushLog 的稳定引用
   useEffect(() => { pushLogRef.current = pushLog; }, [pushLog]);
+
+  // 持久化计算日志到 sessionStorage（刷新页面后恢复，关闭标签页自动清空）
+  useEffect(() => {
+    try { sessionStorage.setItem('factor_compute_logs', JSON.stringify(computeLogs)); } catch { /* quota exceeded，忽略 */ }
+  }, [computeLogs]);
 
   // 手动 STOMP 帧
   const stompFrame = useCallback((cmd, headers, body) => {
@@ -142,6 +164,15 @@ function FactorMonitor() {
             id: 'batch-log-sub',
             destination: '/topic/factor/batch-log',
           }));
+          // 连上后主动查询后端正在计算的因子，同步状态
+          factorApi.running().then(res => {
+            const codes = res?.data || res;
+            if (Array.isArray(codes) && codes.length > 0) {
+              setRunningFactorCodes(new Set(codes));
+            } else {
+              setRunningFactorCodes(new Set());
+            }
+          }).catch(() => {});
         } else if (frame.command === 'MESSAGE') {
           try {
             const data = JSON.parse(frame.body);
@@ -158,10 +189,40 @@ function FactorMonitor() {
               const skip = data.skipped?.length || 0;
               push(`📋 提交完成：${sub} 个已提交，${skip} 个跳过`, skip > 0 ? 'warning' : 'success', ts);
             } else if (data.type === 'FACTOR_PROGRESS') {
+              // 🔍 调试：把完整 WebSocket 消息打印到浏览器 Console
+              console.log('[WS] FACTOR_PROGRESS:', data);
               const icons = { COMPUTING: '🔢', DONE: '✅', TEST_START: '🧪', TESTING: '📊', TEST_DONE: '🎉', FAILED: '❌' };
               const icon = icons[data.stage] || 'ℹ️';
               const logType = data.stage === 'DONE' || data.stage === 'TEST_DONE' ? 'success' : data.stage === 'FAILED' ? 'error' : 'info';
               push(`${icon} [${data.factorCode}] ${data.message}`, logType, ts);
+              // 通过 WebSocket 消息跟踪正在计算的因子（解决 cnt=0 时 isRunning 误判为 false 的问题）
+              // 同时存储实时进度（data.progress）
+              if (data.factorCode) {
+                if (data.stage === 'COMPUTING') {
+                  setRunningFactorCodes(prev => new Set([...prev, data.factorCode]));
+                  // 存储实时进度（后端 sendProgress 的 progress 字段，0-100）
+                  if (data.progress != null) {
+                    setWsProgress(prev => ({ ...prev, [data.factorCode]: data.progress }));
+                  }
+                  // 存储实时 ETA（后端 sendProgress 的 etaSec 字段）
+                  if (data.etaSec != null) {
+                    setFactorEtaSecData(prev => ({ ...prev, [data.factorCode]: data.etaSec }));
+                  }
+                } else if (data.stage === 'DONE' || data.stage === 'FAILED' || data.stage === 'TEST_DONE') {
+                  setRunningFactorCodes(prev => {
+                    const next = new Set(prev);
+                    next.delete(data.factorCode);
+                    return next;
+                  });
+                  setWsProgress(prev => {
+                    const next = { ...prev };
+                    delete next[data.factorCode];
+                    return next;
+                  });
+                  // 清除该因子的 ETA 缓存
+                  setFactorEtaSecData(prev => { const next = { ...prev }; delete next[data.factorCode]; return next; });
+                }
+              }
             }
           } catch (e) {
             console.error('WS message parse error:', e);
@@ -170,8 +231,19 @@ function FactorMonitor() {
       });
     };
 
-    ws.onclose = () => { setWsConnected(false); };
-    ws.onerror = () => { setWsConnected(false); };
+    ws.onclose = () => {
+      setWsConnected(false);
+      // 后端可能已重启，清空残留的计算状态
+      setRunningFactorCodes(new Set());
+      setWsProgress({});
+      setFactorEtaSecData({});
+    };
+    ws.onerror = () => {
+      setWsConnected(false);
+      setRunningFactorCodes(new Set());
+      setWsProgress({});
+      setFactorEtaSecData({});
+    };
 
     wsRef.current = ws;
     return () => {
@@ -213,6 +285,15 @@ function FactorMonitor() {
       const res = await factorApi.monitor();
       const data = res;
       setMonitorData(data);
+
+      // 每次刷新监控数据时，同步后端正在计算的因子状态（解决重启后状态不一致）
+      try {
+        const runningRes = await factorApi.running();
+        const codes = runningRes?.data || runningRes || [];
+        if (Array.isArray(codes)) {
+          setRunningFactorCodes(new Set(codes));
+        }
+      } catch { /* 忽略，不影响主流程 */ }
 
       // 更新速度采样
       const now = Date.now();
@@ -257,7 +338,11 @@ function FactorMonitor() {
   // 构建因子统计 Map
   const statsMap = {};
   if (monitorData?.factors) {
-    monitorData.factors.forEach(f => { statsMap[f.factor_code] = f; });
+    monitorData.factors.forEach(f => {
+      // 后端返回 snake_case(factor_code)，统一转 camelCase 建索引
+      const key = f.factorCode || f.factor_code || f.code;
+      if (key) statsMap[key] = f;
+    });
   }
 
   // 计算每个因子的进度
@@ -270,14 +355,19 @@ function FactorMonitor() {
     // isDone：有数据且交易日达标或接近达标
     const pct = days > 0 ? Math.min(100, Math.round(days / TARGET_DAYS * 100)) : 0;
     const isDone = cnt > 0 && days >= TARGET_DAYS - 5;
-    const isRunning = cnt > 0 && !isDone;
-    return { ...f, cnt, days, stocks, latestDate: s.max_date || null, pct: isDone ? 100 : pct, isDone, isRunning };
+    // isRunning 只依赖后端真实状态（/running API + WebSocket），不再用数据完整性推断
+    // 原因：后端重启后，有数据但没算完的因子会被误判为"计算中"
+    const isRunning = runningFactorCodes.has(f.code);
+    // 进度：正在计算用 WebSocket 实时进度；已完成显示100%；否则按天数比例
+    const displayPct = isRunning ? (wsProgress[f.code] ?? pct) : (isDone ? 100 : pct);
+    return { ...f, cnt, days, stocks, minDate: s.min_date || null, maxDate: s.max_date || null, pct: displayPct, isDone, isRunning };
   });
 
   const totalRecords = monitorData?.totalRecords || 0;
-  const doneCount = factorsWithStats.filter(f => f.isDone).length;
+  // 正在计算的因子不算"已完成"（修复增量计算时 TURN20 等显示"已完成"的 bug）
+  const doneCount = factorsWithStats.filter(f => f.isDone && !f.isRunning).length;
   const runningCount = factorsWithStats.filter(f => f.isRunning).length;
-  const pendingCount = (factors || []).length - doneCount - runningCount;
+  const pendingCount = factorsWithStats.filter(f => !f.isDone && !f.isRunning).length;
 
   // 计算写入速度
   let speed = 0;
@@ -296,30 +386,21 @@ function FactorMonitor() {
     speedText = '--';
   }
 
-  // 预计剩余时间（基于正在计算因子的实际进度）
+  // 预计剩余时间（直接使用后端推送的 etaSec，不再自己瞎算）
+  // 🔍 调试：打印 factorEtaSecData 当前值
+  console.log('[ETA] factorEtaSecData:', factorEtaSecData);
   let etaText = '--';
-  if (speed > 0 && runningCount > 0) {
-    let runRemaining = 0;
-    factorsWithStats.forEach(f => {
-      if (f.isRunning) {
-        const fDone = TARGET_DAYS * TARGET_STOCKS * f.progress / 100;
-        const fTarget = TARGET_DAYS * TARGET_STOCKS;
-        runRemaining += Math.max(0, fTarget - fDone);
-      }
-    });
-    const pendingTarget = pendingCount * TARGET_DAYS * TARGET_STOCKS;
-    const totalRemaining = runRemaining + pendingTarget;
-    if (totalRemaining > 0) {
-      const sec = Math.round(totalRemaining / speed);
-      const hh = Math.floor(sec / 3600);
-      const mm = Math.floor((sec % 3600) / 60);
-      const ss = sec % 60;
-      etaText = hh > 0 ? `${hh}时${mm}分` : mm > 0 ? `${mm}分${ss}秒` : `${ss}秒`;
-    }
+  const allEta = Object.values(factorEtaSecData).filter(v => v != null);
+  if (allEta.length > 0) {
+    const maxEta = Math.max(...allEta);
+    const hh = Math.floor(maxEta / 3600);
+    const mm = Math.floor((maxEta % 3600) / 60);
+    const ss = maxEta % 60;
+    etaText = hh > 0 ? `${hh}时${mm}分` : mm > 0 ? `${mm}分${ss}秒` : `${ss}秒`;
+  } else if (runningCount > 0) {
+    etaText = '计算中';
   } else if (runningCount === 0 && pendingCount === 0 && doneCount > 0) {
     etaText = '已完成';
-  } else if (runningCount > 0) {
-    etaText = '估算中';
   }
 
   // 触发批量计算
@@ -327,6 +408,14 @@ function FactorMonitor() {
     try {
       const vals = await form.validateFields();
       const factorCodes = vals.factorCodes;
+      if (!factorCodes || factorCodes.length === 0) {
+        message.warning('请至少选择一个因子');
+        return;
+      }
+      if (factorCodes.length > 8) {
+        message.error('最多同时计算 8 个因子，请减少选择');
+        return;
+      }
       const startDate = vals.dateRange?.[0]?.format('YYYY-MM-DD');
       const endDate = vals.dateRange?.[1]?.format('YYYY-MM-DD');
       const incremental = vals.incremental ?? true;
@@ -390,10 +479,26 @@ function FactorMonitor() {
       render: v => v > 0 ? v : <Text type="secondary">--</Text>,
     },
     {
-      title: '最新日期',
-      dataIndex: 'latestDate',
-      width: 110,
-      render: v => v ? <span style={{ fontFamily: 'monospace', color: '#94a3b8', fontSize: 12 }}>{v}</span> : <Text type="secondary">--</Text>,
+      title: '日期跨度',
+      key: 'dateSpan',
+      width: 160,
+      render: (_, row) => {
+        const { minDate, maxDate } = row;
+        if (!minDate && !maxDate) return <Text type="secondary">--</Text>;
+        if (minDate && maxDate && minDate === maxDate) {
+          return <span style={{ fontFamily: 'monospace', color: '#94a3b8', fontSize: 12 }}>{minDate}</span>;
+        }
+        if (minDate && maxDate) {
+          // 同年时省略年份
+          const showMin = minDate;
+          const showMax = minDate.slice(0, 4) === maxDate.slice(0, 4)
+            ? maxDate.slice(5)
+            : maxDate;
+          return <span style={{ fontFamily: 'monospace', color: '#94a3b8', fontSize: 12 }}>{showMin}~{showMax}</span>;
+        }
+        // 只有其中一个日期
+        return <span style={{ fontFamily: 'monospace', color: '#94a3b8', fontSize: 12 }}>{minDate || '--'} ~ {maxDate || '--'}</span>;
+      },
     },
     {
       title: '进度',
@@ -429,8 +534,9 @@ function FactorMonitor() {
         return !row.isDone && !row.isRunning;
       },
       render: (_, row) => {
-        if (row.isDone) return <Badge status="success" text={<Text style={{ fontSize: 12, color: '#22c55e' }}>已完成</Text>} />;
+        // 正在计算的因子优先显示"计算中"（覆盖 isDone=true 的增量计算场景）
         if (row.isRunning) return <Badge status="processing" text={<Text style={{ fontSize: 12, color: '#38bdf8' }}>计算中</Text>} />;
+        if (row.isDone) return <Badge status="success" text={<Text style={{ fontSize: 12, color: '#22c55e' }}>已完成</Text>} />;
         return <Badge status="default" text={<Text style={{ fontSize: 12, color: '#94a3b8' }}>待计算</Text>} />;
       },
     },
@@ -738,13 +844,17 @@ function FactorMonitor() {
         <Form form={form} layout="vertical" initialValues={{
           incremental: true,
           dateRange: [dayjs('2025-01-01'), dayjs()],
-          factorCodes: pendingFactors.slice(0, 20).map(f => f.code),
+          factorCodes: pendingFactors.slice(0, 8).map(f => f.code),
         }}>
-          <Form.Item label="选择因子" name="factorCodes" rules={[{ required: true, message: '请至少选择一个因子' }]}>
+          <Form.Item label="选择因子" name="factorCodes" rules={[
+            { required: true, message: '请至少选择一个因子' },
+            { validator: (_, val) => (!val || val.length <= 8) ? Promise.resolve() : Promise.reject('最多同时计算 8 个因子') }
+          ]}>
             <Select
               mode="multiple"
-              placeholder="选择要计算的因子"
+              placeholder="选择要计算的因子（最多 8 个）"
               maxTagCount={5}
+              maxCount={8}
               style={{ width: '100%' }}
               options={(factors || []).map(f => ({
                 value: f.code,
