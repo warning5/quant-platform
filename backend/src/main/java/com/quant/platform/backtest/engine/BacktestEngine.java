@@ -1176,13 +1176,15 @@ public class BacktestEngine {
         List<Double> stratRets = new ArrayList<>();
         List<Double> bmRets = new ArrayList<>();
         
+        // 超额收益序列（在 if 外定义，供后续 Alpha 分析使用）
+        List<Double> excessReturns = new ArrayList<>();
+
         if (!bmCurve.isEmpty()) {
             // 建立基准日期→净值 map
             Map<String, Double> bmMap = new HashMap<>();
             for (Map<String, Object> bm : bmCurve) {
                 bmMap.put((String) bm.get("date"), ((Number) bm.get("value")).doubleValue());
             }
-            List<Double> excessReturns = new ArrayList<>();
             for (int i = 1; i < curve.size(); i++) {
                 String date = (String) curve.get(i).get("date");
                 String prevDate = (String) curve.get(i - 1).get("date");
@@ -1250,6 +1252,35 @@ public class BacktestEngine {
             plRatio = loses > 0 && avgLoss != 0 ? Math.abs(avgWin / avgLoss) : 1.25;
         }
 
+        // ── 超额收益分析（参考 baostock 用户案例的 Alpha 分析表）────────────────
+        double excessMean = 0, excessStd = 0, excessWinRate = 0.5, excessMaxDrawdown = 0, alphaContribution = 0;
+        if (!excessReturns.isEmpty()) {
+            // 超额收益均值（年化）
+            excessMean = excessReturns.stream().mapToDouble(Double::doubleValue).average().orElse(0) * 252;
+            // 超额收益标准差（年化）
+            double exVar2 = excessReturns.stream().mapToDouble(r -> r * r).average().orElse(0)
+                    - Math.pow(excessReturns.stream().mapToDouble(Double::doubleValue).average().orElse(0), 2);
+            excessStd = Math.sqrt(Math.max(exVar2, 0)) * Math.sqrt(252);
+            // 超额胜率：跑赢大盘的天数占比
+            long exWins = excessReturns.stream().filter(r -> r > 0).count();
+            excessWinRate = (double) exWins / excessReturns.size();
+            // 超额收益最大回撤（从累计超额曲线计算）
+            double cumExcess = 0, peakExcess = 0;
+            for (double er : excessReturns) {
+                cumExcess += er;
+                if (cumExcess > peakExcess) peakExcess = cumExcess;
+                double dd = peakExcess - cumExcess;
+                if (dd > excessMaxDrawdown) excessMaxDrawdown = dd;
+            }
+            // Alpha贡献占比 = alpha / (alpha + beta * benchmark_return) 近似为 alpha/超额年化收益
+            double totalExcess = annualReturn - benchmarkAnnualReturn;
+            if (totalExcess != 0) {
+                alphaContribution = Math.abs(alpha / (alpha + beta * benchmarkAnnualReturn));
+            } else {
+                alphaContribution = 0;
+            }
+        }
+
         return BacktestReport.builder()
                 .taskId(task.getId())
                 .strategyCode(task.getStrategyCode())
@@ -1274,6 +1305,11 @@ public class BacktestEngine {
                 .avgWinReturn(bd(avgWin))
                 .avgLossReturn(bd(avgLoss))
                 .profitLossRatio(bd(plRatio))
+                .excessMean(bd(excessMean))
+                .excessStd(bd(excessStd))
+                .excessWinRate(bd(excessWinRate))
+                .excessMaxDrawdown(bd(excessMaxDrawdown))
+                .alphaContribution(bd(alphaContribution))
                 .equityCurveJson(objectMapper.writeValueAsString(result.equityCurve()))
                 .benchmarkCurveJson(objectMapper.writeValueAsString(result.benchmarkCurve()))
                 .drawdownSeriesJson(objectMapper.writeValueAsString(result.equityCurve().stream()

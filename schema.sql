@@ -193,6 +193,12 @@ CREATE TABLE IF NOT EXISTS backtest_report (
     avg_win_return           DECIMAL(10, 6)           COMMENT '平均盈利',
     avg_loss_return          DECIMAL(10, 6)           COMMENT '平均亏损',
     profit_loss_ratio        DECIMAL(10, 6)           COMMENT '盈亏比',
+    -- 超额收益分析指标（Alpha 分析）
+    excess_mean              DECIMAL(10, 6)           COMMENT '超额收益均值（年化）',
+    excess_std               DECIMAL(10, 6)           COMMENT '超额收益标准差（年化）',
+    excess_win_rate          DECIMAL(10, 6)           COMMENT '超额收益胜率（跑赢大盘天数占比）',
+    excess_max_drawdown      DECIMAL(10, 6)           COMMENT '超额收益最大回撤',
+    alpha_contribution       DECIMAL(10, 6)           COMMENT 'Alpha贡献占比（0~1）',
     -- 详细数据 JSON
     equity_curve_json        LONGTEXT                 COMMENT '净值曲线 JSON',
     benchmark_curve_json     LONGTEXT                 COMMENT '基准逐日净值曲线 JSON',

@@ -171,6 +171,38 @@ public class BacktestReport implements Serializable {
     @TableField("profit_loss_ratio")
     private BigDecimal profitLossRatio;
 
+    // ===== 超额收益分析指标（参考 baostock 用户案例）=====
+
+    /**
+     * 超额收益均值（日频年化）
+     */
+    @TableField("excess_mean")
+    private BigDecimal excessMean;
+
+    /**
+     * 超额收益标准差（日频年化）
+     */
+    @TableField("excess_std")
+    private BigDecimal excessStd;
+
+    /**
+     * 超额收益胜率（跑赢大盘的交易天数占比）
+     */
+    @TableField("excess_win_rate")
+    private BigDecimal excessWinRate;
+
+    /**
+     * 超额收益最大回撤
+     */
+    @TableField("excess_max_drawdown")
+    private BigDecimal excessMaxDrawdown;
+
+    /**
+     * Alpha贡献占比（超额收益中alpha贡献的比例，0~1）
+     */
+    @TableField("alpha_contribution")
+    private BigDecimal alphaContribution;
+
     // ===== 详细数据 (JSON) =====
 
     /**

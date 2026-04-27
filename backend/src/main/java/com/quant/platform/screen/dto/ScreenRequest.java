@@ -52,6 +52,14 @@ public class ScreenRequest {
      */
     private String orthogonalizationMethod = "NONE";
 
+    /**
+     * 自定义 SQL WHERE 条件（高级模式）
+     * 将直接拼接到选股查询的 WHERE 子句中，用于进阶用户做精确筛选
+     * 例如: "close > 10 AND volume > 1000000"
+     * 注意：仅限 AND 条件，不允许写 OR/UNION 等危险语句
+     */
+    private String customSqlWhere;
+
     // ─────────────────────────────────────────────────────────────────────
     /**
      * 单个因子配置

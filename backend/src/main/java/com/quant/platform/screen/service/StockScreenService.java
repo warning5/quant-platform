@@ -1,6 +1,5 @@
 package com.quant.platform.screen.service;
 
-import com.quant.platform.factor.domain.FactorDefinition;
 import com.quant.platform.factor.domain.FactorValue;
 import com.quant.platform.factor.mapper.FactorDefinitionMapper;
 import com.quant.platform.factor.mapper.FactorValueMapper;
@@ -9,14 +8,17 @@ import com.quant.platform.market.service.MarketDataService;
 import com.quant.platform.screen.dto.ScreenRequest;
 import com.quant.platform.screen.dto.ScreenResult;
 import com.quant.platform.screen.entity.ScreenPreset;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.core.type.TypeReference;
+import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import javax.sql.DataSource;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.time.LocalDate;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -34,7 +36,9 @@ public class StockScreenService {
     private final MarketDataService marketDataService;
     private final PriceAdvisorService priceAdvisorService;
     private final ScreenPresetService presetService;
-    private final ObjectMapper objectMapper;
+
+    @Resource
+    private DataSource dataSource;
 
     /**
      * 执行多因子选股
@@ -101,6 +105,38 @@ public class StockScreenService {
 
         log.info("Candidate stocks after ST filter: {}", candidates.size());
 
+        // ── 2.5 自定义 SQL WHERE 条件过滤（高级模式）──────────────────
+        if (req.getCustomSqlWhere() != null && !req.getCustomSqlWhere().isBlank()) {
+            String rawSql = req.getCustomSqlWhere().trim();
+            // 安全检查：禁止危险关键字
+            String upper = rawSql.toUpperCase();
+            for (String keyword : new String[]{"UNION", "DELETE", "DROP", "INSERT", "UPDATE", "OR", "--", ";", "/*"}) {
+                if (upper.contains(keyword)) {
+                    log.warn("Blocked custom SQL containing forbidden keyword: {}", keyword);
+                    throw new IllegalArgumentException("自定义SQL条件包含不安全的关键字: " + keyword);
+                }
+            }
+            try {
+                // 用 stock_daily 表 + 选股日期做安全查询，只返回符合条件的 symbol 列表
+                Set<String> sqlFiltered = new HashSet<>();
+                try (Connection conn = dataSource.getConnection();
+                     PreparedStatement ps = conn.prepareStatement(
+                             "SELECT DISTINCT code FROM stock_daily WHERE trade_date = ? AND (" + rawSql + ")")) {
+                    ps.setString(1, screenDate.toString());
+                    try (ResultSet rs = ps.executeQuery()) {
+                        while (rs.next()) {
+                            sqlFiltered.add(rs.getString("code"));
+                        }
+                    }
+                }
+                candidates.retainAll(sqlFiltered);
+                log.info("After custom SQL filter: {} stocks remain (filtered from SQL: {})", candidates.size(), rawSql.substring(0, Math.min(rawSql.length(), 80)));
+            } catch (Exception e) {
+                log.warn("Custom SQL filter failed: {}, error: {}", rawSql, e.getMessage());
+                // SQL 执行失败时不过滤（降级为不使用自定义条件），避免阻断整个选股流程
+            }
+        }
+
         // ── 3. 加载各因子的截面数据，并进行极值处理、标准化 ────────────
         Map<String, Map<String, FactorValue>> factorData = new LinkedHashMap<>();
         Map<String, Integer> coverage = new LinkedHashMap<>();
@@ -123,7 +159,7 @@ public class StockScreenService {
             // 过滤候选股票，并提取原始值
             List<FactorValue> filtered = crossSection.stream()
                     .filter(fv -> candidates.contains(fv.getSymbol()))
-                    .collect(Collectors.toList());
+                    .toList();
 
             // 极值处理
             String outlierMethod = fw.getOutlierMethod() != null && !fw.getOutlierMethod().isEmpty()
@@ -304,9 +340,7 @@ public class StockScreenService {
         if (values == null || values.isEmpty()) return values;
         if (method == null || "NONE".equalsIgnoreCase(method)) return values;
 
-        List<Double> sorted = values.stream().sorted().collect(Collectors.toList());
-        int n = sorted.size();
-
+        List<Double> sorted = values.stream().sorted().toList();
         return switch (method.toUpperCase()) {
             case "MAD" -> applyMAD(values);
             case "SIGMA3", "3SIGMA" -> applySigma3(values);
@@ -320,7 +354,7 @@ public class StockScreenService {
      * 中位数 ± 5*MAD 范围外的值截断
      */
     private List<Double> applyMAD(List<Double> values) {
-        List<Double> sorted = values.stream().sorted().collect(Collectors.toList());
+        List<Double> sorted = values.stream().sorted().toList();
         int n = sorted.size();
         double median = n % 2 == 0
                 ? (sorted.get(n / 2 - 1) + sorted.get(n / 2)) / 2.0
@@ -329,7 +363,7 @@ public class StockScreenService {
         List<Double> absDeviations = values.stream()
                 .map(v -> Math.abs(v - median))
                 .sorted()
-                .collect(Collectors.toList());
+                .toList();
         double mad = n % 2 == 0
                 ? (absDeviations.get(n / 2 - 1) + absDeviations.get(n / 2)) / 2.0
                 : absDeviations.get(n / 2);
@@ -366,7 +400,7 @@ public class StockScreenService {
      * 百分位截断
      */
     private List<Double> applyPercentileClip(List<Double> values, double lowerP, double upperP) {
-        List<Double> sorted = values.stream().sorted().collect(Collectors.toList());
+        List<Double> sorted = values.stream().sorted().toList();
         int n = sorted.size();
         int lowerIdx = (int) (n * lowerP);
         int upperIdx = (int) (n * upperP);
@@ -429,7 +463,7 @@ public class StockScreenService {
      * 百分位排名（0-1）
      */
     private List<Double> applyPercentRank(List<Double> values) {
-        List<Double> sorted = values.stream().sorted().collect(Collectors.toList());
+        List<Double> sorted = values.stream().sorted().toList();
         int n = sorted.size();
         return values.stream()
                 .map(v -> {
@@ -469,8 +503,8 @@ public class StockScreenService {
             // 使用MyBatis-Plus查询最大日期
             var wrapper = new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<FactorValue>();
             wrapper.eq(FactorValue::getFactorCode, code)
-                   .orderByDesc(FactorValue::getCalcDate)
-                   .last("LIMIT 1");
+                    .orderByDesc(FactorValue::getCalcDate)
+                    .last("LIMIT 1");
             FactorValue fv = factorValueMapper.selectOne(wrapper);
             if (fv != null && fv.getCalcDate() != null) {
                 if (latest == null || fv.getCalcDate().isBefore(latest)) {
@@ -490,8 +524,8 @@ public class StockScreenService {
         for (ScreenRequest.FactorWeight fw : factors) {
             var wrapper = new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<FactorValue>();
             wrapper.eq(FactorValue::getFactorCode, fw.getFactorCode())
-                   .orderByDesc(FactorValue::getCalcDate)
-                   .last("LIMIT 1");
+                    .orderByDesc(FactorValue::getCalcDate)
+                    .last("LIMIT 1");
             FactorValue fv = factorValueMapper.selectOne(wrapper);
             if (fv != null && fv.getCalcDate() != null) {
                 if (latest == null || fv.getCalcDate().isBefore(latest)) {
@@ -504,31 +538,30 @@ public class StockScreenService {
     }
 
     private BigDecimal toBD(Object val) {
-        if (val == null) return null;
-        if (val instanceof BigDecimal) return (BigDecimal) val;
-        if (val instanceof Number) return BigDecimal.valueOf(((Number) val).doubleValue()).setScale(2, RoundingMode.HALF_UP);
-        return null;
+        return switch (val) {
+            case BigDecimal bigDecimal -> bigDecimal;
+            case Number number -> BigDecimal.valueOf(number.doubleValue()).setScale(2, RoundingMode.HALF_UP);
+            case null, default -> null;
+        };
     }
 
     /**
      * 施密特正交化（Gram-Schmidt）
      * 对标准化后的因子值矩阵做正交化，消除因子间共线性
-     *
      * 算法：
      * 1. 提取 N 个因子 × M 只股票的矩阵（使用 rankValue）
      * 2. 按因子顺序做 Gram-Schmidt 正交化
      * 3. 将正交化后的值回写到 FactorValue.rankValue
-     *
      * 注意：结果依赖因子顺序，建议将低IC因子放在前面
      */
     private void applyOrthogonalization(Map<String, Map<String, FactorValue>> factorData,
-                                         String method) {
+                                        String method) {
         List<String> factorCodes = new ArrayList<>(factorData.keySet());
         int numFactors = factorCodes.size();
         if (numFactors < 2) return;
 
         // 找出所有因子共有的股票（取交集）
-        Set<String> commonSymbols = new LinkedHashSet<>(factorData.get(factorCodes.get(0)).keySet());
+        Set<String> commonSymbols = new LinkedHashSet<>(factorData.get(factorCodes.getFirst()).keySet());
         for (int i = 1; i < numFactors; i++) {
             commonSymbols.retainAll(factorData.get(factorCodes.get(i)).keySet());
         }
@@ -593,7 +626,7 @@ public class StockScreenService {
         // 计算正交化前后相关性变化（用于日志）
         double avgCorrBefore = avgCorrelation(factorMatrix);
         double avgCorrAfter = avgCorrelation(orthoVectors);
-        log.info("Orthogonalization ({}): {} factors × {} stocks, avg correlation: {:.4f} → {:.4f}",
+        log.info("Orthogonalization ({}): {} factors × {} stocks, avg correlation: {} → {}",
                 method, numFactors, numSymbols, avgCorrBefore, avgCorrAfter);
     }
 
@@ -630,9 +663,11 @@ public class StockScreenService {
         int n = x.length;
         double sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0, sumY2 = 0;
         for (int i = 0; i < n; i++) {
-            sumX += x[i]; sumY += y[i];
+            sumX += x[i];
+            sumY += y[i];
             sumXY += x[i] * y[i];
-            sumX2 += x[i] * x[i]; sumY2 += y[i] * y[i];
+            sumX2 += x[i] * x[i];
+            sumY2 += y[i] * y[i];
         }
         double num = n * sumXY - sumX * sumY;
         double den = Math.sqrt((n * sumX2 - sumX * sumX) * (n * sumY2 - sumY * sumY));

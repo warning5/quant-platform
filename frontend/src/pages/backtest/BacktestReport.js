@@ -686,6 +686,93 @@ function AttributionPanel({ taskId }) {
   );
 }
 
+// ─── 超额收益（Alpha）分析面板 ────────────────────────────────
+function ExcessAnalysisPanel({ report }) {
+  if (!report) return null;
+
+  const fmtPct2 = (v, d = 2) => v != null ? `${(+v * 100).toFixed(d)}%` : '-';
+  const fmt2 = (v, d = 4) => v != null ? (+v).toFixed(d) : '-';
+
+  const excessMetrics = [
+    { label: '超额收益均值', value: report.excessMean, fmt: v => fmtPct2(v), good: v => v > 0,
+      tip: '超额收益的年化均值。>0 表示策略平均每交易日跑赢大盘' },
+    { label: '超额收益标准差', value: report.excessStd, fmt: v => fmtPct2(v), good: v => v < 0.15,
+      tip: '超额收益的波动程度。越低说明 Alpha 越稳定' },
+    { label: '超额收益胜率', value: report.excessWinRate, fmt: v => fmtPct2(v), good: v => v > 0.5,
+      tip: '跑赢大盘的交易天数占比。>50% 说明大部分时间优于基准' },
+    { label: '超额最大回撤', value: report.excessMaxDrawdown, fmt: v => fmtPct2(v), good: v => v > -0.1,
+      tip: '累计超额收益从峰值到谷底的最大跌幅。越小（负得少）说明 Alpha 持续性强' },
+    { label: 'Alpha', value: report.alpha, fmt: v => fmt2(v, 2), good: v => v > 0,
+      tip: 'CAPM 模型计算的超额收益能力。>0 表示有真正的选股/择时价值' },
+    { label: 'Alpha贡献占比', value: report.alphaContribution, fmt: v => v != null ? `${(+v * 100).toFixed(1)}%` : '-', good: v => v > 0.5,
+      tip: 'Alpha 占超额收益的比例。越高说明超额收益主要来自选股能力而非市场暴露' },
+  ];
+
+  const signCol = (v) => +v > 0 ? '#cf1322' : +v < 0 ? '#3f8600' : '#262626';
+  const compareRows = [
+    { metric: '均值', stock: fmtPct2(report.annualReturn), benchmark: fmtPct2(report.benchmarkAnnualReturn), excess: fmtPct2(report.excessMean),
+      interp: '超额收益均值代表策略剔除市场涨跌（Beta）后，每交易日能稳定跑赢大盘的能力，这是策略的纯 Alpha 能力' },
+    { metric: '标准差', stock: fmtPct2(report.volatility), benchmark: '-', excess: fmtPct2(report.excessStd),
+      interp: '超额收益波动性更低，说明策略的 Alpha 部分比总收益更稳定，具备独立于大盘的稳健性' },
+    { metric: '胜率', stock: fmtPct2(report.winRate), benchmark: '-', excess: fmtPct2(report.excessWinRate),
+      interp: `近 ${(report.excessWinRate * 100).toFixed(0)}% 的交易日能跑赢大盘（超额收益为正），这个胜率在低频策略中已属优秀` },
+    { metric: '最大回撤', stock: fmtPct2(report.maxDrawdown), benchmark: '-', excess: fmtPct2(report.excessMaxDrawdown),
+      interp: '超额回撤远小于总收益回撤，说明策略在市场下跌时抗跌性强，风控能力突出' },
+    { metric: '信息比率', stock: fmt2(report.sharpeRatio, 2), benchmark: '-', excess: fmt2(report.informationRatio, 2),
+      interp: `衡量相对基准主动管理的能力。${fmt2(report.informationRatio, 2)} ${+report?.informationRatio > 0.5 ? '> 0.5 已属优秀' : ''}` },
+  ];
+
+  return (
+    <div>
+      {/* 指标卡片 */}
+      <Card size="small" style={{ marginBottom: 16, background: '#fafafa' }}>
+        <Row gutter={8}>
+          {excessMetrics.map((m, i) => {
+            const val = m.value;
+            const isGood = m.good ? (val != null && m.good(+val)) : val != null;
+            return (
+              <Col key={i} style={{ textAlign: 'center', padding: '4px 8px', borderRight: i < excessMetrics.length - 1 ? '1px solid #e8e8e8' : 'none' }}>
+                <AntTooltip title={m.tip} placement="top">
+                  <div style={{ fontSize: 12, color: '#888', cursor: 'default' }}>
+                    {m.label}<span style={{ marginLeft: 2, color: '#bbb', fontSize: 10 }}>ⓘ</span>
+                  </div>
+                </AntTooltip>
+                <div style={{ fontSize: 14, fontWeight: 600, color: isGood ? '#52c41a' : '#262626' }}>{m.fmt(val)}</div>
+              </Col>
+            );
+          })}
+        </Row>
+      </Card>
+
+      {/* 对比分析表 */}
+      <Card size="small" title="策略 vs 基准：超额收益深度分析">
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <thead>
+            <tr style={{ background: '#fafafa' }}>
+              <th style={{ padding: '8px 12px', textAlign: 'left', borderBottom: '2px solid #e8e8e8' }}>指标</th>
+              <th style={{ padding: '8px 12px', textAlign: 'right', borderBottom: '2px solid #e8e8e8' }}>股票收益</th>
+              <th style={{ padding: '8px 12px', textAlign: 'right', borderBottom: '2px solid #e8e8e8' }}>基准</th>
+              <th style={{ padding: '8px 12px', textAlign: 'right', borderBottom: '2px solid #e8e8e8' }}>超额</th>
+              <th style={{ padding: '8px 12px', textAlign: 'left', borderBottom: '2px solid #e8e8e8' }}>解读</th>
+            </tr>
+          </thead>
+          <tbody>
+            {compareRows.map((row, i) => (
+              <tr key={i} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                <td style={{ padding: '8px 12px', fontWeight: 500 }}>{row.metric}</td>
+                <td style={{ padding: '8px 12px', textAlign: 'right', color: signCol(report.annualReturn) }}>{row.stock}</td>
+                <td style={{ padding: '8px 12px', textAlign: 'right', color: '#888' }}>{row.benchmark}</td>
+                <td style={{ padding: '8px 12px', textAlign: 'right', color: signCol(report.excessMean) }}>{row.excess}</td>
+                <td style={{ padding: '8px 12px', color: '#666', fontSize: 12 }}>{row.interp}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Card>
+    </div>
+  );
+}
+
 // ─── 主组件 ──────────────────────────────────────────────────────────────────
 export default function BacktestReport() {
   const { taskId } = useParams();
@@ -781,6 +868,13 @@ export default function BacktestReport() {
       label: '归因分析',
       children: (
         <AttributionPanel taskId={taskId} />
+      ),
+    },
+    {
+      key: 'excess',
+      label: <><LineChartOutlined />Alpha 分析</>,
+      children: (
+        <ExcessAnalysisPanel report={report} />
       ),
     },
     {

@@ -550,8 +550,8 @@ public class FactorComputeEngine {
         int batchSize = 500;
         for (int i = 0; i < values.size(); i += batchSize) {
             List<FactorValue> sub = values.subList(i, Math.min(i + batchSize, values.size()));
-            // 双写：MySQL + ClickHouse
-            factorValueMapper.batchUpsert(sub);
+            // 只写 ClickHouse（MySQL 双写已屏蔽）
+            // factorValueMapper.batchUpsert(sub);
             clickHouseFactorValueService.batchUpsertToCH(sub);
         }
     }

@@ -1424,3 +1424,266 @@ Caused by: java.sql.SQLSyntaxErrorException: Unknown column 'si.list_status' in 
 2026-04-27 19:59:25.102 [http-nio-8080-exec-3] INFO  c.q.p.d.DataUpdateController - 启动数据更新任务: source=ALL, market=ALL, startDate=2026-04-24, endDate=2026-04-27
 2026-04-27 19:59:25.119 [data-update-TASK-1777291165102] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate] 进程已启动, PID=91112, cmd=[python, -u, update_index_daily_baostock.py, --start-date, 2026-04-24, --end-date, 2026-04-27]
 2026-04-27 19:59:36.339 [data-update-TASK-1777291165102] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate] 任务 TASK-1777291165102 结束, 状态: SUCCESS
+2026-04-27 20:02:16.230 [http-nio-8080-exec-4] INFO  c.q.p.d.DataUpdateController - 启动数据更新任务: source=ALL, market=ALL, startDate=2026-04-27, endDate=2026-04-27
+2026-04-27 20:02:16.237 [data-update-TASK-1777291336230] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate] 进程已启动, PID=43460, cmd=[python, -u, update_stock_daily_baostock.py, --market, SH, --start-date, 2026-04-27, --end-date, 2026-04-27]
+2026-04-27 20:14:54.451 [data-update-TASK-1777291336230] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate] 进程已启动, PID=97180, cmd=[python, -u, update_stock_daily_akshare.py, --market, SH, --start-date, 2026-04-27, --end-date, 2026-04-27]
+2026-04-27 20:14:55.516 [data-update-TASK-1777291336230] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate] 任务 TASK-1777291336230 结束, 状态: CANCELLED
+2026-04-27 20:14:59.056 [http-nio-8080-exec-3] INFO  c.q.p.d.DataUpdateController - 启动数据更新任务: source=ALL, market=ALL, startDate=2026-04-27, endDate=2026-04-27
+2026-04-27 20:14:59.203 [data-update-TASK-1777292099057] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate] 进程已启动, PID=48228, cmd=[python, -u, update_stock_daily_baostock.py, --market, SH, --start-date, 2026-04-27, --end-date, 2026-04-27, --resume]
+2026-04-27 20:28:36.722 [MessageBroker-1] INFO  o.s.w.s.c.WebSocketMessageBrokerStats - WebSocketSession[1 current WS(1)-HttpStream(0)-HttpPoll(0), 2 total, 0 closed abnormally (0 connect failure, 0 send limit, 0 transport error)], stompSubProtocol[processed CONNECT(2)-CONNECTED(2)-DISCONNECT(0)], stompBrokerRelay[null], inboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 21], outboundChannel[pool size = 32, active threads = 0, queued tasks = 0, completed tasks = 5694], sockJsScheduler[pool size = 2, active threads = 1, queued tasks = 0, completed tasks = 1]
+2026-04-27 20:57:11.363 [data-update-TASK-1777292099057] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate] 进程已启动, PID=44576, cmd=[python, -u, update_stock_daily_baostock.py, --market, SZ, --start-date, 2026-04-27, --end-date, 2026-04-27, --resume]
+2026-04-27 20:58:36.732 [MessageBroker-1] INFO  o.s.w.s.c.WebSocketMessageBrokerStats - WebSocketSession[1 current WS(1)-HttpStream(0)-HttpPoll(0), 2 total, 0 closed abnormally (0 connect failure, 0 send limit, 0 transport error)], stompSubProtocol[processed CONNECT(2)-CONNECTED(2)-DISCONNECT(0)], stompBrokerRelay[null], inboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 21], outboundChannel[pool size = 32, active threads = 0, queued tasks = 0, completed tasks = 8600], sockJsScheduler[pool size = 3, active threads = 1, queued tasks = 0, completed tasks = 2]
+2026-04-27 21:19:00.990 [data-update-TASK-1777292099057] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate] 进程已启动, PID=89112, cmd=[python, -u, update_stock_daily_akshare.py, --market, SZ, --start-date, 2026-04-27, --end-date, 2026-04-27, --resume]
+2026-04-27 21:19:01.708 [http-nio-8080-exec-10] INFO  c.q.p.d.DataUpdateController - 启动数据更新任务: source=ALL, market=ALL, startDate=2026-04-27, endDate=2026-04-27
+2026-04-27 21:19:01.714 [data-update-TASK-1777295941708] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate] 进程已启动, PID=48696, cmd=[python, -u, update_stock_daily_baostock.py, --market, SH, --start-date, 2026-04-27, --end-date, 2026-04-27, --resume]
+2026-04-27 21:19:02.363 [data-update-TASK-1777292099057] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate] 任务 TASK-1777292099057 结束, 状态: CANCELLED
+2026-04-27 21:19:23.571 [data-update-TASK-1777295941708] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate] 进程已启动, PID=31236, cmd=[python, -u, update_stock_daily_baostock.py, --market, SZ, --start-date, 2026-04-27, --end-date, 2026-04-27, --resume]
+2026-04-27 21:28:36.737 [MessageBroker-3] INFO  o.s.w.s.c.WebSocketMessageBrokerStats - WebSocketSession[1 current WS(1)-HttpStream(0)-HttpPoll(0), 2 total, 0 closed abnormally (0 connect failure, 0 send limit, 0 transport error)], stompSubProtocol[processed CONNECT(2)-CONNECTED(2)-DISCONNECT(0)], stompBrokerRelay[null], inboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 21], outboundChannel[pool size = 32, active threads = 0, queued tasks = 0, completed tasks = 14665], sockJsScheduler[pool size = 4, active threads = 1, queued tasks = 0, completed tasks = 3]
+2026-04-27 21:33:08.235 [data-update-TASK-1777295941708] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate] 进程已启动, PID=52600, cmd=[python, -u, update_stock_daily_akshare.py, --market, SZ, --start-date, 2026-04-27, --end-date, 2026-04-27, --resume]
+2026-04-27 21:33:08.854 [http-nio-8080-exec-10] INFO  c.q.p.d.DataUpdateController - 启动数据更新任务: source=ALL, market=ALL, startDate=2026-04-27, endDate=2026-04-27
+2026-04-27 21:33:08.897 [data-update-TASK-1777296788854] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate] 进程已启动, PID=43668, cmd=[python, -u, update_stock_daily_baostock.py, --market, SH, --start-date, 2026-04-27, --end-date, 2026-04-27, --resume]
+2026-04-27 21:33:09.430 [data-update-TASK-1777295941708] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate] 任务 TASK-1777295941708 结束, 状态: CANCELLED
+2026-04-27 21:33:14.077 [data-update-TASK-1777296788854] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate] 进程已启动, PID=75944, cmd=[python, -u, update_stock_daily_baostock.py, --market, SZ, --start-date, 2026-04-27, --end-date, 2026-04-27, --resume]
+2026-04-27 21:42:09.165 [data-update-TASK-1777296788854] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate] 进程已启动, PID=3828, cmd=[python, -u, update_bj_stock_daily_qq.py, --start-date, 2026-04-27, --end-date, 2026-04-27, --resume]
+2026-04-27 21:46:41.588 [data-update-TASK-1777296788854] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate] 任务 TASK-1777296788854 结束, 状态: SUCCESS
+2026-04-27 21:58:36.752 [MessageBroker-2] INFO  o.s.w.s.c.WebSocketMessageBrokerStats - WebSocketSession[1 current WS(1)-HttpStream(0)-HttpPoll(0), 2 total, 0 closed abnormally (0 connect failure, 0 send limit, 0 transport error)], stompSubProtocol[processed CONNECT(2)-CONNECTED(2)-DISCONNECT(0)], stompBrokerRelay[null], inboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 21], outboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 16571], sockJsScheduler[pool size = 5, active threads = 1, queued tasks = 0, completed tasks = 4]
+2026-04-27 22:15:01.114 [SpringApplicationShutdownHook] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Stopping...
+2026-04-27 22:15:01.114 [SpringApplicationShutdownHook] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - BrokerAvailabilityEvent[available=false, SimpleBrokerMessageHandler [org.springframework.messaging.simp.broker.DefaultSubscriptionRegistry@45cf0c15]]
+2026-04-27 22:15:01.114 [SpringApplicationShutdownHook] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Stopped.
+2026-04-27 22:15:01.126 [SpringApplicationShutdownHook] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Shutdown initiated...
+2026-04-27 22:15:01.128 [SpringApplicationShutdownHook] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Shutdown completed.
+2026-04-27 22:22:03.485 [background-preinit] INFO  o.h.validator.internal.util.Version - HV000001: Hibernate Validator 8.0.1.Final
+2026-04-27 22:22:03.929 [main] INFO  c.q.p.QuantPlatformApplication - Starting QuantPlatformApplication using Java 21.0.7 with PID 45252 (C:\Users\warning5\WorkBuddy\Claw\quant-platform\backend\target\classes started by warning5 in C:\Users\warning5\WorkBuddy\Claw\quant-platform)
+2026-04-27 22:22:03.931 [main] INFO  c.q.p.QuantPlatformApplication - No active profile set, falling back to 1 default profile: "default"
+2026-04-27 22:22:05.787 [main] INFO  o.s.b.w.e.tomcat.TomcatWebServer - Tomcat initialized with port 8080 (http)
+2026-04-27 22:22:05.804 [main] INFO  o.a.coyote.http11.Http11NioProtocol - Initializing ProtocolHandler ["http-nio-8080"]
+2026-04-27 22:22:05.804 [main] INFO  o.a.catalina.core.StandardService - Starting service [Tomcat]
+2026-04-27 22:22:05.807 [main] INFO  o.a.catalina.core.StandardEngine - Starting Servlet engine: [Apache Tomcat/10.1.19]
+2026-04-27 22:22:05.912 [main] INFO  o.a.c.c.C.[.[localhost].[/api] - Initializing Spring embedded WebApplicationContext
+2026-04-27 22:22:05.912 [main] INFO  o.s.b.w.s.c.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 1789 ms
+2026-04-27 22:22:06.560 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 加载 code -> market 映射...
+2026-04-27 22:22:06.605 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Starting...
+2026-04-27 22:22:06.866 [main] INFO  com.zaxxer.hikari.pool.HikariPool - HikariPool-1 - Added connection com.mysql.cj.jdbc.ConnectionImpl@5477d90e
+2026-04-27 22:22:06.870 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Start completed.
+2026-04-27 22:22:07.070 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 已加载 5490 只股票的 market 映射
+2026-04-27 22:22:07.076 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 已加载 5490 只股票的最新市值
+2026-04-27 22:22:07.523 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate] 脚本目录: C:\Users\warning5\WorkBuddy\Claw\quant-platform\scripts
+2026-04-27 22:22:07.525 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_stock_data.py : OK
+2026-04-27 22:22:07.525 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_stock_daily_baostock.py : OK
+2026-04-27 22:22:07.525 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_bj_stock_daily_qq.py : OK
+2026-04-27 22:22:07.527 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_index_daily_baostock.py : OK
+2026-04-27 22:22:07.527 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_dividend_baostock.py : OK
+2026-04-27 22:22:07.693 [main] INFO  c.q.p.f.engine.FactorComputeEngine - Registered 33 financial factor calculators
+2026-04-27 22:22:07.951 [main] INFO  c.q.p.s.service.ScreenPresetService - Built-in screen presets initialized
+2026-04-27 22:22:08.326 [main] INFO  o.s.b.a.w.s.WelcomePageHandlerMapping - Adding welcome page: class path resource [static/index.html]
+2026-04-27 22:22:09.736 [main] INFO  o.a.coyote.http11.Http11NioProtocol - Starting ProtocolHandler ["http-nio-8080"]
+2026-04-27 22:22:09.844 [main] INFO  o.s.b.w.e.tomcat.TomcatWebServer - Tomcat started on port 8080 (http) with context path '/api'
+2026-04-27 22:22:09.905 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Starting...
+2026-04-27 22:22:09.906 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - BrokerAvailabilityEvent[available=true, SimpleBrokerMessageHandler [org.springframework.messaging.simp.broker.DefaultSubscriptionRegistry@6148827c]]
+2026-04-27 22:22:09.907 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Started.
+2026-04-27 22:22:10.137 [main] INFO  c.q.p.QuantPlatformApplication - Started QuantPlatformApplication in 7.789 seconds (process running for 8.684)
+2026-04-27 22:22:10.250 [main] INFO  c.q.p.factor.service.FactorService - Builtin factors initialized
+2026-04-27 22:22:10.258 [main] INFO  c.q.p.s.s.StrategyDataInitializer - Checking strategy data initialization...
+2026-04-27 22:22:10.261 [main] INFO  c.q.p.s.s.StrategyDataInitializer - Strategy data already exists (6 strategies), skipping initialization
+2026-04-27 22:22:10.268 [main] INFO  c.q.p.s.service.StrategyService - Demo strategies already initialized, skipping
+2026-04-27 22:23:09.656 [MessageBroker-1] INFO  o.s.w.s.c.WebSocketMessageBrokerStats - WebSocketSession[0 current WS(0)-HttpStream(0)-HttpPoll(0), 0 total, 0 closed abnormally (0 connect failure, 0 send limit, 0 transport error)], stompSubProtocol[processed CONNECT(0)-CONNECTED(0)-DISCONNECT(0)], stompBrokerRelay[null], inboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0], outboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0], sockJsScheduler[pool size = 1, active threads = 1, queued tasks = 0, completed tasks = 0]
+2026-04-27 22:24:20.695 [SpringApplicationShutdownHook] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Stopping...
+2026-04-27 22:24:20.695 [SpringApplicationShutdownHook] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - BrokerAvailabilityEvent[available=false, SimpleBrokerMessageHandler [org.springframework.messaging.simp.broker.DefaultSubscriptionRegistry@6148827c]]
+2026-04-27 22:24:20.695 [SpringApplicationShutdownHook] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Stopped.
+2026-04-27 22:24:20.705 [SpringApplicationShutdownHook] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Shutdown initiated...
+2026-04-27 22:24:20.717 [SpringApplicationShutdownHook] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Shutdown completed.
+2026-04-27 22:30:22.557 [background-preinit] INFO  o.h.validator.internal.util.Version - HV000001: Hibernate Validator 8.0.1.Final
+2026-04-27 22:30:22.714 [main] INFO  c.q.p.QuantPlatformApplication - Starting QuantPlatformApplication using Java 21.0.7 with PID 95848 (C:\Users\warning5\WorkBuddy\Claw\quant-platform\backend\target\classes started by warning5 in C:\Users\warning5\WorkBuddy\Claw\quant-platform)
+2026-04-27 22:30:22.715 [main] INFO  c.q.p.QuantPlatformApplication - No active profile set, falling back to 1 default profile: "default"
+2026-04-27 22:30:25.180 [main] INFO  o.s.b.w.e.tomcat.TomcatWebServer - Tomcat initialized with port 8080 (http)
+2026-04-27 22:30:25.194 [main] INFO  o.a.coyote.http11.Http11NioProtocol - Initializing ProtocolHandler ["http-nio-8080"]
+2026-04-27 22:30:25.194 [main] INFO  o.a.catalina.core.StandardService - Starting service [Tomcat]
+2026-04-27 22:30:25.194 [main] INFO  o.a.catalina.core.StandardEngine - Starting Servlet engine: [Apache Tomcat/10.1.19]
+2026-04-27 22:30:25.280 [main] INFO  o.a.c.c.C.[.[localhost].[/api] - Initializing Spring embedded WebApplicationContext
+2026-04-27 22:30:25.280 [main] INFO  o.s.b.w.s.c.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 2307 ms
+2026-04-27 22:30:26.407 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 加载 code -> market 映射...
+2026-04-27 22:30:26.459 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Starting...
+2026-04-27 22:30:27.114 [main] INFO  com.zaxxer.hikari.pool.HikariPool - HikariPool-1 - Added connection com.mysql.cj.jdbc.ConnectionImpl@3b2db389
+2026-04-27 22:30:27.116 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Start completed.
+2026-04-27 22:30:27.384 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 已加载 5490 只股票的 market 映射
+2026-04-27 22:30:27.387 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 已加载 5490 只股票的最新市值
+2026-04-27 22:30:27.711 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate] 脚本目录: C:\Users\warning5\WorkBuddy\Claw\quant-platform\scripts
+2026-04-27 22:30:27.711 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_stock_data.py : OK
+2026-04-27 22:30:27.712 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_stock_daily_baostock.py : OK
+2026-04-27 22:30:27.712 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_bj_stock_daily_qq.py : OK
+2026-04-27 22:30:27.713 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_index_daily_baostock.py : OK
+2026-04-27 22:30:27.714 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_dividend_baostock.py : OK
+2026-04-27 22:30:27.872 [main] INFO  c.q.p.f.engine.FactorComputeEngine - Registered 33 financial factor calculators
+2026-04-27 22:30:28.086 [main] INFO  c.q.p.s.service.ScreenPresetService - Built-in screen presets initialized
+2026-04-27 22:30:28.609 [main] INFO  o.s.b.a.w.s.WelcomePageHandlerMapping - Adding welcome page: class path resource [static/index.html]
+2026-04-27 22:30:29.185 [main] INFO  o.a.coyote.http11.Http11NioProtocol - Starting ProtocolHandler ["http-nio-8080"]
+2026-04-27 22:30:29.212 [main] INFO  o.s.b.w.e.tomcat.TomcatWebServer - Tomcat started on port 8080 (http) with context path '/api'
+2026-04-27 22:30:29.218 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Starting...
+2026-04-27 22:30:29.218 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - BrokerAvailabilityEvent[available=true, SimpleBrokerMessageHandler [org.springframework.messaging.simp.broker.DefaultSubscriptionRegistry@6fdb1a59]]
+2026-04-27 22:30:29.219 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Started.
+2026-04-27 22:30:29.566 [main] INFO  c.q.p.QuantPlatformApplication - Started QuantPlatformApplication in 7.828 seconds (process running for 8.677)
+2026-04-27 22:30:29.811 [main] INFO  c.q.p.factor.service.FactorService - Builtin factors initialized
+2026-04-27 22:30:29.833 [main] INFO  c.q.p.s.s.StrategyDataInitializer - Checking strategy data initialization...
+2026-04-27 22:30:29.847 [main] INFO  c.q.p.s.s.StrategyDataInitializer - Strategy data already exists (6 strategies), skipping initialization
+2026-04-27 22:30:29.977 [main] INFO  c.q.p.s.service.StrategyService - Demo strategies already initialized, skipping
+2026-04-27 22:31:13.045 [http-nio-8080-exec-7] INFO  o.a.c.c.C.[.[localhost].[/api] - Initializing Spring DispatcherServlet 'dispatcherServlet'
+2026-04-27 22:31:13.045 [http-nio-8080-exec-7] INFO  o.s.web.servlet.DispatcherServlet - Initializing Servlet 'dispatcherServlet'
+2026-04-27 22:31:13.045 [http-nio-8080-exec-7] INFO  o.s.web.servlet.DispatcherServlet - Completed initialization in 0 ms
+2026-04-27 22:31:29.184 [MessageBroker-1] INFO  o.s.w.s.c.WebSocketMessageBrokerStats - WebSocketSession[0 current WS(0)-HttpStream(0)-HttpPoll(0), 1 total, 0 closed abnormally (0 connect failure, 0 send limit, 0 transport error)], stompSubProtocol[processed CONNECT(1)-CONNECTED(1)-DISCONNECT(0)], stompBrokerRelay[null], inboundChannel[pool size = 12, active threads = 0, queued tasks = 0, completed tasks = 12], outboundChannel[pool size = 2, active threads = 0, queued tasks = 0, completed tasks = 2], sockJsScheduler[pool size = 1, active threads = 1, queued tasks = 0, completed tasks = 0]
+2026-04-27 22:32:02.109 [http-nio-8080-exec-6] INFO  c.q.p.factor.service.FactorService - [getMonitorData] enter, cached=null, age=-1ms
+2026-04-27 22:32:02.115 [http-nio-8080-exec-6] INFO  c.q.p.factor.service.FactorService - [getMonitorData] NO cache, returning empty data (refresh submitted=true)
+2026-04-27 22:32:02.121 [monitor-cache-refresh] INFO  c.q.p.factor.service.FactorService - [loadMonitorData] trying ClickHouse...
+2026-04-27 22:32:02.206 [monitor-cache-refresh] INFO  c.q.p.factor.service.FactorService - [loadMonitorData] CH selectTotalCount cost=85ms, total=0
+2026-04-27 22:32:02.294 [monitor-cache-refresh] INFO  c.q.p.factor.service.FactorService - [loadMonitorData] CH selectFactorStats cost=88ms, size=0
+2026-04-27 22:32:05.160 [http-nio-8080-exec-5] INFO  c.q.p.factor.service.FactorService - [getMonitorData] enter, cached=null, age=-1ms
+2026-04-27 22:32:05.160 [http-nio-8080-exec-5] INFO  c.q.p.factor.service.FactorService - [getMonitorData] NO cache, returning empty data (refresh submitted=false)
+2026-04-27 22:32:06.876 [http-nio-8080-exec-10] INFO  c.q.p.factor.service.FactorService - [getMonitorData] enter, cached=null, age=-1ms
+2026-04-27 22:32:06.876 [http-nio-8080-exec-10] INFO  c.q.p.factor.service.FactorService - [getMonitorData] NO cache, returning empty data (refresh submitted=false)
+2026-04-27 22:32:59.829 [monitor-cache-refresh] INFO  c.q.p.factor.service.FactorService - [loadMonitorData] CH done, total cost=57708ms
+2026-04-27 22:32:59.829 [monitor-cache-refresh] INFO  c.q.p.factor.service.FactorService - [MonitorRefresh] cache refreshed, totalRecords=21221253
+2026-04-27 22:35:24.064 [http-nio-8080-exec-1] INFO  c.q.p.factor.service.FactorService - [getMonitorData] enter, cached=yes, age=144235ms
+2026-04-27 22:35:24.064 [http-nio-8080-exec-1] INFO  c.q.p.factor.service.FactorService - [getMonitorData] returning stale cache (refresh submitted=true)
+2026-04-27 22:35:24.065 [monitor-cache-refresh] INFO  c.q.p.factor.service.FactorService - [loadMonitorData] trying ClickHouse...
+2026-04-27 22:35:24.165 [monitor-cache-refresh] INFO  c.q.p.factor.service.FactorService - [loadMonitorData] CH selectTotalCount cost=100ms, total=0
+2026-04-27 22:35:24.244 [monitor-cache-refresh] INFO  c.q.p.factor.service.FactorService - [loadMonitorData] CH selectFactorStats cost=79ms, size=0
+2026-04-27 22:35:34.072 [http-nio-8080-exec-6] INFO  c.q.p.factor.service.FactorService - [getMonitorData] enter, cached=yes, age=154236ms
+2026-04-27 22:35:34.072 [http-nio-8080-exec-6] INFO  c.q.p.factor.service.FactorService - [getMonitorData] returning stale cache (refresh submitted=false)
+2026-04-27 22:35:36.617 [http-nio-8080-exec-8] INFO  c.q.p.factor.service.FactorService - [getMonitorData] enter, cached=yes, age=156788ms
+2026-04-27 22:35:36.617 [http-nio-8080-exec-8] INFO  c.q.p.factor.service.FactorService - [getMonitorData] returning stale cache (refresh submitted=false)
+2026-04-27 22:35:37.786 [http-nio-8080-exec-5] INFO  c.q.p.factor.service.FactorService - [getMonitorData] enter, cached=yes, age=157957ms
+2026-04-27 22:35:37.786 [http-nio-8080-exec-5] INFO  c.q.p.factor.service.FactorService - [getMonitorData] returning stale cache (refresh submitted=false)
+2026-04-27 22:35:38.760 [http-nio-8080-exec-9] INFO  c.q.p.factor.service.FactorService - [getMonitorData] enter, cached=yes, age=158931ms
+2026-04-27 22:35:38.760 [http-nio-8080-exec-9] INFO  c.q.p.factor.service.FactorService - [getMonitorData] returning stale cache (refresh submitted=false)
+2026-04-27 22:35:39.024 [http-nio-8080-exec-10] INFO  c.q.p.factor.service.FactorService - [getMonitorData] enter, cached=yes, age=159195ms
+2026-04-27 22:35:39.024 [http-nio-8080-exec-10] INFO  c.q.p.factor.service.FactorService - [getMonitorData] returning stale cache (refresh submitted=false)
+2026-04-27 22:35:39.215 [http-nio-8080-exec-6] INFO  c.q.p.factor.service.FactorService - [getMonitorData] enter, cached=yes, age=159386ms
+2026-04-27 22:35:39.215 [http-nio-8080-exec-6] INFO  c.q.p.factor.service.FactorService - [getMonitorData] returning stale cache (refresh submitted=false)
+2026-04-27 22:35:39.374 [http-nio-8080-exec-8] INFO  c.q.p.factor.service.FactorService - [getMonitorData] enter, cached=yes, age=159545ms
+2026-04-27 22:35:39.374 [http-nio-8080-exec-8] INFO  c.q.p.factor.service.FactorService - [getMonitorData] returning stale cache (refresh submitted=false)
+2026-04-27 22:35:39.559 [http-nio-8080-exec-5] INFO  c.q.p.factor.service.FactorService - [getMonitorData] enter, cached=yes, age=159730ms
+2026-04-27 22:35:39.559 [http-nio-8080-exec-5] INFO  c.q.p.factor.service.FactorService - [getMonitorData] returning stale cache (refresh submitted=false)
+2026-04-27 22:35:39.719 [http-nio-8080-exec-9] INFO  c.q.p.factor.service.FactorService - [getMonitorData] enter, cached=yes, age=159890ms
+2026-04-27 22:35:39.719 [http-nio-8080-exec-9] INFO  c.q.p.factor.service.FactorService - [getMonitorData] returning stale cache (refresh submitted=false)
+2026-04-27 22:35:39.901 [http-nio-8080-exec-10] INFO  c.q.p.factor.service.FactorService - [getMonitorData] enter, cached=yes, age=160072ms
+2026-04-27 22:35:39.901 [http-nio-8080-exec-10] INFO  c.q.p.factor.service.FactorService - [getMonitorData] returning stale cache (refresh submitted=false)
+2026-04-27 22:35:40.095 [http-nio-8080-exec-6] INFO  c.q.p.factor.service.FactorService - [getMonitorData] enter, cached=yes, age=160266ms
+2026-04-27 22:35:40.095 [http-nio-8080-exec-6] INFO  c.q.p.factor.service.FactorService - [getMonitorData] returning stale cache (refresh submitted=false)
+2026-04-27 22:35:44.069 [http-nio-8080-exec-8] INFO  c.q.p.factor.service.FactorService - [getMonitorData] enter, cached=yes, age=164240ms
+2026-04-27 22:35:44.069 [http-nio-8080-exec-8] INFO  c.q.p.factor.service.FactorService - [getMonitorData] returning stale cache (refresh submitted=false)
+2026-04-27 22:35:54.071 [http-nio-8080-exec-5] INFO  c.q.p.factor.service.FactorService - [getMonitorData] enter, cached=yes, age=174242ms
+2026-04-27 22:35:54.071 [http-nio-8080-exec-5] INFO  c.q.p.factor.service.FactorService - [getMonitorData] returning stale cache (refresh submitted=false)
+2026-04-27 22:36:04.069 [http-nio-8080-exec-9] INFO  c.q.p.factor.service.FactorService - [getMonitorData] enter, cached=yes, age=184240ms
+2026-04-27 22:36:04.069 [http-nio-8080-exec-9] INFO  c.q.p.factor.service.FactorService - [getMonitorData] returning stale cache (refresh submitted=false)
+2026-04-27 22:36:14.220 [http-nio-8080-exec-10] INFO  c.q.p.factor.service.FactorService - [getMonitorData] enter, cached=yes, age=194391ms
+2026-04-27 22:36:14.220 [http-nio-8080-exec-10] INFO  c.q.p.factor.service.FactorService - [getMonitorData] returning stale cache (refresh submitted=false)
+2026-04-27 22:36:24.209 [http-nio-8080-exec-6] INFO  c.q.p.factor.service.FactorService - [getMonitorData] enter, cached=yes, age=204380ms
+2026-04-27 22:36:24.209 [http-nio-8080-exec-6] INFO  c.q.p.factor.service.FactorService - [getMonitorData] returning stale cache (refresh submitted=false)
+2026-04-27 22:36:28.754 [monitor-cache-refresh] INFO  c.q.p.factor.service.FactorService - [loadMonitorData] CH done, total cost=64689ms
+2026-04-27 22:36:28.754 [monitor-cache-refresh] INFO  c.q.p.factor.service.FactorService - [MonitorRefresh] cache refreshed, totalRecords=21221253
+2026-04-27 22:36:34.216 [http-nio-8080-exec-8] INFO  c.q.p.factor.service.FactorService - [getMonitorData] enter, cached=yes, age=5462ms
+2026-04-27 22:36:34.217 [http-nio-8080-exec-8] INFO  c.q.p.factor.service.FactorService - [getMonitorData] returning cached data
+2026-04-27 22:36:44.227 [http-nio-8080-exec-5] INFO  c.q.p.factor.service.FactorService - [getMonitorData] enter, cached=yes, age=15473ms
+2026-04-27 22:36:44.227 [http-nio-8080-exec-5] INFO  c.q.p.factor.service.FactorService - [getMonitorData] returning cached data
+2026-04-27 22:36:54.214 [http-nio-8080-exec-9] INFO  c.q.p.factor.service.FactorService - [getMonitorData] enter, cached=yes, age=25460ms
+2026-04-27 22:36:54.214 [http-nio-8080-exec-9] INFO  c.q.p.factor.service.FactorService - [getMonitorData] returning cached data
+2026-04-27 22:37:04.213 [http-nio-8080-exec-10] INFO  c.q.p.factor.service.FactorService - [getMonitorData] enter, cached=yes, age=35459ms
+2026-04-27 22:37:04.213 [http-nio-8080-exec-10] INFO  c.q.p.factor.service.FactorService - [getMonitorData] returning cached data
+2026-04-27 22:37:14.207 [http-nio-8080-exec-6] INFO  c.q.p.factor.service.FactorService - [getMonitorData] enter, cached=yes, age=45453ms
+2026-04-27 22:37:14.209 [http-nio-8080-exec-6] INFO  c.q.p.factor.service.FactorService - [getMonitorData] returning cached data
+2026-04-27 22:37:24.215 [http-nio-8080-exec-8] INFO  c.q.p.factor.service.FactorService - [getMonitorData] enter, cached=yes, age=55461ms
+2026-04-27 22:37:24.215 [http-nio-8080-exec-8] INFO  c.q.p.factor.service.FactorService - [getMonitorData] returning cached data
+2026-04-27 22:37:35.258 [http-nio-8080-exec-5] INFO  c.q.p.factor.service.FactorService - [getMonitorData] enter, cached=yes, age=66504ms
+2026-04-27 22:37:35.258 [http-nio-8080-exec-5] INFO  c.q.p.factor.service.FactorService - [getMonitorData] returning stale cache (refresh submitted=true)
+2026-04-27 22:37:35.258 [monitor-cache-refresh] INFO  c.q.p.factor.service.FactorService - [loadMonitorData] trying ClickHouse...
+2026-04-27 22:37:35.379 [monitor-cache-refresh] INFO  c.q.p.factor.service.FactorService - [loadMonitorData] CH selectTotalCount cost=121ms, total=0
+2026-04-27 22:37:35.485 [monitor-cache-refresh] INFO  c.q.p.factor.service.FactorService - [loadMonitorData] CH selectFactorStats cost=106ms, size=0
+2026-04-27 22:37:56.347 [http-nio-8080-exec-9] INFO  c.q.p.factor.service.FactorService - [getMonitorData] enter, cached=yes, age=87593ms
+2026-04-27 22:37:56.347 [http-nio-8080-exec-9] INFO  c.q.p.factor.service.FactorService - [getMonitorData] returning stale cache (refresh submitted=false)
+2026-04-27 22:38:47.525 [monitor-cache-refresh] INFO  c.q.p.factor.service.FactorService - [loadMonitorData] CH done, total cost=72267ms
+2026-04-27 22:38:47.525 [monitor-cache-refresh] INFO  c.q.p.factor.service.FactorService - [MonitorRefresh] cache refreshed, totalRecords=21221253
+2026-04-27 22:38:56.244 [http-nio-8080-exec-10] INFO  c.q.p.factor.service.FactorService - [getMonitorData] enter, cached=yes, age=8719ms
+2026-04-27 22:38:56.244 [http-nio-8080-exec-10] INFO  c.q.p.factor.service.FactorService - [getMonitorData] returning cached data
+2026-04-27 22:39:56.216 [http-nio-8080-exec-6] INFO  c.q.p.factor.service.FactorService - [getMonitorData] enter, cached=yes, age=68691ms
+2026-04-27 22:39:56.216 [http-nio-8080-exec-6] INFO  c.q.p.factor.service.FactorService - [getMonitorData] returning stale cache (refresh submitted=true)
+2026-04-27 22:39:56.216 [monitor-cache-refresh] INFO  c.q.p.factor.service.FactorService - [loadMonitorData] trying ClickHouse...
+2026-04-27 22:39:56.304 [monitor-cache-refresh] INFO  c.q.p.factor.service.FactorService - [loadMonitorData] CH selectTotalCount cost=88ms, total=0
+2026-04-27 22:39:56.377 [monitor-cache-refresh] INFO  c.q.p.factor.service.FactorService - [loadMonitorData] CH selectFactorStats cost=73ms, size=0
+2026-04-27 22:40:56.225 [http-nio-8080-exec-8] INFO  c.q.p.factor.service.FactorService - [getMonitorData] enter, cached=yes, age=128700ms
+2026-04-27 22:40:56.225 [http-nio-8080-exec-8] INFO  c.q.p.factor.service.FactorService - [getMonitorData] returning stale cache (refresh submitted=false)
+2026-04-27 22:40:56.986 [monitor-cache-refresh] INFO  c.q.p.factor.service.FactorService - [loadMonitorData] CH done, total cost=60770ms
+2026-04-27 22:40:56.986 [monitor-cache-refresh] INFO  c.q.p.factor.service.FactorService - [MonitorRefresh] cache refreshed, totalRecords=21221253
+2026-04-27 22:41:13.102 [http-nio-8080-exec-5] INFO  c.q.p.factor.service.FactorService - [getMonitorData] enter, cached=yes, age=16116ms
+2026-04-27 22:41:13.102 [http-nio-8080-exec-5] INFO  c.q.p.factor.service.FactorService - [getMonitorData] returning cached data
+2026-04-27 22:41:14.072 [http-nio-8080-exec-9] INFO  c.q.p.factor.service.FactorService - [getMonitorData] enter, cached=yes, age=17086ms
+2026-04-27 22:41:14.072 [http-nio-8080-exec-9] INFO  c.q.p.factor.service.FactorService - [getMonitorData] returning cached data
+2026-04-27 22:41:24.081 [http-nio-8080-exec-10] INFO  c.q.p.factor.service.FactorService - [getMonitorData] enter, cached=yes, age=27095ms
+2026-04-27 22:41:24.082 [http-nio-8080-exec-10] INFO  c.q.p.factor.service.FactorService - [getMonitorData] returning cached data
+2026-04-27 22:41:34.213 [http-nio-8080-exec-6] INFO  c.q.p.factor.service.FactorService - [getMonitorData] enter, cached=yes, age=37227ms
+2026-04-27 22:41:34.213 [http-nio-8080-exec-6] INFO  c.q.p.factor.service.FactorService - [getMonitorData] returning cached data
+2026-04-27 22:41:44.218 [http-nio-8080-exec-8] INFO  c.q.p.factor.service.FactorService - [getMonitorData] enter, cached=yes, age=47232ms
+2026-04-27 22:41:44.218 [http-nio-8080-exec-8] INFO  c.q.p.factor.service.FactorService - [getMonitorData] returning cached data
+2026-04-27 22:41:54.208 [http-nio-8080-exec-5] INFO  c.q.p.factor.service.FactorService - [getMonitorData] enter, cached=yes, age=57222ms
+2026-04-27 22:41:54.208 [http-nio-8080-exec-5] INFO  c.q.p.factor.service.FactorService - [getMonitorData] returning cached data
+2026-04-27 22:42:04.213 [http-nio-8080-exec-9] INFO  c.q.p.factor.service.FactorService - [getMonitorData] enter, cached=yes, age=67227ms
+2026-04-27 22:42:04.213 [http-nio-8080-exec-9] INFO  c.q.p.factor.service.FactorService - [getMonitorData] returning stale cache (refresh submitted=true)
+2026-04-27 22:42:04.213 [monitor-cache-refresh] INFO  c.q.p.factor.service.FactorService - [loadMonitorData] trying ClickHouse...
+2026-04-27 22:42:04.279 [monitor-cache-refresh] INFO  c.q.p.factor.service.FactorService - [loadMonitorData] CH selectTotalCount cost=66ms, total=0
+2026-04-27 22:42:04.364 [monitor-cache-refresh] INFO  c.q.p.factor.service.FactorService - [loadMonitorData] CH selectFactorStats cost=85ms, size=0
+2026-04-27 22:42:14.213 [http-nio-8080-exec-10] INFO  c.q.p.factor.service.FactorService - [getMonitorData] enter, cached=yes, age=77227ms
+2026-04-27 22:42:14.213 [http-nio-8080-exec-10] INFO  c.q.p.factor.service.FactorService - [getMonitorData] returning stale cache (refresh submitted=false)
+2026-04-27 22:43:09.940 [monitor-cache-refresh] INFO  c.q.p.factor.service.FactorService - [loadMonitorData] CH done, total cost=65727ms
+2026-04-27 22:43:09.940 [monitor-cache-refresh] INFO  c.q.p.factor.service.FactorService - [MonitorRefresh] cache refreshed, totalRecords=21221253
+2026-04-27 22:49:32.511 [http-nio-8080-exec-3] INFO  c.q.p.s.service.StockScreenService - Running stock screen on date=2026-04-24, factors=8, topN=10
+2026-04-27 22:49:32.887 [http-nio-8080-exec-3] INFO  c.q.p.s.service.StockScreenService - [Screen] screenDate=2026-04-24, bars count=5472
+2026-04-27 22:49:32.918 [http-nio-8080-exec-3] INFO  c.q.p.s.service.StockScreenService - Candidate stocks after ST filter: 5291
+2026-04-27 22:49:33.052 [http-nio-8080-exec-3] INFO  c.q.p.s.service.StockScreenService - [Screen] Factor MOM20 coverage: 5291 stocks on 2026-04-24, outlier=MAD, normalize=ZSCORE
+2026-04-27 22:49:33.104 [http-nio-8080-exec-3] INFO  c.q.p.s.service.StockScreenService - [Screen] Factor MOM60 coverage: 5273 stocks on 2026-04-24, outlier=MAD, normalize=ZSCORE
+2026-04-27 22:49:33.113 [http-nio-8080-exec-3] INFO  c.q.p.s.service.StockScreenService - [Screen] Factor MACD coverage: 0 stocks on 2026-04-18, outlier=MAD, normalize=ZSCORE
+2026-04-27 22:49:33.173 [http-nio-8080-exec-3] INFO  c.q.p.s.service.StockScreenService - [Screen] Factor RSI14 coverage: 5291 stocks on 2026-04-24, outlier=MAD, normalize=ZSCORE
+2026-04-27 22:49:33.175 [http-nio-8080-exec-3] INFO  c.q.p.s.service.StockScreenService - [Screen] Factor BOLL_POS coverage: 0 stocks on 2026-04-18, outlier=MAD, normalize=ZSCORE
+2026-04-27 22:49:33.180 [http-nio-8080-exec-3] INFO  c.q.p.s.service.StockScreenService - [Screen] Factor VPCORR20 coverage: 0 stocks on 2026-04-18, outlier=MAD, normalize=ZSCORE
+2026-04-27 22:49:33.239 [http-nio-8080-exec-3] INFO  c.q.p.s.service.StockScreenService - [Screen] Factor VOL20 coverage: 5291 stocks on 2026-04-24, outlier=MAD, normalize=ZSCORE
+2026-04-27 22:49:33.294 [http-nio-8080-exec-3] INFO  c.q.p.s.service.StockScreenService - [Screen] Factor TURN20 coverage: 5291 stocks on 2026-04-24, outlier=MAD, normalize=ZSCORE
+2026-04-27 22:49:33.294 [http-nio-8080-exec-3] INFO  c.q.p.s.service.StockScreenService - [Screen] Candidates: 5291, FactorData keys: [MOM20, MOM60, MACD, RSI14, BOLL_POS, VPCORR20, VOL20, TURN20]
+2026-04-27 22:49:33.312 [http-nio-8080-exec-3] INFO  c.q.p.s.service.StockScreenService - [Screen] Scores total: 653, topStocks: 10
+2026-04-27 22:49:33.312 [http-nio-8080-exec-3] INFO  c.q.p.s.service.StockScreenService - Screen done: 653 stocks scored, top 10 selected
+2026-04-27 22:49:37.044 [http-nio-8080-exec-3] INFO  c.q.p.s.service.StockScreenService - Price advice computed for 10 stocks
+2026-04-27 22:54:10.514 [SpringApplicationShutdownHook] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Stopping...
+2026-04-27 22:54:10.515 [SpringApplicationShutdownHook] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - BrokerAvailabilityEvent[available=false, SimpleBrokerMessageHandler [org.springframework.messaging.simp.broker.DefaultSubscriptionRegistry@6fdb1a59]]
+2026-04-27 22:54:10.515 [SpringApplicationShutdownHook] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Stopped.
+2026-04-27 22:54:10.524 [SpringApplicationShutdownHook] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Shutdown initiated...
+2026-04-27 22:54:10.526 [SpringApplicationShutdownHook] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Shutdown completed.
+2026-04-27 22:54:18.001 [background-preinit] INFO  o.h.validator.internal.util.Version - HV000001: Hibernate Validator 8.0.1.Final
+2026-04-27 22:54:18.146 [main] INFO  c.q.p.QuantPlatformApplication - Starting QuantPlatformApplication using Java 21.0.7 with PID 19976 (C:\Users\warning5\WorkBuddy\Claw\quant-platform\backend\target\classes started by warning5 in C:\Users\warning5\WorkBuddy\Claw\quant-platform)
+2026-04-27 22:54:18.147 [main] INFO  c.q.p.QuantPlatformApplication - No active profile set, falling back to 1 default profile: "default"
+2026-04-27 22:54:19.703 [main] INFO  o.s.b.w.e.tomcat.TomcatWebServer - Tomcat initialized with port 8080 (http)
+2026-04-27 22:54:19.712 [main] INFO  o.a.coyote.http11.Http11NioProtocol - Initializing ProtocolHandler ["http-nio-8080"]
+2026-04-27 22:54:19.714 [main] INFO  o.a.catalina.core.StandardService - Starting service [Tomcat]
+2026-04-27 22:54:19.714 [main] INFO  o.a.catalina.core.StandardEngine - Starting Servlet engine: [Apache Tomcat/10.1.19]
+2026-04-27 22:54:19.774 [main] INFO  o.a.c.c.C.[.[localhost].[/api] - Initializing Spring embedded WebApplicationContext
+2026-04-27 22:54:19.774 [main] INFO  o.s.b.w.s.c.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 1410 ms
+2026-04-27 22:54:20.199 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 加载 code -> market 映射...
+2026-04-27 22:54:20.234 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Starting...
+2026-04-27 22:54:20.408 [main] INFO  com.zaxxer.hikari.pool.HikariPool - HikariPool-1 - Added connection com.mysql.cj.jdbc.ConnectionImpl@2c54c497
+2026-04-27 22:54:20.410 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Start completed.
+2026-04-27 22:54:20.516 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 已加载 5490 只股票的 market 映射
+2026-04-27 22:54:20.518 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 已加载 5490 只股票的最新市值
+2026-04-27 22:54:20.717 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate] 脚本目录: C:\Users\warning5\WorkBuddy\Claw\quant-platform\scripts
+2026-04-27 22:54:20.717 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_stock_data.py : OK
+2026-04-27 22:54:20.717 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_stock_daily_baostock.py : OK
+2026-04-27 22:54:20.717 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_bj_stock_daily_qq.py : OK
+2026-04-27 22:54:20.717 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_index_daily_baostock.py : OK
+2026-04-27 22:54:20.717 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_dividend_baostock.py : OK
+2026-04-27 22:54:20.817 [main] INFO  c.q.p.f.engine.FactorComputeEngine - Registered 33 financial factor calculators
+2026-04-27 22:54:20.957 [main] INFO  c.q.p.s.service.ScreenPresetService - Built-in screen presets initialized
+2026-04-27 22:54:21.160 [main] INFO  o.s.b.a.w.s.WelcomePageHandlerMapping - Adding welcome page: class path resource [static/index.html]
+2026-04-27 22:54:21.473 [main] INFO  o.a.coyote.http11.Http11NioProtocol - Starting ProtocolHandler ["http-nio-8080"]
+2026-04-27 22:54:21.490 [main] INFO  o.s.b.w.e.tomcat.TomcatWebServer - Tomcat started on port 8080 (http) with context path '/api'
+2026-04-27 22:54:21.494 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Starting...
+2026-04-27 22:54:21.495 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - BrokerAvailabilityEvent[available=true, SimpleBrokerMessageHandler [org.springframework.messaging.simp.broker.DefaultSubscriptionRegistry@4e1b5532]]
+2026-04-27 22:54:21.495 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Started.
+2026-04-27 22:54:21.700 [main] INFO  c.q.p.QuantPlatformApplication - Started QuantPlatformApplication in 4.423 seconds (process running for 5.201)
+2026-04-27 22:54:21.794 [main] INFO  c.q.p.factor.service.FactorService - Builtin factors initialized
+2026-04-27 22:54:21.802 [main] INFO  c.q.p.s.s.StrategyDataInitializer - Checking strategy data initialization...
+2026-04-27 22:54:21.805 [main] INFO  c.q.p.s.s.StrategyDataInitializer - Strategy data already exists (6 strategies), skipping initialization
+2026-04-27 22:54:21.812 [main] INFO  c.q.p.s.service.StrategyService - Demo strategies already initialized, skipping

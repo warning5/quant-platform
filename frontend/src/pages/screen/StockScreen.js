@@ -190,6 +190,18 @@ const PRESET_DESCRIPTIONS = {
       { code: 'RSI14', name: 'RSI(14)', direction: '反向', weight: 0.8, reason: '回避超买（≤70）' },
     ],
   },
+  '经典技术指标': {
+    desc: '均线趋势+MACD动能+RSI超卖回避+布林带位置：经典技术分析四件套，参考 baostock 社区用户实战经验',
+    factors: [
+      { code: 'MOM20', name: '20日动量', direction: '正向', weight: 1.5, reason: '核心：短期均线趋势（>0）' },
+      { code: 'MOM60', name: '60日动量', direction: '正向', weight: 1.5, reason: '核心：中长期均线趋势（>0），价格在均线上方' },
+      { code: 'MACD', name: 'MACD', direction: '正向', weight: 1.5, reason: '核心：MACD金叉/动能增强，趋势确认信号' },
+      { code: 'RSI14', name: 'RSI(14)', direction: '反向', weight: 1, reason: '回避超买区间（≤70）' },
+      { code: 'BOLL_POS', name: '布林位置', direction: '正向', weight: 1, reason: '布林带中轨上方运行（>0.2）' },
+      { code: 'VPCORR20', name: '量价相关性', direction: '正向', weight: 0.8, reason: '量价齐升（>0），趋势健康度验证' },
+      { code: 'VOL20', name: '20日波动率', direction: '反向', weight: 0.7, reason: '低波动更稳健' },
+    ],
+  },
 };
 
 /* ── 默认单条因子配置 ──────────────────────────────────────────────── */
@@ -383,6 +395,7 @@ export default function StockScreen() {
   const [direction, setDirection] = useState('LONG');
   const [excludeSt, setExcludeSt] = useState(true);
   const [valuationWeight, setValuationWeight] = useState(40);
+  const [customSqlWhere, setCustomSqlWhere] = useState('');
 
   /* ── 结果 ─────────────────────────────────────────────────────── */
   const [result, setResult] = useState(null);
@@ -564,6 +577,7 @@ export default function StockScreen() {
       direction,
       excludeSt,
       valuationWeight: valuationWeight / 100,
+      customSqlWhere: customSqlWhere || null,
       presetId: selectedPresetId || null,
       factors: factors.map(f => ({
         factorCode: f.factorCode,
@@ -584,7 +598,7 @@ export default function StockScreen() {
       })
       .catch(() => {})
       .finally(() => setRunning(false));
-  }, [factors, screenDate, topN, direction, excludeSt, globalOutlier, globalNormalize, orthogonalMethod, totalWeight, valuationWeight, selectedPresetId]);
+  }, [factors, screenDate, topN, direction, excludeSt, globalOutlier, globalNormalize, orthogonalMethod, totalWeight, valuationWeight, selectedPresetId, customSqlWhere]);
 
   /* ── 结果表格列 ───────────────────────────────────────────────── */
   const factorColumns = useMemo(() => (result?.factors || []).map(fw => ({
@@ -1031,6 +1045,28 @@ export default function StockScreen() {
                 <Select value={orthogonalMethod} onChange={setOrthogonalMethod} style={{ width: '100%' }} size="small">
                   {ORTHOGONAL_OPTIONS.map(o => <Option key={o.value} value={o.value}>{o.label}</Option>)}
                 </Select>
+              </Col>
+
+              {/* 自定义 SQL 条件（高级模式） */}
+              <Col span={24}>
+                <div style={paramLabelStyle}>
+                  <Space size={4}>
+                    <ThunderboltOutlined />
+                    <span>自定义 SQL 条件（高级模式）</span>
+                    <Tag color="purple" size="small">进阶</Tag>
+                  </Space>
+                  <Tooltip title="直接用 SQL WHERE 条件过滤候选股票池，适用于有数据库经验的用户。条件将作用于 stock_daily 表，可使用 close、volume、turnover、change_percent 等字段。仅支持 AND 连接的条件">
+                    <QuestionCircleOutlined style={{ color: '#bbb', marginLeft: 4 }} />
+                  </Tooltip>
+                </div>
+                <TextArea
+                  value={customSqlWhere}
+                  onChange={e => setCustomSqlWhere(e.target.value)}
+                  placeholder={'例如: close > 10 AND volume > 1000000 AND change_percent > -5\n\n可用字段: code, open, high, low, close, volume, turnover, change_percent, change_amount'}
+                  autoSize={{ minRows: 2, maxRows: 4 }}
+                  allowClear
+                  style={{ fontSize: 12, fontFamily: 'monospace' }}
+                />
               </Col>
 
               {/* 估值/技术加权比例 */}

@@ -134,7 +134,8 @@ public class ClickHouseFactorValueService {
             stmt.executeBatch();
             log.debug("[ClickHouse] 批量写入 {} 条因子值", values.size());
         } catch (Exception e) {
-            log.warn("[ClickHouse] 批量写入因子值失败: {}", e.getMessage());
+            log.error("[ClickHouse] 批量写入因子值失败: {}", e.getMessage(), e);
+            throw new RuntimeException("ClickHouse 批量写入失败: " + e.getMessage(), e);
         }
     }
 

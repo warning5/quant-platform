@@ -142,6 +142,16 @@ public class ScreenPresetService {
             "{\"factorCode\":\"VOLUME_RATIO\",\"direction\":1,\"weight\":0.8,\"filterOp\":\"NONE\",\"filterValue\":null}," +
             "{\"factorCode\":\"RSI14\",\"direction\":-1,\"weight\":0.8,\"filterOp\":\"LTE\",\"filterValue\":70}]"));
 
+        // 13. 经典技术指标组合（参考 baostock 用户案例：均线+MACD+RSI+布林带）
+        builtins.add(buildPreset("经典技术指标", "均线趋势+MACD动能+RSI超卖回避+布林带位置：经典技术分析四件套，适合中短线选股",
+            "[{\"factorCode\":\"MOM20\",\"direction\":1,\"weight\":1.5,\"filterOp\":\"GT\",\"filterValue\":0}," +
+            "{\"factorCode\":\"MOM60\",\"direction\":1,\"weight\":1.5,\"filterOp\":\"GT\",\"filterValue\":0}," +
+            "{\"factorCode\":\"MACD\",\"direction\":1,\"weight\":1.5,\"filterOp\":\"NONE\",\"filterValue\":null}," +
+            "{\"factorCode\":\"RSI14\",\"direction\":-1,\"weight\":1,\"filterOp\":\"LTE\",\"filterValue\":70}," +
+            "{\"factorCode\":\"BOLL_POS\",\"direction\":1,\"weight\":1,\"filterOp\":\"GT\",\"filterValue\":0.2}," +
+            "{\"factorCode\":\"VPCORR20\",\"direction\":1,\"weight\":0.8,\"filterOp\":\"GT\",\"filterValue\":0}," +
+            "{\"factorCode\":\"VOL20\",\"direction\":-1,\"weight\":0.7,\"filterOp\":\"NONE\",\"filterValue\":null}]"));
+
         for (ScreenPreset preset : builtins) {
             long count = presetMapper.selectCount(
                 new LambdaQueryWrapper<ScreenPreset>()
