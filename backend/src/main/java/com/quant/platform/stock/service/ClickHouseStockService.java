@@ -539,7 +539,8 @@ public class ClickHouseStockService {
             FROM stock_daily
             WHERE trade_date = ? AND change_percent IS NOT NULL
               AND code NOT LIKE 'sh.000%' AND code NOT LIKE 'sz.399%'
-            ORDER BY change_percent """ + orderClause + " LIMIT ?";
+            ORDER BY change_percent
+            """ + orderClause + " LIMIT ?";
 
         try (Connection conn = getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {

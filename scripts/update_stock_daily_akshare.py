@@ -94,21 +94,18 @@ def build_daily_rows(db, code, name, market, df):
     if df is None or df.empty:
         return []
 
-    first_date = df.iloc[0]['trade_date']
-    prev_close = db.get_prev_close(code, first_date)
+    # 第一条作为 prev_close 参照不写入，调用方已扩1天确保有参照行
+    first_close = float(df.iloc[0]['close']) if df.iloc[0].get('close') else None
+    prev_close = first_close
 
     rows = []
     for i, (_, row) in enumerate(df.iterrows()):
+        if i == 0:
+            continue  # 跳过 padding 参照行
+
         close_p = row.get('close')
         if close_p is not None:
             close_p = float(close_p)
-
-        # 第一条记录：若 prev_close 为 None（DB 无前收），跳过本条，等 resume 补全
-        if i == 0 and prev_close is None:
-            print(f"  [SKIP] {code} {row['trade_date']} prev_close=None，跳过首条，等 resume 补全")
-            if close_p is not None:
-                prev_close = close_p
-            continue
 
         if prev_close is not None and prev_close != 0 and close_p is not None:
             change_pct = round((close_p - prev_close) / prev_close * 100, 2)
@@ -230,7 +227,9 @@ def main():
                             continue
                         print(f"  [resume] {code} 已有数据至 {latest_date}，从 {actual_start} 开始补全")
 
-                df = fetch_stock_history(code, market, actual_start, end_date)
+                # 往前扩1天：让 akshare 返回前一日 close 作为 prev_close 参照，第一条 padding 不写入
+                fetch_start = actual_start - timedelta(days=1)
+                df = fetch_stock_history(code, market, fetch_start, end_date)
                 if df is not None and not df.empty:
                     rows = build_daily_rows(db, code, name, market, df)
                     n = db.upsert_daily(rows)

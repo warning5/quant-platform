@@ -238,6 +238,17 @@ public class DataUpdateService {
                     task.setProgress(100);
                     task.setCurrentStep(divOk ? "更新完成" : "更新失败");
                 }
+            } else if ("FINANCIAL".equals(updateType)) {
+                // 财务数据：执行 update_financial_data.py
+                task.setTotalStocks(5500); // 约5500只股票
+                task.setCurrentStep("财务数据");
+                broadcastStatus(task);
+                boolean finOk = runSingleScript(taskId, task, cmd, "财务数据");
+                if (!"CANCELLED".equals(task.getStatus())) {
+                    task.setStatus(finOk ? "SUCCESS" : "FAILED");
+                    task.setProgress(100);
+                    task.setCurrentStep(finOk ? "更新完成" : "更新失败");
+                }
             } else if (cmd == null) {
                 // ALL → 依次执行 SH、SZ、BJ
                 executeAllMarkets(taskId, request);
@@ -485,10 +496,26 @@ public class DataUpdateService {
 
         String updateType = request.getUpdateType();
 
-        // 指数日线
+        // 指数日线（只传日期和 code 参数，不支持 resume/limit 等）
         if ("INDEX".equals(updateType)) {
             cmd.add("update_index_daily_baostock.py");
-            addCommonArgs(cmd, request);
+            // 日期参数
+            String startDate = request.getStartDate();
+            String endDate = request.getEndDate();
+            if ((startDate == null || startDate.isEmpty()) && (endDate == null || endDate.isEmpty())) {
+                java.time.LocalDate today = java.time.LocalDate.now();
+                java.time.LocalDate from = today.minusDays(defaultStartDays);
+                startDate = from.toString();
+                endDate = today.toString();
+            }
+            if (startDate != null && !startDate.isEmpty()) {
+                cmd.add("--start-date");
+                cmd.add(startDate);
+            }
+            if (endDate != null && !endDate.isEmpty()) {
+                cmd.add("--end-date");
+                cmd.add(endDate);
+            }
             return cmd;
         }
 
@@ -499,6 +526,23 @@ public class DataUpdateService {
             if (request.getLimit() != null && request.getLimit() > 0) {
                 cmd.add("--limit");
                 cmd.add(request.getLimit().toString());
+            }
+            return cmd;
+        }
+
+        // 财务数据
+        if ("FINANCIAL".equals(updateType)) {
+            cmd.add("update_financial_data.py");
+            if (request.getYearStart() != null) {
+                cmd.add("--year-start");
+                cmd.add(request.getYearStart().toString());
+            }
+            if (request.getYearEnd() != null) {
+                cmd.add("--year-end");
+                cmd.add(request.getYearEnd().toString());
+            }
+            if (request.isForce()) {
+                cmd.add("--force");
             }
             return cmd;
         }
@@ -679,7 +723,20 @@ public class DataUpdateService {
             msg.put("endTime", task.getEndTime() != null ? task.getEndTime().toString() : null);
             msg.put("error", task.getError());
             if (task.getRequest() != null) {
-                msg.put("updateType", task.getRequest().getUpdateType());
+                DataUpdateRequest req = task.getRequest();
+                msg.put("updateType", req.getUpdateType());
+                msg.put("source", req.getSource());
+                msg.put("market", req.getMarket());
+                msg.put("startDate", req.getStartDate());
+                msg.put("endDate", req.getEndDate());
+                msg.put("resume", req.isResume());
+                msg.put("excludeSt", req.isExcludeSt());
+                msg.put("dailyOnly", req.isDailyOnly());
+                msg.put("infoOnly", req.isInfoOnly());
+                msg.put("force", req.isForce());
+                msg.put("yearStart", req.getYearStart());
+                msg.put("yearEnd", req.getYearEnd());
+                msg.put("stockPool", req.getStockPool());
             }
             messagingTemplate.convertAndSend("/topic/data-update/status", msg);
         } catch (Exception e) {

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Card, Row, Col, Statistic, Button, Select, DatePicker, Form,
-  Checkbox, Tag, Typography, Space, Alert, Table, Tooltip, Progress, Badge, message, Divider, Tabs
+  Checkbox, Tag, Typography, Space, Alert, Table, Tooltip, Progress, Badge, message, Divider, Tabs, Spin
 } from 'antd';
 import {
   PlayCircleOutlined, StopOutlined, ReloadOutlined,
@@ -12,7 +12,7 @@ import {
   LineChartOutlined, GiftOutlined
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import { dataUpdateApi } from '../../api/index';
+import { dataUpdateApi, financialApi } from '../../api/index';
 
 const { Text, Title } = Typography;
 const { RangePicker } = DatePicker;
@@ -91,6 +91,44 @@ const getDuration = (task) => {
   return `${Math.floor(diff / 3600)}时${Math.floor((diff % 3600) / 60)}分`;
 };
 
+// ========== 通用：渲染任务配置标签 ==========
+const renderTaskConfig = (task, updateType) => {
+  if (!task || !task.status || task.status === 'IDLE') return null;
+
+  const tags = [];
+
+  // 市场/数据源
+  if (updateType === 'DAILY') {
+    const marketMap = { ALL: '全市场', SH: '沪市', SZ: '深市', BJ: '北交所' };
+    const sourceMap = { ALL: '全部', BAOSTOCK: 'Baostock', TENCENT: '腾讯' };
+    if (task.configMarket) tags.push(<Tag key="mkt" color="blue">{marketMap[task.configMarket] || task.configMarket}</Tag>);
+    if (task.configSource && task.configSource !== 'ALL') tags.push(<Tag key="src" color="cyan">{sourceMap[task.configSource] || task.configSource}</Tag>);
+    if (task.configStockPool && task.configStockPool !== 'ALL') {
+      const poolMap = { SH300: '沪深300', SZ50: '上证50', ZZ500: '中证500', ZZ1000: '中证1000', STAR50: '科创板50' };
+      tags.push(<Tag key="pool" color="purple">{poolMap[task.configStockPool] || task.configStockPool}</Tag>);
+    }
+    if (task.configResume) tags.push(<Tag key="resume" color="orange">断点续传</Tag>);
+    if (task.configExcludeSt) tags.push(<Tag key="exclude" color="red">排除ST</Tag>);
+    if (task.configDailyOnly) tags.push(<Tag key="daily" color="geekblue">仅日线</Tag>);
+    if (task.configInfoOnly) tags.push(<Tag key="info" color="geekblue">仅股票信息</Tag>);
+  } else if (updateType === 'INDEX') {
+    if (task.configResume) tags.push(<Tag key="resume" color="orange">断点续传</Tag>);
+  } else if (updateType === 'DIVIDEND') {
+    if (task.configResume) tags.push(<Tag key="resume" color="orange">跳过已有</Tag>);
+  } else if (updateType === 'FINANCIAL') {
+    if (task.configYearStart) tags.push(<Tag key="year" color="blue">{task.configYearStart}~{task.configYearEnd || ''}</Tag>);
+    if (task.configForce) tags.push(<Tag key="force" color="red">强制重新采集</Tag>);
+  }
+
+  // 日期范围
+  if (task.configStartDate || task.configEndDate) {
+    const dateStr = [task.configStartDate, task.configEndDate].filter(Boolean).join(' ~ ');
+    tags.push(<Tag key="dates" color="default">{dateStr}</Tag>);
+  }
+
+  return tags.length > 0 ? <Space size={4} style={{ marginLeft: 8 }}>{tags}</Space> : null;
+};
+
 // ========== 通用：进度条 ==========
 const renderProgressBar = (task) => {
   if (!task) return null;
@@ -151,6 +189,17 @@ function DataUpdate() {
   const [dividendTask, setDividendTask] = useState(null);
   const [dividendLogs, setDividendLogs] = useState([]);
   const dividendLogRef = useRef(null);
+
+  // 财务数据
+  const [financialTask, setFinancialTask] = useState(null);
+  const [financialLogs, setFinancialLogs] = useState([]);
+  const financialLogRef = useRef(null);
+  const [financialForm] = Form.useForm();
+  const [financialValidateResult, setFinancialValidateResult] = useState(null);
+  const [financialValidateLoading, setFinancialValidateLoading] = useState(false);
+  const [financialCoverage, setFinancialCoverage] = useState(null);
+  const [financialCoverageLoading, setFinancialCoverageLoading] = useState(true);
+  const financialCoverageFetchedRef = useRef(false);
 
   const [wsConnected, setWsConnected] = useState(false);
 
@@ -245,6 +294,7 @@ function DataUpdate() {
     switch (updateType) {
       case 'INDEX': return setIndexTask;
       case 'DIVIDEND': return setDividendTask;
+      case 'FINANCIAL': return setFinancialTask;
       default: return setDailyTask;
     }
   }, []);
@@ -253,6 +303,7 @@ function DataUpdate() {
     switch (updateType) {
       case 'INDEX': return setIndexLogs;
       case 'DIVIDEND': return setDividendLogs;
+      case 'FINANCIAL': return setFinancialLogs;
       default: return setDailyLogs;
     }
   }, []);
@@ -312,6 +363,19 @@ function DataUpdate() {
               if (msg.endTime !== undefined) t.endTime = msg.endTime;
               if (msg.error !== undefined) t.error = msg.error;
               t.updateType = ut;
+              // 保存配置信息用于展示
+              if (msg.market !== undefined) t.configMarket = msg.market;
+              if (msg.source !== undefined) t.configSource = msg.source;
+              if (msg.startDate !== undefined) t.configStartDate = msg.startDate;
+              if (msg.endDate !== undefined) t.configEndDate = msg.endDate;
+              if (msg.resume !== undefined) t.configResume = msg.resume;
+              if (msg.excludeSt !== undefined) t.configExcludeSt = msg.excludeSt;
+              if (msg.dailyOnly !== undefined) t.configDailyOnly = msg.dailyOnly;
+              if (msg.infoOnly !== undefined) t.configInfoOnly = msg.infoOnly;
+              if (msg.force !== undefined) t.configForce = msg.force;
+              if (msg.yearStart !== undefined) t.configYearStart = msg.yearStart;
+              if (msg.yearEnd !== undefined) t.configYearEnd = msg.yearEnd;
+              if (msg.stockPool !== undefined) t.configStockPool = msg.stockPool;
               return t;
             });
           } else if (msg.type === 'DATA_UPDATE_LOG') {
@@ -373,6 +437,28 @@ function DataUpdate() {
     if (isFirst) setDividendCoverageLoading(false);
   }, []);
 
+  // 财务数据概览
+  const fetchFinancialCoverage = useCallback(async () => {
+    const isFirst = !financialCoverageFetchedRef.current;
+    if (isFirst) setFinancialCoverageLoading(true);
+    try {
+      const res = await financialApi.getProgress();
+      setFinancialCoverage(res);
+      financialCoverageFetchedRef.current = true;
+    } catch (e) {
+      console.error('fetchFinancialCoverage failed:', e);
+    }
+    if (isFirst) setFinancialCoverageLoading(false);
+  }, []);
+
+  // 财务任务运行时自动刷新概览（每10秒）
+  useEffect(() => {
+    if (financialTask?.status === 'RUNNING') {
+      const timer = setInterval(() => fetchFinancialCoverage(), 10000);
+      return () => clearInterval(timer);
+    }
+  }, [financialTask?.status, fetchFinancialCoverage]);
+
   // 任务运行中时自动刷新覆盖率（每10秒）
   useEffect(() => {
     if (dailyTask?.status === 'RUNNING') {
@@ -380,6 +466,21 @@ function DataUpdate() {
       return () => clearInterval(timer);
     }
   }, [dailyTask?.status, fetchCoverage]);
+
+  // tradingDates 加载完成后，默认日期设为最近一个交易日
+  // 规则：18:00 前选前一个交易日，18:00 后选当天（如果是交易日）
+  useEffect(() => {
+    if (tradingDates && tradingDates.length > 0) {
+      const now = dayjs();
+      const cutoffHour = 18;
+      // tradingDates 按日期降序排列，[0] = 今天，[1] = 昨天
+      const idx = now.hour() >= cutoffHour ? 0 : 1;
+      const targetDate = tradingDates[idx] ? tradingDates[idx] : tradingDates[0];
+      const targetDayjs = dayjs(targetDate);
+      setMissingDate(targetDayjs);
+      setMissingIndexDate(targetDayjs);
+    }
+  }, [tradingDates]);
 
   useEffect(() => {
     if (indexTask?.status === 'RUNNING') {
@@ -413,6 +514,7 @@ function DataUpdate() {
     fetchCoverage();
     fetchIndexCoverage();
     fetchDividendCoverage();
+    fetchFinancialCoverage();
     dataUpdateApi.getTradingDates(365).then(res => setTradingDates(res || [])).catch(() => {});
     dataUpdateApi.getMissingStats(dayjs().subtract(1, 'day').format('YYYY-MM-DD'))
       .then(res => setMissingStats(res)).catch(() => {});
@@ -441,12 +543,16 @@ function DataUpdate() {
   useEffect(() => {
     if (dividendLogRef.current) dividendLogRef.current.scrollTop = dividendLogRef.current.scrollHeight;
   }, [dividendLogs]);
+  useEffect(() => {
+    if (financialLogRef.current) financialLogRef.current.scrollTop = financialLogRef.current.scrollHeight;
+  }, [financialLogs]);
 
   // ========== 提交任务 ==========
   const handleSubmit = async (updateType) => {
     try {
       const currentForm = updateType === 'INDEX' ? indexForm
-        : updateType === 'DIVIDEND' ? dividendForm : form;
+        : updateType === 'DIVIDEND' ? dividendForm
+        : updateType === 'FINANCIAL' ? financialForm : form;
       const values = await currentForm.validateFields();
       const dates = values.dateRange;
       const request = {
@@ -463,6 +569,9 @@ function DataUpdate() {
         limit: values.limit || null,
         batchSize: values.batchSize || null,
         delay: values.delay || null,
+        yearStart: values.yearStart || null,
+        yearEnd: values.yearEnd || null,
+        force: values.force || false,
       };
 
       // 清空对应 Tab 的日志
@@ -487,13 +596,34 @@ function DataUpdate() {
   // ========== 取消任务 ==========
   const handleCancel = async (updateType) => {
     const task = updateType === 'INDEX' ? indexTask
-      : updateType === 'DIVIDEND' ? dividendTask : dailyTask;
+      : updateType === 'DIVIDEND' ? dividendTask
+      : updateType === 'FINANCIAL' ? financialTask : dailyTask;
     if (!task || !task.taskId) return;
     try {
       await dataUpdateApi.cancelTask(task.taskId);
       message.info('任务已取消');
     } catch (e) {
       message.error('取消失败');
+    }
+  };
+
+  // ========== 财务数据校验 ==========
+  const handleFinancialValidate = async () => {
+    setFinancialValidateLoading(true);
+    setFinancialValidateResult(null);
+    try {
+      // 拦截器已解包 ApiResponse，res 直接是后端返回的 result Map
+      const res = await financialApi.validate();
+      if (res && Object.keys(res).length > 0) {
+        setFinancialValidateResult(res);
+      } else {
+        message.warning('校验结果为空');
+      }
+    } catch (e) {
+      const msg = e.response?.data?.message || e.message || '校验失败';
+      message.error(`校验失败: ${msg}`);
+    } finally {
+      setFinancialValidateLoading(false);
     }
   };
 
@@ -505,6 +635,7 @@ function DataUpdate() {
     setActiveTab(key);
     if (key === 'INDEX') fetchIndexCoverage();
     if (key === 'DIVIDEND') fetchDividendCoverage();
+    if (key === 'FINANCIAL') fetchFinancialCoverage();
   };
 
   // ========== 股票日线 Tab ==========
@@ -579,7 +710,7 @@ function DataUpdate() {
         {/* 进度条 */}
         {renderProgressBar(dailyTask)}
         {/* 日志 - 始终显示 */}
-        <Card title={<span>更新日志 <Text type="secondary" style={{ fontSize: 12 }}>({dailyLogs.length} 条)</Text></span>}
+        <Card title={<span>更新日志 <Text type="secondary" style={{ fontSize: 12 }}>({dailyLogs.length} 条)</Text>{renderTaskConfig(dailyTask, 'DAILY')}</span>}
           size="small" extra={<Button size="small" onClick={() => setDailyLogs([])}>清空</Button>}>
           {renderLogs(dailyLogs, dailyLogRef)}
         </Card>
@@ -688,13 +819,240 @@ function DataUpdate() {
         {/* 进度条 */}
         {renderProgressBar(indexTask)}
         {/* 日志 - 始终显示 */}
-        <Card title={<span>更新日志 <Text type="secondary" style={{ fontSize: 12 }}>({indexLogs.length} 条)</Text></span>}
+        <Card title={<span>更新日志 <Text type="secondary" style={{ fontSize: 12 }}>({indexLogs.length} 条)</Text>{renderTaskConfig(indexTask, 'INDEX')}</span>}
           size="small" extra={<Button size="small" onClick={() => setIndexLogs([])}>清空</Button>}>
           {renderLogs(indexLogs, indexLogRef)}
         </Card>
         {/* 指数完整性检查 */}
         {renderIndexIntegrity()}
       </>
+    );
+  };
+
+  // ========== 财务数据 Tab ==========
+  const renderFinancialTab = () => {
+    const isRunning = financialTask?.status === 'RUNNING';
+    // 计算总记录数
+    const totalRecords = financialCoverage
+      ? (financialCoverage.income?.count || 0)
+        + (financialCoverage.balance?.count || 0)
+        + (financialCoverage.cashflow?.count || 0)
+        + (financialCoverage.indicator?.count || 0)
+      : 0;
+    return (
+      <>
+        {/* 财务数据概览 */}
+        <Card
+          title={<span><DatabaseOutlined /> 数据概览</span>}
+          size="small"
+          style={{ marginBottom: 16 }}
+          loading={financialCoverageLoading}
+          extra={<Button size="small" icon={<ReloadOutlined />} onClick={fetchFinancialCoverage}>刷新</Button>}
+        >
+          <Row gutter={16}>
+            <Col span={4}>
+              <Statistic
+                title="有财务数据的股票"
+                value={financialCoverage?.uniqueStocks || 0}
+                suffix="只"
+                valueStyle={{ fontSize: 16, color: '#1677ff' }}
+                prefix={<BarChartOutlined />}
+              />
+            </Col>
+            <Col span={5}>
+              <Statistic
+                title="总记录数"
+                formatter={() => {
+                  const r = totalRecords;
+                  return <span>{r >= 10000 ? (r / 10000).toFixed(1) + ' 万' : (r || 0).toLocaleString()}</span>;
+                }}
+                suffix="条"
+                valueStyle={{ fontSize: 16, color: '#52c41a' }}
+              />
+            </Col>
+            <Col span={7}>
+              <Statistic
+                title="数据表"
+                formatter={() => <Text style={{ fontSize: 13 }}>利润表 / 资产负债表 / 现金流量表 / 财务指标</Text>}
+                valueStyle={{ fontSize: 13 }}
+              />
+            </Col>
+            {isRunning && (
+              <Col span={8}>
+                <Statistic title="状态" formatter={() => statusTag('RUNNING')} valueStyle={{ fontSize: 14 }} />
+              </Col>
+            )}
+          </Row>
+          {/* 各表详细统计 */}
+          {financialCoverage && (
+            <Row gutter={12} style={{ marginTop: 12 }}>
+              {[
+                { key: 'income', label: '利润表', icon: '💰', color: '#1677ff' },
+                { key: 'balance', label: '资产负债表', icon: '📊', color: '#52c41a' },
+                { key: 'cashflow', label: '现金流量表', icon: '🏦', color: '#fa8c16' },
+                { key: 'indicator', label: '财务指标', icon: '📈', color: '#722ed1' },
+              ].map(table => (
+                <Col span={6} key={table.key}>
+                  <Card size="small" style={{ backgroundColor: '#fafafa', borderLeft: `3px solid ${table.color}` }}>
+                    <Statistic
+                      title={table.label}
+                      value={financialCoverage[table.key]?.count || 0}
+                      suffix={
+                        <span style={{ fontSize: 11, color: '#8c8c8c', fontWeight: 400, marginLeft: 4 }}>
+                          条 · {financialCoverage[table.key]?.stocks || 0} 只股票
+                        </span>
+                      }
+                      valueStyle={{ fontSize: 15, color: table.color, fontWeight: 600 }}
+                    />
+                  </Card>
+                </Col>
+              ))}
+            </Row>
+          )}
+        </Card>
+
+        <Card title="财务数据采集配置" size="small" style={{ marginBottom: 16 }}>
+          <Form form={financialForm} layout="inline"
+            initialValues={{ yearStart: dayjs().year() - 1, yearEnd: dayjs().year(), force: false }}>
+            <Row gutter={[16, 12]} style={{ width: '100%' }}>
+              <Col>
+                <Form.Item name="yearStart" label="起始年份" style={{ marginBottom: 0 }}>
+                  <Select style={{ width: 100 }}>
+                    {Array.from({ length: dayjs().year() - 2010 + 1 }, (_, i) => dayjs().year() - i).map(y => (
+                      <Select.Option key={y} value={y}>{y} 年</Select.Option>
+                    ))}
+                  </Select>
+                </Form.Item>
+              </Col>
+              <Col>
+                <span style={{ lineHeight: '32px', color: '#8c8c8c', margin: '0 4px' }}>至</span>
+              </Col>
+              <Col>
+                <Form.Item name="yearEnd" label="结束年份" style={{ marginBottom: 0 }}>
+                  <Select style={{ width: 100 }}>
+                    {Array.from({ length: dayjs().year() - 2010 + 1 }, (_, i) => dayjs().year() - i).map(y => (
+                      <Select.Option key={y} value={y}>{y} 年</Select.Option>
+                    ))}
+                  </Select>
+                </Form.Item>
+              </Col>
+              <Col>
+                <Form.Item name="force" valuePropName="checked" style={{ marginBottom: 0 }}>
+                  <Checkbox>强制重新采集（覆盖已有数据）</Checkbox>
+                </Form.Item>
+              </Col>
+            </Row>
+            <Row gutter={[16, 12]} style={{ width: '100%', marginTop: 8 }}>
+              <Col>
+                <Space size={12}>
+                  <Button type="primary" icon={<PlayCircleOutlined />}
+                    onClick={() => handleSubmit('FINANCIAL')} disabled={isRunning}>
+                    开始采集
+                  </Button>
+                  <Button danger icon={<StopOutlined />}
+                    onClick={() => handleCancel('FINANCIAL')} disabled={!isRunning}>
+                    取消任务
+                  </Button>
+                  <Button icon={<SearchOutlined />}
+                    onClick={handleFinancialValidate} loading={financialValidateLoading}>
+                    数据校验
+                  </Button>
+                  {isRunning && <Tag color="processing">采集进行中...</Tag>}
+                  {financialTask && financialTask.status === 'SUCCESS' && <Tag color="success">采集完成</Tag>}
+                  {financialTask && financialTask.status === 'FAILED' && <Tag color="error">采集失败</Tag>}
+                </Space>
+              </Col>
+            </Row>
+          </Form>
+        </Card>
+        {/* 进度条 */}
+        {renderProgressBar(financialTask)}
+        {/* 日志 */}
+        <Card title={<span>采集日志 <Text type="secondary" style={{ fontSize: 12 }}>({financialLogs.length} 条)</Text>{renderTaskConfig(financialTask, 'FINANCIAL')}</span>}
+          size="small" extra={<Button size="small" onClick={() => setFinancialLogs([])}>清空</Button>}>
+          {renderLogs(financialLogs, financialLogRef)}
+        </Card>
+        {/* 校验报告 */}
+        {financialValidateResult && renderFinancialValidateCard()}
+      </>
+    );
+  };
+
+  // ========== 财务校验报告 ==========
+  const renderFinancialValidateCard = () => {
+    const { tableStats, yearCoverage, fieldNullRates, anomalies, missingStocks, totalStocks } = financialValidateResult;
+    return (
+      <Card title={<span><SearchOutlined /> 数据校验报告</span>} size="small" style={{ marginTop: 16 }}
+        extra={<Button size="small" type="text" onClick={() => setFinancialValidateResult(null)}>关闭</Button>}>
+        {/* 表级统计 */}
+        <Text strong style={{ fontSize: 13 }}>【1】表级记录统计</Text>
+        <Table dataSource={Object.entries(tableStats || {}).map(([key, v]) => ({ key, ...v }))}
+          columns={[
+            { title: '表名', dataIndex: 'label', width: 120 },
+            { title: '记录数', dataIndex: 'records', render: v => v?.toLocaleString(), align: 'right' },
+            { title: '覆盖股票', dataIndex: 'stocks', render: v => v?.toLocaleString(), align: 'right' },
+          ]}
+          size="small" pagination={false} style={{ marginTop: 8, marginBottom: 16 }} />
+
+        {/* 年份覆盖 */}
+        <Text strong style={{ fontSize: 13 }}>【2】年份覆盖（stock_financial_indicator）</Text>
+        <Table dataSource={(yearCoverage || []).map((r, i) => ({ ...r, key: i }))}
+          columns={[
+            { title: '年份', dataIndex: 'report_year', width: 80, align: 'right' },
+            { title: '报告期数', dataIndex: 'record_cnt', render: v => v?.toLocaleString(), align: 'right' },
+            { title: '覆盖股票', dataIndex: 'stock_cnt', render: v => v?.toLocaleString(), align: 'right' },
+          ]}
+          size="small" pagination={false} style={{ marginTop: 8, marginBottom: 16 }} />
+
+        {/* 字段空值率 */}
+        <Text strong style={{ fontSize: 13 }}>【3】关键字段空值率</Text>
+        <Table dataSource={(fieldNullRates || []).map((r, i) => ({ ...r, key: i }))}
+          columns={[
+            { title: '字段', dataIndex: 'field', width: 160 },
+            { title: '非空记录', dataIndex: 'nonNull', render: v => v?.toLocaleString(), align: 'right' },
+            { title: '总记录', dataIndex: 'total', render: v => v?.toLocaleString(), align: 'right' },
+            { title: '空值率', dataIndex: 'rate', render: v => `${v}%`,
+              align: 'right', title: '空值率(%)' },
+          ]}
+          size="small" pagination={false} style={{ marginTop: 8, marginBottom: 16 }} />
+
+        {/* 同比异常 */}
+        <Text strong style={{ fontSize: 13 }}>【4】净利润同比异常（扭亏/转亏/变化>10倍）</Text>
+        {anomalies && anomalies.length > 0 ? (
+          <Table dataSource={anomalies.map((r, i) => ({ ...r, key: i }))}
+            columns={[
+              { title: '代码', dataIndex: 'code', width: 100 },
+              { title: '名称', dataIndex: 'name', width: 120, ellipsis: true },
+              { title: '年份', dataIndex: 'report_year', width: 70, align: 'right' },
+              { title: '类型', dataIndex: 'report_type', width: 60, align: 'center',
+                render: v => ['', '一季报', '中报', '三季报', '年报'][v] || v },
+              { title: '当年净利润', dataIndex: 'cur_profit', align: 'right',
+                render: v => v != null ? Number(v).toLocaleString() : '-' },
+              { title: '上年净利润', dataIndex: 'prev_profit', align: 'right',
+                render: v => v != null ? Number(v).toLocaleString() : '-' },
+            ]}
+            size="small" pagination={false} style={{ marginTop: 8, marginBottom: 16 }} />
+        ) : (
+          <Alert message="未发现明显异常" type="success" showIcon style={{ marginTop: 8, marginBottom: 16 }} />
+        )}
+
+        {/* 缺失警告 */}
+        <Text strong style={{ fontSize: 13 }}>【5】近3年财报完全缺失的股票（{totalStocks}只有效股票中）</Text>
+        {missingStocks && missingStocks.length > 0 ? (
+          <>
+            <Alert message={`共 ${missingStocks.length} 只（显示前20）`} type="warning" showIcon style={{ marginTop: 8, marginBottom: 8 }} />
+            <Table dataSource={missingStocks.map((r, i) => ({ ...r, key: i }))}
+              columns={[
+                { title: '代码', dataIndex: 'code', width: 100 },
+                { title: '名称', dataIndex: 'name', width: 120 },
+                { title: '市场', dataIndex: 'market', width: 80 },
+              ]}
+              size="small" pagination={false} />
+          </>
+        ) : (
+          <Alert message="未发现明显缺失" type="success" showIcon style={{ marginTop: 8 }} />
+        )}
+      </Card>
     );
   };
 
@@ -792,7 +1150,7 @@ function DataUpdate() {
         {/* 进度条 */}
         {renderProgressBar(dividendTask)}
         {/* 日志 - 始终显示 */}
-        <Card title={<span>更新日志 <Text type="secondary" style={{ fontSize: 12 }}>({dividendLogs.length} 条)</Text></span>}
+        <Card title={<span>更新日志 <Text type="secondary" style={{ fontSize: 12 }}>({dividendLogs.length} 条)</Text>{renderTaskConfig(dividendTask, 'DIVIDEND')}</span>}
           size="small" extra={<Button size="small" onClick={() => setDividendLogs([])}>清空</Button>}>
           {renderLogs(dividendLogs, dividendLogRef)}
         </Card>
@@ -889,6 +1247,10 @@ function DataUpdate() {
         <Col>
           <Text>检查日期:</Text>
           <DatePicker value={missingIndexDate} onChange={d => setMissingIndexDate(d)}
+            disabledDate={(current) => {
+              if (!tradingDates || tradingDates.length === 0) return false;
+              return !tradingDates.includes(current.format('YYYY-MM-DD'));
+            }}
             allowClear={false} style={{ marginLeft: 8, width: 140 }} />
         </Col>
         <Col>
@@ -925,6 +1287,10 @@ function DataUpdate() {
         <Col>
           <Text>检查日期:</Text>
           <DatePicker value={missingDate} onChange={d => setMissingDate(d)}
+            disabledDate={(current) => {
+              if (!tradingDates || tradingDates.length === 0) return false;
+              return !tradingDates.includes(current.format('YYYY-MM-DD'));
+            }}
             allowClear={false} style={{ marginLeft: 8, width: 140 }} />
         </Col>
         <Col>
@@ -1010,6 +1376,7 @@ function DataUpdate() {
           items={[
             {
               key: 'DAILY',
+              forceRender: true,
               label: <span><RiseOutlined /> 股票日线</span>,
               children: (
                 <div style={{ padding: '16px 0' }}>
@@ -1085,6 +1452,7 @@ function DataUpdate() {
             },
             {
               key: 'INDEX',
+              forceRender: true,
               label: <span><PieChartOutlined /> 指数日线</span>,
               children: (
                 <div style={{ padding: '16px 0' }}>
@@ -1094,8 +1462,15 @@ function DataUpdate() {
             },
             {
               key: 'DIVIDEND',
+              forceRender: true,
               label: <span><DollarOutlined /> 分红除权</span>,
               children: <div style={{ padding: '16px 0' }}>{renderDividendTab()}</div>,
+            },
+            {
+              key: 'FINANCIAL',
+              forceRender: true,
+              label: <span><BarChartOutlined /> 财务数据</span>,
+              children: <div style={{ padding: '16px 0' }}>{renderFinancialTab()}</div>,
             },
           ]}
         />

@@ -127,6 +127,8 @@ export const financialApi = {
   getStockList: (keyword, page = 0, size = 20) =>
     api.get('/financial/stocks', { params: { keyword, page, size } }),
   getStockCount: () => api.get('/financial/stocks/count'),
+  validate: () => api.get('/financial/validate', { timeout: 60000 }),
+  getProgress: () => api.get('/financial/progress'),
 };
 
 // ===== 数据更新 API =====

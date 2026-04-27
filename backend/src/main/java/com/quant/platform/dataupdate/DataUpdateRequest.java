@@ -8,7 +8,7 @@ import lombok.Data;
 @Data
 public class DataUpdateRequest {
 
-    /** 更新类型: DAILY (股票日线), INDEX (指数日线), DIVIDEND (分红除权) */
+    /** 更新类型: DAILY (股票日线), INDEX (指数日线), DIVIDEND (分红除权), FINANCIAL (财务数据) */
     private String updateType = "DAILY";
 
     /** 数据源: BAOSTOCK (SH/SZ), TENCENT (BJ), ALL */
@@ -46,4 +46,13 @@ public class DataUpdateRequest {
 
     /** 批次延迟（秒） */
     private Double delay;
+
+    /** 财务数据采集起始年份 */
+    private Integer yearStart;
+
+    /** 财务数据采集结束年份 */
+    private Integer yearEnd;
+
+    /** 财务数据：强制重新采集 */
+    private boolean force = false;
 }

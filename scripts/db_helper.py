@@ -408,11 +408,9 @@ class StockDailyDB:
 
     def upsert_daily(self, rows):
         """
-        批量插入日线数据。
+        批量 upsert 日线数据。
 
-        ClickHouse (ReplacingMergeTree): 直接 INSERT，
-          同一 (code, trade_date) 会自动按 update_time 去重保留最新版本。
-
+        ClickHouse: 先 DELETE 旧版本再 INSERT，保证 (code, trade_date) 唯一。
         MySQL: ON DUPLICATE KEY UPDATE 覆盖。
 
         返回: 插入的行数
@@ -421,6 +419,7 @@ class StockDailyDB:
             return 0
 
         if self.backend == "clickhouse":
+            self._ch_delete_rows(rows)
             self._ch_insert_rows(rows)
             return len(rows)
         else:
@@ -454,9 +453,7 @@ class StockDailyDB:
                 print(f"  [WARN] ClickHouse DELETE 失败（数据可能有重复）: {e}")
 
     def _ch_insert_rows(self, rows):
-        """ClickHouse: 批量插入数据（行式）。
-        ReplacingMergeTree 自动按 update_time 去重，无需先 DELETE。
-        """
+        """ClickHouse: 批量插入数据（行式）。调用方需先调 _ch_delete_rows 删除旧版本。"""
         if not rows:
             return
 
@@ -467,7 +464,7 @@ class StockDailyDB:
         biz_cols = [
             "code", "trade_date", "name", "open_price", "close_price",
             "high_price", "low_price", "pre_close", "volume", "amount",
-            "change_percent", "change_amount", "turn_over_rate",
+            "change_percent", "change_amount", "turnover_rate",
             "pe_ttm", "pb",
         ]
 
@@ -728,6 +725,17 @@ class StockDailyDB:
                         fixed_count += 1
                     if cur_pre is None or cur_pre == 0:
                         new_pre = prev_close
+                        fixed_count += 1
+                elif close_p is not None and prev_close is None:
+                    # 第一行：prev_close 无历史数据。用 pctChg 反算；
+                    # pctChg=0 时 fallback 为 pre_close=close（跨年/长假首日常见）
+                    if cur_pct is not None and cur_pct != 0:
+                        new_pre = round(close_p / (1 + cur_pct / 100), 2)
+                        new_pct = cur_pct
+                        fixed_count += 1
+                    elif cur_pre is None or cur_pre == 0:
+                        new_pre = close_p  # fallback：平盘，pre_close=close
+                        new_pct = 0.0
                         fixed_count += 1
 
                 # 构造重新写入的行（只修改变动的字段，update_time 由 _ch_insert_rows 用当前时间填充）

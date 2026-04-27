@@ -177,16 +177,20 @@ def fetch_qq_snapshot_batch(codes_markets, batch_size=100, delay=0.1):
 def build_daily_rows(db, code, name, market, rows, snapshot=None):
     """将腾讯接口数据转换为 db_helper.upsert_daily() 需要的 row list
 
+    第一条记录作为 prev_close 参照不写入，从第二条开始写入。
+    调用方已将查询范围往前扩1天以确保有参照行。
+
     参数:
         snapshot: {"pe_ttm": ..., "pb": ...}
                   来自 fetch_qq_snapshot_batch() 批量获取
-                  腾讯快照只有当前值，北交所无历史百度估值，所以用快照值填所有日期
+                  腾讯快照只有当前值，北交所无历史估值，所以用快照值填所有日期
     """
     if not rows:
         return []
 
-    first_date = rows[0][0]
-    prev_close = db.get_prev_close(code, first_date)
+    # 第一条作为 prev_close 参照，不写入
+    first_close = to_float(rows[0][2])
+    prev_close = first_close
 
     # 腾讯快照值（北交所无历史估值，用当前值填所有交易日）
     snap_pe = snapshot.get("pe_ttm") if snapshot else None
@@ -196,12 +200,8 @@ def build_daily_rows(db, code, name, market, rows, snapshot=None):
     for i, row in enumerate(rows):
         trade_date = row[0]
         close_p = to_float(row[2])
-
-        # 第一条记录：若 prev_close 为 None（DB 无前收），跳过本条，等 resume 补全
-        if i == 0 and prev_close is None:
-            print(f"  [SKIP] {code} {trade_date} prev_close=None，跳过首条，等 resume 补全")
-            if close_p is not None:
-                prev_close = close_p  # 为下一行提供 prev_close
+        if i == 0:
+            prev_close = close_p  # padding 行：用它更新 prev_close，继续
             continue
 
         # 计算涨跌幅和涨跌额
@@ -324,7 +324,10 @@ def main():
             else:
                 actual_start = start_date
 
-            rows = fetch_bj_stock_history(code, actual_start, end_date)
+            # 往前扩1天：让腾讯返回前一日 close 作为 prev_close 参照，
+            # 第一条（padding行）不写入，只作参照
+            fetch_start = actual_start - timedelta(days=1)
+            rows = fetch_bj_stock_history(code, fetch_start, end_date)
 
             if rows:
                 # 直接从预取好的快照映射中取（无需逐只请求腾讯接口）

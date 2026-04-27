@@ -10,8 +10,8 @@ import com.quant.platform.backtest.mapper.BacktestTaskMapper;
 import com.quant.platform.backtest.mapper.ParamOptimizeReportMapper;
 import com.quant.platform.strategy.domain.StrategyDefinition;
 import com.quant.platform.strategy.service.StrategyService;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
@@ -32,7 +32,6 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class ParamOptimizeService {
 
     private final BacktestEngine backtestEngine;
@@ -43,8 +42,25 @@ public class ParamOptimizeService {
     private final ObjectMapper objectMapper;
 
     /** 注入 Spring 管理的异步执行器（与 @Async 使用同一个线程池） */
-    @Qualifier("backtestTaskExecutorService")
     private final ExecutorService backtestExecutor;
+
+    @Autowired
+    public ParamOptimizeService(
+            BacktestEngine backtestEngine,
+            BacktestTaskMapper taskMapper,
+            BacktestReportMapper reportMapper,
+            ParamOptimizeReportMapper optimizeReportMapper,
+            StrategyService strategyService,
+            ObjectMapper objectMapper,
+            @Qualifier("backtestTaskExecutorService") ExecutorService backtestExecutor) {
+        this.backtestEngine = backtestEngine;
+        this.taskMapper = taskMapper;
+        this.reportMapper = reportMapper;
+        this.optimizeReportMapper = optimizeReportMapper;
+        this.strategyService = strategyService;
+        this.objectMapper = objectMapper;
+        this.backtestExecutor = backtestExecutor;
+    }
 
     // 内存存储优化任务状态（轻量级，不写DB）
     private final ConcurrentHashMap<String, OptimizeJob> jobs = new ConcurrentHashMap<>();
