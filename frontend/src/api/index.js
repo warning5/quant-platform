@@ -54,8 +54,8 @@ export const factorApi = {
   getAllDefinitions: () => api.get('/factors', { params: { page: 0, size: 200 } }),
   monitor: () => api.get('/factors/monitor'),
   running: () => api.get('/factors/running'),
-  batchCompute: (factorCodes, startDate, endDate, incremental = true) =>
-    api.post('/factors/batch-compute', null, { params: { factorCodes: factorCodes.join(','), startDate, endDate, incremental } }),
+  batchCompute: (factorCodes, startDate, endDate, incremental = true, force = false) =>
+    api.post('/factors/batch-compute', null, { params: { factorCodes: factorCodes.join(','), startDate, endDate, incremental, force } }),
   // P1: 因子组合权重优化
   weightOptimize: (factorCodes, startDate, endDate, method = 'MARKOWITZ') =>
     api.post('/factors/weight-optimize', null, {

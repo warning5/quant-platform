@@ -137,6 +137,32 @@ public class StockScreenService {
             }
         }
 
+        // ── 2.6 MA 均线位置过滤（价格在 MA30/60/100 上方）──────────────
+        if (req.getMaPositionFilter() != null) {
+            ScreenRequest.MaPositionFilter mpf = req.getMaPositionFilter();
+            boolean needMaFilter = Boolean.TRUE.equals(mpf.getAboveMA30())
+                    || Boolean.TRUE.equals(mpf.getAboveMA60())
+                    || Boolean.TRUE.equals(mpf.getAboveMA100());
+            if (needMaFilter) {
+                // 将候选 symbol 转为带后缀格式（barMap key），批量计算均线位置
+                List<String> candidateList = new ArrayList<>(candidates);
+                Map<String, Map<String, Object>> maPositions =
+                        priceAdvisorService.batchCalcMaPositions(candidateList, screenDate);
+                candidates.removeIf(sym -> {
+                    Map<String, Object> pos = maPositions.get(sym);
+                    if (pos == null) return true; // 无数据，剔除
+                    if (Boolean.TRUE.equals(mpf.getAboveMA30())
+                            && !Boolean.TRUE.equals(pos.get("aboveMA30"))) return true;
+                    if (Boolean.TRUE.equals(mpf.getAboveMA60())
+                            && !Boolean.TRUE.equals(pos.get("aboveMA60"))) return true;
+                    if (Boolean.TRUE.equals(mpf.getAboveMA100())
+                            && !Boolean.TRUE.equals(pos.get("aboveMA100"))) return true;
+                    return false;
+                });
+                log.info("[Screen] After MA position filter: {} stocks remain", candidates.size());
+            }
+        }
+
         // ── 3. 加载各因子的截面数据，并进行极值处理、标准化 ────────────
         Map<String, Map<String, FactorValue>> factorData = new LinkedHashMap<>();
         Map<String, Integer> coverage = new LinkedHashMap<>();

@@ -10,6 +10,9 @@ import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.cache.CacheManager;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
@@ -50,6 +53,7 @@ public class DataUpdateService {
     private final StockInfoMapper stockInfoMapper;
     private final ClickHouseStockService clickHouseStockService;
     private final JdbcTemplate jdbcTemplate;
+    private final CacheManager cacheManager;
     /**
      * 正在运行的任务
      */
@@ -302,6 +306,10 @@ public class DataUpdateService {
             // 从活跃任务中移除（避免阻止新任务启动）
             activeTasks.remove(taskId);
             currentProcess = null;
+            // 任务完成后清除数据概览缓存
+            if (!"CANCELLED".equals(task.getStatus())) {
+                clearDataCoverageCache();
+            }
             broadcastStatus(task);
             log.info("[DataUpdate] 任务 {} 结束, 状态: {}", taskId, task.getStatus());
         }
@@ -515,6 +523,10 @@ public class DataUpdateService {
             if (endDate != null && !endDate.isEmpty()) {
                 cmd.add("--end-date");
                 cmd.add(endDate);
+            }
+            // force 参数
+            if (request.isForce()) {
+                cmd.add("--force");
             }
             return cmd;
         }
@@ -768,75 +780,92 @@ public class DataUpdateService {
     // ==================== 数据完整性检查 ====================
 
     /**
-     * 获取数据完整性概览
+     * 获取数据完整性概览（带缓存，5分钟有效）
+     * 优化：合并多个串行SQL为单次查询
      */
+    @Cacheable(value = "dataCoverage", key = "'overview'")
     public Map<String, Object> getDataCoverage() {
         Map<String, Object> result = new LinkedHashMap<>();
 
-        // 总体统计
+        // 总体统计（MySQL）
         long totalStocks = stockInfoMapper.selectCount(null);
-        long totalDailyRecords = clickHouseStockService.getTotalDailyCount();
 
-        // 最新交易日
-        LocalDate latestRecord = clickHouseStockService.getLatestTradeDate();
-        String latestTradeDate = latestRecord != null ? latestRecord.toString() : "无数据";
+        // ── ClickHouse 合并查询：一次SQL查出所有指标（排除指数） ─────────────
+        String mergedSql = """
+            SELECT 
+                COUNT(*) as total_records,
+                MIN(trade_date) as earliest_date,
+                MAX(trade_date) as latest_date,
+                -- 各市场记录数
+                countIf(code LIKE '6%' OR code LIKE '688%' OR code LIKE '689%') as sh_records,
+                countIf(code LIKE '0%' OR code LIKE '3%') as sz_records,
+                countIf(code LIKE '92%') as bj_records,
+                -- 各市场最新交易日
+                maxIf(trade_date, code LIKE '6%' OR code LIKE '688%' OR code LIKE '689%') as sh_latest,
+                maxIf(trade_date, code LIKE '0%' OR code LIKE '3%') as sz_latest,
+                maxIf(trade_date, code LIKE '92%') as bj_latest
+            FROM stock_daily
+            WHERE code NOT LIKE 'sh.%' AND code NOT LIKE 'sz.%'
+            """;
 
-        // 最早交易日
-        LocalDate earliestRecord = clickHouseStockService.getEarliestTradeDate();
-        String earliestTradeDate = earliestRecord != null ? earliestRecord.toString() : "无数据";
+        Map<String, Object> chData;
+        try {
+            List<Map<String, Object>> rows = clickHouseStockService.queryForList(mergedSql);
+            if (!rows.isEmpty()) {
+                chData = rows.get(0);
+            } else {
+                chData = Map.of();
+            }
+        } catch (Exception e) {
+            log.warn("[DataCoverage] ClickHouse合并查询失败: {}", e.getMessage());
+            chData = Map.of();
+        }
 
+        long totalDailyRecords = toLong(chData.get("total_records"));
+        String latestTradeDate = toDateStr(chData.get("latest_date"));
+        String earliestTradeDate = toDateStr(chData.get("earliest_date"));
+
+        // 概览
         Map<String, Object> overview = new LinkedHashMap<>();
         overview.put("totalStocks", totalStocks);
         overview.put("totalDailyRecords", totalDailyRecords);
         overview.put("latestTradeDate", latestTradeDate);
         overview.put("earliestTradeDate", earliestTradeDate);
 
-        // 各市场详细统计
+        // 各市场详细统计（MySQL查股票数，ClickHouse查日线数）
         List<Map<String, Object>> marketCoverage = new ArrayList<>();
-        for (String market : Arrays.asList("SH", "SZ", "BJ")) {
+        String[] markets = {"SH", "SZ", "BJ"};
+        String[] chRecordKeys = {"sh_records", "sz_records", "bj_records"};
+        String[] chDateKeys = {"sh_latest", "sz_latest", "bj_latest"};
+        String[][] marketPatterns = {
+            {"6", "688", "689"},
+            {"0", "3"},
+            {"92"}
+        };
+
+        for (int i = 0; i < markets.length; i++) {
+            String market = markets[i];
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("market", market);
 
-            // stock_info 中该市场股票总数
+            // stock_info 中该市场股票总数（MySQL）
             LambdaQueryWrapper<StockInfo> iw = new LambdaQueryWrapper<>();
             iw.eq(StockInfo::getMarket, market);
             long infoCount = stockInfoMapper.selectCount(iw);
             m.put("infoCount", infoCount);
 
-            // stock_daily 中该市场记录数（通过代码前缀判断市场）
-            String codePattern = switch (market) {
-                case "SH" -> "(code LIKE '6%')";
-                case "SZ" -> "(code LIKE '0%' OR code LIKE '3%')";
-                case "BJ" -> "(code LIKE '92%')";
-                default -> "1=1";
-            };
-            long dailyCount = clickHouseStockService.getDailyCountByCodePrefix(codePattern);
+            // ClickHouse 数据
+            long dailyCount = toLong(chData.get(chRecordKeys[i]));
             m.put("dailyRecords", dailyCount);
 
-            // 该市场最新交易日
-            String latestCodePattern = switch (market) {
-                case "SH" -> "(code LIKE '6%' OR code LIKE '688%' OR code LIKE '689%')";
-                case "SZ" -> "(code LIKE '0%' OR code LIKE '3%')";
-                case "BJ" -> "(code LIKE '92%')";
-                default -> "1=1";
-            };
-            LocalDate mLatestDate = null;
-            String latestDateSql = "SELECT MAX(trade_date) FROM stock_daily WHERE " + latestCodePattern;
-            Object latestObj = clickHouseStockService.queryForObject(latestDateSql);
-            if (latestObj != null) {
-                mLatestDate = LocalDate.parse(latestObj.toString());
-            }
-            m.put("latestDate", mLatestDate != null ? mLatestDate.toString() : "无数据");
+            String latestDateStr = toDateStr(chData.get(chDateKeys[i]));
+            m.put("latestDate", latestDateStr);
 
-            // 该市场最新交易日的股票数（使用COUNT DISTINCT去重，避免重复记录导致统计错误）
-            if (mLatestDate != null) {
-                String distinctPattern = switch (market) {
-                    case "SH" -> "(code LIKE '6%' OR code LIKE '688%' OR code LIKE '689%')";
-                    case "SZ" -> "(code LIKE '0%' OR code LIKE '3%')";
-                    case "BJ" -> "code LIKE '92%'";
-                    default -> "1=1";
-                };
-                long latestDayCount = clickHouseStockService.getDistinctCodeCount(mLatestDate, distinctPattern);
+            // 最新交易日覆盖股票数
+            if (latestDateStr != null && !latestDateStr.equals("无数据")) {
+                LocalDate latestDate = LocalDate.parse(latestDateStr);
+                String patternSql = buildCodePatternSql(marketPatterns[i]);
+                long latestDayCount = clickHouseStockService.getDistinctCodeCount(latestDate, patternSql);
                 m.put("latestDayCount", latestDayCount);
             } else {
                 m.put("latestDayCount", 0);
@@ -844,10 +873,48 @@ public class DataUpdateService {
 
             marketCoverage.add(m);
         }
+
         result.put("overview", overview);
         result.put("markets", marketCoverage);
 
+        log.info("[DataCoverage] 数据概览查询完成，缓存5分钟");
         return result;
+    }
+
+    /**
+     * 数据更新完成后清除缓存
+     */
+    @CacheEvict(value = "dataCoverage", allEntries = true)
+    public void evictDataCoverageCache() {
+        log.info("[DataCoverage] 缓存已清除");
+    }
+
+    // ── 辅助方法 ────────────────────────────────────────────────────
+
+    private long toLong(Object obj) {
+        if (obj == null) return 0L;
+        if (obj instanceof Number) return ((Number) obj).longValue();
+        try {
+            return Long.parseLong(obj.toString());
+        } catch (NumberFormatException e) {
+            return 0L;
+        }
+    }
+
+    private String toDateStr(Object obj) {
+        if (obj == null) return "无数据";
+        String str = obj.toString();
+        return str.isEmpty() ? "无数据" : str;
+    }
+
+    private String buildCodePatternSql(String[] prefixes) {
+        StringBuilder sb = new StringBuilder("(");
+        for (int i = 0; i < prefixes.length; i++) {
+            if (i > 0) sb.append(" OR ");
+            sb.append("code LIKE '").append(prefixes[i]).append("%'");
+        }
+        sb.append(")");
+        return sb.toString();
     }
 
     /**
@@ -1028,6 +1095,21 @@ public class DataUpdateService {
             """.formatted(marketCondition, date);
 
         return jdbcTemplate.queryForList(sql);
+    }
+
+    /**
+     * 手动清除数据概览缓存
+     */
+    public void clearDataCoverageCache() {
+        try {
+            var cache = cacheManager.getCache("dataCoverage");
+            if (cache != null) {
+                cache.clear();
+                log.info("[DataCoverage] 缓存已清除");
+            }
+        } catch (Exception e) {
+            log.warn("[DataCoverage] 清除缓存失败: {}", e.getMessage());
+        }
     }
 
     @PreDestroy

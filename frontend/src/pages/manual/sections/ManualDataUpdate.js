@@ -24,7 +24,7 @@ export default function ManualDataUpdate() {
       <Title level={4}>快速操作</Title>
       <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
         <Col xs={24} md={6}>
-          <Card size="small" bodyStyle={{ padding: '12px 16px' }}>
+          <Card size="small" styles={{ body: { padding: '12px 16px' } }}>
             <Text strong style={{ fontSize: 14, display: 'block', marginBottom: 8 }}>
               📊 日常行情更新
             </Text>
@@ -35,7 +35,7 @@ export default function ManualDataUpdate() {
           </Card>
         </Col>
         <Col xs={24} md={6}>
-          <Card size="small" bodyStyle={{ padding: '12px 16px' }}>
+          <Card size="small" styles={{ body: { padding: '12px 16px' } }}>
             <Text strong style={{ fontSize: 14, display: 'block', marginBottom: 8 }}>
               🔄 断点续传
             </Text>
@@ -46,7 +46,7 @@ export default function ManualDataUpdate() {
           </Card>
         </Col>
         <Col xs={24} md={6}>
-          <Card size="small" bodyStyle={{ padding: '12px 16px' }}>
+          <Card size="small" styles={{ body: { padding: '12px 16px' } }}>
             <Text strong style={{ fontSize: 14, display: 'block', marginBottom: 8 }}>
               📈 仅更新日线
             </Text>
@@ -57,7 +57,7 @@ export default function ManualDataUpdate() {
           </Card>
         </Col>
         <Col xs={24} md={6}>
-          <Card size="small" bodyStyle={{ padding: '12px 16px' }}>
+          <Card size="small" styles={{ body: { padding: '12px 16px' } }}>
             <Text strong style={{ fontSize: 14, display: 'block', marginBottom: 8 }}>
               💰 财务数据更新
             </Text>
@@ -157,6 +157,7 @@ export default function ManualDataUpdate() {
       <Table 
         size="small"
         pagination={false}
+        rowKey="type"
         columns={[
           { title: '数据类型', dataIndex: 'type', key: 'type', width: 120 },
           { title: '主数据源', dataIndex: 'primary', key: 'primary', width: 150 },

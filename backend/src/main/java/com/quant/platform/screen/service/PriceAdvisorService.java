@@ -57,8 +57,8 @@ public class PriceAdvisorService {
         String code = symbol.contains(".") ? symbol.substring(0, symbol.indexOf('.')) : symbol;
         double techWeight = 1.0 - valuationWeight;
 
-        // 1. 加载近120日行情
-        LocalDate histStart = screenDate.minusDays(120);
+        // 1. 加载近180日行情（保证 MA100 有足够数据）
+        LocalDate histStart = screenDate.minusDays(180);
         List<StockDaily> history = clickHouseStockService.getStockDaily(code, histStart, screenDate);
 
         if (history.isEmpty()) return null;
@@ -139,20 +139,30 @@ public class PriceAdvisorService {
             return levels;
         }
 
-        // 取最近最多60条
-        int startIdx = Math.max(0, history.size() - 60);
-        List<StockDaily> recent = history.subList(startIdx, history.size());
+        // 使用完整 history（最多180条），保证 MA100 精度
+        List<StockDaily> recent = history;
 
         double close = currentClose.doubleValue();
 
-        // MA5, MA10, MA20
-        double ma5 = calcMA(recent, 5);
+        // MA5, MA10, MA20, MA30, MA60, MA100
+        double ma5  = calcMA(recent, 5);
         double ma10 = calcMA(recent, 10);
         double ma20 = calcMA(recent, 20);
+        double ma30 = calcMA(recent, 30);
+        double ma60 = calcMA(recent, 60);
+        double ma100 = calcMA(recent, 100);
 
-        levels.put("MA5", round2(ma5));
+        levels.put("MA5",  round2(ma5));
         levels.put("MA10", round2(ma10));
         levels.put("MA20", round2(ma20));
+        levels.put("MA30", round2(ma30));
+        levels.put("MA60", round2(ma60));
+        levels.put("MA100", round2(ma100));
+
+        // 均线多头排列标记（close 在各均线上方为 true）
+        levels.put("aboveMA30",  close >= ma30  && ma30  > 0);
+        levels.put("aboveMA60",  close >= ma60  && ma60  > 0);
+        levels.put("aboveMA100", close >= ma100 && ma100 > 0);
 
         // 布林带下轨 (20日均值 - 2×20日标准差)
         double bollLower = calcBollLower(recent, 20);
@@ -185,6 +195,39 @@ public class PriceAdvisorService {
         levels.put("suggestTechPrice", round2(techPrice));
 
         return levels;
+    }
+
+    /**
+     * 批量计算股票的均线位置（供 StockScreenService 做 MA 位置过滤使用）
+     * 返回 symbol -> {ma30, ma60, ma100, aboveMA30, aboveMA60, aboveMA100}
+     */
+    public Map<String, Map<String, Object>> batchCalcMaPositions(List<String> symbols, LocalDate screenDate) {
+        Map<String, Map<String, Object>> result = new LinkedHashMap<>();
+        LocalDate histStart = screenDate.minusDays(180);
+        for (String symbol : symbols) {
+            try {
+                String code = symbol.contains(".") ? symbol.substring(0, symbol.indexOf('.')) : symbol;
+                List<StockDaily> history = clickHouseStockService.getStockDaily(code, histStart, screenDate);
+                if (history.isEmpty()) continue;
+                StockDaily today = history.get(history.size() - 1);
+                if (today.getClosePrice() == null || today.getClosePrice().doubleValue() <= 0) continue;
+                double close = today.getClosePrice().doubleValue();
+                double ma30  = calcMA(history, 30);
+                double ma60  = calcMA(history, 60);
+                double ma100 = calcMA(history, 100);
+                Map<String, Object> pos = new LinkedHashMap<>();
+                pos.put("ma30",  round2(ma30));
+                pos.put("ma60",  round2(ma60));
+                pos.put("ma100", round2(ma100));
+                pos.put("aboveMA30",  close >= ma30  && ma30  > 0);
+                pos.put("aboveMA60",  close >= ma60  && ma60  > 0);
+                pos.put("aboveMA100", close >= ma100 && ma100 > 0);
+                result.put(symbol, pos);
+            } catch (Exception e) {
+                log.warn("MA position calc failed for {}: {}", symbol, e.getMessage());
+            }
+        }
+        return result;
     }
 
     /**

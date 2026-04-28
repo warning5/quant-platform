@@ -605,7 +605,7 @@ public class ClickHouseStockService {
         String sql = "SELECT DISTINCT trade_date FROM stock_daily ORDER BY trade_date DESC LIMIT ?";
         try (Connection conn = getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setInt(1, Math.min(limit, 500));
+            stmt.setInt(1, Math.min(limit, 10000));
             try (ResultSet rs = stmt.executeQuery()) {
                 List<String> result = new ArrayList<>();
                 while (rs.next()) result.add(rs.getString("trade_date"));
@@ -795,7 +795,7 @@ public class ClickHouseStockService {
         LambdaQueryWrapper<StockDaily> wrapper = new LambdaQueryWrapper<>();
         wrapper.groupBy(StockDaily::getTradeDate)
                .orderByDesc(StockDaily::getTradeDate)
-               .last("LIMIT " + Math.min(limit, 500))
+               .last("LIMIT " + Math.min(limit, 10000))
                .select(StockDaily::getTradeDate);
         return stockDailyMapper.selectList(wrapper).stream()
                 .map(d -> d.getTradeDate().toString())

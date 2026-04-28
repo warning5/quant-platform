@@ -1252,6 +1252,50 @@ public class BacktestEngine {
             plRatio = loses > 0 && avgLoss != 0 ? Math.abs(avgWin / avgLoss) : 1.25;
         }
 
+        // ── 已实现收益曲线（按交易配对，逐日累计）────────────────────────────
+        // BUY 时记录成本；SELL/STOP_LOSS_SELL 时计算已实现PnL并按日期汇总
+        List<Map<String, Object>> realizedCurve = new ArrayList<>();
+        {
+            double initialCapitalLocal = result.initialCapital();
+            Map<String, Double> buyCostMap  = new HashMap<>();   // symbol -> 买入成本（含手续费）
+            Map<String, Double> buySharesMap = new HashMap<>();  // symbol -> 持有股数
+            Map<String, Double> dailyRealizedPnl = new TreeMap<>();  // date -> 当日新增已实现PnL
+            for (Map<String, Object> t : allTrades) {
+                String sym    = (String) t.get("symbol");
+                String action = (String) t.get("action");
+                double tTotal = t.get("total") != null ? ((Number) t.get("total")).doubleValue() : 0;
+                double tFee   = t.get("fee")   != null ? ((Number) t.get("fee")).doubleValue()   : 0;
+                String tDate  = (String) t.get("date");
+                if ("BUY".equals(action)) {
+                    // 买入成本 = 金额 + 手续费
+                    buyCostMap.merge(sym, tTotal + tFee, Double::sum);
+                    double shares = t.get("amount") != null ? ((Number) t.get("amount")).doubleValue() : 0;
+                    buySharesMap.merge(sym, shares, Double::sum);
+                } else if (("SELL".equals(action) || "STOP_LOSS_SELL".equals(action))
+                        && buyCostMap.containsKey(sym)) {
+                    // 已实现 = 卖出金额(扣费后) - 对应成本
+                    double proceeds = tTotal - tFee;
+                    double cost     = buyCostMap.remove(sym);
+                    buySharesMap.remove(sym);
+                    double pnl = proceeds - cost;
+                    dailyRealizedPnl.merge(tDate, pnl, Double::sum);
+                }
+            }
+            // 对 equityCurve 的每个日期，前向填充已实现PnL累计值 → 净值
+            double cumPnl = 0;
+            for (Map<String, Object> ep : result.equityCurve()) {
+                String d = (String) ep.get("date");
+                if (dailyRealizedPnl.containsKey(d)) {
+                    cumPnl += dailyRealizedPnl.get(d);
+                }
+                Map<String, Object> rp = new HashMap<>();
+                rp.put("date", d);
+                // 已实现净值 = 1 + 累计已实现PnL / 初始资金
+                rp.put("value", round(1.0 + cumPnl / initialCapitalLocal, 6));
+                realizedCurve.add(rp);
+            }
+        }
+
         // ── 超额收益分析（参考 baostock 用户案例的 Alpha 分析表）────────────────
         double excessMean = 0, excessStd = 0, excessWinRate = 0.5, excessMaxDrawdown = 0, alphaContribution = 0;
         if (!excessReturns.isEmpty()) {
@@ -1320,6 +1364,7 @@ public class BacktestEngine {
                 .tradeLogJson(objectMapper.writeValueAsString(result.tradeLog().stream()
                         .limit(500)
                         .collect(Collectors.toList())))
+                .realizedCurveJson(objectMapper.writeValueAsString(realizedCurve))
                 .build();
     }
 

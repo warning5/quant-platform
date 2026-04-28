@@ -3,3 +3,5 @@
 /backend/target/
 /.idea/
 /backend/logs/
+/scripts/.codebuddy/
+/scripts/.workbuddy/

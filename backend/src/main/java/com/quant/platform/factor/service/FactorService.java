@@ -372,7 +372,7 @@ public class FactorService {
      * @return 已提交的因子代码列表
      */
     public Map<String, Object> triggerBatchCompute(List<String> factorCodes, LocalDate startDate, LocalDate endDate,
-                                                     boolean incremental) {
+                                                     boolean incremental, boolean force) {
         List<String> submitted = new java.util.ArrayList<>();
         List<String> skipped = new java.util.ArrayList<>();
         List<String> symbols = marketDataService.getAllSymbols();
@@ -400,7 +400,7 @@ public class FactorService {
 
             if (incremental) {
                 LocalDate latestDate = computeEngine.findLatestDate(code);
-                if (latestDate != null && !latestDate.isBefore(endDate)) {
+                if (!force && latestDate != null && !latestDate.isBefore(endDate)) {
                     skipped.add(code + "(已计算到" + latestDate + ")");
                     continue;
                 }

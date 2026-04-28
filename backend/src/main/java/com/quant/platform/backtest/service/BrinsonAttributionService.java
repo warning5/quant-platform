@@ -151,6 +151,7 @@ public class BrinsonAttributionService {
             }
 
             // 计算全市场基准行业权重和收益率（使用持仓期的中间日期的数据）
+            // midDate 可能落在非交易日（周末/节假日），需要回溯到最近交易日
             LocalDate midDate = start.plusDays(Math.min(3, java.time.temporal.ChronoUnit.DAYS.between(start, end) / 2));
             Map<String, Double> benchmarkIndustryWeight = new HashMap<>();
             Map<String, Double> benchmarkIndustryReturn = new HashMap<>();
@@ -158,7 +159,23 @@ public class BrinsonAttributionService {
             computeBenchmarkIndustryData(midDate, benchmarkIndustryWeight, benchmarkIndustryReturn);
 
             if (benchmarkIndustryWeight.isEmpty()) {
-                log.warn("无法获取 {} 全市场行业数据，跳过该期归因", midDate);
+                log.warn("无法获取 {} 全市场行业数据，尝试回溯到最近交易日", midDate);
+                // 回溯：向前查找最近的交易日，最多尝试5天（覆盖最长假期）
+                LocalDate adjusted = null;
+                for (int back = 1; back <= 5; back++) {
+                    adjusted = midDate.minusDays(back);
+                    benchmarkIndustryWeight.clear();
+                    benchmarkIndustryReturn.clear();
+                    computeBenchmarkIndustryData(adjusted, benchmarkIndustryWeight, benchmarkIndustryReturn);
+                    if (!benchmarkIndustryWeight.isEmpty()) {
+                        log.info("回溯成功: {} -> {} (前{}天)", midDate, adjusted, back);
+                        break;
+                    }
+                }
+            }
+
+            if (benchmarkIndustryWeight.isEmpty()) {
+                log.warn("无法获取 {} 全市场行业数据（含回溯），跳过该期归因", midDate);
                 continue;
             }
 

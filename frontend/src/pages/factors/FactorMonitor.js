@@ -419,9 +419,10 @@ function FactorMonitor() {
       const startDate = vals.dateRange?.[0]?.format('YYYY-MM-DD');
       const endDate = vals.dateRange?.[1]?.format('YYYY-MM-DD');
       const incremental = vals.incremental ?? true;
+      const force = vals.force ?? false;
 
       setComputeLoading(true);
-      const res = await factorApi.batchCompute(factorCodes, startDate, endDate, incremental);
+      const res = await factorApi.batchCompute(factorCodes, startDate, endDate, incremental, force);
       const result = res;
       message.success(
         `已提交 ${result.submitted?.length || 0} 个因子，跳过 ${result.skipped?.length || 0} 个`
@@ -843,7 +844,7 @@ function FactorMonitor() {
         />
         <Form form={form} layout="vertical" initialValues={{
           incremental: true,
-          dateRange: [dayjs('2025-01-01'), dayjs()],
+          dateRange: [dayjs('2019-01-02'), dayjs()],
           factorCodes: pendingFactors.slice(0, 8).map(f => f.code),
         }}>
           <Form.Item label="选择因子" name="factorCodes" rules={[
@@ -893,7 +894,10 @@ function FactorMonitor() {
           </Row>
           <Divider style={{ margin: '12px 0' }} />
           <Form.Item label="计算日期范围" name="dateRange" rules={[{ required: true }]}>
-            <RangePicker style={{ width: '100%' }} />
+            <RangePicker
+              style={{ width: '100%' }}
+              disabledDate={(current) => current && (current.isBefore(dayjs('2019-01-02')) || current.isAfter(dayjs()))}
+            />
           </Form.Item>
           <Form.Item
             label="增量计算（跳过已有数据的日期）"
@@ -901,6 +905,13 @@ function FactorMonitor() {
             valuePropName="checked"
           >
             <Switch checkedChildren="增量" unCheckedChildren="全量" />
+          </Form.Item>
+          <Form.Item
+            label="强制重算（忽略已有数据，全量覆盖）"
+            name="force"
+            valuePropName="checked"
+          >
+            <Switch checkedChildren="强制" unCheckedChildren="正常" />
           </Form.Item>
         </Form>
       </Modal>

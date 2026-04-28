@@ -663,19 +663,90 @@ class StockDailyDB:
                 total_fixed += len(updates)
         return total_fixed
 
-    def _ch_fix_change(self, code=None, stock_list=None):
-        """ClickHouse: 补全 change 字段。
-
-        策略: 先 DELETE 该 code 全量数据，再重新 INSERT 全量（包含修复值）。
-        全量写入确保 (code, trade_date) 唯一，无重复。
+    def _ch_wait_mutations_done(self, max_wait=600, poll_interval=10):
         """
+        等待当前 stock 数据库所有未完成的 mutation 全部完成。
+        ClickHouse ALTER TABLE UPDATE/DELETE 是异步的，需要等待才能安全提交新 mutation。
+        健壮版：带重试，即使数据库繁忙也不会卡死。
+        """
+        import requests
+        start = time.time()
+        consecutive_errors = 0
+        while True:
+            try:
+                r = requests.post(
+                    "http://localhost:8123/",
+                    params={
+                        "user": CLICKHOUSE_CONFIG["username"],
+                        "password": CLICKHOUSE_CONFIG["password"],
+                        "database": "stock",
+                    },
+                    data=b"SELECT count() FROM system.mutations WHERE is_done = 0 AND database = 'stock'",
+                    timeout=120,
+                )
+                if r.status_code == 200:
+                    count = int(r.text.strip())
+                    consecutive_errors = 0
+                    if count == 0:
+                        return
+                    elapsed = time.time() - start
+                    print(f"    [mutation] 等待中，剩余 {count} 个未完成 ({elapsed:.0f}s)")
+                else:
+                    consecutive_errors += 1
+            except Exception as e:
+                consecutive_errors += 1
+                if consecutive_errors >= 5:
+                    elapsed = time.time() - start
+                    print(f"    [mutation] 查询异常连续 {consecutive_errors} 次，超时退出 ({elapsed:.0f}s)")
+                    return
+            if time.time() - start > max_wait:
+                print(f"    [mutation] 等待超时（>{max_wait}s），继续执行")
+                return
+            time.sleep(poll_interval)
+
+    def _ch_command_raw(self, sql):
+        """通过 HTTP 接口直接执行 ALTER TABLE mutation，绕过 max_query_size 限制。
+
+        clickhouse_connect 的 command() 无法在 SQL 解析前传递 max_query_size，
+        改用 requests.post 通过 HTTP 查询参数设置。
+        """
+        import requests
+        r = requests.post(
+            "http://localhost:8123/",
+            params={
+                "max_query_size": "10485760",
+                "max_ast_elements": "1048576",
+                "user": CLICKHOUSE_CONFIG["username"],
+                "password": CLICKHOUSE_CONFIG["password"],
+                "database": CLICKHOUSE_CONFIG["database"],
+            },
+            data=sql.encode("utf-8"),
+            timeout=120,
+        )
+        if r.status_code != 200:
+            raise RuntimeError(f"ClickHouse HTTP {r.status_code}: {r.text[:500]}")
+        return r.text
+
+    def _ch_fix_change(self, code=None, stock_list=None):
+        """ClickHouse: 补全 change 字段（window function + 逐只更新）。
+
+        策略:
+          1. 用 SELECT window function 一次性计算所有缺失行的正确值
+          2. 按 code 分组，每只股票单独 ALTER TABLE UPDATE
+          3. 通过 HTTP 查询参数设置 max_query_size/max_ast_elements 避免大 SQL 被拒
+
+        性能: 全表 ~1-2分钟（mutation 异步）
+        """
+        table = self.CH_TABLE
+
+        # Step 1: 查出需要修复的 code 列表
         if code:
             codes = [code]
         elif stock_list:
             codes = [s[0] for s in stock_list]
         else:
             r = self.ch_client.query(
-                f"SELECT DISTINCT code FROM {self.CH_TABLE} "
+                f"SELECT DISTINCT code FROM {table} "
                 f"WHERE pre_close IS NULL OR change_percent IS NULL OR change_amount IS NULL "
                 f"ORDER BY code"
             )
@@ -685,96 +756,84 @@ class StockDailyDB:
             return 0
 
         total_fixed = 0
-        for c in codes:
-            # Step 1: 读该 code 全部行（ORDER BY trade_date 保证连续计算正确）
-            r = self.ch_client.query(
-                f"SELECT * FROM {self.CH_TABLE} WHERE code = %(code)s ORDER BY trade_date",
-                parameters={"code": c},
-            )
-            rows = r.result_rows
-            if len(rows) < 2:
-                continue
 
-            # 解析列名
-            raw_cols = r.column_names
-            col_names = [c[0] if isinstance(c, (list, tuple)) else c for c in raw_cols]
+        # 分批 SELECT，每批 50 只，避免结果集过大
+        batch_size = 50
+        for i in range(0, len(codes), batch_size):
+            batch = codes[i:i + batch_size]
+            escaped_codes = "', '".join(batch)
+            where_clause = f"code IN ('{escaped_codes}')"
 
-            # Step 2: 计算修复值，并构造全量重新写入的行列表
-            rows_to_insert = []
-            prev_close = None
-            fixed_count = 0
+            batch_num = i // batch_size + 1
+            total_batches = (len(codes) + batch_size - 1) // batch_size
+            print(f"  [fix_change] 处理第 {batch_num}/{total_batches} 批 ({len(batch)} 只) ...")
 
-            for row in rows:
-                row_dict = {col_names[i]: row[i] for i in range(len(col_names))}
+            # Step 2: 用 window function 一次性计算本批所有行的正确值
+            calc_sql = f"""
+                SELECT code, trade_date,
+                       lagInFrame(close_price, 1)
+                           OVER (PARTITION BY code ORDER BY trade_date) AS new_pre_close,
+                       close_price,
+                       round(
+                           (close_price - lagInFrame(close_price, 1)
+                               OVER (PARTITION BY code ORDER BY trade_date))
+                           / (lagInFrame(close_price, 1)
+                               OVER (PARTITION BY code ORDER BY trade_date)) * 100, 2
+                       ) AS new_change_pct,
+                       round(
+                           close_price - lagInFrame(close_price, 1)
+                               OVER (PARTITION BY code ORDER BY trade_date), 2
+                       ) AS new_change_amt
+                FROM {table}
+                WHERE {where_clause}
+                  AND close_price IS NOT NULL
+            """
+            calc_result = self.ch_client.query(calc_sql)
 
-                close_p = float(row_dict["close_price"]) if row_dict.get("close_price") else None
-                cur_pre = float(row_dict["pre_close"]) if row_dict.get("pre_close") else None
-                cur_pct = float(row_dict["change_percent"]) if row_dict.get("change_percent") else None
-                cur_amt = float(row_dict["change_amount"]) if row_dict.get("change_amount") else None
+            # Step 3: 按 code 分组
+            from collections import defaultdict
+            code_rows = defaultdict(list)
+            for row in calc_result.result_rows:
+                r_code = row[0]
+                new_pre = row[2]
+                if new_pre is not None and float(new_pre) > 0:
+                    code_rows[r_code].append({
+                        'date': str(row[1]),
+                        'pre_close': round(float(new_pre), 2),
+                        'change_percent': round(float(row[4]), 2),
+                        'change_amount': round(float(row[5]), 2),
+                    })
 
-                new_pre, new_pct, new_amt = cur_pre, cur_pct, cur_amt
+            # Step 4: 每只股票合并为 1 个 mutation（减少并发数，避免 TOO_MANY_MUTATIONS）
+            for c, updates in code_rows.items():
+                whens_pre = []
+                whens_pct = []
+                whens_amt = []
+                for u in updates:
+                    date_str = u['date']
+                    whens_pre.append(f"WHEN (code='{c}' AND trade_date='{date_str}') THEN {u['pre_close']}")
+                    whens_pct.append(f"WHEN (code='{c}' AND trade_date='{date_str}') THEN {u['change_percent']}")
+                    whens_amt.append(f"WHEN (code='{c}' AND trade_date='{date_str}') THEN {u['change_amount']}")
 
-                if prev_close is not None and close_p is not None:
-                    exp_pct = round((close_p - prev_close) / prev_close * 100, 2)
-                    exp_amt = round(close_p - prev_close, 2)
-                    if cur_pct is None or cur_pct == 0:
-                        new_pct = exp_pct
-                        fixed_count += 1
-                    if cur_amt is None or cur_amt == 0:
-                        new_amt = exp_amt
-                        fixed_count += 1
-                    if cur_pre is None or cur_pre == 0:
-                        new_pre = prev_close
-                        fixed_count += 1
-                elif close_p is not None and prev_close is None:
-                    # 第一行：prev_close 无历史数据。用 pctChg 反算；
-                    # pctChg=0 时 fallback 为 pre_close=close（跨年/长假首日常见）
-                    if cur_pct is not None and cur_pct != 0:
-                        new_pre = round(close_p / (1 + cur_pct / 100), 2)
-                        new_pct = cur_pct
-                        fixed_count += 1
-                    elif cur_pre is None or cur_pre == 0:
-                        new_pre = close_p  # fallback：平盘，pre_close=close
-                        new_pct = 0.0
-                        fixed_count += 1
-
-                # 构造重新写入的行（只修改变动的字段，update_time 由 _ch_insert_rows 用当前时间填充）
-                new_dict = dict(row_dict)
-                new_dict["pre_close"] = new_pre
-                new_dict["change_percent"] = new_pct
-                new_dict["change_amount"] = new_amt
-                new_dict.pop("update_time", None)  # 触发 _ch_insert_rows 使用 now_dt
-                rows_to_insert.append(new_dict)
-
-                if close_p is not None:
-                    prev_close = close_p
-
-            if fixed_count > 0:
-                # Step 3: 先 DELETE 该 code 的所有旧数据
-                self.ch_client.command(
-                    f"ALTER TABLE {self.CH_TABLE} DELETE WHERE code = %(code)s",
-                    parameters={"code": c},
+                # 三字段合一，一次 mutation
+                update_sql = (
+                    f"ALTER TABLE {table} UPDATE "
+                    f"pre_close = CASE {' '.join(whens_pre)} ELSE pre_close END, "
+                    f"change_percent = CASE {' '.join(whens_pct)} ELSE change_percent END, "
+                    f"change_amount = CASE {' '.join(whens_amt)} ELSE change_amount END "
+                    f"WHERE code = '{c}'"
                 )
-                # 等待 mutation 完成（超时 120s）
-                for _ in range(120):
-                    r_check = self.ch_client.query(
-                        f"SELECT count() FROM {self.CH_TABLE} WHERE code = %(code)s",
-                        parameters={"code": c},
-                    )
-                    if r_check.result_rows[0][0] == 0:
-                        break
-                    time.sleep(1)
-                else:
-                    print(f"  [WARN] {c}: DELETE mutation 超时，跳过")
-                    continue
+                try:
+                    self._ch_command_raw(update_sql)
+                except Exception as e:
+                    print(f"  [WARN] mutation 异常 (code={c}): {e}")
 
-                # Step 4: 重新 INSERT 全量行（包含修复值）
-                self._ch_insert_rows(rows_to_insert)
-                total_fixed += fixed_count
-                print(f"  [fix_change] {c}: 修复 {fixed_count} 个字段，DELETE 后重新写入 {len(rows_to_insert)} 条")
+                total_fixed += len(updates)
 
-            time.sleep(0.01)
+            # 批次之间等待 mutation 完成，避免积压超过 ClickHouse 并发限制（默认 1000）
+            self._ch_wait_mutations_done()
 
+        print(f"  [fix_change] 完成: 共修复 {total_fixed:,} 条记录")
         return total_fixed
 
     def get_missing_pe_pb_dates(self, code):

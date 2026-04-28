@@ -177,8 +177,8 @@ def fetch_qq_snapshot_batch(codes_markets, batch_size=100, delay=0.1):
 def build_daily_rows(db, code, name, market, rows, snapshot=None):
     """将腾讯接口数据转换为 db_helper.upsert_daily() 需要的 row list
 
-    第一条记录作为 prev_close 参照不写入，从第二条开始写入。
-    调用方已将查询范围往前扩1天以确保有参照行。
+    当 rows 只有1条时（单日查询场景），不跳过，直接写入（pre_close 留空后续由
+    field_completer 补全）。当 rows >= 2 条时，第一条作为 prev_close 参照不写入。
 
     参数:
         snapshot: {"pe_ttm": ..., "pb": ...}
@@ -188,21 +188,48 @@ def build_daily_rows(db, code, name, market, rows, snapshot=None):
     if not rows:
         return []
 
-    # 第一条作为 prev_close 参照，不写入
-    first_close = to_float(rows[0][2])
-    prev_close = first_close
-
     # 腾讯快照值（北交所无历史估值，用当前值填所有交易日）
     snap_pe = snapshot.get("pe_ttm") if snapshot else None
     snap_pb = snapshot.get("pb") if snapshot else None
 
     result = []
+    prev_close = None  # 初始无参照
+
+    # 只有1条时直接写入，不需要 prev_close 参照行
+    if len(rows) == 1:
+        row = rows[0]
+        close_p = to_float(row[2])
+        amount = to_float(row[8]) if len(row) > 8 else None
+        if amount is not None:
+            amount = amount * 10000  # 万元→元
+        result.append({
+            "code": code,
+            "name": name,
+            "trade_date": row[0],
+            "open_price": to_float(row[1]),
+            "close_price": close_p,
+            "high_price": to_float(row[3]),
+            "low_price": to_float(row[4]),
+            "pre_close": None,  # 后续由 field_completer 补全
+            "volume": to_int(row[5]),
+            "amount": amount,
+            "change_percent": None,
+            "change_amount": None,
+            "turnover_rate": to_float(row[7]) if len(row) > 7 else None,
+            "pe_ttm": snap_pe,
+            "pb": snap_pb,
+        })
+        return result
+
+    # 2条及以上：第一条作为 prev_close 参照，不写入
+    prev_close = to_float(rows[0][2])
+
     for i, row in enumerate(rows):
+        if i == 0:
+            continue  # skip padding 行
+
         trade_date = row[0]
         close_p = to_float(row[2])
-        if i == 0:
-            prev_close = close_p  # padding 行：用它更新 prev_close，继续
-            continue
 
         # 计算涨跌幅和涨跌额
         if prev_close is not None and prev_close != 0 and close_p is not None:
@@ -324,9 +351,8 @@ def main():
             else:
                 actual_start = start_date
 
-            # 往前扩1天：让腾讯返回前一日 close 作为 prev_close 参照，
-            # 第一条（padding行）不写入，只作参照
-            fetch_start = actual_start - timedelta(days=1)
+            # 往前扩3天：确保跨周末/节假日时能获取到最近一个交易日作为 prev_close 参照
+            fetch_start = actual_start - timedelta(days=3)
             rows = fetch_bj_stock_history(code, fetch_start, end_date)
 
             if rows:

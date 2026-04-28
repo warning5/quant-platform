@@ -116,7 +116,7 @@ export function ManualStrategies() {
       {/* 选股流程 */}
       <Title level={4}>选股流程</Title>
       <Steps
-        current={4}
+        current={5}
         items={[
           { title: '选择组合', description: '从12个预设组合中选择，或自定义配置因子+权重' },
           { title: '设置日期', description: '选择选股日期（需有行情数据和因子数据）' },
@@ -304,12 +304,13 @@ export function ManualBacktests() {
       <Title level={4}>回测报告内容说明</Title>
       <Alert type="info" showIcon style={{ marginBottom: 12 }}
         message="完整回测报告包含以下内容"
-        description="绩效概览（核心指标卡片）→ 收益分析（净值曲线、超额曲线）→ 风险分析（回撤曲线、持仓分析）→ 交易记录（每次买卖明细）→ 归因分析（因子暴露与收益归因）"
+        description="绩效概览（核心指标卡片）→ 收益分析（净值曲线、超额曲线、已实现收益曲线）→ 风险分析（回撤曲线、持仓分析）→ 交易记录（每次买卖明细）→ 归因分析（因子暴露与收益归因）"
       />
       <Row gutter={[12, 12]}>
         {[
           { title: '净值曲线', icon: '📈', desc: '展示策略净值随时间的变化，与基准净值对比。曲线越平滑、收益越高，策略越好。' },
           { title: '超额收益曲线', icon: '📊', desc: '策略净值 - 基准净值，反映策略相对于市场的超额收益能力。持续在 0 轴上方说明持续跑赢基准。' },
+          { title: '已实现收益曲线', icon: '💰', desc: '仅统计已平仓交易的累计收益率（剔除浮盈浮亏），更真实反映已实现盈利。曲线为虚线，仅在发生实际卖出时更新，其余日期前向填充。' },
           { title: '回撤曲线', icon: '📉', desc: '展示从每个历史高点到当时的亏损幅度。回撤越大、持续时间越长，策略风险越高。' },
           { title: '持仓分析', icon: '🏦', desc: '展示各持仓的权重分布、换手率、持仓周期等，帮助了解策略的交易特征。' },
           { title: '交易明细', icon: '📋', desc: '每次买入/卖出的日期、股票、价格、数量、手续费、盈亏金额等完整记录。' },
@@ -322,6 +323,28 @@ export function ManualBacktests() {
             </Card>
           </Col>
         ))}
+      </Row>
+
+      <Title level={5} style={{ marginTop: 16 }}>已实现收益曲线 — 解读要点</Title>
+      <Row gutter={[12, 12]}>
+        <Col xs={24} md={12}>
+          <Card size="small" type="inner" title="与净值曲线的区别">
+            <Paragraph style={{ fontSize: 12, margin: 0 }}>
+              <Text strong>净值曲线</Text> = 已平仓盈亏 + 当前持仓浮盈浮亏（含未实现盈亏）。<br/>
+              <Text strong>已实现收益曲线</Text> = 仅已平仓交易的盈亏（不含持仓浮盈）。<br/><br/>
+              当策略持有大量未平仓仓位时，两条曲线会出现明显偏离。策略若处于浮盈状态但已平仓部分亏损，已实现曲线会低于净值曲线。
+            </Paragraph>
+          </Card>
+        </Col>
+        <Col xs={24} md={12}>
+          <Card size="small" type="inner" title="实战意义">
+            <Paragraph style={{ fontSize: 12, margin: 0 }}>
+              <Text strong>避免"纸面富贵"：</Text>净值新高但已实现收益为负，说明盈利全靠未平仓持仓，存在回撤风险。<br/><br/>
+              <Text strong>配对精准：</Text>系统按 FIFO（先进先出）原则配对买卖交易，每笔卖出精确计算对应成本。<br/><br/>
+              <Text strong>前向填充：</Text>无平仓交易的日期，已实现净值沿用最近一次平仓后的数值，保证曲线连续。
+            </Paragraph>
+          </Card>
+        </Col>
       </Row>
 
       <Alert type="warning" showIcon style={{ marginTop: 16 }}

@@ -491,17 +491,67 @@ export function ManualFactorStrategy() {
         </Col>
       </Row>
 
-      <Title level={4}>选股流程（5 步）</Title>
+      <Title level={4}>选股流程（6 步）</Title>
       <Steps
-        current={4}
+        current={5}
         items={[
           { title: '数据准备', description: '获取候选股票池，计算各因子在截面上的值' },
           { title: '因子预处理', description: '极值处理 + Z-Score 标准化，使因子可比' },
+          { title: '均线位置过滤（可选）', description: '要求股价站在指定均线上方，排除下降趋势中的标的' },
           { title: '加权求和', description: '综合得分 = Σ(因子权重 × 标准化因子值)' },
           { title: '排序筛选', description: '按综合得分降序排列，选取 top N（如 30 只）' },
           { title: '风控过滤', description: '剔除 ST 股、涨跌停、流动性差的股票' },
         ]}
       />
+
+      {/* 均线位置过滤 */}
+      <Title level={4}>均线位置过滤</Title>
+      <Alert type="info" showIcon style={{ marginBottom: 12 }}
+        message="多头趋势过滤器 — 在因子选股之前做一层趋势预筛选"
+        description="仅保留当前价格站上指定移动平均线的股票，排除处于下降通道中的标的。这是一个可选的前置过滤条件，可与任意预设组合配合使用。"
+      />
+      <Row gutter={[12, 12]}>
+        <Col xs={24} md={16}>
+          <Card size="small" type="inner" title="三种均线选项">
+            <Paragraph style={{ fontSize: 12 }}>
+              系统提供三个可独立勾选的均线条件（可多选）：
+            </Paragraph>
+            <Table
+              size="small"
+              pagination={false}
+              rowKey="tag"
+              dataSource={[
+                { tag: 'MA30', desc: '收盘价高于 30 日均线', span: '约 1.5 个月', scene: '短期偏多，宽松过滤' },
+                { tag: 'MA60', desc: '收盘价高于 60 日均线', span: '约 3 个月（季度）', scene: '中期趋势确认' },
+                { tag: 'MA100', desc: '收盘价高于 100 日均线', span: '约 5 个月', scene: '强趋势过滤，最严格' },
+              ]}
+              columns={[
+                { title: '选项', dataIndex: 'tag', key: 'option',
+                  render: v => <Tag color="blue">价格 &gt; {v}</Tag> },
+                { title: '含义', dataIndex: 'desc', key: 'desc' },
+                { title: '时间跨度', dataIndex: 'span', key: 'span' },
+                { title: '适用场景', dataIndex: 'scene', key: 'scene' },
+              ]}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} md={8}>
+          <Card size="small" type="inner" title="使用建议" style={{ height: '100%' }}>
+            <Paragraph style={{ fontSize: 12, margin: '0 0 8px' }}>
+              <Text strong>多选逻辑：</Text>同时勾选多个条件时取交集（AND），即价格必须同时满足所有勾选的均线条件。
+            </Paragraph>
+            <Paragraph style={{ fontSize: 12, margin: '0 0 8px' }}>
+              <Text strong>动量策略推荐：</Text>至少开启 MA60 或 MA100 过滤，确保选出的股票处于明确上升趋势中。
+            </Paragraph>
+            <Paragraph style={{ fontSize: 12, margin: '0 0 8px' }}>
+              <Text strong>价值反转策略：</Text>不建议使用此功能，因为价值股往往在下跌后被低估。
+            </Paragraph>
+            <Paragraph style={{ fontSize: 12, margin: 0 }}>
+              <Text strong>计算方式：</Text>后端通过 PriceAdvisorService.batchCalcMaPositions() 批量计算候选股票的 MA 值和位置关系，无数据的股票自动剔除。
+            </Paragraph>
+          </Card>
+        </Col>
+      </Row>
 
       <Card size="small" style={{ marginTop: 16, background: '#f5f5f5' }}>
         <Title level={5}>综合得分计算公式</Title>

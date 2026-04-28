@@ -158,11 +158,13 @@ public class DataUpdateController {
         int totalMissing = 0;
 
         // 1. 各市场 stock_info 股票总数（MySQL 始终走这里）
+        //    注意：仅统计 查询日 ≥ 上市日 的股票（查询日前尚未上市的不计入）
         Map<String, Long> totalByMarket = new HashMap<>();
         for (String market : Arrays.asList("SH", "SZ", "BJ")) {
             com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.quant.platform.stock.entity.StockInfo> w =
                     new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
             w.eq(com.quant.platform.stock.entity.StockInfo::getMarket, market);
+            w.le(com.quant.platform.stock.entity.StockInfo::getListDate, date); // 上市日在查询日之前或当天
             Long total = stockInfoMapper.selectCount(w);
             totalByMarket.put(market, total != null ? total : 0L);
         }
@@ -170,7 +172,7 @@ public class DataUpdateController {
         if (clickHouseConfig.isEnabled()) {
             // ── ClickHouse 路径 ──────────────────────────────────────────
             // ClickHouse 无 stock_info，所以：① 一次查出该日全部已有 codes
-            //                                   ② 用 codeToMarket 缓存映射区分市场
+            //                                   ② 用 codeToMarket / codeToListDate 缓存映射区分市场和上市日
             Set<String> existingCodes = new HashSet<>();
             String chSql = "SELECT DISTINCT code FROM stock.stock_daily WHERE trade_date = '" + date + "'";
             List<Map<String, Object>> rows = clickHouseStockService.queryForList(chSql);
@@ -179,24 +181,32 @@ public class DataUpdateController {
                 if (codeVal != null) existingCodes.add(codeVal.toString());
             }
 
-            // 懒加载 code → market 映射（仅 ClickHouse 路径需要）
+            // 懒加载 code → market 映射 + code → listDate 映射（仅 ClickHouse 路径需要）
             if (codeToMarket == null) {
                 codeToMarket = new HashMap<>();
+                codeToListDate = new HashMap<>();
                 com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.quant.platform.stock.entity.StockInfo> w =
                         new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
                 w.select(com.quant.platform.stock.entity.StockInfo::getCode,
-                        com.quant.platform.stock.entity.StockInfo::getMarket);
+                        com.quant.platform.stock.entity.StockInfo::getMarket,
+                        com.quant.platform.stock.entity.StockInfo::getListDate);
                 for (com.quant.platform.stock.entity.StockInfo s : stockInfoMapper.selectList(w)) {
                     if (s.getCode() != null && s.getMarket() != null) {
                         codeToMarket.put(s.getCode(), s.getMarket());
+                        codeToListDate.put(s.getCode(), s.getListDate());
                     }
                 }
             }
 
             // 用 codeToMarket 将 existingCodes 按市场分组
+            // 额外过滤：仅计入 查询日 ≥ 上市日 的股票（查询日前尚未上市的不计入）
             Map<String, Integer> existingByMarket = new HashMap<>();
             for (String m : Arrays.asList("SH", "SZ", "BJ")) existingByMarket.put(m, 0);
             for (String code : existingCodes) {
+                LocalDate listDate = codeToListDate.get(code);
+                if (listDate != null && date.isBefore(listDate)) {
+                    continue; // 尚未上市，不计入
+                }
                 String m = codeToMarket.get(code);
                 if (m != null && existingByMarket.containsKey(m)) {
                     existingByMarket.put(m, existingByMarket.get(m) + 1);
@@ -212,14 +222,17 @@ public class DataUpdateController {
             }
         } else {
             // ── MySQL 路径 ────────────────────────────────────────────────
+            // 已有数据统计：JOIN stock_info 并过滤上市日 ≤ 查询日
             for (String market : Arrays.asList("SH", "SZ", "BJ")) {
                 long total = totalByMarket.getOrDefault(market, 0L);
-                String mysqlSql = String.format(
+                String mysqlSql =
                     "SELECT COUNT(DISTINCT sd.code) FROM stock_daily sd " +
-                    "WHERE sd.trade_date = ? AND sd.code IN (" +
-                    "  SELECT si.code FROM stock_info si WHERE si.market = '%s')",
-                    market);
-                Long existing = jdbcTemplate.queryForObject(mysqlSql, Long.class, java.sql.Date.valueOf(date));
+                    "JOIN stock_info si ON sd.code = si.code " +
+                    "WHERE sd.trade_date = ? " +
+                    "  AND si.market = ?" +
+                    "  AND si.list_date IS NOT NULL AND si.list_date <= ?";
+                Long existing = jdbcTemplate.queryForObject(mysqlSql, Long.class,
+                        java.sql.Date.valueOf(date), market, java.sql.Date.valueOf(date));
                 long missing = Math.max(0, total - existing);
                 result.put(market, (int) missing);
                 totalMissing += (int) missing;
@@ -232,11 +245,12 @@ public class DataUpdateController {
         return ApiResponse.success(result);
     }
 
-    @GetMapping("/trading-dates")
+    @GetMapping({"/trading-dates", "/trading-dates/all"})
     @Operation(summary = "获取有数据的交易日列表")
     public ApiResponse<List<String>> getTradingDates(
             @RequestParam(defaultValue = "30") int limit) {
-        return ApiResponse.success(getRecentTradingDates(limit));
+        // /trading-dates/all 路径时，limit 参数忽略，返回全部交易日（上限 5000）
+        return ApiResponse.success(getRecentTradingDates(limit > 100 ? limit : 9999));
     }
 
     // ==================== 私有方法 ====================
@@ -244,6 +258,7 @@ public class DataUpdateController {
     /**
      * 查询缺失股票列表
      * 只匹配 stock_info 中的 code，排除指数（指数不在 stock_info 中）
+     * 过滤规则：仅报告 查询日 ≥ 上市日 的股票（查询日前尚未上市的股票不视为缺失）
      */
     private List<Map<String, Object>> queryMissingStocks(LocalDate date, String market) {
         // clickhouse.enabled = true  → ClickHouse 查已有 codes
@@ -258,7 +273,8 @@ public class DataUpdateController {
         wrapper.select(
                 com.quant.platform.stock.entity.StockInfo::getCode,
                 com.quant.platform.stock.entity.StockInfo::getName,
-                com.quant.platform.stock.entity.StockInfo::getMarket);
+                com.quant.platform.stock.entity.StockInfo::getMarket,
+                com.quant.platform.stock.entity.StockInfo::getListDate);
         List<com.quant.platform.stock.entity.StockInfo> allStocks = stockInfoMapper.selectList(wrapper);
 
         // 2. 获取该日 stock_daily 中已有数据的 codes
@@ -288,8 +304,13 @@ public class DataUpdateController {
         }
 
         // 3. 差集 = stock_info 中有但 stock_daily 该日没有的
+        //    额外过滤：查询日早于上市日 → 该股票当时尚未上市，不视为缺失
         List<Map<String, Object>> missing = new ArrayList<>();
         for (com.quant.platform.stock.entity.StockInfo stock : allStocks) {
+            // 关键过滤：查询日在上市日之前 → 不应显示为缺失
+            if (stock.getListDate() != null && date.isBefore(stock.getListDate())) {
+                continue; // 尚未上市，跳过
+            }
             if (!existingCodes.contains(stock.getCode())) {
                 Map<String, Object> m = new LinkedHashMap<>();
                 m.put("code", stock.getCode());
@@ -309,4 +330,10 @@ public class DataUpdateController {
 
     /** stock_info 全量 code → market 映射（ClickHouse 路径懒加载缓存） */
     private volatile Map<String, String> codeToMarket;
+
+    /**
+     * stock_info 全量 code → listDate 映射（ClickHouse 路径懒加载缓存）。
+     * 用于在 getMissingStats 中过滤掉查询日尚未上市的股票。
+     */
+    private volatile Map<String, LocalDate> codeToListDate;
 }

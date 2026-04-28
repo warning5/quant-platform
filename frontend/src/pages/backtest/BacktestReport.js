@@ -103,10 +103,11 @@ function MetricBar({ report }) {
 }
 
 // ─── 主图：收益对比 + 日收益柱状图 + 回撤（类似图片的专业界面）────────────────────
-function MainChart({ equityCurveJson, benchmarkCurveJson, drawdownSeriesJson, maxDrawdown }) {
-  const stratData = useMemo(() => safeJson(equityCurveJson), [equityCurveJson]);
-  const bmData = useMemo(() => safeJson(benchmarkCurveJson), [benchmarkCurveJson]);
-  const ddData = useMemo(() => safeJson(drawdownSeriesJson), [drawdownSeriesJson]);
+function MainChart({ equityCurveJson, benchmarkCurveJson, drawdownSeriesJson, maxDrawdown, realizedCurveJson }) {
+  const stratData    = useMemo(() => safeJson(equityCurveJson),    [equityCurveJson]);
+  const bmData       = useMemo(() => safeJson(benchmarkCurveJson), [benchmarkCurveJson]);
+  const ddData       = useMemo(() => safeJson(drawdownSeriesJson), [drawdownSeriesJson]);
+  const realizedData = useMemo(() => safeJson(realizedCurveJson),  [realizedCurveJson]);
 
   if (!stratData.length) return <Empty text="暂无净值曲线数据" />;
 
@@ -141,6 +142,15 @@ function MainChart({ equityCurveJson, benchmarkCurveJson, drawdownSeriesJson, ma
   const drawdowns = ddData.length ? ddData.map(d => +(+d.drawdown * 100).toFixed(4)) : 
     stratData.map(d => +(+d.drawdown * 100).toFixed(4));
 
+  // 已实现收益率（前向填充到 dates）
+  const realizedMap = {};
+  realizedData.forEach(d => { realizedMap[d.date] = +d.value; });
+  const realizedReturns = stratData.map(d => {
+    const rv = realizedMap[d.date];
+    return rv != null ? +((rv - 1) * 100).toFixed(4) : null;
+  });
+  const hasRealized = realizedData.length > 0;
+
   const option = {
     backgroundColor: 'transparent',
     tooltip: {
@@ -152,7 +162,9 @@ function MainChart({ equityCurveJson, benchmarkCurveJson, drawdownSeriesJson, ma
         params.forEach(p => {
           if (p.seriesName === '日收益' || p.seriesName === '回撤') return;
           const col = p.seriesName === '策略收益' ? '#cf1322'
-            : p.seriesName === '基准收益' ? '#8c8c8c' : '#fa8c16';
+            : p.seriesName === '基准收益' ? '#8c8c8c'
+            : p.seriesName === '已实现收益' ? '#13c2c2'
+            : '#fa8c16';
           const sign = p.value >= 0 ? '+' : '';
           html += `<div><span style="color:${col}">●</span> ${p.seriesName}：<b>${sign}${(+p.value).toFixed(2)}%</b></div>`;
         });
@@ -160,13 +172,16 @@ function MainChart({ equityCurveJson, benchmarkCurveJson, drawdownSeriesJson, ma
       },
     },
     legend: {
-      data: ['策略收益', '基准收益', '超额收益'],
+      data: hasRealized
+        ? ['策略收益', '基准收益', '超额收益', '已实现收益']
+        : ['策略收益', '基准收益', '超额收益'],
       top: 4,
       textStyle: { color: '#666' },
       selected: {
         '策略收益': true,
         '基准收益': true,
         '超额收益': true,
+        '已实现收益': true,
       },
     },
     grid: [
@@ -256,6 +271,17 @@ function MainChart({ equityCurveJson, benchmarkCurveJson, drawdownSeriesJson, ma
         xAxisIndex: 0,
         yAxisIndex: 0,
       },
+      // 主图 - 已实现收益（虚线，仅有已平仓收益）
+      ...(hasRealized ? [{
+        name: '已实现收益',
+        type: 'line',
+        data: realizedReturns,
+        smooth: false,
+        lineStyle: { color: '#13c2c2', width: 1.5, type: 'dashed' },
+        symbol: 'none',
+        xAxisIndex: 0,
+        yAxisIndex: 0,
+      }] : []),
       // 子图1 - 日收益柱状图
       {
         name: '日收益',
@@ -840,6 +866,7 @@ export default function BacktestReport() {
               benchmarkCurveJson={report?.benchmarkCurveJson}
               drawdownSeriesJson={report?.drawdownSeriesJson}
               maxDrawdown={report?.maxDrawdown}
+              realizedCurveJson={report?.realizedCurveJson}
             />
           </Card>
         </>

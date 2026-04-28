@@ -10,7 +10,7 @@ import {
   SaveOutlined, CopyOutlined, StarOutlined, WarningOutlined,
   SafetyCertificateOutlined, ArrowUpOutlined, ArrowDownOutlined,
   PlusSquareOutlined, MinusSquareOutlined, ThunderboltOutlined, LineChartOutlined, FundOutlined,
-  MenuFoldOutlined, MenuUnfoldOutlined,
+  MenuFoldOutlined, MenuUnfoldOutlined, RiseOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import api from '../../api';
@@ -396,6 +396,9 @@ export default function StockScreen() {
   const [excludeSt, setExcludeSt] = useState(true);
   const [valuationWeight, setValuationWeight] = useState(40);
   const [customSqlWhere, setCustomSqlWhere] = useState('');
+  const [maAbove30, setMaAbove30] = useState(false);
+  const [maAbove60, setMaAbove60] = useState(false);
+  const [maAbove100, setMaAbove100] = useState(false);
 
   /* ── 结果 ─────────────────────────────────────────────────────── */
   const [result, setResult] = useState(null);
@@ -579,6 +582,11 @@ export default function StockScreen() {
       valuationWeight: valuationWeight / 100,
       customSqlWhere: customSqlWhere || null,
       presetId: selectedPresetId || null,
+      maPositionFilter: (maAbove30 || maAbove60 || maAbove100) ? {
+        aboveMA30:  maAbove30  || null,
+        aboveMA60:  maAbove60  || null,
+        aboveMA100: maAbove100 || null,
+      } : null,
       factors: factors.map(f => ({
         factorCode: f.factorCode,
         direction: f.direction,
@@ -598,7 +606,7 @@ export default function StockScreen() {
       })
       .catch(() => {})
       .finally(() => setRunning(false));
-  }, [factors, screenDate, topN, direction, excludeSt, globalOutlier, globalNormalize, orthogonalMethod, totalWeight, valuationWeight, selectedPresetId, customSqlWhere]);
+  }, [factors, screenDate, topN, direction, excludeSt, globalOutlier, globalNormalize, orthogonalMethod, totalWeight, valuationWeight, selectedPresetId, customSqlWhere, maAbove30, maAbove60, maAbove100]);
 
   /* ── 结果表格列 ───────────────────────────────────────────────── */
   const factorColumns = useMemo(() => (result?.factors || []).map(fw => ({
@@ -1067,6 +1075,51 @@ export default function StockScreen() {
                   allowClear
                   style={{ fontSize: 12, fontFamily: 'monospace' }}
                 />
+              </Col>
+
+              {/* MA 均线位置过滤 */}
+              <Col span={24}>
+                <div style={paramLabelStyle}>
+                  <Space size={4}>
+                    <RiseOutlined />
+                    <span>均线位置过滤</span>
+                    <Tag color="blue" size="small">多头</Tag>
+                  </Space>
+                  <Tooltip title="要求当前价格在指定均线上方，过滤掉处于下降趋势的股票。MA30≈1.5月、MA60≈3月、MA100≈5月">
+                    <QuestionCircleOutlined style={{ color: '#bbb', marginLeft: 4 }} />
+                  </Tooltip>
+                </div>
+                <Space size={8} wrap>
+                  <Button
+                    size="small"
+                    type={maAbove30 ? 'primary' : 'default'}
+                    onClick={() => setMaAbove30(v => !v)}
+                    style={{ minWidth: 72 }}
+                  >
+                    {maAbove30 ? '✓ ' : ''}价格 &gt; MA30
+                  </Button>
+                  <Button
+                    size="small"
+                    type={maAbove60 ? 'primary' : 'default'}
+                    onClick={() => setMaAbove60(v => !v)}
+                    style={{ minWidth: 72 }}
+                  >
+                    {maAbove60 ? '✓ ' : ''}价格 &gt; MA60
+                  </Button>
+                  <Button
+                    size="small"
+                    type={maAbove100 ? 'primary' : 'default'}
+                    onClick={() => setMaAbove100(v => !v)}
+                    style={{ minWidth: 72 }}
+                  >
+                    {maAbove100 ? '✓ ' : ''}价格 &gt; MA100
+                  </Button>
+                </Space>
+                {(maAbove30 || maAbove60 || maAbove100) && (
+                  <div style={{ marginTop: 4, fontSize: 11, color: '#faad14' }}>
+                    ⚠ 均线过滤会对每只候选股票单独加载历史行情，候选池较大时耗时会增加
+                  </div>
+                )}
               </Col>
 
               {/* 估值/技术加权比例 */}

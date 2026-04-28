@@ -60,6 +60,23 @@ public class ScreenRequest {
      */
     private String customSqlWhere;
 
+    /**
+     * MA 均线位置过滤
+     * 要求当前价在指定的均线上方（多头排列过滤）
+     * 例如: aboveMA30=true 表示要求当前价在 MA30 上方
+     */
+    private MaPositionFilter maPositionFilter;
+
+    @Data
+    public static class MaPositionFilter {
+        /** 是否要求价格在 MA30 上方，null = 不过滤 */
+        private Boolean aboveMA30;
+        /** 是否要求价格在 MA60 上方，null = 不过滤 */
+        private Boolean aboveMA60;
+        /** 是否要求价格在 MA100 上方，null = 不过滤 */
+        private Boolean aboveMA100;
+    }
+
     // ─────────────────────────────────────────────────────────────────────
     /**
      * 单个因子配置

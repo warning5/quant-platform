@@ -122,12 +122,13 @@ public class FactorController {
             @RequestParam String factorCodes,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
-            @RequestParam(defaultValue = "true") boolean incremental) {
+            @RequestParam(defaultValue = "true") boolean incremental,
+            @RequestParam(defaultValue = "false") boolean force) {
         List<String> codeList = Arrays.asList(factorCodes.split(","));
         if (codeList.size() > 8) {
             return ApiResponse.error("最多同时计算 8 个因子，当前提交了 " + codeList.size() + " 个");
         }
-        Map<String, Object> result = factorService.triggerBatchCompute(codeList, startDate, endDate, incremental);
+        Map<String, Object> result = factorService.triggerBatchCompute(codeList, startDate, endDate, incremental, force);
         return ApiResponse.success("批量计算任务已提交", result);
     }
 

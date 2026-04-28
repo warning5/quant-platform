@@ -242,6 +242,13 @@ public class BacktestReport implements Serializable {
     private String tradeLogJson;
 
     /**
+     * 已实现收益率曲线（仅统计已平仓交易的累计PnL，剔除浮盈浮亏）
+     * 格式同 equityCurveJson：[{date, value}]，value 从 1.0 开始
+     */
+    @TableField(exist = false)
+    private String realizedCurveJson;
+
+    /**
      * 创建时间
      */
     @TableField(value = "created_at", fill = FieldFill.INSERT)

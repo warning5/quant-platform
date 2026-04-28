@@ -184,6 +184,7 @@ function DataUpdate() {
 
   const [indexTask, setIndexTask] = useState(null);
   const [indexLogs, setIndexLogs] = useState([]);
+  const [indexForce, setIndexForce] = useState(false);
   const indexLogRef = useRef(null);
 
   const [dividendTask, setDividendTask] = useState(null);
@@ -203,8 +204,10 @@ function DataUpdate() {
 
   const [wsConnected, setWsConnected] = useState(false);
 
-  // 当前激活的 Tab
-  const [activeTab, setActiveTab] = useState('DAILY');
+  // 当前激活的 Tab（刷新后保持在原 Tab）
+  const [activeTab, setActiveTab] = useState(
+    () => localStorage.getItem('quant-dataupdate-active-tab') || 'DAILY'
+  );
 
   // ========== 指数数据完整性检查 ==========
   const [missingIndexDate, setMissingIndexDate] = useState(dayjs().subtract(1, 'day'));
@@ -468,14 +471,13 @@ function DataUpdate() {
   }, [dailyTask?.status, fetchCoverage]);
 
   // tradingDates 加载完成后，默认日期设为最近一个交易日
-  // 规则：18:00 前选前一个交易日，18:00 后选当天（如果是交易日）
+  // 如果今天在列表中，18:00前选前一个交易日，18:00后选今天
+  // 如果今天不在列表中（非交易日/数据未更新），直接选最近一个交易日
   useEffect(() => {
     if (tradingDates && tradingDates.length > 0) {
-      const now = dayjs();
-      const cutoffHour = 18;
-      // tradingDates 按日期降序排列，[0] = 今天，[1] = 昨天
-      const idx = now.hour() >= cutoffHour ? 0 : 1;
-      const targetDate = tradingDates[idx] ? tradingDates[idx] : tradingDates[0];
+      const todayStr = dayjs().format('YYYY-MM-DD');
+      const idx = (tradingDates[0] === todayStr && dayjs().hour() < 18) ? 1 : 0;
+      const targetDate = tradingDates[idx] || tradingDates[0];
       const targetDayjs = dayjs(targetDate);
       setMissingDate(targetDayjs);
       setMissingIndexDate(targetDayjs);
@@ -633,6 +635,7 @@ function DataUpdate() {
   // ========== Tab 切换 ==========
   const onTabChange = (key) => {
     setActiveTab(key);
+    localStorage.setItem('quant-dataupdate-active-tab', key);
     if (key === 'INDEX') fetchIndexCoverage();
     if (key === 'DIVIDEND') fetchDividendCoverage();
     if (key === 'FINANCIAL') fetchFinancialCoverage();
@@ -776,7 +779,10 @@ function DataUpdate() {
 
         {/* 指数日线配置 */}
         <Card title="指数日线配置" size="small" style={{ marginBottom: 16 }}>
-          <Form form={indexForm} layout="inline" initialValues={{ resume: false }}>
+          <Form form={indexForm} layout="inline" initialValues={{ resume: false }}
+          onValuesChange={(changed) => {
+            if (changed.force !== undefined) setIndexForce(changed.force);
+          }}>
             <Row gutter={[16, 12]} style={{ width: '100%' }}>
               <Col>
                 <Form.Item name="dateRange" label="日期范围" tooltip="不选则自动检测起始日期">
@@ -794,6 +800,11 @@ function DataUpdate() {
               <Col>
                 <Form.Item name="resume" valuePropName="checked" style={{ marginBottom: 0 }}>
                   <Checkbox>断点续传</Checkbox>
+                </Form.Item>
+              </Col>
+              <Col>
+                <Form.Item name="force" valuePropName="checked" style={{ marginBottom: 0 }}>
+                  <Checkbox>强制更新（忽略"已是最新"判断）</Checkbox>
                 </Form.Item>
               </Col>
             </Row>
@@ -819,8 +830,15 @@ function DataUpdate() {
         {/* 进度条 */}
         {renderProgressBar(indexTask)}
         {/* 日志 - 始终显示 */}
-        <Card title={<span>更新日志 <Text type="secondary" style={{ fontSize: 12 }}>({indexLogs.length} 条)</Text>{renderTaskConfig(indexTask, 'INDEX')}</span>}
-          size="small" extra={<Button size="small" onClick={() => setIndexLogs([])}>清空</Button>}>
+        <Card title={
+            <Space>
+              <span>更新日志 <Text type="secondary" style={{ fontSize: 12 }}>({indexLogs.length} 条)</Text></span>
+              {indexForce && <Tag color="red">强制更新</Tag>}
+              {renderTaskConfig(indexTask, 'INDEX')}
+            </Space>
+          }
+          size="small"
+          extra={<Button size="small" onClick={() => setIndexLogs([])}>清空</Button>}>
           {renderLogs(indexLogs, indexLogRef)}
         </Card>
         {/* 指数完整性检查 */}
@@ -1011,13 +1029,13 @@ function DataUpdate() {
             { title: '字段', dataIndex: 'field', width: 160 },
             { title: '非空记录', dataIndex: 'nonNull', render: v => v?.toLocaleString(), align: 'right' },
             { title: '总记录', dataIndex: 'total', render: v => v?.toLocaleString(), align: 'right' },
-            { title: '空值率', dataIndex: 'rate', render: v => `${v}%`,
-              align: 'right', title: '空值率(%)' },
+            { title: '空值率(%)', dataIndex: 'rate', render: v => `${v}%`,
+              align: 'right' },
           ]}
           size="small" pagination={false} style={{ marginTop: 8, marginBottom: 16 }} />
 
         {/* 同比异常 */}
-        <Text strong style={{ fontSize: 13 }}>【4】净利润同比异常（扭亏/转亏/变化>10倍）</Text>
+        <Text strong style={{ fontSize: 13 }}>【4】净利润同比异常（扭亏/转亏/变化&gt;10倍）</Text>
         {anomalies && anomalies.length > 0 ? (
           <Table dataSource={anomalies.map((r, i) => ({ ...r, key: i }))}
             columns={[
@@ -1248,8 +1266,8 @@ function DataUpdate() {
           <Text>检查日期:</Text>
           <DatePicker value={missingIndexDate} onChange={d => setMissingIndexDate(d)}
             disabledDate={(current) => {
-              if (!tradingDates || tradingDates.length === 0) return false;
-              return !tradingDates.includes(current.format('YYYY-MM-DD'));
+              // 只限制不能选未来日期，不限制必须是交易日
+              return current && current.isAfter(dayjs().endOf('day'));
             }}
             allowClear={false} style={{ marginLeft: 8, width: 140 }} />
         </Col>
@@ -1288,8 +1306,8 @@ function DataUpdate() {
           <Text>检查日期:</Text>
           <DatePicker value={missingDate} onChange={d => setMissingDate(d)}
             disabledDate={(current) => {
-              if (!tradingDates || tradingDates.length === 0) return false;
-              return !tradingDates.includes(current.format('YYYY-MM-DD'));
+              // 只限制不能选未来日期
+              return current && current.isAfter(dayjs().endOf('day'));
             }}
             allowClear={false} style={{ marginLeft: 8, width: 140 }} />
         </Col>
@@ -1356,8 +1374,8 @@ function DataUpdate() {
   );
 
   return (
-    <div style={{ padding: '0 0 24px' }}>
-      <Title level={4} style={{ marginBottom: 16 }}>
+    <div style={{ padding: '0 0 16px' }}>
+      <Title level={4} style={{ marginBottom: 8 }}>
         <CloudSyncOutlined /> 数据更新管理
         <Badge status={wsConnected ? 'success' : 'error'}
           text={<Text type="secondary" style={{ fontSize: 13 }}>
