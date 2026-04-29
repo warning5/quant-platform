@@ -10,9 +10,6 @@ import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.cache.CacheManager;
-import org.springframework.cache.annotation.CacheEvict;
-import org.springframework.cache.annotation.Cacheable;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
@@ -53,7 +50,6 @@ public class DataUpdateService {
     private final StockInfoMapper stockInfoMapper;
     private final ClickHouseStockService clickHouseStockService;
     private final JdbcTemplate jdbcTemplate;
-    private final CacheManager cacheManager;
     /**
      * 正在运行的任务
      */
@@ -306,10 +302,6 @@ public class DataUpdateService {
             // 从活跃任务中移除（避免阻止新任务启动）
             activeTasks.remove(taskId);
             currentProcess = null;
-            // 任务完成后清除数据概览缓存
-            if (!"CANCELLED".equals(task.getStatus())) {
-                clearDataCoverageCache();
-            }
             broadcastStatus(task);
             log.info("[DataUpdate] 任务 {} 结束, 状态: {}", taskId, task.getStatus());
         }
@@ -690,6 +682,28 @@ public class DataUpdateService {
             task.setCurrentStep(mPrefix + "完成");
         }
 
+        // 解析字段变更统计（[FIELD_CHANGES] 名称:15 | 总市值:3210 | ...）
+        if (line.contains("[FIELD_CHANGES]")) {
+            try {
+                String data = line.substring(line.indexOf("[FIELD_CHANGES]") + 15).trim();
+                Map<String, Integer> changes = new java.util.LinkedHashMap<>();
+                for (String part : data.split("\\|")) {
+                    part = part.trim();
+                    int colonIdx = part.lastIndexOf(':');
+                    if (colonIdx > 0) {
+                        String field = part.substring(0, colonIdx).trim();
+                        int count = Integer.parseInt(part.substring(colonIdx + 1).trim());
+                        changes.put(field, count);
+                    }
+                }
+                if (!changes.isEmpty()) {
+                    task.setFieldChanges(changes);
+                }
+            } catch (Exception e) {
+                log.warn("[DataUpdate] 解析FIELD_CHANGES失败: {}", e.getMessage());
+            }
+        }
+
         // 检测失败股票并记录
         String lineLower = line.toLowerCase();
         if (lineLower.contains("失败") || lineLower.contains("error") || lineLower.contains("fail")) {
@@ -734,6 +748,7 @@ public class DataUpdateService {
             msg.put("startTime", task.getStartTime() != null ? task.getStartTime().toString() : null);
             msg.put("endTime", task.getEndTime() != null ? task.getEndTime().toString() : null);
             msg.put("error", task.getError());
+            msg.put("fieldChanges", task.getFieldChanges());
             if (task.getRequest() != null) {
                 DataUpdateRequest req = task.getRequest();
                 msg.put("updateType", req.getUpdateType());
@@ -780,10 +795,9 @@ public class DataUpdateService {
     // ==================== 数据完整性检查 ====================
 
     /**
-     * 获取数据完整性概览（带缓存，5分钟有效）
-     * 优化：合并多个串行SQL为单次查询
+     * 获取数据完整性概览
+     * 优化：合并多个串行SQL为单次ClickHouse查询
      */
-    @Cacheable(value = "dataCoverage", key = "'overview'")
     public Map<String, Object> getDataCoverage() {
         Map<String, Object> result = new LinkedHashMap<>();
 
@@ -792,7 +806,7 @@ public class DataUpdateService {
 
         // ── ClickHouse 合并查询：一次SQL查出所有指标（排除指数） ─────────────
         String mergedSql = """
-            SELECT 
+            SELECT\s
                 COUNT(*) as total_records,
                 MIN(trade_date) as earliest_date,
                 MAX(trade_date) as latest_date,
@@ -804,20 +818,25 @@ public class DataUpdateService {
                 maxIf(trade_date, code LIKE '6%' OR code LIKE '688%' OR code LIKE '689%') as sh_latest,
                 maxIf(trade_date, code LIKE '0%' OR code LIKE '3%') as sz_latest,
                 maxIf(trade_date, code LIKE '92%') as bj_latest
-            FROM stock_daily
+            FROM stock_daily FINAL
             WHERE code NOT LIKE 'sh.%' AND code NOT LIKE 'sz.%'
-            """;
+           \s""";
 
         Map<String, Object> chData;
+        boolean chOk = false;
+        String chError = null;
         try {
             List<Map<String, Object>> rows = clickHouseStockService.queryForList(mergedSql);
             if (!rows.isEmpty()) {
-                chData = rows.get(0);
+                chData = rows.getFirst();
+                chOk = true;
             } else {
                 chData = Map.of();
+                chError = "ClickHouse 查询返回空结果";
             }
         } catch (Exception e) {
-            log.warn("[DataCoverage] ClickHouse合并查询失败: {}", e.getMessage());
+            chError = e.getMessage();
+            log.warn("[DataCoverage] ClickHouse合并查询失败: {}", chError);
             chData = Map.of();
         }
 
@@ -876,17 +895,12 @@ public class DataUpdateService {
 
         result.put("overview", overview);
         result.put("markets", marketCoverage);
+        if (!chOk) {
+            result.put("warning", "ClickHouse 查询失败，数据可能不完整: " + (chError != null ? chError : "未知错误"));
+        }
 
-        log.info("[DataCoverage] 数据概览查询完成，缓存5分钟");
+        log.info("[DataCoverage] 数据概览查询完成");
         return result;
-    }
-
-    /**
-     * 数据更新完成后清除缓存
-     */
-    @CacheEvict(value = "dataCoverage", allEntries = true)
-    public void evictDataCoverageCache() {
-        log.info("[DataCoverage] 缓存已清除");
     }
 
     // ── 辅助方法 ────────────────────────────────────────────────────
@@ -940,7 +954,7 @@ public class DataUpdateService {
 
         // 总记录数
         String totalSql = """
-            SELECT COUNT(*) as cnt FROM stock_daily
+            SELECT COUNT(*) as cnt FROM stock_daily FINAL
             WHERE code IN ('sh.000001','sh.000016','sh.000022','sh.000300','sh.000688','sh.000852','sh.000905',
                            'sz.399001','sz.399006','sz.399303')
             """;
@@ -1095,21 +1109,6 @@ public class DataUpdateService {
             """.formatted(marketCondition, date);
 
         return jdbcTemplate.queryForList(sql);
-    }
-
-    /**
-     * 手动清除数据概览缓存
-     */
-    public void clearDataCoverageCache() {
-        try {
-            var cache = cacheManager.getCache("dataCoverage");
-            if (cache != null) {
-                cache.clear();
-                log.info("[DataCoverage] 缓存已清除");
-            }
-        } catch (Exception e) {
-            log.warn("[DataCoverage] 清除缓存失败: {}", e.getMessage());
-        }
     }
 
     @PreDestroy

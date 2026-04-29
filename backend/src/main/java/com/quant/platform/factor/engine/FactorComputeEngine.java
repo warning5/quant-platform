@@ -147,6 +147,13 @@ public class FactorComputeEngine {
         registerBuiltin(new BuiltinFactors.TurnoverAnomalyCalculator());
         registerBuiltin(new BuiltinFactors.VolumeSurpriseCalculator());
 
+        // 注册缠论因子 (2026-04-29)
+        registerBuiltin(new ChanTheoryFactors.PenDirectionCalculator());
+        registerBuiltin(new ChanTheoryFactors.TrendTypeCalculator());
+        registerBuiltin(new ChanTheoryFactors.BuySellSignalCalculator());
+        registerBuiltin(new ChanTheoryFactors.HubPositionCalculator());
+        registerBuiltin(new ChanTheoryFactors.PenCountCalculator());
+
         // 注册财务因子（使用 FinancialFactorCalculator 接口）
         registerFinancial(new FinancialFactors.GrossProfitMarginCalc());
         registerFinancial(new FinancialFactors.NetProfitMarginCalc());
@@ -729,9 +736,45 @@ public class FactorComputeEngine {
 
             // ── 股票池白名单 ────────────────────────────────────────
             Set<String> poolSymbols = getStockPoolSymbols(report.getStockPool());
-            sendProgress(factor.getFactorCode(), "TEST_START", 6, "股票池加载完成，" + poolSymbols.size() + "只股票");
+            String poolDesc = poolSymbols.isEmpty() ? "全A（不限制）" : poolSymbols.size() + "只股票";
+            sendProgress(factor.getFactorCode(), "TEST_START", 6, "股票池加载完成，" + poolDesc);
 
             final int GROUP_COUNT = 5;
+
+            // ── 预查因子值有数据的日期（避免逐日查询空数据浪费时间） ───
+            Set<LocalDate> validDates = new HashSet<>();
+            if (clickHouseConfig.isEnabled()) {
+                try {
+                    List<LocalDate> datesWithData = clickHouseFactorValueService.findDistinctDatesByFactorCode(
+                            factor.getFactorCode(), report.getStartDate(), report.getEndDate());
+                    validDates.addAll(datesWithData);
+                } catch (Exception e) {
+                    log.warn("[ClickHouse] 预查因子值日期失败: {}", e.getMessage());
+                }
+            }
+            long datesWithFactor = dates.stream().filter(validDates::contains).count();
+            long datesWithoutFactor = dates.size() - datesWithFactor;
+            sendProgress(factor.getFactorCode(), "TEST_START", 7, String.format(
+                    "因子值日期扫描完成：有数据 %d 天，无数据 %d 天（将跳过）", datesWithFactor, datesWithoutFactor));
+
+            // 如果有效日期不足，提前结束
+            if (datesWithFactor < 1) {
+                report.setStatus(FactorTestReport.TestStatus.COMPLETED);
+                report.setIcMean(bd(0));
+                report.setIcStd(bd(0));
+                report.setIcir(bd(0));
+                report.setIcPositiveRate(bd(0));
+                report.setTopGroupReturn(bd(0));
+                report.setBottomGroupReturn(bd(0));
+                report.setLongShortReturn(bd(0));
+                report.setMonotonicity(bd(0));
+                report.setGroupCount(GROUP_COUNT);
+                report.setErrorMessage("检测区间内无因子值数据，无法进行检测");
+                testReportMapper.updateById(report);
+                sendProgress(factor.getFactorCode(), "COMPLETED", 100,
+                        "检测完成：检测区间内无因子值数据，请先计算因子值或调整检测日期范围");
+                return;
+            }
 
             // ── IC 序列 ──────────────────────────────────────────
             List<Double> icList = new ArrayList<>();
@@ -762,26 +805,34 @@ public class FactorComputeEngine {
 
             int totalDays = dates.size() - 1;
             int processed = 0;
+            int skippedNoData = 0;
+            int skippedNoReturn = 0;
 
             for (int di = 0; di < dates.size() - 1; di++) {
                 LocalDate calcDate = dates.get(di);
                 LocalDate nextDate = dates.get(di + 1);
 
-                // 优先从 ClickHouse 读取
-                List<FactorValue> factorValues;
+                // ── 快速跳过：预查已确定无因子值的日期 ──
+                if (!validDates.contains(calcDate)) {
+                    skippedNoData++;
+                    appendNavPoint(groupNavData, calcDate, groupNavs, benchmarkNav);
+                    appendLsNavPoint(longShortNavData, calcDate, lsTopNav, lsBottomNav, lsNetNav);
+                    double[] zeros = new double[GROUP_COUNT];
+                    groupDailyReturnsList.add(zeros);
+                    topGroupDailyList.add(0.0);
+                    benchmarkDailyList.add(0.0);
+                    topActiveReturnList.add(0.0);
+                    processed++;
+                    continue;
+                }
+
+                // 从 ClickHouse 读取因子值（不降级 MySQL）
+                List<FactorValue> factorValues = List.of();
                 if (clickHouseConfig.isEnabled()) {
                     try {
                         factorValues = clickHouseFactorValueService.findByFactorCodeAndDate(factor.getFactorCode(), calcDate);
-                        if (factorValues.isEmpty()) {
-                            LambdaQueryWrapper<FactorValue> wrapper = new LambdaQueryWrapper<>();
-                            wrapper.eq(FactorValue::getFactorCode, factor.getFactorCode()).eq(FactorValue::getCalcDate, calcDate).orderByAsc(FactorValue::getSymbol);
-                            factorValues = factorValueMapper.selectList(wrapper);
-                        }
                     } catch (Exception e) {
-                        log.warn("[ClickHouse] 因子值查询失败，回退 MySQL: {}", e.getMessage());
-                        LambdaQueryWrapper<FactorValue> wrapper = new LambdaQueryWrapper<>();
-                        wrapper.eq(FactorValue::getFactorCode, factor.getFactorCode()).eq(FactorValue::getCalcDate, calcDate).orderByAsc(FactorValue::getSymbol);
-                        factorValues = factorValueMapper.selectList(wrapper);
+                        log.warn("[ClickHouse] 因子值查询失败: {}", e.getMessage());
                     }
                 } else {
                     LambdaQueryWrapper<FactorValue> wrapper = new LambdaQueryWrapper<>();
@@ -795,11 +846,9 @@ public class FactorComputeEngine {
                 }
 
                 if (factorValues.size() < GROUP_COUNT * 2) {
-                    log.warn("Skip date {}: factorValues={} < {}", calcDate, factorValues.size(), GROUP_COUNT * 2);
-                    sendProgress(factor.getFactorCode(), "TESTING", 10, String.format("[%s] 因子值不足，仅 %d 只（需至少 %d），跳过", calcDate, factorValues.size(), GROUP_COUNT * 2));
+                    skippedNoData++;
                     appendNavPoint(groupNavData, calcDate, groupNavs, benchmarkNav);
                     appendLsNavPoint(longShortNavData, calcDate, lsTopNav, lsBottomNav, lsNetNav);
-                    // 数据不足时添加0收益到统计列表，保持数据一致性
                     double[] zeros = new double[GROUP_COUNT];
                     groupDailyReturnsList.add(zeros);
                     topGroupDailyList.add(0.0);
@@ -809,25 +858,34 @@ public class FactorComputeEngine {
                     continue;
                 }
 
+                // 分批获取当期+下期行情（避免 CH 内存爆掉）
+                List<String> symbols = factorValues.stream().map(FactorValue::getSymbol).toList();
+                final int BATCH = 1000;
+                Map<String, List<MarketDailyBar>> currBars = new HashMap<>();
+                Map<String, List<MarketDailyBar>> nextBars = new HashMap<>();
+                for (int b = 0; b < symbols.size(); b += BATCH) {
+                    List<String> batch = symbols.subList(b, Math.min(b + BATCH, symbols.size()));
+                    currBars.putAll(marketDataService.getBarsBatch(batch, calcDate, calcDate));
+                    nextBars.putAll(marketDataService.getBarsBatch(batch, nextDate, nextDate));
+                }
                 // 获取下期收益
                 Map<String, Double> nextReturns = new HashMap<>();
                 for (FactorValue fv : factorValues) {
-                    List<MarketDailyBar> curr = marketDataService.getBarsBySymbol(fv.getSymbol(), calcDate, calcDate);
-                    List<MarketDailyBar> next = marketDataService.getBarsBySymbol(fv.getSymbol(), nextDate, nextDate);
-                    if (!curr.isEmpty() && !next.isEmpty()) {
+                    String sym = fv.getSymbol();
+                    List<MarketDailyBar> curr = currBars.get(sym);
+                    List<MarketDailyBar> next = nextBars.get(sym);
+                    if (curr != null && !curr.isEmpty() && next != null && !next.isEmpty()) {
                         double r = next.getFirst().getClose().doubleValue() / curr.getFirst().getClose().doubleValue() - 1;
-                        nextReturns.put(fv.getSymbol(), r);
+                        nextReturns.put(sym, r);
                     }
                 }
 
                 List<FactorValue> valid = factorValues.stream().filter(fv -> nextReturns.containsKey(fv.getSymbol())).toList();
 
                 if (valid.size() < GROUP_COUNT * 2) {
-                    log.warn("Skip date {}: valid returns={} (total={}, nextReturns={})", calcDate, valid.size(), factorValues.size(), nextReturns.size());
-                    sendProgress(factor.getFactorCode(), "TESTING", 10, String.format("[%s] 下期行情数据不足，有效 %d 只（需至少 %d），跳过", calcDate, valid.size(), GROUP_COUNT * 2));
+                    skippedNoReturn++;
                     appendNavPoint(groupNavData, calcDate, groupNavs, benchmarkNav);
                     appendLsNavPoint(longShortNavData, calcDate, lsTopNav, lsBottomNav, lsNetNav);
-                    // 数据不足时添加0收益到统计列表，保持数据一致性
                     double[] zeros = new double[GROUP_COUNT];
                     groupDailyReturnsList.add(zeros);
                     topGroupDailyList.add(0.0);
@@ -903,6 +961,14 @@ public class FactorComputeEngine {
                 detail.append(String.format(" | 基准:%.2f%%", benchmarkRet * 100));
                 sendProgress(factor.getFactorCode(), "TESTING", pct, detail.toString());
             }
+
+            // ── 跳过日期汇总日志 ──
+            if (skippedNoData > 0 || skippedNoReturn > 0) {
+                sendProgress(factor.getFactorCode(), "TESTING", 93, String.format(
+                        "跳过汇总：无因子值 %d 天 | 无下期行情 %d 天 | 有效计算 %d 天",
+                        skippedNoData, skippedNoReturn, icList.size()));
+            }
+
             sendProgress(factor.getFactorCode(), "TESTING", 95, "回测计算完成，开始计算统计指标");
 
             // ── 汇总：IC 统计 ────────────────────────────────────

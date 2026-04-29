@@ -106,6 +106,11 @@ def end_date_from_report(report_date_str):
 
 def fetch_yjbb(year):
     """拉取指定年份的业绩报表，返回 DataFrame"""
+    # 当前年份的年报要到次年4月才发布完毕，当年直接跳过
+    current_year = datetime.now().year
+    if year >= current_year:
+        print(f"  跳过 {year} 年报（尚未发布）")
+        return None
     date_str = f'{year}1231'
     print(f"  拉取东方财富业绩报表 {date_str} ...")
     for attempt in range(3):

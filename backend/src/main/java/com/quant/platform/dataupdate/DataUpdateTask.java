@@ -4,7 +4,9 @@ import lombok.Data;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 数据更新任务状态（可序列化推送给前端）
@@ -47,6 +49,9 @@ public class DataUpdateTask {
 
     /** 请求参数快照 */
     private DataUpdateRequest request;
+
+    /** 字段变更统计（stock_info更新时各字段变更数量），如 {"名称":15, "总市值":3210} */
+    private Map<String, Integer> fieldChanges = new LinkedHashMap<>();
 
     /** 创建时间 */
     private LocalDateTime createTime = LocalDateTime.now();

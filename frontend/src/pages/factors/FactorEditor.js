@@ -10,7 +10,7 @@ const { Title, Text } = Typography;
 const { TextArea } = Input;
 const { Option } = Select;
 
-const CATEGORIES = ['MOMENTUM','VALUE','QUALITY','VOLATILITY','TECHNICAL','FUNDAMENTAL','SENTIMENT','CUSTOM'];
+const CATEGORIES = ['MOMENTUM','VALUE','QUALITY','VOLATILITY','TECHNICAL','FUNDAMENTAL','SENTIMENT','CHANTHEORY','CUSTOM'];
 
 const TEMPLATES = {
   default:    '自定义',

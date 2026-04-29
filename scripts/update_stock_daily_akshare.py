@@ -155,20 +155,20 @@ def main():
     parser.add_argument('--quiet', action='store_true', help='安静模式')
     args = parser.parse_args()
 
-    start_date = datetime.strptime(args.start_date, '%Y-%m-%d')
-    end_date = datetime.strptime(args.end_date, '%Y-%m-%d') if args.end_date else datetime.now()
+    start_date = datetime.strptime(args.start_date, '%Y-%m-%d').date()
+    end_date = datetime.strptime(args.end_date, '%Y-%m-%d').date() if args.end_date else datetime.now().date()
 
     print(f"{'=' * 60}")
     print(f"akshare 沪深日线数据更新 → {get_backend_label()}")
-    print(f"日期范围: {start_date.date()} ~ {end_date.date()}")
+    print(f"日期范围: {start_date} ~ {end_date}")
     print(f"市场: {args.market}")
     print(f"{'=' * 60}")
 
     db = StockDailyDB()
 
     # 计算 end_date 之前的最后一个实际交易日（供断点续传比较用）
-    actual_end_date = db.get_last_trading_day_before(end_date.date())
-    print(f"        实际期末交易日: {actual_end_date} (end_date={end_date.date()})")
+    actual_end_date = db.get_last_trading_day_before(end_date)
+    print(f"        实际期末交易日: {actual_end_date} (end_date={end_date})")
 
     try:
         if args.market == 'ALL':
@@ -188,7 +188,7 @@ def main():
 
         # 断点续传
         if args.resume:
-            print(f"\n[断点续传] 检查 [{start_date.date()}~{end_date.date()}] 已有数据...")
+            print(f"\n[断点续传] 检查 [{start_date}~{end_date}] 已有数据...")
             all_codes = [s[0] for s in all_stocks]
             # 使用区间查询，只检查指定范围内的最新数据
             latest_map = db.get_latest_dates_in_range_batch(all_codes, start_date, end_date)

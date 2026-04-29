@@ -5,17 +5,16 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.quant.platform.common.exception.BusinessException;
 import com.quant.platform.common.exception.ResourceNotFoundException;
+import com.quant.platform.config.ClickHouseConfig;
 import com.quant.platform.factor.domain.FactorDefinition;
 import com.quant.platform.factor.domain.FactorTestReport;
 import com.quant.platform.factor.domain.FactorValue;
-import com.quant.platform.factor.engine.BuiltinFactors;
 import com.quant.platform.factor.engine.FactorComputeEngine;
 import com.quant.platform.factor.engine.ScriptedFactorEngine;
 import com.quant.platform.factor.mapper.FactorDefinitionMapper;
 import com.quant.platform.factor.mapper.FactorTestReportMapper;
 import com.quant.platform.factor.mapper.FactorValueMapper;
 import com.quant.platform.market.service.MarketDataService;
-import com.quant.platform.config.ClickHouseConfig;
 import com.quant.platform.stock.entity.StockInfo;
 import com.quant.platform.stock.mapper.StockInfoMapper;
 import lombok.RequiredArgsConstructor;
@@ -26,8 +25,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
-import java.util.*;
-import java.util.stream.Collectors;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * 因子管理服务
@@ -218,6 +218,7 @@ public class FactorService {
 
     /**
      * 批量查询因子计算状态（因子值数量 + 检测报告数量 + 计算日期范围）
+     * 因子值统计只查ClickHouse，不降级到MySQL
      */
     public Map<String, Map<String, Object>> batchGetFactorStatus(List<String> factorCodes) {
         if (factorCodes == null || factorCodes.isEmpty()) {
@@ -225,33 +226,32 @@ public class FactorService {
         }
         Map<String, Map<String, Object>> result = new java.util.HashMap<>();
 
-        // 1. 批量查询每个因子的值数量（逐个）
+        // 1. 从ClickHouse批量查询因子值统计（count + 日期范围），不降级MySQL
+        try {
+            Map<String, Map<String, Object>> chStats = clickHouseFactorValueService.batchGetStatusFromCH(factorCodes);
+            for (String code : factorCodes) {
+                Map<String, Object> entry = new java.util.HashMap<>();
+                Map<String, Object> chEntry = chStats.get(code);
+                if (chEntry != null) {
+                    entry.putAll(chEntry);
+                } else {
+                    entry.put("valueCount", 0L);
+                }
+                result.put(code, entry);
+            }
+        } catch (Exception e) {
+            log.warn("[ClickHouse] 因子值统计查询失败，返回空统计: {}", e.getMessage());
+            for (String code : factorCodes) {
+                result.put(code, Map.of("valueCount", 0L));
+            }
+        }
+
+        // 2. 查询检测报告数量（MySQL，test_report表不在CH中）
         for (String code : factorCodes) {
-            long valueCount = factorValueMapper.selectCount(
-                    new LambdaQueryWrapper<FactorValue>().eq(FactorValue::getFactorCode, code));
             long testCount = testReportMapper.selectCount(
                     new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<FactorTestReport>()
                             .eq(FactorTestReport::getFactorCode, code));
-            java.util.Map<String, Object> entry = new java.util.HashMap<>();
-            entry.put("valueCount", valueCount);
-            entry.put("testCount", testCount);
-            result.put(code, entry);
-        }
-
-        // 2. 批量查询日期范围（一条 SQL，IN 子句）
-        try {
-            List<Map<String, Object>> dateRanges = factorValueMapper.selectDateRangeByFactorCodes(factorCodes);
-            for (Map<String, Object> row : dateRanges) {
-                String code = (String) row.get("factor_code");
-                if (result.containsKey(code)) {
-                    Object minDate = row.get("min_date");
-                    Object maxDate = row.get("max_date");
-                    if (minDate != null) result.get(code).put("minDate", minDate.toString());
-                    if (maxDate != null) result.get(code).put("maxDate", maxDate.toString());
-                }
-            }
-        } catch (Exception e) {
-            log.warn("查询因子日期范围失败，忽略: {}", e.getMessage());
+            result.get(code).put("testCount", testCount);
         }
 
         return result;
@@ -437,22 +437,20 @@ public class FactorService {
     }
 
     /**
-     * 查询因子已有数据量（返回 factorCode + count，供前端判断是否需要先触发计算）
-     * 优化：先用 LIMIT 1 判断是否有数据，有数据再精确 COUNT
+     * 查询因子已有数据量（从ClickHouse查询，不降级MySQL）
      */
     public Map<String, Object> getFactorValueCount(Long factorId) {
         FactorDefinition factor = getById(factorId);
-        // 先用 LIMIT 1 快速判断是否有数据（避免千万行 COUNT 扫描）
-        Long quickCheck = factorValueMapper.selectCount(
-                new LambdaQueryWrapper<FactorValue>()
-                        .eq(FactorValue::getFactorCode, factor.getFactorCode())
-                        .last("LIMIT 1"));
-        if (quickCheck == 0) {
-            return Map.of("factorCode", factor.getFactorCode(), "count", 0L);
+        long count = 0L;
+        try {
+            Map<String, Map<String, Object>> chStats = clickHouseFactorValueService.batchGetStatusFromCH(List.of(factor.getFactorCode()));
+            Map<String, Object> stat = chStats.get(factor.getFactorCode());
+            if (stat != null && stat.get("valueCount") != null) {
+                count = (Long) stat.get("valueCount");
+            }
+        } catch (Exception e) {
+            log.warn("[ClickHouse] 因子值数量查询失败: {}", e.getMessage());
         }
-        long count = factorValueMapper.selectCount(
-                new LambdaQueryWrapper<FactorValue>()
-                        .eq(FactorValue::getFactorCode, factor.getFactorCode()));
         return Map.of("factorCode", factor.getFactorCode(), "count", count);
     }
 
@@ -463,14 +461,19 @@ public class FactorService {
     public Map<String, Object> getFactorInit(Long factorId) {
         FactorDefinition factor = getById(factorId);
         List<FactorTestReport> reports = testReportMapper.findByFactorCode(factor.getFactorCode());
-        // 快速 COUNT：先 LIMIT 1 判断，有数据再精确统计
-        Long quickCheck = factorValueMapper.selectCount(
-                new LambdaQueryWrapper<FactorValue>()
-                        .eq(FactorValue::getFactorCode, factor.getFactorCode())
-                        .last("LIMIT 1"));
-        long valueCount = quickCheck == 0 ? 0L :
-                factorValueMapper.selectCount(new LambdaQueryWrapper<FactorValue>()
-                        .eq(FactorValue::getFactorCode, factor.getFactorCode()));
+
+        // 从ClickHouse查询因子值数量（不降级MySQL）
+        long valueCount = 0L;
+        try {
+            Map<String, Map<String, Object>> chStats = clickHouseFactorValueService.batchGetStatusFromCH(List.of(factor.getFactorCode()));
+            Map<String, Object> stat = chStats.get(factor.getFactorCode());
+            if (stat != null && stat.get("valueCount") != null) {
+                valueCount = (Long) stat.get("valueCount");
+            }
+        } catch (Exception e) {
+            log.warn("[ClickHouse] 详情页因子值统计查询失败: {}", e.getMessage());
+        }
+
         Map<String, Object> result = new java.util.HashMap<>();
         result.put("factor", factor);
         result.put("reports", reports);
@@ -803,7 +806,7 @@ public class FactorService {
                 List<Map<String, Object>> stats = clickHouseFactorValueService.selectFactorStats();
                 log.info("[loadMonitorData] CH selectFactorStats cost={}ms, size={}", System.currentTimeMillis() - t0, stats.size());
                 // CH 查询失败或返回空时回退 MySQL
-                if (stats == null || stats.isEmpty()) {
+                if (stats.isEmpty()) {
                     total = factorValueMapper.selectTotalCount();
                     stats = factorValueMapper.selectFactorStats();
                 }

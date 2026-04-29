@@ -1,16 +1,11 @@
 package com.quant.platform.factor.service;
 
 import com.quant.platform.config.ClickHouseConfig;
-import com.quant.platform.factor.domain.FactorValue;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import java.math.BigDecimal;
 import java.sql.*;
-import java.sql.Date;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.util.*;
 
 /**
@@ -31,13 +26,14 @@ public class ClickHouseFactorValueService {
     /**
      * 根据因子代码和日期查询因子值（CH 优先）
      */
-    public List<FactorValue> findByFactorCodeAndDate(String factorCode, LocalDate calcDate) {
+    public java.util.List<com.quant.platform.factor.domain.FactorValue> findByFactorCodeAndDate(
+            String factorCode, java.time.LocalDate calcDate) {
         if (!clickHouseConfig.isEnabled()) {
             return List.of(); // 回退到 Mapper
         }
 
         try {
-            List<FactorValue> result = queryByFactorCodeAndDateFromCH(factorCode, calcDate);
+            java.util.List<com.quant.platform.factor.domain.FactorValue> result = queryByFactorCodeAndDateFromCH(factorCode, calcDate);
             if (!result.isEmpty()) {
                 log.debug("[ClickHouse] 因子值命中: {} {}", factorCode, calcDate);
                 return result;
@@ -51,13 +47,14 @@ public class ClickHouseFactorValueService {
     /**
      * 根据因子代码和日期范围查询因子值（CH 优先）
      */
-    public List<FactorValue> findByFactorCodeAndDateRange(String factorCode, LocalDate startDate, LocalDate endDate) {
+    public java.util.List<com.quant.platform.factor.domain.FactorValue> findByFactorCodeAndDateRange(
+            String factorCode, java.time.LocalDate startDate, java.time.LocalDate endDate) {
         if (!clickHouseConfig.isEnabled()) {
             return List.of(); // 回退到 Mapper
         }
 
         try {
-            List<FactorValue> result = queryByFactorCodeAndDateRangeFromCH(factorCode, startDate, endDate);
+            java.util.List<com.quant.platform.factor.domain.FactorValue> result = queryByFactorCodeAndDateRangeFromCH(factorCode, startDate, endDate);
             if (!result.isEmpty()) {
                 log.debug("[ClickHouse] 因子值范围查询命中: {} {}~{}", factorCode, startDate, endDate);
                 return result;
@@ -85,6 +82,50 @@ public class ClickHouseFactorValueService {
     }
 
     /**
+     * 按因子代码列表批量查询统计（只查CH，不降级到MySQL）
+     * 用于因子列表页的计算状态展示
+     */
+    public Map<String, Map<String, Object>> batchGetStatusFromCH(List<String> factorCodes) {
+        if (!clickHouseConfig.isEnabled() || factorCodes == null || factorCodes.isEmpty()) {
+            return Map.of();
+        }
+
+        String placeholders = String.join(",", factorCodes.stream()
+                .map(c -> "'" + c.replace("'", "''") + "'").toList());
+
+        String sql = String.format("""
+            SELECT factor_code,
+                   count() AS value_count,
+                   min(calc_date) AS min_date,
+                   max(calc_date) AS max_date
+            FROM stock.factor_value
+            WHERE factor_code IN (%s)
+            GROUP BY factor_code
+            """, placeholders);
+
+        Map<String, Map<String, Object>> result = new LinkedHashMap<>();
+        try (Connection conn = getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+
+            while (rs.next()) {
+                String code = rs.getString("factor_code");
+                Map<String, Object> entry = new LinkedHashMap<>();
+                entry.put("valueCount", rs.getLong("value_count"));
+                java.sql.Date minDate = rs.getDate("min_date");
+                java.sql.Date maxDate = rs.getDate("max_date");
+                if (minDate != null) entry.put("minDate", minDate.toString());
+                if (maxDate != null) entry.put("maxDate", maxDate.toString());
+                result.put(code, entry);
+            }
+        } catch (Exception e) {
+            log.error("[ClickHouse] batchGetStatus 查询失败: {}", e.getMessage(), e);
+            throw new RuntimeException("ClickHouse 批量状态查询失败", e);
+        }
+        return result;
+    }
+
+    /**
      * 总记录数查询（CH 优先）
      */
     public long selectTotalCount() {
@@ -100,12 +141,44 @@ public class ClickHouseFactorValueService {
         return -1; // 回退到 Mapper
     }
 
+    /**
+     * 查询因子在日期范围内有数据的日期列表（仅 DISTINCT calc_date，轻量查询）
+     */
+    public java.util.List<java.time.LocalDate> findDistinctDatesByFactorCode(
+            String factorCode, java.time.LocalDate startDate, java.time.LocalDate endDate) {
+        if (!clickHouseConfig.isEnabled()) {
+            return List.of();
+        }
+        String sql = """
+            SELECT DISTINCT calc_date
+            FROM stock.factor_value
+            WHERE factor_code = ? AND calc_date >= ? AND calc_date <= ?
+            ORDER BY calc_date
+            """;
+        java.util.List<java.time.LocalDate> result = new ArrayList<>();
+        try (Connection conn = getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, factorCode);
+            stmt.setString(2, startDate.toString());
+            stmt.setString(3, endDate.toString());
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    java.sql.Date d = rs.getDate("calc_date");
+                    if (d != null) result.add(d.toLocalDate());
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[ClickHouse] findDistinctDates 查询失败: {}", e.getMessage());
+        }
+        return result;
+    }
+
     // ==================== 写入方法（双写） ====================
 
     /**
      * 批量写入因子值到 ClickHouse
      */
-    public void batchUpsertToCH(List<FactorValue> values) {
+    public void batchUpsertToCH(java.util.List<com.quant.platform.factor.domain.FactorValue> values) {
         if (!clickHouseConfig.isEnabled() || values == null || values.isEmpty()) {
             return;
         }
@@ -119,15 +192,15 @@ public class ClickHouseFactorValueService {
         try (Connection conn = getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
 
-            for (FactorValue fv : values) {
+            for (com.quant.platform.factor.domain.FactorValue fv : values) {
                 stmt.setLong(1, fv.getId() != null ? fv.getId() : 0);
                 stmt.setString(2, fv.getFactorCode());
                 stmt.setString(3, fv.getSymbol());
                 stmt.setString(4, fv.getCalcDate().toString());
-                setParam(stmt, 5, fv.getFactorVal());
-                setParam(stmt, 6, fv.getRankValue());
-                setParam(stmt, 7, fv.getZScore());
-                setParam(stmt, 8, fv.getCreatedAt());
+                setBigDecimal(stmt, 5, fv.getFactorVal());
+                setBigDecimal(stmt, 6, fv.getRankValue());
+                setBigDecimal(stmt, 7, fv.getZScore());
+                setLocalDateTime(stmt, 8, fv.getCreatedAt());
                 stmt.addBatch();
             }
 
@@ -141,7 +214,8 @@ public class ClickHouseFactorValueService {
 
     // ==================== ClickHouse 查询实现 ====================
 
-    private List<FactorValue> queryByFactorCodeAndDateFromCH(String factorCode, LocalDate calcDate) {
+    private java.util.List<com.quant.platform.factor.domain.FactorValue> queryByFactorCodeAndDateFromCH(
+            String factorCode, java.time.LocalDate calcDate) {
         String sql = """
             SELECT id, factor_code, symbol, calc_date, factor_val, rank_value, z_score, created_at
             FROM stock.factor_value
@@ -149,7 +223,7 @@ public class ClickHouseFactorValueService {
             ORDER BY symbol
             """;
 
-        List<FactorValue> result = new ArrayList<>();
+        java.util.List<com.quant.platform.factor.domain.FactorValue> result = new ArrayList<>();
         try (Connection conn = getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
 
@@ -168,7 +242,8 @@ public class ClickHouseFactorValueService {
         return result;
     }
 
-    private List<FactorValue> queryByFactorCodeAndDateRangeFromCH(String factorCode, LocalDate startDate, LocalDate endDate) {
+    private java.util.List<com.quant.platform.factor.domain.FactorValue> queryByFactorCodeAndDateRangeFromCH(
+            String factorCode, java.time.LocalDate startDate, java.time.LocalDate endDate) {
         String sql = """
             SELECT id, factor_code, symbol, calc_date, factor_val, rank_value, z_score, created_at
             FROM stock.factor_value
@@ -176,7 +251,7 @@ public class ClickHouseFactorValueService {
             ORDER BY calc_date, symbol
             """;
 
-        List<FactorValue> result = new ArrayList<>();
+        java.util.List<com.quant.platform.factor.domain.FactorValue> result = new ArrayList<>();
         try (Connection conn = getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
 
@@ -248,23 +323,23 @@ public class ClickHouseFactorValueService {
 
     // ==================== 辅助方法 ====================
 
-    private FactorValue convertResultSet(ResultSet rs) throws SQLException {
-        FactorValue fv = new FactorValue();
+    private com.quant.platform.factor.domain.FactorValue convertResultSet(ResultSet rs) throws SQLException {
+        com.quant.platform.factor.domain.FactorValue fv = new com.quant.platform.factor.domain.FactorValue();
         fv.setId(rs.getLong("id"));
         fv.setFactorCode(rs.getString("factor_code"));
         fv.setSymbol(rs.getString("symbol"));
 
-        Date date = rs.getDate("calc_date");
+        java.sql.Date date = rs.getDate("calc_date");
         fv.setCalcDate(date != null ? date.toLocalDate() : null);
 
         double factorVal = rs.getDouble("factor_val");
-        fv.setFactorVal(rs.wasNull() ? null : BigDecimal.valueOf(factorVal));
+        fv.setFactorVal(rs.wasNull() ? null : java.math.BigDecimal.valueOf(factorVal));
 
         double rankValue = rs.getDouble("rank_value");
-        fv.setRankValue(rs.wasNull() ? null : BigDecimal.valueOf(rankValue));
+        fv.setRankValue(rs.wasNull() ? null : java.math.BigDecimal.valueOf(rankValue));
 
         double zScore = rs.getDouble("z_score");
-        fv.setZScore(rs.wasNull() ? null : BigDecimal.valueOf(zScore));
+        fv.setZScore(rs.wasNull() ? null : java.math.BigDecimal.valueOf(zScore));
 
         Timestamp createdAt = rs.getTimestamp("created_at");
         fv.setCreatedAt(createdAt != null ? createdAt.toLocalDateTime() : null);
@@ -272,7 +347,7 @@ public class ClickHouseFactorValueService {
         return fv;
     }
 
-    private void setParam(PreparedStatement stmt, int index, BigDecimal value) throws SQLException {
+    private void setBigDecimal(PreparedStatement stmt, int index, java.math.BigDecimal value) throws SQLException {
         if (value != null) {
             stmt.setDouble(index, value.doubleValue());
         } else {
@@ -280,7 +355,7 @@ public class ClickHouseFactorValueService {
         }
     }
 
-    private void setParam(PreparedStatement stmt, int index, LocalDateTime value) throws SQLException {
+    private void setLocalDateTime(PreparedStatement stmt, int index, java.time.LocalDateTime value) throws SQLException {
         if (value != null) {
             stmt.setTimestamp(index, Timestamp.valueOf(value));
         } else {

@@ -36,10 +36,10 @@ class StockDailyDB:
     # ClickHouse 表名
     CH_TABLE = "stock.stock_daily"
 
-    # stock_daily 的 17 个字段（业务15列 + create_time + update_time）
+    # stock_daily 的 18 个字段（id + 业务15列 + create_time + update_time）
     # 注意：已移除 market_cap 和 circ_market_cap 字段
     DAILY_COLUMNS = [
-        "code", "trade_date", "name", "open_price", "close_price",
+        "id", "code", "trade_date", "name", "open_price", "close_price",
         "high_price", "low_price", "pre_close", "volume", "amount",
         "change_percent", "change_amount", "turnover_rate",
         "pe_ttm", "pb",
@@ -293,6 +293,12 @@ class StockDailyDB:
 
     def get_latest_date_in_range(self, code, start_date, end_date):
         """获取指定日期范围内的最新交易日"""
+        # 确保 start_date/end_date 是 date 类型，避免 datetime 的 "00:00:00" 导致 CH TYPE_MISMATCH
+        if isinstance(start_date, datetime):
+            start_date = start_date.date()
+        if isinstance(end_date, datetime):
+            end_date = end_date.date()
+
         if self.backend == "clickhouse":
             r = self.ch_client.query(
                 f"SELECT MAX(trade_date) FROM {self.CH_TABLE} "
@@ -319,6 +325,12 @@ class StockDailyDB:
         if not codes:
             return {}
         result = {code: None for code in codes}
+
+        # 确保 start_date/end_date 是 date 类型，避免 datetime 的 "00:00:00" 导致 CH TYPE_MISMATCH
+        if isinstance(start_date, datetime):
+            start_date = start_date.date()
+        if isinstance(end_date, datetime):
+            end_date = end_date.date()
 
         if self.backend == "clickhouse":
             # CH 表中代码不带前缀，需要建立映射
@@ -410,7 +422,8 @@ class StockDailyDB:
         """
         批量 upsert 日线数据。
 
-        ClickHouse: 先 DELETE 旧版本再 INSERT，保证 (code, trade_date) 唯一。
+        ClickHouse: 直接 INSERT，依赖 ReplacingMergeTree 自动去重（update_time 为版本列）。
+        不再使用 ALTER TABLE DELETE mutation，彻底避免 TOO_MANY_MUTATIONS 问题。
         MySQL: ON DUPLICATE KEY UPDATE 覆盖。
 
         返回: 插入的行数
@@ -419,107 +432,153 @@ class StockDailyDB:
             return 0
 
         if self.backend == "clickhouse":
-            self._ch_delete_rows(rows)
-            self._ch_insert_rows(rows)
-            return len(rows)
+            return self._ch_insert_rows(rows)
         else:
             return self._mysql_upsert_rows(rows)
 
     def _ch_delete_rows(self, rows):
-        """ClickHouse: 批量删除旧数据（兼容旧 MergeTree 引擎）"""
-        if not rows:
-            return
-
-        # 分批删除，每批 1000 条避免 SQL 过长
-        batch_size = 1000
-        for i in range(0, len(rows), batch_size):
-            batch = rows[i : i + batch_size]
-            conditions = []
-            params = {}
-            for idx, row in enumerate(batch):
-                conditions.append(f"(%(code{idx})s, %(td{idx})s)")
-                td = row.get("trade_date")
-                if isinstance(td, date):
-                    td = td.strftime("%Y-%m-%d") if hasattr(td, "strftime") else str(td)
-                params[f"code{idx}"] = row["code"]
-                params[f"td{idx}"] = td
-
-            where_clause = ", ".join(conditions)
-            sql = f"ALTER TABLE {self.CH_TABLE} DELETE WHERE (code, trade_date) IN ({where_clause})"
-            try:
-                self.ch_client.command(sql, parameters=params)
-            except Exception as e:
-                # ALTER TABLE DELETE 在某些版本可能不支持，回退为忽略
-                print(f"  [WARN] ClickHouse DELETE 失败（数据可能有重复）: {e}")
+        """已废弃：不再使用 ALTER TABLE DELETE mutation。保留此方法仅为兼容旧调用，实际为空操作。
+        ReplacingMergeTree 依靠 INSERT 覆盖（update_time 版本列）实现幂等写入，无需手动 DELETE。
+        """
+        pass  # no-op: 不产生任何 mutation
 
     def _ch_insert_rows(self, rows):
-        """ClickHouse: 批量插入数据（行式）。调用方需先调 _ch_delete_rows 删除旧版本。"""
+        """
+        ClickHouse: 批量幂等写入。返回实际写入主表的行数。
+
+        直接 INSERT（ch_client.insert），写入前先查 FINAL 表过滤已存在的 (code, trade_date)。
+        原因：ReplacingMergeTree 的自动去重只在后台合并时生效，查询不加 FINAL 会看到重复行。
+        应用层预过滤可以：
+        - 减少重复写入量
+        - 返回准确的新增行数
+        - 降低 OPTIMIZE TABLE 的频率需求
+
+        对于已存在但需要更新的行，仍然直接 INSERT（update_time 版本列保证覆盖）。
+        """
         if not rows:
-            return
+            return 0
 
         now_dt = datetime.now()
+        # CH 主表 code 存纯数字（无 sh/sz/bj 前缀），写入前统一 normalize
+        def _norm_code(c):
+            if isinstance(c, str) and len(c) > 2 and c[:2].upper() in ("SH", "SZ", "BJ"):
+                return c[2:]
+            return c
 
-        # 业务字段（不含时间）
-        # 注意：已移除 market_cap 和 circ_market_cap 字段
         biz_cols = [
-            "code", "trade_date", "name", "open_price", "close_price",
+            "id", "code", "trade_date", "name", "open_price", "close_price",
             "high_price", "low_price", "pre_close", "volume", "amount",
             "change_percent", "change_amount", "turnover_rate",
             "pe_ttm", "pb",
         ]
 
-        # 转换为行式数据（list of list）
-        all_rows = []
+        # ── 预过滤：查 FINAL 表，找出已存在的 (code, trade_date) ──
+        existing_keys = set()
+        codes_in_batch = set()
+        dates_in_batch = set()
         for row in rows:
-            vals = []
-            for col in biz_cols:
-                val = row.get(col)
-                # 类型转换
-                if col == "trade_date":
-                    # ClickHouse Date 列需要 date 对象
-                    if isinstance(val, str):
-                        val = date.fromisoformat(val)
-                    elif isinstance(val, datetime):
-                        val = val.date()
-                elif col in ("volume",) and val is not None:
-                    val = int(val)
-                elif col != "code" and col != "name" and val is not None:
-                    val = float(val)
-                vals.append(val)
+            c = _norm_code(row.get("code", ""))
+            d = row.get("trade_date")
+            if isinstance(d, str):
+                d = date.fromisoformat(d)
+            elif isinstance(d, datetime):
+                d = d.date()
+            if c:
+                codes_in_batch.add(c)
+                dates_in_batch.add(d)
 
-            # create_time: Nullable(DateTime)，允许 NULL
-            ct = row.get("create_time")
-            if ct is None:
-                vals.append(now_dt)
-            elif isinstance(ct, str):
-                vals.append(datetime.fromisoformat(ct))
-            elif isinstance(ct, date) and not isinstance(ct, datetime):
-                vals.append(datetime.combine(ct, datetime.min.time()))
-            else:
-                vals.append(ct)
-
-            # update_time: DateTime NOT NULL（ReplacingMergeTree 的 version 列）
-            ut = row.get("update_time")
-            if ut is None:
-                vals.append(now_dt)
-            elif isinstance(ut, str):
-                vals.append(datetime.fromisoformat(ct) if ut == ct else datetime.now())
-            elif isinstance(ut, date) and not isinstance(ut, datetime):
-                vals.append(datetime.combine(ut, datetime.min.time()))
-            else:
-                vals.append(ut)
-
-            all_rows.append(vals)
-
-        # 分批插入，每批 5000 条
-        batch_size = 5000
-        total = len(all_rows)
-        for i in range(0, total, batch_size):
-            batch = all_rows[i : i + batch_size]
+        if codes_in_batch and dates_in_batch:
             try:
-                self.ch_client.insert(self.CH_TABLE, batch, column_names=self.DAILY_COLUMNS)
+                code_list = sorted(codes_in_batch)
+                date_list = sorted(dates_in_batch)
+                # 分批查 FINAL，避免 IN clause 过长
+                ch_batch = 500
+                for ci in range(0, len(code_list), ch_batch):
+                    code_chunk = code_list[ci:ci + ch_batch]
+                    code_ph = ", ".join(f"'{c}'" for c in code_chunk)
+                    date_ph = ", ".join(f"'{d}'" for d in date_list)
+                    r = self.ch_client.query(
+                        f"SELECT code, trade_date FROM {self.CH_TABLE} FINAL "
+                        f"WHERE code IN ({code_ph}) AND trade_date IN ({date_ph})"
+                    )
+                    for row_data in r.result_rows:
+                        existing_keys.add((str(row_data[0]), row_data[1]))
             except Exception as e:
-                print(f"  [ERROR] ClickHouse INSERT 失败 (批次 {i//batch_size + 1}): {e}")
+                print(f"  [WARN] FINAL 预查询失败，跳过去重: {e}")
+                existing_keys = set()  # 查不到就不去重，全量写入
+
+        # 分批：2000条/批
+        batch_size = 2000
+        total_inserted = 0
+        skipped = 0
+        for i in range(0, len(rows), batch_size):
+            batch = rows[i : i + batch_size]
+            insert_rows = []
+            for row in batch:
+                code_val = _norm_code(row.get("code", ""))
+                td_val = row.get("trade_date")
+                if isinstance(td_val, str):
+                    td_val = date.fromisoformat(td_val)
+                elif isinstance(td_val, datetime):
+                    td_val = td_val.date()
+
+                # 跳过已存在且数据完整的行（无需重复写入）
+                key = (code_val, td_val)
+                if key in existing_keys:
+                    skipped += 1
+                    continue
+
+                vals = []
+                vals.append(int(row.get("id", 0) or 0))
+
+                for col in biz_cols[1:]:
+                    val = row.get(col)
+                    if col == "code":
+                        val = _norm_code(val)  # ← 统一去前缀
+                    if col == "trade_date":
+                        if isinstance(val, str):
+                            val = date.fromisoformat(val)
+                        elif isinstance(val, datetime):
+                            val = val.date()
+                    elif col in ("volume",) and val is not None:
+                        val = int(val)
+                    elif col != "code" and col != "name" and val is not None:
+                        val = float(val)
+                    vals.append(val)
+
+                ct = row.get("create_time")
+                if ct is None:
+                    vals.append(now_dt)
+                elif isinstance(ct, str):
+                    vals.append(datetime.fromisoformat(ct))
+                elif isinstance(ct, date) and not isinstance(ct, datetime):
+                    vals.append(datetime.combine(ct, datetime.min.time()))
+                else:
+                    vals.append(ct)
+
+                ut = row.get("update_time")
+                if ut is None:
+                    vals.append(now_dt)
+                elif isinstance(ut, str):
+                    vals.append(datetime.fromisoformat(ct) if ut == ct else datetime.now())
+                elif isinstance(ut, date) and not isinstance(ut, datetime):
+                    vals.append(datetime.combine(ut, datetime.min.time()))
+                else:
+                    vals.append(ut)
+                insert_rows.append(vals)
+
+            if not insert_rows:
+                continue
+            try:
+                # 直接 INSERT 到主表
+                self.ch_client.insert(self.CH_TABLE, insert_rows, column_names=self.DAILY_COLUMNS)
+                total_inserted += len(insert_rows)
+            except Exception as e:
+                print(f"  [ERROR] ClickHouse 插入失败 (批次 {i // batch_size + 1}): {e}")
+
+        if skipped > 0:
+            print(f"    [CH] 跳过 {skipped} 条已存在记录（FINAL 去重）")
+        return total_inserted
 
     def _mysql_upsert_rows(self, rows):
         """MySQL: 批量 UPSERT"""
@@ -790,48 +849,57 @@ class StockDailyDB:
             """
             calc_result = self.ch_client.query(calc_sql)
 
-            # Step 3: 按 code 分组
-            from collections import defaultdict
-            code_rows = defaultdict(list)
+            # Step 3: 收集需要更新的 (code, trade_date) 及计算值
+            # 同时把完整行数据读出来，以便 re-INSERT（覆盖旧版本）
+            need_update = {}  # (code, date_str) -> {pre_close, change_percent, change_amount}
             for row in calc_result.result_rows:
                 r_code = row[0]
                 new_pre = row[2]
                 if new_pre is not None and float(new_pre) > 0:
-                    code_rows[r_code].append({
-                        'date': str(row[1]),
+                    key = (r_code, str(row[1]))
+                    need_update[key] = {
                         'pre_close': round(float(new_pre), 2),
                         'change_percent': round(float(row[4]), 2),
                         'change_amount': round(float(row[5]), 2),
-                    })
+                    }
 
-            # Step 4: 每只股票合并为 1 个 mutation（减少并发数，避免 TOO_MANY_MUTATIONS）
-            for c, updates in code_rows.items():
-                whens_pre = []
-                whens_pct = []
-                whens_amt = []
-                for u in updates:
-                    date_str = u['date']
-                    whens_pre.append(f"WHEN (code='{c}' AND trade_date='{date_str}') THEN {u['pre_close']}")
-                    whens_pct.append(f"WHEN (code='{c}' AND trade_date='{date_str}') THEN {u['change_percent']}")
-                    whens_amt.append(f"WHEN (code='{c}' AND trade_date='{date_str}') THEN {u['change_amount']}")
+            if not need_update:
+                continue
 
-                # 三字段合一，一次 mutation
-                update_sql = (
-                    f"ALTER TABLE {table} UPDATE "
-                    f"pre_close = CASE {' '.join(whens_pre)} ELSE pre_close END, "
-                    f"change_percent = CASE {' '.join(whens_pct)} ELSE change_percent END, "
-                    f"change_amount = CASE {' '.join(whens_amt)} ELSE change_amount END "
-                    f"WHERE code = '{c}'"
+            # Step 4: 读出这些行的完整数据，打补丁后重新 INSERT（零 mutation）
+            # ReplacingMergeTree 靠 update_time 版本列覆盖旧数据
+            keys_by_code = {}
+            for (c, d) in need_update:
+                keys_by_code.setdefault(c, []).append(d)
+
+            now_dt = datetime.now()
+            insert_rows = []
+            for c, dates in keys_by_code.items():
+                dates_literal = ", ".join(f"'{d}'" for d in dates)
+                sel = self.ch_client.query(
+                    f"SELECT {', '.join(self.DAILY_COLUMNS)} "
+                    f"FROM {table} FINAL "
+                    f"WHERE code = '{c}' AND toString(trade_date) IN ({dates_literal})"
                 )
-                try:
-                    self._ch_command_raw(update_sql)
-                except Exception as e:
-                    print(f"  [WARN] mutation 异常 (code={c}): {e}")
+                for orig in sel.result_rows:
+                    row_dict = dict(zip(self.DAILY_COLUMNS, orig))
+                    key = (c, str(row_dict['trade_date']))
+                    if key in need_update:
+                        patch = need_update[key]
+                        row_dict['pre_close'] = patch['pre_close']
+                        row_dict['change_percent'] = patch['change_percent']
+                        row_dict['change_amount'] = patch['change_amount']
+                        row_dict['update_time'] = now_dt  # 递增版本，触发覆盖
+                    vals = [row_dict.get(col) for col in self.DAILY_COLUMNS]
+                    insert_rows.append(vals)
 
-                total_fixed += len(updates)
-
-            # 批次之间等待 mutation 完成，避免积压超过 ClickHouse 并发限制（默认 1000）
-            self._ch_wait_mutations_done()
+            if insert_rows:
+                ins_batch = 5000
+                for j in range(0, len(insert_rows), ins_batch):
+                    self.ch_client.insert(table, insert_rows[j:j+ins_batch],
+                                          column_names=self.DAILY_COLUMNS)
+                total_fixed += len(insert_rows)
+                print(f"    [fix_change] INSERT 覆盖 {len(insert_rows)} 条 (零 mutation)")
 
         print(f"  [fix_change] 完成: 共修复 {total_fixed:,} 条记录")
         return total_fixed

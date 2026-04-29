@@ -202,8 +202,11 @@ def fetch_all_stocks_qq(stocks: list, batch_size: int = 50, delay: float = 0.2) 
 
 # ─── 数据库操作 ───────────────────────────────────────────────
 
-def load_stocks_from_db(conn, skip_bj: bool = False) -> list:
-    """从数据库读取所有需要更新的股票 [(code, market), ...]"""
+def load_stocks_from_db(conn, skip_bj: bool = False) -> tuple:
+    """
+    从数据库读取所有需要更新的股票。
+    返回: ([(code, market), ...], {code: {name, is_st, total_market_cap, float_market_cap, pe_ttm, pb}})
+    """
     with conn.cursor() as cur:
         if skip_bj:
             cur.execute("SELECT code, market FROM stock_info WHERE market IN ('SH','SZ') ORDER BY code")
@@ -212,31 +215,80 @@ def load_stocks_from_db(conn, skip_bj: bool = False) -> list:
         rows = cur.fetchall()
     stocks = [(r["code"], r["market"]) for r in rows]
     print(f"[INFO] 从数据库加载 {len(stocks)} 只股票")
-    return stocks
+
+    # 加载旧值用于变更统计
+    old_vals = {}
+    if stocks:
+        codes = [s[0] for s in stocks]
+        with conn.cursor() as cur:
+            for i in range(0, len(codes), 500):
+                batch = codes[i:i + 500]
+                placeholders = ",".join(["%s"] * len(batch))
+                cur.execute(
+                    f"SELECT code, name, is_st, total_market_cap, float_market_cap, pe_ttm, pb "
+                    f"FROM stock_info WHERE code IN ({placeholders})",
+                    batch,
+                )
+                for r in cur.fetchall():
+                    old_vals[r["code"]] = {
+                        "name": r.get("name"),
+                        "is_st": r.get("is_st"),
+                        "total_market_cap": r.get("total_market_cap"),
+                        "float_market_cap": r.get("float_market_cap"),
+                        "pe_ttm": r.get("pe_ttm"),
+                        "pb": r.get("pb"),
+                    }
+    print(f"[INFO] 加载旧值 {len(old_vals)} 条用于变更对比")
+
+    return stocks, old_vals
 
 
-def batch_update_db(conn, stocks_data: dict, dry_run: bool = False) -> tuple:
+def batch_update_db(conn, stocks_data: dict, old_vals: dict, dry_run: bool = False) -> tuple:
     """
-    批量更新数据库。
+    批量更新数据库，并统计各字段变更数量。
     stocks_data: {code: {name, total_market_cap, float_market_cap, pe_ttm, pb}}
-    返回: (成功数, 未命中数, 失败数)
+    old_vals: {code: {name, is_st, total_market_cap, float_market_cap, pe_ttm, pb}}
+    返回: (成功数, 未命中数, 失败数, 变更统计dict)
     """
     now = datetime.datetime.now()
     ok = miss = err = 0
+
+    # 字段变更统计
+    FIELD_LABELS = {
+        "name": "名称",
+        "is_st": "ST状态",
+        "total_market_cap": "总市值",
+        "float_market_cap": "流通市值",
+        "pe_ttm": "PE(TTM)",
+        "pb": "PB",
+    }
+    change_counts = {k: 0 for k in FIELD_LABELS}
+
+    def values_differ(old_v, new_v):
+        """比较新旧值，None 和 0 视为等效于无值"""
+        if old_v is None and new_v is None:
+            return False
+        if old_v is None or new_v is None:
+            return True
+        if isinstance(old_v, float) and isinstance(new_v, (int, float)):
+            return abs(old_v - float(new_v)) > 1e-6
+        return str(old_v) != str(new_v)
 
     if dry_run:
         print(f"[DRY-RUN] 共 {len(stocks_data)} 条数据，不写入数据库")
         samples = list(stocks_data.items())[:3]
         for code, d in samples:
             print(f"  示例 {code}: {d}")
-        return 0, 0, 0
+        return 0, 0, 0, change_counts
 
     with conn.cursor() as cur:
         for code, d in stocks_data.items():
+            new_name = d.get("name")
+            new_is_st = is_st_stock(new_name or "")
             rec = {
                 "code":             code,
-                "name":             d.get("name"),
-                "is_st":            is_st_stock(d.get("name", "")),
+                "name":             new_name,
+                "is_st":            new_is_st,
                 "total_market_cap": d.get("total_market_cap"),
                 "float_market_cap": d.get("float_market_cap"),
                 "pe_ttm":           d.get("pe_ttm"),
@@ -247,6 +299,20 @@ def batch_update_db(conn, stocks_data: dict, dry_run: bool = False) -> tuple:
                 affected = cur.execute(UPDATE_SQL, rec)
                 if affected > 0:
                     ok += 1
+                    # 对比旧值统计变更
+                    old = old_vals.get(code, {})
+                    if values_differ(old.get("name"), new_name):
+                        change_counts["name"] += 1
+                    if values_differ(old.get("is_st"), new_is_st):
+                        change_counts["is_st"] += 1
+                    if values_differ(old.get("total_market_cap"), d.get("total_market_cap")):
+                        change_counts["total_market_cap"] += 1
+                    if values_differ(old.get("float_market_cap"), d.get("float_market_cap")):
+                        change_counts["float_market_cap"] += 1
+                    if values_differ(old.get("pe_ttm"), d.get("pe_ttm")):
+                        change_counts["pe_ttm"] += 1
+                    if values_differ(old.get("pb"), d.get("pb")):
+                        change_counts["pb"] += 1
                 else:
                     miss += 1
             except Exception as e:
@@ -255,7 +321,13 @@ def batch_update_db(conn, stocks_data: dict, dry_run: bool = False) -> tuple:
                     print(f"[ERROR] 更新失败 code={code}：{e}")
 
     conn.commit()
-    return ok, miss, err
+
+    # 输出变更统计（便于后端解析）
+    parts = [f"{FIELD_LABELS[k]}:{v}" for k, v in change_counts.items() if v > 0]
+    if parts:
+        print(f"[FIELD_CHANGES] {' | '.join(parts)}")
+
+    return ok, miss, err, change_counts
 
 
 # ─── 主流程 ───────────────────────────────────────────────────
@@ -285,8 +357,8 @@ def main():
         sys.exit(1)
 
     try:
-        # 1. 从数据库读取股票列表
-        stocks = load_stocks_from_db(conn, skip_bj=args.skip_bj)
+        # 1. 从数据库读取股票列表 + 旧值
+        stocks, old_vals = load_stocks_from_db(conn, skip_bj=args.skip_bj)
 
         if not stocks:
             print("[WARN] 数据库中无股票数据，退出")
@@ -303,8 +375,8 @@ def main():
             print("[ERROR] 未能获取任何行情数据，请检查网络连接")
             return
 
-        # 3. 写入数据库
-        ok, miss, err = batch_update_db(conn, stocks_data, dry_run=args.dry_run)
+        # 3. 写入数据库（含变更统计）
+        ok, miss, err, change_counts = batch_update_db(conn, stocks_data, old_vals, dry_run=args.dry_run)
 
         elapsed = (datetime.datetime.now() - start).total_seconds()
         print("=" * 65)

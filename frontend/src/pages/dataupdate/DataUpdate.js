@@ -210,7 +210,7 @@ function DataUpdate() {
   );
 
   // ========== 指数数据完整性检查 ==========
-  const [missingIndexDate, setMissingIndexDate] = useState(dayjs().subtract(1, 'day'));
+  const [missingIndexDate, setMissingIndexDate] = useState(dayjs().tz().subtract(1, 'day'));
   const [missingIndices, setMissingIndices] = useState([]);
   const [missingIndexLoading, setMissingIndexLoading] = useState(false);
 
@@ -252,7 +252,7 @@ function DataUpdate() {
   };
 
   // ========== 股票数据完整性检查 ==========
-  const [missingDate, setMissingDate] = useState(dayjs().subtract(1, 'day'));
+  const [missingDate, setMissingDate] = useState(null);
   const [missingMarket, setMissingMarket] = useState('ALL');
   const [missingStocks, setMissingStocks] = useState([]);
   const [missingLoading, setMissingLoading] = useState(false);
@@ -365,6 +365,7 @@ function DataUpdate() {
               if (msg.startTime !== undefined) t.startTime = msg.startTime;
               if (msg.endTime !== undefined) t.endTime = msg.endTime;
               if (msg.error !== undefined) t.error = msg.error;
+              if (msg.fieldChanges !== undefined) t.fieldChanges = msg.fieldChanges;
               t.updateType = ut;
               // 保存配置信息用于展示
               if (msg.market !== undefined) t.configMarket = msg.market;
@@ -470,17 +471,25 @@ function DataUpdate() {
     }
   }, [dailyTask?.status, fetchCoverage]);
 
+  // 判断今天是否为潜在交易日（工作日，排除周末）
+  // 注：不覆盖法定节假日调休（如国庆调休周末上班），需要时可对接后端交易日历接口
+  const isPotentialTradingDay = () => {
+    const day = dayjs().day(); // 0=周日, 6=周六
+    return day >= 1 && day <= 5;
+  };
+
   // tradingDates 加载完成后，默认日期设为最近一个交易日
-  // 如果今天在列表中，18:00前选前一个交易日，18:00后选今天
-  // 如果今天不在列表中（非交易日/数据未更新），直接选最近一个交易日
+  // 逻辑：
+  //   18:00 后 + 今天是工作日 → 选今天（即使数据未更新，方便检查缺失）
+  //   18:00 前 → 选 tradingDates[0]（最新有数据的日期）
+  //   今天是周末 → 选 tradingDates[0]
   useEffect(() => {
     if (tradingDates && tradingDates.length > 0) {
-      const todayStr = dayjs().format('YYYY-MM-DD');
-      const idx = (tradingDates[0] === todayStr && dayjs().hour() < 18) ? 1 : 0;
-      const targetDate = tradingDates[idx] || tradingDates[0];
-      const targetDayjs = dayjs(targetDate);
-      setMissingDate(targetDayjs);
-      setMissingIndexDate(targetDayjs);
+      const now = dayjs();
+      const after18 = now.hour() >= 18;
+      const targetDate = (after18 && isPotentialTradingDay()) ? now : dayjs(tradingDates[0]);
+      setMissingDate(targetDate);
+      setMissingIndexDate(targetDate);
     }
   }, [tradingDates]);
 
@@ -518,7 +527,7 @@ function DataUpdate() {
     fetchDividendCoverage();
     fetchFinancialCoverage();
     dataUpdateApi.getTradingDates(365).then(res => setTradingDates(res || [])).catch(() => {});
-    dataUpdateApi.getMissingStats(dayjs().subtract(1, 'day').format('YYYY-MM-DD'))
+    dataUpdateApi.getMissingStats(dayjs().tz().subtract(1, 'day').format('YYYY-MM-DD'))
       .then(res => setMissingStats(res)).catch(() => {});
     dataUpdateApi.getDefaultDates().then(res => {
       if (res) {
@@ -712,6 +721,17 @@ function DataUpdate() {
         </Card>
         {/* 进度条 */}
         {renderProgressBar(dailyTask)}
+        {/* 字段变更统计 */}
+        {dailyTask?.fieldChanges && Object.keys(dailyTask.fieldChanges).length > 0 && (
+          <Card size="small" style={{ marginBottom: 8 }}>
+            <Space wrap>
+              <Text type="secondary" style={{ fontSize: 13 }}>字段变更统计:</Text>
+              {Object.entries(dailyTask.fieldChanges).map(([field, count]) => (
+                <Tag key={field} color="blue">{field}: {count}只</Tag>
+              ))}
+            </Space>
+          </Card>
+        )}
         {/* 日志 - 始终显示 */}
         <Card title={<span>更新日志 <Text type="secondary" style={{ fontSize: 12 }}>({dailyLogs.length} 条)</Text>{renderTaskConfig(dailyTask, 'DAILY')}</span>}
           size="small" extra={<Button size="small" onClick={() => setDailyLogs([])}>清空</Button>}>

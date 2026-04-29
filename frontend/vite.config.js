@@ -30,7 +30,7 @@ export default defineConfig({
       },
       // 兼容旧 SockJS 端点
       '/ws': {
-        target: 'http://localhost:8080/api',
+        target: 'ws://localhost:8080/api',
         ws: true,
         changeOrigin: true,
       },

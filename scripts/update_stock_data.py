@@ -453,6 +453,30 @@ def main():
         except Exception as e:
             print(f"\n[WARN] 字段补全异常: {e}")
 
+    # ─── Part 4: ClickHouse OPTIMIZE（去重合并） ───
+    if DB_BACKEND == "clickhouse" and do_daily:
+        try:
+            import clickhouse_connect
+            from db_config import CLICKHOUSE_CONFIG
+            ch = clickhouse_connect.get_client(
+                host=CLICKHOUSE_CONFIG["host"], port=CLICKHOUSE_CONFIG["port"],
+                username=CLICKHOUSE_CONFIG["user"], password=CLICKHOUSE_CONFIG["password"],
+                database=CLICKHOUSE_CONFIG["database"],
+            )
+            print(f"\n{'=' * 70}")
+            print(f"  ClickHouse OPTIMIZE TABLE FINAL（去重合并）")
+            print(f"{'=' * 70}")
+            t0 = time.time()
+            ch.command("OPTIMIZE TABLE stock.stock_daily FINAL")
+            elapsed = time.time() - t0
+            r = ch.query("SELECT count() AS total, countDistinct(code, trade_date) AS distinct_rows FROM stock.stock_daily")
+            total, distinct = r.result_rows[0]
+            dups = total - distinct
+            print(f"  完成 (耗时 {elapsed:.1f}s): 总行 {total:,}, 去重后 {distinct:,}, 重复 {dups:,}")
+            print(f"{'=' * 70}")
+        except Exception as e:
+            print(f"\n[WARN] ClickHouse OPTIMIZE 失败: {e}")
+
     # ─── 汇总 ───
     total_elapsed = time.time() - total_start
 

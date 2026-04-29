@@ -22,7 +22,6 @@ import java.util.Set;
 /**
  * ClickHouse 股票数据服务
  * 优先从 ClickHouse 查询，失败时回退到 MySQL
- *
  * 所有查询方法统一遵循: CH enabled → 查 CH → 失败/无数据 → 回退 MySQL
  */
 @Slf4j
@@ -302,7 +301,7 @@ public class ClickHouseStockService {
         }
 
         try {
-            String sql = "SELECT COUNT(DISTINCT code) FROM stock_daily WHERE trade_date = ? AND " + codePattern;
+            String sql = "SELECT COUNT(DISTINCT code) FROM stock_daily FINAL WHERE trade_date = ? AND " + codePattern;
             try (Connection conn = getConnection();
                  PreparedStatement stmt = conn.prepareStatement(sql)) {
                 stmt.setString(1, date.toString());
@@ -380,7 +379,7 @@ public class ClickHouseStockService {
             SELECT code, trade_date, name, open_price, close_price, high_price, low_price,
                    pre_close, volume, amount, change_percent, change_amount,
                    turnover_rate, pe_ttm, pb
-            FROM stock_daily
+            FROM stock_daily FINAL
             WHERE code = ? AND trade_date >= ? AND trade_date <= ?
             ORDER BY trade_date
             """;
@@ -398,7 +397,7 @@ public class ClickHouseStockService {
             SELECT code, trade_date, name, open_price, close_price, high_price, low_price,
                    pre_close, volume, amount, change_percent, change_amount,
                    turnover_rate, pe_ttm, pb
-            FROM stock_daily
+            FROM stock_daily FINAL
             WHERE code IN (%s) AND trade_date >= ? AND trade_date <= ?
             ORDER BY code, trade_date
             """, placeholders);
@@ -411,7 +410,7 @@ public class ClickHouseStockService {
             SELECT code, trade_date, name, open_price, close_price, high_price, low_price,
                    pre_close, volume, amount, change_percent, change_amount,
                    turnover_rate, pe_ttm, pb
-            FROM stock_daily
+            FROM stock_daily FINAL
             WHERE trade_date = ?
             """);
 
@@ -445,7 +444,7 @@ public class ClickHouseStockService {
 
         // 总数
         long total;
-        String countSql = "SELECT COUNT(*) FROM stock_daily " + whereSql;
+        String countSql = "SELECT COUNT(*) FROM stock_daily FINAL " + whereSql;
         try (Connection conn = getConnection();
              PreparedStatement stmt = conn.prepareStatement(countSql)) {
             stmt.setString(1, date.toString());
@@ -466,7 +465,7 @@ public class ClickHouseStockService {
             SELECT code, trade_date, name, open_price, close_price, high_price, low_price,
                    pre_close, volume, amount, change_percent, change_amount,
                    turnover_rate, pe_ttm, pb
-            FROM stock_daily
+            FROM stock_daily FINAL
             """ + whereSql + " " + orderBy + " LIMIT ? OFFSET ?";
 
         List<StockDaily> records = new ArrayList<>();
@@ -502,7 +501,7 @@ public class ClickHouseStockService {
                 countIf(change_percent IS NULL OR change_percent = 0) AS flatCount,
                 ifNull(avg(change_percent), 0) AS avgPctChg,
                 ifNull(SUM(amount), 0) AS totalAmount
-            FROM stock_daily
+            FROM stock_daily FINAL
             WHERE trade_date = ?
               AND code NOT LIKE 'sh.000%'
               AND code NOT LIKE 'sz.399%'
@@ -536,7 +535,7 @@ public class ClickHouseStockService {
         String orderClause = "ASC".equalsIgnoreCase(order) ? "ASC" : "DESC";
         String sql = """
             SELECT code, name, change_percent, close_price, volume, amount, turnover_rate
-            FROM stock_daily
+            FROM stock_daily FINAL
             WHERE trade_date = ? AND change_percent IS NOT NULL
               AND code NOT LIKE 'sh.000%' AND code NOT LIKE 'sz.399%'
             ORDER BY change_percent

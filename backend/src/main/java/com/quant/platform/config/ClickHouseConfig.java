@@ -20,7 +20,7 @@ public class ClickHouseConfig {
 
     private String username = "default";
 
-    private String password = "clickhouse";
+    private String password = "123456";
 
     private boolean enabled = true;
 

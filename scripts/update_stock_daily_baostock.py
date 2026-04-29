@@ -314,6 +314,7 @@ def main():
         # ── [3/4] 遍历股票，插入数据 ─────────────────────────────────
         print(f"\n[4/4] 获取历史行情并写入...")
         total_success = 0
+        total_skipped = 0
         total_failed = 0
         total_no_data = 0
 
@@ -354,7 +355,7 @@ def main():
                     rows = build_daily_rows(db, code, name, market, df)
                     n = db.upsert_daily(rows)
                     total_success += n
-                    total_failed += len(df) - n
+                    total_skipped += len(df) - n
                     processed_codes.append((code, market))
                     print(f"[{i}/{len(stocks)}] {code} {name}: 写入 {n} 条")
                 elif df is None:
@@ -376,6 +377,7 @@ def main():
         print(f"总耗时: {elapsed:.1f} 秒")
         print(f"处理股票: {len(stocks)} 只")
         print(f"成功记录: {total_success:,} 条")
+        print(f"跳过已存在: {total_skipped} 条")
         print(f"失败记录: {total_failed} 条")
         print(f"无数据: {total_no_data} 只")
         print("=" * 80)

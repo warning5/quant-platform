@@ -42,6 +42,7 @@ const CATEGORY_LABELS = {
   QUALITY: '质量',
   SENTIMENT: '情绪',
   LIQUIDITY: '流动性',
+  CHANTHEORY: '缠论',
 };
 
 const TARGET_DAYS = 310;

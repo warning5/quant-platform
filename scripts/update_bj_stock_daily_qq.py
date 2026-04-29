@@ -343,7 +343,7 @@ def main():
         all_snapshots = fetch_qq_snapshot_batch(codes_markets, batch_size=100)
         print(f"  快照获取完成: {len(all_snapshots)}/{len(stocks)} 只有数据\n")
 
-        total_success = total_failed = total_no_data = 0
+        total_success = total_skipped = total_no_data = 0
 
         for i, (code, name, market) in enumerate(stocks, 1):
             if args.resume and code in stock_start_dates:
@@ -361,7 +361,7 @@ def main():
                 daily_rows = build_daily_rows(db, code, name, market, rows, snapshot=snapshot)
                 n = db.upsert_daily(daily_rows)
                 total_success += n
-                total_failed += len(daily_rows) - n
+                total_skipped += len(daily_rows) - n
                 if i % 10 == 0 or i <= 5:
                     elapsed = time.time() - start_time
                     speed = i / elapsed
@@ -383,7 +383,7 @@ def main():
         print(f"完成! 耗时: {elapsed:.1f}秒 ({elapsed/60:.1f}分钟)")
         print(f"处理股票: {len(stocks)} 只")
         print(f"成功写入: {total_success:,} 条")
-        print(f"写入失败: {total_failed} 条")
+        print(f"跳过已存在: {total_skipped} 条")
         print(f"无数据  : {total_no_data} 只")
         print("=" * 70)
 

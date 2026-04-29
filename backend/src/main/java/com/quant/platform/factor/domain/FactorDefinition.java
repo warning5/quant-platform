@@ -115,6 +115,7 @@ public class FactorDefinition implements Serializable {
         TECHNICAL,      // 技术因子
         FUNDAMENTAL,    // 基本面因子
         SENTIMENT,      // 情绪因子
+        CHANTHEORY,     // 缠论因子
         LIQUIDITY,      // 流动性因子
         VOLUME_PRICE,   // 量价因子
         CUSTOM          // 自定义

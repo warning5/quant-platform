@@ -7,7 +7,7 @@ import { factorApi } from '../../api';
 const { Title } = Typography;
 const { Option } = Select;
 
-const CATEGORY_OPTIONS = ['MOMENTUM','VALUE','QUALITY','VOLATILITY','TECHNICAL','FUNDAMENTAL','SENTIMENT','CUSTOM'];
+const CATEGORY_OPTIONS = ['MOMENTUM','VALUE','QUALITY','VOLATILITY','TECHNICAL','FUNDAMENTAL','SENTIMENT','CHANTHEORY','CUSTOM'];
 const CATEGORY_LABELS = {
   MOMENTUM: '动量',
   VALUE: '价值',
@@ -16,6 +16,7 @@ const CATEGORY_LABELS = {
   TECHNICAL: '技术',
   FUNDAMENTAL: '基本面',
   SENTIMENT: '情绪',
+  CHANTHEORY: '缠论',
   CUSTOM: '自定义',
 };
 const STATUS_COLORS = { DRAFT:'default', TESTING:'processing', ACTIVE:'success', DEPRECATED:'default' };
@@ -196,7 +197,7 @@ export default function FactorList() {
   return (
     <div>
       <div className="page-header">
-        <Title level={4} style={{ margin: 0 }}>因子管理</Title>
+        <Title level={4} style={{ margin: 0 }}>因子列表</Title>
         <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/factors/new')}>
           新建因子
         </Button>
