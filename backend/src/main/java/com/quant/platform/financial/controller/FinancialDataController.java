@@ -102,6 +102,27 @@ public class FinancialDataController {
         return ApiResponse.success(financialDataService.getFinancialStockCount());
     }
 
+    @GetMapping("/picks/duan-yongping")
+    @Operation(summary = "段永平派选股", description = "基于价值投资理念筛选：好公司+好价格+现金流充裕")
+    public ApiResponse<Map<String, Object>> getDuanYongpingPicks(
+            @RequestParam(defaultValue = "20") int limit) {
+        return ApiResponse.success(financialDataService.getDuanYongpingPicks(Math.min(limit, 50)));
+    }
+
+    @GetMapping("/picks/hot-money")
+    @Operation(summary = "游资/短线派选股", description = "基于高弹性+中小盘+资金关注筛选")
+    public ApiResponse<Map<String, Object>> getHotMoneyPicks(
+            @RequestParam(defaultValue = "20") int limit) {
+        return ApiResponse.success(financialDataService.getHotMoneyPicks(Math.min(limit, 50)));
+    }
+
+    @GetMapping("/picks/quant")
+    @Operation(summary = "量化派选股", description = "基于多因子综合评分，追求风险收益比")
+    public ApiResponse<Map<String, Object>> getQuantPicks(
+            @RequestParam(defaultValue = "20") int limit) {
+        return ApiResponse.success(financialDataService.getQuantPicks(Math.min(limit, 50)));
+    }
+
     @GetMapping("/progress")
     @Operation(summary = "财务数据更新进度")
     public ApiResponse<Map<String, Object>> getProgress() {

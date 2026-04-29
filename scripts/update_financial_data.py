@@ -532,6 +532,20 @@ def save_sina_to_table(df, code, table_name, col_map, conn, force=False):
             print(f"    ERR {table_name} {code} {rd}: {e}")
 
     conn.commit()
+
+    # 写入后计算 free_cash_flow = net_operate_cf + net_invest_cf
+    if table_name == 'stock_cashflow' and inserted > 0:
+        try:
+            cursor.execute("""
+                UPDATE stock_cashflow
+                SET free_cash_flow = COALESCE(net_operate_cf, 0) + COALESCE(net_invest_cf, 0)
+                WHERE code = %s AND free_cash_flow IS NULL
+                  AND net_operate_cf IS NOT NULL AND net_invest_cf IS NOT NULL
+            """, (code,))
+            conn.commit()
+        except Exception:
+            pass  # FCF 计算失败不影响主流程
+
     return inserted
 
 

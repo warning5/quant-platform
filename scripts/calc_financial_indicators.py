@@ -101,16 +101,17 @@ def main():
     # 加载 income 数据: key=(code,report_date)
     print("加载 income 数据...")
     cur.execute("SELECT code, report_date, total_revenue, operating_profit, "
-                "net_profit_incl_minority, total_profit, finance_expense, income_tax FROM stock_income")
+                "net_profit_incl_minority, net_profit, total_profit, finance_expense, income_tax FROM stock_income")
     income_data = {}
     for r in cur.fetchall():
         income_data[(r[0], r[1])] = {
             'total_revenue': to_float(r[2]),
             'operating_profit': to_float(r[3]),
             'net_profit_incl_minority': to_float(r[4]),
-            'total_profit': to_float(r[5]),
-            'finance_expense': to_float(r[6]),
-            'income_tax': to_float(r[7]),
+            'net_profit': to_float(r[5]),
+            'total_profit': to_float(r[6]),
+            'finance_expense': to_float(r[7]),
+            'income_tax': to_float(r[8]),
         }
 
     # 加载 balance 数据
@@ -131,13 +132,14 @@ def main():
 
     # 加载 cashflow 数据
     print("加载 cashflow 数据...")
-    cur.execute("SELECT code, report_date, net_operate_cf, cash_received_sales "
+    cur.execute("SELECT code, report_date, net_operate_cf, cash_received_sales, free_cash_flow "
                 "FROM stock_cashflow")
     cashflow_data = {}
     for r in cur.fetchall():
         cashflow_data[(r[0], r[1])] = {
             'net_operate_cf': to_float(r[2]),
             'cash_received_sales': to_float(r[3]),
+            'free_cash_flow': to_float(r[4]),
         }
 
     print("开始计算...")
@@ -151,7 +153,10 @@ def main():
 
         total_revenue = inc.get('total_revenue')
         operating_profit = inc.get('operating_profit')
-        net_profit = inc.get('net_profit_incl_minority')
+        # 含少数股东净利润（用于 ROA/ROIC/CF/NP 等指标，与总资产/总权益口径匹配）
+        net_profit = inc.get('net_profit_incl_minority') or inc.get('net_profit')
+        # 归母净利润（用于利润增速，与官方披露口径一致）
+        net_profit_attr = inc.get('net_profit')
         total_profit = inc.get('total_profit')
         finance_expense = inc.get('finance_expense')
         income_tax = inc.get('income_tax')
@@ -175,7 +180,10 @@ def main():
 
         prev_operating_profit = prev_inc.get('operating_profit')
         prev_total_revenue = prev_inc.get('total_revenue')
-        prev_net_profit = prev_inc.get('net_profit_incl_minority')
+        # 上年同期归母净利润（用于利润增速）
+        prev_net_profit_attr = prev_inc.get('net_profit')
+        # 上年同期含少数股东净利润（用于营业利润增速的参照等）
+        prev_net_profit = prev_inc.get('net_profit_incl_minority') or prev_inc.get('net_profit')
         prev_total_assets = prev_bal.get('total_assets')
         prev_parent_equity = prev_bal.get('parent_equity')
 
@@ -200,8 +208,8 @@ def main():
         # 3. revenue_yoy
         revenue_yoy = calc_yoy(total_revenue, prev_total_revenue)
 
-        # 4. net_profit_yoy
-        net_profit_yoy = calc_yoy(net_profit, prev_net_profit)
+        # 4. net_profit_yoy（归母净利润口径，与官方披露一致）
+        net_profit_yoy = calc_yoy(net_profit_attr, prev_net_profit_attr)
 
         # 5. operating_profit_yoy
         operating_profit_yoy = calc_yoy(operating_profit, prev_operating_profit)
@@ -272,6 +280,8 @@ def main():
             'sales_cash_ratio': r4(sales_cash_ratio),
             'operating_revenue_per_share': r4(operating_revenue_per_share),
             'bps': r4(bps),
+            'net_operate_cf': cf.get('net_operate_cf'),
+            'free_cash_flow': cf.get('free_cash_flow'),
         }
 
         # 只更新非空的值

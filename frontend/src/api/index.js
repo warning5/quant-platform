@@ -129,6 +129,9 @@ export const financialApi = {
   getStockCount: () => api.get('/financial/stocks/count'),
   validate: () => api.get('/financial/validate', { timeout: 60000 }),
   getProgress: () => api.get('/financial/progress'),
+  getDuanYongpingPicks: (limit = 20) => api.get('/financial/picks/duan-yongping', { params: { limit } }),
+  getHotMoneyPicks: (limit = 20) => api.get('/financial/picks/hot-money', { params: { limit } }),
+  getQuantPicks: (limit = 20) => api.get('/financial/picks/quant', { params: { limit } }),
 };
 
 // ===== 数据更新 API =====

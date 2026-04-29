@@ -98,6 +98,22 @@ body {
   background: #fafafa;
 }
 
+/* ── 选股策略 Tooltip 白底 ─────────────────────────────────── */
+.strategy-tooltip {
+  max-width: 720px !important;
+}
+.strategy-tooltip .ant-tooltip-inner {
+  background: #fff;
+  color: #333;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.12), 0 3px 6px rgba(0,0,0,0.08);
+  border-radius: 8px;
+  padding: 12px 16px;
+  max-width: 720px;
+}
+.strategy-tooltip .ant-tooltip-arrow-content {
+  background: #fff;
+}
+
 /* ── 使用手册菜单收起样式 ─────────────────────────────────────── */
 .menu-collapsed .ant-menu-item,
 .menu-collapsed .ant-menu-submenu-title {

@@ -330,6 +330,49 @@ public class FinancialFactors {
         }
     }
 
+    // ======================== 自由现金流因子 ========================
+
+    /** 自由现金流(亿元) — 经营现金流+投资现金流，正值说明公司能产生自由现金 */
+    public static class FreeCashFlowCalc implements FinancialFactorCalculator {
+        @Override public String getFactorCode() { return "FIN_FCF"; }
+        @Override
+        public BigDecimal calculate(String code, StockFinancialIndicator ind) {
+            if (ind.getFreeCashFlow() == null) return null;
+            // 转换为亿元（原始单位为元），方便截面比较
+            return ind.getFreeCashFlow()
+                    .divide(BigDecimal.valueOf(1e8), SCALE, RoundingMode.HALF_UP);
+        }
+    }
+
+    /** 自由现金流/经营现金流 — 反映经营赚来的钱有多少是自由的（扣除资本开支后） */
+    public static class FreeCashFlowToOpCfCalc implements FinancialFactorCalculator {
+        @Override public String getFactorCode() { return "FIN_FCF_TO_OPCF"; }
+        @Override
+        public BigDecimal calculate(String code, StockFinancialIndicator ind) {
+            if (ind.getFreeCashFlow() == null || ind.getNetOperateCf() == null) return null;
+            double opCf = ind.getNetOperateCf().doubleValue();
+            if (opCf == 0) return null;
+            return ind.getFreeCashFlow().divide(ind.getNetOperateCf(), SCALE, RoundingMode.HALF_UP);
+        }
+    }
+
+    /** 自由现金流/净利润 — FCF含金量，段永平最看重的指标之一，越接近1说明利润含金量越高 */
+    public static class FreeCashFlowToNpCalc implements FinancialFactorCalculator {
+        @Override public String getFactorCode() { return "FIN_FCF_TO_NP"; }
+        @Override
+        public BigDecimal calculate(String code, StockFinancialIndicator ind) {
+            // FCF/NP = (FCF/经营CF) × (经营CF/NP) = fcfToOpCf × operatingCfToNp/100
+            if (ind.getFreeCashFlow() == null || ind.getNetOperateCf() == null) return null;
+            if (ind.getOperatingCfToNp() == null) return null;
+            double opCf = ind.getNetOperateCf().doubleValue();
+            if (opCf == 0) return null;
+            // FCF/NP = (FCF / 经营CF) × (经营CF / NP)
+            double fcfToOpCf = ind.getFreeCashFlow().doubleValue() / opCf;
+            double opCfToNp = ind.getOperatingCfToNp().doubleValue() / 100.0;
+            return BigDecimal.valueOf(fcfToOpCf * opCfToNp).setScale(SCALE, RoundingMode.HALF_UP);
+        }
+    }
+
     // ======================== 价值因子 (VALUE - 财务数据部分) ========================
 
     /** 盈利收益率代理 = 净利率 / BPS 的倒数（不依赖市价） */

@@ -1,11 +1,13 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Card, Table, Tag, Space, Typography, Row, Col, Statistic, Select, Spin, Tabs,
-  Descriptions, Input, Button, message
+  Descriptions, Input, Button, message, Tooltip
 } from 'antd';
 import {
   SearchOutlined, ReloadOutlined, FundOutlined, RiseOutlined, FallOutlined,
-  PieChartOutlined, BarChartOutlined
+  PieChartOutlined, BarChartOutlined, QuestionCircleOutlined,
+  SafetyCertificateOutlined, ThunderboltOutlined, RobotOutlined, ArrowLeftOutlined
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import { financialApi, marketApi } from '../../api';
@@ -83,6 +85,9 @@ const cashflowColumns = [
     render: v => v != null ? <Text type={v >= 0 ? 'danger' : 'success'}>{fmtAmount(v)}</Text> : '-' },
   { title: '现金净增加', dataIndex: 'netCashIncrease', width: 120, align: 'right', render: v => fmtAmount(v) },
   { title: '期末现金', dataIndex: 'cashAtEnd', width: 120, align: 'right', render: v => fmtAmount(v) },
+  { title: <span>自由现金流 <Tooltip title="FCF = 经营净现金流 + 投资净现金流。衡量企业扣除资本支出后可自由支配的现金，正值越大说明造血能力越强。一季报、中报、三季报未披露现金流量表时无数据"><QuestionCircleOutlined style={{ color: '#999', fontSize: 12 }} /></Tooltip></span>,
+    dataIndex: 'freeCashFlow', width: 140, align: 'right',
+    render: v => v != null ? <Text type={v >= 0 ? 'danger' : 'success'}>{fmtAmount(v)}</Text> : '-' },
 ];
 
 // 财务指标列
@@ -103,10 +108,137 @@ const indicatorColumns = [
   { title: '应收周转天数', dataIndex: 'arTurnoverDays', width: 100, align: 'right', render: v => fmtVal(v, 0) },
   { title: 'EPS(元)', dataIndex: 'epsBasic', width: 90, align: 'right', render: v => v != null ? `¥${fmtVal(v)}` : '-' },
   { title: 'BPS(元)', dataIndex: 'bps', width: 90, align: 'right', render: v => v != null ? `¥${fmtVal(v)}` : '-' },
+  { title: 'FCF(亿)', dataIndex: 'freeCashFlow', width: 100, align: 'right',
+    render: v => v != null ? <Text type={Number(v) >= 0 ? 'danger' : 'success'}>{fmtAmount(v)}</Text> : '-' },
+  { title: 'FCF/经营CF', dataIndex: 'netOperateCf', width: 110, align: 'right',
+    render: (v, r) => (v != null && r.freeCashFlow != null && Number(v) !== 0)
+      ? fmtVal(Number(r.freeCashFlow) / Number(v)) : '-' },
+  { title: <span>CF/NP(%) <Tooltip title={'经营现金流/净利润×100。衡量利润含金量：>100%说明利润有真金白银支撑，<100%说明利润含应收等"纸面利润"。一季报、中报、三季报未披露现金流量表时无数据'}><QuestionCircleOutlined style={{ color: '#999', fontSize: 12 }} /></Tooltip></span>,
+    dataIndex: 'operatingCfToNp', width: 120, align: 'right', render: v => fmtPct(v) },
 ];
 
+/** 三大流派选股卡片 */
+function StylePicksCards({ onSelect }) {
+  const [duanData, setDuanData] = useState(null);
+  const [hotData, setHotData] = useState(null);
+  const [quantData, setQuantData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([
+      financialApi.getDuanYongpingPicks(20),
+      financialApi.getHotMoneyPicks(20),
+      financialApi.getQuantPicks(20),
+    ])
+      .then(([d, h, q]) => {
+        setDuanData(d);
+        setHotData(h);
+        setQuantData(q);
+      })
+      .catch(() => message.error('加载选股数据失败'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const pickColumns = [
+    { title: '#', width: 35, render: (_, __, i) => i + 1 },
+    { title: '代码', dataIndex: 'code', width: 75 },
+    { title: '名称', dataIndex: 'name', width: 75, ellipsis: true, render: (v, r) => (
+      <a onClick={(e) => { e.stopPropagation(); handleRowClick(r.code); }}>{v}</a>
+    )},
+    { title: '评分', dataIndex: 'score', width: 55, align: 'right', render: v => v != null ? <Text strong>{Number(v).toFixed(1)}</Text> : '-' },
+    { title: '期数', dataIndex: 'periods', width: 45, align: 'center', render: v => v || '-' },
+  ];
+
+  // 段永平派专用列
+  const duanColumns = [
+    ...pickColumns.slice(0, 3),
+    { title: '均ROE', dataIndex: 'avg_roe', width: 60, align: 'right', render: v => v != null ? Number(v).toFixed(1) : '-' },
+    { title: '均毛利率', dataIndex: 'avg_gpm', width: 70, align: 'right', render: v => v != null ? Number(v).toFixed(1) : '-' },
+    { title: 'PE', dataIndex: 'pe_ttm', width: 50, align: 'right', render: v => v != null ? Number(v).toFixed(1) : '-' },
+    pickColumns[3], pickColumns[4],
+  ];
+
+  // 游资派专用列
+  const hotColumns = [
+    ...pickColumns.slice(0, 3),
+    { title: '利润增速', dataIndex: 'max_np_yoy', width: 70, align: 'right',
+      render: v => v != null ? <Text type={v >= 0 ? 'danger' : 'success'}>{Number(v).toFixed(1)}</Text> : '-' },
+    { title: '营收增速', dataIndex: 'max_rev_yoy', width: 70, align: 'right',
+      render: v => v != null ? <Text type={v >= 0 ? 'danger' : 'success'}>{Number(v).toFixed(1)}</Text> : '-' },
+    { title: 'PE', dataIndex: 'pe_ttm', width: 50, align: 'right', render: v => v != null ? Number(v).toFixed(1) : '-' },
+    pickColumns[3], pickColumns[4],
+  ];
+
+  // 量化派专用列
+  const quantColumns = [
+    ...pickColumns.slice(0, 3),
+    { title: '均ROE', dataIndex: 'avg_roe', width: 60, align: 'right', render: v => v != null ? Number(v).toFixed(1) : '-' },
+    { title: '利润增速', dataIndex: 'max_np_yoy', width: 70, align: 'right',
+      render: v => v != null ? <Text type={v >= 0 ? 'danger' : 'success'}>{Number(v).toFixed(1)}</Text> : '-' },
+    { title: 'PE', dataIndex: 'pe_ttm', width: 50, align: 'right', render: v => v != null ? Number(v).toFixed(1) : '-' },
+    pickColumns[3], pickColumns[4],
+  ];
+
+  const handleRowClick = (code) => {
+    onSelect(code);
+  };
+
+  const renderPickCard = (data, icon, color, columns) => {
+    if (!data) return null;
+    const strategyTip = (
+      <div style={{ maxHeight: 360, overflow: 'auto', lineHeight: 1.8 }}>
+        <div style={{ fontWeight: 600, fontSize: 13, color: color, marginBottom: 6, borderBottom: `1px solid ${color}30`, paddingBottom: 4 }}>
+          {data.style} · 筛选与评分规则
+        </div>
+        <ol style={{ margin: 0, paddingLeft: 18, fontSize: 12 }}>
+          {(data.strategy || []).map((s, i) => <li key={i}>{s}</li>)}
+        </ol>
+      </div>
+    );
+    return (
+      <Card
+        title={
+          <span>{icon} {data.style} <Text type="secondary" style={{ fontSize: 13, fontWeight: 400 }}>{data.subtitle}</Text>
+            <Tooltip title={strategyTip} classNames={{ root: 'strategy-tooltip' }}>
+              <QuestionCircleOutlined style={{ marginLeft: 8, color: color, fontSize: 14, cursor: 'pointer' }} />
+            </Tooltip>
+          </span>
+        }
+        style={{ height: '100%' }}
+        styles={{ header: { borderBottom: `2px solid ${color}` } }}
+      >
+        <Table
+          columns={columns || pickColumns}
+          dataSource={data.stocks || []}
+          rowKey="code"
+          size="small"
+          pagination={false}
+          scroll={{ y: 520 }}
+          onRow={(record) => ({
+            onClick: () => handleRowClick(record.code),
+            style: { cursor: 'pointer' },
+          })}
+        />
+      </Card>
+    );
+  };
+
+  if (loading) return <div style={{ textAlign: 'center', padding: 80 }}><Spin size="large" /><div style={{ marginTop: 12, color: '#999' }}>加载选股数据...</div></div>;
+
+  return (
+    <Row gutter={[16, 16]}>
+      <Col span={8}>{renderPickCard(duanData, <SafetyCertificateOutlined />, '#52c41a', duanColumns)}</Col>
+      <Col span={8}>{renderPickCard(hotData, <ThunderboltOutlined />, '#fa8c16', hotColumns)}</Col>
+      <Col span={8}>{renderPickCard(quantData, <RobotOutlined />, '#1677ff', quantColumns)}</Col>
+    </Row>
+  );
+}
+
 export default function FinancialData() {
-  const [selectedCode, setSelectedCode] = useState(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const codeFromUrl = searchParams.get('code');
+  const [selectedCode, setSelectedCode] = useState(codeFromUrl || null);
   const [searchValue, setSearchValue] = useState('');
   const [searchOptions, setSearchOptions] = useState([]);
   const [searching, setSearching] = useState(false);
@@ -120,6 +252,22 @@ export default function FinancialData() {
   const [indicatorData, setIndicatorData] = useState([]);
   const [trendData, setTrendData] = useState([]);
   const [tableLoading, setTableLoading] = useState(false);
+
+  // 从 URL 恢复时，预加载搜索选项使 Select 能显示 code+名称
+  useEffect(() => {
+    if (codeFromUrl && searchOptions.length === 0) {
+      marketApi.searchSymbols(codeFromUrl, 1)
+        .then(res => {
+          if (res && res.length > 0) {
+            setSearchOptions(res.map(s => ({
+              value: s.code,
+              label: `${s.code} ${s.name}`,
+            })));
+          }
+        })
+        .catch(() => {});
+    }
+  }, [codeFromUrl]);
 
   // 搜索股票
   const handleSearch = useCallback((value) => {
@@ -178,7 +326,7 @@ export default function FinancialData() {
     const dates = trendData.map(d => d.reportDate);
     return {
       tooltip: { trigger: 'axis' },
-      legend: { data: ['ROE', '毛利率', '净利率', '营收增速', '利润增速'], top: 0 },
+      legend: { data: ['ROE', '毛利率', '净利率', '营收增速', '利润增速', 'CF/NP'], top: 0 },
       grid: { left: 50, right: 30, top: 40, bottom: 30 },
       xAxis: { type: 'category', data: dates, axisLabel: { rotate: 30, fontSize: 10 } },
       yAxis: { type: 'value', axisLabel: { formatter: '{value}%' } },
@@ -188,6 +336,8 @@ export default function FinancialData() {
         { name: '净利率', type: 'line', data: trendData.map(d => d.netProfitMargin), smooth: true, symbol: 'circle', symbolSize: 4 },
         { name: '营收增速', type: 'bar', data: trendData.map(d => d.revenueYoy), barMaxWidth: 12, itemStyle: { color: '#1677ff' } },
         { name: '利润增速', type: 'bar', data: trendData.map(d => d.netProfitYoy), barMaxWidth: 12, itemStyle: { color: '#52c41a' } },
+        { name: 'CF/NP', type: 'line', data: trendData.map(d => d.operatingCfToNp), smooth: true, symbol: 'circle', symbolSize: 4,
+          lineStyle: { width: 2, type: 'dashed' }, itemStyle: { color: '#722ed1' } },
       ],
     };
   }, [trendData]);
@@ -234,20 +384,26 @@ export default function FinancialData() {
   }, [cashflowData]);
 
   const descItems = overview ? [
-    { label: '报告期', children: overview.reportDate || '-' },
-    { label: 'ROE', children: overview.roe != null ? `${overview.roe}%` : '-' },
-    { label: '毛利率', children: overview.grossProfitMargin != null ? `${overview.grossProfitMargin}%` : '-' },
-    { label: '净利率', children: overview.netProfitMargin != null ? `${overview.netProfitMargin}%` : '-' },
-    { label: '营收增速', children: overview.revenueYoy != null
-      ? <Text type={overview.revenueYoy >= 0 ? 'danger' : 'success'}>{overview.revenueYoy}%</Text> : '-' },
-    { label: '利润增速', children: overview.netProfitYoy != null
-      ? <Text type={overview.netProfitYoy >= 0 ? 'danger' : 'success'}>{overview.netProfitYoy}%</Text> : '-' },
-    { label: '资产负债率', children: overview.debtToAssetRatio != null ? `${overview.debtToAssetRatio}%` : '-' },
-    { label: '流动比率', children: fmtVal(overview.currentRatio) },
-    { label: 'EPS', children: overview.epsBasic != null ? `¥${overview.epsBasic}` : '-' },
-    { label: '每股净资产', children: overview.bps != null ? `¥${overview.bps}` : '-' },
-    { label: '存货周转率', children: fmtVal(overview.inventoryTurnover) },
-    { label: '应收周转天数', children: overview.arTurnoverDays ? `${overview.arTurnoverDays}天` : '-' },
+    { key: 'report_date', label: '报告期', children: overview.reportDate || '-' },
+    { key: 'roe', label: 'ROE', children: overview.roe != null ? `${overview.roe}%` : '-' },
+    { key: 'gpm', label: '毛利率', children: overview.grossProfitMargin != null ? `${overview.grossProfitMargin}%` : '-' },
+    { key: 'npm', label: '净利率', children: overview.netProfitMargin != null ? `${overview.netProfitMargin}%` : '-' },
+    { key: 'rev_yoy', label: '营收增速', children: overview.revenueYoy != null
+      ? <Text type={overview.revenueYoy >= 0 ? 'danger' : 'success'}>{fmtPct(overview.revenueYoy)}</Text> : '-' },
+    { key: 'np_yoy', label: '利润增速', children: overview.netProfitYoy != null
+      ? <Text type={overview.netProfitYoy >= 0 ? 'danger' : 'success'}>{fmtPct(overview.netProfitYoy)}</Text> : '-' },
+    { key: 'debt', label: '资产负债率', children: overview.debtToAssetRatio != null ? `${overview.debtToAssetRatio}%` : '-' },
+    { key: 'current', label: '流动比率', children: fmtVal(overview.currentRatio) },
+    { key: 'eps', label: 'EPS', children: overview.epsBasic != null ? `¥${overview.epsBasic}` : '-' },
+    { key: 'bps', label: '每股净资产', children: overview.bps != null ? `¥${overview.bps}` : '-' },
+    { key: 'inv_turn', label: '存货周转率', children: fmtVal(overview.inventoryTurnover) },
+    { key: 'ar_days', label: '应收周转天数', children: overview.arTurnoverDays ? `${overview.arTurnoverDays}天` : '-' },
+    { key: 'ocf', label: '经营现金流', children: overview.netOperateCf != null ? fmtAmount(overview.netOperateCf) : '-' },
+    { key: 'fcf', label: <span>自由现金流 <Tooltip title="FCF = 经营净现金流 + 投资净现金流。衡量企业扣除资本支出后可自由支配的现金，正值越大说明造血能力越强。一季报、中报、三季报未披露现金流量表时无数据"><QuestionCircleOutlined style={{ color: '#999', fontSize: 11 }} /></Tooltip></span>,
+      children: overview.freeCashFlow != null
+      ? <Text type={Number(overview.freeCashFlow) >= 0 ? 'danger' : 'success'}>{fmtAmount(overview.freeCashFlow)}</Text> : '-' },
+    { key: 'cfnp', label: <span>CF/NP <Tooltip title={'经营现金流/净利润×100。衡量利润含金量：>100%说明利润有真金白银支撑，<100%说明利润含应收等"纸面利润"。一季报、中报、三季报未披露现金流量表时无数据'}><QuestionCircleOutlined style={{ color: '#999', fontSize: 11 }} /></Tooltip></span>,
+      children: overview.operatingCfToNp != null ? fmtPct(overview.operatingCfToNp) : '-' },
   ] : [];
 
   const tabItems = [
@@ -257,7 +413,7 @@ export default function FinancialData() {
       children: (
         <Card size="small">
           <Table dataSource={indicatorData} columns={indicatorColumns} rowKey="reportDate"
-                 size="small" loading={tableLoading} scroll={{ x: 1200 }} pagination={false} />
+                 size="small" loading={tableLoading} scroll={{ x: 1500 }} pagination={false} />
         </Card>
       ),
     },
@@ -287,7 +443,7 @@ export default function FinancialData() {
       children: (
         <Card size="small">
           <Table dataSource={cashflowData} columns={cashflowColumns} rowKey="reportDate"
-                 size="small" loading={tableLoading} scroll={{ x: 950 }} pagination={false} />
+                 size="small" loading={tableLoading} scroll={{ x: 1100 }} pagination={false} />
         </Card>
       ),
     },
@@ -297,6 +453,11 @@ export default function FinancialData() {
     <div>
       <div className="page-header">
         <Title level={4} style={{ margin: 0 }}>财务数据</Title>
+        {selectedCode && (
+          <Button type="link" icon={<ArrowLeftOutlined />} onClick={() => { setSelectedCode(null); setSearchParams({}); }}>
+            返回选股列表
+          </Button>
+        )}
       </div>
 
       {/* 搜索栏 */}
@@ -305,7 +466,7 @@ export default function FinancialData() {
           <Text strong>选择股票：</Text>
           <Select
             value={selectedCode}
-            onChange={v => setSelectedCode(v)}
+            onChange={v => { setSelectedCode(v); setSearchParams(v ? { code: v } : {}); }}
             style={{ width: 280 }}
             showSearch
             onSearch={handleSearch}
@@ -323,10 +484,7 @@ export default function FinancialData() {
       </Card>
 
       {!selectedCode ? (
-        <div style={{ textAlign: 'center', padding: 80, color: '#bfbfbf' }}>
-          <FundOutlined style={{ fontSize: 48 }} />
-          <div style={{ marginTop: 12, fontSize: 16 }}>请先选择一只股票查看财务数据</div>
-        </div>
+        <StylePicksCards onSelect={(code) => { setSelectedCode(code); setSearchParams({ code }); }} />
       ) : (
         <>
           {/* 概览卡片 */}
@@ -334,16 +492,22 @@ export default function FinancialData() {
             <>
               <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
                 {[
-                  { label: 'ROE', value: overview.roe, suffix: '%', color: '#1677ff' },
-                  { label: '毛利率', value: overview.grossProfitMargin, suffix: '%', color: '#722ed1' },
-                  { label: '净利率', value: overview.netProfitMargin, suffix: '%', color: '#13c2c2' },
-                  { label: '营收增速', value: overview.revenueYoy, suffix: '%',
+                  { id: 'roe', label: 'ROE', value: overview.roe, suffix: '%', color: '#1677ff' },
+                  { id: 'gpm', label: '毛利率', value: overview.grossProfitMargin, suffix: '%', color: '#722ed1' },
+                  { id: 'npm', label: '净利率', value: overview.netProfitMargin, suffix: '%', color: '#13c2c2' },
+                  { id: 'rev_yoy', label: '营收增速', value: overview.revenueYoy != null ? Number(overview.revenueYoy).toFixed(2) : null, suffix: '%',
                     color: overview.revenueYoy >= 0 ? '#cf1322' : '#389e0d' },
-                  { label: '利润增速', value: overview.netProfitYoy, suffix: '%',
+                  { id: 'np_yoy', label: '利润增速', value: overview.netProfitYoy != null ? Number(overview.netProfitYoy).toFixed(2) : null, suffix: '%',
                     color: overview.netProfitYoy >= 0 ? '#cf1322' : '#389e0d' },
-                  { label: '资产负债率', value: overview.debtToAssetRatio, suffix: '%', color: '#fa8c16' },
+                  { id: 'debt', label: '资产负债率', value: overview.debtToAssetRatio, suffix: '%', color: '#fa8c16' },
+                  { id: 'fcf', label: <span>自由现金流 <Tooltip title="FCF = 经营净现金流 + 投资净现金流。衡量企业扣除资本支出后可自由支配的现金，正值越大说明造血能力越强。一季报、中报、三季报未披露现金流量表时无数据"><QuestionCircleOutlined style={{ color: '#999', fontSize: 11 }} /></Tooltip></span>,
+                    value: overview.freeCashFlow != null ? (Number(overview.freeCashFlow) / 1e8).toFixed(2) : null, suffix: '亿',
+                    color: overview.freeCashFlow != null ? (Number(overview.freeCashFlow) >= 0 ? '#cf1322' : '#389e0d') : undefined },
+                  { id: 'cfnp', label: <span>CF/NP <Tooltip title={'经营现金流/净利润×100。衡量利润含金量：>100%说明利润有真金白银支撑，<100%说明利润含应收等"纸面利润"。一季报、中报、三季报未披露现金流量表时无数据'}><QuestionCircleOutlined style={{ color: '#999', fontSize: 11 }} /></Tooltip></span>,
+                    value: overview.operatingCfToNp != null ? Number(overview.operatingCfToNp).toFixed(2) : null, suffix: '%',
+                    color: overview.operatingCfToNp != null ? '#722ed1' : undefined },
                 ].map(item => (
-                  <Col key={item.label} xs={12} sm={8} md={4}>
+                  <Col key={item.id} xs={12} sm={8} md={6} lg={3}>
                     <Card size="small">
                       <Statistic title={item.label} value={item.value || '-'}
                                 suffix={item.suffix}
@@ -356,7 +520,7 @@ export default function FinancialData() {
               <Descriptions bordered size="small" column={4} style={{ marginBottom: 16 }}
                              title={`${overview.name || selectedCode} · 最新财务指标`}>
                 {descItems.map(d => (
-                  <Descriptions.Item key={d.label} label={d.label}>{d.children}</Descriptions.Item>
+                  <Descriptions.Item key={d.key} label={d.label}>{d.children}</Descriptions.Item>
                 ))}
               </Descriptions>
             </>

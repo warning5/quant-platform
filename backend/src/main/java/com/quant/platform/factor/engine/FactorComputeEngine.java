@@ -188,6 +188,10 @@ public class FactorComputeEngine {
         registerFinancial(new FinancialFactors.EarningsYieldCalc());
         registerFinancial(new FinancialFactors.BookValueCalc());
         registerFinancial(new FinancialFactors.RevenueQualityCalc());
+        // 自由现金流因子
+        registerFinancial(new FinancialFactors.FreeCashFlowCalc());
+        registerFinancial(new FinancialFactors.FreeCashFlowToOpCfCalc());
+        registerFinancial(new FinancialFactors.FreeCashFlowToNpCalc());
         log.info("Registered {} financial factor calculators", financialCalculators.size());
     }
 

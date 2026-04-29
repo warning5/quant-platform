@@ -88,6 +88,12 @@ public class StockFinancialIndicator implements Serializable {
     @TableField("operating_cf_to_np")
     private BigDecimal operatingCfToNp;
 
+    @TableField("free_cash_flow")
+    private BigDecimal freeCashFlow;
+
+    @TableField("net_operate_cf")
+    private BigDecimal netOperateCf;
+
     @TableField(value = "create_time", fill = FieldFill.INSERT)
     private LocalDateTime createTime;
 
