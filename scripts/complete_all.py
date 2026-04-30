@@ -8,7 +8,7 @@ complete_all.py
 执行步骤:
 1. SQL 补全 change 字段（全量，快速）
 2. Baostock 历史补全 PE/PB（全量，约 10-20 分钟）
-3. akshare 并发补全市值字段到 stock_info（全量，约 5-10 分钟）
+3. akshare 补全市值字段到 stock_info（全量，约 5-10 分钟）
 4. 显示数据状态统计
 
 用法:
@@ -27,33 +27,31 @@ if _SCRIPT_DIR not in sys.path:
 from db_helper import StockDailyDB
 from field_completer import complete_fields
 import akshare as ak
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
 
 # ─── 市值字段补全（akshare → stock_info.total_market_cap）────────
 
-MARKET_PREFIX_AK = {"SH": "sh", "SZ": "sz", "BJ": "bj"}
-MAX_WORKERS = 30
 
-
-def _fetch_market_cap_akshare(code, market):
+def _fetch_all_market_cap_once():
     """
-    通过 akshare 获取单只股票的市值（亿元）。
-    返回: (code, total_market_cap) 或 None
+    通过 akshare 一次性获取全市场股票的市值（亿元）。
+    非交易时间东方财富接口可能拒绝连接，返回 None。
+    返回: dict {code: total_market_cap} 或 None
     """
     try:
-        prefix = MARKET_PREFIX_AK.get(market, "sz")
-        sym = f"{prefix}{code}"
         df = ak.stock_zh_a_spot_em()
-        row = df[df["代码"] == code]
-        if row.empty:
+        if df is None or df.empty:
             return None
-        total_cap = row.iloc[0].get("总市值")
-        if total_cap is None or (isinstance(total_cap, float) and total_cap <= 0):
-            return None
-        return (code, float(total_cap))
-    except Exception:
+        result = {}
+        for _, row in df.iterrows():
+            code = row.get("代码")
+            total_cap = row.get("总市值")
+            if code and total_cap is not None and isinstance(total_cap, (int, float)) and total_cap > 0:
+                result[code] = float(total_cap)
+        return result if result else None
+    except Exception as e:
+        print(f"    [WARN] akshare 全市场行情接口失败: {e}")
         return None
 
 
@@ -87,9 +85,10 @@ def _batch_update_stock_info_market_cap(db, code_caps, batch_size=200):
     return total_updated
 
 
-def complete_market_cap_akshare(db, max_workers=MAX_WORKERS):
+def complete_market_cap_akshare(db):
     """
-    akshare 并发补全全市场股票的总市值字段到 stock_info 表。
+    akshare 补全全市场股票的总市值字段到 stock_info 表。
+    优化：只调用一次 stock_zh_a_spot_em() 获取全市场数据，不再并发 5490 次。
     返回: 更新的股票数
     """
     # 获取所有股票
@@ -99,24 +98,24 @@ def complete_market_cap_akshare(db, max_workers=MAX_WORKERS):
     if not stocks:
         return 0
 
-    # 并发抓取
+    # 一次性获取全市场市值
+    print("[市值补全] 正在从东方财富获取全市场行情...")
+    cap_map = _fetch_all_market_cap_once()
+
+    if not cap_map:
+        print("[市值补全] 未获取到任何市值数据（可能处于非交易时间，东方财富接口不可用）")
+        return 0
+
+    # 匹配本地股票代码
     results = []
-    done = 0
-    total = len(stocks)
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = {pool.submit(_fetch_market_cap_akshare, code, market): (code, market)
-                   for code, name, market in stocks}
-        for fut in as_completed(futures):
-            done += 1
-            val = fut.result()
-            if val:
-                results.append(val)
-            if done % 500 == 0 or done == total:
-                pct = done * 100 // total
-                print(f"  进度 {done}/{total} ({pct}%) | 已获取 {len(results)} 条市值")
+    for code, name, market in stocks:
+        if code in cap_map:
+            results.append((code, cap_map[code]))
+
+    print(f"[市值补全] 匹配到 {len(results)}/{len(stocks)} 只股票的市值数据")
 
     if not results:
-        print("[市值补全] 未获取到任何市值数据")
+        print("[市值补全] 无匹配的市值数据")
         return 0
 
     # 批量写入 stock_info
@@ -137,35 +136,50 @@ def main():
         # ── Step 1: SQL 补全 change 字段 ─────────────────────────
         print("[Step 1] SQL 补全 change 字段（全量）...")
         t1 = time.time()
-        n1 = db.complete_change_fields()
-        print(f"  → 完成: {n1:,} 条  (耗时 {time.time()-t1:.1f}s)\n")
+        try:
+            n1 = db.complete_change_fields()
+            print(f"  → 完成: {n1:,} 条  (耗时 {time.time()-t1:.1f}s)\n")
+        except Exception as e:
+            n1 = 0
+            print(f"  → 失败: {e}  (耗时 {time.time()-t1:.1f}s)\n")
 
         # ── Step 2: Baostock 历史补全 PE/PB ─────────────────────
         print("[Step 2] Baostock 历史补全 PE/PB（全量，约 10-20 分钟）...")
         t2 = time.time()
-        n2 = complete_fields(db, force_full_scan=True)
-        print(f"  → 完成: 累计补全 {n2:,} 条  (耗时 {time.time()-t2:.1f}s)\n")
+        try:
+            n2 = complete_fields(db, force_full_scan=True)
+            print(f"  → 完成: 累计补全 {n2:,} 条  (耗时 {time.time()-t2:.1f}s)\n")
+        except Exception as e:
+            n2 = 0
+            print(f"  → 失败: {e}  (耗时 {time.time()-t2:.1f}s)\n")
 
-        # ── Step 3: akshare 并发补全市值字段 ────────────────────
-        print("[Step 3] akshare 并发补全市值字段（全量，约 5-10 分钟）...")
+        # ── Step 3: akshare 补全市值字段 ────────────────────────
+        print("[Step 3] akshare 补全市值字段（全量，约 5-10 分钟）...")
         t3 = time.time()
-        n3 = complete_market_cap_akshare(db)
-        print(f"  → 完成: 更新 {n3:,} 只  (耗时 {time.time()-t3:.1f}s)\n")
+        try:
+            n3 = complete_market_cap_akshare(db)
+            print(f"  → 完成: 更新 {n3:,} 只  (耗时 {time.time()-t3:.1f}s)\n")
+        except Exception as e:
+            n3 = 0
+            print(f"  → 失败: {e}  (耗时 {time.time()-t3:.1f}s)\n")
 
         # ── Step 4: 数据状态统计 ────────────────────────────────
         print("[Step 4] 数据状态统计...")
-        stats = db.get_daily_stats()
-        print(f"  stock_daily 总记录数: {stats['total']:,}")
-        print(f"  股票只数: {stats['stocks']:,}")
-        print(f"  日期范围: {stats['min_date']} ~ {stats['max_date']}")
+        try:
+            stats = db.get_daily_stats()
+            print(f"  stock_daily 总记录数: {stats['total']:,}")
+            print(f"  股票只数: {stats['stocks']:,}")
+            print(f"  日期范围: {stats['min_date']} ~ {stats['max_date']}")
 
-        print(f"\n  字段覆盖率（2025-01-01 至今）:")
-        cov = db.get_field_coverage(since="2025-01-01")
-        print(f"  {'字段':<12} {'非空数':>10} {'总数':>10} {'覆盖率':>8}")
-        print(f"  {'-'*44}")
-        for label, cnt, total in cov:
-            pct = cnt / total * 100 if total > 0 else 0
-            print(f"  {label:<12} {cnt:>10,} {total:>10,} {pct:>7.1f}%")
+            print(f"\n  字段覆盖率（2025-01-01 至今）:")
+            cov = db.get_field_coverage(since="2025-01-01")
+            print(f"  {'字段':<12} {'非空数':>10} {'总数':>10} {'覆盖率':>8}")
+            print(f"  {'-'*44}")
+            for label, cnt, total in cov:
+                pct = cnt / total * 100 if total > 0 else 0
+                print(f"  {label:<12} {cnt:>10,} {total:>10,} {pct:>7.1f}%")
+        except Exception as e:
+            print(f"  → 统计失败: {e}")
 
     elapsed = time.time() - t0
     print(f"\n{'='*60}")

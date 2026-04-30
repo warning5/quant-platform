@@ -128,41 +128,49 @@ public class FinancialDataController {
     public ApiResponse<Map<String, Object>> getProgress() {
         Map<String, Object> result = new LinkedHashMap<>();
 
-        // 各表记录数和去重股票数
+        // 获取 stock_info 中的有效股票代码集合
+        List<String> validCodeList = jdbcTemplate.queryForList(
+                "SELECT DISTINCT code FROM stock_info", String.class);
+        Set<String> validCodes = new HashSet<>(validCodeList);
+
+        // 各表记录数和去重股票数（过滤后）
         Map<String, Object> income = new LinkedHashMap<>();
         long incomeCount = incomeMapper.selectCount(null);
-        long incomeStocks = countDistinct(incomeMapper);
+        long incomeStocks = countDistinctFiltered(incomeMapper, validCodes);
         income.put("count", incomeCount);
         income.put("stocks", incomeStocks);
         result.put("income", income);
 
         Map<String, Object> balance = new LinkedHashMap<>();
         long balanceCount = balanceMapper.selectCount(null);
-        long balanceStocks = countDistinctBalance(balanceMapper);
+        long balanceStocks = countDistinctBalanceFiltered(balanceMapper, validCodes);
         balance.put("count", balanceCount);
         balance.put("stocks", balanceStocks);
         result.put("balance", balance);
 
         Map<String, Object> cashflow = new LinkedHashMap<>();
         long cashflowCount = cashflowMapper.selectCount(null);
-        long cashflowStocks = countDistinctCashflow(cashflowMapper);
+        long cashflowStocks = countDistinctCashflowFiltered(cashflowMapper, validCodes);
         cashflow.put("count", cashflowCount);
         cashflow.put("stocks", cashflowStocks);
         result.put("cashflow", cashflow);
 
         Map<String, Object> indicator = new LinkedHashMap<>();
         long indicatorCount = indicatorMapper.selectCount(null);
-        long indicatorStocks = countDistinctIndicator(indicatorMapper);
+        long indicatorStocks = countDistinctIndicatorFiltered(indicatorMapper, validCodes);
         indicator.put("count", indicatorCount);
         indicator.put("stocks", indicatorStocks);
         result.put("indicator", indicator);
 
-        // 覆盖的不同股票总数
+        // 覆盖的不同股票总数（仅统计 stock_info 中存在的 A 股）
         Set<String> allCodes = new HashSet<>();
         allCodes.addAll(getDistinctCodes(incomeMapper));
         allCodes.addAll(getDistinctCodesBalance(balanceMapper));
         allCodes.addAll(getDistinctCodesCashflow(cashflowMapper));
         allCodes.addAll(getDistinctCodesIndicator(indicatorMapper));
+
+        // 过滤：只保留 stock_info 中存在的 A 股（validCodes 已在方法开头获取）
+        allCodes.retainAll(validCodes);
         result.put("uniqueStocks", allCodes.size());
 
         // 读取日志文件
@@ -299,32 +307,28 @@ public class FinancialDataController {
         return ApiResponse.success(result);
     }
 
-    private long countDistinct(StockIncomeMapper mapper) {
-        QueryWrapper<StockIncome> wrapper = new QueryWrapper<>();
-        wrapper.select("COUNT(DISTINCT code) as cnt");
-        Map<String, Object> map = mapper.selectMaps(wrapper).getFirst();
-        return ((Number) map.get("cnt")).longValue();
+    private long countDistinctFiltered(StockIncomeMapper mapper, Set<String> validCodes) {
+        Set<String> codes = getDistinctCodes(mapper);
+        codes.retainAll(validCodes);
+        return codes.size();
     }
 
-    private long countDistinctBalance(StockBalanceMapper mapper) {
-        QueryWrapper<StockBalance> wrapper = new QueryWrapper<>();
-        wrapper.select("COUNT(DISTINCT code) as cnt");
-        Map<String, Object> map = mapper.selectMaps(wrapper).getFirst();
-        return ((Number) map.get("cnt")).longValue();
+    private long countDistinctBalanceFiltered(StockBalanceMapper mapper, Set<String> validCodes) {
+        Set<String> codes = getDistinctCodesBalance(mapper);
+        codes.retainAll(validCodes);
+        return codes.size();
     }
 
-    private long countDistinctCashflow(StockCashflowMapper mapper) {
-        QueryWrapper<StockCashflow> wrapper = new QueryWrapper<>();
-        wrapper.select("COUNT(DISTINCT code) as cnt");
-        Map<String, Object> map = mapper.selectMaps(wrapper).getFirst();
-        return ((Number) map.get("cnt")).longValue();
+    private long countDistinctCashflowFiltered(StockCashflowMapper mapper, Set<String> validCodes) {
+        Set<String> codes = getDistinctCodesCashflow(mapper);
+        codes.retainAll(validCodes);
+        return codes.size();
     }
 
-    private long countDistinctIndicator(StockFinancialIndicatorMapper mapper) {
-        QueryWrapper<StockFinancialIndicator> wrapper = new QueryWrapper<>();
-        wrapper.select("COUNT(DISTINCT code) as cnt");
-        Map<String, Object> map = mapper.selectMaps(wrapper).getFirst();
-        return ((Number) map.get("cnt")).longValue();
+    private long countDistinctIndicatorFiltered(StockFinancialIndicatorMapper mapper, Set<String> validCodes) {
+        Set<String> codes = getDistinctCodesIndicator(mapper);
+        codes.retainAll(validCodes);
+        return codes.size();
     }
 
     private Set<String> getDistinctCodes(StockIncomeMapper mapper) {

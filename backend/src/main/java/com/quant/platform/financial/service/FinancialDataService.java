@@ -17,7 +17,6 @@ import org.springframework.cache.annotation.Cacheable;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
-import java.math.BigDecimal;
 import java.util.*;
 
 /**
@@ -36,7 +35,9 @@ public class FinancialDataService {
     private final JdbcTemplate jdbcTemplate;
 
     /**
-     * 获取股票财务概览（最近一期指标）
+     * 获取股票财务概览
+     * 优先取最新年报(report_type=4)——年报数据最完整（含现金流量表、含少数股东净利润等），
+     * 一季报/中报/三季报因数据源(baostock)可能缺失部分字段，导致衍生指标无法计算。
      */
     public Map<String, Object> getFinancialOverview(String code) {
         // 获取股票基本信息
@@ -48,25 +49,28 @@ public class FinancialDataService {
             result.put("market", stockInfo.getMarket());
         }
 
-        // 最近一期财务指标
-        StockFinancialIndicator latestIndicator = getLatestIndicator(code);
-        if (latestIndicator != null) {
-            result.put("reportDate", latestIndicator.getReportDate());
-            result.put("endDate", latestIndicator.getEndDate());
-            result.put("roe", latestIndicator.getRoe());
-            result.put("grossProfitMargin", latestIndicator.getGrossProfitMargin());
-            result.put("netProfitMargin", latestIndicator.getNetProfitMargin());
-            result.put("revenueYoy", latestIndicator.getRevenueYoy());
-            result.put("netProfitYoy", latestIndicator.getNetProfitYoy());
-            result.put("debtToAssetRatio", latestIndicator.getDebtToAssetRatio());
-            result.put("currentRatio", latestIndicator.getCurrentRatio());
-            result.put("epsBasic", latestIndicator.getEpsBasic());
-            result.put("bps", latestIndicator.getBps());
-            result.put("inventoryTurnover", latestIndicator.getInventoryTurnover());
-            result.put("arTurnoverDays", latestIndicator.getArTurnoverDays());
-            result.put("freeCashFlow", latestIndicator.getFreeCashFlow());
-            result.put("netOperateCf", latestIndicator.getNetOperateCf());
-            result.put("operatingCfToNp", latestIndicator.getOperatingCfToNp());
+        // 优先取最新年报，若无年报则回退到最新一期
+        StockFinancialIndicator indicator = getLatestIndicatorByType(code, 4);
+        if (indicator == null) {
+            indicator = getLatestIndicator(code);
+        }
+        if (indicator != null) {
+            result.put("reportDate", indicator.getReportDate());
+            result.put("endDate", indicator.getEndDate());
+            result.put("roe", indicator.getRoe());
+            result.put("grossProfitMargin", indicator.getGrossProfitMargin());
+            result.put("netProfitMargin", indicator.getNetProfitMargin());
+            result.put("revenueYoy", indicator.getRevenueYoy());
+            result.put("netProfitYoy", indicator.getNetProfitYoy());
+            result.put("debtToAssetRatio", indicator.getDebtToAssetRatio());
+            result.put("currentRatio", indicator.getCurrentRatio());
+            result.put("epsBasic", indicator.getEpsBasic());
+            result.put("bps", indicator.getBps());
+            result.put("inventoryTurnover", indicator.getInventoryTurnover());
+            result.put("arTurnoverDays", indicator.getArTurnoverDays());
+            result.put("freeCashFlow", indicator.getFreeCashFlow());
+            result.put("netOperateCf", indicator.getNetOperateCf());
+            result.put("operatingCfToNp", indicator.getOperatingCfToNp());
         }
 
         return result;
@@ -117,11 +121,23 @@ public class FinancialDataService {
     }
 
     /**
-     * 获取最近一期财务指标
+     * 获取最近一期财务指标（不限报告类型）
      */
     private StockFinancialIndicator getLatestIndicator(String code) {
         LambdaQueryWrapper<StockFinancialIndicator> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(StockFinancialIndicator::getCode, code)
+               .orderByDesc(StockFinancialIndicator::getReportDate)
+               .last("LIMIT 1");
+        return indicatorMapper.selectOne(wrapper);
+    }
+
+    /**
+     * 获取指定报告类型的最新一期财务指标
+     */
+    private StockFinancialIndicator getLatestIndicatorByType(String code, int reportType) {
+        LambdaQueryWrapper<StockFinancialIndicator> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(StockFinancialIndicator::getCode, code)
+               .eq(StockFinancialIndicator::getReportType, reportType)
                .orderByDesc(StockFinancialIndicator::getReportDate)
                .last("LIMIT 1");
         return indicatorMapper.selectOne(wrapper);

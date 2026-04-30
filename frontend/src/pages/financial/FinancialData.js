@@ -140,51 +140,74 @@ function StylePicksCards({ onSelect }) {
       .finally(() => setLoading(false));
   }, []);
 
-  const pickColumns = [
+  // 带颜色说明的列标题（问号 Tooltip）
+  const colTitle = (name, tip) => (
+    <span>{name} <Tooltip title={tip} placement="top"><QuestionCircleOutlined style={{ color: '#999', fontSize: 11, cursor: 'pointer', marginLeft: 2 }} /></Tooltip></span>
+  );
+
+  // 公共基础列
+  const baseColumns = [
     { title: '#', width: 35, render: (_, __, i) => i + 1 },
     { title: '代码', dataIndex: 'code', width: 75 },
     { title: '名称', dataIndex: 'name', width: 75, ellipsis: true, render: (v, r) => (
       <a onClick={(e) => { e.stopPropagation(); handleRowClick(r.code); }}>{v}</a>
     )},
-    { title: '评分', dataIndex: 'score', width: 55, align: 'right', render: v => v != null ? <Text strong>{Number(v).toFixed(1)}</Text> : '-' },
-    { title: '期数', dataIndex: 'periods', width: 45, align: 'center', render: v => v || '-' },
   ];
 
-  // 段永平派专用列
+  // 通用尾部列
+  const tailColumns = [
+    { title: '评分', dataIndex: 'score', width: 55, align: 'right', fixed: 'right', render: v => v != null ? <Text strong>{Number(v).toFixed(1)}</Text> : '-' },
+    { title: '期数', dataIndex: 'periods', width: 45, align: 'center', fixed: 'right', render: v => v || '-' },
+  ];
+
+  // 段永平派专用列：均ROE、均毛利率、CF/NP、均负债率、ROE稳定、PE
   const duanColumns = [
-    ...pickColumns.slice(0, 3),
-    { title: '均ROE', dataIndex: 'avg_roe', width: 60, align: 'right', render: v => v != null ? Number(v).toFixed(1) : '-' },
-    { title: '均毛利率', dataIndex: 'avg_gpm', width: 70, align: 'right', render: v => v != null ? Number(v).toFixed(1) : '-' },
+    ...baseColumns,
+    { title: '均ROE(%)', dataIndex: 'avg_roe', width: 70, align: 'right', render: v => v != null ? Number(v).toFixed(1) : '-' },
+    { title: '均毛利率(%)', dataIndex: 'avg_gpm', width: 90, align: 'right', render: v => v != null ? Number(v).toFixed(1) : '-' },
+    { title: colTitle('CF/NP(%)', '经营现金流/净利润。红色≥100（利润含金量高，有真金白银支撑），灰色<100'), dataIndex: 'max_cfnp', width: 80, align: 'right',
+      render: v => v != null ? <Text type={v >= 100 ? 'danger' : 'secondary'}>{Number(v).toFixed(1)}</Text> : '-' },
+    { title: '均负债率(%)', dataIndex: 'avg_debt', width: 90, align: 'right', render: v => v != null ? Number(v).toFixed(1) : '-' },
+    { title: colTitle('ROE稳定', 'ROE跨期标准差，越小越稳定。红色≤5（非常稳定），黄色5~10，灰色>10'), dataIndex: 'std_roe', width: 80, align: 'right',
+      render: v => v != null ? <Text type={v <= 5 ? 'danger' : v <= 10 ? 'warning' : 'secondary'}>{Number(v).toFixed(1)}</Text> : '-' },
     { title: 'PE', dataIndex: 'pe_ttm', width: 50, align: 'right', render: v => v != null ? Number(v).toFixed(1) : '-' },
-    pickColumns[3], pickColumns[4],
+    ...tailColumns,
   ];
 
-  // 游资派专用列
+  // 游资/短线派专用列：利润增速、营收增速、均ROE、均毛利率、PE
   const hotColumns = [
-    ...pickColumns.slice(0, 3),
-    { title: '利润增速', dataIndex: 'max_np_yoy', width: 70, align: 'right',
+    ...baseColumns,
+    { title: colTitle('利润增速(%)', '近15个月最大值。红色=正增长，绿色=负增长'), dataIndex: 'max_np_yoy', width: 95, align: 'right',
       render: v => v != null ? <Text type={v >= 0 ? 'danger' : 'success'}>{Number(v).toFixed(1)}</Text> : '-' },
-    { title: '营收增速', dataIndex: 'max_rev_yoy', width: 70, align: 'right',
+    { title: colTitle('营收增速(%)', '近15个月最大值。红色=正增长，绿色=负增长'), dataIndex: 'max_rev_yoy', width: 95, align: 'right',
       render: v => v != null ? <Text type={v >= 0 ? 'danger' : 'success'}>{Number(v).toFixed(1)}</Text> : '-' },
+    { title: '均ROE(%)', dataIndex: 'avg_roe', width: 70, align: 'right', render: v => v != null ? Number(v).toFixed(1) : '-' },
+    { title: '均毛利率(%)', dataIndex: 'avg_gpm', width: 90, align: 'right', render: v => v != null ? Number(v).toFixed(1) : '-' },
     { title: 'PE', dataIndex: 'pe_ttm', width: 50, align: 'right', render: v => v != null ? Number(v).toFixed(1) : '-' },
-    pickColumns[3], pickColumns[4],
+    ...tailColumns,
   ];
 
-  // 量化派专用列
+  // 量化派专用列：均ROE、均毛利率、利润增速、均CF/NP、均负债率、ROE稳定、PE
   const quantColumns = [
-    ...pickColumns.slice(0, 3),
-    { title: '均ROE', dataIndex: 'avg_roe', width: 60, align: 'right', render: v => v != null ? Number(v).toFixed(1) : '-' },
-    { title: '利润增速', dataIndex: 'max_np_yoy', width: 70, align: 'right',
+    ...baseColumns,
+    { title: '均ROE(%)', dataIndex: 'avg_roe', width: 70, align: 'right', render: v => v != null ? Number(v).toFixed(1) : '-' },
+    { title: '均毛利率(%)', dataIndex: 'avg_gpm', width: 90, align: 'right', render: v => v != null ? Number(v).toFixed(1) : '-' },
+    { title: colTitle('利润增速(%)', '近15个月最大值。红色=正增长，绿色=负增长'), dataIndex: 'max_np_yoy', width: 95, align: 'right',
       render: v => v != null ? <Text type={v >= 0 ? 'danger' : 'success'}>{Number(v).toFixed(1)}</Text> : '-' },
+    { title: colTitle('均CF/NP(%)', '经营现金流/净利润跨期均值。红色≥100，灰色<100'), dataIndex: 'avg_cfnp', width: 90, align: 'right',
+      render: v => v != null ? <Text type={v >= 100 ? 'danger' : 'secondary'}>{Number(v).toFixed(1)}</Text> : '-' },
+    { title: '均负债率(%)', dataIndex: 'avg_debt', width: 90, align: 'right', render: v => v != null ? Number(v).toFixed(1) : '-' },
+    { title: colTitle('ROE稳定', 'ROE跨期标准差，越小越稳定。红色≤5（非常稳定），黄色5~10，灰色>10'), dataIndex: 'std_roe', width: 80, align: 'right',
+      render: v => v != null ? <Text type={v <= 5 ? 'danger' : v <= 10 ? 'warning' : 'secondary'}>{Number(v).toFixed(1)}</Text> : '-' },
     { title: 'PE', dataIndex: 'pe_ttm', width: 50, align: 'right', render: v => v != null ? Number(v).toFixed(1) : '-' },
-    pickColumns[3], pickColumns[4],
+    ...tailColumns,
   ];
 
   const handleRowClick = (code) => {
     onSelect(code);
   };
 
-  const renderPickCard = (data, icon, color, columns) => {
+  const renderPickCard = (data, color, columns) => {
     if (!data) return null;
     const strategyTip = (
       <div style={{ maxHeight: 360, overflow: 'auto', lineHeight: 1.8 }}>
@@ -199,22 +222,21 @@ function StylePicksCards({ onSelect }) {
     return (
       <Card
         title={
-          <span>{icon} {data.style} <Text type="secondary" style={{ fontSize: 13, fontWeight: 400 }}>{data.subtitle}</Text>
+          <span>{data.style} <Text type="secondary" style={{ fontSize: 13, fontWeight: 400 }}>{data.subtitle}</Text>
             <Tooltip title={strategyTip} classNames={{ root: 'strategy-tooltip' }}>
               <QuestionCircleOutlined style={{ marginLeft: 8, color: color, fontSize: 14, cursor: 'pointer' }} />
             </Tooltip>
           </span>
         }
-        style={{ height: '100%' }}
         styles={{ header: { borderBottom: `2px solid ${color}` } }}
       >
         <Table
-          columns={columns || pickColumns}
+          columns={columns}
           dataSource={data.stocks || []}
           rowKey="code"
           size="small"
           pagination={false}
-          scroll={{ y: 520 }}
+          scroll={{ y: 560 }}
           onRow={(record) => ({
             onClick: () => handleRowClick(record.code),
             style: { cursor: 'pointer' },
@@ -224,14 +246,77 @@ function StylePicksCards({ onSelect }) {
     );
   };
 
+  // 三流派对比表格
+  const compareContent = (
+    <div style={{ fontSize: 13, lineHeight: 1.7, minWidth: 800 }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+        <colgroup>
+          <col style={{ width: '14%' }} />
+          <col style={{ width: '29%' }} />
+          <col style={{ width: '29%' }} />
+          <col style={{ width: '28%' }} />
+        </colgroup>
+        <thead>
+          <tr style={{ background: '#fafafa' }}>
+            <th style={{ padding: '6px 10px', border: '1px solid #e8e8e8', textAlign: 'left', fontWeight: 600 }}>对比维度</th>
+            <th style={{ padding: '6px 10px', border: '1px solid #e8e8e8', textAlign: 'center', color: '#52c41a', fontWeight: 600 }}>段永平派</th>
+            <th style={{ padding: '6px 10px', border: '1px solid #e8e8e8', textAlign: 'center', color: '#fa8c16', fontWeight: 600 }}>游资/短线派</th>
+            <th style={{ padding: '6px 10px', border: '1px solid #e8e8e8', textAlign: 'center', color: '#1677ff', fontWeight: 600 }}>量化派</th>
+          </tr>
+        </thead>
+        <tbody>
+          {[
+            ['核心理念', '价值投资：好公司+好价格+现金流', '高弹性+中小盘+资金关注', '多因子综合评分，追求风险收益比'],
+            ['ROE门槛', '均值≥15%', '无硬性门槛', '均值≥8%'],
+            ['毛利率门槛', '均值≥30%', '无硬性门槛', '无硬性门槛'],
+            ['利润增速', '无硬性门槛', '最大值≥50%', '关注最大值（成长性）'],
+            ['营收增速', '无硬性门槛', '最大值≥30%', '无硬性门槛'],
+            ['利润含金量', 'CF/NP≥80%', '不关注', '均值（现金流评分）'],
+            ['资产负债率', '均值≤60%', '不关注', '均值≤70%'],
+            ['ROE稳定性', '标准差越小加分越高', '不关注', '标准差越小加分越高'],
+            ['PE范围', '0~30', '>0', '3~40'],
+            ['市值要求', '不关注', '10~800亿', '≥50亿'],
+            ['评分权重', '盈利25%+护城河15%+含金量15%+稳健15%+估值15%+稳定15%', '利润增速40%+营收增速30%+市值适配30%', '盈利20%+护城河10%+成长15%+现金流10%+估值15%+运营10%+稳定10%+完整度10%'],
+          ].map(([dim, d1, d2, d3], i) => (
+            <tr key={i} style={{ background: i % 2 === 1 ? '#fafafa' : '#fff' }}>
+              <td style={{ padding: '5px 10px', border: '1px solid #e8e8e8', fontWeight: 500 }}>{dim}</td>
+              <td style={{ padding: '5px 10px', border: '1px solid #e8e8e8', textAlign: 'center' }}>{d1}</td>
+              <td style={{ padding: '5px 10px', border: '1px solid #e8e8e8', textAlign: 'center' }}>{d2}</td>
+              <td style={{ padding: '5px 10px', border: '1px solid #e8e8e8', textAlign: 'center' }}>{d3}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+
   if (loading) return <div style={{ textAlign: 'center', padding: 80 }}><Spin size="large" /><div style={{ marginTop: 12, color: '#999' }}>加载选股数据...</div></div>;
 
   return (
-    <Row gutter={[16, 16]}>
-      <Col span={8}>{renderPickCard(duanData, <SafetyCertificateOutlined />, '#52c41a', duanColumns)}</Col>
-      <Col span={8}>{renderPickCard(hotData, <ThunderboltOutlined />, '#fa8c16', hotColumns)}</Col>
-      <Col span={8}>{renderPickCard(quantData, <RobotOutlined />, '#1677ff', quantColumns)}</Col>
-    </Row>
+    <Tabs
+      tabBarExtraContent={
+        <Tooltip title={compareContent} classNames={{ root: 'strategy-tooltip' }}>
+          <QuestionCircleOutlined style={{ fontSize: 18, color: '#999', cursor: 'pointer', marginRight: 8 }} />
+        </Tooltip>
+      }
+      items={[
+        {
+          key: 'duan',
+          label: <span><SafetyCertificateOutlined /> 段永平派</span>,
+          children: renderPickCard(duanData, '#52c41a', duanColumns),
+        },
+        {
+          key: 'hot',
+          label: <span><ThunderboltOutlined /> 游资/短线派</span>,
+          children: renderPickCard(hotData, '#fa8c16', hotColumns),
+        },
+        {
+          key: 'quant',
+          label: <span><RobotOutlined /> 量化派</span>,
+          children: renderPickCard(quantData, '#1677ff', quantColumns),
+        },
+      ]}
+    />
   );
 }
 
@@ -518,7 +603,7 @@ export default function FinancialData() {
               </Row>
 
               <Descriptions bordered size="small" column={4} style={{ marginBottom: 16 }}
-                             title={`${overview.name || selectedCode} · 最新财务指标`}>
+                             title={`${overview.name || selectedCode} · 最新年报财务指标（${overview.reportDate}）`}>
                 {descItems.map(d => (
                   <Descriptions.Item key={d.key} label={d.label}>{d.children}</Descriptions.Item>
                 ))}

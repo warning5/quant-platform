@@ -322,24 +322,25 @@ def fetch_sina_report(code, symbol_type, timeout=15):
     symbol_type: '利润表' / '资产负债表' / '现金流量表'
     timeout: 单次请求超时秒数
     """
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+
+    def _fetch():
+        return ak.stock_financial_report_sina(stock=code, symbol=symbol_type)
+
+    executor = ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(_fetch)
     try:
-        import signal
-        # Windows 不支持 SIGALRM，用线程超时
-        from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
-
-        def _fetch():
-            return ak.stock_financial_report_sina(stock=code, symbol=symbol_type)
-
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(_fetch)
-            try:
-                df = future.result(timeout=timeout)
-                return df
-            except FuturesTimeoutError:
-                print(f"    TIMEOUT {code} {symbol_type} ({timeout}s)")
-                return None
-    except Exception as e:
+        df = future.result(timeout=timeout)
+        return df
+    except FuturesTimeoutError:
+        print(f"    TIMEOUT {code} {symbol_type} ({timeout}s)")
         return None
+    except Exception:
+        return None
+    finally:
+        # 不 cancel —— cancel 只能阻止未开始的任务，无法终止运行中的线程
+        # 直接 shutdown(wait=False) 丢弃后台线程，避免卡在 with 块等待
+        executor.shutdown(wait=False)
 
 # 利润表字段映射（新浪 -> 数据库）
 # 2026-04-16 修正：补全缺失字段，修正名称不匹配

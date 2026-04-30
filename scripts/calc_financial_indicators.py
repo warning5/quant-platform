@@ -3,7 +3,7 @@
 """
 财务指标计算脚本
 从 stock_income / stock_balance / stock_cashflow 表的原始数据，
-计算 stock_financial_indicator 中无法直接采集的 16 个衍生指标。
+计算 stock_financial_indicator 中无法直接采集的衍生指标。
 
 公式：
   roa                          = 净利润(含少数) / 总资产平均 * 100
@@ -23,6 +23,12 @@
   sales_cash_ratio             = 销售商品收到的现金 / 营业总收入 * 100
   operating_revenue_per_share  = 营业总收入 / 总股本
   bps                          = 归属母公司权益 / 总股本
+  eps_basic                    = income表原始值 或 归母净利润/总股本
+  debt_to_asset_ratio          = 总负债 / 总资产 * 100
+  current_ratio                = 流动资产 / 流动负债
+  net_profit_margin            = 净利润(含少数) / 营业总收入 * 100
+  inventory_turnover           = 营业成本 / 存货（年化）
+  ar_turnover_days             = 365 / 应收账款周转率
 
 注意：
   - 同比增长率需要上一年度同期数据
@@ -100,24 +106,27 @@ def main():
 
     # 加载 income 数据: key=(code,report_date)
     print("加载 income 数据...")
-    cur.execute("SELECT code, report_date, total_revenue, operating_profit, "
-                "net_profit_incl_minority, net_profit, total_profit, finance_expense, income_tax FROM stock_income")
+    cur.execute("SELECT code, report_date, total_revenue, operating_profit, operating_cost, "
+                "net_profit_incl_minority, net_profit, total_profit, finance_expense, income_tax, eps_basic FROM stock_income")
     income_data = {}
     for r in cur.fetchall():
         income_data[(r[0], r[1])] = {
             'total_revenue': to_float(r[2]),
             'operating_profit': to_float(r[3]),
-            'net_profit_incl_minority': to_float(r[4]),
-            'net_profit': to_float(r[5]),
-            'total_profit': to_float(r[6]),
-            'finance_expense': to_float(r[7]),
-            'income_tax': to_float(r[8]),
+            'operating_cost': to_float(r[4]),
+            'net_profit_incl_minority': to_float(r[5]),
+            'net_profit': to_float(r[6]),
+            'total_profit': to_float(r[7]),
+            'finance_expense': to_float(r[8]),
+            'income_tax': to_float(r[9]),
+            'eps_basic': to_float(r[10]),
         }
 
     # 加载 balance 数据
     print("加载 balance 数据...")
     cur.execute("SELECT code, report_date, total_assets, total_liabilities, "
-                "total_equity, parent_equity, accounts_receivable, paid_in_capital "
+                "total_equity, parent_equity, accounts_receivable, paid_in_capital, "
+                "total_current_assets, total_current_liabilities, inventory "
                 "FROM stock_balance")
     balance_data = {}
     for r in cur.fetchall():
@@ -128,6 +137,9 @@ def main():
             'parent_equity': to_float(r[5]),
             'accounts_receivable': to_float(r[6]),
             'paid_in_capital': to_float(r[7]),
+            'total_current_assets': to_float(r[8]),
+            'total_current_liabilities': to_float(r[9]),
+            'inventory': to_float(r[10]),
         }
 
     # 加载 cashflow 数据
@@ -153,6 +165,7 @@ def main():
 
         total_revenue = inc.get('total_revenue')
         operating_profit = inc.get('operating_profit')
+        operating_cost = inc.get('operating_cost')
         # 含少数股东净利润（用于 ROA/ROIC/CF/NP 等指标，与总资产/总权益口径匹配）
         net_profit = inc.get('net_profit_incl_minority') or inc.get('net_profit')
         # 归母净利润（用于利润增速，与官方披露口径一致）
@@ -160,6 +173,7 @@ def main():
         total_profit = inc.get('total_profit')
         finance_expense = inc.get('finance_expense')
         income_tax = inc.get('income_tax')
+        eps_basic_raw = inc.get('eps_basic')
 
         total_assets = bal.get('total_assets')
         total_liabilities = bal.get('total_liabilities')
@@ -167,6 +181,9 @@ def main():
         parent_equity = bal.get('parent_equity')
         accounts_receivable = bal.get('accounts_receivable')
         paid_in_capital = bal.get('paid_in_capital')
+        total_current_assets = bal.get('total_current_assets')
+        total_current_liabilities = bal.get('total_current_liabilities')
+        inventory = bal.get('inventory')
 
         net_operate_cf = cf.get('net_operate_cf')
         cash_received_sales = cf.get('cash_received_sales')
@@ -259,6 +276,41 @@ def main():
         # 16. bps = 归母权益 / 总股本
         bps = safe_div(parent_equity, paid_in_capital) if parent_equity and paid_in_capital else None
 
+        # ── 新增指标 ──
+
+        # 17. eps_basic: 优先取 income 表原始值，无则用归母净利润/总股本
+        if eps_basic_raw:
+            eps_basic = eps_basic_raw
+        elif net_profit_attr and paid_in_capital and paid_in_capital != 0:
+            eps_basic = net_profit_attr / paid_in_capital
+        else:
+            eps_basic = None
+
+        # 18. debt_to_asset_ratio = 总负债 / 总资产 * 100
+        debt_to_asset_ratio = safe_div(total_liabilities, total_assets) * 100 if total_liabilities and total_assets else None
+
+        # 19. current_ratio = 流动资产 / 流动负债
+        current_ratio = safe_div(total_current_assets, total_current_liabilities) if total_current_assets and total_current_liabilities else None
+
+        # 20. net_profit_margin = 净利润(含少数) / 营业总收入 * 100（年化）
+        if net_profit and total_revenue and total_revenue != 0:
+            net_profit_margin = net_profit / total_revenue * 100 * af
+        else:
+            net_profit_margin = None
+
+        # 21. inventory_turnover = 营业成本 / 存货平均（年化）
+        if operating_cost and inventory and inventory != 0:
+            inventory_turnover = operating_cost / inventory * af
+        else:
+            inventory_turnover = None
+
+        # 22. ar_turnover_days = 365 / 应收账款周转率
+        if total_revenue and accounts_receivable and accounts_receivable != 0:
+            ar_ratio = total_revenue / accounts_receivable * af
+            ar_turnover_days = 365 / ar_ratio if ar_ratio > 0 else None
+        else:
+            ar_turnover_days = None
+
         # 四舍五入
         def r4(v):
             return round(v, 4) if v is not None else None
@@ -280,6 +332,12 @@ def main():
             'sales_cash_ratio': r4(sales_cash_ratio),
             'operating_revenue_per_share': r4(operating_revenue_per_share),
             'bps': r4(bps),
+            'eps_basic': r4(eps_basic),
+            'debt_to_asset_ratio': r4(debt_to_asset_ratio),
+            'current_ratio': r4(current_ratio),
+            'net_profit_margin': r4(net_profit_margin),
+            'inventory_turnover': r4(inventory_turnover),
+            'ar_turnover_days': r4(ar_turnover_days),
             'net_operate_cf': cf.get('net_operate_cf'),
             'free_cash_flow': cf.get('free_cash_flow'),
         }
