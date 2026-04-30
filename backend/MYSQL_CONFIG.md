@@ -62,6 +62,7 @@ mysql -u root -p quantdb < schema.sql
 ## 配置说明
 
 ### H2数据库 (默认)
+
 - 文件路径: `./data/quantdb`
 - 控制台访问: http://localhost:8080/api/h2-console
 - 用户名: `sa`
@@ -69,6 +70,7 @@ mysql -u root -p quantdb < schema.sql
 - JDBC URL: `jdbc:h2:file:./data/quantdb`
 
 ### MySQL数据库 (生产环境推荐)
+
 - 数据库名: `quantdb`
 - 字符集: `utf8mb4`
 - 时区: `Asia/Shanghai`
@@ -77,6 +79,7 @@ mysql -u root -p quantdb < schema.sql
 ## 数据库表结构
 
 主要表包括:
+
 - `factor_definition`: 因子定义
 - `factor_value`: 因子值
 - `factor_test_report`: 因子测试报告(包含IC分析、分组回测、因子衰减分析)

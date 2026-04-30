@@ -1,64 +1,67 @@
 <!DOCTYPE html>
-<html><head><title>WS Status</title></head><body style="font-family:monospace;padding:20px">
+<html>
+<head><title>WS Status</title></head>
+<body style="font-family:monospace;padding:20px">
 <h2>WebSocket Connection Test</h2>
 <div id="status">Connecting...</div>
 <div id="log" style="background:#111;color:#0f0;padding:10px;margin-top:10px;border-radius:4px;min-height:200px"></div>
 <script>
-var statusEl = document.getElementById('status');
-var logEl = document.getElementById('log');
-function addLog(msg, color) {
-  var d = document.createElement('div');
-  d.style.color = color || '#0f0';
-  d.textContent = new Date().toLocaleTimeString() + ': ' + msg;
-  logEl.appendChild(d);
-}
-
-// Direct connection to backend (bypass Vite proxy)
-var ws = new WebSocket('ws://localhost:8080/api/ws-native');
-
-ws.onopen = function() {
-  statusEl.innerHTML = '<span style="color:green">WebSocket OPEN</span>';
-  addLog('WebSocket connection established', '#0f0');
-  // Send STOMP CONNECT
-  ws.send('CONNECT\naccept-version:1.2\nheart-beat:10000,10000\n\n\u0000');
-};
-
-ws.onmessage = function(evt) {
-  var data = evt.data;
-  addLog('RECV: ' + data.substring(0, 300), '#4af');
-  
-  // On STOMP CONNECTED, subscribe
-  if (data.indexOf('CONNECTED') !== -1) {
-    statusEl.innerHTML = '<span style="color:green">STOMP CONNECTED</span>';
-    addLog('Subscribing to /topic/factor/batch-log', '#ff0');
-    ws.send('SUBSCRIBE\nid:test-1\ndestination:/topic/factor/batch-log\n\n\u0000');
-  }
-  
-  // On MESSAGE
-  if (data.indexOf('MESSAGE') !== -1) {
-    addLog('Got MESSAGE frame!', '#f0f');
-    // Extract body
-    var bodyStart = data.indexOf('{');
-    var bodyEnd = data.lastIndexOf('}');
-    if (bodyStart !== -1 && bodyEnd !== -1) {
-      try {
-        var json = JSON.parse(data.substring(bodyStart, bodyEnd + 1));
-        addLog('PARSED: type=' + json.type + ' msg=' + json.message, '#fff');
-      } catch(e) {
-        addLog('Parse error: ' + e.message, '#f00');
-      }
+    var statusEl = document.getElementById('status');
+    var logEl = document.getElementById('log');
+    function addLog(msg, color) {
+      var d = document.createElement('div');
+      d.style.color = color || '#0f0';
+      d.textContent = new Date().toLocaleTimeString() + ': ' + msg;
+      logEl.appendChild(d);
     }
-  }
-};
 
-ws.onerror = function(err) {
-  statusEl.innerHTML = '<span style="color:red">WebSocket ERROR: ' + err.type + '</span>';
-  addLog('Error: ' + err.type, '#f00');
-};
+    // Direct connection to backend (bypass Vite proxy)
+    var ws = new WebSocket('ws://localhost:8080/api/ws-native');
 
-ws.onclose = function(evt) {
-  statusEl.innerHTML = '<span style="color:red">WebSocket CLOSED: ' + evt.code + ' ' + evt.reason + '</span>';
-  addLog('Closed: ' + evt.code + ' ' + evt.reason, '#f00');
-};
+    ws.onopen = function() {
+      statusEl.innerHTML = '<span style="color:green">WebSocket OPEN</span>';
+      addLog('WebSocket connection established', '#0f0');
+      // Send STOMP CONNECT
+      ws.send('CONNECT\naccept-version:1.2\nheart-beat:10000,10000\n\n\u0000');
+    };
+
+    ws.onmessage = function(evt) {
+      var data = evt.data;
+      addLog('RECV: ' + data.substring(0, 300), '#4af');
+
+      // On STOMP CONNECTED, subscribe
+      if (data.indexOf('CONNECTED') !== -1) {
+        statusEl.innerHTML = '<span style="color:green">STOMP CONNECTED</span>';
+        addLog('Subscribing to /topic/factor/batch-log', '#ff0');
+        ws.send('SUBSCRIBE\nid:test-1\ndestination:/topic/factor/batch-log\n\n\u0000');
+      }
+
+      // On MESSAGE
+      if (data.indexOf('MESSAGE') !== -1) {
+        addLog('Got MESSAGE frame!', '#f0f');
+        // Extract body
+        var bodyStart = data.indexOf('{');
+        var bodyEnd = data.lastIndexOf('}');
+        if (bodyStart !== -1 && bodyEnd !== -1) {
+          try {
+            var json = JSON.parse(data.substring(bodyStart, bodyEnd + 1));
+            addLog('PARSED: type=' + json.type + ' msg=' + json.message, '#fff');
+          } catch(e) {
+            addLog('Parse error: ' + e.message, '#f00');
+          }
+        }
+      }
+    };
+
+    ws.onerror = function(err) {
+      statusEl.innerHTML = '<span style="color:red">WebSocket ERROR: ' + err.type + '</span>';
+      addLog('Error: ' + err.type, '#f00');
+    };
+
+    ws.onclose = function(evt) {
+      statusEl.innerHTML = '<span style="color:red">WebSocket CLOSED: ' + evt.code + ' ' + evt.reason + '</span>';
+      addLog('Closed: ' + evt.code + ' ' + evt.reason, '#f00');
+    };
 </script>
-</body></html>
+</body>
+</html>

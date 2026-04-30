@@ -46,7 +46,9 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
         return executor;               // Spring 会在 destroy 时正确关闭
     }
 
-    /** 专供需要 ExecutorService 类型注入的地方使用（与 backtestTaskExecutor 同一个线程池） */
+    /**
+     * 专供需要 ExecutorService 类型注入的地方使用（与 backtestTaskExecutor 同一个线程池）
+     */
     @Bean(name = "backtestTaskExecutorService")
     public ExecutorService backtestTaskExecutorService(
             @Qualifier("backtestTaskExecutor") ThreadPoolTaskExecutor executor) {

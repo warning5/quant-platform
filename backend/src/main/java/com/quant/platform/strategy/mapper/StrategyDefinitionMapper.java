@@ -24,7 +24,7 @@ public interface StrategyDefinitionMapper extends BaseMapper<StrategyDefinition>
      * 搜索策略（支持分页）
      */
     default List<StrategyDefinition> search(String keyword, StrategyDefinition.StrategyType type,
-                                             StrategyDefinition.StrategyStatus status, int offset, int limit) {
+                                            StrategyDefinition.StrategyStatus status, int offset, int limit) {
         return selectList(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<StrategyDefinition>()
                 .like(keyword != null, StrategyDefinition::getStrategyName, keyword)
                 .or()

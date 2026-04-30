@@ -226,11 +226,11 @@ public class DataUpdateController {
             for (String market : Arrays.asList("SH", "SZ", "BJ")) {
                 long total = totalByMarket.getOrDefault(market, 0L);
                 String mysqlSql =
-                    "SELECT COUNT(DISTINCT sd.code) FROM stock_daily sd " +
-                    "JOIN stock_info si ON sd.code = si.code " +
-                    "WHERE sd.trade_date = ? " +
-                    "  AND si.market = ?" +
-                    "  AND si.list_date IS NOT NULL AND si.list_date <= ?";
+                        "SELECT COUNT(DISTINCT sd.code) FROM stock_daily sd " +
+                                "JOIN stock_info si ON sd.code = si.code " +
+                                "WHERE sd.trade_date = ? " +
+                                "  AND si.market = ?" +
+                                "  AND si.list_date IS NOT NULL AND si.list_date <= ?";
                 Long existing = jdbcTemplate.queryForObject(mysqlSql, Long.class,
                         java.sql.Date.valueOf(date), market, java.sql.Date.valueOf(date));
                 long missing = Math.max(0, total - existing);
@@ -328,7 +328,9 @@ public class DataUpdateController {
 
     // ── 辅助字段 ───────────────────────────────────────────────────
 
-    /** stock_info 全量 code → market 映射（ClickHouse 路径懒加载缓存） */
+    /**
+     * stock_info 全量 code → market 映射（ClickHouse 路径懒加载缓存）
+     */
     private volatile Map<String, String> codeToMarket;
 
     /**

@@ -29,14 +29,15 @@ public class FactorCorrelationService {
 
     /**
      * 计算因子相关性矩阵
+     *
      * @param factorCodes 因子代码列表
-     * @param startDate 开始日期
-     * @param endDate 结束日期
+     * @param startDate   开始日期
+     * @param endDate     结束日期
      * @return 相关性数据 [{factorCode1, factorCode2, correlation}]
      */
     public List<Map<String, Object>> computeCorrelationMatrix(List<String> factorCodes,
-                                                               LocalDate startDate,
-                                                               LocalDate endDate) {
+                                                              LocalDate startDate,
+                                                              LocalDate endDate) {
         log.info("Computing correlation matrix for {} factors from {} to {}", factorCodes.size(), startDate, endDate);
 
         List<Map<String, Object>> correlations = new ArrayList<>();
@@ -51,13 +52,13 @@ public class FactorCorrelationService {
 
             // 按日期分组
             Map<LocalDate, List<Double>> crossSection = values.stream()
-                .filter(fv -> fv.getFactorVal() != null)
-                .filter(fv -> fv.getFactorVal().doubleValue() != fv.getFactorVal().doubleValue() == false) // 过滤NaN
-                .collect(Collectors.groupingBy(
-                    FactorValue::getCalcDate,
-                    TreeMap::new,
-                    Collectors.mapping(fv -> fv.getFactorVal().doubleValue(), Collectors.toList())
-                ));
+                    .filter(fv -> fv.getFactorVal() != null)
+                    .filter(fv -> fv.getFactorVal().doubleValue() == fv.getFactorVal().doubleValue()) // 过滤NaN
+                    .collect(Collectors.groupingBy(
+                            FactorValue::getCalcDate,
+                            TreeMap::new,
+                            Collectors.mapping(fv -> fv.getFactorVal().doubleValue(), Collectors.toList())
+                    ));
 
             // 每天取中位数
             Map<LocalDate, Double> series = new HashMap<>();

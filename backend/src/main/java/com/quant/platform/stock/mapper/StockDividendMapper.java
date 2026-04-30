@@ -22,8 +22,8 @@ public interface StockDividendMapper extends BaseMapper<StockDividend> {
             "AND ex_dividend_date BETWEEN #{startDate} AND #{endDate} " +
             "ORDER BY ex_dividend_date")
     List<StockDividend> findByCodeAndDateRange(@Param("code") String code,
-                                                 @Param("startDate") LocalDate startDate,
-                                                 @Param("endDate") LocalDate endDate);
+                                               @Param("startDate") LocalDate startDate,
+                                               @Param("endDate") LocalDate endDate);
 
     /**
      * 查询指定日期所有发生除权除息的记录

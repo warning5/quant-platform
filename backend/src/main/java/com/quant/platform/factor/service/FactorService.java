@@ -206,9 +206,9 @@ public class FactorService {
 
         LambdaQueryWrapper<FactorDefinition> wrapper = new LambdaQueryWrapper<>();
         wrapper.and(keyword != null, w -> w
-                .like(FactorDefinition::getFactorName, keyword)
-                .or()
-                .like(FactorDefinition::getFactorCode, keyword))
+                        .like(FactorDefinition::getFactorName, keyword)
+                        .or()
+                        .like(FactorDefinition::getFactorCode, keyword))
                 .eq(cat != null, FactorDefinition::getCategory, cat)
                 .eq(st != null, FactorDefinition::getStatus, st)
                 .orderByDesc(FactorDefinition::getCreatedAt);
@@ -365,14 +365,15 @@ public class FactorService {
 
     /**
      * 批量并行触发多个因子计算（每个因子在独立线程中执行）
+     *
      * @param factorCodes 因子代码列表
-     * @param startDate 开始日期
-     * @param endDate 结束日期
+     * @param startDate   开始日期
+     * @param endDate     结束日期
      * @param incremental 是否增量计算（跳过已有数据的日期）
      * @return 已提交的因子代码列表
      */
     public Map<String, Object> triggerBatchCompute(List<String> factorCodes, LocalDate startDate, LocalDate endDate,
-                                                     boolean incremental, boolean force) {
+                                                   boolean incremental, boolean force) {
         List<String> submitted = new java.util.ArrayList<>();
         List<String> skipped = new java.util.ArrayList<>();
         List<String> symbols = marketDataService.getAllSymbols();
@@ -534,7 +535,7 @@ public class FactorService {
         }
 
         if (report.getStatus() == FactorTestReport.TestStatus.RUNNING
-            || report.getStatus() == FactorTestReport.TestStatus.PENDING) {
+                || report.getStatus() == FactorTestReport.TestStatus.PENDING) {
             // 运行中或待运行状态：标记为失败
             report.setStatus(FactorTestReport.TestStatus.FAILED);
             report.setErrorMessage("用户手动停止检测");

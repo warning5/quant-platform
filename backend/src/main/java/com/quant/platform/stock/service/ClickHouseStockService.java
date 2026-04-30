@@ -10,14 +10,9 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.sql.*;
+import java.sql.Date;
 import java.time.LocalDate;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 /**
  * ClickHouse 股票数据服务
@@ -80,7 +75,8 @@ public class ClickHouseStockService {
 
     /**
      * 查询指定日期的所有股票数据（截面）
-     * @param date 交易日期
+     *
+     * @param date         交易日期
      * @param excludeNames 需要排除的名称（如指数名称）
      */
     public List<StockDaily> getStockDailyByDate(LocalDate date, Collection<String> excludeNames) {
@@ -105,7 +101,7 @@ public class ClickHouseStockService {
      * 分页查询截面数据
      */
     public Map<String, Object> getCrossSectionPaged(LocalDate date, int page, int size,
-                                                     String keyword, String sortField, String sortOrder) {
+                                                    String keyword, String sortField, String sortOrder) {
         if (!clickHouseConfig.isEnabled()) {
             return getCrossSectionPagedFromMySQL(date, page, size, keyword, sortField, sortOrder);
         }
@@ -376,13 +372,13 @@ public class ClickHouseStockService {
 
     private List<StockDaily> queryFromClickHouse(String code, LocalDate startDate, LocalDate endDate) {
         String sql = """
-            SELECT code, trade_date, name, open_price, close_price, high_price, low_price,
-                   pre_close, volume, amount, change_percent, change_amount,
-                   turnover_rate, pe_ttm, pb
-            FROM stock_daily FINAL
-            WHERE code = ? AND trade_date >= ? AND trade_date <= ?
-            ORDER BY trade_date
-            """;
+                SELECT code, trade_date, name, open_price, close_price, high_price, low_price,
+                       pre_close, volume, amount, change_percent, change_amount,
+                       turnover_rate, pe_ttm, pb
+                FROM stock_daily FINAL
+                WHERE code = ? AND trade_date >= ? AND trade_date <= ?
+                ORDER BY trade_date
+                """;
 
         return executeQuery(sql, code, startDate, endDate);
     }
@@ -394,25 +390,25 @@ public class ClickHouseStockService {
 
         String placeholders = String.join(",", codes.stream().map(c -> "'" + c + "'").toList());
         String sql = String.format("""
-            SELECT code, trade_date, name, open_price, close_price, high_price, low_price,
-                   pre_close, volume, amount, change_percent, change_amount,
-                   turnover_rate, pe_ttm, pb
-            FROM stock_daily FINAL
-            WHERE code IN (%s) AND trade_date >= ? AND trade_date <= ?
-            ORDER BY code, trade_date
-            """, placeholders);
+                SELECT code, trade_date, name, open_price, close_price, high_price, low_price,
+                       pre_close, volume, amount, change_percent, change_amount,
+                       turnover_rate, pe_ttm, pb
+                FROM stock_daily FINAL
+                WHERE code IN (%s) AND trade_date >= ? AND trade_date <= ?
+                ORDER BY code, trade_date
+                """, placeholders);
 
         return executeQuery(sql, startDate, endDate);
     }
 
     private List<StockDaily> queryDailyByDateFromClickHouse(LocalDate date, Collection<String> excludeNames) {
         StringBuilder sql = new StringBuilder("""
-            SELECT code, trade_date, name, open_price, close_price, high_price, low_price,
-                   pre_close, volume, amount, change_percent, change_amount,
-                   turnover_rate, pe_ttm, pb
-            FROM stock_daily FINAL
-            WHERE trade_date = ?
-            """);
+                SELECT code, trade_date, name, open_price, close_price, high_price, low_price,
+                       pre_close, volume, amount, change_percent, change_amount,
+                       turnover_rate, pe_ttm, pb
+                FROM stock_daily FINAL
+                WHERE trade_date = ?
+                """);
 
         if (excludeNames != null && !excludeNames.isEmpty()) {
             String names = String.join("','", excludeNames);
@@ -435,7 +431,7 @@ public class ClickHouseStockService {
     }
 
     private Map<String, Object> getCrossSectionPagedFromClickHouse(LocalDate date, int page, int size,
-                                                                    String keyword, String sortField, String sortOrder) {
+                                                                   String keyword, String sortField, String sortOrder) {
         StringBuilder whereSql = new StringBuilder("WHERE trade_date = ?");
         if (keyword != null && !keyword.trim().isEmpty()) {
             String kw = keyword.trim();
@@ -462,11 +458,11 @@ public class ClickHouseStockService {
         // 分页查询
         int offset = (page - 1) * size;
         String dataSql = """
-            SELECT code, trade_date, name, open_price, close_price, high_price, low_price,
-                   pre_close, volume, amount, change_percent, change_amount,
-                   turnover_rate, pe_ttm, pb
-            FROM stock_daily FINAL
-            """ + whereSql + " " + orderBy + " LIMIT ? OFFSET ?";
+                SELECT code, trade_date, name, open_price, close_price, high_price, low_price,
+                       pre_close, volume, amount, change_percent, change_amount,
+                       turnover_rate, pe_ttm, pb
+                FROM stock_daily FINAL
+                """ + whereSql + " " + orderBy + " LIMIT ? OFFSET ?";
 
         List<StockDaily> records = new ArrayList<>();
         try (Connection conn = getConnection();
@@ -494,18 +490,18 @@ public class ClickHouseStockService {
     private Map<String, Object> getOverviewStatsFromClickHouse(LocalDate tradeDate) {
         // 排除指数代码（sh.000xxx / sz.399xxx），只统计股票
         String sql = """
-            SELECT
-                COUNT(*) AS count,
-                countIf(change_percent > 0) AS riseCount,
-                countIf(change_percent < 0) AS fallCount,
-                countIf(change_percent IS NULL OR change_percent = 0) AS flatCount,
-                ifNull(avg(change_percent), 0) AS avgPctChg,
-                ifNull(SUM(amount), 0) AS totalAmount
-            FROM stock_daily FINAL
-            WHERE trade_date = ?
-              AND code NOT LIKE 'sh.000%'
-              AND code NOT LIKE 'sz.399%'
-            """;
+                SELECT
+                    COUNT(*) AS count,
+                    countIf(change_percent > 0) AS riseCount,
+                    countIf(change_percent < 0) AS fallCount,
+                    countIf(change_percent IS NULL OR change_percent = 0) AS flatCount,
+                    ifNull(avg(change_percent), 0) AS avgPctChg,
+                    ifNull(SUM(amount), 0) AS totalAmount
+                FROM stock_daily FINAL
+                WHERE trade_date = ?
+                  AND code NOT LIKE 'sh.000%'
+                  AND code NOT LIKE 'sz.399%'
+                """;
 
         try (Connection conn = getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
@@ -534,12 +530,12 @@ public class ClickHouseStockService {
         // 排除指数代码（sh.000xxx / sz.399xxx）
         String orderClause = "ASC".equalsIgnoreCase(order) ? "ASC" : "DESC";
         String sql = """
-            SELECT code, name, change_percent, close_price, volume, amount, turnover_rate
-            FROM stock_daily FINAL
-            WHERE trade_date = ? AND change_percent IS NOT NULL
-              AND code NOT LIKE 'sh.000%' AND code NOT LIKE 'sz.399%'
-            ORDER BY change_percent
-            """ + orderClause + " LIMIT ?";
+                SELECT code, name, change_percent, close_price, volume, amount, turnover_rate
+                FROM stock_daily FINAL
+                WHERE trade_date = ? AND change_percent IS NOT NULL
+                  AND code NOT LIKE 'sh.000%' AND code NOT LIKE 'sz.399%'
+                ORDER BY change_percent
+                """ + orderClause + " LIMIT ?";
 
         try (Connection conn = getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
@@ -700,18 +696,18 @@ public class ClickHouseStockService {
     private List<StockDaily> getFromMySQL(String code, LocalDate startDate, LocalDate endDate) {
         LambdaQueryWrapper<StockDaily> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(StockDaily::getCode, code)
-               .ge(StockDaily::getTradeDate, startDate)
-               .le(StockDaily::getTradeDate, endDate)
-               .orderByAsc(StockDaily::getTradeDate);
+                .ge(StockDaily::getTradeDate, startDate)
+                .le(StockDaily::getTradeDate, endDate)
+                .orderByAsc(StockDaily::getTradeDate);
         return stockDailyMapper.selectList(wrapper);
     }
 
     private List<StockDaily> getBatchFromMySQL(List<String> codes, LocalDate startDate, LocalDate endDate) {
         LambdaQueryWrapper<StockDaily> wrapper = new LambdaQueryWrapper<>();
         wrapper.in(StockDaily::getCode, codes)
-               .ge(StockDaily::getTradeDate, startDate)
-               .le(StockDaily::getTradeDate, endDate)
-               .orderByAsc(StockDaily::getCode, StockDaily::getTradeDate);
+                .ge(StockDaily::getTradeDate, startDate)
+                .le(StockDaily::getTradeDate, endDate)
+                .orderByAsc(StockDaily::getCode, StockDaily::getTradeDate);
         return stockDailyMapper.selectList(wrapper);
     }
 
@@ -726,7 +722,7 @@ public class ClickHouseStockService {
     }
 
     private Map<String, Object> getCrossSectionPagedFromMySQL(LocalDate date, int page, int size,
-                                                                String keyword, String sortField, String sortOrder) {
+                                                              String keyword, String sortField, String sortOrder) {
         String sortClause = buildOrderByClause(sortField, sortOrder);
 
         // 总数查询
@@ -793,9 +789,9 @@ public class ClickHouseStockService {
     private List<String> getRecentTradingDatesFromMySQL(int limit) {
         LambdaQueryWrapper<StockDaily> wrapper = new LambdaQueryWrapper<>();
         wrapper.groupBy(StockDaily::getTradeDate)
-               .orderByDesc(StockDaily::getTradeDate)
-               .last("LIMIT " + Math.min(limit, 10000))
-               .select(StockDaily::getTradeDate);
+                .orderByDesc(StockDaily::getTradeDate)
+                .last("LIMIT " + Math.min(limit, 10000))
+                .select(StockDaily::getTradeDate);
         return stockDailyMapper.selectList(wrapper).stream()
                 .map(d -> d.getTradeDate().toString())
                 .toList();
@@ -817,8 +813,8 @@ public class ClickHouseStockService {
         if (codes.isEmpty()) return Set.of();
         LambdaQueryWrapper<StockDaily> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(StockDaily::getTradeDate, date)
-               .in(StockDaily::getCode, codes)
-               .select(StockDaily::getCode);
+                .in(StockDaily::getCode, codes)
+                .select(StockDaily::getCode);
         return stockDailyMapper.selectList(wrapper).stream()
                 .map(StockDaily::getCode)
                 .collect(java.util.stream.Collectors.toSet());
@@ -981,12 +977,12 @@ public class ClickHouseStockService {
         if (!clickHouseConfig.isEnabled()) return;
 
         String sql = """
-            INSERT INTO stock_daily
-            (code, trade_date, name, open_price, close_price, high_price, low_price,
-             pre_close, volume, amount, change_percent, change_amount,
-             turnover_rate, pe_ttm, pb)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """;
+                INSERT INTO stock_daily
+                (code, trade_date, name, open_price, close_price, high_price, low_price,
+                 pre_close, volume, amount, change_percent, change_amount,
+                 turnover_rate, pe_ttm, pb)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """;
 
         try (Connection conn = getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
@@ -1020,12 +1016,12 @@ public class ClickHouseStockService {
         if (!clickHouseConfig.isEnabled() || dailies.isEmpty()) return;
 
         String sql = """
-            INSERT INTO stock_daily
-            (code, trade_date, name, open_price, close_price, high_price, low_price,
-             pre_close, volume, amount, change_percent, change_amount,
-             turnover_rate, pe_ttm, pb)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """;
+                INSERT INTO stock_daily
+                (code, trade_date, name, open_price, close_price, high_price, low_price,
+                 pre_close, volume, amount, change_percent, change_amount,
+                 turnover_rate, pe_ttm, pb)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """;
 
         try (Connection conn = getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {

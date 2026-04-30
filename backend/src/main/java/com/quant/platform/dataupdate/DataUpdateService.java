@@ -64,7 +64,7 @@ public class DataUpdateService {
     private String scriptDir;
     /**
      * -- GETTER --
-     *  获取当前活跃任务
+     * 获取当前活跃任务
      */
     @Getter
     @Value("${quant.data-update.default-start-days:3}")
@@ -165,8 +165,8 @@ public class DataUpdateService {
             String ut = t.getRequest() != null ? t.getRequest().getUpdateType() : null;
             // 只在当前没有运行中任务时才添加已完成任务
             boolean hasRunning = result.stream()
-                .anyMatch(r -> r.getRequest() != null &&
-                    ut != null && ut.equals(r.getRequest().getUpdateType()));
+                    .anyMatch(r -> r.getRequest() != null &&
+                            ut != null && ut.equals(r.getRequest().getUpdateType()));
             if (!hasRunning) {
                 result.add(t);
             }
@@ -177,7 +177,7 @@ public class DataUpdateService {
     /**
      * 取消任务
      */
-        public synchronized boolean cancelTask(String taskId) {
+    public synchronized boolean cancelTask(String taskId) {
         DataUpdateTask task = activeTasks.get(taskId);
         if (task == null || !task.isRunning()) return false;
 
@@ -266,7 +266,7 @@ public class DataUpdateService {
                 broadcastStatus(task);
                 log.info("[DataUpdate] 启动任务 {}: {}", taskId, cmd);
                 boolean ok = runSingleScript(taskId, task, cmd, marketLabel);
-                
+
                 // 单个市场执行失败时，尝试备用数据源（SH/SZ 支持 akshare 备用）
                 if (!ok && !"CANCELLED".equals(task.getStatus()) && ("SH".equals(m) || "SZ".equals(m))) {
                     broadcastLog(taskId, "\n[WARN] Baostock 更新失败，尝试使用 akshare 作为备用数据源...");
@@ -279,7 +279,7 @@ public class DataUpdateService {
                     addCommonArgs(backupCmd, request);
                     ok = runSingleScript(taskId, task, backupCmd, marketLabel + " (备用)");
                 }
-                
+
                 if (!"CANCELLED".equals(task.getStatus())) {
                     task.setStatus(ok ? "SUCCESS" : "FAILED");
                     task.setProgress(100);
@@ -343,7 +343,7 @@ public class DataUpdateService {
             task.setProgress(0);
             broadcastStatus(task);
             broadcastLog(taskId, "\n========== " + ms[0] + " ==========");
-            
+
             // 尝试主数据源
             List<String> scriptCmd = new ArrayList<>();
             scriptCmd.add(pythonPath);
@@ -363,7 +363,7 @@ public class DataUpdateService {
             }
             addCommonArgs(scriptCmd, request);
             boolean ok = runSingleScript(taskId, task, scriptCmd, ms[0]);
-            
+
             // 主数据源失败且存在备用数据源时，尝试备用
             if (!ok && ms.length > 2 && ms[2].endsWith("akshare.py")) {
                 broadcastLog(taskId, "\n[WARN] Baostock 更新失败，尝试使用 akshare 作为备用数据源...");
@@ -378,7 +378,7 @@ public class DataUpdateService {
                 addCommonArgs(backupCmd, request);
                 ok = runSingleScript(taskId, task, backupCmd, ms[0] + " (备用)");
             }
-            
+
             if (!ok) allSuccess = false;
         }
 
@@ -634,9 +634,9 @@ public class DataUpdateService {
      */
     // 匹配 "失败" 或 "error" 行中可能包含的股票代码和日期
     private static final Pattern FAILED_PATTERN = Pattern.compile(
-        // 匹配 [代码] 名称 ... 失败 或 代码 名称 失败 (日期)
-        // baostock 输出格式示例: "[1/100] 600519.SH 贵州茅台 - 请求失败"
-        "([\\d]{6}\\.[A-Z]{2})\\s+(\\S+)\\s+.*?(失败|error|Error|ERROR|fail|Fail|FAIL)"
+            // 匹配 [代码] 名称 ... 失败 或 代码 名称 失败 (日期)
+            // baostock 输出格式示例: "[1/100] 600519.SH 贵州茅台 - 请求失败"
+            "([\\d]{6}\\.[A-Z]{2})\\s+(\\S+)\\s+.*?(失败|error|Error|ERROR|fail|Fail|FAIL)"
     );
 
     private void parseProgress(String line, DataUpdateTask task) {
@@ -806,21 +806,21 @@ public class DataUpdateService {
 
         // ── ClickHouse 合并查询：一次SQL查出所有指标（排除指数） ─────────────
         String mergedSql = """
-            SELECT\s
-                COUNT(*) as total_records,
-                MIN(trade_date) as earliest_date,
-                MAX(trade_date) as latest_date,
-                -- 各市场记录数
-                countIf(code LIKE '6%' OR code LIKE '688%' OR code LIKE '689%') as sh_records,
-                countIf(code LIKE '0%' OR code LIKE '3%') as sz_records,
-                countIf(code LIKE '92%') as bj_records,
-                -- 各市场最新交易日
-                maxIf(trade_date, code LIKE '6%' OR code LIKE '688%' OR code LIKE '689%') as sh_latest,
-                maxIf(trade_date, code LIKE '0%' OR code LIKE '3%') as sz_latest,
-                maxIf(trade_date, code LIKE '92%') as bj_latest
-            FROM stock_daily FINAL
-            WHERE code NOT LIKE 'sh.%' AND code NOT LIKE 'sz.%'
-           \s""";
+                 SELECT\s
+                     COUNT(*) as total_records,
+                     MIN(trade_date) as earliest_date,
+                     MAX(trade_date) as latest_date,
+                     -- 各市场记录数
+                     countIf(code LIKE '6%' OR code LIKE '688%' OR code LIKE '689%') as sh_records,
+                     countIf(code LIKE '0%' OR code LIKE '3%') as sz_records,
+                     countIf(code LIKE '92%') as bj_records,
+                     -- 各市场最新交易日
+                     maxIf(trade_date, code LIKE '6%' OR code LIKE '688%' OR code LIKE '689%') as sh_latest,
+                     maxIf(trade_date, code LIKE '0%' OR code LIKE '3%') as sz_latest,
+                     maxIf(trade_date, code LIKE '92%') as bj_latest
+                 FROM stock_daily FINAL
+                 WHERE code NOT LIKE 'sh.%' AND code NOT LIKE 'sz.%'
+                \s""";
 
         Map<String, Object> chData;
         boolean chOk = false;
@@ -857,9 +857,9 @@ public class DataUpdateService {
         String[] chRecordKeys = {"sh_records", "sz_records", "bj_records"};
         String[] chDateKeys = {"sh_latest", "sz_latest", "bj_latest"};
         String[][] marketPatterns = {
-            {"6", "688", "689"},
-            {"0", "3"},
-            {"92"}
+                {"6", "688", "689"},
+                {"0", "3"},
+                {"92"}
         };
 
         for (int i = 0; i < markets.length; i++) {
@@ -939,25 +939,25 @@ public class DataUpdateService {
 
         // 各指数数据统计（CH 中 code 格式为 sh.000001 / sz.399006）
         String indexSql = """
-            SELECT code, name,
-                   COUNT(*) as record_count,
-                   MIN(trade_date) as min_date,
-                   MAX(trade_date) as max_date
-            FROM stock_daily
-            WHERE code IN ('sh.000001','sh.000016','sh.000022','sh.000300','sh.000688','sh.000852','sh.000905',
-                           'sz.399001','sz.399006','sz.399303')
-            GROUP BY code, name
-            ORDER BY code
-            """;
+                SELECT code, name,
+                       COUNT(*) as record_count,
+                       MIN(trade_date) as min_date,
+                       MAX(trade_date) as max_date
+                FROM stock_daily
+                WHERE code IN ('sh.000001','sh.000016','sh.000022','sh.000300','sh.000688','sh.000852','sh.000905',
+                               'sz.399001','sz.399006','sz.399303')
+                GROUP BY code, name
+                ORDER BY code
+                """;
         List<Map<String, Object>> indices = clickHouseStockService.queryForList(indexSql);
         result.put("indices", indices);
 
         // 总记录数
         String totalSql = """
-            SELECT COUNT(*) as cnt FROM stock_daily FINAL
-            WHERE code IN ('sh.000001','sh.000016','sh.000022','sh.000300','sh.000688','sh.000852','sh.000905',
-                           'sz.399001','sz.399006','sz.399303')
-            """;
+                SELECT COUNT(*) as cnt FROM stock_daily FINAL
+                WHERE code IN ('sh.000001','sh.000016','sh.000022','sh.000300','sh.000688','sh.000852','sh.000905',
+                               'sz.399001','sz.399006','sz.399303')
+                """;
         Object totalObj = clickHouseStockService.queryForObject(totalSql);
         long totalRecords = totalObj != null ? ((Number) totalObj).longValue() : 0;
         result.put("totalRecords", totalRecords);
@@ -966,10 +966,10 @@ public class DataUpdateService {
         // 最新交易日（指数数据的最大 trade_date）
         // CH 中 code 格式为 sh.000001 / sz.399001，需带上前缀查询
         String latestSql = """
-            SELECT MAX(trade_date) FROM stock_daily
-            WHERE code IN ('sh.000001','sh.000016','sh.000022','sh.000300','sh.000688','sh.000852','sh.000905',
-                           'sz.399001','sz.399006','sz.399303')
-            """;
+                SELECT MAX(trade_date) FROM stock_daily
+                WHERE code IN ('sh.000001','sh.000016','sh.000022','sh.000300','sh.000688','sh.000852','sh.000905',
+                               'sz.399001','sz.399006','sz.399303')
+                """;
         Object latest = clickHouseStockService.queryForObject(latestSql);
         result.put("latestTradeDate", latest != null ? latest.toString() : null);
 
@@ -997,11 +997,11 @@ public class DataUpdateService {
         // 查该日期有数据的指数 code（CH 中带 sh./sz. 前缀）
         Set<String> existingCodes = new HashSet<>();
         String sql = """
-            SELECT DISTINCT code FROM stock_daily
-            WHERE trade_date = ?
-              AND code IN ('sh.000001','sh.000016','sh.000022','sh.000300','sh.000688','sh.000852','sh.000905',
-                           'sz.399001','sz.399006','sz.399303')
-            """;
+                SELECT DISTINCT code FROM stock_daily
+                WHERE trade_date = ?
+                  AND code IN ('sh.000001','sh.000016','sh.000022','sh.000300','sh.000688','sh.000852','sh.000905',
+                               'sz.399001','sz.399006','sz.399303')
+                """;
         List<Map<String, Object>> rows = clickHouseStockService.queryForList(sql, date.toString());
         for (Map<String, Object> row : rows) {
             existingCodes.add(String.valueOf(row.get("code")));
@@ -1060,17 +1060,17 @@ public class DataUpdateService {
         // 沪深各市场缺少分红数据的股票数
         for (String market : Arrays.asList("SH", "SZ")) {
             long total = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM stock_info WHERE market = '" + market + "'", Long.class);
+                    "SELECT COUNT(*) FROM stock_info WHERE market = '" + market + "'", Long.class);
             long covered = jdbcTemplate.queryForObject(
-                "SELECT COUNT(DISTINCT sd.code) FROM stock_dividend sd " +
-                "INNER JOIN stock_info si ON sd.code = si.code WHERE si.market = '" + market + "'", Long.class);
+                    "SELECT COUNT(DISTINCT sd.code) FROM stock_dividend sd " +
+                            "INNER JOIN stock_info si ON sd.code = si.code WHERE si.market = '" + market + "'", Long.class);
             result.put(market, total - covered);
         }
         long totalSh = (long) result.getOrDefault("SH", 0L);
         long totalSz = (long) result.getOrDefault("SZ", 0L);
         result.put("total", totalSh + totalSz);
         result.put("coveredStocks", jdbcTemplate.queryForObject(
-            "SELECT COUNT(DISTINCT code) FROM stock_dividend", Long.class));
+                "SELECT COUNT(DISTINCT code) FROM stock_dividend", Long.class));
 
         return result;
     }
@@ -1082,12 +1082,12 @@ public class DataUpdateService {
         String marketCondition = "ALL".equals(market) ? "" : " AND si.market = '" + market + "'";
         int offset = (page - 1) * pageSize;
         String sql = "SELECT si.code, si.name, si.market " +
-            "FROM stock_info si " +
-            "LEFT JOIN stock_dividend sd ON si.code = sd.code " +
-            "WHERE si.market IN ('SH', 'SZ') AND sd.id IS NULL" +
-            marketCondition + " " +
-            "ORDER BY si.code " +
-            "LIMIT " + pageSize + " OFFSET " + offset;
+                "FROM stock_info si " +
+                "LEFT JOIN stock_dividend sd ON si.code = sd.code " +
+                "WHERE si.market IN ('SH', 'SZ') AND sd.id IS NULL" +
+                marketCondition + " " +
+                "ORDER BY si.code " +
+                "LIMIT " + pageSize + " OFFSET " + offset;
         return jdbcTemplate.queryForList(sql);
     }
 
@@ -1098,15 +1098,15 @@ public class DataUpdateService {
         // 使用 SQL 直接查询缺失股票
         String marketCondition = "ALL".equals(market) ? "" : " AND si.market = '" + market + "'";
         String sql = """
-            SELECT si.code, si.name, si.market
-            FROM stock_info si
-            WHERE si.market IN ('SH', 'SZ', 'BJ')
-            %s
-            AND si.code NOT IN (
-                SELECT code FROM stock_daily WHERE trade_date = '%s'
-            )
-            ORDER BY si.code
-            """.formatted(marketCondition, date);
+                SELECT si.code, si.name, si.market
+                FROM stock_info si
+                WHERE si.market IN ('SH', 'SZ', 'BJ')
+                %s
+                AND si.code NOT IN (
+                    SELECT code FROM stock_daily WHERE trade_date = '%s'
+                )
+                ORDER BY si.code
+                """.formatted(marketCondition, date);
 
         return jdbcTemplate.queryForList(sql);
     }

@@ -13,14 +13,24 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class Fractal {
-    /** 分型中间K线在合并序列中的位置 */
+    /**
+     * 分型中间K线在合并序列中的位置
+     */
     private int index;
-    /** 分型类型 */
+    /**
+     * 分型类型
+     */
     private FractalType fractalType;
-    /** 分型的高点 */
+    /**
+     * 分型的高点
+     */
     private double high;
-    /** 分型的低点 */
+    /**
+     * 分型的低点
+     */
     private double low;
-    /** 中间那根合并K线 */
+    /**
+     * 中间那根合并K线
+     */
     private MergedBar mergedBar;
 }

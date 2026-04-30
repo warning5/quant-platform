@@ -17,11 +17,11 @@ public interface StrategySignalGenerator {
     /**
      * 生成目标持仓
      *
-     * @param rebalanceDate   调仓日期
-     * @param factorValues    当日因子值 (factorCode -> (symbol -> value))
-     * @param marketBars      当日行情快照
+     * @param rebalanceDate    调仓日期
+     * @param factorValues     当日因子值 (factorCode -> (symbol -> value))
+     * @param marketBars       当日行情快照
      * @param currentPositions 当前持仓 (symbol -> weight)
-     * @param context         额外上下文
+     * @param context          额外上下文
      * @return 目标持仓 (symbol -> weight), weight之和应≤1
      */
     Map<String, Double> generateSignals(

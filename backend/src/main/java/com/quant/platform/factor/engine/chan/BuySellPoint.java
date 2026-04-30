@@ -15,11 +15,15 @@ import java.time.LocalDate;
 @NoArgsConstructor
 @AllArgsConstructor
 public class BuySellPoint {
-    /** 在合并序列中的位置 */
+    /**
+     * 在合并序列中的位置
+     */
     private int index;
     private BuySellType buySellType;
     private double price;
     private LocalDate date;
-    /** 关联的中枢（如有） */
+    /**
+     * 关联的中枢（如有）
+     */
     private Hub hub;
 }

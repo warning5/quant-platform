@@ -17,45 +17,75 @@ public class FinancialFactors {
 
     // ======================== 盈利能力因子 ========================
 
-    /** 毛利率 (%) */
+    /**
+     * 毛利率 (%)
+     */
     public static class GrossProfitMarginCalc implements FinancialFactorCalculator {
-        @Override public String getFactorCode() { return "FIN_GROSS_MARGIN"; }
+        @Override
+        public String getFactorCode() {
+            return "FIN_GROSS_MARGIN";
+        }
+
         @Override
         public BigDecimal calculate(String code, StockFinancialIndicator ind) {
             return ind.getGrossProfitMargin();
         }
     }
 
-    /** 净利率 (%) */
+    /**
+     * 净利率 (%)
+     */
     public static class NetProfitMarginCalc implements FinancialFactorCalculator {
-        @Override public String getFactorCode() { return "FIN_NET_MARGIN"; }
+        @Override
+        public String getFactorCode() {
+            return "FIN_NET_MARGIN";
+        }
+
         @Override
         public BigDecimal calculate(String code, StockFinancialIndicator ind) {
             return ind.getNetProfitMargin();
         }
     }
 
-    /** ROE 净资产收益率 (%) */
+    /**
+     * ROE 净资产收益率 (%)
+     */
     public static class RoeCalc implements FinancialFactorCalculator {
-        @Override public String getFactorCode() { return "FIN_ROE"; }
+        @Override
+        public String getFactorCode() {
+            return "FIN_ROE";
+        }
+
         @Override
         public BigDecimal calculate(String code, StockFinancialIndicator ind) {
             return ind.getRoe();
         }
     }
 
-    /** ROA 总资产收益率 (%) */
+    /**
+     * ROA 总资产收益率 (%)
+     */
     public static class RoaCalc implements FinancialFactorCalculator {
-        @Override public String getFactorCode() { return "FIN_ROA"; }
+        @Override
+        public String getFactorCode() {
+            return "FIN_ROA";
+        }
+
         @Override
         public BigDecimal calculate(String code, StockFinancialIndicator ind) {
             return ind.getRoa();
         }
     }
 
-    /** 营业总成本/营业总收入 = 100 - 毛利率 */
+    /**
+     * 营业总成本/营业总收入 = 100 - 毛利率
+     */
     public static class TotalCostRatioCalc implements FinancialFactorCalculator {
-        @Override public String getFactorCode() { return "FIN_TOTAL_COST_RATIO"; }
+        @Override
+        public String getFactorCode() {
+            return "FIN_TOTAL_COST_RATIO";
+        }
+
         @Override
         public BigDecimal calculate(String code, StockFinancialIndicator ind) {
             if (ind.getGrossProfitMargin() == null) return null;
@@ -64,9 +94,15 @@ public class FinancialFactors {
         }
     }
 
-    /** 期间费用率(管理+销售+财务) = 毛利率 - 净利率 */
+    /**
+     * 期间费用率(管理+销售+财务) = 毛利率 - 净利率
+     */
     public static class PeriodExpenseRatioCalc implements FinancialFactorCalculator {
-        @Override public String getFactorCode() { return "FIN_PERIOD_EXPENSE_RATIO"; }
+        @Override
+        public String getFactorCode() {
+            return "FIN_PERIOD_EXPENSE_RATIO";
+        }
+
         @Override
         public BigDecimal calculate(String code, StockFinancialIndicator ind) {
             if (ind.getGrossProfitMargin() == null || ind.getNetProfitMargin() == null) return null;
@@ -75,9 +111,15 @@ public class FinancialFactors {
         }
     }
 
-    /** EBIT/营业总收入 ≈ ROA / 总资产周转率 */
+    /**
+     * EBIT/营业总收入 ≈ ROA / 总资产周转率
+     */
     public static class EbitMarginCalc implements FinancialFactorCalculator {
-        @Override public String getFactorCode() { return "FIN_EBIT_MARGIN"; }
+        @Override
+        public String getFactorCode() {
+            return "FIN_EBIT_MARGIN";
+        }
+
         @Override
         public BigDecimal calculate(String code, StockFinancialIndicator ind) {
             if (ind.getRoa() == null) return null;
@@ -88,45 +130,75 @@ public class FinancialFactors {
 
     // ======================== 成长能力因子 ========================
 
-    /** 营业收入同比增长率 (%) */
+    /**
+     * 营业收入同比增长率 (%)
+     */
     public static class RevenueYoyCalc implements FinancialFactorCalculator {
-        @Override public String getFactorCode() { return "FIN_REVENUE_YOY"; }
+        @Override
+        public String getFactorCode() {
+            return "FIN_REVENUE_YOY";
+        }
+
         @Override
         public BigDecimal calculate(String code, StockFinancialIndicator ind) {
             return ind.getRevenueYoy();
         }
     }
 
-    /** 净利润同比增长率 (%) */
+    /**
+     * 净利润同比增长率 (%)
+     */
     public static class NetProfitYoyCalc implements FinancialFactorCalculator {
-        @Override public String getFactorCode() { return "FIN_NET_PROFIT_YOY"; }
+        @Override
+        public String getFactorCode() {
+            return "FIN_NET_PROFIT_YOY";
+        }
+
         @Override
         public BigDecimal calculate(String code, StockFinancialIndicator ind) {
             return ind.getNetProfitYoy();
         }
     }
 
-    /** 营业利润同比增长率 (%) */
+    /**
+     * 营业利润同比增长率 (%)
+     */
     public static class OperatingProfitYoyCalc implements FinancialFactorCalculator {
-        @Override public String getFactorCode() { return "FIN_OPERATING_PROFIT_YOY"; }
+        @Override
+        public String getFactorCode() {
+            return "FIN_OPERATING_PROFIT_YOY";
+        }
+
         @Override
         public BigDecimal calculate(String code, StockFinancialIndicator ind) {
             return ind.getOperatingProfitYoy();
         }
     }
 
-    /** 总资产同比增长率 (%) */
+    /**
+     * 总资产同比增长率 (%)
+     */
     public static class TotalAssetsYoyCalc implements FinancialFactorCalculator {
-        @Override public String getFactorCode() { return "FIN_TOTAL_ASSETS_YOY"; }
+        @Override
+        public String getFactorCode() {
+            return "FIN_TOTAL_ASSETS_YOY";
+        }
+
         @Override
         public BigDecimal calculate(String code, StockFinancialIndicator ind) {
             return ind.getTotalAssetsYoy();
         }
     }
 
-    /** 基本每股收益同比增长率（用净利润同比近似） */
+    /**
+     * 基本每股收益同比增长率（用净利润同比近似）
+     */
     public static class EpsBasicYoyCalc implements FinancialFactorCalculator {
-        @Override public String getFactorCode() { return "FIN_EPS_YOY"; }
+        @Override
+        public String getFactorCode() {
+            return "FIN_EPS_YOY";
+        }
+
         @Override
         public BigDecimal calculate(String code, StockFinancialIndicator ind) {
             return ind.getNetProfitYoy();
@@ -135,36 +207,60 @@ public class FinancialFactors {
 
     // ======================== 偿债能力因子 ========================
 
-    /** 流动比率 */
+    /**
+     * 流动比率
+     */
     public static class CurrentRatioCalc implements FinancialFactorCalculator {
-        @Override public String getFactorCode() { return "FIN_CURRENT_RATIO"; }
+        @Override
+        public String getFactorCode() {
+            return "FIN_CURRENT_RATIO";
+        }
+
         @Override
         public BigDecimal calculate(String code, StockFinancialIndicator ind) {
             return ind.getCurrentRatio();
         }
     }
 
-    /** 速动比率 */
+    /**
+     * 速动比率
+     */
     public static class QuickRatioCalc implements FinancialFactorCalculator {
-        @Override public String getFactorCode() { return "FIN_QUICK_RATIO"; }
+        @Override
+        public String getFactorCode() {
+            return "FIN_QUICK_RATIO";
+        }
+
         @Override
         public BigDecimal calculate(String code, StockFinancialIndicator ind) {
             return ind.getQuickRatio();
         }
     }
 
-    /** 资产负债率 (%) */
+    /**
+     * 资产负债率 (%)
+     */
     public static class DebtToAssetRatioCalc implements FinancialFactorCalculator {
-        @Override public String getFactorCode() { return "FIN_DEBT_TO_ASSET"; }
+        @Override
+        public String getFactorCode() {
+            return "FIN_DEBT_TO_ASSET";
+        }
+
         @Override
         public BigDecimal calculate(String code, StockFinancialIndicator ind) {
             return ind.getDebtToAssetRatio();
         }
     }
 
-    /** 产权比率 = 资产负债率 / (1 - 资产负债率) */
+    /**
+     * 产权比率 = 资产负债率 / (1 - 资产负债率)
+     */
     public static class DebtToEquityRatioCalc implements FinancialFactorCalculator {
-        @Override public String getFactorCode() { return "FIN_DEBT_TO_EQUITY"; }
+        @Override
+        public String getFactorCode() {
+            return "FIN_DEBT_TO_EQUITY";
+        }
+
         @Override
         public BigDecimal calculate(String code, StockFinancialIndicator ind) {
             if (ind.getDebtToAssetRatio() == null) return null;
@@ -176,9 +272,15 @@ public class FinancialFactors {
 
     // ======================== 营运能力因子 ========================
 
-    /** 应收账款周转率（次）= 365 / 周转天数 */
+    /**
+     * 应收账款周转率（次）= 365 / 周转天数
+     */
     public static class ArTurnoverCalc implements FinancialFactorCalculator {
-        @Override public String getFactorCode() { return "FIN_AR_TURNOVER"; }
+        @Override
+        public String getFactorCode() {
+            return "FIN_AR_TURNOVER";
+        }
+
         @Override
         public BigDecimal calculate(String code, StockFinancialIndicator ind) {
             if (ind.getArTurnoverDays() == null || ind.getArTurnoverDays().doubleValue() == 0) return null;
@@ -187,36 +289,60 @@ public class FinancialFactors {
         }
     }
 
-    /** 应收账款周转天数 */
+    /**
+     * 应收账款周转天数
+     */
     public static class ArTurnoverDaysCalc implements FinancialFactorCalculator {
-        @Override public String getFactorCode() { return "FIN_AR_TURNOVER_DAYS"; }
+        @Override
+        public String getFactorCode() {
+            return "FIN_AR_TURNOVER_DAYS";
+        }
+
         @Override
         public BigDecimal calculate(String code, StockFinancialIndicator ind) {
             return ind.getArTurnoverDays();
         }
     }
 
-    /** 总资产周转率（次） */
+    /**
+     * 总资产周转率（次）
+     */
     public static class TotalAssetsTurnoverCalc implements FinancialFactorCalculator {
-        @Override public String getFactorCode() { return "FIN_ASSETS_TURNOVER"; }
+        @Override
+        public String getFactorCode() {
+            return "FIN_ASSETS_TURNOVER";
+        }
+
         @Override
         public BigDecimal calculate(String code, StockFinancialIndicator ind) {
             return ind.getTotalAssetsTurnover();
         }
     }
 
-    /** 存货周转率（次） */
+    /**
+     * 存货周转率（次）
+     */
     public static class InventoryTurnoverCalc implements FinancialFactorCalculator {
-        @Override public String getFactorCode() { return "FIN_INVENTORY_TURNOVER"; }
+        @Override
+        public String getFactorCode() {
+            return "FIN_INVENTORY_TURNOVER";
+        }
+
         @Override
         public BigDecimal calculate(String code, StockFinancialIndicator ind) {
             return ind.getInventoryTurnover();
         }
     }
 
-    /** 存货周转天数 */
+    /**
+     * 存货周转天数
+     */
     public static class InventoryTurnoverDaysCalc implements FinancialFactorCalculator {
-        @Override public String getFactorCode() { return "FIN_INVENTORY_TURNOVER_DAYS"; }
+        @Override
+        public String getFactorCode() {
+            return "FIN_INVENTORY_TURNOVER_DAYS";
+        }
+
         @Override
         public BigDecimal calculate(String code, StockFinancialIndicator ind) {
             return ind.getInventoryTurnoverDays();
@@ -225,18 +351,30 @@ public class FinancialFactors {
 
     // ======================== 现金流因子 ========================
 
-    /** 经营现金流/净利润 */
+    /**
+     * 经营现金流/净利润
+     */
     public static class OperatingCfToNpCalc implements FinancialFactorCalculator {
-        @Override public String getFactorCode() { return "FIN_CF_TO_NP"; }
+        @Override
+        public String getFactorCode() {
+            return "FIN_CF_TO_NP";
+        }
+
         @Override
         public BigDecimal calculate(String code, StockFinancialIndicator ind) {
             return ind.getOperatingCfToNp();
         }
     }
 
-    /** 每股经营现金流 ≈ 经营现金流/净利润 × 每股收益 */
+    /**
+     * 每股经营现金流 ≈ 经营现金流/净利润 × 每股收益
+     */
     public static class OperatingCfPerShareCalc implements FinancialFactorCalculator {
-        @Override public String getFactorCode() { return "FIN_CF_PER_SHARE"; }
+        @Override
+        public String getFactorCode() {
+            return "FIN_CF_PER_SHARE";
+        }
+
         @Override
         public BigDecimal calculate(String code, StockFinancialIndicator ind) {
             if (ind.getOperatingCfToNp() == null || ind.getEpsBasic() == null) return null;
@@ -245,9 +383,15 @@ public class FinancialFactors {
         }
     }
 
-    /** 经营现金流/营业总收入 ≈ 经营现金流/净利润 × 净利率 */
+    /**
+     * 经营现金流/营业总收入 ≈ 经营现金流/净利润 × 净利率
+     */
     public static class OperatingCfToRevenueCalc implements FinancialFactorCalculator {
-        @Override public String getFactorCode() { return "FIN_CF_TO_REVENUE"; }
+        @Override
+        public String getFactorCode() {
+            return "FIN_CF_TO_REVENUE";
+        }
+
         @Override
         public BigDecimal calculate(String code, StockFinancialIndicator ind) {
             if (ind.getOperatingCfToNp() == null || ind.getNetProfitMargin() == null) return null;
@@ -258,9 +402,15 @@ public class FinancialFactors {
 
     // ======================== 每股指标因子 ========================
 
-    /** 每股净资产 BPS */
+    /**
+     * 每股净资产 BPS
+     */
     public static class BpsCalc implements FinancialFactorCalculator {
-        @Override public String getFactorCode() { return "FIN_BPS"; }
+        @Override
+        public String getFactorCode() {
+            return "FIN_BPS";
+        }
+
         @Override
         public BigDecimal calculate(String code, StockFinancialIndicator ind) {
             return ind.getBps();
@@ -269,9 +419,15 @@ public class FinancialFactors {
 
     // ======================== 质量因子 (QUALITY) ========================
 
-    /** ROE稳定性 - 用ROE绝对值近似（多期ROE标准差需要多期数据，单期用ROE质量代理） */
+    /**
+     * ROE稳定性 - 用ROE绝对值近似（多期ROE标准差需要多期数据，单期用ROE质量代理）
+     */
     public static class RoeStabilityCalc implements FinancialFactorCalculator {
-        @Override public String getFactorCode() { return "FIN_ROE_STABILITY"; }
+        @Override
+        public String getFactorCode() {
+            return "FIN_ROE_STABILITY";
+        }
+
         @Override
         public BigDecimal calculate(String code, StockFinancialIndicator ind) {
             // ROE稳定性代理：用ROE/ROA的比率，比率越接近说明盈利结构越稳定
@@ -282,9 +438,15 @@ public class FinancialFactors {
         }
     }
 
-    /** 盈利质量 - 经营现金流/净利润比率，接近1说明利润含金量高 */
+    /**
+     * 盈利质量 - 经营现金流/净利润比率，接近1说明利润含金量高
+     */
     public static class EarningsQualityCalc implements FinancialFactorCalculator {
-        @Override public String getFactorCode() { return "FIN_EARNINGS_QUALITY"; }
+        @Override
+        public String getFactorCode() {
+            return "FIN_EARNINGS_QUALITY";
+        }
+
         @Override
         public BigDecimal calculate(String code, StockFinancialIndicator ind) {
             // 直接使用 operatingCfToNp 指标，值越接近1利润含金量越高
@@ -292,9 +454,15 @@ public class FinancialFactors {
         }
     }
 
-    /** 毛利率稳定性代理 - 毛利率越高说明定价权越强（质量越好的代理指标） */
+    /**
+     * 毛利率稳定性代理 - 毛利率越高说明定价权越强（质量越好的代理指标）
+     */
     public static class GrossMarginQualityCalc implements FinancialFactorCalculator {
-        @Override public String getFactorCode() { return "FIN_GROSS_MARGIN_QUALITY"; }
+        @Override
+        public String getFactorCode() {
+            return "FIN_GROSS_MARGIN_QUALITY";
+        }
+
         @Override
         public BigDecimal calculate(String code, StockFinancialIndicator ind) {
             if (ind.getGrossProfitMargin() == null) return null;
@@ -304,9 +472,15 @@ public class FinancialFactors {
         }
     }
 
-    /** 经营杠杆 = 固定成本占比代理（用毛利率波动代理） */
+    /**
+     * 经营杠杆 = 固定成本占比代理（用毛利率波动代理）
+     */
     public static class OperatingLeverageCalc implements FinancialFactorCalculator {
-        @Override public String getFactorCode() { return "FIN_OPERATING_LEVERAGE"; }
+        @Override
+        public String getFactorCode() {
+            return "FIN_OPERATING_LEVERAGE";
+        }
+
         @Override
         public BigDecimal calculate(String code, StockFinancialIndicator ind) {
             // 经营杠杆代理：期间费用率/净利率，值越大说明固定成本占比越高
@@ -318,9 +492,15 @@ public class FinancialFactors {
         }
     }
 
-    /** 现金流质量 - 经营现金流/营收比率 */
+    /**
+     * 现金流质量 - 经营现金流/营收比率
+     */
     public static class CashFlowQualityCalc implements FinancialFactorCalculator {
-        @Override public String getFactorCode() { return "FIN_CF_QUALITY"; }
+        @Override
+        public String getFactorCode() {
+            return "FIN_CF_QUALITY";
+        }
+
         @Override
         public BigDecimal calculate(String code, StockFinancialIndicator ind) {
             if (ind.getOperatingCfToNp() == null || ind.getNetProfitMargin() == null) return null;
@@ -332,9 +512,15 @@ public class FinancialFactors {
 
     // ======================== 自由现金流因子 ========================
 
-    /** 自由现金流(亿元) — 经营现金流+投资现金流，正值说明公司能产生自由现金 */
+    /**
+     * 自由现金流(亿元) — 经营现金流+投资现金流，正值说明公司能产生自由现金
+     */
     public static class FreeCashFlowCalc implements FinancialFactorCalculator {
-        @Override public String getFactorCode() { return "FIN_FCF"; }
+        @Override
+        public String getFactorCode() {
+            return "FIN_FCF";
+        }
+
         @Override
         public BigDecimal calculate(String code, StockFinancialIndicator ind) {
             if (ind.getFreeCashFlow() == null) return null;
@@ -344,9 +530,15 @@ public class FinancialFactors {
         }
     }
 
-    /** 自由现金流/经营现金流 — 反映经营赚来的钱有多少是自由的（扣除资本开支后） */
+    /**
+     * 自由现金流/经营现金流 — 反映经营赚来的钱有多少是自由的（扣除资本开支后）
+     */
     public static class FreeCashFlowToOpCfCalc implements FinancialFactorCalculator {
-        @Override public String getFactorCode() { return "FIN_FCF_TO_OPCF"; }
+        @Override
+        public String getFactorCode() {
+            return "FIN_FCF_TO_OPCF";
+        }
+
         @Override
         public BigDecimal calculate(String code, StockFinancialIndicator ind) {
             if (ind.getFreeCashFlow() == null || ind.getNetOperateCf() == null) return null;
@@ -356,9 +548,15 @@ public class FinancialFactors {
         }
     }
 
-    /** 自由现金流/净利润 — FCF含金量，段永平最看重的指标之一，越接近1说明利润含金量越高 */
+    /**
+     * 自由现金流/净利润 — FCF含金量，段永平最看重的指标之一，越接近1说明利润含金量越高
+     */
     public static class FreeCashFlowToNpCalc implements FinancialFactorCalculator {
-        @Override public String getFactorCode() { return "FIN_FCF_TO_NP"; }
+        @Override
+        public String getFactorCode() {
+            return "FIN_FCF_TO_NP";
+        }
+
         @Override
         public BigDecimal calculate(String code, StockFinancialIndicator ind) {
             // FCF/NP = (FCF/经营CF) × (经营CF/NP) = fcfToOpCf × operatingCfToNp/100
@@ -375,9 +573,15 @@ public class FinancialFactors {
 
     // ======================== 价值因子 (VALUE - 财务数据部分) ========================
 
-    /** 盈利收益率代理 = 净利率 / BPS 的倒数（不依赖市价） */
+    /**
+     * 盈利收益率代理 = 净利率 / BPS 的倒数（不依赖市价）
+     */
     public static class EarningsYieldCalc implements FinancialFactorCalculator {
-        @Override public String getFactorCode() { return "FIN_EARNINGS_YIELD"; }
+        @Override
+        public String getFactorCode() {
+            return "FIN_EARNINGS_YIELD";
+        }
+
         @Override
         public BigDecimal calculate(String code, StockFinancialIndicator ind) {
             // EP代理：ROE × 净利率 / 100（净资产收益率×利润率综合反映盈利能力）
@@ -387,9 +591,15 @@ public class FinancialFactors {
         }
     }
 
-    /** 账面价值代理 = BPS 对数（不依赖市价，反映每股内在价值） */
+    /**
+     * 账面价值代理 = BPS 对数（不依赖市价，反映每股内在价值）
+     */
     public static class BookValueCalc implements FinancialFactorCalculator {
-        @Override public String getFactorCode() { return "FIN_BOOK_VALUE"; }
+        @Override
+        public String getFactorCode() {
+            return "FIN_BOOK_VALUE";
+        }
+
         @Override
         public BigDecimal calculate(String code, StockFinancialIndicator ind) {
             if (ind.getBps() == null || ind.getBps().doubleValue() <= 0) return null;
@@ -398,9 +608,15 @@ public class FinancialFactors {
         }
     }
 
-    /** 营收质量 = 营收同比增长率 × 净利率（高增长+高利润率 = 高质量） */
+    /**
+     * 营收质量 = 营收同比增长率 × 净利率（高增长+高利润率 = 高质量）
+     */
     public static class RevenueQualityCalc implements FinancialFactorCalculator {
-        @Override public String getFactorCode() { return "FIN_REVENUE_QUALITY"; }
+        @Override
+        public String getFactorCode() {
+            return "FIN_REVENUE_QUALITY";
+        }
+
         @Override
         public BigDecimal calculate(String code, StockFinancialIndicator ind) {
             if (ind.getRevenueYoy() == null || ind.getNetProfitMargin() == null) return null;

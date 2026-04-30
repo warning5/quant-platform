@@ -23,7 +23,9 @@ public class BuiltinFactors {
      */
     public static class Momentum20Calculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "MOM20"; }
+        public String getFactorCode() {
+            return "MOM20";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -42,7 +44,9 @@ public class BuiltinFactors {
      */
     public static class Momentum60Calculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "MOM60"; }
+        public String getFactorCode() {
+            return "MOM60";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -61,7 +65,9 @@ public class BuiltinFactors {
      */
     public static class Volatility20Calculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "VOL20"; }
+        public String getFactorCode() {
+            return "VOL20";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -91,7 +97,9 @@ public class BuiltinFactors {
      */
     public static class Turnover20Calculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "TURN20"; }
+        public String getFactorCode() {
+            return "TURN20";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -110,7 +118,9 @@ public class BuiltinFactors {
      */
     public static class SizeCalculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "SIZE"; }
+        public String getFactorCode() {
+            return "SIZE";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -128,7 +138,9 @@ public class BuiltinFactors {
      */
     public static class Rsi5Calculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "RSI5"; }
+        public String getFactorCode() {
+            return "RSI5";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -153,7 +165,9 @@ public class BuiltinFactors {
      */
     public static class BollingerPositionCalculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "BOLL_POS"; }
+        public String getFactorCode() {
+            return "BOLL_POS";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -183,7 +197,9 @@ public class BuiltinFactors {
      */
     public static class Momentum5Calculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "MOM5"; }
+        public String getFactorCode() {
+            return "MOM5";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -202,7 +218,9 @@ public class BuiltinFactors {
      */
     public static class Momentum120Calculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "MOM120"; }
+        public String getFactorCode() {
+            return "MOM120";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -221,7 +239,9 @@ public class BuiltinFactors {
      */
     public static class Reversal5Calculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "REVERSAL5"; }
+        public String getFactorCode() {
+            return "REVERSAL5";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -242,7 +262,9 @@ public class BuiltinFactors {
      */
     public static class Volatility5Calculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "VOL5"; }
+        public String getFactorCode() {
+            return "VOL5";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -272,7 +294,9 @@ public class BuiltinFactors {
      */
     public static class Volatility60Calculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "VOL60"; }
+        public String getFactorCode() {
+            return "VOL60";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -302,7 +326,9 @@ public class BuiltinFactors {
      */
     public static class VolatilityRatioCalculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "VOL_RATIO"; }
+        public String getFactorCode() {
+            return "VOL_RATIO";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -347,7 +373,9 @@ public class BuiltinFactors {
      */
     public static class AmihudCalculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "AMIHUD"; }
+        public String getFactorCode() {
+            return "AMIHUD";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -378,7 +406,9 @@ public class BuiltinFactors {
      */
     public static class TurnoverChangeCalculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "TURNOVER_CHANGE"; }
+        public String getFactorCode() {
+            return "TURNOVER_CHANGE";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -408,7 +438,9 @@ public class BuiltinFactors {
      */
     public static class VolumeRatioCalculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "VOLUME_RATIO"; }
+        public String getFactorCode() {
+            return "VOLUME_RATIO";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -440,7 +472,9 @@ public class BuiltinFactors {
      */
     public static class Rsi14Calculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "RSI14"; }
+        public String getFactorCode() {
+            return "RSI14";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -465,7 +499,9 @@ public class BuiltinFactors {
      */
     public static class MacdCalculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "MACD"; }
+        public String getFactorCode() {
+            return "MACD";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -495,7 +531,9 @@ public class BuiltinFactors {
      */
     public static class KdjKCalculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "KDJ_K"; }
+        public String getFactorCode() {
+            return "KDJ_K";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -527,7 +565,9 @@ public class BuiltinFactors {
      */
     public static class Atr20Calculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "ATR20"; }
+        public String getFactorCode() {
+            return "ATR20";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -551,7 +591,9 @@ public class BuiltinFactors {
      */
     public static class UpperShadowCalculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "UPPER_SHADOW"; }
+        public String getFactorCode() {
+            return "UPPER_SHADOW";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -572,7 +614,9 @@ public class BuiltinFactors {
      */
     public static class PriceMomAccCalculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "PRICE_MOM_ACC"; }
+        public String getFactorCode() {
+            return "PRICE_MOM_ACC";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -600,7 +644,9 @@ public class BuiltinFactors {
      */
     public static class Psy12Calculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "PSY12"; }
+        public String getFactorCode() {
+            return "PSY12";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -620,7 +666,9 @@ public class BuiltinFactors {
      */
     public static class Srdm30Calculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "SRDM30"; }
+        public String getFactorCode() {
+            return "SRDM30";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -646,7 +694,9 @@ public class BuiltinFactors {
      */
     public static class BollMidCalculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "BOLL_MID"; }
+        public String getFactorCode() {
+            return "BOLL_MID";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -664,7 +714,9 @@ public class BuiltinFactors {
      */
     public static class Mfi14Calculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "MFI14"; }
+        public String getFactorCode() {
+            return "MFI14";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -693,7 +745,9 @@ public class BuiltinFactors {
      */
     public static class BbiCalculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "BBI"; }
+        public String getFactorCode() {
+            return "BBI";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -717,7 +771,9 @@ public class BuiltinFactors {
      */
     public static class Ma5Calculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "MA5"; }
+        public String getFactorCode() {
+            return "MA5";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -734,7 +790,9 @@ public class BuiltinFactors {
      */
     public static class Ema5Calculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "EMA5"; }
+        public String getFactorCode() {
+            return "EMA5";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -754,7 +812,9 @@ public class BuiltinFactors {
      */
     public static class Wr14Calculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "WR14"; }
+        public String getFactorCode() {
+            return "WR14";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -775,7 +835,9 @@ public class BuiltinFactors {
      */
     public static class ObvCalculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "OBV"; }
+        public String getFactorCode() {
+            return "OBV";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -799,7 +861,9 @@ public class BuiltinFactors {
      */
     public static class Vroc12Calculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "VROC12"; }
+        public String getFactorCode() {
+            return "VROC12";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -817,7 +881,9 @@ public class BuiltinFactors {
      */
     public static class PvtCalculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "PVT"; }
+        public String getFactorCode() {
+            return "PVT";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -841,7 +907,9 @@ public class BuiltinFactors {
      */
     public static class PriceOscCalculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "PRICEOSC"; }
+        public String getFactorCode() {
+            return "PRICEOSC";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -861,7 +929,9 @@ public class BuiltinFactors {
      */
     public static class Vr26Calculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "VR26"; }
+        public String getFactorCode() {
+            return "VR26";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -886,7 +956,9 @@ public class BuiltinFactors {
      */
     public static class Bias6Calculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "BIAS6"; }
+        public String getFactorCode() {
+            return "BIAS6";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -905,7 +977,9 @@ public class BuiltinFactors {
      */
     public static class Vstd10Calculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "VSTD10"; }
+        public String getFactorCode() {
+            return "VSTD10";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -928,7 +1002,9 @@ public class BuiltinFactors {
      */
     public static class Roc12Calculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "ROC12"; }
+        public String getFactorCode() {
+            return "ROC12";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -947,7 +1023,9 @@ public class BuiltinFactors {
      */
     public static class Cci14Calculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "CCI14"; }
+        public String getFactorCode() {
+            return "CCI14";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -977,7 +1055,9 @@ public class BuiltinFactors {
      */
     public static class Trix12Calculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "TRIX12"; }
+        public String getFactorCode() {
+            return "TRIX12";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -991,13 +1071,13 @@ public class BuiltinFactors {
             // 第二次EMA（用第一次结果的每期值）
             double[] ema1Series = new double[closes.length];
             ema1Series[0] = closes[0];
-            for (int i = 1; i < closes.length; i++) ema1Series[i] = closes[i] * k + ema1Series[i-1] * (1 - k);
+            for (int i = 1; i < closes.length; i++) ema1Series[i] = closes[i] * k + ema1Series[i - 1] * (1 - k);
             double[] ema2Series = new double[closes.length];
             ema2Series[0] = ema1Series[0];
-            for (int i = 1; i < closes.length; i++) ema2Series[i] = ema1Series[i] * k + ema2Series[i-1] * (1 - k);
+            for (int i = 1; i < closes.length; i++) ema2Series[i] = ema1Series[i] * k + ema2Series[i - 1] * (1 - k);
             double[] ema3Series = new double[closes.length];
             ema3Series[0] = ema2Series[0];
-            for (int i = 1; i < closes.length; i++) ema3Series[i] = ema2Series[i] * k + ema3Series[i-1] * (1 - k);
+            for (int i = 1; i < closes.length; i++) ema3Series[i] = ema2Series[i] * k + ema3Series[i - 1] * (1 - k);
             int last = closes.length - 1;
             if (ema3Series[last - 1] == 0) return null;
             double trix = (ema3Series[last] - ema3Series[last - 1]) / ema3Series[last - 1] * 100;
@@ -1010,7 +1090,9 @@ public class BuiltinFactors {
      */
     public static class Vma5Calculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "VMA5"; }
+        public String getFactorCode() {
+            return "VMA5";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -1027,7 +1109,9 @@ public class BuiltinFactors {
      */
     public static class Atr14Calculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "ATR14"; }
+        public String getFactorCode() {
+            return "ATR14";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -1051,7 +1135,9 @@ public class BuiltinFactors {
      */
     public static class Mtm6Calculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "MTM6"; }
+        public String getFactorCode() {
+            return "MTM6";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -1068,7 +1154,9 @@ public class BuiltinFactors {
      */
     public static class VoscCalculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "VOSC"; }
+        public String getFactorCode() {
+            return "VOSC";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -1090,7 +1178,9 @@ public class BuiltinFactors {
      */
     public static class VolPriceCorr20Calculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "VPCORR20"; }
+        public String getFactorCode() {
+            return "VPCORR20";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -1110,7 +1200,8 @@ public class BuiltinFactors {
             int n = x.length;
             double sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0, sumY2 = 0;
             for (int i = 0; i < n; i++) {
-                sumX += x[i]; sumY += y[i];
+                sumX += x[i];
+                sumY += y[i];
                 sumXY += x[i] * y[i];
                 sumX2 += x[i] * x[i];
                 sumY2 += y[i] * y[i];
@@ -1123,9 +1214,15 @@ public class BuiltinFactors {
 
     // ======================== 新增26个技术因子 (2026-04-16) ========================
 
-    /** ARBR 人气意愿指标 - AR = (最高价-开盘价)/(开盘价-最低价) 累计26日 */
+    /**
+     * ARBR 人气意愿指标 - AR = (最高价-开盘价)/(开盘价-最低价) 累计26日
+     */
     public static class ArbrCalculator implements FactorCalculator {
-        @Override public String getFactorCode() { return "ARBR"; }
+        @Override
+        public String getFactorCode() {
+            return "ARBR";
+        }
+
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
                                     List<MarketDailyBar> history, Map<String, Object> context) {
@@ -1144,9 +1241,15 @@ public class BuiltinFactors {
         }
     }
 
-    /** BBIBOLL 布林带多空线 = (MA3+MA6+MA12+MA24)/4 + 2*STD(MA3,MA6,MA12,MA24) 的通道位置 */
+    /**
+     * BBIBOLL 布林带多空线 = (MA3+MA6+MA12+MA24)/4 + 2*STD(MA3,MA6,MA12,MA24) 的通道位置
+     */
     public static class BbibollCalculator implements FactorCalculator {
-        @Override public String getFactorCode() { return "BBIBOLL"; }
+        @Override
+        public String getFactorCode() {
+            return "BBIBOLL";
+        }
+
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
                                     List<MarketDailyBar> history, Map<String, Object> context) {
@@ -1160,7 +1263,8 @@ public class BuiltinFactors {
             double ma24 = avg(closes, n - 24, n);
             double bbi = (ma3 + ma6 + ma12 + ma24) / 4;
             // 用bbi值的最近10日标准差
-            if (n < 36) return bbi == 0 ? null : BigDecimal.valueOf(closes[n-1] / bbi - 1).setScale(8, RoundingMode.HALF_UP);
+            if (n < 36)
+                return bbi == 0 ? null : BigDecimal.valueOf(closes[n - 1] / bbi - 1).setScale(8, RoundingMode.HALF_UP);
             double sum = 0;
             int cnt = 0;
             for (int i = Math.max(24, n - 10); i < n; i++) {
@@ -1175,16 +1279,25 @@ public class BuiltinFactors {
             if (cnt == 0) return null;
             double std = Math.sqrt(sum / cnt);
             if (std == 0) return null;
-            return BigDecimal.valueOf((closes[n-1] - bbi) / std).setScale(8, RoundingMode.HALF_UP);
+            return BigDecimal.valueOf((closes[n - 1] - bbi) / std).setScale(8, RoundingMode.HALF_UP);
         }
+
         private double avg(double[] arr, int from, int to) {
-            double s = 0; for (int i = from; i < to; i++) s += arr[i]; return s / (to - from);
+            double s = 0;
+            for (int i = from; i < to; i++) s += arr[i];
+            return s / (to - from);
         }
     }
 
-    /** CDP 逆势操作 - (最高+最低+2*收盘)/4 的压力线 */
+    /**
+     * CDP 逆势操作 - (最高+最低+2*收盘)/4 的压力线
+     */
     public static class CdpCalculator implements FactorCalculator {
-        @Override public String getFactorCode() { return "CDP"; }
+        @Override
+        public String getFactorCode() {
+            return "CDP";
+        }
+
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
                                     List<MarketDailyBar> history, Map<String, Object> context) {
@@ -1200,9 +1313,15 @@ public class BuiltinFactors {
         }
     }
 
-    /** ENV14 包络线 - 收盘价/(MA14 * 1.05) 表示在上轨的相对位置 */
+    /**
+     * ENV14 包络线 - 收盘价/(MA14 * 1.05) 表示在上轨的相对位置
+     */
     public static class Env14Calculator implements FactorCalculator {
-        @Override public String getFactorCode() { return "ENV14"; }
+        @Override
+        public String getFactorCode() {
+            return "ENV14";
+        }
+
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
                                     List<MarketDailyBar> history, Map<String, Object> context) {
@@ -1216,9 +1335,15 @@ public class BuiltinFactors {
         }
     }
 
-    /** DBCD 异同离差乖离率 - 多步平滑BIAS */
+    /**
+     * DBCD 异同离差乖离率 - 多步平滑BIAS
+     */
     public static class DbcdCalculator implements FactorCalculator {
-        @Override public String getFactorCode() { return "DBCD"; }
+        @Override
+        public String getFactorCode() {
+            return "DBCD";
+        }
+
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
                                     List<MarketDailyBar> history, Map<String, Object> context) {
@@ -1233,9 +1358,15 @@ public class BuiltinFactors {
         }
     }
 
-    /** CR 能量指标 - 中间价多空力量比 */
+    /**
+     * CR 能量指标 - 中间价多空力量比
+     */
     public static class CrCalculator implements FactorCalculator {
-        @Override public String getFactorCode() { return "CR"; }
+        @Override
+        public String getFactorCode() {
+            return "CR";
+        }
+
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
                                     List<MarketDailyBar> history, Map<String, Object> context) {
@@ -1253,9 +1384,15 @@ public class BuiltinFactors {
         }
     }
 
-    /** DPO 去势价格振荡 - 收盘价 - N日前MA */
+    /**
+     * DPO 去势价格振荡 - 收盘价 - N日前MA
+     */
     public static class DpoCalculator implements FactorCalculator {
-        @Override public String getFactorCode() { return "DPO"; }
+        @Override
+        public String getFactorCode() {
+            return "DPO";
+        }
+
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
                                     List<MarketDailyBar> history, Map<String, Object> context) {
@@ -1267,9 +1404,15 @@ public class BuiltinFactors {
         }
     }
 
-    /** WR12 12日威廉指标 */
+    /**
+     * WR12 12日威廉指标
+     */
     public static class Wr12Calculator implements FactorCalculator {
-        @Override public String getFactorCode() { return "WR12"; }
+        @Override
+        public String getFactorCode() {
+            return "WR12";
+        }
+
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
                                     List<MarketDailyBar> history, Map<String, Object> context) {
@@ -1284,9 +1427,15 @@ public class BuiltinFactors {
         }
     }
 
-    /** VRSI6 成交量RSI 6日 */
+    /**
+     * VRSI6 成交量RSI 6日
+     */
     public static class Vrsi6Calculator implements FactorCalculator {
-        @Override public String getFactorCode() { return "VRSI6"; }
+        @Override
+        public String getFactorCode() {
+            return "VRSI6";
+        }
+
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
                                     List<MarketDailyBar> history, Map<String, Object> context) {
@@ -1304,9 +1453,15 @@ public class BuiltinFactors {
         }
     }
 
-    /** BIAS12 12日乖离率 */
+    /**
+     * BIAS12 12日乖离率
+     */
     public static class Bias12Calculator implements FactorCalculator {
-        @Override public String getFactorCode() { return "BIAS12"; }
+        @Override
+        public String getFactorCode() {
+            return "BIAS12";
+        }
+
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
                                     List<MarketDailyBar> history, Map<String, Object> context) {
@@ -1319,9 +1474,15 @@ public class BuiltinFactors {
         }
     }
 
-    /** BIAS24 24日乖离率 */
+    /**
+     * BIAS24 24日乖离率
+     */
     public static class Bias24Calculator implements FactorCalculator {
-        @Override public String getFactorCode() { return "BIAS24"; }
+        @Override
+        public String getFactorCode() {
+            return "BIAS24";
+        }
+
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
                                     List<MarketDailyBar> history, Map<String, Object> context) {
@@ -1334,9 +1495,15 @@ public class BuiltinFactors {
         }
     }
 
-    /** RCCD BIAS变化率 */
+    /**
+     * RCCD BIAS变化率
+     */
     public static class RccdCalculator implements FactorCalculator {
-        @Override public String getFactorCode() { return "RCCD"; }
+        @Override
+        public String getFactorCode() {
+            return "RCCD";
+        }
+
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
                                     List<MarketDailyBar> history, Map<String, Object> context) {
@@ -1356,9 +1523,15 @@ public class BuiltinFactors {
         }
     }
 
-    /** DDI 方向标准差 */
+    /**
+     * DDI 方向标准差
+     */
     public static class DdiCalculator implements FactorCalculator {
-        @Override public String getFactorCode() { return "DDI"; }
+        @Override
+        public String getFactorCode() {
+            return "DDI";
+        }
+
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
                                     List<MarketDailyBar> history, Map<String, Object> context) {
@@ -1381,9 +1554,15 @@ public class BuiltinFactors {
         }
     }
 
-    /** CVLT 变动率 - A/D变化率 */
+    /**
+     * CVLT 变动率 - A/D变化率
+     */
     public static class CvltCalculator implements FactorCalculator {
-        @Override public String getFactorCode() { return "CVLT"; }
+        @Override
+        public String getFactorCode() {
+            return "CVLT";
+        }
+
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
                                     List<MarketDailyBar> history, Map<String, Object> context) {
@@ -1407,9 +1586,15 @@ public class BuiltinFactors {
         }
     }
 
-    /** VHF 趋势清晰度 - 价格方向一致性 */
+    /**
+     * VHF 趋势清晰度 - 价格方向一致性
+     */
     public static class VhfCalculator implements FactorCalculator {
-        @Override public String getFactorCode() { return "VHF"; }
+        @Override
+        public String getFactorCode() {
+            return "VHF";
+        }
+
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
                                     List<MarketDailyBar> history, Map<String, Object> context) {
@@ -1426,9 +1611,15 @@ public class BuiltinFactors {
         }
     }
 
-    /** SI 摆动指标 - (收盘-开盘)/(最高-最低) 的累积 */
+    /**
+     * SI 摆动指标 - (收盘-开盘)/(最高-最低) 的累积
+     */
     public static class SiCalculator implements FactorCalculator {
-        @Override public String getFactorCode() { return "SI"; }
+        @Override
+        public String getFactorCode() {
+            return "SI";
+        }
+
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
                                     List<MarketDailyBar> history, Map<String, Object> context) {
@@ -1448,9 +1639,15 @@ public class BuiltinFactors {
         }
     }
 
-    /** MASS 质量指数 - 高低价差EMA比值 */
+    /**
+     * MASS 质量指数 - 高低价差EMA比值
+     */
     public static class MassCalculator implements FactorCalculator {
-        @Override public String getFactorCode() { return "MASS"; }
+        @Override
+        public String getFactorCode() {
+            return "MASS";
+        }
+
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
                                     List<MarketDailyBar> history, Map<String, Object> context) {
@@ -1465,11 +1662,11 @@ public class BuiltinFactors {
             double k = 2.0 / 10;
             double[] ema1 = new double[ehl.length];
             ema1[0] = ehl[0];
-            for (int i = 1; i < ehl.length; i++) ema1[i] = ehl[i] * k + ema1[i-1] * (1 - k);
+            for (int i = 1; i < ehl.length; i++) ema1[i] = ehl[i] * k + ema1[i - 1] * (1 - k);
             // 9日EMA of ema1
             double[] ema2 = new double[ehl.length];
             ema2[0] = ema1[0];
-            for (int i = 1; i < ehl.length; i++) ema2[i] = ema1[i] * k + ema2[i-1] * (1 - k);
+            for (int i = 1; i < ehl.length; i++) ema2[i] = ema1[i] * k + ema2[i - 1] * (1 - k);
             // MASS = sum(ema1/ema2) over 25 days
             double sum = 0;
             for (int i = history.size() - 25; i < history.size(); i++) {
@@ -1480,9 +1677,15 @@ public class BuiltinFactors {
         }
     }
 
-    /** SRMI9 慢速随机指标 */
+    /**
+     * SRMI9 慢速随机指标
+     */
     public static class Srmi9Calculator implements FactorCalculator {
-        @Override public String getFactorCode() { return "SRMI9"; }
+        @Override
+        public String getFactorCode() {
+            return "SRMI9";
+        }
+
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
                                     List<MarketDailyBar> history, Map<String, Object> context) {
@@ -1504,9 +1707,15 @@ public class BuiltinFactors {
         }
     }
 
-    /** VMACD 成交量MACD = VOL_EMA12 - VOL_EMA26 */
+    /**
+     * VMACD 成交量MACD = VOL_EMA12 - VOL_EMA26
+     */
     public static class VmacdCalculator implements FactorCalculator {
-        @Override public String getFactorCode() { return "VMACD"; }
+        @Override
+        public String getFactorCode() {
+            return "VMACD";
+        }
+
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
                                     List<MarketDailyBar> history, Map<String, Object> context) {
@@ -1522,9 +1731,15 @@ public class BuiltinFactors {
         }
     }
 
-    /** LWR 慢速威廉指标 */
+    /**
+     * LWR 慢速威廉指标
+     */
     public static class LwrCalculator implements FactorCalculator {
-        @Override public String getFactorCode() { return "LWR"; }
+        @Override
+        public String getFactorCode() {
+            return "LWR";
+        }
+
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
                                     List<MarketDailyBar> history, Map<String, Object> context) {
@@ -1538,9 +1753,15 @@ public class BuiltinFactors {
         }
     }
 
-    /** ADTM 动态买卖气指标 */
+    /**
+     * ADTM 动态买卖气指标
+     */
     public static class AdtmCalculator implements FactorCalculator {
-        @Override public String getFactorCode() { return "ADTM"; }
+        @Override
+        public String getFactorCode() {
+            return "ADTM";
+        }
+
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
                                     List<MarketDailyBar> history, Map<String, Object> context) {
@@ -1559,9 +1780,15 @@ public class BuiltinFactors {
         }
     }
 
-    /** MICD 平滑异同移动平均 = EMA(ROC12) - EMA(EMA(ROC12)) */
+    /**
+     * MICD 平滑异同移动平均 = EMA(ROC12) - EMA(EMA(ROC12))
+     */
     public static class MicdCalculator implements FactorCalculator {
-        @Override public String getFactorCode() { return "MICD"; }
+        @Override
+        public String getFactorCode() {
+            return "MICD";
+        }
+
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
                                     List<MarketDailyBar> history, Map<String, Object> context) {
@@ -1584,9 +1811,15 @@ public class BuiltinFactors {
         }
     }
 
-    /** DMA 平行线差 = MA10 - MA50 */
+    /**
+     * DMA 平行线差 = MA10 - MA50
+     */
     public static class DmaCalculator implements FactorCalculator {
-        @Override public String getFactorCode() { return "DMA"; }
+        @Override
+        public String getFactorCode() {
+            return "DMA";
+        }
+
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
                                     List<MarketDailyBar> history, Map<String, Object> context) {
@@ -1599,9 +1832,15 @@ public class BuiltinFactors {
         }
     }
 
-    /** TAPI 成交量乘数 - 成交额加权价格趋势 */
+    /**
+     * TAPI 成交量乘数 - 成交额加权价格趋势
+     */
     public static class TapiCalculator implements FactorCalculator {
-        @Override public String getFactorCode() { return "TAPI"; }
+        @Override
+        public String getFactorCode() {
+            return "TAPI";
+        }
+
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
                                     List<MarketDailyBar> history, Map<String, Object> context) {
@@ -1615,9 +1854,15 @@ public class BuiltinFactors {
         }
     }
 
-    /** MI12 动量指标 - 12日ROC的EMA */
+    /**
+     * MI12 动量指标 - 12日ROC的EMA
+     */
     public static class Mi12Calculator implements FactorCalculator {
-        @Override public String getFactorCode() { return "MI12"; }
+        @Override
+        public String getFactorCode() {
+            return "MI12";
+        }
+
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
                                     List<MarketDailyBar> history, Map<String, Object> context) {
@@ -1636,9 +1881,15 @@ public class BuiltinFactors {
         }
     }
 
-    /** MTM_MTM 动量百分比 - MTM6 / 6日前价格 */
+    /**
+     * MTM_MTM 动量百分比 - MTM6 / 6日前价格
+     */
     public static class MtmPctCalculator implements FactorCalculator {
-        @Override public String getFactorCode() { return "MTM_PCT"; }
+        @Override
+        public String getFactorCode() {
+            return "MTM_PCT";
+        }
+
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
                                     List<MarketDailyBar> history, Map<String, Object> context) {
@@ -1650,9 +1901,15 @@ public class BuiltinFactors {
         }
     }
 
-    /** WAD 威廉斯累积/派发 */
+    /**
+     * WAD 威廉斯累积/派发
+     */
     public static class WadCalculator implements FactorCalculator {
-        @Override public String getFactorCode() { return "WAD"; }
+        @Override
+        public String getFactorCode() {
+            return "WAD";
+        }
+
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
                                     List<MarketDailyBar> history, Map<String, Object> context) {
@@ -1674,9 +1931,15 @@ public class BuiltinFactors {
 
     // ======================== 情绪因子 (SENTIMENT) ========================
 
-    /** 近20日涨停次数 - pctChg >= 9.8% 视为涨停（覆盖9.8%~10%的近似涨停） */
+    /**
+     * 近20日涨停次数 - pctChg >= 9.8% 视为涨停（覆盖9.8%~10%的近似涨停）
+     */
     public static class LimitUpCountCalculator implements FactorCalculator {
-        @Override public String getFactorCode() { return "LIMIT_UP_COUNT"; }
+        @Override
+        public String getFactorCode() {
+            return "LIMIT_UP_COUNT";
+        }
+
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
                                     List<MarketDailyBar> history, Map<String, Object> context) {
@@ -1690,9 +1953,15 @@ public class BuiltinFactors {
         }
     }
 
-    /** 换手率异常度 - 近5日均换手率 / 60日均换手率，值越大说明关注度突然升高 */
+    /**
+     * 换手率异常度 - 近5日均换手率 / 60日均换手率，值越大说明关注度突然升高
+     */
     public static class TurnoverAnomalyCalculator implements FactorCalculator {
-        @Override public String getFactorCode() { return "TURNOVER_ANOMALY"; }
+        @Override
+        public String getFactorCode() {
+            return "TURNOVER_ANOMALY";
+        }
+
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
                                     List<MarketDailyBar> history, Map<String, Object> context) {
@@ -1723,9 +1992,15 @@ public class BuiltinFactors {
         }
     }
 
-    /** 成交量惊喜 - 近5日均量 / 20日均量 的对数，反映资金突然涌入程度 */
+    /**
+     * 成交量惊喜 - 近5日均量 / 20日均量 的对数，反映资金突然涌入程度
+     */
     public static class VolumeSurpriseCalculator implements FactorCalculator {
-        @Override public String getFactorCode() { return "VOLUME_SURPRISE"; }
+        @Override
+        public String getFactorCode() {
+            return "VOLUME_SURPRISE";
+        }
+
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
                                     List<MarketDailyBar> history, Map<String, Object> context) {

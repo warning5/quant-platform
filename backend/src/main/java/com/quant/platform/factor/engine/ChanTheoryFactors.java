@@ -25,7 +25,9 @@ public class ChanTheoryFactors {
      */
     public static class PenDirectionCalculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "CHAN_PEN_DIR"; }
+        public String getFactorCode() {
+            return "CHAN_PEN_DIR";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -49,7 +51,9 @@ public class ChanTheoryFactors {
      */
     public static class TrendTypeCalculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "CHAN_TREND"; }
+        public String getFactorCode() {
+            return "CHAN_TREND";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -72,7 +76,9 @@ public class ChanTheoryFactors {
      */
     public static class BuySellSignalCalculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "CHAN_BUY_SELL"; }
+        public String getFactorCode() {
+            return "CHAN_BUY_SELL";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -93,14 +99,16 @@ public class ChanTheoryFactors {
     /**
      * CHAN_HUB_POS — 相对中枢位置因子
      * 值: 当前价格相对最后一个中枢的归一化位置
-     *   >1.0: 在中枢上方（强势）
-     *   [0,1]: 在中枢区间内（震荡）
-     *   <0: 在中枢下方（弱势）
+     * >1.0: 在中枢上方（强势）
+     * [0,1]: 在中枢区间内（震荡）
+     * <0: 在中枢下方（弱势）
      * 用途: 判断当前价格在中枢中的相对强弱
      */
     public static class HubPositionCalculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "CHAN_HUB_POS"; }
+        public String getFactorCode() {
+            return "CHAN_HUB_POS";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
@@ -134,7 +142,9 @@ public class ChanTheoryFactors {
      */
     public static class PenCountCalculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "CHAN_PEN_COUNT"; }
+        public String getFactorCode() {
+            return "CHAN_PEN_COUNT";
+        }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,

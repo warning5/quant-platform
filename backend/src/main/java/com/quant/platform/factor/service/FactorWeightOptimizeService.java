@@ -10,14 +10,13 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.*;
-import java.util.stream.Collectors;
 
 /**
  * 因子组合权重优化服务
  * 支持三种优化方法：
- *  1. EQUAL           — 等权（基准）
- *  2. MARKOWITZ       — 均值-方差（最大化夏普比率）
- *  3. RISK_PARITY     — 风险平价（每个因子对组合风险的贡献相等）
+ * 1. EQUAL           — 等权（基准）
+ * 2. MARKOWITZ       — 均值-方差（最大化夏普比率）
+ * 3. RISK_PARITY     — 风险平价（每个因子对组合风险的贡献相等）
  * 输入：多个因子代码 + 日期范围（用 factor_value.rank_value 作为截面收益代理）
  * 输出：每个因子的推荐权重
  */
@@ -135,7 +134,7 @@ public class FactorWeightOptimizeService {
      * 加载因子截面收益率：用 rank_value 的日变化量（差分）作为日收益代理
      */
     private Map<String, List<Double>> loadFactorReturns(List<String> factorCodes,
-                                                         String startDate, String endDate) {
+                                                        String startDate, String endDate) {
         Map<String, List<Double>> result = new HashMap<>();
         for (String code : factorCodes) {
             // 取全市场 rank_value 的中位数作为因子"收益"
@@ -248,7 +247,7 @@ public class FactorWeightOptimizeService {
     }
 
     private double[] negativeSharpeGrad(double[] w, double[] mu, double[][] cov,
-                                         double rf, int n) {
+                                        double rf, int n) {
         double ret = dot(w, mu) - rf;
         double var = quadraticForm(w, cov);
         double vol = Math.sqrt(Math.max(var, 1e-12));
@@ -319,12 +318,12 @@ public class FactorWeightOptimizeService {
      */
     private List<Map<String, Object>> calcEfficientFrontier(double[] means, double[][] cov, int n, int points) {
         List<Map<String, Object>> frontier = new ArrayList<>();
-        
+
         // 计算全局最小方差组合（有效前沿的左端点）
         double[] minVarWeights = minimizeVariance(cov, n);
         double minVarReturn = dot(minVarWeights, means) * 252;
         double minVarVol = Math.sqrt(Math.max(quadraticForm(minVarWeights, cov), 0) * 252);
-        
+
         // 计算最大收益组合（有效前沿的右端点）
         int maxRetIdx = 0;
         for (int i = 1; i < n; i++) {
@@ -334,18 +333,18 @@ public class FactorWeightOptimizeService {
         maxRetWeights[maxRetIdx] = 1.0;
         double maxRetReturn = means[maxRetIdx] * 252;
         double maxRetVol = Math.sqrt(Math.max(cov[maxRetIdx][maxRetIdx], 0) * 252);
-        
+
         // 在最小方差和最大收益之间生成多个目标收益水平
         for (int k = 0; k < points; k++) {
             double lambda = (double) k / (points - 1); // 0 到 1
             // 在最小方差组合和最大收益组合之间插值目标收益
             double targetRet = minVarReturn + (maxRetReturn - minVarReturn) * lambda;
-            
+
             // 求解给定目标收益下的最小方差组合
             double[] w = solveMinVarianceForTarget(means, cov, n, targetRet);
             double vol = Math.sqrt(Math.max(quadraticForm(w, cov), 0) * 252);
             double ret = dot(w, means) * 252;
-            
+
             Map<String, Object> point = new LinkedHashMap<>();
             point.put("return", round4(ret));
             point.put("volatility", round4(vol));
@@ -354,7 +353,7 @@ public class FactorWeightOptimizeService {
         }
         return frontier;
     }
-    
+
     /**
      * 求解全局最小方差组合
      */
@@ -384,11 +383,11 @@ public class FactorWeightOptimizeService {
         double[] w = equalWeights(n);
         double lr = 0.005;
         double penalty = 1000.0; // 强惩罚项确保收益约束
-        
+
         for (int iter = 0; iter < 3000; iter++) {
             double currentRet = dot(w, mu) * 252;
             double retError = currentRet - targetRet;
-            
+
             double[] grad = new double[n];
             for (int i = 0; i < n; i++) {
                 // 方差梯度 + 收益约束惩罚梯度
@@ -396,13 +395,13 @@ public class FactorWeightOptimizeService {
                 double retGrad = 2 * penalty * retError * mu[i] * 252;
                 grad[i] = varGrad + retGrad;
             }
-            
+
             for (int i = 0; i < n; i++) {
                 w[i] -= lr * grad[i];
                 w[i] = Math.max(0, w[i]); // 非负约束
             }
             normalize(w); // 权重和为1
-            
+
             if (iter > 0 && iter % 500 == 0) lr *= 0.95;
         }
         return w;

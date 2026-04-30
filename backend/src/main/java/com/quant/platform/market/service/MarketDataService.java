@@ -5,14 +5,17 @@ import com.quant.platform.stock.entity.StockDaily;
 import com.quant.platform.stock.entity.StockInfo;
 import com.quant.platform.stock.mapper.StockInfoMapper;
 import com.quant.platform.stock.service.ClickHouseStockService;
+import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import jakarta.annotation.PostConstruct;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
-import java.util.*;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -26,13 +29,19 @@ public class MarketDataService {
     private final ClickHouseStockService clickHouseStockService;
     private final StockInfoMapper stockInfoMapper;
 
-    /** code → market (SH/SZ/BJ) */
+    /**
+     * code → market (SH/SZ/BJ)
+     */
     private Map<String, String> codeMarketMap;
 
-    /** code → totalMarketCap (来自 stock_info 的最新市值，万元) */
+    /**
+     * code → totalMarketCap (来自 stock_info 的最新市值，万元)
+     */
     private Map<String, BigDecimal> codeMarketCapMap;
 
-    /** 指数代码 → 指数名称（用于区分指数和同代码个股，如 000001=上证指数 vs 平安银行） */
+    /**
+     * 指数代码 → 指数名称（用于区分指数和同代码个股，如 000001=上证指数 vs 平安银行）
+     */
     private static final Map<String, String> INDEX_NAME_MAP = Map.ofEntries(
             Map.entry("000001", "上证指数"),
             Map.entry("000016", "上证50"),
@@ -72,7 +81,9 @@ public class MarketDataService {
 
     // ==================== 概览（轻量） ====================
 
-    /** 概览缓存：同一交易日不重复查询数据库 */
+    /**
+     * 概览缓存：同一交易日不重复查询数据库
+     */
     private volatile Map<String, Object> overviewCache;
     private volatile String cachedDate = null;
 
@@ -170,6 +181,7 @@ public class MarketDataService {
     /**
      * 批量查询多只股票的行情数据（一次性查询，内存分组）
      * 用于因子计算场景，替代逐只查询（5490 只 × N 天 = 数万次 DB 调用）
+     *
      * @return Map<symbol, List<MarketDailyBar>> 按 symbol（带市场后缀）分组的行情数据
      */
     public Map<String, List<MarketDailyBar>> getBarsBatch(List<String> symbols, LocalDate startDate, LocalDate endDate) {

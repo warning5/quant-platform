@@ -31,6 +31,6 @@ public interface StockDailyMapper extends BaseMapper<StockDaily> {
      * 返回列表: code, name, change_percent, close_price, volume, amount, turnover_rate
      */
     List<Map<String, Object>> selectTopByPctChg(@Param("tradeDate") LocalDate tradeDate,
-                                                 @Param("limit") int limit,
-                                                 @Param("order") String order);
+                                                @Param("limit") int limit,
+                                                @Param("order") String order);
 }

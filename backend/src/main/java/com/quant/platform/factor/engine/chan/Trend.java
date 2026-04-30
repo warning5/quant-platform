@@ -19,9 +19,13 @@ import java.util.List;
 public class Trend {
     private int index;
     private TrendType trendType;
-    /** 起始线段序号 */
+    /**
+     * 起始线段序号
+     */
     private int startIndex;
-    /** 结束线段序号(-1表示未结束) */
+    /**
+     * 结束线段序号(-1表示未结束)
+     */
     private int endIndex;
     private LocalDate startDate;
     private LocalDate endDate;

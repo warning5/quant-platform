@@ -15,8 +15,8 @@ public interface FinancialFactorCalculator {
     /**
      * 从财务指标中提取因子值
      *
-     * @param code       股票代码
-     * @param indicator  财务指标（最近一期年报数据）
+     * @param code      股票代码
+     * @param indicator 财务指标（最近一期年报数据）
      * @return 因子值，null表示无法计算
      */
     BigDecimal calculate(String code, StockFinancialIndicator indicator);

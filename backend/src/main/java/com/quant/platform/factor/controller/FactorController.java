@@ -1,30 +1,25 @@
 package com.quant.platform.factor.controller;
 
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.quant.platform.common.dto.ApiResponse;
 import com.quant.platform.factor.domain.FactorDefinition;
 import com.quant.platform.factor.domain.FactorTestReport;
 import com.quant.platform.factor.domain.FactorValue;
+import com.quant.platform.factor.engine.FactorComputeEngine;
 import com.quant.platform.factor.service.FactorCorrelationService;
 import com.quant.platform.factor.service.FactorService;
 import com.quant.platform.factor.service.FactorWeightOptimizeService;
-import com.quant.platform.factor.engine.FactorComputeEngine;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import com.baomidou.mybatisplus.core.metadata.IPage;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.web.bind.annotation.*;
 
-import org.springframework.messaging.simp.SimpMessagingTemplate;
-
-import java.time.LocalDateTime;
 import java.time.LocalDate;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.time.LocalDateTime;
+import java.util.*;
 
 /**
  * 因子管理API
@@ -88,7 +83,7 @@ public class FactorController {
     @PutMapping("/{id}")
     @Operation(summary = "更新因子")
     public ApiResponse<FactorDefinition> update(@PathVariable Long id,
-                                                 @RequestBody FactorDefinition factor) {
+                                                @RequestBody FactorDefinition factor) {
         return ApiResponse.success("因子更新成功", factorService.updateFactor(id, factor));
     }
 
@@ -102,7 +97,7 @@ public class FactorController {
     @PatchMapping("/{id}/status")
     @Operation(summary = "更改因子状态")
     public ApiResponse<FactorDefinition> changeStatus(@PathVariable Long id,
-                                                       @RequestParam String status) {
+                                                      @RequestParam String status) {
         return ApiResponse.success(factorService.changeStatus(id, FactorDefinition.FactorStatus.valueOf(status)));
     }
 

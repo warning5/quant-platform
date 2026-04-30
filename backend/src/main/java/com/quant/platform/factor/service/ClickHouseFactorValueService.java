@@ -6,7 +6,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.sql.*;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
  * ClickHouse 因子值服务
@@ -94,14 +97,14 @@ public class ClickHouseFactorValueService {
                 .map(c -> "'" + c.replace("'", "''") + "'").toList());
 
         String sql = String.format("""
-            SELECT factor_code,
-                   count() AS value_count,
-                   min(calc_date) AS min_date,
-                   max(calc_date) AS max_date
-            FROM stock.factor_value
-            WHERE factor_code IN (%s)
-            GROUP BY factor_code
-            """, placeholders);
+                SELECT factor_code,
+                       count() AS value_count,
+                       min(calc_date) AS min_date,
+                       max(calc_date) AS max_date
+                FROM stock.factor_value
+                WHERE factor_code IN (%s)
+                GROUP BY factor_code
+                """, placeholders);
 
         Map<String, Map<String, Object>> result = new LinkedHashMap<>();
         try (Connection conn = getConnection();
@@ -150,11 +153,11 @@ public class ClickHouseFactorValueService {
             return List.of();
         }
         String sql = """
-            SELECT DISTINCT calc_date
-            FROM stock.factor_value
-            WHERE factor_code = ? AND calc_date >= ? AND calc_date <= ?
-            ORDER BY calc_date
-            """;
+                SELECT DISTINCT calc_date
+                FROM stock.factor_value
+                WHERE factor_code = ? AND calc_date >= ? AND calc_date <= ?
+                ORDER BY calc_date
+                """;
         java.util.List<java.time.LocalDate> result = new ArrayList<>();
         try (Connection conn = getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
@@ -184,10 +187,10 @@ public class ClickHouseFactorValueService {
         }
 
         String sql = """
-            INSERT INTO stock.factor_value
-            (id, factor_code, symbol, calc_date, factor_val, rank_value, z_score, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """;
+                INSERT INTO stock.factor_value
+                (id, factor_code, symbol, calc_date, factor_val, rank_value, z_score, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """;
 
         try (Connection conn = getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
@@ -217,11 +220,11 @@ public class ClickHouseFactorValueService {
     private java.util.List<com.quant.platform.factor.domain.FactorValue> queryByFactorCodeAndDateFromCH(
             String factorCode, java.time.LocalDate calcDate) {
         String sql = """
-            SELECT id, factor_code, symbol, calc_date, factor_val, rank_value, z_score, created_at
-            FROM stock.factor_value
-            WHERE factor_code = ? AND calc_date = ?
-            ORDER BY symbol
-            """;
+                SELECT id, factor_code, symbol, calc_date, factor_val, rank_value, z_score, created_at
+                FROM stock.factor_value
+                WHERE factor_code = ? AND calc_date = ?
+                ORDER BY symbol
+                """;
 
         java.util.List<com.quant.platform.factor.domain.FactorValue> result = new ArrayList<>();
         try (Connection conn = getConnection();
@@ -245,11 +248,11 @@ public class ClickHouseFactorValueService {
     private java.util.List<com.quant.platform.factor.domain.FactorValue> queryByFactorCodeAndDateRangeFromCH(
             String factorCode, java.time.LocalDate startDate, java.time.LocalDate endDate) {
         String sql = """
-            SELECT id, factor_code, symbol, calc_date, factor_val, rank_value, z_score, created_at
-            FROM stock.factor_value
-            WHERE factor_code = ? AND calc_date >= ? AND calc_date <= ?
-            ORDER BY calc_date, symbol
-            """;
+                SELECT id, factor_code, symbol, calc_date, factor_val, rank_value, z_score, created_at
+                FROM stock.factor_value
+                WHERE factor_code = ? AND calc_date >= ? AND calc_date <= ?
+                ORDER BY calc_date, symbol
+                """;
 
         java.util.List<com.quant.platform.factor.domain.FactorValue> result = new ArrayList<>();
         try (Connection conn = getConnection();
@@ -273,15 +276,15 @@ public class ClickHouseFactorValueService {
 
     private List<Map<String, Object>> queryFactorStatsFromCH() {
         String sql = """
-            SELECT factor_code,
-                   count() AS cnt,
-                   min(calc_date) AS min_date,
-                   max(calc_date) AS max_date,
-                   count(DISTINCT calc_date) AS days,
-                   count(DISTINCT symbol) AS stocks
-            FROM stock.factor_value
-            GROUP BY factor_code
-            """;
+                SELECT factor_code,
+                       count() AS cnt,
+                       min(calc_date) AS min_date,
+                       max(calc_date) AS max_date,
+                       count(DISTINCT calc_date) AS days,
+                       count(DISTINCT symbol) AS stocks
+                FROM stock.factor_value
+                GROUP BY factor_code
+                """;
 
         List<Map<String, Object>> result = new ArrayList<>();
         try (Connection conn = getConnection();

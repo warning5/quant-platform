@@ -12,12 +12,12 @@ import java.util.*;
 
 /**
  * 蒙特卡洛模拟服务
- *
+ * <p>
  * 方法：Bootstrap 重采样
- *   - 从历史日收益率序列中随机有放回地抽取 T 个日收益率，合成一条模拟路径
- *   - 重复 N 次，生成 N 条模拟净值曲线
- *   - 统计置信区间（5% / 25% / 50% / 75% / 95% 分位数）
- *   - 统计关键风险指标的分布（最大回撤、年化收益率）
+ * - 从历史日收益率序列中随机有放回地抽取 T 个日收益率，合成一条模拟路径
+ * - 重复 N 次，生成 N 条模拟净值曲线
+ * - 统计置信区间（5% / 25% / 50% / 75% / 95% 分位数）
+ * - 统计关键风险指标的分布（最大回撤、年化收益率）
  */
 @Slf4j
 @Service
@@ -33,9 +33,9 @@ public class MonteCarloService {
     /**
      * 基于已完成回测的历史日收益率进行蒙特卡洛模拟
      *
-     * @param taskId       已完成的回测任务ID
-     * @param simulations  模拟路径数量（默认500）
-     * @param horizonDays  预测期交易日数（默认252）
+     * @param taskId      已完成的回测任务ID
+     * @param simulations 模拟路径数量（默认500）
+     * @param horizonDays 预测期交易日数（默认252）
      * @return 模拟结果：置信区间 + 风险指标分布
      */
     @SuppressWarnings("unchecked")
@@ -220,7 +220,10 @@ public class MonteCarloService {
         double sum = 0;
         int count = 0;
         for (double v : sorted) {
-            if (v <= threshold) { sum += v; count++; }
+            if (v <= threshold) {
+                sum += v;
+                count++;
+            }
         }
         return count > 0 ? sum / count : threshold;
     }
@@ -266,8 +269,11 @@ public class MonteCarloService {
     private double toDouble(Object v) {
         if (v == null) return 1.0;
         if (v instanceof Number n) return n.doubleValue();
-        try { return Double.parseDouble(v.toString()); }
-        catch (Exception e) { return 1.0; }
+        try {
+            return Double.parseDouble(v.toString());
+        } catch (Exception e) {
+            return 1.0;
+        }
     }
 
     private double round4(double v) {

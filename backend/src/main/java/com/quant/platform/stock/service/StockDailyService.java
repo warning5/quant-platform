@@ -53,8 +53,8 @@ public class StockDailyService {
     public List<StockDaily> getStockDailyByDateRange(LocalDate startDate, LocalDate endDate) {
         LambdaQueryWrapper<StockDaily> wrapper = new LambdaQueryWrapper<>();
         wrapper.ge(StockDaily::getTradeDate, startDate)
-               .le(StockDaily::getTradeDate, endDate)
-               .orderByAsc(StockDaily::getTradeDate);
+                .le(StockDaily::getTradeDate, endDate)
+                .orderByAsc(StockDaily::getTradeDate);
         return stockDailyMapper.selectList(wrapper);
     }
 

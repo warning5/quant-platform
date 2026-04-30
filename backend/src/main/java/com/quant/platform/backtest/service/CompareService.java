@@ -120,7 +120,10 @@ public class CompareService {
     private BigDecimal toBD(Object v) {
         if (v == null) return BigDecimal.ZERO;
         if (v instanceof BigDecimal bd) return bd;
-        try { return new BigDecimal(v.toString()); }
-        catch (Exception e) { return BigDecimal.ZERO; }
+        try {
+            return new BigDecimal(v.toString());
+        } catch (Exception e) {
+            return BigDecimal.ZERO;
+        }
     }
 }

@@ -1,12 +1,12 @@
 package com.quant.platform.strategy.controller;
 
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.quant.platform.common.dto.ApiResponse;
 import com.quant.platform.strategy.domain.StrategyDefinition;
 import com.quant.platform.strategy.service.StrategyService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
-import com.baomidou.mybatisplus.core.metadata.IPage;
 import org.springframework.web.bind.annotation.*;
 
 /**
@@ -46,7 +46,7 @@ public class StrategyController {
     @PutMapping("/{id}")
     @Operation(summary = "更新策略")
     public ApiResponse<StrategyDefinition> update(@PathVariable Long id,
-                                                   @RequestBody StrategyDefinition strategy) {
+                                                  @RequestBody StrategyDefinition strategy) {
         return ApiResponse.success("策略更新成功", strategyService.updateStrategy(id, strategy));
     }
 
@@ -60,7 +60,7 @@ public class StrategyController {
     @PatchMapping("/{id}/status")
     @Operation(summary = "更改策略状态")
     public ApiResponse<StrategyDefinition> changeStatus(@PathVariable Long id,
-                                                         @RequestParam String status) {
+                                                        @RequestParam String status) {
         return ApiResponse.success(strategyService.changeStatus(id, StrategyDefinition.StrategyStatus.valueOf(status)));
     }
 

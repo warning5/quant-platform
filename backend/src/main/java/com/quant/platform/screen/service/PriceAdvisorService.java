@@ -12,7 +12,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.*;
 
@@ -30,12 +29,13 @@ public class PriceAdvisorService {
 
     /**
      * 为一批股票计算买入价、止盈止损、风险提示
-     * @param symbols 股票代码列表（如 000001.SZ）
-     * @param screenDate 选股日期
+     *
+     * @param symbols         股票代码列表（如 000001.SZ）
+     * @param screenDate      选股日期
      * @param valuationWeight 估值权重（如 0.4）
      */
     public Map<String, Map<String, Object>> batchAdvise(List<String> symbols, LocalDate screenDate,
-                                                         double valuationWeight) {
+                                                        double valuationWeight) {
         Map<String, Map<String, Object>> result = new LinkedHashMap<>();
         for (String symbol : symbols) {
             try {
@@ -145,14 +145,14 @@ public class PriceAdvisorService {
         double close = currentClose.doubleValue();
 
         // MA5, MA10, MA20, MA30, MA60, MA100
-        double ma5  = calcMA(recent, 5);
+        double ma5 = calcMA(recent, 5);
         double ma10 = calcMA(recent, 10);
         double ma20 = calcMA(recent, 20);
         double ma30 = calcMA(recent, 30);
         double ma60 = calcMA(recent, 60);
         double ma100 = calcMA(recent, 100);
 
-        levels.put("MA5",  round2(ma5));
+        levels.put("MA5", round2(ma5));
         levels.put("MA10", round2(ma10));
         levels.put("MA20", round2(ma20));
         levels.put("MA30", round2(ma30));
@@ -160,8 +160,8 @@ public class PriceAdvisorService {
         levels.put("MA100", round2(ma100));
 
         // 均线多头排列标记（close 在各均线上方为 true）
-        levels.put("aboveMA30",  close >= ma30  && ma30  > 0);
-        levels.put("aboveMA60",  close >= ma60  && ma60  > 0);
+        levels.put("aboveMA30", close >= ma30 && ma30 > 0);
+        levels.put("aboveMA60", close >= ma60 && ma60 > 0);
         levels.put("aboveMA100", close >= ma100 && ma100 > 0);
 
         // 布林带下轨 (20日均值 - 2×20日标准差)
@@ -212,15 +212,15 @@ public class PriceAdvisorService {
                 StockDaily today = history.get(history.size() - 1);
                 if (today.getClosePrice() == null || today.getClosePrice().doubleValue() <= 0) continue;
                 double close = today.getClosePrice().doubleValue();
-                double ma30  = calcMA(history, 30);
-                double ma60  = calcMA(history, 60);
+                double ma30 = calcMA(history, 30);
+                double ma60 = calcMA(history, 60);
                 double ma100 = calcMA(history, 100);
                 Map<String, Object> pos = new LinkedHashMap<>();
-                pos.put("ma30",  round2(ma30));
-                pos.put("ma60",  round2(ma60));
+                pos.put("ma30", round2(ma30));
+                pos.put("ma60", round2(ma60));
                 pos.put("ma100", round2(ma100));
-                pos.put("aboveMA30",  close >= ma30  && ma30  > 0);
-                pos.put("aboveMA60",  close >= ma60  && ma60  > 0);
+                pos.put("aboveMA30", close >= ma30 && ma30 > 0);
+                pos.put("aboveMA60", close >= ma60 && ma60 > 0);
                 pos.put("aboveMA100", close >= ma100 && ma100 > 0);
                 result.put(symbol, pos);
             } catch (Exception e) {
@@ -238,16 +238,16 @@ public class PriceAdvisorService {
 
         // 查询行业
         StockInfo stockInfo = stockInfoMapper.selectOne(
-            new LambdaQueryWrapper<StockInfo>().eq(StockInfo::getCode, code));
+                new LambdaQueryWrapper<StockInfo>().eq(StockInfo::getCode, code));
         String industry = stockInfo != null ? stockInfo.getIndustry() : null;
 
         // 查询最新财务指标
         StockFinancialIndicator indicator = financialIndicatorMapper.selectOne(
-            new LambdaQueryWrapper<StockFinancialIndicator>()
-                .eq(StockFinancialIndicator::getCode, code)
-                .le(StockFinancialIndicator::getEndDate, screenDate)
-                .orderByDesc(StockFinancialIndicator::getEndDate)
-                .last("LIMIT 1"));
+                new LambdaQueryWrapper<StockFinancialIndicator>()
+                        .eq(StockFinancialIndicator::getCode, code)
+                        .le(StockFinancialIndicator::getEndDate, screenDate)
+                        .orderByDesc(StockFinancialIndicator::getEndDate)
+                        .last("LIMIT 1"));
 
         if (indicator == null) {
             levels.put("suggestValuationPrice", 0);
@@ -298,9 +298,9 @@ public class PriceAdvisorService {
         try {
             // 查询同行业所有股票当日的 PB/PE
             List<StockInfo> peers = stockInfoMapper.selectList(
-                new LambdaQueryWrapper<StockInfo>()
-                    .eq(StockInfo::getIndustry, industry)
-                    .isNotNull(StockInfo::getMarket));
+                    new LambdaQueryWrapper<StockInfo>()
+                            .eq(StockInfo::getIndustry, industry)
+                            .isNotNull(StockInfo::getMarket));
 
             if (peers.size() < 3) return 0;
 
@@ -308,12 +308,12 @@ public class PriceAdvisorService {
             List<StockDaily> dailyBars = clickHouseStockService.getStockDailyBatch(codes, screenDate, screenDate);
 
             List<Double> values = dailyBars.stream()
-                .map(d -> "pb".equals(field) ? d.getPb() : d.getPeTtm())
-                .filter(Objects::nonNull)
-                .map(BigDecimal::doubleValue)
-                .filter(v -> v > 0 && v < 200) // 过滤异常值
-                .sorted()
-                .toList();
+                    .map(d -> "pb".equals(field) ? d.getPb() : d.getPeTtm())
+                    .filter(Objects::nonNull)
+                    .map(BigDecimal::doubleValue)
+                    .filter(v -> v > 0 && v < 200) // 过滤异常值
+                    .sorted()
+                    .toList();
 
             if (values.isEmpty()) return 0;
             return values.get(values.size() / 2); // 中位数
@@ -363,9 +363,9 @@ public class PriceAdvisorService {
     private List<String> risks = new ArrayList<>();
 
     private List<String> assessRisks(BigDecimal currentClose, double suggestPrice,
-                                      List<StockDaily> history,
-                                      Map<String, Object> valuationLevels,
-                                      Map<String, Object> techLevels) {
+                                     List<StockDaily> history,
+                                     Map<String, Object> valuationLevels,
+                                     Map<String, Object> techLevels) {
         risks = new ArrayList<>();
         double close = currentClose.doubleValue();
 
@@ -460,7 +460,7 @@ public class PriceAdvisorService {
      * 生成买入理由摘要
      */
     private String buildBuyReason(Map<String, Object> valuationLevels, Map<String, Object> techLevels,
-                                    List<String> risks) {
+                                  List<String> risks) {
         StringBuilder reason = new StringBuilder();
 
         double pbPrice = toDouble(valuationLevels.get("pbPrice"));
@@ -523,7 +523,8 @@ public class PriceAdvisorService {
     }
 
     private double calcATR(List<StockDaily> bars, int period) {
-        if (bars.size() < period + 1) return bars.isEmpty() ? 0 : bars.get(bars.size() - 1).getClosePrice().doubleValue() * 0.02;
+        if (bars.size() < period + 1)
+            return bars.isEmpty() ? 0 : bars.get(bars.size() - 1).getClosePrice().doubleValue() * 0.02;
         double sum = 0;
         for (int i = bars.size() - period; i < bars.size(); i++) {
             sum += calcTrueRange(bars.get(i), bars.get(i - 1));
@@ -581,6 +582,11 @@ public class PriceAdvisorService {
         return 0;
     }
 
-    private double round2(double v) { return Math.round(v * 100.0) / 100.0; }
-    private double round1(double v) { return Math.round(v * 10.0) / 10.0; }
+    private double round2(double v) {
+        return Math.round(v * 100.0) / 100.0;
+    }
+
+    private double round1(double v) {
+        return Math.round(v * 10.0) / 10.0;
+    }
 }

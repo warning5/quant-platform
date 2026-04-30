@@ -155,9 +155,8 @@ public class StockScreenService {
                             && !Boolean.TRUE.equals(pos.get("aboveMA30"))) return true;
                     if (Boolean.TRUE.equals(mpf.getAboveMA60())
                             && !Boolean.TRUE.equals(pos.get("aboveMA60"))) return true;
-                    if (Boolean.TRUE.equals(mpf.getAboveMA100())
-                            && !Boolean.TRUE.equals(pos.get("aboveMA100"))) return true;
-                    return false;
+                    return Boolean.TRUE.equals(mpf.getAboveMA100())
+                            && !Boolean.TRUE.equals(pos.get("aboveMA100"));
                 });
                 log.info("[Screen] After MA position filter: {} stocks remain", candidates.size());
             }

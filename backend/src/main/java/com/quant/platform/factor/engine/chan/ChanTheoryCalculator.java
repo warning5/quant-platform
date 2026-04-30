@@ -4,7 +4,9 @@ import com.quant.platform.market.domain.MarketDailyBar;
 import lombok.extern.slf4j.Slf4j;
 
 import java.time.LocalDate;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 
 /**
  * 缠论基础计算引擎
@@ -19,7 +21,9 @@ import java.util.*;
 @Slf4j
 public class ChanTheoryCalculator {
 
-    /** 笔最少包含的合并K线数（缠论要求顶底间有独立K线） */
+    /**
+     * 笔最少包含的合并K线数（缠论要求顶底间有独立K线）
+     */
     private static final int MIN_PEN_BAR_COUNT = 4;
 
     // ═══════════════════════════════════════════════════════════
@@ -28,6 +32,7 @@ public class ChanTheoryCalculator {
 
     /**
      * 从 MarketDailyBar 列表计算缠论结构
+     *
      * @param bars 历史数据（时间正序）
      * @return 缠论计算结果
      */
@@ -161,7 +166,9 @@ public class ChanTheoryCalculator {
         return merged;
     }
 
-    /** 判断两根K线是否存在包含关系 */
+    /**
+     * 判断两根K线是否存在包含关系
+     */
     private static boolean isContained(double high1, double low1, double high2, double low2) {
         // a包含b: high1 >= high2 && low1 <= low2
         // b包含a: high2 >= high1 && low2 <= low1
@@ -295,9 +302,9 @@ public class ChanTheoryCalculator {
      * 2. 维护当前"待确认"分型 candidate
      * 3. 如果遇到同类型分型: 取极值(顶取最高,底取最低),更新candidate
      * 4. 如果遇到异类型分型:
-     *    - 间距>=MIN_PEN_BAR_COUNT: 确认candidate入列,新分型成为candidate
-     *    - 间距<MIN_PEN_BAR_COUNT: 不确认candidate,将新分型与candidate比较,
-     *      如果新分型更极端则替换candidate(跳过中间的无效分型)
+     * - 间距>=MIN_PEN_BAR_COUNT: 确认candidate入列,新分型成为candidate
+     * - 间距<MIN_PEN_BAR_COUNT: 不确认candidate,将新分型与candidate比较,
+     * 如果新分型更极端则替换candidate(跳过中间的无效分型)
      */
     private static List<Fractal> filterValidFractals(List<Fractal> fractals) {
         if (fractals.isEmpty()) {
@@ -372,12 +379,12 @@ public class ChanTheoryCalculator {
 
     /**
      * 从笔序列推导线段
-     *
+     * <p>
      * 简化判断(实用版):
      * - 3笔重叠构成线段
      * - 线段被破坏: 特质序列出现分型
-     *   上升线段: 反向笔低点低于前一笔低点,且终点低于前一笔起点
-     *   下降线段: 反向笔高点高于前一笔高点,且终点高于前一笔起点
+     * 上升线段: 反向笔低点低于前一笔低点,且终点低于前一笔起点
+     * 下降线段: 反向笔高点高于前一笔高点,且终点高于前一笔起点
      */
     public static List<Segment> buildSegments(List<Pen> pens, List<MergedBar> mergedBars) {
         if (pens == null || pens.size() < 3) {
@@ -434,7 +441,7 @@ public class ChanTheoryCalculator {
 
     /**
      * 判断线段是否在当前位置被破坏
-     *
+     * <p>
      * 上升线段中的破坏: 特质序列出现顶分型,即上升笔序列高点先升后降
      * 下降线段中的破坏: 特质序列出现底分型,即下降笔序列低点先降后升
      */
@@ -475,7 +482,7 @@ public class ChanTheoryCalculator {
 
     /**
      * 由线段构建中枢
-     *
+     * <p>
      * 缠论定义:
      * 1. 最低级别中枢: 三段连续线段的价格区间有重叠
      * 2. 中枢区间(ZD, ZG): 三段重叠部分的(最高低点, 最低高点)
@@ -551,12 +558,16 @@ public class ChanTheoryCalculator {
         return hubs;
     }
 
-    /** 线段的高点 */
+    /**
+     * 线段的高点
+     */
     private static double segHigh(Segment seg) {
         return Math.max(seg.getStartPrice(), seg.getEndPrice());
     }
 
-    /** 线段的低点 */
+    /**
+     * 线段的低点
+     */
     private static double segLow(Segment seg) {
         return Math.min(seg.getStartPrice(), seg.getEndPrice());
     }
@@ -575,12 +586,12 @@ public class ChanTheoryCalculator {
 
     /**
      * 由中枢判断走势类型
-     *
+     * <p>
      * 缠论定义:
      * - 盘整: 只有一个中枢
      * - 趋势: 两个或以上同向中枢
-     *   - 上涨趋势: 后一个中枢的区间高于前一个
-     *   - 下跌趋势: 后一个中枢的区间低于前一个
+     * - 上涨趋势: 后一个中枢的区间高于前一个
+     * - 下跌趋势: 后一个中枢的区间低于前一个
      */
     public static List<Trend> buildTrends(List<Hub> hubs, List<Segment> segments) {
         if (hubs == null || hubs.isEmpty()) {
@@ -656,7 +667,7 @@ public class ChanTheoryCalculator {
 
     /**
      * 识别买卖点
-     *
+     * <p>
      * 缠论定义:
      * - 一买: 下跌趋势背驰(最后一个中枢之后的下跌力度减弱)
      * - 二买: 一买之后的回调不创新低
@@ -693,10 +704,12 @@ public class ChanTheoryCalculator {
         return points;
     }
 
-    /** 下跌趋势中寻找买点 */
+    /**
+     * 下跌趋势中寻找买点
+     */
     private static void findBuyPointsInDowntrend(Trend trend, List<Pen> pens,
-                                                  List<MergedBar> mergedBars,
-                                                  List<BuySellPoint> points) {
+                                                 List<MergedBar> mergedBars,
+                                                 List<BuySellPoint> points) {
         if (trend.getHubs().size() < 2) return;
 
         Hub lastHub = trend.getHubs().get(trend.getHubs().size() - 1);
@@ -727,10 +740,12 @@ public class ChanTheoryCalculator {
         }
     }
 
-    /** 上涨趋势中寻找卖点 */
+    /**
+     * 上涨趋势中寻找卖点
+     */
     private static void findSellPointsInUptrend(Trend trend, List<Pen> pens,
-                                                 List<MergedBar> mergedBars,
-                                                 List<BuySellPoint> points) {
+                                                List<MergedBar> mergedBars,
+                                                List<BuySellPoint> points) {
         if (trend.getHubs().size() < 2) return;
 
         Hub lastHub = trend.getHubs().get(trend.getHubs().size() - 1);
@@ -760,12 +775,14 @@ public class ChanTheoryCalculator {
         }
     }
 
-    /** 盘整中寻找三买三卖 */
+    /**
+     * 盘整中寻找三买三卖
+     */
     private static void findPointsInConsolidation(Trend trend, List<Pen> pens,
-                                                   List<Segment> segments,
-                                                   List<Hub> allHubs,
-                                                   List<MergedBar> mergedBars,
-                                                   List<BuySellPoint> points) {
+                                                  List<Segment> segments,
+                                                  List<Hub> allHubs,
+                                                  List<MergedBar> mergedBars,
+                                                  List<BuySellPoint> points) {
         if (trend.getHubs().isEmpty()) return;
         Hub hub = trend.getHubs().get(0);
 
@@ -833,7 +850,7 @@ public class ChanTheoryCalculator {
     }
 
     private static ChanTheoryResult buildPartialResult(List<MergedBar> merged, List<Fractal> fractals,
-                                                        List<Pen> pens) {
+                                                       List<Pen> pens) {
         return ChanTheoryResult.builder()
                 .mergedBars(merged)
                 .fractals(fractals)
@@ -846,7 +863,7 @@ public class ChanTheoryCalculator {
     }
 
     private static ChanTheoryResult buildPartialResult(List<MergedBar> merged, List<Fractal> fractals,
-                                                        List<Pen> pens, List<Segment> segments) {
+                                                       List<Pen> pens, List<Segment> segments) {
         return ChanTheoryResult.builder()
                 .mergedBars(merged)
                 .fractals(fractals)

@@ -36,7 +36,9 @@ public class BrinsonAttributionService {
     private final ClickHouseStockService clickHouseStockService;
     private final ObjectMapper objectMapper;
 
-    /** 需要排除的指数名称 */
+    /**
+     * 需要排除的指数名称
+     */
     private static final Set<String> INDEX_NAMES = Set.of(
             "上证指数", "上证50", "中证红利", "沪深300",
             "科创50", "中证1000", "中证500", "深证成指", "创业板指", "国证2000");
@@ -44,19 +46,19 @@ public class BrinsonAttributionService {
     /**
      * 核心 Brinson 归因计算
      *
-     * @param taskId               回测任务ID
-     * @param positionHistoryJson  持仓历史 JSON
-     * @param equityCurveJson      净值曲线 JSON
-     * @param benchmarkCurveJson   基准曲线 JSON
-     * @param benchmarkCode        基准指数代码
+     * @param taskId              回测任务ID
+     * @param positionHistoryJson 持仓历史 JSON
+     * @param equityCurveJson     净值曲线 JSON
+     * @param benchmarkCurveJson  基准曲线 JSON
+     * @param benchmarkCode       基准指数代码
      * @return 归因结果
      */
     @SuppressWarnings("unchecked")
     public Map<String, Object> computeBrinson(Long taskId,
-                                               String positionHistoryJson,
-                                               String equityCurveJson,
-                                               String benchmarkCurveJson,
-                                               String benchmarkCode) {
+                                              String positionHistoryJson,
+                                              String equityCurveJson,
+                                              String benchmarkCurveJson,
+                                              String benchmarkCode) {
         if (positionHistoryJson == null || positionHistoryJson.isBlank()) {
             throw new BusinessException("持仓历史数据为空，无法进行归因分析");
         }
@@ -334,8 +336,8 @@ public class BrinsonAttributionService {
      * - 市值加权模式：按流通市值加权，需要当日市值数据（缺失时用最新市值兜底）
      */
     private void computeBenchmarkIndustryData(LocalDate date,
-                                               Map<String, Double> industryWeight,
-                                               Map<String, Double> industryReturn) {
+                                              Map<String, Double> industryWeight,
+                                              Map<String, Double> industryReturn) {
         // 查询当日所有股票行情（排除指数）
         List<StockDaily> dailies = clickHouseStockService.getStockDailyByDate(date, INDEX_NAMES);
         if (dailies.isEmpty()) return;
@@ -389,10 +391,10 @@ public class BrinsonAttributionService {
      * 计算组合各行业的收益率
      */
     private void computePortfolioIndustryReturn(Map<String, Object> positions,
-                                                 LocalDate startDate,
-                                                 LocalDate endDate,
-                                                 Map<String, Double> industryReturn,
-                                                 Map<String, String> codeIndustryMap) {
+                                                LocalDate startDate,
+                                                LocalDate endDate,
+                                                Map<String, Double> industryReturn,
+                                                Map<String, String> codeIndustryMap) {
         // 按行业分组持仓
         Map<String, List<String>> industryStocks = new HashMap<>();
         for (String symbol : positions.keySet()) {

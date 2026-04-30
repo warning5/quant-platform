@@ -265,8 +265,8 @@ class ChanTheoryCalculatorTest {
     private List<MarketDailyBar> fetchFromClickHouse(String code, int limit) throws Exception {
         String sql = String.format(
                 "SELECT trade_date, open_price, high_price, low_price, close_price, volume " +
-                "FROM stock.stock_daily WHERE code='%s' AND open_price IS NOT NULL " +
-                "ORDER BY trade_date DESC LIMIT %d FORMAT CSVWithNames", code, limit);
+                        "FROM stock.stock_daily WHERE code='%s' AND open_price IS NOT NULL " +
+                        "ORDER BY trade_date DESC LIMIT %d FORMAT CSVWithNames", code, limit);
 
         // 尝试两个地址
         String[] urls = {CH_URL, "http://127.0.0.1:8123"};
@@ -285,7 +285,10 @@ class ChanTheoryCalculatorTest {
                 if (conn.getResponseCode() == 200) break; // 成功
             } catch (Exception e) {
                 log.debug("尝试 {} 失败: {}", baseUrl, e.getMessage());
-                if (conn != null) try { conn.disconnect(); } catch (Exception ignored) {}
+                if (conn != null) try {
+                    conn.disconnect();
+                } catch (Exception ignored) {
+                }
                 continue;
             }
         }
@@ -302,7 +305,10 @@ class ChanTheoryCalculatorTest {
         DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd");
 
         while ((line = reader.readLine()) != null) {
-            if (header) { header = false; continue; } // skip header
+            if (header) {
+                header = false;
+                continue;
+            } // skip header
             String[] parts = line.replace("\"", "").split(",");
             if (parts.length < 6) continue;
 
@@ -332,7 +338,9 @@ class ChanTheoryCalculatorTest {
         return bars;
     }
 
-    /** 构造趋势行情 */
+    /**
+     * 构造趋势行情
+     */
     private List<MarketDailyBar> createTrendBars(String direction, double start, double end, int count) {
         List<MarketDailyBar> bars = new ArrayList<>();
         double step = (end - start) / count;
@@ -359,7 +367,9 @@ class ChanTheoryCalculatorTest {
         return bars;
     }
 
-    /** 从价格数组构造行情（每个价格用 open=close=price, high=price+0.5, low=price-0.5）*/
+    /**
+     * 从价格数组构造行情（每个价格用 open=close=price, high=price+0.5, low=price-0.5）
+     */
     private List<MarketDailyBar> createBarsFromPrices(double[] prices) {
         List<MarketDailyBar> bars = new ArrayList<>();
         LocalDate baseDate = LocalDate.of(2025, 1, 2);
@@ -379,16 +389,20 @@ class ChanTheoryCalculatorTest {
         return bars;
     }
 
-    /** 断言分型顶底交替 */
+    /**
+     * 断言分型顶底交替
+     */
     private void assertFractalAlternation(List<Fractal> fractals) {
         for (int i = 1; i < fractals.size(); i++) {
             assertNotEquals(fractals.get(i - 1).getFractalType(), fractals.get(i).getFractalType(),
                     "相邻分型必须顶底交替，第" + i + "个分型与第" + (i - 1) + "个相同: " +
-                    fractals.get(i - 1).getFractalType());
+                            fractals.get(i - 1).getFractalType());
         }
     }
 
-    /** 断言笔价格一致性 */
+    /**
+     * 断言笔价格一致性
+     */
     private void assertPenPriceConsistency(List<Pen> pens) {
         for (Pen pen : pens) {
             if (pen.getDirection() == Direction.UP) {
@@ -401,7 +415,9 @@ class ChanTheoryCalculatorTest {
         }
     }
 
-    /** 断言笔方向交替 */
+    /**
+     * 断言笔方向交替
+     */
     private void assertPenAlternation(List<Pen> pens) {
         for (int i = 1; i < pens.size(); i++) {
             assertNotEquals(pens.get(i - 1).getDirection(), pens.get(i).getDirection(),
@@ -409,7 +425,9 @@ class ChanTheoryCalculatorTest {
         }
     }
 
-    /** 打印笔摘要 */
+    /**
+     * 打印笔摘要
+     */
     private void logPens(List<Pen> pens) {
         int limit = Math.min(pens.size(), 10);
         log.info("--- 最近{}笔 ---", limit);

@@ -63,7 +63,11 @@ public class BacktestEngine {
             if (task != null) {
                 break;
             }
-            try { Thread.sleep(200); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+            try {
+                Thread.sleep(200);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+            }
         }
         if (task == null) {
             log.error("Backtest task [{}] not found in DB after retries, aborting", taskId);
@@ -199,19 +203,19 @@ public class BacktestEngine {
             log.warn("Failed to load benchmark bars for {}: {}", benchmarkSymbol, e.getMessage());
         }
         log.info("Loaded {} benchmark bars for {} from {} to {}", benchmarkBars.size(), benchmarkSymbol, startDate, endDate);
-        
+
         // 建立日期→收盘价映射
         Map<LocalDate, Double> benchmarkClose = new LinkedHashMap<>();
         for (MarketDailyBar b : benchmarkBars) {
             benchmarkClose.put(b.getTradeDate(), b.getClose().doubleValue());
         }
-        
+
         // ── 基准数据完整性检查 ─────────────────────────────────────
         if (benchmarkClose.isEmpty()) {
             throw new RuntimeException("基准指数 " + benchmarkSymbol + " 在 " + startDate + " 至 " + endDate
                     + " 期间无数据，请先在「数据更新」页面更新指数日线数据");
         }
-        
+
         // 检查基准数据覆盖情况
         LocalDate firstBmDate = benchmarkClose.keySet().iterator().next();
         LocalDate lastBmDate = new ArrayList<>(benchmarkClose.keySet()).get(benchmarkClose.size() - 1);
@@ -242,16 +246,16 @@ public class BacktestEngine {
                 break;
             }
         }
-        
+
         // 基准初始价（回测开始日期或之后的第一个有效收盘价）
         double benchmarkBase = startDateClose != null ? startDateClose
                 : (firstValidClose != null ? firstValidClose : 1.0);
-        
+
         if (benchmarkBase <= 0) benchmarkBase = 1.0;
-        
+
         // 用于基准价格前向填充的变量
         double lastValidBmClose = benchmarkBase;
-        
+
         log.info("Benchmark base price: {}, firstValidClose: {}, startDateClose: {}", benchmarkBase, firstValidClose, startDateClose);
         log.info("First trading date: {}, Last trading date: {}", tradingDates.getFirst(), tradingDates.getLast());
 
@@ -429,7 +433,10 @@ public class BacktestEngine {
                 for (String sym : new HashSet<>(oldPositions.keySet())) {
                     if (effectiveTargets.containsKey(sym)) continue; // 继续持有
                     MarketDailyBar bar = barMap.get(sym);
-                    if (bar == null) { soldSymbols.add(sym); continue; }
+                    if (bar == null) {
+                        soldSymbols.add(sym);
+                        continue;
+                    }
                     if (suspendFilter && isSuspended(bar)) continue; // 停牌不卖
                     if (limitFilter && isLimitDown(bar)) continue; // 跌停不卖
                     soldSymbols.add(sym);
@@ -575,7 +582,7 @@ public class BacktestEngine {
         Map<String, Double> scores = new HashMap<>();
 
         // 如果是自定义脚本策略，使用Groovy脚本执行
-        if (strategy.getStrategyType() == StrategyDefinition.StrategyType.CUSTOM 
+        if (strategy.getStrategyType() == StrategyDefinition.StrategyType.CUSTOM
                 && strategy.getScriptCode() != null && !strategy.getScriptCode().isBlank()) {
             return computeScoresWithScript(bars, factorValueMap, task, strategy);
         }
@@ -661,7 +668,7 @@ public class BacktestEngine {
                                                         BacktestTask task,
                                                         StrategyDefinition strategy) {
         Map<String, Double> scores = new HashMap<>();
-        
+
         try {
             Binding binding = new Binding();
             binding.setVariable("marketBars", bars);
@@ -671,10 +678,10 @@ public class BacktestEngine {
                     ? task.getMaxPositionCount()
                     : (strategy.getMaxPositionCount() != null ? strategy.getMaxPositionCount() : 20);
             binding.setVariable("maxPositions", maxPositions);
-            
+
             GroovyShell shell = new GroovyShell(binding);
             Object result = shell.evaluate(strategy.getScriptCode());
-            
+
             if (result instanceof Map<?, ?> resultMap) {
                 for (Map.Entry<?, ?> entry : resultMap.entrySet()) {
                     if (entry.getKey() instanceof String symbol && entry.getValue() instanceof Number weight) {
@@ -682,12 +689,12 @@ public class BacktestEngine {
                     }
                 }
             }
-            
+
             log.debug("Script strategy [{}] computed scores for {} stocks", strategy.getStrategyCode(), scores.size());
         } catch (Exception e) {
             log.error("Failed to execute script strategy [{}]: {}", strategy.getStrategyCode(), e.getMessage(), e);
         }
-        
+
         return scores;
     }
 
@@ -753,7 +760,7 @@ public class BacktestEngine {
      * VOLUME: 按成交量比例计算滑点，滑点 = baseRate × (tradeAmount / dayAmount)^0.5
      */
     private double applySlippage(double price, boolean isBuy, double baseSlippage,
-                                  double tradeAmount, double dayAmount, String model) {
+                                 double tradeAmount, double dayAmount, String model) {
         double slip = baseSlippage;
         if ("VOLUME".equalsIgnoreCase(model) && dayAmount > 0) {
             // 成交量比例滑点：成交额占日成交额比例越高，滑点越大
@@ -768,7 +775,7 @@ public class BacktestEngine {
      * 买入：佣金（双向，最低5元）+ 过户费（沪深双向）
      * 卖出：佣金（双向，最低5元）+ 印花税（单向，万5）+ 过户费（沪深双向）
      *
-     * @param symbol      股票代码（含交易所后缀，如 600000.SH、000001.SZ）
+     * @param symbol          股票代码（含交易所后缀，如 600000.SH、000001.SZ）
      * @param transferFeeRate 过户费率（沪深默认 0.00002 = 0.02‰，2022年起统一双向收取）
      */
     private double calcFee(double amount, boolean isSell, double commissionRate,
@@ -790,17 +797,17 @@ public class BacktestEngine {
      * <p>
      * 注意：分红处理不产生交易费用，因为是公司行为而非主动交易。
      *
-     * @param positions 当前持仓 (symbol -> shares)，会被直接修改
-     * @param cashRef   长度为1的数组，用于返回分红现金（供调用方加到 cash 上）
-     * @param barMap    当日行情快照
-     * @param today     当前日期
-     * @param tradeLog  交易日志（分红事件会记录为 DIVIDEND 类型）
+     * @param positions  当前持仓 (symbol -> shares)，会被直接修改
+     * @param cashRef    长度为1的数组，用于返回分红现金（供调用方加到 cash 上）
+     * @param barMap     当日行情快照
+     * @param today      当前日期
+     * @param tradeLog   交易日志（分红事件会记录为 DIVIDEND 类型）
      * @param adjFactors 复权因子 map（会被直接修改）
      */
     private void processDividendEvents(Map<String, Double> positions, double[] cashRef,
-                                        Map<String, MarketDailyBar> barMap,
-                                        LocalDate today, List<Map<String, Object>> tradeLog,
-                                        Map<String, Double> adjFactors) {
+                                       Map<String, MarketDailyBar> barMap,
+                                       LocalDate today, List<Map<String, Object>> tradeLog,
+                                       Map<String, Double> adjFactors) {
         double totalDividendCash = 0.0;
 
         for (Map.Entry<String, Double> pos : positions.entrySet()) {
@@ -892,7 +899,7 @@ public class BacktestEngine {
      * 仅更新复权因子（不做持仓调整），用于 dividendReinvest=false 时保持价格连续性。
      */
     private void updateAdjFactors(Map<String, Double> adjFactors,
-                                   Map<String, MarketDailyBar> barMap, LocalDate today) {
+                                  Map<String, MarketDailyBar> barMap, LocalDate today) {
         for (Map.Entry<String, MarketDailyBar> entry : barMap.entrySet()) {
             String symbol = entry.getKey();
             MarketDailyBar bar = entry.getValue();
@@ -918,16 +925,16 @@ public class BacktestEngine {
      * NEXT_OPEN → 次日开盘价（从预加载的 nextDayBarMap 获取，更真实）
      * VWAP     → 当日成交量加权均价，用 (high+low+close)/3 近似
      *
-     * @param bar          当日行情
-     * @param tradingDates 全部交易日列表
-     * @param di           当前交易日下标
-     * @param orderType    成交模式
+     * @param bar           当日行情
+     * @param tradingDates  全部交易日列表
+     * @param di            当前交易日下标
+     * @param orderType     成交模式
      * @param nextDayBarMap 次日行情快照（NEXT_OPEN 模式使用）
      * @return 成交参考价格
      */
     private double getExecutionPrice(MarketDailyBar bar, List<LocalDate> tradingDates,
-                                      int di, String orderType,
-                                      Map<String, MarketDailyBar> nextDayBarMap) {
+                                     int di, String orderType,
+                                     Map<String, MarketDailyBar> nextDayBarMap) {
         double close = bar.getClose().doubleValue();
         if ("NEXT_OPEN".equalsIgnoreCase(orderType)) {
             // 次日开盘价：从预加载的次日行情中获取真实开盘价
@@ -946,24 +953,25 @@ public class BacktestEngine {
         // CLOSE（默认）
         return close;
     }
+
     private List<Map<String, Object>> rebalance(Map<String, Double> oldPositions,
-                                                 Map<String, Double> targetWeights,
-                                                 Map<String, MarketDailyBar> barMap,
-                                                 double portfolioValue,
-                                                 double commission, double slippage,
-                                                 LocalDate date,
-                                                 Map<String, Double> positionValues,
-                                                 String slippageModel,
-                                                 double stampTaxRate,
-                                                 double minCommission,
-                                                 boolean limitFilter,
-                                                 boolean suspendFilter,
-                                                 double transferFeeRate,
-                                                 String orderType,
-                                                 List<LocalDate> tradingDates,
-                                                 int di,
-                                                 Map<String, MarketDailyBar> nextDayBarMap,
-                                                 Map<String, Double> positionCosts) {
+                                                Map<String, Double> targetWeights,
+                                                Map<String, MarketDailyBar> barMap,
+                                                double portfolioValue,
+                                                double commission, double slippage,
+                                                LocalDate date,
+                                                Map<String, Double> positionValues,
+                                                String slippageModel,
+                                                double stampTaxRate,
+                                                double minCommission,
+                                                boolean limitFilter,
+                                                boolean suspendFilter,
+                                                double transferFeeRate,
+                                                String orderType,
+                                                List<LocalDate> tradingDates,
+                                                int di,
+                                                Map<String, MarketDailyBar> nextDayBarMap,
+                                                Map<String, Double> positionCosts) {
         List<Map<String, Object>> trades = new ArrayList<>();
 
         // 记录卖出
@@ -1054,18 +1062,18 @@ public class BacktestEngine {
      * 重新计算现金
      */
     private double recalcCash(Map<String, Double> oldPositions,
-                               Map<String, Double> targetWeights,
-                               Map<String, MarketDailyBar> barMap,
-                               double portfolioValue, double commission, double slippage,
-                               String slippageModel,
-                               double stampTaxRate,
-                               double minCommission,
-                               boolean limitFilter,
-                               boolean suspendFilter,
-                               double transferFeeRate,
-                               String orderType,
-                               List<LocalDate> tradingDates,
-                               int di) {
+                              Map<String, Double> targetWeights,
+                              Map<String, MarketDailyBar> barMap,
+                              double portfolioValue, double commission, double slippage,
+                              String slippageModel,
+                              double stampTaxRate,
+                              double minCommission,
+                              boolean limitFilter,
+                              boolean suspendFilter,
+                              double transferFeeRate,
+                              String orderType,
+                              List<LocalDate> tradingDates,
+                              int di) {
         double totalFee = 0;
 
         // 买入费用
@@ -1115,7 +1123,7 @@ public class BacktestEngine {
             case "DAILY" -> true;
             case "WEEKLY" -> today.getYear() != lastDate.getYear() ||
                     today.get(java.time.temporal.IsoFields.WEEK_OF_WEEK_BASED_YEAR) !=
-                    lastDate.get(java.time.temporal.IsoFields.WEEK_OF_WEEK_BASED_YEAR);
+                            lastDate.get(java.time.temporal.IsoFields.WEEK_OF_WEEK_BASED_YEAR);
             case "MONTHLY" -> today.getYear() != lastDate.getYear() ||
                     today.getMonthValue() != lastDate.getMonthValue();
             case "QUARTERLY" -> today.getYear() != lastDate.getYear() ||
@@ -1131,16 +1139,16 @@ public class BacktestEngine {
         int tradingDays = result.tradingDays();
         double annualFactor = tradingDays > 0 ? 252.0 / tradingDays : 1;
 
-        double totalReturn  = result.totalReturn();
+        double totalReturn = result.totalReturn();
         // 使用简单年化而非复利年化，避免短周期回测的极端值
         // 复利年化：Math.pow(1 + totalReturn, annualFactor) - 1
         // 简单年化：totalReturn * annualFactor
         double annualReturn = totalReturn * annualFactor;
 
         // ── 基准收益 ──────────────────────────────────────────────────
-        double benchmarkTotalReturn  = result.benchmarkTotalReturn();
+        double benchmarkTotalReturn = result.benchmarkTotalReturn();
         double benchmarkAnnualReturn = benchmarkTotalReturn * annualFactor;
-        double excessAnnualReturn    = annualReturn - benchmarkAnnualReturn;
+        double excessAnnualReturn = annualReturn - benchmarkAnnualReturn;
 
         // ── 从策略净值曲线计算日收益序列 ─────────────────────────────
         List<Double> dailyReturns = new ArrayList<>();
@@ -1151,12 +1159,12 @@ public class BacktestEngine {
             if (prev > 0) dailyReturns.add(curr / prev - 1);
         }
 
-        double meanRet   = dailyReturns.stream().mapToDouble(Double::doubleValue).average().orElse(0);
-        double variance  = dailyReturns.stream().mapToDouble(r -> (r - meanRet) * (r - meanRet)).average().orElse(0);
+        double meanRet = dailyReturns.stream().mapToDouble(Double::doubleValue).average().orElse(0);
+        double variance = dailyReturns.stream().mapToDouble(r -> (r - meanRet) * (r - meanRet)).average().orElse(0);
         double volatility = Math.sqrt(variance) * Math.sqrt(252);
 
         double riskFreeRate = 0.03;
-        double sharpeRatio  = volatility > 0 ? (annualReturn - riskFreeRate) / volatility : 0;
+        double sharpeRatio = volatility > 0 ? (annualReturn - riskFreeRate) / volatility : 0;
         // 限制异常值（理论上夏普比率不太可能超过 100）
         sharpeRatio = Math.max(-100, Math.min(100, sharpeRatio));
 
@@ -1166,8 +1174,8 @@ public class BacktestEngine {
                 .average().orElse(0)) * Math.sqrt(252);
         double sortinoRatio = downside > 0 ? (annualReturn - riskFreeRate) / downside : 0;
         sortinoRatio = Math.max(-100, Math.min(100, sortinoRatio));
-        
-        double calmarRatio  = result.maxDrawdown() > 0 ? annualReturn / result.maxDrawdown() : 0;
+
+        double calmarRatio = result.maxDrawdown() > 0 ? annualReturn / result.maxDrawdown() : 0;
         calmarRatio = Math.max(-100, Math.min(100, calmarRatio));
 
         // ── 基准相关指标（Alpha、Beta、Tracking Error、Information Ratio）────────────────────
@@ -1175,7 +1183,7 @@ public class BacktestEngine {
         List<Map<String, Object>> bmCurve = result.benchmarkCurve();
         List<Double> stratRets = new ArrayList<>();
         List<Double> bmRets = new ArrayList<>();
-        
+
         // 超额收益序列（在 if 外定义，供后续 Alpha 分析使用）
         List<Double> excessReturns = new ArrayList<>();
 
@@ -1199,20 +1207,20 @@ public class BacktestEngine {
                     excessReturns.add(stratRet - bmRet);
                 }
             }
-            
+
             int n = excessReturns.size();
             if (n > 1) {
                 // 信息比率
                 double exMean = excessReturns.stream().mapToDouble(Double::doubleValue).average().orElse(0);
-                double exVar  = excessReturns.stream().mapToDouble(r -> (r - exMean) * (r - exMean)).average().orElse(0);
-                double exStd  = Math.sqrt(exVar) * Math.sqrt(252);
+                double exVar = excessReturns.stream().mapToDouble(r -> (r - exMean) * (r - exMean)).average().orElse(0);
+                double exStd = Math.sqrt(exVar) * Math.sqrt(252);
                 informationRatio = exStd > 0 ? (exMean * 252) / exStd : 0;
                 trackingError = exStd;  // 年化跟踪误差
-                
+
                 // Beta 和 Alpha（CAPM）
                 double stratMean = stratRets.stream().mapToDouble(Double::doubleValue).average().orElse(0);
                 double bmMean = bmRets.stream().mapToDouble(Double::doubleValue).average().orElse(0);
-                
+
                 double cov = 0, bmVar = 0;
                 for (int i = 0; i < n; i++) {
                     cov += (stratRets.get(i) - stratMean) * (bmRets.get(i) - bmMean);
@@ -1220,7 +1228,7 @@ public class BacktestEngine {
                 }
                 cov /= n;
                 bmVar /= n;
-                
+
                 beta = bmVar > 0 ? cov / bmVar : 1.0;
                 // Alpha = 策略平均收益 - Beta * 基准平均收益（日频，年化）
                 alpha = (stratMean - beta * bmMean) * 252;
@@ -1233,9 +1241,9 @@ public class BacktestEngine {
         Map<String, Double> buyPrices = new HashMap<>();
         List<Double> tradeRets = new ArrayList<>();
         for (Map<String, Object> t : allTrades) {
-            String sym    = (String) t.get("symbol");
+            String sym = (String) t.get("symbol");
             String action = (String) t.get("action");
-            double price  = ((Number) t.get("price")).doubleValue();
+            double price = ((Number) t.get("price")).doubleValue();
             if ("BUY".equals(action)) {
                 buyPrices.put(sym, price);
             } else if ("SELL".equals(action) && buyPrices.containsKey(sym)) {
@@ -1244,10 +1252,10 @@ public class BacktestEngine {
             }
         }
         if (!tradeRets.isEmpty()) {
-            long wins  = tradeRets.stream().filter(r -> r > 0).count();
+            long wins = tradeRets.stream().filter(r -> r > 0).count();
             long loses = tradeRets.stream().filter(r -> r < 0).count();
             winRate = (double) wins / tradeRets.size();
-            avgWin  = tradeRets.stream().filter(r -> r > 0).mapToDouble(Double::doubleValue).average().orElse(0.01);
+            avgWin = tradeRets.stream().filter(r -> r > 0).mapToDouble(Double::doubleValue).average().orElse(0.01);
             avgLoss = tradeRets.stream().filter(r -> r < 0).mapToDouble(Double::doubleValue).average().orElse(-0.008);
             plRatio = loses > 0 && avgLoss != 0 ? Math.abs(avgWin / avgLoss) : 1.25;
         }
@@ -1257,15 +1265,15 @@ public class BacktestEngine {
         List<Map<String, Object>> realizedCurve = new ArrayList<>();
         {
             double initialCapitalLocal = result.initialCapital();
-            Map<String, Double> buyCostMap  = new HashMap<>();   // symbol -> 买入成本（含手续费）
+            Map<String, Double> buyCostMap = new HashMap<>();   // symbol -> 买入成本（含手续费）
             Map<String, Double> buySharesMap = new HashMap<>();  // symbol -> 持有股数
             Map<String, Double> dailyRealizedPnl = new TreeMap<>();  // date -> 当日新增已实现PnL
             for (Map<String, Object> t : allTrades) {
-                String sym    = (String) t.get("symbol");
+                String sym = (String) t.get("symbol");
                 String action = (String) t.get("action");
                 double tTotal = t.get("total") != null ? ((Number) t.get("total")).doubleValue() : 0;
-                double tFee   = t.get("fee")   != null ? ((Number) t.get("fee")).doubleValue()   : 0;
-                String tDate  = (String) t.get("date");
+                double tFee = t.get("fee") != null ? ((Number) t.get("fee")).doubleValue() : 0;
+                String tDate = (String) t.get("date");
                 if ("BUY".equals(action)) {
                     // 买入成本 = 金额 + 手续费
                     buyCostMap.merge(sym, tTotal + tFee, Double::sum);
@@ -1275,7 +1283,7 @@ public class BacktestEngine {
                         && buyCostMap.containsKey(sym)) {
                     // 已实现 = 卖出金额(扣费后) - 对应成本
                     double proceeds = tTotal - tFee;
-                    double cost     = buyCostMap.remove(sym);
+                    double cost = buyCostMap.remove(sym);
                     buySharesMap.remove(sym);
                     double pnl = proceeds - cost;
                     dailyRealizedPnl.merge(tDate, pnl, Double::sum);
@@ -1374,7 +1382,8 @@ public class BacktestEngine {
                 messagingTemplate.convertAndSend("/topic/backtest/" + taskId,
                         Map.of("taskId", taskId, "stage", stage, "progress", pct, "message", message));
             }
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        }
     }
 
     /**
@@ -1382,7 +1391,7 @@ public class BacktestEngine {
      * 消息格式：{ taskId, stage:"RUNNING", progress, date, stratValue, bmValue }
      */
     private void sendProgressWithCurve(Long taskId, int pct, String date,
-                                        double stratValue, double bmValue) {
+                                       double stratValue, double bmValue) {
         try {
             if (messagingTemplate != null) {
                 Map<String, Object> msg = new HashMap<>();
@@ -1395,7 +1404,8 @@ public class BacktestEngine {
                 msg.put("bmValue", bmValue);
                 messagingTemplate.convertAndSend("/topic/backtest/" + taskId, msg);
             }
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        }
     }
 
     private BigDecimal bd(double v) {
@@ -1427,7 +1437,8 @@ public class BacktestEngine {
         }
     }
 
-    record FactorWeight(String factorCode, double weight) {}
+    record FactorWeight(String factorCode, double weight) {
+    }
 
     record BacktestResult(
             double totalReturn,
@@ -1445,7 +1456,8 @@ public class BacktestEngine {
             List<Map<String, Object>> tradeLog,
             int tradingDays,
             double benchmarkTotalReturn
-    ) {}
+    ) {
+    }
 
     /**
      * 计算收益率百分比

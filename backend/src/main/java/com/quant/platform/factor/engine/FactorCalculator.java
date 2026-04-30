@@ -21,10 +21,10 @@ public interface FactorCalculator {
     /**
      * 计算单只股票在某日的因子值
      *
-     * @param symbol    股票代码
-     * @param calcDate  计算日期
-     * @param history   历史数据（时间正序）
-     * @param context   额外上下文（其他因子值等）
+     * @param symbol   股票代码
+     * @param calcDate 计算日期
+     * @param history  历史数据（时间正序）
+     * @param context  额外上下文（其他因子值等）
      * @return 因子值，null表示无法计算
      */
     BigDecimal calculate(String symbol, LocalDate calcDate,

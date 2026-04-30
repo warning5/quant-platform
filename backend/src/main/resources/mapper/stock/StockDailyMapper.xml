@@ -3,42 +3,38 @@
 <mapper namespace="com.quant.platform.stock.mapper.StockDailyMapper">
 
     <!-- 插入或更新股票每日行情 -->
-    <insert id="insertOrUpdate" parameterType="com.quant.platform.stock.entity.StockDaily" useGeneratedKeys="true" keyProperty="id">
-        INSERT INTO stock_daily (
-            code, trade_date, name, open_price, close_price, high_price, low_price, pre_close,
-            volume, amount, change_percent, change_amount, turnover_rate, pe_ttm, pb,
-            create_time, update_time
-        ) VALUES (
-            #{code}, #{tradeDate}, #{name}, #{openPrice}, #{closePrice}, #{highPrice}, #{lowPrice}, #{preClose},
-            #{volume}, #{amount}, #{changePercent}, #{changeAmount}, #{turnoverRate}, #{peTtm}, #{pb},
-            #{createTime}, #{updateTime}
-        )
-        ON DUPLICATE KEY UPDATE
-            name = VALUES(name),
-            open_price = VALUES(open_price),
-            close_price = VALUES(close_price),
-            high_price = VALUES(high_price),
-            low_price = VALUES(low_price),
-            pre_close = VALUES(pre_close),
-            volume = VALUES(volume),
-            amount = VALUES(amount),
-            change_percent = VALUES(change_percent),
-            change_amount = VALUES(change_amount),
-            turnover_rate = VALUES(turnover_rate),
-            pe_ttm = VALUES(pe_ttm),
-            pb = VALUES(pb),
-            update_time = VALUES(update_time)
+    <insert id="insertOrUpdate" parameterType="com.quant.platform.stock.entity.StockDaily" useGeneratedKeys="true"
+            keyProperty="id">
+        INSERT INTO stock_daily (code, trade_date, name, open_price, close_price, high_price, low_price, pre_close,
+                                 volume, amount, change_percent, change_amount, turnover_rate, pe_ttm, pb,
+                                 create_time, update_time)
+        VALUES (#{code}, #{tradeDate}, #{name}, #{openPrice}, #{closePrice}, #{highPrice}, #{lowPrice}, #{preClose},
+                #{volume}, #{amount}, #{changePercent}, #{changeAmount}, #{turnoverRate}, #{peTtm}, #{pb},
+                #{createTime}, #{updateTime})
+        ON DUPLICATE KEY UPDATE name           = VALUES(name),
+                                open_price     = VALUES(open_price),
+                                close_price    = VALUES(close_price),
+                                high_price     = VALUES(high_price),
+                                low_price      = VALUES(low_price),
+                                pre_close      = VALUES(pre_close),
+                                volume         = VALUES(volume),
+                                amount         = VALUES(amount),
+                                change_percent = VALUES(change_percent),
+                                change_amount  = VALUES(change_amount),
+                                turnover_rate  = VALUES(turnover_rate),
+                                pe_ttm         = VALUES(pe_ttm),
+                                pb             = VALUES(pb),
+                                update_time    = VALUES(update_time)
     </insert>
 
     <!-- 获取指定日期的市场统计摘要（SQL聚合，排除指数） -->
     <select id="selectOverviewStats" resultType="java.util.Map">
-        SELECT
-            COUNT(*) AS count,
-            SUM(CASE WHEN change_percent &gt; 0 THEN 1 ELSE 0 END) AS riseCount,
-            SUM(CASE WHEN change_percent &lt; 0 THEN 1 ELSE 0 END) AS fallCount,
-            SUM(CASE WHEN change_percent IS NULL OR change_percent = 0 THEN 1 ELSE 0 END) AS flatCount,
-            ROUND(IFNULL(AVG(change_percent), 0), 4) AS avgPctChg,
-            IFNULL(SUM(amount), 0) AS totalAmount
+        SELECT COUNT(*)                                                                      AS count,
+               SUM(CASE WHEN change_percent &gt; 0 THEN 1 ELSE 0 END)                        AS riseCount,
+               SUM(CASE WHEN change_percent &lt; 0 THEN 1 ELSE 0 END)                        AS fallCount,
+               SUM(CASE WHEN change_percent IS NULL OR change_percent = 0 THEN 1 ELSE 0 END) AS flatCount,
+               ROUND(IFNULL(AVG(change_percent), 0), 4)                                      AS avgPctChg,
+               IFNULL(SUM(amount), 0)                                                        AS totalAmount
         FROM stock_daily
         WHERE trade_date = #{tradeDate}
           AND code NOT LIKE 'sh.000%'
@@ -50,9 +46,9 @@
         SELECT code, name, change_percent, close_price, volume, amount, turnover_rate
         FROM stock_daily
         WHERE trade_date = #{tradeDate}
-          AND change_percent IS NOT NULL
-          AND code NOT LIKE 'sh.000%'
-          AND code NOT LIKE 'sz.399%'
+        AND change_percent IS NOT NULL
+        AND code NOT LIKE 'sh.000%'
+        AND code NOT LIKE 'sz.399%'
         ORDER BY change_percent
         <choose>
             <when test="order == 'ASC'">ASC</when>

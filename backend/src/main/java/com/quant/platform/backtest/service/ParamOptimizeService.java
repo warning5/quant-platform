@@ -18,15 +18,18 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.*;
-import java.util.concurrent.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 参数优化服务 —— 网格搜索（Grid Search）
  * <p>
  * 支持的可变参数：
- *   maxPositionCount (int), stopLossPct (double), stopProfitPct (double),
- *   rebalanceFrequency (string: DAILY/WEEKLY/MONTHLY)
+ * maxPositionCount (int), stopLossPct (double), stopProfitPct (double),
+ * rebalanceFrequency (string: DAILY/WEEKLY/MONTHLY)
  * <p>
  * 目标函数：可选 sharpeRatio / annualReturn / calmarRatio
  */
@@ -41,7 +44,9 @@ public class ParamOptimizeService {
     private final StrategyService strategyService;
     private final ObjectMapper objectMapper;
 
-    /** 注入 Spring 管理的异步执行器（与 @Async 使用同一个线程池） */
+    /**
+     * 注入 Spring 管理的异步执行器（与 @Async 使用同一个线程池）
+     */
     private final ExecutorService backtestExecutor;
 
     @Autowired
@@ -68,7 +73,8 @@ public class ParamOptimizeService {
     /**
      * 参数网格定义
      */
-    public record ParamRange(String name, List<Object> values) {}
+    public record ParamRange(String name, List<Object> values) {
+    }
 
     /**
      * 参数优化请求
@@ -79,11 +85,17 @@ public class ParamOptimizeService {
         public String endDate;
         public BigDecimal initialCapital;
         public String benchmarkCode;
-        /** 目标函数: sharpeRatio / annualReturn / calmarRatio */
+        /**
+         * 目标函数: sharpeRatio / annualReturn / calmarRatio
+         */
         public String objective = "sharpeRatio";
-        /** 参数网格：[{name, values}] */
+        /**
+         * 参数网格：[{name, values}]
+         */
         public List<Map<String, Object>> paramGrid;
-        /** 最大并行任务数 */
+        /**
+         * 最大并行任务数
+         */
         public int maxConcurrent = 3;
     }
 
@@ -177,12 +189,12 @@ public class ParamOptimizeService {
                     .filter(r -> r.get("score") != null)
                     .max(Comparator.comparingDouble(r -> toDouble(r.get("score"))))
                     .orElse(null);
-            
+
             // 诊断日志：记录结果统计
             long successCount = job.results.stream().filter(r -> r.get("score") != null).count();
             long errorCount = job.results.stream().filter(r -> r.get("error") != null).count();
             log.info("[ParamOptimize] Job {} completed: total={}, success={}, error={}, bestResult={}",
-                    jobId, job.results.size(), successCount, errorCount, 
+                    jobId, job.results.size(), successCount, errorCount,
                     job.bestResult != null ? "found" : "null");
 
             // 按 score 降序排列
@@ -368,8 +380,8 @@ public class ParamOptimizeService {
      * 运行单次回测，返回参数 + 关键指标
      */
     private Map<String, Object> runSingleBacktest(StrategyDefinition baseSt,
-                                                   OptimizeRequest req,
-                                                   Map<String, Object> params) throws Exception {
+                                                  OptimizeRequest req,
+                                                  Map<String, Object> params) throws Exception {
         // 构造回测任务
         BacktestTask task = BacktestTask.builder()
                 .strategyId(baseSt.getId())
@@ -456,7 +468,7 @@ public class ParamOptimizeService {
      * 将参数应用到回测任务（动态参数覆盖策略定义中的值）
      */
     private void applyParams(BacktestTask task, StrategyDefinition baseSt,
-                              Map<String, Object> params) throws Exception {
+                             Map<String, Object> params) throws Exception {
         // 遍历优化参数，正确设置到 BacktestTask
         for (Map.Entry<String, Object> e : params.entrySet()) {
             switch (e.getKey()) {
@@ -511,8 +523,11 @@ public class ParamOptimizeService {
     private double toDouble(Object v) {
         if (v == null) return 0;
         if (v instanceof Number n) return n.doubleValue();
-        try { return Double.parseDouble(v.toString()); }
-        catch (Exception e) { return 0; }
+        try {
+            return Double.parseDouble(v.toString());
+        } catch (Exception e) {
+            return 0;
+        }
     }
 
     private BigDecimal toBigDecimal(Object v) {
@@ -534,14 +549,20 @@ public class ParamOptimizeService {
             default -> {
             }
         }
-        try { return new BigDecimal(v.toString()); }
-        catch (Exception e) { return BigDecimal.ZERO; }
+        try {
+            return new BigDecimal(v.toString());
+        } catch (Exception e) {
+            return BigDecimal.ZERO;
+        }
     }
 
     private Integer toInteger(Object v) {
         if (v == null) return null;
         if (v instanceof Number n) return n.intValue();
-        try { return Integer.parseInt(v.toString().replaceAll("\\.0+$", "")); }
-        catch (Exception e) { return null; }
+        try {
+            return Integer.parseInt(v.toString().replaceAll("\\.0+$", ""));
+        } catch (Exception e) {
+            return null;
+        }
     }
 }

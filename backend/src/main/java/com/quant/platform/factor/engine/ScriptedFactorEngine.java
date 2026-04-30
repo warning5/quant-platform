@@ -30,18 +30,18 @@ public class ScriptedFactorEngine {
     /**
      * 执行Groovy脚本计算因子值
      *
-     * @param scriptCode  Groovy脚本代码
-     * @param factorCode  因子代码（用于缓存）
-     * @param symbol      股票代码
-     * @param calcDate    计算日期
-     * @param history     历史K线数据
-     * @param context     额外上下文
+     * @param scriptCode Groovy脚本代码
+     * @param factorCode 因子代码（用于缓存）
+     * @param symbol     股票代码
+     * @param calcDate   计算日期
+     * @param history    历史K线数据
+     * @param context    额外上下文
      * @return 因子值
      */
     public BigDecimal calculate(String scriptCode, String factorCode,
-                                 String symbol, LocalDate calcDate,
-                                 List<MarketDailyBar> history,
-                                 Map<String, Object> context) {
+                                String symbol, LocalDate calcDate,
+                                List<MarketDailyBar> history,
+                                Map<String, Object> context) {
         try {
             Binding binding = new Binding();
             binding.setVariable("symbol", symbol);

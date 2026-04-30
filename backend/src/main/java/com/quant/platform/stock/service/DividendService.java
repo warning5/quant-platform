@@ -7,9 +7,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.LocalDate;
-import java.util.*;
+import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 import java.util.stream.Collectors;
 
 /**
@@ -29,12 +30,12 @@ public class DividendService {
      * 简化计算: adjFactor = ∏(1 + 送转比例)
      * 对于日期 d，前复权因子 = 从最新除权日到 d 之间所有除权事件的因子乘积
      */
-    private volatile Map<String, Map<LocalDate, BigDecimal>> adjFactorCache = null;
+    private final Map<String, Map<LocalDate, BigDecimal>> adjFactorCache = null;
 
     /**
      * 缓存: symbol -> (exDate -> 每股派息金额)
      */
-    private volatile Map<String, Map<LocalDate, BigDecimal>> cashDivCache = null;
+    private final Map<String, Map<LocalDate, BigDecimal>> cashDivCache = null;
 
     /**
      * 查询指定股票在日期范围内的分红记录
@@ -93,10 +94,10 @@ public class DividendService {
      * 计算累积前复权因子: 给定一个日期，返回从该日期到最新除权日的累积复权因子。
      * 前复权: 把历史价格调高到与最新价格可比。
      * adjFactor(date) = ∏{exDate > date} singleFactor(exDate)
-     *
+     * <p>
      * 使用示例:
-     *   adjClose = rawClose × adjFactor(date)
-     *   这样历史所有价格都以最新股本为基准，可以直接比较。
+     * adjClose = rawClose × adjFactor(date)
+     * 这样历史所有价格都以最新股本为基准，可以直接比较。
      *
      * @param symbol 股票代码
      * @param date   需要计算复权因子的日期

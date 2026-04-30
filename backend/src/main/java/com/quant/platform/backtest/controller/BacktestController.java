@@ -1,21 +1,17 @@
 package com.quant.platform.backtest.controller;
 
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quant.platform.backtest.domain.BacktestReport;
 import com.quant.platform.backtest.domain.BacktestTask;
 import com.quant.platform.backtest.domain.ParamOptimizeReport;
 import com.quant.platform.backtest.mapper.ParamOptimizeReportMapper;
-import com.quant.platform.backtest.service.BacktestService;
-import com.quant.platform.backtest.service.BrinsonAttributionService;
-import com.quant.platform.backtest.service.CompareService;
-import com.quant.platform.backtest.service.MonteCarloService;
-import com.quant.platform.backtest.service.ParamOptimizeService;
+import com.quant.platform.backtest.service.*;
 import com.quant.platform.common.dto.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.SneakyThrows;
-import com.baomidou.mybatisplus.core.metadata.IPage;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
@@ -231,7 +227,7 @@ public class BacktestController {
             }
             // 运行中任务 endMs=0，使用当前时间计算已耗时
             long elapsed = job.endMs > 0 ? job.endMs - job.startMs
-                                         : System.currentTimeMillis() - job.startMs;
+                    : System.currentTimeMillis() - job.startMs;
             result.put("elapsedMs", elapsed);
         }
         if (job.errorMessage != null) result.put("errorMessage", job.errorMessage);
