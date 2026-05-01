@@ -393,7 +393,7 @@ public class BacktestEngine {
                     List<FactorValue> fvList = (clickHouseFactorValueService != null)
                             ? clickHouseFactorValueService.findByFactorCodeAndDate(fw.factorCode, today)
                             : factorValueMapper.selectList(
-                                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<FactorValue>()
+                            new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<FactorValue>()
                                     .eq(FactorValue::getFactorCode, fw.factorCode)
                                     .eq(FactorValue::getCalcDate, today));
                     Map<String, FactorValue> fvMap = fvList.stream()

@@ -276,6 +276,7 @@ public class FactorController {
     }
 
     // ── 缠论因子筛选（P1）────────────────────────────────────────────
+
     /**
      * 缠论因子筛选
      * GET /factors/chan-screen?penDir=1,-1&trend=1,0,-1&buySell=1,2,-1&hubPosMin=0&hubPosMax=1&penCountMin=1&penCountMax=20&keyword=&page=0&size=20

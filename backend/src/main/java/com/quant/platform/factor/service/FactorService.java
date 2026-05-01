@@ -3,7 +3,6 @@ package com.quant.platform.factor.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quant.platform.common.exception.BusinessException;
 import com.quant.platform.common.exception.ResourceNotFoundException;
 import com.quant.platform.config.ClickHouseConfig;
@@ -27,11 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 /**
  * 因子管理服务
@@ -779,16 +774,17 @@ public class FactorService {
 
     /**
      * 缠论因子筛选
-     * @param penDirList   笔方向过滤（+1/-1，null=不过滤）
-     * @param trendList    走势类型（1/0/-1，null=不过滤）
-     * @param buySellList  买卖点（1~3/-1~-3，null=不过滤）
-     * @param hubPosMin    中枢位置下限（0~1，null=不过滤）
-     * @param hubPosMax    中枢位置上限
-     * @param penCountMin  笔数量下限（null=不过滤）
-     * @param penCountMax  笔数量上限
-     * @param keyword      股票代码/名称关键词（null=不过滤）
-     * @param page         页码（0-based）
-     * @param size         每页条数
+     *
+     * @param penDirList  笔方向过滤（+1/-1，null=不过滤）
+     * @param trendList   走势类型（1/0/-1，null=不过滤）
+     * @param buySellList 买卖点（1~3/-1~-3，null=不过滤）
+     * @param hubPosMin   中枢位置下限（0~1，null=不过滤）
+     * @param hubPosMax   中枢位置上限
+     * @param penCountMin 笔数量下限（null=不过滤）
+     * @param penCountMax 笔数量上限
+     * @param keyword     股票代码/名称关键词（null=不过滤）
+     * @param page        页码（0-based）
+     * @param size        每页条数
      * @return { list: 当前页数据, total: 符合条件总数 }
      */
     public Map<String, Object> chanScreen(
@@ -827,7 +823,7 @@ public class FactorService {
 
         int total = all.size();
         int fromIndex = Math.min(page * size, total);
-        int toIndex   = Math.min((page + 1) * size, total);
+        int toIndex = Math.min((page + 1) * size, total);
         List<Map<String, Object>> pageList = all.subList(fromIndex, toIndex);
 
         Map<String, Object> result = new LinkedHashMap<>();
