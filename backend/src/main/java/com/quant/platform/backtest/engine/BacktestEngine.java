@@ -7,6 +7,7 @@ import com.quant.platform.backtest.mapper.BacktestReportMapper;
 import com.quant.platform.backtest.mapper.BacktestTaskMapper;
 import com.quant.platform.factor.domain.FactorValue;
 import com.quant.platform.factor.mapper.FactorValueMapper;
+import com.quant.platform.factor.service.ClickHouseFactorValueService;
 import com.quant.platform.market.domain.MarketDailyBar;
 import com.quant.platform.market.service.MarketDataService;
 import com.quant.platform.stock.service.DividendService;
@@ -41,6 +42,8 @@ public class BacktestEngine {
     private final BacktestReportMapper reportMapper;
     private final MarketDataService marketDataService;
     private final FactorValueMapper factorValueMapper;
+    @Autowired(required = false)
+    private ClickHouseFactorValueService clickHouseFactorValueService;
     private final StrategyService strategyService;
     private final DividendService dividendService;
 
@@ -387,8 +390,12 @@ public class BacktestEngine {
                 // 获取因子值
                 Map<String, Map<String, FactorValue>> factorValueMap = new HashMap<>();
                 for (FactorWeight fw : factorWeights) {
-                    List<FactorValue> fvList = factorValueMapper
-                            .findByFactorCodeAndDate(fw.factorCode, today);
+                    List<FactorValue> fvList = (clickHouseFactorValueService != null)
+                            ? clickHouseFactorValueService.findByFactorCodeAndDate(fw.factorCode, today)
+                            : factorValueMapper.selectList(
+                                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<FactorValue>()
+                                    .eq(FactorValue::getFactorCode, fw.factorCode)
+                                    .eq(FactorValue::getCalcDate, today));
                     Map<String, FactorValue> fvMap = fvList.stream()
                             .collect(Collectors.toMap(FactorValue::getSymbol, fv -> fv));
                     factorValueMap.put(fw.factorCode, fvMap);

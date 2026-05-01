@@ -356,7 +356,7 @@ def main():
             print(f"[ERROR] 无效的市场: {m}，支持: SH / SZ / BJ / ALL")
             sys.exit(1)
 
-    # ─── 构建 extra_args ───
+    # ─── 构建 extra_args（不含 info_only/daily_only/index_only，避免子脚本不识别）──
     extra_args = []
     if args.code:
         extra_args += ["--code", args.code]

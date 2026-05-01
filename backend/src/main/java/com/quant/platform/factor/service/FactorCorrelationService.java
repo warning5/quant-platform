@@ -1,7 +1,6 @@
 package com.quant.platform.factor.service;
 
 import com.quant.platform.factor.domain.FactorValue;
-import com.quant.platform.factor.mapper.FactorValueMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -25,7 +24,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class FactorCorrelationService {
 
-    private final FactorValueMapper factorValueMapper;
+    private final ClickHouseFactorValueService clickHouseFactorValueService;
 
     /**
      * 计算因子相关性矩阵
@@ -48,7 +47,7 @@ public class FactorCorrelationService {
         Set<LocalDate> allDates = new TreeSet<>();
 
         for (String factorCode : factorCodes) {
-            List<FactorValue> values = factorValueMapper.findByFactorCodeAndDateRange(factorCode, startDate, endDate);
+            List<FactorValue> values = clickHouseFactorValueService.findByFactorCodeAndDateRange(factorCode, startDate, endDate);
 
             // 按日期分组
             Map<LocalDate, List<Double>> crossSection = values.stream()

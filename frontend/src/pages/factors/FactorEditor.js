@@ -1,16 +1,18 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
-  Card, Form, Input, Select, Button, Space, Typography, Tabs, message, Spin, Alert
+  Card, Form, Input, Select, Button, Space, Typography, Tabs, message, Spin, Alert, Modal, Tooltip
 } from 'antd';
-import { ArrowLeftOutlined, SaveOutlined, CheckCircleOutlined } from '@ant-design/icons';
+import {
+  ArrowLeftOutlined, SaveOutlined, CheckCircleOutlined,
+  QuestionCircleOutlined, PlusOutlined, CodeOutlined,
+} from '@ant-design/icons';
 import { factorApi } from '../../api';
+import { CATEGORY_DISPLAY, CATEGORY_LABELS } from './constants';
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
 const { Option } = Select;
-
-const CATEGORIES = ['MOMENTUM','VALUE','QUALITY','VOLATILITY','TECHNICAL','FUNDAMENTAL','SENTIMENT','CHANTHEORY','CUSTOM'];
 
 const TEMPLATES = {
   default:    '自定义',
@@ -28,6 +30,7 @@ export default function FactorEditor() {
   const [validating, setValidating] = useState(false);
   const [scriptCode, setScriptCode] = useState('');
   const [validateResult, setValidateResult] = useState(null);
+  const [helpVisible, setHelpVisible] = useState(false);
   const isEdit = !!id;
 
   useEffect(() => {
@@ -82,10 +85,19 @@ export default function FactorEditor() {
 
   return (
     <div>
-      <div className="page-header">
+      {/* ── 标题行（纯内联样式，避免 page-header CSS 挤压） ─────────────────────── */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
         <Space>
           <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/factors')}>返回</Button>
-          <Title level={4} style={{ margin: 0 }}>{isEdit ? '编辑因子' : '新建因子'}</Title>
+          <Title level={4} style={{ margin: 0 }}>
+            {isEdit ? '编辑因子' : '新建因子'}
+          </Title>
+          <Tooltip title="查看新建因子流程">
+            <QuestionCircleOutlined
+              style={{ fontSize: 16, color: '#1677ff', cursor: 'pointer' }}
+              onClick={() => setHelpVisible(true)}
+            />
+          </Tooltip>
         </Space>
         <Space>
           <Button icon={<CheckCircleOutlined />} onClick={handleValidate} loading={validating}>
@@ -111,8 +123,8 @@ export default function FactorEditor() {
                   <Input placeholder="如：自定义动量因子" />
                 </Form.Item>
                 <Form.Item name="category" label="因子分类" rules={[{ required: true }]}>
-                  <Select placeholder="选择分类">
-                    {CATEGORIES.map(c => <Option key={c} value={c}>{c}</Option>)}
+                  <Select showSearch optionFilterProp="children" placeholder="选择分类">
+                    {CATEGORY_DISPLAY.map(o => <Option key={o.value} value={o.value}>{o.label}</Option>)}
                   </Select>
                 </Form.Item>
                 <Form.Item name="description" label="因子描述">
@@ -187,6 +199,98 @@ export default function FactorEditor() {
           ),
         },
       ]} />
+
+      {/* ── 新建因子流程说明 ─────────────────────────────────────────────────── */}
+      <Modal
+        title="新建因子 · 完整流程"
+        open={helpVisible}
+        onCancel={() => setHelpVisible(false)}
+        footer={null}
+        width={900}
+      >
+        <div style={{ fontSize: 13, lineHeight: 1.8 }}>
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 16, whiteSpace: 'pre-line' }}
+            message="新增一个完整可用的因子，需要以下 4 步："
+          />
+
+          {/* 步骤卡片 */}
+          {[
+            {
+              step: 1,
+              icon: <CodeOutlined />,
+              title: '实现计算逻辑（后端 Java）',
+              desc: '在因子计算引擎中添加计算方法。例如缠论因子，需在 ChanTheoryCalculator 中新增方法实现算法。',
+              color: '#1677ff',
+            },
+            {
+              step: 2,
+              icon: <PlusOutlined />,
+              title: '注册因子（后端 Java）',
+              desc: '在 FactorComputeEngine 的 registerBuiltin() 中注册新因子（定义代码、名称、分类）。',
+              color: '#52c41a',
+            },
+            {
+              step: 3,
+              icon: <PlusOutlined />,
+              title: '创建因子记录（数据库）',
+              desc: '在因子管理页面填写基本信息（代码、名称、分类、描述），保存后在 factor_definition 表中创建记录，并设置为「已激活」状态。',
+              color: '#faad14',
+            },
+            {
+              step: 4,
+              icon: <PlusOutlined />,
+              title: '触发计算（前端操作）',
+              desc: '在因子管理 → 因子监控中，点击计算按钮，触发因子值计算。计算完成后即可在筛选、选股等模块中使用。',
+              color: '#f5222d',
+            },
+          ].map(item => (
+            <Card
+              key={item.step}
+              size="small"
+              style={{ marginBottom: 12, borderLeft: `3px solid ${item.color}` }}
+            >
+              <Space>
+                <span style={{
+                  background: item.color, color: '#fff',
+                  borderRadius: '50%', width: 24, height: 24,
+                  display: 'inline-flex', alignItems: 'center',
+                  justifyContent: 'center', fontSize: 13, fontWeight: 'bold',
+                }}>
+                  {item.step}
+                </span>
+                <Text strong style={{ fontSize: 14 }}>{item.title}</Text>
+              </Space>
+              <div style={{ marginLeft: 36, marginTop: 4, color: '#666', whiteSpace: 'pre-line' }}>
+                {item.desc}
+              </div>
+            </Card>
+          ))}
+
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginTop: 8 }}
+            message="关于缠论因子"
+            description={
+              <div>
+                <div>缠论因子属于特殊类别（CHANTHEORY），新增后会被缠论结构筛选页面<Text strong>自动感知</Text>——筛选维度会动态出现，无需修改前端代码。</div>
+                <div style={{ marginTop: 4 }}>但计算逻辑本身必须用 Java 代码实现，无法通过配置完成。</div>
+              </div>
+            }
+          />
+
+          <Alert
+            type="success"
+            showIcon
+            style={{ marginTop: 8 }}
+            message="建议：先用策略管理测试"
+            description="如果只是想用某个因子做选股或回测，可以直接在「策略管理 → 选股条件」中添加因子条件，无需新增因子定义。"
+          />
+        </div>
+      </Modal>
     </div>
   );
 }

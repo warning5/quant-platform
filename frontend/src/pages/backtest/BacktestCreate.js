@@ -123,7 +123,7 @@ export default function BacktestCreate() {
       };
       setSubmitting(true);
       backtestApi.create(payload).then(res => {
-        const taskId = res.data?.id;
+        const taskId = res?.id;
         message.success('回测任务已提交，正在执行...');
         if (taskId) {
           navigate(`/backtests/${taskId}/running`);

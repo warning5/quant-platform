@@ -252,6 +252,17 @@ public class DataUpdateService {
             } else if (cmd == null) {
                 // ALL → 依次执行 SH、SZ、BJ
                 executeAllMarkets(taskId, request);
+            } else if (cmd.size() >= 3 && "update_stock_info_daily.py".equals(cmd.get(cmd.size() - 1))) {
+                // infoOnly 模式：只执行 stock_info 脚本
+                task.setTotalStocks(5500);
+                task.setCurrentStep("股票信息");
+                broadcastStatus(task);
+                boolean ok = runSingleScript(taskId, task, cmd, "股票信息");
+                if (!"CANCELLED".equals(task.getStatus())) {
+                    task.setStatus(ok ? "SUCCESS" : "FAILED");
+                    task.setProgress(100);
+                    task.setCurrentStep(ok ? "更新完成" : "更新失败");
+                }
             } else {
                 task.setTotalStocks(estimateTotalStocks(request));
                 // 根据请求参数推断市场名称
@@ -317,6 +328,18 @@ public class DataUpdateService {
         task.setProcessedStocks(0);
         task.setTotalStocks(0);
         boolean allSuccess = true;
+
+        // infoOnly 模式：只更新 stock_info，跳过所有日线脚本
+        if (request.isInfoOnly()) {
+            broadcastLog(taskId, "[INFO] 仅更新 stock_info，跳过日线行情...");
+            boolean ok = runUpdateStockInfo(taskId, task);
+            if (!"CANCELLED".equals(task.getStatus())) {
+                task.setStatus(ok ? "SUCCESS" : "FAILED");
+                task.setProgress(100);
+                task.setCurrentStep(ok ? "全部完成" : "部分失败");
+            }
+            return;
+        }
 
         // 根据数据源决定更新哪些市场
         List<String[]> marketScripts = new ArrayList<>();
@@ -443,6 +466,17 @@ public class DataUpdateService {
     }
 
     /**
+     * 执行 stock_info 更新脚本
+     */
+    private boolean runUpdateStockInfo(String taskId, DataUpdateTask task) throws IOException, InterruptedException {
+        List<String> cmd = new ArrayList<>();
+        cmd.add(pythonPath);
+        cmd.add("-u");
+        cmd.add("update_stock_info_daily.py");
+        return runSingleScript(taskId, task, cmd, "股票信息");
+    }
+
+    /**
      * 向命令添加日期/选项等公共参数
      */
     private void addCommonArgs(List<String> cmd, DataUpdateRequest request) {
@@ -490,6 +524,15 @@ public class DataUpdateService {
      * 构建命令行
      */
     private List<String> buildCommand(DataUpdateRequest request) {
+        // infoOnly 模式：只执行 stock_info 更新脚本
+        if (request.isInfoOnly()) {
+            List<String> cmd = new ArrayList<>();
+            cmd.add(pythonPath);
+            cmd.add("-u");
+            cmd.add("update_stock_info_daily.py");
+            return cmd;
+        }
+
         List<String> cmd = new ArrayList<>();
         cmd.add(pythonPath);
         cmd.add("-u");  // 强制 unbuffered stdout，解决管道模式下行缓冲失效问题

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Card, Typography, Row, Col, Tag, Alert } from 'antd';
-import { FundOutlined, CloudSyncOutlined, SearchOutlined } from '@ant-design/icons';
+import { FundOutlined, CloudSyncOutlined, SearchOutlined, PlusOutlined, CodeOutlined } from '@ant-design/icons';
 
 const { Title, Paragraph, Text } = Typography;
 
@@ -14,14 +14,15 @@ export function ManualFactors() {
 
       <Title level={4}>因子分类</Title>
       <Row gutter={[8, 8]} style={{ marginBottom: 16 }}>
-        <Col><Tag color="blue">动量</Tag></Col>
-        <Col><Tag color="gold">价值</Tag></Col>
-        <Col><Tag color="green">质量</Tag></Col>
-        <Col><Tag color="orange">波动率</Tag></Col>
-        <Col><Tag color="purple">技术</Tag></Col>
-        <Col><Tag color="cyan">基本面</Tag></Col>
-        <Col><Tag color="magenta">情绪</Tag></Col>
-        <Col><Tag>自定义</Tag></Col>
+        <Col><Tag color="blue">动量 MOMENTUM</Tag></Col>
+        <Col><Tag color="gold">价值 VALUE</Tag></Col>
+        <Col><Tag color="green">质量 QUALITY</Tag></Col>
+        <Col><Tag color="orange">波动率 VOLATILITY</Tag></Col>
+        <Col><Tag color="purple">技术 TECHNICAL</Tag></Col>
+        <Col><Tag color="cyan">基本面 FUNDAMENTAL</Tag></Col>
+        <Col><Tag color="magenta">情绪 SENTIMENT</Tag></Col>
+        <Col><Tag color="red">缠论 CHANTHEORY</Tag></Col>
+        <Col><Tag>自定义 CUSTOM</Tag></Col>
       </Row>
 
       <Title level={4}>因子类型</Title>
@@ -202,4 +203,147 @@ export function ManualFactorDetail() {
   );
 }
 
-export default { ManualFactors, ManualFactorMonitor, ManualFactorDetail };
+export function ManualFactorCreate() {
+  return (
+    <section id="factor-create" style={{ paddingBottom: 32 }}>
+      <Title level={2}><PlusOutlined /> 新建因子</Title>
+      <Paragraph>
+        平台支持通过 Groovy 脚本自定义因子。点击「因子管理」→「新建因子」即可进入因子创建页面。
+        新建因子的完整流程如下：
+      </Paragraph>
+
+      <Alert
+        type="info"
+        showIcon
+        style={{ marginBottom: 16 }}
+        message="新建因子的 4 步完整流程"
+        description="新增一个完整可用的因子，需要前后端协同：后端实现计算逻辑 → 注册因子 → 前端创建记录 → 触发计算。"
+      />
+
+      {/* 步骤卡片 */}
+      {[
+        {
+          n: 1,
+          icon: <CodeOutlined />,
+          title: '实现计算逻辑（后端 Java）',
+          desc: '在因子计算引擎中添加计算方法。例如缠论因子，需在 ChanTheoryCalculator 中新增方法实现算法。技术因子通过 Groovy 脚本直接在页面定义，无需修改后端代码。',
+          color: '#1677ff',
+        },
+        {
+          n: 2,
+          icon: <PlusOutlined />,
+          title: '注册因子（后端 Java，内置因子）',
+          desc: '如果是用 Java 实现的内置因子，需要在 FactorComputeEngine 的 registerBuiltin() 中注册（定义代码、名称、分类、描述）。脚本因子则跳过此步。',
+          color: '#52c41a',
+        },
+        {
+          n: 3,
+          icon: <PlusOutlined />,
+          title: '创建因子记录（因子管理页面）',
+          desc: '在「因子管理 → 新建因子」页面填写基本信息：因子代码（唯一标识）、因子名称、因子分类（选「缠论 CHANTHEORY」即可纳入缠论筛选）、描述。保存后在因子定义表中创建记录，并设置为「已激活」状态。',
+          color: '#faad14',
+        },
+        {
+          n: 4,
+          icon: <CloudSyncOutlined />,
+          title: '触发计算（因子监控）',
+          desc: '在「因子管理 → 因子监控」中，勾选新因子，点击计算按钮。计算完成后，因子值存储在 factor_value 表中，可在筛选、选股、回测等模块中使用。',
+          color: '#f5222d',
+        },
+      ].map(item => (
+        <Card
+          key={item.n}
+          size="small"
+          style={{ marginBottom: 12, borderLeft: `3px solid ${item.color}` }}
+        >
+          <Row gutter={16} align="middle">
+            <Col span={1}>
+              <span style={{
+                background: item.color, color: '#fff',
+                borderRadius: '50%', width: 26, height: 26,
+                display: 'inline-flex', alignItems: 'center',
+                justifyContent: 'center', fontWeight: 'bold',
+              }}>
+                {item.n}
+              </span>
+            </Col>
+            <Col span={23}>
+              <Text strong style={{ fontSize: 14 }}>{item.title}</Text>
+              <div style={{ marginTop: 4, color: '#666', fontSize: 13 }}>{item.desc}</div>
+            </Col>
+          </Row>
+        </Card>
+      ))}
+
+      <Alert
+        type="warning"
+        showIcon
+        style={{ marginTop: 8 }}
+        message="关于缠论因子"
+        description={
+          <div>
+            <Paragraph style={{ marginBottom: 8 }}>
+              缠论因子属于特殊类别（CHANTHEORY），与普通因子有以下区别：
+            </Paragraph>
+            <ul style={{ paddingLeft: 20, marginBottom: 0 }}>
+              <li><Text strong>计算逻辑</Text>：必须用 Java 代码实现（ChanTheoryCalculator），无法用 Groovy 脚本</li>
+              <li><Text strong>自动感知</Text>：新增后会被「缠论结构筛选」页面自动感知——筛选维度和结果列动态出现，无需修改前端代码</li>
+              <li><Text strong>筛选控件</Text>：如果新因子的值是枚举型（如 1/0/-1），需要在因子记录的 parameters_json 字段中配置 controlType 和 options</li>
+            </ul>
+          </div>
+        }
+      />
+
+      <Alert
+        type="success"
+        showIcon
+        style={{ marginTop: 8 }}
+        message="建议：先用策略管理测试"
+        description={
+          <span>
+            如果只是想用某个因子做选股或回测，可以<Text strong>直接</Text>在「策略管理 → 选股条件」中添加因子条件，
+            无需新增因子定义。只有当需要「缠论筛选」这样的快捷入口，或需要共享给多策略使用时，才需要新建因子。
+          </span>
+        }
+      />
+
+      <Title level={4}>Groovy 脚本因子示例</Title>
+      <Alert
+        type="info"
+        showIcon
+        style={{ marginBottom: 8 }}
+        message="Groovy 脚本因子不需要修改后端代码"
+        description="脚本因子通过 Groovy 语言在页面直接编写，无需 Java 开发经验，适合技术因子的快速迭代。"
+      />
+      <Row gutter={[16, 16]}>
+        <Col xs={24} md={12}>
+          <Card size="small" title="示例：5日均线" style={{ borderLeft: '4px solid #1677ff' }}>
+            <Paragraph style={{ fontSize: 12 }}>
+              <Text code style={{ fontSize: 11 }}>{`// 计算5日简单均线
+double sum = 0;
+for (int i = 0; i < 5 && i < n; i++) {
+    sum += history.get(n - 1 - i).close.doubleValue();
+}
+return sum / Math.min(5, n);`}</Text>
+            </Paragraph>
+          </Card>
+        </Col>
+        <Col xs={24} md={12}>
+          <Card size="small" title="可用变量说明" style={{ borderLeft: '4px solid #52c41a' }}>
+            <Paragraph style={{ fontSize: 12 }}>
+              <Text code>history</Text> - List 历史K线（时间正序）<br/>
+              <Text code>bar</Text> - 最新K线 MarketDailyBar<br/>
+              <Text code>close</Text> - 最新收盘价 BigDecimal<br/>
+              <Text code>n</Text> - 数据条数 int<br/>
+              <Text code>symbol</Text> - 股票代码 String<br/>
+              <Text code>calcDate</Text> - 计算日期 LocalDate<br/>
+              <Text strong>返回：</Text> Number，null 表示无法计算
+            </Paragraph>
+          </Card>
+        </Col>
+      </Row>
+    </section>
+  );
+}
+
+export default { ManualFactors, ManualFactorMonitor, ManualFactorDetail, ManualFactorCreate };

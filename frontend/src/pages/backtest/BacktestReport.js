@@ -414,6 +414,156 @@ function TradeTable({ tradeLogJson }) {
   );
 }
 
+
+// ─── 持仓过程点位图 ───────────────────────────────────────────────────────────
+function PositionProcessChart({ equityCurveJson, tradeLogJson, positionHistoryJson }) {
+  const curve = useMemo(() => safeJson(equityCurveJson), [equityCurveJson]);
+  const trades = useMemo(() => safeJson(tradeLogJson), [tradeLogJson]);
+  const history = useMemo(() => safeJson(positionHistoryJson), [positionHistoryJson]);
+
+  if (!curve.length) return <Empty text="暂无净值曲线数据" />;
+
+  const dates = curve.map(d => d.date);
+  // 净值收益百分比（相对初始值1的涨跌）
+  const curveReturns = curve.map(d => +((+d.value - 1) * 100).toFixed(4));
+
+  // 找出每个交易日的持仓数量（当日有持仓的股票数）
+  const posCountMap = {};
+  history.forEach(h => { posCountMap[h.date] = Object.keys(h.positions || {}).length; });
+
+  // 买卖点事件（仅 BUY/SELL，排除 DIVIDEND）
+  const buyEvents = trades.filter(t => t.action === 'BUY');
+  const sellEvents = trades.filter(t => t.action === 'SELL');
+
+  // 找出买卖点对应的净值收益
+  const dateToReturn = {};
+  curve.forEach(d => { dateToReturn[d.date] = +((+d.value - 1) * 100).toFixed(4); });
+
+  // 持仓数量序列（只取有数据的日期）
+  const posCountSeries = dates.map(dt => posCountMap[dt] ?? null);
+
+  // ECharts 点位标注
+  const buyMarkers = buyEvents.map(t => ({
+    date: t.date,
+    value: dateToReturn[t.date],
+    symbol: t.symbol,
+    name: t.name,
+    price: t.price,
+    amount: t.amount,
+    action: 'BUY',
+  })).filter(m => m.value != null);
+
+  const sellMarkers = sellEvents.map(t => ({
+    date: t.date,
+    value: dateToReturn[t.date],
+    symbol: t.symbol,
+    name: t.name,
+    price: t.price,
+    amount: t.amount,
+    action: 'SELL',
+  })).filter(m => m.value != null);
+
+  const option = {
+    backgroundColor: 'transparent',
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'cross', lineStyle: { type: 'dashed' } },
+      formatter: params => {
+        const date = params[0]?.name;
+        if (!date) return '';
+        let html = `<div style="font-weight:600;margin-bottom:4px">${date}</div>`;
+        params.forEach(p => {
+          if (p.seriesName === '持仓数量') return;
+          const sign = p.value >= 0 ? '+' : '';
+          html += `<div><span style="color:${p.color}">●</span> ${p.seriesName}：<b>${sign}${typeof p.value === 'number' ? p.value.toFixed(2) : p.value}%</b></div>`;
+        });
+        // 附加买卖点信息
+        const buys = buyMarkers.filter(m => m.date === date);
+        const sells = sellMarkers.filter(m => m.date === date);
+        buys.forEach(b => {
+          html += `<div style="color:#cf1322;font-size:12px;margin-top:2px">▲ 买入 ${b.symbol} ${b.name}  ${b.price}元 × ${b.amount}股</div>`;
+        });
+        sells.forEach(s => {
+          html += `<div style="color:#52c41a;font-size:12px;margin-top:2px">▼ 卖出 ${s.symbol} ${s.name}  ${s.price}元 × ${s.amount}股</div>`;
+        });
+        return html;
+      },
+    },
+    legend: {
+      data: ['策略净值(%)', '持仓数量'],
+      top: 4,
+      textStyle: { color: '#666' },
+    },
+    grid: [
+      { left: 56, right: 16, top: 40, bottom: 100 },
+      { left: 56, right: 16, top: '75%', height: 50 },
+    ],
+    xAxis: [
+      {
+        type: 'category', data: dates,
+        axisLabel: { show: false }, boundaryGap: false, gridIndex: 0,
+      },
+      {
+        type: 'category', data: dates,
+        axisLabel: { rotate: 30, fontSize: 10, color: '#888' }, boundaryGap: false, gridIndex: 1,
+      },
+    ],
+    yAxis: [
+      {
+        type: 'value', name: '收益率(%)',
+        axisLabel: { formatter: v => `${v > 0 ? '+' : ''}${v.toFixed(0)}%`, color: '#888' },
+        splitLine: { lineStyle: { color: '#f0f0f0', type: 'dashed' } }, gridIndex: 0,
+      },
+      {
+        type: 'value', name: '持仓数',
+        axisLabel: { formatter: v => String(Math.round(v)), color: '#888' },
+        splitLine: { show: false }, gridIndex: 1,
+      },
+    ],
+    dataZoom: [
+      { type: 'inside', xAxisIndex: [0, 1], throttle: 50 },
+      { type: 'slider', xAxisIndex: [0, 1], height: 20, bottom: 8 },
+    ],
+    series: [
+      // 主图 - 净值收益曲线
+      {
+        name: '策略净值(%)',
+        type: 'line', data: curveReturns,
+        smooth: true, lineStyle: { color: '#cf1322', width: 2 },
+        symbol: 'none', xAxisIndex: 0, yAxisIndex: 0,
+      },
+      // 买卖点 - 买入（红色三角）
+      ...buyMarkers.map((m, idx) => ({
+        name: '买入-' + idx, type: 'scatter',
+        data: [[m.date, m.value]],
+        xAxisIndex: 0, yAxisIndex: 0,
+        symbol: 'triangle', symbolSize: 10,
+        itemStyle: { color: '#cf1322', borderColor: '#fff', borderWidth: 1 },
+        tooltip: { show: false },
+      })),
+      // 买卖点 - 卖出（绿色三角）
+      ...sellMarkers.map((m, idx) => ({
+        name: '卖出-' + idx, type: 'scatter',
+        data: [[m.date, m.value]],
+        xAxisIndex: 0, yAxisIndex: 0,
+        symbol: 'triangle', symbolSize: 10,
+        itemStyle: { color: '#52c41a', borderColor: '#fff', borderWidth: 1 },
+        tooltip: { show: false },
+      })),
+      // 子图 - 持仓数量
+      {
+        name: '持仓数量', type: 'line', data: posCountSeries,
+        smooth: true, lineStyle: { color: '#1677ff', width: 1.5 },
+        symbol: 'none', xAxisIndex: 1, yAxisIndex: 1,
+        areaStyle: { color: 'rgba(22,119,255,0.06)' },
+      },
+    ],
+  };
+
+  return <ReactECharts option={option} style={{ height: 420 }} />;
+}
+
+
 // ─── Brinson 归因分析 ────────────────────────────────────────────────────────
 
 /** 归因汇总卡片 */
@@ -887,6 +1037,19 @@ export default function BacktestReport() {
       children: (
         <Card title="交易记录" size="small">
           <TradeTable tradeLogJson={report?.tradeLogJson} />
+        </Card>
+      ),
+    },
+    {
+      key: 'position',
+      label: '持仓过程',
+      children: (
+        <Card title="持仓过程点位图" size="small">
+          <PositionProcessChart
+            equityCurveJson={report?.equityCurveJson}
+            tradeLogJson={report?.tradeLogJson}
+            positionHistoryJson={report?.positionHistoryJson}
+          />
         </Card>
       ),
     },

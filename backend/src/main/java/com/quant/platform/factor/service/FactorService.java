@@ -3,6 +3,7 @@ package com.quant.platform.factor.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quant.platform.common.exception.BusinessException;
 import com.quant.platform.common.exception.ResourceNotFoundException;
 import com.quant.platform.config.ClickHouseConfig;
@@ -24,7 +25,10 @@ import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -551,46 +555,28 @@ public class FactorService {
      */
     public List<FactorValue> getFactorTimeSeries(String factorCode, String symbol,
                                                  LocalDate start, LocalDate end) {
-        // 优先从 ClickHouse 读取，失败时回退 MySQL
-        if (clickHouseConfig.isEnabled()) {
-            try {
-                List<FactorValue> result = clickHouseFactorValueService
-                        .findByFactorCodeAndDateRange(factorCode, start, end);
-                if (!result.isEmpty()) {
-                    return result.stream()
-                            .filter(fv -> fv.getSymbol().equals(symbol))
-                            .toList();
-                }
-            } catch (Exception e) {
-                log.warn("[ClickHouse] 因子时间序列查询失败，回退 MySQL: {}", e.getMessage());
-            }
-        }
-        return factorValueMapper.findByFactorCodeAndSymbol(factorCode, symbol);
+        List<FactorValue> result = clickHouseFactorValueService
+                .findByFactorCodeAndDateRange(factorCode, start, end);
+        return result.stream()
+                .filter(fv -> fv.getSymbol().equals(symbol))
+                .toList();
     }
 
     /**
      * 查询该因子有数据的股票列表（带名称），支持关键词搜索，最多返回 50 条
-     * 优先从 ClickHouse 读取
+     * 全部走 ClickHouse
      */
     public List<Map<String, String>> getFactorSymbols(String factorCode, String keyword) {
-        // 1. 查 factor_value 表中该因子有哪些 symbol（优先 CH）
+        // 1. 从 CH 获取该因子有数据的股票列表
         Set<String> factorSymbols;
-        if (clickHouseConfig.isEnabled()) {
-            try {
-                List<FactorValue> values = clickHouseFactorValueService
-                        .findByFactorCodeAndDateRange(factorCode, LocalDate.of(2000, 1, 1), LocalDate.now());
-                if (!values.isEmpty()) {
-                    factorSymbols = values.stream()
-                            .map(FactorValue::getSymbol)
-                            .collect(java.util.stream.Collectors.toSet());
-                } else {
-                    factorSymbols = getFactorSymbolsFromMySQL(factorCode);
-                }
-            } catch (Exception e) {
-                log.warn("[ClickHouse] 因子股票列表查询失败，回退 MySQL: {}", e.getMessage());
-                factorSymbols = getFactorSymbolsFromMySQL(factorCode);
-            }
-        } else {
+        try {
+            List<FactorValue> values = clickHouseFactorValueService
+                    .findByFactorCodeAndDateRange(factorCode, LocalDate.of(2000, 1, 1), LocalDate.now());
+            factorSymbols = values.stream()
+                    .map(FactorValue::getSymbol)
+                    .collect(java.util.stream.Collectors.toSet());
+        } catch (Exception e) {
+            log.warn("[FactorService] getFactorSymbols CH 失败: {}", e.getMessage());
             factorSymbols = getFactorSymbolsFromMySQL(factorCode);
         }
 
@@ -638,24 +624,10 @@ public class FactorService {
 
     /**
      * 获取某日因子截面数据（带股票名称），按因子值降序，分页返回
-     * 优先从 ClickHouse 读取
+     * 全部走 ClickHouse
      */
     public Map<String, Object> getFactorCrossSection(String factorCode, LocalDate date, int page, int size) {
-        // 优先从 ClickHouse 读取
-        List<FactorValue> values;
-        if (clickHouseConfig.isEnabled()) {
-            try {
-                values = clickHouseFactorValueService.findByFactorCodeAndDate(factorCode, date);
-                if (values.isEmpty()) {
-                    values = factorValueMapper.findByFactorCodeAndDate(factorCode, date);
-                }
-            } catch (Exception e) {
-                log.warn("[ClickHouse] 因子截面数据查询失败，回退 MySQL: {}", e.getMessage());
-                values = factorValueMapper.findByFactorCodeAndDate(factorCode, date);
-            }
-        } else {
-            values = factorValueMapper.findByFactorCodeAndDate(factorCode, date);
-        }
+        List<FactorValue> values = clickHouseFactorValueService.findByFactorCodeAndDate(factorCode, date);
 
         // 批量查询股票名称：从 symbol（如 000001.SZ）中提取 code，关联 stock_info
         Set<String> allSymbols = values.stream()
@@ -793,37 +765,207 @@ public class FactorService {
     }
 
     /**
-     * 从 DB/CH 加载监控数据（抽出为独立方法，便于维护）
+     * 从 ClickHouse 加载监控数据
      */
     private Map<String, Object> loadMonitorDataFromDb() {
         long start = System.currentTimeMillis();
-        if (clickHouseConfig.isEnabled()) {
+        log.info("[loadMonitorData] querying ClickHouse...");
+        long total = clickHouseFactorValueService.selectTotalCount();
+        List<Map<String, Object>> stats = clickHouseFactorValueService.selectFactorStats();
+        log.info("[loadMonitorData] CH done, total={}, stats={}, cost={}ms",
+                total, stats.size(), System.currentTimeMillis() - start);
+        return Map.of("totalRecords", total, "factors", stats);
+    }
+
+    /**
+     * 缠论因子筛选
+     * @param penDirList   笔方向过滤（+1/-1，null=不过滤）
+     * @param trendList    走势类型（1/0/-1，null=不过滤）
+     * @param buySellList  买卖点（1~3/-1~-3，null=不过滤）
+     * @param hubPosMin    中枢位置下限（0~1，null=不过滤）
+     * @param hubPosMax    中枢位置上限
+     * @param penCountMin  笔数量下限（null=不过滤）
+     * @param penCountMax  笔数量上限
+     * @param keyword      股票代码/名称关键词（null=不过滤）
+     * @param page         页码（0-based）
+     * @param size         每页条数
+     * @return { list: 当前页数据, total: 符合条件总数 }
+     */
+    public Map<String, Object> chanScreen(
+            List<Integer> penDirList,
+            List<Integer> trendList,
+            List<Integer> buySellList,
+            BigDecimal hubPosMin,
+            BigDecimal hubPosMax,
+            BigDecimal penCountMin,
+            BigDecimal penCountMax,
+            String keyword,
+            int page,
+            int size) {
+
+        // 从 factor_definition 动态查询所有激活的缠论因子代码
+        List<FactorDefinition> chanFactors = factorMapper.selectList(
+                new LambdaQueryWrapper<FactorDefinition>()
+                        .eq(FactorDefinition::getCategory, FactorDefinition.FactorCategory.CHANTHEORY)
+                        .eq(FactorDefinition::getStatus, FactorDefinition.FactorStatus.ACTIVE)
+                        .orderByAsc(FactorDefinition::getId)
+        );
+
+        if (chanFactors.isEmpty()) {
+            log.warn("[FactorService] chanScreen: 未找到激活的缠论因子，返回空结果");
+            return Map.of("list", List.of(), "total", 0);
+        }
+
+        List<String> factorCodes = chanFactors.stream()
+                .map(FactorDefinition::getFactorCode)
+                .toList();
+
+        List<Map<String, Object>> all = clickHouseFactorValueService.chanScreen(
+                penDirList, trendList, buySellList,
+                hubPosMin, hubPosMax, penCountMin, penCountMax, keyword,
+                factorCodes);
+
+        int total = all.size();
+        int fromIndex = Math.min(page * size, total);
+        int toIndex   = Math.min((page + 1) * size, total);
+        List<Map<String, Object>> pageList = all.subList(fromIndex, toIndex);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("list", pageList);
+        result.put("total", total);
+        return result;
+    }
+
+    /**
+     * 缠论筛选元数据：动态获取所有缠论因子定义，供前端动态渲染筛选控件和表格列
+     * 从 factor_definition 表查询 CHANTHEORY 类别的激活因子
+     * 因子配置从 parameters_json 字段读取，格式：
+     * { "screenable": true, "controlType": "enum|slider|input", "options": [...], "min": 0, "max": 1 }
+     */
+    public Map<String, Object> getChanScreenMeta() {
+        // 1. 查询所有激活的缠论因子
+        List<FactorDefinition> chanFactors = factorMapper.selectList(
+                new LambdaQueryWrapper<FactorDefinition>()
+                        .eq(FactorDefinition::getCategory, FactorDefinition.FactorCategory.CHANTHEORY)
+                        .eq(FactorDefinition::getStatus, FactorDefinition.FactorStatus.ACTIVE)
+                        .orderByAsc(FactorDefinition::getId)
+        );
+
+        if (chanFactors.isEmpty()) {
+            return Map.of("factors", List.of(), "columns", List.of());
+        }
+
+        // 2. 解析 parameters_json，构建前端控件配置
+        List<Map<String, Object>> factorConfigs = new ArrayList<>();
+        List<Map<String, Object>> columnConfigs = new ArrayList<>();
+
+        for (FactorDefinition f : chanFactors) {
+            String code = f.getFactorCode();
+            Map<String, Object> screenConfig = parseScreenConfig(f.getParametersJson(), code);
+
+            Map<String, Object> factorConfig = new LinkedHashMap<>();
+            factorConfig.put("code", code);
+            factorConfig.put("name", f.getFactorName());
+            factorConfig.put("description", f.getDescription());
+            factorConfig.put("controlType", screenConfig.get("controlType"));
+            factorConfig.put("options", screenConfig.get("options"));
+            factorConfig.put("min", screenConfig.get("min"));
+            factorConfig.put("max", screenConfig.get("max"));
+            factorConfigs.add(factorConfig);
+
+            // 表格列配置（固定基础列 + 动态因子列）
+            Map<String, Object> col = new LinkedHashMap<>();
+            col.put("key", code.toLowerCase().replace("chan_", "chan_"));
+            col.put("dataIndex", code.toLowerCase());
+            col.put("title", f.getFactorName());
+            col.put("controlType", screenConfig.get("controlType"));
+            columnConfigs.add(col);
+        }
+
+        // 3. 返回元数据
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("factors", factorConfigs);
+        result.put("columns", columnConfigs);
+        return result;
+    }
+
+    /**
+     * 解析因子的筛选配置
+     * 优先从 parameters_json 读取，否则根据因子代码约定推断
+     */
+    private Map<String, Object> parseScreenConfig(String paramsJson, String code) {
+        Map<String, Object> config = new LinkedHashMap<>();
+
+        // 默认：连续值滑块
+        config.put("controlType", "slider");
+        config.put("min", 0);
+        config.put("max", 100);
+        config.put("options", List.of());
+
+        if (paramsJson != null && !paramsJson.isBlank()) {
             try {
-                log.info("[loadMonitorData] trying ClickHouse...");
-                long t0 = System.currentTimeMillis();
-                long total = clickHouseFactorValueService.selectTotalCount();
-                log.info("[loadMonitorData] CH selectTotalCount cost={}ms, total={}", System.currentTimeMillis() - t0, total);
-                t0 = System.currentTimeMillis();
-                List<Map<String, Object>> stats = clickHouseFactorValueService.selectFactorStats();
-                log.info("[loadMonitorData] CH selectFactorStats cost={}ms, size={}", System.currentTimeMillis() - t0, stats.size());
-                // CH 查询失败或返回空时回退 MySQL
-                if (stats.isEmpty()) {
-                    total = factorValueMapper.selectTotalCount();
-                    stats = factorValueMapper.selectFactorStats();
+                com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+                Map<String, Object> params = mapper.readValue(paramsJson, Map.class);
+                Map<String, Object> screen = (Map<String, Object>) params.get("screen");
+                if (screen != null) {
+                    if (screen.get("controlType") != null) {
+                        config.put("controlType", screen.get("controlType"));
+                    }
+                    if (screen.get("options") != null) {
+                        config.put("options", screen.get("options"));
+                    }
+                    if (screen.get("min") != null) {
+                        config.put("min", ((Number) screen.get("min")).doubleValue());
+                    }
+                    if (screen.get("max") != null) {
+                        config.put("max", ((Number) screen.get("max")).doubleValue());
+                    }
+                    return config;
                 }
-                log.info("[loadMonitorData] CH done, total cost={}ms", System.currentTimeMillis() - start);
-                return Map.of("totalRecords", total, "factors", stats);
             } catch (Exception e) {
-                log.warn("[ClickHouse] 监控数据查询失败，回退 MySQL: {} (cost={}ms)", e.getMessage(), System.currentTimeMillis() - start);
+                log.warn("[getChanScreenMeta] 解析 parameters_json 失败: {} -> {}", code, e.getMessage());
             }
         }
-        log.info("[loadMonitorData] using MySQL...");
-        long t0 = System.currentTimeMillis();
-        long total = factorValueMapper.selectTotalCount();
-        log.info("[loadMonitorData] MySQL selectTotalCount cost={}ms", System.currentTimeMillis() - t0);
-        t0 = System.currentTimeMillis();
-        List<Map<String, Object>> stats = factorValueMapper.selectFactorStats();
-        log.info("[loadMonitorData] MySQL selectFactorStats cost={}ms, size={}, total cost={}ms", System.currentTimeMillis() - t0, stats.size(), System.currentTimeMillis() - start);
-        return Map.of("totalRecords", total, "factors", stats);
+
+        // 根据因子代码约定推断（兼容现有因子）
+        switch (code) {
+            case "CHAN_PEN_DIR" -> {
+                config.put("controlType", "checkbox");
+                config.put("options", List.of(
+                        Map.of("label", "上升笔 ▲", "value", 1),
+                        Map.of("label", "下降笔 ▼", "value", -1)
+                ));
+            }
+            case "CHAN_TREND" -> {
+                config.put("controlType", "checkbox");
+                config.put("options", List.of(
+                        Map.of("label", "上涨", "value", 1),
+                        Map.of("label", "盘整", "value", 0),
+                        Map.of("label", "下跌", "value", -1)
+                ));
+            }
+            case "CHAN_BUY_SELL" -> {
+                config.put("controlType", "checkbox");
+                config.put("options", List.of(
+                        Map.of("label", "1买", "value", 1),
+                        Map.of("label", "2买", "value", 2),
+                        Map.of("label", "3买", "value", 3),
+                        Map.of("label", "1卖", "value", -1),
+                        Map.of("label", "2卖", "value", -2),
+                        Map.of("label", "3卖", "value", -3)
+                ));
+            }
+            case "CHAN_HUB_POS" -> {
+                config.put("controlType", "slider");
+                config.put("min", 0.0);
+                config.put("max", 1.0);
+            }
+            case "CHAN_PEN_COUNT" -> {
+                config.put("controlType", "slider");
+                config.put("min", 1.0);
+                config.put("max", 100.0);
+            }
+        }
+        return config;
     }
 }

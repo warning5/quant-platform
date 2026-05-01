@@ -42,6 +42,7 @@ import traceback
 
 import requests
 import pymysql
+import clickhouse_connect
 
 # ─── 数据库配置 ──────────────────────────────────────────────
 DB_CONFIG = dict(
@@ -52,6 +53,15 @@ DB_CONFIG = dict(
     password="123456",
     charset="utf8mb4",
     cursorclass=pymysql.cursors.DictCursor,
+)
+
+# ClickHouse 配置
+CH_CONFIG = dict(
+    host="localhost",
+    port=8123,
+    username="default",
+    password="123456",
+    database="stock",
 )
 
 # 腾讯财经接口
@@ -322,12 +332,108 @@ def batch_update_db(conn, stocks_data: dict, old_vals: dict, dry_run: bool = Fal
 
     conn.commit()
 
-    # 输出变更统计（便于后端解析）
-    parts = [f"{FIELD_LABELS[k]}:{v}" for k, v in change_counts.items() if v > 0]
-    if parts:
-        print(f"[FIELD_CHANGES] {' | '.join(parts)}")
+    # 输出变更统计（始终显示所有字段，0 变更的也输出）
+    parts = [f"{FIELD_LABELS[k]}:{v}" for k, v in change_counts.items()]
+    print(f"[FIELD_CHANGES] {' | '.join(parts)}")
 
     return ok, miss, err, change_counts
+
+
+# ─── ClickHouse 双写 ───────────────────────────────────────────────────────────
+def _ch_batch_update_stock_info(conn, stocks_data: dict, dry_run: bool = False) -> int:
+    """
+    ClickHouse 双写：以 MySQL 全量为基准，用 stocks_data 覆盖最新值。
+    确保所有股票都写入 CH（API 拉取失败的用 MySQL 旧值兜底）。
+    """
+    now = datetime.datetime.now()
+
+    # 1. 从 MySQL 加载全量 stock_info（不含 symbol，MySQL 无此列）
+    mysql_rows = []
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, code, name, market, industry, list_date, is_hs, is_st, "
+            "total_share, float_share, total_market_cap, float_market_cap, "
+            "pe_ttm, pb, create_time, update_time "
+            "FROM stock_info ORDER BY code"
+        )
+        mysql_rows = cur.fetchall()
+
+    if not mysql_rows:
+        print("[CH] MySQL 中无数据，跳过 CH 双写")
+        return 0
+
+    # 2. 构建 CH rows，用 stocks_data 覆盖最新值
+    rows = []
+    for r in mysql_rows:
+        code = r["code"]
+        d = stocks_data.get(code, {})
+
+        new_name = d.get("name") or r["name"]
+        new_is_st = is_st_stock(new_name or "")
+        m = r["market"] or ""
+
+        pe = d.get("pe_ttm")
+        pb = d.get("pb")
+        pe_final = float(pe) if pe is not None else (float(r["pe_ttm"]) if r["pe_ttm"] is not None else 0.0)
+        pb_final = float(pb) if pb is not None else (float(r["pb"]) if r["pb"] is not None else 0.0)
+
+        # symbol: MySQL 无此列，实时计算
+        sym = f"{code}.{m}" if m else code
+
+        rows.append([
+            r["id"] if r["id"] is not None else 0,
+            code,
+            new_name or "",
+            m,
+            r["industry"] or "",
+            r["list_date"] or datetime.date(1970, 1, 1),
+            r["is_hs"] if r["is_hs"] is not None else 0,
+            new_is_st,
+            float(r["total_share"] or 0),
+            float(r["float_share"] or 0),
+            float(d.get("total_market_cap") or r["total_market_cap"] or 0),
+            float(d.get("float_market_cap") or r["float_market_cap"] or 0),
+            pe_final,
+            pb_final,
+            r["create_time"],
+            now,
+            sym,
+        ])
+
+    if dry_run:
+        print(f"[DRY-RUN] ClickHouse 模拟写入 {len(rows)} 条（MySQL 全量 {len(mysql_rows)} 条）")
+        return len(rows)
+
+    try:
+        ch = clickhouse_connect.get_client(**CH_CONFIG)
+
+        # 删除所有 MySQL 中存在的 code
+        codes_to_del = [r["code"] for r in mysql_rows]
+        for i in range(0, len(codes_to_del), 500):
+            chunk = codes_to_del[i:i + 500]
+            ph = ", ".join(f"'{c}'" for c in chunk)
+            ch.command(f"ALTER TABLE stock_info DELETE WHERE code IN ({ph})")
+
+        # 批量写入
+        ch.insert(
+            "stock_info",
+            rows,
+            column_names=[
+                "id", "code", "name", "market", "industry",
+                "list_date", "is_hs", "is_st",
+                "total_share", "float_share",
+                "total_market_cap", "float_market_cap",
+                "pe_ttm", "pb",
+                "create_time", "update_time", "symbol",
+            ]
+        )
+        ch.close()
+        print(f"[CH] ClickHouse 双写完成 {len(rows)} 条（MySQL 全量兜底）")
+        return len(rows)
+    except Exception as e:
+        print(f"[ERROR] ClickHouse 双写失败: {e}")
+        traceback.print_exc()
+        return 0
 
 
 # ─── 主流程 ───────────────────────────────────────────────────
@@ -377,6 +483,10 @@ def main():
 
         # 3. 写入数据库（含变更统计）
         ok, miss, err, change_counts = batch_update_db(conn, stocks_data, old_vals, dry_run=args.dry_run)
+
+        # 4. ClickHouse 双写（以 MySQL 全量兜底）
+        if not args.dry_run:
+            _ch_batch_update_stock_info(conn, stocks_data, dry_run=False)
 
         elapsed = (datetime.datetime.now() - start).total_seconds()
         print("=" * 65)

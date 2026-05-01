@@ -15,6 +15,7 @@ import {
   ManualFactors,
   ManualFactorMonitor,
   ManualFactorDetail,
+  ManualFactorCreate,
 } from './sections/ManualFactorComponents';
 import {
   ManualFactorTest,
@@ -33,6 +34,7 @@ import {
   ManualFromBacktestToTrading,
   ManualFactorWeightOptimize,
 } from './sections/ManualParamOptimize';
+import { ManualChanScreen } from './sections/ManualChanScreen';
 
 const { Title, Text } = Typography;
 
@@ -91,6 +93,8 @@ export default function Manual() {
         { key: 'factor-correlation', label: '因子相关性分析', onClick: () => scrollToSection('factor-correlation') },
         { key: 'factor-strategy', label: '因子策略', onClick: () => scrollToSection('factor-strategy') },
         { key: 'factor-weight-optimize', label: '因子权重', onClick: () => scrollToSection('factor-weight-optimize') },
+        { key: 'factor-create', label: '新建因子', onClick: () => scrollToSection('factor-create') },
+        { key: 'chan-screen', label: '缠论结构筛选', onClick: () => scrollToSection('chan-screen') },
       ],
     },
     {
@@ -136,6 +140,7 @@ export default function Manual() {
         <ManualOverview />
         <ManualMarket />
         <ManualDataUpdate />
+        <ManualFinancial />
         <ManualFactors />
         <ManualFactorMonitor />
         <ManualFactorDetail />
@@ -150,6 +155,8 @@ export default function Manual() {
         <ManualParamOptimize />
         <ManualFromBacktestToTrading />
         <ManualFactorWeightOptimize />
+        <ManualFactorCreate />
+        <ManualChanScreen />
       </Card>
 
       <FloatButton.BackTop />

@@ -144,7 +144,7 @@ export default function BacktestCompare() {
   useEffect(() => {
     setLoadingTasks(true);
     backtestApi.list({ page: 0, size: 100, status: 'COMPLETED' })
-      .then(res => setTasks(res.data?.records || []))
+      .then(res => setTasks(res?.records || []))
       .catch(() => {})
       .finally(() => setLoadingTasks(false));
   }, []);
@@ -154,7 +154,7 @@ export default function BacktestCompare() {
     setLoading(true);
     setError(null);
     backtestApi.compare(selectedIds)
-      .then(res => setCompareResult(res.data))
+      .then(res => setCompareResult(res))
       .catch(e => setError(e.message || '对比失败'))
       .finally(() => setLoading(false));
   };

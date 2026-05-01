@@ -5,56 +5,16 @@ import com.quant.platform.factor.domain.FactorValue;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
-import org.apache.ibatis.annotations.Select;
 
-import java.time.LocalDate;
 import java.util.List;
-import java.util.Map;
 
 /**
- * 因子值Mapper
+ * 因子值 Mapper
+ * 注意：查询全部走 ClickHouse（FactorService / ClickHouseFactorValueService）
+ * 此处仅保留写入方法
  */
 @Mapper
 public interface FactorValueMapper extends BaseMapper<FactorValue> {
-
-    /**
-     * 根据因子代码和日期查询因子值
-     */
-    @Select("SELECT * FROM factor_value WHERE factor_code = #{factorCode} AND calc_date = #{calcDate} ORDER BY symbol")
-    List<FactorValue> findByFactorCodeAndDate(
-            @Param("factorCode") String factorCode,
-            @Param("calcDate") LocalDate calcDate);
-
-    /**
-     * 根据因子代码和日期范围查询因子值
-     */
-    @Select("SELECT * FROM factor_value WHERE factor_code = #{factorCode} AND calc_date BETWEEN #{startDate} AND #{endDate} ORDER BY calc_date, symbol")
-    List<FactorValue> findByFactorCodeAndDateRange(
-            @Param("factorCode") String factorCode,
-            @Param("startDate") LocalDate startDate,
-            @Param("endDate") LocalDate endDate);
-
-    /**
-     * 根据日期查询所有因子值
-     */
-    @Select("SELECT * FROM factor_value WHERE calc_date = #{calcDate} ORDER BY factor_code, symbol")
-    List<FactorValue> findByDate(@Param("calcDate") LocalDate calcDate);
-
-    /**
-     * 根据因子代码和股票查询因子值历史
-     */
-    @Select("SELECT * FROM factor_value WHERE factor_code = #{factorCode} AND symbol = #{symbol} ORDER BY calc_date DESC")
-    List<FactorValue> findByFactorCodeAndSymbol(
-            @Param("factorCode") String factorCode,
-            @Param("symbol") String symbol);
-
-    /**
-     * 批量查询多个因子的最新值
-     */
-    @Select("SELECT * FROM factor_value WHERE factor_code IN (${factorCodes}) AND calc_date = #{calcDate} ORDER BY factor_code, symbol")
-    List<FactorValue> findByFactorCodesAndDate(
-            @Param("factorCodes") String factorCodes,
-            @Param("calcDate") LocalDate calcDate);
 
     /**
      * INSERT ... ON DUPLICATE KEY UPDATE（配合唯一索引 uk_factor_symbol_date）
@@ -76,34 +36,4 @@ public interface FactorValueMapper extends BaseMapper<FactorValue> {
             " ON DUPLICATE KEY UPDATE factor_val=VALUES(factor_val), z_score=VALUES(z_score), rank_value=VALUES(rank_value)" +
             "</script>")
     int batchUpsert(@Param("list") List<FactorValue> list);
-
-    /**
-     * 按因子代码聚合统计：记录数、最早日期、最新日期、交易日数、股票数
-     */
-    @Select("SELECT factor_code, COUNT(*) AS cnt, " +
-            "MIN(calc_date) AS min_date, MAX(calc_date) AS max_date, " +
-            "COUNT(DISTINCT calc_date) AS days, COUNT(DISTINCT symbol) AS stocks " +
-            "FROM factor_value GROUP BY factor_code")
-    List<Map<String, Object>> selectFactorStats();
-
-    /**
-     * 批量查询指定因子代码的计算日期范围（min/max calc_date）
-     * 用于因子列表页展示数据覆盖范围
-     */
-    @Select("<script>" +
-            "SELECT factor_code, MIN(calc_date) AS min_date, MAX(calc_date) AS max_date " +
-            "FROM factor_value " +
-            "WHERE factor_code IN " +
-            "<foreach collection='codes' item='c' open='(' separator=',' close=')'>" +
-            "#{c}" +
-            "</foreach>" +
-            " GROUP BY factor_code" +
-            "</script>")
-    List<Map<String, Object>> selectDateRangeByFactorCodes(@Param("codes") List<String> codes);
-
-    /**
-     * 全表总记录数（不走 MyBatis-Plus 避免全量查询）
-     */
-    @Select("SELECT COUNT(*) FROM factor_value")
-    long selectTotalCount();
 }

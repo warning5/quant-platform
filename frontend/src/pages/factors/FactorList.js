@@ -3,22 +3,10 @@ import { Table, Tag, Button, Space, Input, Select, Card, Typography, Popconfirm,
 import { PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined, PlayCircleOutlined, ClearOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { factorApi } from '../../api';
+import { CATEGORY_OPTIONS, CATEGORY_LABELS } from './constants';
 
 const { Title } = Typography;
 const { Option } = Select;
-
-const CATEGORY_OPTIONS = ['MOMENTUM','VALUE','QUALITY','VOLATILITY','TECHNICAL','FUNDAMENTAL','SENTIMENT','CHANTHEORY','CUSTOM'];
-const CATEGORY_LABELS = {
-  MOMENTUM: '动量',
-  VALUE: '价值',
-  QUALITY: '质量',
-  VOLATILITY: '波动率',
-  TECHNICAL: '技术',
-  FUNDAMENTAL: '基本面',
-  SENTIMENT: '情绪',
-  CHANTHEORY: '缠论',
-  CUSTOM: '自定义',
-};
 const STATUS_COLORS = { DRAFT:'default', TESTING:'processing', ACTIVE:'success', DEPRECATED:'default' };
 const STATUS_LABELS = { DRAFT:'草稿', TESTING:'测试中', ACTIVE:'已激活', DEPRECATED:'已废弃' };
 const TYPE_LABELS = { BUILTIN:'内置', SCRIPTED:'脚本', COMPOSITE:'合成' };

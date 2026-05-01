@@ -26,6 +26,7 @@ import BacktestCompare from './pages/backtest/BacktestCompare';
 import ParamOptimize from './pages/backtest/ParamOptimize';
 import FactorWeightOptimize from './pages/factors/FactorWeightOptimize';
 import StockScreen from './pages/screen/StockScreen';
+import ChanScreen from './pages/chan/ChanScreen';
 import Manual from './pages/manual/Manual';
 import FinancialData from './pages/financial/FinancialData';
 import DataUpdate from './pages/dataupdate/DataUpdate';
@@ -52,6 +53,7 @@ function AppLayout() {
         { key: '/factor-monitor', label: <Link to="/factor-monitor">因子计算</Link> },
         { key: '/factor-correlation', label: <Link to="/factor-correlation">因子相关性</Link> },
         { key: '/factor-weight-optimize', label: <Link to="/factor-weight-optimize">权重优化</Link> },
+        { key: '/chan-screen', label: <Link to="/chan-screen">缠论筛选</Link> },
         { key: '/screen', label: <Link to="/screen">因子策略</Link> },
       ],
     },
@@ -196,6 +198,7 @@ function AppLayout() {
             <Route path="/backtests/:taskId/running" element={<BacktestRunning />} />
             <Route path="/backtests/:taskId/report" element={<BacktestReport />} />
             <Route path="/factor-weight-optimize" element={<FactorWeightOptimize defaultFactorCodes={[]} />} />
+            <Route path="/chan-screen" element={<ChanScreen />} />
             <Route path="/screen" element={<StockScreen />} />
             <Route path="/manual" element={<Manual />} />
             <Route path="*" element={<Navigate to="/" replace />} />

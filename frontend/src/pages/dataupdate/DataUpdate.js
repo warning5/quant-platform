@@ -365,7 +365,6 @@ function DataUpdate() {
               if (msg.startTime !== undefined) t.startTime = msg.startTime;
               if (msg.endTime !== undefined) t.endTime = msg.endTime;
               if (msg.error !== undefined) t.error = msg.error;
-              if (msg.fieldChanges !== undefined) t.fieldChanges = msg.fieldChanges;
               t.updateType = ut;
               // 保存配置信息用于展示
               if (msg.market !== undefined) t.configMarket = msg.market;
@@ -721,17 +720,6 @@ function DataUpdate() {
         </Card>
         {/* 进度条 */}
         {renderProgressBar(dailyTask)}
-        {/* 字段变更统计 */}
-        {dailyTask?.fieldChanges && Object.keys(dailyTask.fieldChanges).length > 0 && (
-          <Card size="small" style={{ marginBottom: 8 }}>
-            <Space wrap>
-              <Text type="secondary" style={{ fontSize: 13 }}>字段变更统计:</Text>
-              {Object.entries(dailyTask.fieldChanges).map(([field, count]) => (
-                <Tag key={field} color="blue">{field}: {count}只</Tag>
-              ))}
-            </Space>
-          </Card>
-        )}
         {/* 日志 - 始终显示 */}
         <Card title={<span>更新日志 <Text type="secondary" style={{ fontSize: 12 }}>({dailyLogs.length} 条)</Text>{renderTaskConfig(dailyTask, 'DAILY')}</span>}
           size="small" extra={<Button size="small" onClick={() => setDailyLogs([])}>清空</Button>}>

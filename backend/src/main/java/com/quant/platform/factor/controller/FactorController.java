@@ -17,6 +17,7 @@ import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.web.bind.annotation.*;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
@@ -266,5 +267,36 @@ public class FactorController {
         List<String> codes = Arrays.asList(factorCodes.split(","));
         return ApiResponse.success(
                 factorWeightOptimizeService.optimize(codes, startDate, endDate, method));
+    }
+
+    @GetMapping("/chan-screen/meta")
+    @Operation(summary = "缠论筛选元数据：动态获取所有缠论因子定义（代码/名称/筛选控件类型）")
+    public ApiResponse<Map<String, Object>> chanScreenMeta() {
+        return ApiResponse.success(factorService.getChanScreenMeta());
+    }
+
+    // ── 缠论因子筛选（P1）────────────────────────────────────────────
+    /**
+     * 缠论因子筛选
+     * GET /factors/chan-screen?penDir=1,-1&trend=1,0,-1&buySell=1,2,-1&hubPosMin=0&hubPosMax=1&penCountMin=1&penCountMax=20&keyword=&page=0&size=20
+     */
+    @GetMapping("/chan-screen")
+    @Operation(summary = "缠论因子筛选（P1）：按笔方向/走势类型/买卖点/中枢位置/笔数量筛选")
+    public ApiResponse<Map<String, Object>> chanScreen(
+            @RequestParam(required = false) List<Integer> penDir,
+            @RequestParam(required = false) List<Integer> trend,
+            @RequestParam(required = false) List<Integer> buySell,
+            @RequestParam(required = false) BigDecimal hubPosMin,
+            @RequestParam(required = false) BigDecimal hubPosMax,
+            @RequestParam(required = false) BigDecimal penCountMin,
+            @RequestParam(required = false) BigDecimal penCountMax,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return ApiResponse.success(
+                factorService.chanScreen(
+                        penDir, trend, buySell,
+                        hubPosMin, hubPosMax, penCountMin, penCountMax,
+                        keyword, page, size));
     }
 }

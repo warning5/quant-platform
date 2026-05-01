@@ -5,6 +5,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.sql.*;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -126,6 +127,140 @@ public class ClickHouseFactorValueService {
             throw new RuntimeException("ClickHouse 批量状态查询失败", e);
         }
         return result;
+    }
+
+    /**
+     * 缠论因子筛选 Pivot 查询（CH 版本）
+     * penDir / trend / buySell 传 null 表示不过滤
+     * 动态SQL：自动从 factor_definition 表查询 CHANTHEORY 类别的激活因子，
+     * 动态构建 pivot 列，新增/删除/重命名缠论因子后自动生效。
+     */
+    public List<Map<String, Object>> chanScreen(
+            List<Integer> penDirList,
+            List<Integer> trendList,
+            List<Integer> buySellList,
+            BigDecimal hubPosMin,
+            BigDecimal hubPosMax,
+            BigDecimal penCountMin,
+            BigDecimal penCountMax,
+            String keyword,
+            List<String> factorCodes) {
+        if (!clickHouseConfig.isEnabled()) {
+            return List.of(); // 回退到 Mapper
+        }
+
+        // factorCodes 由调用方（FactorService）从 MySQL 的 factor_definition 表动态传入
+        if (factorCodes == null || factorCodes.isEmpty()) {
+            log.warn("[ClickHouse] chanScreen: 未传入因子代码列表，返回空结果");
+            return List.of();
+        }
+
+        // 2. 构建 IN 子句
+        String factorInClause = factorCodes.stream()
+                .map(c -> "'" + c.replace("'", "''") + "'")
+                .reduce((a, b) -> a + "," + b)
+                .orElse("''");
+
+        // 3. 构造 WHERE 条件片段（兼容现有5个因子的筛选参数）
+        StringBuilder where = new StringBuilder();
+
+        if (penDirList != null && !penDirList.isEmpty()) {
+            String vals = penDirList.stream().map(String::valueOf).reduce((a, b) -> a + "," + b).orElse("");
+            where.append(" AND chan_pen_dir IN (").append(vals).append(")");
+        }
+        if (trendList != null && !trendList.isEmpty()) {
+            String vals = trendList.stream().map(String::valueOf).reduce((a, b) -> a + "," + b).orElse("");
+            where.append(" AND chan_trend IN (").append(vals).append(")");
+        }
+        if (buySellList != null && !buySellList.isEmpty()) {
+            String vals = buySellList.stream().map(String::valueOf).reduce((a, b) -> a + "," + b).orElse("");
+            where.append(" AND chan_buy_sell IN (").append(vals).append(")");
+        }
+        if (hubPosMin != null) {
+            where.append(" AND chan_hub_pos >= ").append(hubPosMin);
+        }
+        if (hubPosMax != null) {
+            where.append(" AND chan_hub_pos <= ").append(hubPosMax);
+        }
+        if (penCountMin != null) {
+            where.append(" AND chan_pen_count >= ").append(penCountMin);
+        }
+        if (penCountMax != null) {
+            where.append(" AND chan_pen_count <= ").append(penCountMax);
+        }
+        if (keyword != null && !keyword.isBlank()) {
+            where.append(" AND (d.symbol LIKE '%").append(keyword.replace("'", "''")).append("%' OR si.name LIKE '%").append(keyword.replace("'", "''")).append("%')");
+        }
+
+        // 5. 拼接完整 SQL（用 StringBuilder 避免模板占位符混淆）
+        String firstFactorCode = factorCodes.getFirst();
+
+        // 构建 pivot 列名（小写）列表，用于 GROUP BY
+        List<String> colAliases = factorCodes.stream().map(String::toLowerCase).toList();
+
+        StringBuilder sqlBuilder = new StringBuilder();
+        sqlBuilder.append("SELECT d.symbol AS ts_code, si.name, d.calc_date");
+        for (String alias : colAliases) {
+            sqlBuilder.append(", d.").append(alias);
+        }
+        sqlBuilder.append("\nFROM (\n");
+        sqlBuilder.append("  SELECT symbol, calc_date");
+        for (String code : factorCodes) {
+            sqlBuilder.append(", maxIf(toFloat64(factor_val), factor_code = '")
+                    .append(code.replace("'", "''"))
+                    .append("') AS ").append(code.toLowerCase());
+        }
+        sqlBuilder.append(", max(calc_date) AS latest_date\n");
+        sqlBuilder.append("  FROM stock.factor_value\n");
+        sqlBuilder.append("  WHERE factor_code IN (").append(factorInClause).append(")\n");
+        sqlBuilder.append("    AND calc_date = (\n");
+        sqlBuilder.append("      SELECT max(calc_date)\n");
+        sqlBuilder.append("      FROM stock.factor_value\n");
+        sqlBuilder.append("      WHERE factor_code = '").append(firstFactorCode.replace("'", "''")).append("'\n");
+        sqlBuilder.append("    )\n");
+        sqlBuilder.append("  GROUP BY symbol, calc_date\n");
+        sqlBuilder.append("  HAVING ");
+        for (int i = 0; i < colAliases.size(); i++) {
+            if (i > 0) sqlBuilder.append(" AND ");
+            sqlBuilder.append(colAliases.get(i)).append(" IS NOT NULL");
+        }
+        sqlBuilder.append("\n");
+        sqlBuilder.append(") d\n");
+        sqlBuilder.append("LEFT JOIN stock_info si ON si.symbol = d.symbol\n");
+        sqlBuilder.append("WHERE 1=1").append(where).append("\n");
+        sqlBuilder.append("ORDER BY d.symbol\n");
+
+        String sql = sqlBuilder.toString();
+
+        log.info("[ClickHouse] chanScreen dynamic SQL: factors={}, where={}", factorCodes.size(), where);
+
+        // 6. 执行查询（动态列映射）
+        colAliases = factorCodes.stream()
+                .map(String::toLowerCase)
+                .toList();
+
+        List<Map<String, Object>> result = new ArrayList<>();
+        try (Connection conn = getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
+
+            while (rs.next()) {
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("ts_code", rs.getString("ts_code"));
+                row.put("name", rs.getString("name"));
+                row.put("calc_date", rs.getDate("calc_date"));
+                // 动态列：所有因子值
+                for (String col : colAliases) {
+                    row.put(col, rs.getObject(col));
+                }
+                result.add(row);
+            }
+            log.debug("[ClickHouse] chanScreen dynamic query hit {} rows", result.size());
+            return result;
+        } catch (Exception e) {
+            log.error("[ClickHouse] chanScreen dynamic query failed: {}", e.getMessage(), e);
+            throw new RuntimeException("ClickHouse 缠论筛选失败: " + e.getMessage(), e);
+        }
     }
 
     /**
