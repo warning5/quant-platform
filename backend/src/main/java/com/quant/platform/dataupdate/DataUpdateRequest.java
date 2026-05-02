@@ -9,7 +9,8 @@ import lombok.Data;
 public class DataUpdateRequest {
 
     /**
-     * 更新类型: DAILY (股票日线), INDEX (指数日线), DIVIDEND (分红除权), FINANCIAL (财务数据)
+     * 更新类型: DAILY (股票日线), INDEX (指数日线), DIVIDEND (分红除权),
+     *           FINANCIAL (财务数据), SENTIMENT (情绪数据)
      */
     private String updateType = "DAILY";
 

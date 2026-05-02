@@ -2447,3 +2447,60 @@ Caused by: java.sql.BatchUpdateException: Code: 47. DB::Exception: Unknown expre
 2026-05-01 22:47:45.958 [http-nio-8080-exec-7] INFO  c.q.p.dataupdate.DataUpdateService - [DataCoverage] 数据概览查询完成
 2026-05-01 22:47:55.972 [http-nio-8080-exec-10] INFO  c.q.p.dataupdate.DataUpdateService - [DataCoverage] 数据概览查询完成
 2026-05-01 22:47:56.287 [data-update-TASK-1777646775381] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate] 任务 TASK-1777646775381 结束, 状态: SUCCESS
+2026-05-01 22:50:57.247 [MessageBroker-2] INFO  o.s.w.s.c.WebSocketMessageBrokerStats - WebSocketSession[1 current WS(1)-HttpStream(0)-HttpPoll(0), 6 total, 0 closed abnormally (0 connect failure, 0 send limit, 1 transport error)], stompSubProtocol[processed CONNECT(6)-CONNECTED(6)-DISCONNECT(0)], stompBrokerRelay[null], inboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 69], outboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 241], sockJsScheduler[pool size = 3, active threads = 1, queued tasks = 0, completed tasks = 2]
+2026-05-01 23:20:10.489 [http-nio-8080-exec-8] INFO  c.q.p.dataupdate.DataUpdateService - [DataCoverage] 数据概览查询完成
+2026-05-01 23:20:57.249 [MessageBroker-2] INFO  o.s.w.s.c.WebSocketMessageBrokerStats - WebSocketSession[1 current WS(1)-HttpStream(0)-HttpPoll(0), 7 total, 0 closed abnormally (0 connect failure, 0 send limit, 1 transport error)], stompSubProtocol[processed CONNECT(7)-CONNECTED(7)-DISCONNECT(0)], stompBrokerRelay[null], inboundChannel[pool size = 9, active threads = 0, queued tasks = 0, completed tasks = 81], outboundChannel[pool size = 1, active threads = 0, queued tasks = 0, completed tasks = 243], sockJsScheduler[pool size = 4, active threads = 1, queued tasks = 0, completed tasks = 3]
+2026-05-01 23:50:57.253 [MessageBroker-3] INFO  o.s.w.s.c.WebSocketMessageBrokerStats - WebSocketSession[1 current WS(1)-HttpStream(0)-HttpPoll(0), 7 total, 0 closed abnormally (0 connect failure, 0 send limit, 1 transport error)], stompSubProtocol[processed CONNECT(7)-CONNECTED(7)-DISCONNECT(0)], stompBrokerRelay[null], inboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 81], outboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 243], sockJsScheduler[pool size = 5, active threads = 1, queued tasks = 0, completed tasks = 4]
+2026-05-01 23:53:46.724 [SpringApplicationShutdownHook] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Stopping...
+2026-05-01 23:53:46.725 [SpringApplicationShutdownHook] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - BrokerAvailabilityEvent[available=false, SimpleBrokerMessageHandler [org.springframework.messaging.simp.broker.DefaultSubscriptionRegistry@50008974]]
+2026-05-01 23:53:46.725 [SpringApplicationShutdownHook] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Stopped.
+2026-05-01 23:53:46.750 [SpringApplicationShutdownHook] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Shutdown initiated...
+2026-05-01 23:53:46.756 [SpringApplicationShutdownHook] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Shutdown completed.
+2026-05-01 23:55:26.806 [background-preinit] INFO  o.h.validator.internal.util.Version - HV000001: Hibernate Validator 8.0.1.Final
+2026-05-01 23:55:26.922 [main] INFO  c.q.p.QuantPlatformApplication - Starting QuantPlatformApplication using Java 21.0.7 with PID 14740 (C:\Users\warning5\WorkBuddy\Claw\quant-platform\backend\target\classes started by warning5 in C:\Users\warning5\WorkBuddy\Claw\quant-platform)
+2026-05-01 23:55:26.922 [main] INFO  c.q.p.QuantPlatformApplication - No active profile set, falling back to 1 default profile: "default"
+2026-05-01 23:55:28.959 [main] INFO  o.s.b.w.e.tomcat.TomcatWebServer - Tomcat initialized with port 8080 (http)
+2026-05-01 23:55:28.978 [main] INFO  o.a.coyote.http11.Http11NioProtocol - Initializing ProtocolHandler ["http-nio-8080"]
+2026-05-01 23:55:28.981 [main] INFO  o.a.catalina.core.StandardService - Starting service [Tomcat]
+2026-05-01 23:55:28.981 [main] INFO  o.a.catalina.core.StandardEngine - Starting Servlet engine: [Apache Tomcat/10.1.19]
+2026-05-01 23:55:29.118 [main] INFO  o.a.c.c.C.[.[localhost].[/api] - Initializing Spring embedded WebApplicationContext
+2026-05-01 23:55:29.118 [main] INFO  o.s.b.w.s.c.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 2019 ms
+2026-05-01 23:55:30.067 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 加载 code -> market 映射...
+2026-05-01 23:55:30.117 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Starting...
+2026-05-01 23:55:30.402 [main] INFO  com.zaxxer.hikari.pool.HikariPool - HikariPool-1 - Added connection com.mysql.cj.jdbc.ConnectionImpl@2d593b56
+2026-05-01 23:55:30.402 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Start completed.
+2026-05-01 23:55:30.591 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 已加载 5490 只股票的 market 映射
+2026-05-01 23:55:30.591 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 已加载 5490 只股票的最新市值
+2026-05-01 23:55:31.037 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate] 脚本目录: C:\Users\warning5\WorkBuddy\Claw\quant-platform\scripts
+2026-05-01 23:55:31.037 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_stock_data.py : OK
+2026-05-01 23:55:31.039 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_stock_daily_baostock.py : OK
+2026-05-01 23:55:31.039 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_bj_stock_daily_qq.py : OK
+2026-05-01 23:55:31.039 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_index_daily_baostock.py : OK
+2026-05-01 23:55:31.039 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_dividend_baostock.py : OK
+2026-05-01 23:55:31.331 [main] INFO  c.q.p.f.engine.FactorComputeEngine - Registered 36 financial factor calculators
+2026-05-01 23:55:31.660 [main] INFO  c.q.p.s.service.ScreenPresetService - Built-in screen presets initialized
+2026-05-01 23:55:31.982 [main] INFO  o.s.b.a.w.s.WelcomePageHandlerMapping - Adding welcome page: class path resource [static/index.html]
+2026-05-01 23:55:32.534 [main] INFO  o.a.coyote.http11.Http11NioProtocol - Starting ProtocolHandler ["http-nio-8080"]
+2026-05-01 23:55:32.566 [main] INFO  o.s.b.w.e.tomcat.TomcatWebServer - Tomcat started on port 8080 (http) with context path '/api'
+2026-05-01 23:55:32.576 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Starting...
+2026-05-01 23:55:32.576 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - BrokerAvailabilityEvent[available=true, SimpleBrokerMessageHandler [org.springframework.messaging.simp.broker.DefaultSubscriptionRegistry@3a7dcfb7]]
+2026-05-01 23:55:32.576 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Started.
+2026-05-01 23:55:32.661 [http-nio-8080-exec-4] INFO  o.a.c.c.C.[.[localhost].[/api] - Initializing Spring DispatcherServlet 'dispatcherServlet'
+2026-05-01 23:55:32.661 [http-nio-8080-exec-4] INFO  o.s.web.servlet.DispatcherServlet - Initializing Servlet 'dispatcherServlet'
+2026-05-01 23:55:32.661 [http-nio-8080-exec-4] INFO  o.s.web.servlet.DispatcherServlet - Completed initialization in 0 ms
+2026-05-01 23:55:33.007 [main] INFO  c.q.p.QuantPlatformApplication - Started QuantPlatformApplication in 6.961 seconds (process running for 7.491)
+2026-05-01 23:55:33.203 [main] INFO  c.q.p.factor.service.FactorService - Builtin factors initialized
+2026-05-01 23:55:33.218 [main] INFO  c.q.p.s.s.StrategyDataInitializer - Checking strategy data initialization...
+2026-05-01 23:55:33.224 [main] INFO  c.q.p.s.s.StrategyDataInitializer - Strategy data already exists (6 strategies), skipping initialization
+2026-05-01 23:55:33.240 [main] INFO  c.q.p.s.service.StrategyService - Demo strategies already initialized, skipping
+2026-05-01 23:55:33.446 [http-nio-8080-exec-2] INFO  c.q.p.dataupdate.DataUpdateService - [DataCoverage] 数据概览查询完成
+2026-05-01 23:55:38.985 [http-nio-8080-exec-4] INFO  c.q.p.dataupdate.DataUpdateService - [DataCoverage] 数据概览查询完成
+2026-05-01 23:55:46.749 [http-nio-8080-exec-9] INFO  c.q.p.dataupdate.DataUpdateService - [DataCoverage] 数据概览查询完成
+2026-05-01 23:55:56.995 [http-nio-8080-exec-10] INFO  c.q.p.dataupdate.DataUpdateService - [DataCoverage] 数据概览查询完成
+2026-05-01 23:56:04.028 [http-nio-8080-exec-3] INFO  c.q.p.dataupdate.DataUpdateService - [DataCoverage] 数据概览查询完成
+2026-05-01 23:56:32.544 [MessageBroker-1] INFO  o.s.w.s.c.WebSocketMessageBrokerStats - WebSocketSession[1 current WS(1)-HttpStream(0)-HttpPoll(0), 4 total, 0 closed abnormally (0 connect failure, 0 send limit, 0 transport error)], stompSubProtocol[processed CONNECT(4)-CONNECTED(4)-DISCONNECT(0)], stompBrokerRelay[null], inboundChannel[pool size = 32, active threads = 0, queued tasks = 0, completed tasks = 45], outboundChannel[pool size = 7, active threads = 0, queued tasks = 0, completed tasks = 7], sockJsScheduler[pool size = 1, active threads = 1, queued tasks = 0, completed tasks = 0]
+2026-05-01 23:56:38.348 [SpringApplicationShutdownHook] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Stopping...
+2026-05-01 23:56:38.348 [SpringApplicationShutdownHook] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - BrokerAvailabilityEvent[available=false, SimpleBrokerMessageHandler [org.springframework.messaging.simp.broker.DefaultSubscriptionRegistry@3a7dcfb7]]
+2026-05-01 23:56:38.348 [SpringApplicationShutdownHook] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Stopped.
+2026-05-01 23:56:38.361 [SpringApplicationShutdownHook] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Shutdown initiated...
+2026-05-01 23:56:38.370 [SpringApplicationShutdownHook] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Shutdown completed.

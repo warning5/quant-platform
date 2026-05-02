@@ -155,6 +155,10 @@ export const dataUpdateApi = {
   getTradingDates: (limit = 30) => api.get('/data-update/trading-dates', { params: { limit } }),
   getDefaultDates: () => api.get('/data-update/default-dates'),
   getRecentTasks: () => api.get('/data-update/recent-tasks'),
+  // 情绪数据
+  getSentimentCoverage: () => api.get('/data-update/sentiment/coverage'),
+  getSentimentTableStats: (table) => api.get(`/data-update/sentiment/table-stats/${table}`),
+  validateSentiment: () => api.get('/data-update/sentiment/validate'),
 };
 
 export default api;

@@ -5,7 +5,7 @@ import {
 } from 'antd';
 import {
   ReloadOutlined, StockOutlined, RiseOutlined, FallOutlined,
-  BarChartOutlined, LineChartOutlined, SearchOutlined
+  BarChartOutlined, LineChartOutlined, SearchOutlined, QuestionCircleOutlined
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import dayjs from 'dayjs';
@@ -345,7 +345,31 @@ export default function MarketList() {
             /* ── Tab 2: 市场截面 ── */
             {
               key: 'cross',
-              label: <><BarChartOutlined /> 市场截面（{overview?.latestDate || '-'}）</>,
+              label: (
+                <>
+                  <BarChartOutlined /> 市场截面（{overview?.latestDate || '-'}）
+                  <Tooltip
+                    title={
+                      <div style={{ padding: '4px 0' }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: '#1890ff' }}>
+                          市场截面 — 当日全市场快照
+                        </div>
+                        <div style={{ fontSize: 12, lineHeight: 2, color: '#333' }}>
+                          <div><b>1. 市场情绪感知</b> — 快速查看当日涨跌分布与平均涨跌幅</div>
+                          <div><b>2. 异动发现</b> — 涨跌幅 / 成交额 Top 排名定位强势股与弱势股</div>
+                          <div><b>3. 数据质量验证</b> — 截面股票数 vs 总数，排查停牌 / 缺失</div>
+                          <div><b>4. 选股起点</b> — 排序筛选候选股，点击进入个股深入分析</div>
+                        </div>
+                      </div>
+                    }
+                    overlayStyle={{ maxWidth: 420 }}
+                    overlayInnerStyle={{ padding: '12px 16px' }}
+                    color="#fff"
+                  >
+                    <QuestionCircleOutlined style={{ marginLeft: 6, color: '#1890ff', cursor: 'pointer', fontSize: 14 }} />
+                  </Tooltip>
+                </>
+              ),
               children: (
                 <Row gutter={[12, 12]}>
                   <Col xs={24} lg={10}>

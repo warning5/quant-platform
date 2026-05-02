@@ -53,6 +53,7 @@ AKSHARE_SCRIPT  = os.path.join(SCRIPT_DIR, "update_stock_daily_akshare.py")
 BJ_QQ_SCRIPT    = os.path.join(SCRIPT_DIR, "update_bj_stock_daily_qq.py")
 INFO_SCRIPT     = os.path.join(SCRIPT_DIR, "update_stock_info_daily.py")
 INDEX_SCRIPT    = os.path.join(SCRIPT_DIR, "update_index_daily_baostock.py")
+SENTIMENT_SCRIPT = os.path.join(SCRIPT_DIR, "update_sentiment_data.py")
 
 
 def resolve_date(date_str):
@@ -187,6 +188,19 @@ def run_index_daily(start_date, end_date, extra_args):
     return run_cmd(cmd, "指数日线数据 (Baostock)")
 
 
+def run_sentiment(date_str=None):
+    """调用情绪数据采集脚本（涨跌停/北向资金/资金情绪）"""
+    if not os.path.exists(SENTIMENT_SCRIPT):
+        print(f"[ERROR] 找不到脚本: {SENTIMENT_SCRIPT}")
+        return False
+
+    cmd = [sys.executable, SENTIMENT_SCRIPT]
+    if date_str:
+        cmd += ["--date", date_str.replace("-", "")]
+
+    return run_cmd(cmd, "市场情绪数据 (涨跌停/北向/资金)")
+
+
 def show_summary():
     """显示当前数据概况"""
     try:
@@ -277,6 +291,7 @@ def main():
   %(prog)s --resume                           # 断点续传
   %(prog)s --limit 10                         # 限制数量（测试）
   %(prog)s --summary                          # 只看数据概况，不更新
+  %(prog)s --sentiment-only                   # 只采集市场情绪数据
 
 日期参数支持:
   YYYY-MM-DD     标准日期格式
@@ -312,6 +327,10 @@ def main():
     parser.add_argument(
         "--summary", action="store_true",
         help="只显示数据概况，不执行更新"
+    )
+    parser.add_argument(
+        "--sentiment-only", action="store_true",
+        help="只采集市场情绪数据（涨跌停/北向资金/资金情绪），不更新日线和info"
     )
 
     # ─── 市场选择 ───
@@ -390,6 +409,8 @@ def main():
         print(f"  更新模式:   仅信息 (stock_info)")
     elif args.index_only:
         print(f"  更新模式:   仅指数日线")
+    elif args.sentiment_only:
+        print(f"  更新模式:   仅市场情绪数据（涨跌停/北向/资金情绪）")
     else:
         print(f"  更新模式:   个股日线 + 指数日线 + 信息 (全部)")
     print(f"{'#' * 70}")
@@ -406,9 +427,9 @@ def main():
     total_start = time.time()
     results = []
 
-    do_daily = not args.info_only and not args.index_only
-    do_info  = not args.daily_only and not args.index_only
-    do_index = not args.info_only and not args.daily_only or args.index_only
+    do_daily = not args.info_only and not args.index_only and not args.sentiment_only
+    do_info  = not args.daily_only and not args.index_only and not args.sentiment_only
+    do_index = (not args.info_only and not args.daily_only and not args.sentiment_only) or args.index_only
 
     # ─── Part 1: 更新日线行情 ───
     if do_daily:
@@ -434,8 +455,14 @@ def main():
         ok = run_stock_info(info_args)
         results.append(("stock_info", ok))
 
+    # ─── Part 2.5: 情绪数据 ───
+    if args.sentiment_only or (not args.info_only and not args.daily_only and not args.index_only):
+        # 全量模式：最后跑情绪数据
+        ok = run_sentiment(end_date)
+        results.append(("市场情绪", ok))
+
     # ─── Part 3: 自动补全缺失字段 ───
-    do_fix = not args.info_only  # info-only 模式不补全日线字段
+    do_fix = not args.info_only and not args.sentiment_only  # info-only / sentiment-only 模式不补全日线字段
     if do_fix:
         try:
             from db_helper import StockDailyDB

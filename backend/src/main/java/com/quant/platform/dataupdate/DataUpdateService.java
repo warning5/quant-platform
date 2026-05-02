@@ -247,7 +247,18 @@ public class DataUpdateService {
                 if (!"CANCELLED".equals(task.getStatus())) {
                     task.setStatus(finOk ? "SUCCESS" : "FAILED");
                     task.setProgress(100);
-                    task.setCurrentStep(finOk ? "更新完成" : "更新失败");
+                    task.setCurrentStep(finOk ? "采集完成" : "采集失败");
+                }
+            } else if ("SENTIMENT".equals(updateType)) {
+                // 情绪数据：执行 update_sentiment_data.py
+                task.setTotalStocks(1);
+                task.setCurrentStep("情绪数据");
+                broadcastStatus(task);
+                boolean senOk = runSingleScript(taskId, task, cmd, "情绪数据");
+                if (!"CANCELLED".equals(task.getStatus())) {
+                    task.setStatus(senOk ? "SUCCESS" : "FAILED");
+                    task.setProgress(100);
+                    task.setCurrentStep(senOk ? "采集完成" : "采集失败");
                 }
             } else if (cmd == null) {
                 // ALL → 依次执行 SH、SZ、BJ
@@ -590,6 +601,19 @@ public class DataUpdateService {
             }
             if (request.isForce()) {
                 cmd.add("--force");
+            }
+            return cmd;
+        }
+
+        // 情绪数据
+        if ("SENTIMENT".equals(updateType)) {
+            cmd.add("update_sentiment_data.py");
+            String startDate = request.getStartDate();
+            String endDate = request.getEndDate();
+            if (startDate != null && !startDate.isEmpty()) {
+                // yyyy-MM-dd → YYYYMMDD
+                cmd.add("--date");
+                cmd.add(startDate.replace("-", ""));
             }
             return cmd;
         }

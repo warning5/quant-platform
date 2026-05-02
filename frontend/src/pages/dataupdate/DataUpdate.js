@@ -202,6 +202,17 @@ function DataUpdate() {
   const [financialCoverageLoading, setFinancialCoverageLoading] = useState(true);
   const financialCoverageFetchedRef = useRef(false);
 
+  // 情绪数据
+  const [sentimentTask, setSentimentTask] = useState(null);
+  const [sentimentLogs, setSentimentLogs] = useState([]);
+  const sentimentLogRef = useRef(null);
+  const [sentimentForm] = Form.useForm();
+  const [sentimentCoverage, setSentimentCoverage] = useState(null);
+  const [sentimentCoverageLoading, setSentimentCoverageLoading] = useState(true);
+  const sentimentCoverageFetchedRef = useRef(false);
+  const [sentimentValidateResult, setSentimentValidateResult] = useState(null);
+  const [sentimentValidateLoading, setSentimentValidateLoading] = useState(false);
+
   const [wsConnected, setWsConnected] = useState(false);
 
   // 当前激活的 Tab（刷新后保持在原 Tab）
@@ -298,6 +309,7 @@ function DataUpdate() {
       case 'INDEX': return setIndexTask;
       case 'DIVIDEND': return setDividendTask;
       case 'FINANCIAL': return setFinancialTask;
+      case 'SENTIMENT': return setSentimentTask;
       default: return setDailyTask;
     }
   }, []);
@@ -307,6 +319,7 @@ function DataUpdate() {
       case 'INDEX': return setIndexLogs;
       case 'DIVIDEND': return setDividendLogs;
       case 'FINANCIAL': return setFinancialLogs;
+      case 'SENTIMENT': return setSentimentLogs;
       default: return setDailyLogs;
     }
   }, []);
@@ -454,6 +467,28 @@ function DataUpdate() {
     if (isFirst) setFinancialCoverageLoading(false);
   }, []);
 
+  // 情绪数据概览
+  const fetchSentimentCoverage = useCallback(async () => {
+    const isFirst = !sentimentCoverageFetchedRef.current;
+    if (isFirst) setSentimentCoverageLoading(true);
+    try {
+      const res = await dataUpdateApi.getSentimentCoverage();
+      setSentimentCoverage(res);
+      sentimentCoverageFetchedRef.current = true;
+    } catch (e) {
+      console.error('fetchSentimentCoverage failed:', e);
+    }
+    if (isFirst) setSentimentCoverageLoading(false);
+  }, []);
+
+  // 情绪任务运行时自动刷新概览（每10秒）
+  useEffect(() => {
+    if (sentimentTask?.status === 'RUNNING') {
+      const timer = setInterval(() => fetchSentimentCoverage(), 10000);
+      return () => clearInterval(timer);
+    }
+  }, [sentimentTask?.status, fetchSentimentCoverage]);
+
   // 财务任务运行时自动刷新概览（每10秒）
   useEffect(() => {
     if (financialTask?.status === 'RUNNING') {
@@ -525,6 +560,7 @@ function DataUpdate() {
     fetchIndexCoverage();
     fetchDividendCoverage();
     fetchFinancialCoverage();
+    fetchSentimentCoverage();
     dataUpdateApi.getTradingDates(365).then(res => setTradingDates(res || [])).catch(() => {});
     dataUpdateApi.getMissingStats(dayjs().tz().subtract(1, 'day').format('YYYY-MM-DD'))
       .then(res => setMissingStats(res)).catch(() => {});
@@ -556,6 +592,9 @@ function DataUpdate() {
   useEffect(() => {
     if (financialLogRef.current) financialLogRef.current.scrollTop = financialLogRef.current.scrollHeight;
   }, [financialLogs]);
+  useEffect(() => {
+    if (sentimentLogRef.current) sentimentLogRef.current.scrollTop = sentimentLogRef.current.scrollHeight;
+  }, [sentimentLogs]);
 
   // ========== 提交任务 ==========
   const handleSubmit = async (updateType) => {
@@ -637,6 +676,25 @@ function DataUpdate() {
     }
   };
 
+  // ========== 情绪数据校验 ==========
+  const handleSentimentValidate = async () => {
+    setSentimentValidateLoading(true);
+    setSentimentValidateResult(null);
+    try {
+      const res = await dataUpdateApi.validateSentiment();
+      if (res && Object.keys(res).length > 0) {
+        setSentimentValidateResult(res);
+      } else {
+        message.warning('校验结果为空');
+      }
+    } catch (e) {
+      const msg = e.response?.data?.message || e.message || '校验失败';
+      message.error(`校验失败: ${msg}`);
+    } finally {
+      setSentimentValidateLoading(false);
+    }
+  };
+
   const overview = coverage?.overview || {};
   const markets = coverage?.markets || [];
 
@@ -647,6 +705,7 @@ function DataUpdate() {
     if (key === 'INDEX') fetchIndexCoverage();
     if (key === 'DIVIDEND') fetchDividendCoverage();
     if (key === 'FINANCIAL') fetchFinancialCoverage();
+    if (key === 'SENTIMENT') fetchSentimentCoverage();
   };
 
   // ========== 股票日线 Tab ==========
@@ -1266,6 +1325,166 @@ function DataUpdate() {
     </Card>
   );
 
+  // ========== 情绪数据 Tab ==========
+  const renderSentimentTab = () => {
+    const isRunning = sentimentTask?.status === 'RUNNING';
+    return (
+      <>
+        {/* 情绪数据概览 */}
+        <Card
+          title={<span><DatabaseOutlined /> 数据概览</span>}
+          size="small"
+          style={{ marginBottom: 16 }}
+          loading={sentimentCoverageLoading}
+          extra={<Button size="small" icon={<ReloadOutlined />} onClick={fetchSentimentCoverage}>刷新</Button>}
+        >
+          <Row gutter={16}>
+            <Col span={4}>
+              <Statistic
+                title="情绪数据表"
+                value={sentimentCoverage?.tableCount || 0}
+                suffix="张"
+                valueStyle={{ fontSize: 16, color: '#1677ff' }}
+                prefix={<DatabaseOutlined />}
+              />
+            </Col>
+            <Col span={5}>
+              <Statistic
+                title="总记录数"
+                formatter={() => {
+                  const r = sentimentCoverage?.totalRecords || 0;
+                  return <span>{r >= 10000 ? (r / 10000).toFixed(1) + ' 万' : (r || 0).toLocaleString()}</span>;
+                }}
+                suffix="条"
+                valueStyle={{ fontSize: 16, color: '#52c41a' }}
+              />
+            </Col>
+            <Col span={7}>
+              <Statistic
+                title="数据表"
+                formatter={() => <Text style={{ fontSize: 12 }}>涨跌停/北向资金/公告/热度/新闻</Text>}
+                valueStyle={{ fontSize: 12 }}
+              />
+            </Col>
+            {isRunning && (
+              <Col span={8}>
+                <Statistic title="状态" formatter={() => statusTag('RUNNING')}
+                  valueStyle={{ fontSize: 14 }} />
+              </Col>
+            )}
+          </Row>
+          {/* 各表详细统计 */}
+          {sentimentCoverage?.tables && sentimentCoverage.tables.length > 0 && (
+            <Row gutter={12} style={{ marginTop: 12 }}>
+              {sentimentCoverage.tables.map(table => (
+                <Col span={6} key={table.table}>
+                  <Card size="small" style={{ backgroundColor: '#fafafa', borderLeft: '3px solid #722ed1' }}>
+                    <Statistic
+                      title={table.name}
+                      value={table.recordCount || 0}
+                      suffix={
+                        <span style={{ fontSize: 11, color: '#8c8c8c', fontWeight: 400, marginLeft: 4 }}>
+                          条 · {table.minDate && table.maxDate ? `${table.minDate?.slice(5, 10)}~${table.maxDate?.slice(5, 10)}` : ''}
+                        </span>
+                      }
+                      valueStyle={{ fontSize: 14, color: '#722ed1', fontWeight: 600 }}
+                    />
+                  </Card>
+                </Col>
+              ))}
+            </Row>
+          )}
+        </Card>
+
+        {/* 情绪数据采集配置 */}
+        <Card title="情绪数据采集配置" size="small" style={{ marginBottom: 16 }}>
+          <Form form={sentimentForm} layout="inline">
+            <Row gutter={[16, 12]} style={{ width: '100%' }}>
+              <Col>
+                <Space size={12}>
+                  <Button type="primary" icon={<PlayCircleOutlined />}
+                    onClick={() => handleSubmit('SENTIMENT')} disabled={isRunning}>
+                    开始采集
+                  </Button>
+                  <Button danger icon={<StopOutlined />}
+                    onClick={() => handleCancel('SENTIMENT')} disabled={!isRunning}>
+                    取消任务
+                  </Button>
+                  <Button icon={<SearchOutlined />}
+                    onClick={handleSentimentValidate} loading={sentimentValidateLoading}>
+                    数据校验
+                  </Button>
+                  {isRunning && <Tag color="processing">采集中...</Tag>}
+                  {sentimentTask && sentimentTask.status === 'SUCCESS' && <Tag color="success">采集完成</Tag>}
+                  {sentimentTask && sentimentTask.status === 'FAILED' && <Tag color="error">采集失败</Tag>}
+                </Space>
+              </Col>
+            </Row>
+          </Form>
+        </Card>
+
+        {/* 进度条 */}
+        {renderProgressBar(sentimentTask)}
+
+        {/* 日志 */}
+        <Card title={<span>采集日志 <Text type="secondary" style={{ fontSize: 12 }}>({sentimentLogs.length} 条)</Text></span>}
+          size="small" extra={<Button size="small" onClick={() => setSentimentLogs([])}>清空</Button>}>
+          {renderLogs(sentimentLogs, sentimentLogRef)}
+        </Card>
+
+        {/* 情绪数据校验报告 */}
+        {sentimentValidateResult && renderSentimentValidateCard()}
+      </>
+    );
+  };
+
+  // ========== 情绪数据校验报告 ==========
+  const renderSentimentValidateCard = () => {
+    const { tables, tableCount, totalWarnings, status } = sentimentValidateResult;
+    return (
+      <Card title={<span><SearchOutlined /> 数据校验报告</span>} size="small" style={{ marginTop: 16 }}
+        extra={<Button size="small" type="text" onClick={() => setSentimentValidateResult(null)}>关闭</Button>}>
+        {/* 概览 */}
+        <Row gutter={16} style={{ marginBottom: 16 }}>
+          <Col span={4}>
+            <Statistic title="校验表数" value={tableCount || 0}
+              valueStyle={{ fontSize: 14, color: '#1677ff' }} />
+          </Col>
+          <Col span={4}>
+            <Statistic title="警告数" value={totalWarnings || 0}
+              valueStyle={{ fontSize: 14, color: totalWarnings > 0 ? '#fa8c16' : '#52c41a' }} />
+          </Col>
+          <Col span={4}>
+            <Statistic title="状态" value={status === 'OK' ? '正常' : '有警告'}
+              valueStyle={{ fontSize: 14, color: status === 'OK' ? '#52c41a' : '#fa8c16' }} />
+          </Col>
+        </Row>
+
+        {/* 各表校验结果 */}
+        <Table
+          dataSource={(tables || []).map((t, i) => ({ ...t, key: i }))}
+          columns={[
+            { title: '表名', dataIndex: 'name', width: 120 },
+            { title: '记录数', dataIndex: 'recordCount', render: v => (v || 0).toLocaleString(), align: 'right' },
+            { title: '最近7天数据', dataIndex: 'recentRecordCount',
+              render: v => v > 0 ? <Tag color="success">{v}条</Tag> : <Tag color="default">无</Tag> },
+            { title: '空值检查', dataIndex: 'warningCount',
+              render: v => v > 0 ? <Tag color="warning">{v}项</Tag> : <Tag color="success">正常</Tag> },
+            {
+              title: '详情', dataIndex: 'nullChecks', width: 200,
+              render: checks => checks && checks.length > 0 ? (
+                <ul style={{ margin: 0, paddingLeft: 16, fontSize: 11 }}>
+                  {checks.map((c, i) => <li key={i}>{c.message}</li>)}
+                </ul>
+              ) : '-'
+            },
+          ]}
+          size="small" pagination={false}
+        />
+      </Card>
+    );
+  };
+
   // ========== 指数完整性检查 ==========
   const renderIndexIntegrity = () => (
     <Card title={<span><SearchOutlined /> 指数完整性检查</span>} size="small" style={{ marginTop: 16 }}>
@@ -1497,6 +1716,12 @@ function DataUpdate() {
               forceRender: true,
               label: <span><BarChartOutlined /> 财务数据</span>,
               children: <div style={{ padding: '16px 0' }}>{renderFinancialTab()}</div>,
+            },
+            {
+              key: 'SENTIMENT',
+              forceRender: true,
+              label: <span><ThunderboltOutlined /> 情绪数据</span>,
+              children: <div style={{ padding: '16px 0' }}>{renderSentimentTab()}</div>,
             },
           ]}
         />
