@@ -88,4 +88,49 @@ public class DataUpdateRequest {
      * 财务数据：强制重新采集
      */
     private boolean force = false;
+
+    /**
+     * 情绪数据：采集龙虎榜（默认 true）
+     */
+    private boolean fetchLhb = true;
+
+    /**
+     * 情绪数据：采集融资融券（默认 true）
+     */
+    private boolean fetchMargin = true;
+
+    /**
+     * 情绪数据：采集机构调研（默认 true）
+     */
+    private boolean fetchSurvey = true;
+
+    /**
+     * 情绪数据：采集大宗交易（默认 true）
+     */
+    private boolean fetchBlockTrade = true;
+
+    /**
+     * 情绪数据：采集市场活跃度（默认 true）
+     */
+    private boolean fetchActivity = true;
+
+    /**
+     * 情绪数据：采集涨跌停池（默认 true）
+     */
+    private boolean fetchZtPool = true;
+
+    /**
+     * 情绪数据：采集资金情绪代理（默认 true）
+     */
+    private boolean fetchMoneyflow = true;
+
+    /**
+     * 情绪数据：采集公告（默认 true）
+     */
+    private boolean fetchNotice = true;
+
+    /**
+     * 研报数据：单只股票代码（为空则更新全部）
+     */
+    private String singleCode;
 }

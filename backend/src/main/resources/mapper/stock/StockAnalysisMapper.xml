@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" 
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.quant.platform.stock.analysis.mapper.StockAnalysisMapper">
+    
+    <!-- 查询机构调研统计（最近N天） -->
+    <select id="selectSurveyStats" resultType="java.util.Map">
+        SELECT 
+            COUNT(*) as survey_count,
+            AVG(survey_count) as avg_survey_count
+        FROM stock_sentiment_survey
+        WHERE code = #{code}
+          AND max_date >= DATE_SUB(CURDATE(), INTERVAL #{days} DAY)
+    </select>
+    
+    <!-- 查询涨跌停池统计（最近N天） -->
+    <select id="selectZtPoolStats" resultType="java.util.Map">
+        SELECT 
+            SUM(CASE WHEN zt_type = 'zt' THEN 1 ELSE 0 END) as limit_up_count,
+            SUM(CASE WHEN zt_type = 'zbgc' THEN 1 ELSE 0 END) as broken_count,
+            AVG(strength) as avg_strength
+        FROM stock_sentiment_zt
+        WHERE code = #{code}
+          AND trade_date >= DATE_SUB(CURDATE(), INTERVAL #{days} DAY)
+    </select>
+    
+    <!-- 查询基本面数据：pe_ttm/pb 从 CH stock_daily 取（MySQL stock_daily 为空），其余从 stock_financial_indicator 取 -->
+    <select id="selectFundamentalSignal" resultType="com.quant.platform.stock.analysis.domain.FundamentalSignal">
+        SELECT
+            fi.roe as roe,
+            fi.revenue_yoy as revenueYoy,
+            fi.net_profit_yoy as netProfitYoy,
+            fi.gross_profit_margin as grossMargin,
+            fi.debt_to_asset_ratio as debtRatio
+        FROM stock_financial_indicator fi
+        WHERE fi.code = #{code}
+          AND fi.end_date = (SELECT MAX(end_date) FROM stock_financial_indicator WHERE code = #{code})
+        LIMIT 1
+    </select>
+    
+    <!-- 查询事件面数据 -->
+    <select id="selectSentimentSignal" resultType="com.quant.platform.stock.analysis.domain.SentimentSignal">
+        SELECT 
+            0 as limitUpDays,
+            0 as limitUpStrength,
+            (SELECT COUNT(*) FROM stock_sentiment_zt 
+             WHERE code = #{code} AND zt_type = 'zbgc' 
+             AND trade_date >= DATE_SUB(CURDATE(), INTERVAL 20 DAY)) as brokenLimitUpCount20,
+            0.0 as brokenLimitUpRate,
+            FALSE as isStrongStock
+        FROM dual
+    </select>
+    
+    <!-- 查询股票基本信息（仅从 stock_info 取名称，价格从 CH 获取） -->
+    <select id="selectStockInfo" resultType="java.util.Map">
+        SELECT 
+            si.name
+        FROM stock_info si
+        WHERE si.code = #{code}
+        LIMIT 1
+    </select>
+    
+</mapper>

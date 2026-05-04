@@ -150,6 +150,30 @@ export default function ManualDataUpdate() {
         </Row>
       </Card>
 
+      {/* 情绪数据 */}
+      <Card size="small" title={<Space><span>⚡ 情绪数据</span><Tag color="orange">每日更新</Tag></Space>} style={{ marginBottom: 12 }}>
+        <Row gutter={[16, 8]}>
+          <Col xs={24} md={12}>
+            <Text strong>配置选项：</Text>
+            <ul style={{ margin: '8px 0', fontSize: 13 }}>
+              <li><Text code>日期范围</Text>：默认最近7天，可自定义起止日期</li>
+              <li><Text code>龙虎榜</Text>：龙虎榜详情 + 机构统计（涨跌停异动股）</li>
+              <li><Text code>融资融券</Text>：两融汇总 + 个股明细（杠杆资金动向）</li>
+              <li><Text code>机构调研</Text>：上市公司接待调研记录（机构关注度）</li>
+            </ul>
+          </Col>
+          <Col xs={24} md={12}>
+            <Text strong>数据源说明：</Text>
+            <ul style={{ margin: '8px 0', fontSize: 13 }}>
+              <li><Text code>大宗交易</Text>：大单交易记录（折溢价率）</li>
+              <li><Text code>市场活跃度</Text>：沪深两市成交额/换手率</li>
+              <li><Text code>涨跌停池</Text>：涨停/跌停股票池（量价异动）</li>
+              <li><Text code>数据源</Text>：东方财富 + 同花顺（akshare 封装）</li>
+            </ul>
+          </Col>
+        </Row>
+      </Card>
+
       <Divider />
 
       {/* 数据源说明 */}
@@ -170,6 +194,7 @@ export default function ManualDataUpdate() {
           { type: '指数日线', primary: 'Baostock', backup: '-', note: '10个主要指数' },
           { type: '分红除权', primary: '巨潮', backup: '同花顺→东财', note: '三级回退机制' },
           { type: '财务数据', primary: '同花顺', backup: '东方财富', note: '年报后补全' },
+          { type: '情绪数据', primary: '东方财富', backup: '同花顺', note: '龙虎榜/融资融券/调研/大宗交易' },
         ]}
         style={{ marginBottom: 16 }}
       />

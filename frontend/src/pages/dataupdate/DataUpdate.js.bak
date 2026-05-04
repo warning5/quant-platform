@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  Card, Row, Col, Statistic, Button, Input, Select, DatePicker, Form,
+  Card, Row, Col, Statistic, Button, Select, DatePicker, Form,
   Checkbox, Tag, Typography, Space, Alert, Table, Tooltip, Progress, Badge, message, Divider, Tabs, Spin
 } from 'antd';
 import {
@@ -9,7 +9,7 @@ import {
   FilterOutlined, SearchOutlined, CloudSyncOutlined,
   DatabaseOutlined, RiseOutlined, FallOutlined,
   CalendarOutlined, BarChartOutlined, PieChartOutlined, DollarOutlined,
-  LineChartOutlined, GiftOutlined, FileTextOutlined
+  LineChartOutlined, GiftOutlined
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { dataUpdateApi, financialApi } from '../../api/index';
@@ -129,7 +129,7 @@ const renderTaskConfig = (task, updateType) => {
     if (task.configFetchNotice !== false) tags.push(<Tag key="notice" color="volcano">公告</Tag>);
   } else if (updateType === 'RESEARCH') {
     if (task.configForce) tags.push(<Tag key="force" color="red">强制重新采集</Tag>);
-    if (task.configSingleCode) tags.push(<Tag key="single" color="geekblue">单只: {task.configSingleCode}</Tag>);
+    if (task.configSingleCode) tags.push(<Tag key="single" color="blue">单只: {task.configSingleCode}</Tag>);
   }
 
   // 日期范围
@@ -448,31 +448,6 @@ function DataUpdate() {
     ws.onerror = () => { setWsConnected(false); };
   }, [getTaskUpdater, getLogUpdater]);
 
-  // ========== 日志自动滚动 ==========
-  useEffect(() => {
-    if (dailyLogRef.current) dailyLogRef.current.scrollTop = dailyLogRef.current.scrollHeight;
-  }, [dailyLogs]);
-
-  useEffect(() => {
-    if (indexLogRef.current) indexLogRef.current.scrollTop = indexLogRef.current.scrollHeight;
-  }, [indexLogs]);
-
-  useEffect(() => {
-    if (dividendLogRef.current) dividendLogRef.current.scrollTop = dividendLogRef.current.scrollHeight;
-  }, [dividendLogs]);
-
-  useEffect(() => {
-    if (financialLogRef.current) financialLogRef.current.scrollTop = financialLogRef.current.scrollHeight;
-  }, [financialLogs]);
-
-  useEffect(() => {
-    if (sentimentLogRef.current) sentimentLogRef.current.scrollTop = sentimentLogRef.current.scrollHeight;
-  }, [sentimentLogs]);
-
-  useEffect(() => {
-    if (researchLogRef.current) researchLogRef.current.scrollTop = researchLogRef.current.scrollHeight;
-  }, [researchLogs]);
-
   const fetchCoverage = useCallback(async () => {
     const isFirst = !coverageFetchedRef.current;
     if (isFirst) setCoverageLoading(true);
@@ -661,7 +636,6 @@ function DataUpdate() {
     fetchDividendCoverage();
     fetchFinancialCoverage();
     fetchSentimentCoverage();
-    fetchResearchCoverage();
     dataUpdateApi.getTradingDates(365).then(res => setTradingDates(res || [])).catch(() => {});
     dataUpdateApi.getMissingStats(dayjs().tz().subtract(1, 'day').format('YYYY-MM-DD'))
       .then(res => setMissingStats(res)).catch(() => {});
@@ -703,8 +677,7 @@ function DataUpdate() {
       const currentForm = updateType === 'INDEX' ? indexForm
         : updateType === 'DIVIDEND' ? dividendForm
         : updateType === 'FINANCIAL' ? financialForm
-        : updateType === 'SENTIMENT' ? sentimentForm
-        : updateType === 'RESEARCH' ? researchForm : form;
+        : updateType === 'SENTIMENT' ? sentimentForm : form;
       const values = await currentForm.validateFields();
       const dates = values.dateRange;
       const request = {
@@ -762,7 +735,6 @@ function DataUpdate() {
       : updateType === 'DIVIDEND' ? dividendTask
       : updateType === 'FINANCIAL' ? financialTask
       : updateType === 'SENTIMENT' ? sentimentTask
-      : updateType === 'RESEARCH' ? researchTask
       : dailyTask;
     if (!task || !task.taskId) return;
     try {
@@ -1662,138 +1634,6 @@ function DataUpdate() {
     );
   };
 
-  // ========== 研报数据 Tab ==========
-  const renderResearchTab = () => {
-    const isRunning = researchTask?.status === 'RUNNING';
-    return (
-      <>
-        {/* 研报数据概览 */}
-        <Card
-          title={<span><FileTextOutlined /> 数据概览</span>}
-          size="small" style={{ marginBottom: 16 }}
-          loading={researchCoverageLoading}
-          extra={<Button size="small" icon={<ReloadOutlined />} onClick={fetchResearchCoverage}>刷新</Button>}
-        >
-          <Row gutter={16}>
-            <Col span={4}>
-              <Statistic title="研报总数" value={researchCoverage?.totalCount || 0} suffix="条"
-                valueStyle={{ fontSize: 16, color: '#1677ff' }} prefix={<FileTextOutlined />} />
-            </Col>
-            <Col span={5}>
-              <Statistic title="覆盖股票" value={researchCoverage?.stockCount || 0} suffix="只"
-                valueStyle={{ fontSize: 16, color: '#52c41a' }} />
-            </Col>
-            <Col span={7}>
-              <Statistic title="最新日期" value={researchCoverage?.latestDate || '--'}
-                valueStyle={{ fontSize: 16 }} prefix={<CalendarOutlined />} />
-            </Col>
-            {isRunning && (
-              <Col span={8}>
-                <Statistic title="状态" formatter={() => statusTag('RUNNING')}
-                  valueStyle={{ fontSize: 14 }} />
-              </Col>
-            )}
-          </Row>
-        </Card>
-
-        {/* 研报数据采集配置 */}
-        <Card title="研报数据采集配置" size="small" style={{ marginBottom: 16 }}>
-          <Form form={researchForm} layout="inline" initialValues={{
-            force: false,
-            dateRange: [dayjs().subtract(1, 'month'), dayjs()],
-          }}>
-            <Row gutter={[16, 12]} style={{ width: '100%' }}>
-              <Col>
-                <Form.Item name="dateRange" label="日期范围">
-                  <RangePicker size="small" />
-                </Form.Item>
-              </Col>
-              <Col>
-                <Form.Item name="singleCode" label="单只股票">
-                  <Input placeholder="留空则更新全部，如 000001" style={{ width: 200 }} allowClear />
-                </Form.Item>
-              </Col>
-              <Col>
-                <Form.Item name="force" valuePropName="checked" style={{ marginBottom: 0 }}>
-                  <Checkbox>强制重新采集（更新全部已有记录）</Checkbox>
-                </Form.Item>
-              </Col>
-              <Col>
-                <span style={{ lineHeight: '32px', color: '#8c8c8c', fontSize: 13 }}>
-                  <FileTextOutlined style={{ marginRight: 4 }} />
-                  采集东方财富个股研报数据，包含评级、盈利预测、PDF链接
-                </span>
-              </Col>
-            </Row>
-            <Row gutter={[16, 12]} style={{ width: '100%', marginTop: 8 }}>
-              <Col>
-                <Space size={12}>
-                  <Button type="primary" icon={<PlayCircleOutlined />}
-                    onClick={() => handleSubmit('RESEARCH')} disabled={isRunning}>
-                    开始采集
-                  </Button>
-                  <Button danger icon={<StopOutlined />}
-                    onClick={() => handleCancel('RESEARCH')} disabled={!isRunning}>
-                    取消任务
-                  </Button>
-                  <Button icon={<SearchOutlined />}
-                    onClick={handleResearchValidate} loading={researchValidateLoading}>
-                    数据校验
-                  </Button>
-                  {isRunning && <Tag color="processing">采集中...</Tag>}
-                  {researchTask && researchTask.status === 'SUCCESS' && <Tag color="success">采集完成</Tag>}
-                  {researchTask && researchTask.status === 'FAILED' && <Tag color="error">采集失败</Tag>}
-                </Space>
-              </Col>
-            </Row>
-          </Form>
-        </Card>
-
-        {/* 进度条 */}
-        {renderProgressBar(researchTask)}
-
-        {/* 日志 */}
-        <Card title={<span>采集日志 <Text type="secondary" style={{ fontSize: 12 }}>({researchLogs.length} 条)</Text>{renderTaskConfig(researchTask, 'RESEARCH')}</span>}
-          size="small" extra={<Button size="small" onClick={() => setResearchLogs([])}>清空</Button>}>
-          {renderLogs(researchLogs, researchLogRef)}
-        </Card>
-
-        {/* 研报数据校验报告 */}
-        {researchValidateResult && renderResearchValidateCard()}
-      </>
-    );
-  };
-
-  // ========== 研报数据校验报告 ==========
-  const renderResearchValidateCard = () => {
-    const { totalReports, status, warnings } = researchValidateResult || {};
-    return (
-      <Card title={<span><SearchOutlined /> 研报数据校验报告</span>} size="small" style={{ marginTop: 16 }}
-        extra={<Button size="small" type="text" onClick={() => setResearchValidateResult(null)}>关闭</Button>}>
-        <Row gutter={16} style={{ marginBottom: 16 }}>
-          <Col span={4}>
-            <Statistic title="研报数" value={totalReports || 0}
-              valueStyle={{ fontSize: 14, color: '#1677ff' }} />
-          </Col>
-          <Col span={4}>
-            <Statistic title="警告数" value={(warnings || []).length || 0}
-              valueStyle={{ fontSize: 14, color: (warnings || []).length > 0 ? '#fa8c16' : '#52c41a' }} />
-          </Col>
-          <Col span={4}>
-            <Statistic title="状态" value={status === 'OK' ? '正常' : '有警告'}
-              valueStyle={{ fontSize: 14, color: status === 'OK' ? '#52c41a' : '#fa8c16' }} />
-          </Col>
-        </Row>
-        {(warnings || []).length > 0 && (
-          <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12 }}>
-            {warnings.map((w, i) => <li key={i}>{w}</li>)}
-          </ul>
-        )}
-      </Card>
-    );
-  };
-
-
   // ========== 指数完整性检查 ==========
   const renderIndexIntegrity = () => (
     <Card title={<span><SearchOutlined /> 指数完整性检查</span>} size="small" style={{ marginTop: 16 }}>
@@ -2031,12 +1871,6 @@ function DataUpdate() {
               forceRender: true,
               label: <span><ThunderboltOutlined /> 情绪数据</span>,
               children: <div style={{ padding: '16px 0' }}>{renderSentimentTab()}</div>,
-            },
-            {
-              key: 'RESEARCH',
-              forceRender: true,
-              label: <span><FileTextOutlined /> 研报数据</span>,
-              children: <div style={{ padding: '16px 0' }}>{renderResearchTab()}</div>,
             },
           ]}
         />

@@ -90,7 +90,7 @@ public class DataUpdateService {
             // 检查关键脚本是否存在
             String[] scripts = {"update_stock_data.py", "update_stock_daily_baostock.py",
                     "update_bj_stock_daily_qq.py", "update_index_daily_baostock.py",
-                    "update_dividend_baostock.py"};
+                    "update_dividend_baostock.py", "update_research_report.py"};
             for (String s : scripts) {
                 File f = new File(resolvedScriptDir, s);
                 log.info("[DataUpdate]   {} : {}", s, f.exists() ? "OK" : "MISSING");
@@ -263,7 +263,7 @@ public class DataUpdateService {
             } else if (cmd == null) {
                 // ALL → 依次执行 SH、SZ、BJ
                 executeAllMarkets(taskId, request);
-            } else if (cmd.size() >= 3 && "update_stock_info_daily.py".equals(cmd.get(cmd.size() - 1))) {
+            } else if (cmd.size() >= 3 && "update_stock_info_daily.py".equals(cmd.getLast())) {
                 // infoOnly 模式：只执行 stock_info 脚本
                 task.setTotalStocks(5500);
                 task.setCurrentStep("股票信息");
@@ -611,9 +611,51 @@ public class DataUpdateService {
             String startDate = request.getStartDate();
             String endDate = request.getEndDate();
             if (startDate != null && !startDate.isEmpty()) {
-                // yyyy-MM-dd → YYYYMMDD
-                cmd.add("--date");
-                cmd.add(startDate.replace("-", ""));
+                cmd.add("--start-date");
+                cmd.add(startDate);
+            }
+            if (endDate != null && !endDate.isEmpty()) {
+                cmd.add("--end-date");
+                cmd.add(endDate);
+            }
+            // 未勾选的数据源传 --skip-xxx 参数
+            if (!request.isFetchLhb()) {
+                cmd.add("--skip-lhb");
+                cmd.add("--skip-lhb-inst");
+            }
+            if (!request.isFetchMargin()) {
+                cmd.add("--skip-margin");
+                cmd.add("--skip-margin-detail");
+            }
+            if (!request.isFetchSurvey()) cmd.add("--skip-survey");
+            if (!request.isFetchBlockTrade()) cmd.add("--skip-block");
+            if (!request.isFetchActivity()) cmd.add("--skip-activity");
+            if (!request.isFetchZtPool()) cmd.add("--skip-zt");
+            if (!request.isFetchMoneyflow()) cmd.add("--skip-moneyflow");
+            if (!request.isFetchNotice()) cmd.add("--skip-notice");
+            return cmd;
+        }
+
+        // 研报数据
+        if ("RESEARCH".equals(updateType)) {
+            cmd.add("update_research_report.py");
+            if (request.isForce()) {
+                cmd.add("--all");
+            }
+            // 日期范围
+            String startDate = request.getStartDate();
+            String endDate = request.getEndDate();
+            if (startDate != null && !startDate.isEmpty()) {
+                cmd.add("--start-date");
+                cmd.add(startDate);
+            }
+            if (endDate != null && !endDate.isEmpty()) {
+                cmd.add("--end-date");
+                cmd.add(endDate);
+            }
+            String singleCode = request.getSingleCode(); // 新增字段：单只股票代码
+            if (singleCode != null && !singleCode.isEmpty()) {
+                cmd.add(singleCode);
             }
             return cmd;
         }
@@ -831,6 +873,14 @@ public class DataUpdateService {
                 msg.put("yearStart", req.getYearStart());
                 msg.put("yearEnd", req.getYearEnd());
                 msg.put("stockPool", req.getStockPool());
+                msg.put("fetchLhb", req.isFetchLhb());
+                msg.put("fetchMargin", req.isFetchMargin());
+                msg.put("fetchSurvey", req.isFetchSurvey());
+                msg.put("fetchBlockTrade", req.isFetchBlockTrade());
+                msg.put("fetchActivity", req.isFetchActivity());
+                msg.put("fetchZtPool", req.isFetchZtPool());
+                msg.put("fetchMoneyflow", req.isFetchMoneyflow());
+                msg.put("fetchNotice", req.isFetchNotice());
             }
             messagingTemplate.convertAndSend("/topic/data-update/status", msg);
         } catch (Exception e) {

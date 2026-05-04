@@ -189,7 +189,7 @@ def run_index_daily(start_date, end_date, extra_args):
 
 
 def run_sentiment(date_str=None):
-    """调用情绪数据采集脚本（涨跌停/北向资金/资金情绪）"""
+    """调用情绪数据采集脚本（涨跌停/资金情绪）"""
     if not os.path.exists(SENTIMENT_SCRIPT):
         print(f"[ERROR] 找不到脚本: {SENTIMENT_SCRIPT}")
         return False
@@ -198,7 +198,7 @@ def run_sentiment(date_str=None):
     if date_str:
         cmd += ["--date", date_str.replace("-", "")]
 
-    return run_cmd(cmd, "市场情绪数据 (涨跌停/北向/资金)")
+    return run_cmd(cmd, "市场情绪数据 (涨跌停/资金)")
 
 
 def show_summary():
@@ -330,7 +330,7 @@ def main():
     )
     parser.add_argument(
         "--sentiment-only", action="store_true",
-        help="只采集市场情绪数据（涨跌停/北向资金/资金情绪），不更新日线和info"
+        help="只采集市场情绪数据（涨跌停/资金情绪），不更新日线和info"
     )
 
     # ─── 市场选择 ───

@@ -338,4 +338,69 @@ public class DataUpdateController {
      * 用于在 getMissingStats 中过滤掉查询日尚未上市的股票。
      */
     private volatile Map<String, LocalDate> codeToListDate;
+    @GetMapping("/research/coverage")
+    @Operation(summary = "研报数据覆盖率概览")
+    public ApiResponse<Map<String, Object>> getResearchCoverage() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        try {
+            Integer totalCount = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM stock_research_report", Integer.class);
+            result.put("totalCount", totalCount != null ? totalCount : 0);
+
+            Integer stockCount = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(DISTINCT code) FROM stock_research_report", Integer.class);
+            result.put("stockCount", stockCount != null ? stockCount : 0);
+
+            String latestDate = jdbcTemplate.queryForObject(
+                    "SELECT MAX(report_date) FROM stock_research_report", String.class);
+            result.put("latestDate", latestDate != null ? latestDate : "");
+
+            return ApiResponse.success(result);
+        } catch (Exception e) {
+            log.error("获取研报覆盖率失败", e);
+            return ApiResponse.error("获取研报覆盖率失败: " + e.getMessage());
+        }
+    }
+
+    @GetMapping("/research/validate")
+    @Operation(summary = "研报数据校验")
+    public ApiResponse<Map<String, Object>> validateResearch() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        try {
+            // 研报总数
+            Integer totalReports = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM stock_research_report", Integer.class);
+            result.put("totalReports", totalReports != null ? totalReports : 0);
+
+            // === 空值检查 ===
+            List<String> warnings = new ArrayList<>();
+
+            // 检查 rating 为空
+            Integer nullRating = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM stock_research_report WHERE rating IS NULL OR rating = ''", Integer.class);
+            if (nullRating != null && nullRating > 0) {
+                warnings.add("rating 为空: " + nullRating + " 条");
+            }
+
+            // 检查 report_title 为空
+            Integer nullTitle = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM stock_research_report WHERE report_title IS NULL OR report_title = ''", Integer.class);
+            if (nullTitle != null && nullTitle > 0) {
+                warnings.add("report_title 为空: " + nullTitle + " 条");
+            }
+
+            // 检查 7 天内新增数据
+            Integer recentCount = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM stock_research_report WHERE report_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)", Integer.class);
+            result.put("recentReports", recentCount != null ? recentCount : 0);
+
+            result.put("warnings", warnings);
+            result.put("status", warnings.isEmpty() ? "OK" : "WARNING");
+
+            return ApiResponse.success(result);
+        } catch (Exception e) {
+            log.error("研报数据校验失败", e);
+            return ApiResponse.error("研报数据校验失败: " + e.getMessage());
+        }
+    }
 }

@@ -1,68 +1,68 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-update_sentiment_data.py
+update_sentiment_data.py v2
 ========================
 拉取市场情绪数据并双写 ClickHouse + MySQL：
-  1. 涨跌停池（涨停/跌停/炸板）—— 东方财富
-  2. 北向资金（指数级别 + 个股持股）—— 东方财富
-  3. 资金情绪代理指标（从涨停池提取换手率/量比）
 
-ClickHouse 表：
-  - stock.stock_sentiment_zt         （涨跌停池）
-  - stock.stock_sentiment_hsgt       （北向资金指数）
-  - stock.stock_sentiment_hsgt_hold  （北向持股）
-  - stock.stock_sentiment_moneyflow  （资金情绪代理）
-
-MySQL 表（与 ClickHouse 同名，字段一致）：
-  - stock_sentiment_zt
-  - stock_sentiment_hsgt
-  - stock_sentiment_hsgt_hold
-  - stock_sentiment_moneyflow
+  ClickHouse 表（同名 MySQL 表同步）:
+    1. stock_sentiment_lhb          龙虎榜详情
+    2. stock_sentiment_lhb_inst     龙虎榜机构统计
+    3. stock_sentiment_margin       融资融券汇总（沪市）
+    4. stock_sentiment_margin_detail 融资融券个股（沪市）
+    5. stock_sentiment_survey      机构调研
+    6. stock_sentiment_block_trade 大宗交易
+    7. stock_sentiment_activity    市场活跃度
+    8. stock_sentiment_zt         涨跌停池（保留）
+    9. stock_sentiment_moneyflow  资金情绪代理（保留，从涨停池提取）
+   10. stock_sentiment_notice     公告（保留）
 
 用法：
-  python update_sentiment_data.py                    # 全部
-  python update_sentiment_data.py --skip-zt          # 跳过涨跌停
-  python update_sentiment_data.py --date 20260430    # 指定日期
+  python update_sentiment_data.py                     # 全部
+  python update_sentiment_data.py --skip-lhb           # 跳过龙虎榜
+  python update_sentiment_data.py --date 20260430     # 指定日期
   python update_sentiment_data.py --dry-run          # 不写库
+  python update_sentiment_data.py --catchup 30        # 补最近30天数据
 """
 
 import sys
 import time
 import datetime
-import traceback
 import argparse
+import traceback
 
 import pandas as pd
 import clickhouse_connect
-import requests
+import pymysql
 
 # ─── 配置 ──────────────────────────────────────────────────────
 CH_CONFIG = dict(
     host="localhost", port=8123,
     username="default", password="123456", database="stock",
 )
-
 MYSQL_CONFIG = dict(
     host="localhost", port=3306,
     user="root", password="123456", database="stock",
     charset="utf8mb4",
 )
 
-QQ_HEADERS = {
-    "Referer": "https://finance.qq.com",
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-}
-QQ_URL = "https://qt.gtimg.cn/q={codes}"
-
-# ─── 工具 ──────────────────────────────────────────────────────
+# ─── 工具函数 ────────────────────────────────────────────────────
 
 def to_float(val, default=0.0):
-    if val is None or str(val).strip() in ("", "-", "None"):
+    if val is None or str(val).strip() in ("", "-", "None", "nan"):
         return default
     try:
         f = float(val)
-        return f if f == f else default  # NaN → default
+        return f if f == f else default   # NaN → default
+    except (ValueError, TypeError):
+        return default
+
+
+def to_int(val, default=0):
+    if val is None or str(val).strip() in ("", "-", "None"):
+        return default
+    try:
+        return int(val)
     except (ValueError, TypeError):
         return default
 
@@ -74,29 +74,97 @@ def to_date(val):
     s = str(val).strip()
     if not s or s in ("None", "-"):
         return None
-    # YYYYMMDD
     if len(s) == 8 and s.isdigit():
         return datetime.date(int(s[:4]), int(s[4:6]), int(s[6:8]))
-    # YYYY-MM-DD
     if len(s) >= 10:
         return datetime.date.fromisoformat(s[:10])
     return None
 
 
-def code_to_symbol(code: str) -> tuple:
-    """返回 (symbol, market)"""
-    if code.startswith(("60", "68", "90")):
-        return f"{code}.SH", "SH", f"sh{code}"
-    elif code.startswith(("00", "30", "20")):
-        return f"{code}.SZ", "SZ", f"sz{code}"
-    else:
-        return f"{code}.BJ", "BJ", f"bj{code}"
+# ─── CH 写入 ─────────────────────────────────────────────────────
 
+def _ch_dedup_filter(table: str, rows: list, column_names: list, dedup_cols: list) -> list:
+    """查 CH FINAL 表预过滤已存在的行，返回待写入行列表"""
+    if not rows or not dedup_cols:
+        return rows
+    try:
+        from datetime import date as date_type
+        dedup_indices = [column_names.index(c) for c in dedup_cols]
 
-# ─── ClickHouse 写入 ───────────────────────────────────────────
+        # 收集本批次所有去重键值
+        row_keys = set()
+        for row in rows:
+            key = tuple(row[idx] for idx in dedup_indices)
+            row_keys.add(key)
+
+        if not row_keys:
+            return rows
+
+        # 归一化 date/datetime → date 对象（与 CH 存储格式一致）
+        def _norm_val(v):
+            if isinstance(v, datetime.datetime):
+                return v.date()
+            elif isinstance(v, str):
+                try:
+                    return date_type.fromisoformat(v)
+                except ValueError:
+                    return v
+            return v
+
+        norm_keys = set()
+        for key in row_keys:
+            norm_keys.add(tuple(_norm_val(v) for v in key))
+
+        # 按列收集去重列值，构建 WHERE IN 子句
+        col_vals = {col: set() for col in dedup_cols}
+        for key in norm_keys:
+            for i, col in enumerate(dedup_cols):
+                col_vals[col].add(key[i])
+
+        where_parts = []
+        for col in dedup_cols:
+            vals = col_vals[col]
+            if not vals:
+                continue
+            formatted = []
+            for v in vals:
+                if isinstance(v, date_type):
+                    formatted.append(f"'{v}'")
+                elif isinstance(v, str):
+                    formatted.append(f"'{v}'")
+                else:
+                    formatted.append(str(v))
+            where_parts.append(f"{col} IN ({', '.join(formatted)})")
+
+        query = (f"SELECT {', '.join(dedup_cols)} "
+                 f"FROM {table} FINAL WHERE {' AND '.join(where_parts)}")
+
+        client = clickhouse_connect.get_client(**CH_CONFIG)
+        result = client.query(query)
+        existing_keys = set(tuple(r) for r in result.result_rows)
+        client.close()
+
+        # 过滤 rows：只保留不存在的键
+        filtered = []
+        skipped = 0
+        for row in rows:
+            key = tuple(row[idx] for idx in dedup_indices)
+            norm_key = tuple(_norm_val(v) for v in key)
+            if norm_key not in existing_keys:
+                filtered.append(row)
+            else:
+                skipped += 1
+
+        if skipped:
+            print(f"  [CH] {table}: 跳过 {skipped} 条已存在记录（FINAL 预过滤）")
+        return filtered
+    except Exception as e:
+        print(f"  [WARN] {table} 预过滤失败，跳过去重: {e}")
+        return rows
+
 
 def _ch_batch_insert(table: str, rows: list, column_names: list, dry_run: bool = False) -> int:
-    """通用 CH 批量写入（ReplacingMergeTree，直接 INSERT 覆盖）"""
+    """写入 CH（不做预过滤，由 _dual_write 统一处理）"""
     if not rows:
         print(f"[CH] {table}: 无数据，跳过")
         return 0
@@ -115,24 +183,20 @@ def _ch_batch_insert(table: str, rows: list, column_names: list, dry_run: bool =
         return 0
 
 
-# ─── MySQL 写入 ─────────────────────────────────────────────────
+# ─── MySQL 写入 ──────────────────────────────────────────────────
 
-def _mysql_batch_upsert(table: str, rows: list, column_names: list, unique_cols: list, dry_run: bool = False) -> int:
-    """MySQL 批量 REPLACE INTO（基于唯一键覆盖）"""
+def _mysql_batch_upsert(table: str, rows: list, column_names: list,
+                           unique_cols: list, dry_run: bool = False) -> int:
     if not rows:
         return 0
     if dry_run:
         print(f"[DRY-RUN] {table}: MySQL 模拟写入 {len(rows)} 条")
         return len(rows)
     try:
-        import pymysql
         conn = pymysql.connect(**MYSQL_CONFIG)
         cur = conn.cursor()
-
         placeholders = ", ".join(["%s"] * len(column_names))
         sql = f"REPLACE INTO {table} ({', '.join(column_names)}) VALUES ({placeholders})"
-
-        # 批量写入
         cur.executemany(sql, rows)
         conn.commit()
         affected = cur.rowcount
@@ -148,45 +212,357 @@ def _mysql_batch_upsert(table: str, rows: list, column_names: list, unique_cols:
 
 # ─── 双写入口 ──────────────────────────────────────────────────
 
-def _dual_write(
-        table: str, rows: list, ch_columns: list,
-        mysql_columns: list, mysql_unique: list, dry_run: bool = False) -> None:
-    """同时写入 CH + MySQL"""
+def _dual_write(table, rows, ch_columns, mysql_columns, mysql_unique, dry_run=False):
     if not rows:
         print(f"[SKIP] {table}: 无数据")
         return
-    ch_ok = _ch_batch_insert(table, rows, ch_columns, dry_run)
-    mysql_ok = _mysql_batch_upsert(table, rows, mysql_columns, mysql_unique, dry_run)
-    if ch_ok > 0 and mysql_ok > 0:
-        print(f"  ✓ {table}: CH({ch_ok}) + MySQL({mysql_ok}) 写入完成")
-    elif ch_ok > 0:
+    # CH 预过滤：查 FINAL 表跳过已存在行，CH 和 MySQL 共用过滤结果
+    if not dry_run and mysql_unique:
+        rows = _ch_dedup_filter(table, rows, ch_columns, mysql_unique)
+    if not rows:
+        print(f"  ≡ {table}: CH/MySQL 均已存在，跳过")
+        return
+    ch_ok  = _ch_batch_insert(table, rows, ch_columns, dry_run)
+    my_ok = _mysql_batch_upsert(table, rows, mysql_columns, mysql_unique, dry_run)
+    if ch_ok and my_ok:
+        print(f"  ✓ {table}: CH({ch_ok}) + MySQL({my_ok}) 写入完成")
+    elif ch_ok:
         print(f"  ⚠ {table}: CH 成功，MySQL 失败")
-    elif mysql_ok > 0:
+    elif my_ok:
         print(f"  ⚠ {table}: MySQL 成功，CH 失败")
 
 
-# ─── 涨跌停数据 ────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════
+# 1. 龙虎榜详情  stock_lhb_detail_em
+# ║  返回字段: 序号/代码/名称/上榜日/解读/收盘价/涨跌幅/
+# ║            龙虎榜净买额/买入额/卖出额/成交额/市场总成交额/
+# ║            净买额占总成交比/成交额占总成交比/换手率/流通市值/
+# ║            上榜原因/上榜后1日/上榜后2日/上榜后5日/上榜后10日
+# ╙══════════════════════════════════════════════════════════════
 
-def fetch_zt_data(date_str: str) -> tuple:
-    """
-    获取涨跌停池（涨停强势 + 跌停 + 炸板）。
-    返回 (zt_rows, dt_rows, zbgc_rows)
-    """
+def fetch_lhb_detail(start_date: str, end_date: str) -> list:
+    """龙虎榜详情，返回 rows: [code,name,trade_date,close,pct_change,
+                                   net_amount,buy_amount,sell_amount,total_amount,
+                                   market_amount,net_ratio,amount_ratio,turnover,
+                                   float_mv,reason,after_1d,after_2d,after_5d,after_10d,update_time]"""
     import akshare as ak
-
-    zt_rows, dt_rows, zbgc_rows = [], [], []
-
-    # 1) 涨停强势池
+    rows = []
     try:
+        df = ak.stock_lhb_detail_em(start_date=start_date, end_date=end_date)
+        if df is None or df.empty:
+            return rows
+        for _, r in df.iterrows():
+            code = str(r.get("代码", "")).strip().zfill(6)
+            if not code or code == "000000":
+                continue
+            td = to_date(r.get("上榜日"))
+            if td is None:
+                continue
+            rows.append([
+                code,
+                str(r.get("名称", ""))[:50],
+                td,
+                to_float(r.get("收盘价")),
+                to_float(r.get("涨跌幅")),
+                to_float(r.get("龙虎榜净买额")),
+                to_float(r.get("龙虎榜买入额")),
+                to_float(r.get("龙虎榜卖出额")),
+                to_float(r.get("龙虎榜成交额")),
+                to_float(r.get("市场总成交额")),
+                to_float(r.get("净买额占总成交比")),
+                to_float(r.get("成交额占总成交比")),
+                to_float(r.get("换手率")),
+                to_float(r.get("流通市值")),
+                str(r.get("上榜原因", ""))[:200],
+                to_float(r.get("上榜后1日"), None),
+                to_float(r.get("上榜后2日"), None),
+                to_float(r.get("上榜后5日"), None),
+                to_float(r.get("上榜后10日"), None),
+                datetime.datetime.now(),
+            ])
+        print(f"  龙虎榜详情: {len(rows)} 条")
+    except Exception as e:
+        print(f"  龙虎榜详情获取失败: {e}")
+    return rows
+
+
+# ═══════════════════════════════════════════════════════════════
+# 2. 龙虎榜机构统计  stock_lhb_jgmmtj_em
+# ║  返回字段: 序号/代码/名称/收盘价/涨跌幅/买方机构数/卖方机构数/
+# ║            机构买入总额/机构卖出总额/机构买入净额/市场总成交额/
+# ║            机构净买额占总成交额比/换手率/流通市值/上榜原因/上榜日期
+# ╙══════════════════════════════════════════════════════════════
+
+def fetch_lhb_inst(start_date: str, end_date: str) -> list:
+    import akshare as ak
+    rows = []
+    try:
+        df = ak.stock_lhb_jgmmtj_em(start_date=start_date, end_date=end_date)
+        if df is None or df.empty:
+            return rows
+        for _, r in df.iterrows():
+            code = str(r.get("代码", "")).strip().zfill(6)
+            if not code or code == "000000":
+                continue
+            td = to_date(r.get("上榜日期"))
+            if td is None:
+                continue
+            rows.append([
+                code,
+                str(r.get("名称", ""))[:50],
+                td,
+                to_float(r.get("收盘价")),
+                to_float(r.get("涨跌幅")),
+                to_int(r.get("买方机构数")),
+                to_int(r.get("卖方机构数")),
+                to_float(r.get("机构买入总额")),
+                to_float(r.get("机构卖出总额")),
+                to_float(r.get("机构买入净额")),
+                to_float(r.get("市场总成交额")),
+                to_float(r.get("机构净买额占总成交额比")),
+                to_float(r.get("换手率")),
+                to_float(r.get("流通市值")),
+                str(r.get("上榜原因", ""))[:200],
+                datetime.datetime.now(),
+            ])
+        print(f"  龙虎榜机构: {len(rows)} 条")
+    except Exception as e:
+        print(f"  龙虎榜机构获取失败: {e}")
+    return rows
+
+
+# ═══════════════════════════════════════════════════════════════
+# 3. 融资融券汇总（沪市） stock_margin_sse
+# ║  返回字段: 信用交易日期/融资余额/融资买入额/融券余量/
+# ║            融券余量金额/融券卖出量/融资融券余额
+# ╙══════════════════════════════════════════════════════════════
+
+def fetch_margin(start_date: str, end_date: str) -> list:
+    import akshare as ak
+    rows = []
+    try:
+        df = ak.stock_margin_sse(start_date=start_date, end_date=end_date)
+        if df is None or df.empty:
+            return rows
+        for _, r in df.iterrows():
+            td = to_date(r.get("信用交易日期"))
+            if td is None:
+                continue
+            rows.append([
+                td,
+                to_float(r.get("融资余额")),
+                to_float(r.get("融资买入额")),
+                to_float(r.get("融券余量")),
+                to_float(r.get("融券余量金额")),
+                to_float(r.get("融券卖出量")),
+                to_float(r.get("融资融券余额")),
+                datetime.datetime.now(),
+            ])
+        print(f"  融资融券汇总: {len(rows)} 条")
+    except Exception as e:
+        print(f"  融资融券汇总获取失败: {e}")
+    return rows
+
+
+# ═══════════════════════════════════════════════════════════════
+# 4. 融资融券个股（沪市） stock_margin_detail_sse
+# ║  返回字段: 信用交易日期/标的证券代码/标的证券简称/
+# ║            融资余额/融资买入额/融资偿还额/融券余量/融券卖出量/融券偿还量
+# ╙══════════════════════════════════════════════════════════════
+
+def fetch_margin_detail(trade_date: str) -> list:
+    import akshare as ak
+    rows = []
+    try:
+        df = ak.stock_margin_detail_sse(date=trade_date)
+        if df is None or df.empty:
+            print("  融资融券个股: 无数据（可能非交易日或接口无数据）")
+            return rows
+        for _, r in df.iterrows():
+            code = str(r.get("标的证券代码", "")).strip().zfill(6)
+            if not code:
+                continue
+            td = to_date(r.get("信用交易日期"))
+            if td is None:
+                continue
+            rows.append([
+                td,
+                code,
+                str(r.get("标的证券简称", ""))[:50],
+                to_float(r.get("融资余额")),
+                to_float(r.get("融资买入额")),
+                to_float(r.get("融资偿还额")),
+                to_float(r.get("融券余量")),
+                to_float(r.get("融券卖出量")),
+                to_float(r.get("融券偿还量")),
+                datetime.datetime.now(),
+            ])
+        print(f"  融资融券个股: {len(rows)} 条")
+    except Exception as e:
+        print(f"  融资融券个股获取失败: {e}（该日期可能非交易日或接口暂无数据）")
+    return rows
+
+
+# ═══════════════════════════════════════════════════════════════
+# 5. 机构调研  stock_jgdy_tj_em
+# ║  返回字段: 序号/代码/名称/最新价/涨跌幅/接待机构数量/
+# ║            接待方式/接待人员/接待地点/接待日期/公告日期
+# ╙══════════════════════════════════════════════════════════════
+
+def fetch_survey(notice_date: str) -> list:
+    import akshare as ak
+    rows = []
+    try:
+        df = ak.stock_jgdy_tj_em(date=notice_date)
+        if df is None or df.empty:
+            return rows
+        for _, r in df.iterrows():
+            code = str(r.get("代码", "")).strip().zfill(6)
+            if not code or code == "000000":
+                continue
+            md = to_date(r.get("接待日期"))
+            nd = to_date(r.get("公告日期"))
+            if md is None:
+                continue
+            rows.append([
+                code,
+                str(r.get("名称", ""))[:50],
+                to_float(r.get("最新价")),
+                to_float(r.get("涨跌幅")),
+                to_int(r.get("接待机构数量")),
+                str(r.get("接待方式", ""))[:100],
+                str(r.get("接待人员", ""))[:100],
+                str(r.get("接待地点", ""))[:100],
+                md,
+                nd,
+                datetime.datetime.now(),
+            ])
+        print(f"  机构调研: {len(rows)} 条")
+    except Exception as e:
+        print(f"  机构调研获取失败: {e}")
+    return rows
+
+
+# ═══════════════════════════════════════════════════════════════
+# 6. 大宗交易  stock_dzjy_mrmx
+# ║  返回字段: 序号/交易日期/证券代码/证券简称/
+# ║            成交价/成交量/成交额/买方营业部/卖方营业部
+# ╙══════════════════════════════════════════════════════════════
+
+def fetch_block_trade(start_date: str, end_date: str) -> list:
+    import akshare as ak
+    rows = []
+    try:
+        df = ak.stock_dzjy_mrmx(start_date=start_date, end_date=end_date)
+        if df is None or df.empty:
+            return rows
+        for _, r in df.iterrows():
+            code = str(r.get("证券代码", "")).strip().zfill(6)
+            if not code:
+                continue
+            td = to_date(r.get("交易日期"))
+            if td is None:
+                continue
+            rows.append([
+                td,
+                code,
+                str(r.get("证券简称", ""))[:50],
+                to_float(r.get("成交价")),
+                to_float(r.get("成交量")),
+                to_float(r.get("成交额")),
+                str(r.get("买方营业部", ""))[:100],
+                str(r.get("卖方营业部", ""))[:100],
+                datetime.datetime.now(),
+            ])
+        print(f"  大宗交易: {len(rows)} 条")
+    except Exception as e:
+        print(f"  大宗交易获取失败: {e}")
+    return rows
+
+
+# ═══════════════════════════════════════════════════════════════
+# 7. 市场活跃度  stock_market_activity_legu
+# ║  返回字段: item/value
+# ║  item 取值: 上涨/涨停/真实涨停/st st*涨停/下跌/跌停/
+# ║              真实跌停/st st*跌停/平盘/停牌/活跃度/统计日期
+# ╙══════════════════════════════════════════════════════════════
+
+def fetch_activity() -> list:
+    """市场活跃度，返回 [trade_date, up, zt, zt_real, zt_st,
+                                   down, dt, dt_real, dt_st, flat, suspended,
+                                   activity_ratio, update_time]"""
+    import akshare as ak
+    try:
+        df = ak.stock_market_activity_legu()
+        if df is None or df.empty:
+            return []
+        rec = {}
+        trade_date = None
+        for _, r in df.iterrows():
+            item  = str(r.get("item", ""))
+            value = r.get("value")
+            # 统计日期行：提取日期
+            if "统计日期" in item or "统计日期" in str(value):
+                ds = str(value)
+                if len(ds) >= 10:
+                    trade_date = to_date(ds[:10])
+                continue
+            rec[item] = value
+
+        if trade_date is None:
+            # 从"统计日期"行取日期
+            for _, r in df.iterrows():
+                if "统计日期" in str(r.get("item", "")):
+                    ds = str(r.get("value", ""))
+                    if len(ds) >= 10:
+                        trade_date = to_date(ds[:10])
+                        break
+        if trade_date is None:
+            # fallback：用今天
+            trade_date = datetime.date.today()
+
+        activity_str = str(rec.get("活跃度", "0%")).replace("%", "")
+        rows = [[
+            trade_date,
+            to_int(rec.get("上涨")),
+            to_int(rec.get("涨停")),
+            to_int(rec.get("真实涨停")),
+            to_int(rec.get("st st*涨停", rec.get("st*涨停", rec.get("ST涨停", 0)))),
+            to_int(rec.get("下跌")),
+            to_int(rec.get("跌停")),
+            to_int(rec.get("真实跌停")),
+            to_int(rec.get("st st*跌停", rec.get("st*跌停", rec.get("ST跌停", 0)))),
+            to_int(rec.get("平盘")),
+            to_int(rec.get("停牌")),
+            to_float(activity_str),
+            datetime.datetime.now(),
+        ]]
+        print(f"  市场活跃度: {trade_date} 上涨{rows[0][1]}家/涨停{rows[0][2]}家")
+        return rows
+    except Exception as e:
+        print(f"  市场活跃度获取失败: {e}")
+        return []
+
+
+# ═══════════════════════════════════════════════════════════════
+# 保留：8. 涨跌停池（涨停/跌停/炸板）
+# ╙══════════════════════════════════════════════════════════════
+
+def fetch_zt_data(date_str: str) -> list:
+    """获取涨跌停池，返回 zt_rows（供 _dual_write 直接写入 stock_sentiment_zt）"""
+    import akshare as ak
+    zt_rows = []
+    try:
+        # 涨停强势池
         df = ak.stock_zt_pool_strong_em(date=date_str)
         if df is not None and not df.empty:
             for _, r in df.iterrows():
                 code = str(r.get("代码", "")).zfill(6)
-                # 涨停统计 1/2 → is_new=1, zt_type=zt
                 zt_stat = str(r.get("涨停统计", ""))
                 is_new = 1 if zt_stat.startswith("1/") else 0
                 zt_rows.append([
-                    code, to_date(date_str), code, str(r.get("名称", "")),
+                    code, to_date(date_str), code,
+                    str(r.get("名称", "")),
                     to_float(r.get("最新价")), to_float(r.get("涨跌幅")),
                     "zt", str(r.get("入选理由", ""))[:200], is_new,
                     datetime.datetime.now(),
@@ -195,14 +571,14 @@ def fetch_zt_data(date_str: str) -> tuple:
     except Exception as e:
         print(f"  涨停强势池获取失败: {e}")
 
-    # 2) 跌停池
     try:
         df2 = ak.stock_zt_pool_dtgc_em(date=date_str)
         if df2 is not None and not df2.empty:
             for _, r in df2.iterrows():
                 code = str(r.get("代码", "")).zfill(6)
                 zt_rows.append([
-                    code, to_date(date_str), code, str(r.get("名称", "")),
+                    code, to_date(date_str), code,
+                    str(r.get("名称", "")),
                     to_float(r.get("最新价")), to_float(r.get("涨跌幅")),
                     "dt", str(r.get("所属行业", ""))[:200], 0,
                     datetime.datetime.now(),
@@ -211,14 +587,14 @@ def fetch_zt_data(date_str: str) -> tuple:
     except Exception as e:
         print(f"  跌停池获取失败: {e}")
 
-    # 3) 炸板池（已涨停又打开）
     try:
         df3 = ak.stock_zt_pool_zbgc_em(date=date_str)
         if df3 is not None and not df3.empty:
             for _, r in df3.iterrows():
                 code = str(r.get("代码", "")).zfill(6)
                 zt_rows.append([
-                    code, to_date(date_str), code, str(r.get("名称", "")),
+                    code, to_date(date_str), code,
+                    str(r.get("名称", "")),
                     to_float(r.get("最新价")), to_float(r.get("涨跌幅")),
                     "zbgc", str(r.get("所属行业", ""))[:200], 0,
                     datetime.datetime.now(),
@@ -227,165 +603,62 @@ def fetch_zt_data(date_str: str) -> tuple:
     except Exception as e:
         print(f"  炸板池获取失败: {e}")
 
-    return zt_rows, dt_rows, zbgc_rows
+    return zt_rows
 
 
-# ─── 北向资金数据 ──────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════
+# 保留：9. 资金情绪代理（从涨停池提取换手率/量比）
+# ╙══════════════════════════════════════════════════════════════
 
-def fetch_hsgt_index(date_str: str) -> list:
-    """获取北向资金指数级别数据"""
+def fetch_moneyflow_from_zt(date_str: str) -> list:
+    """从涨停池提取换手率/量比/成交额作为资金情绪代理（保持与原12列表结构一致）"""
     import akshare as ak
-
     rows = []
     try:
-        df = ak.stock_hsgt_hist_em(symbol="北向资金")
+        df = ak.stock_zt_pool_strong_em(date=date_str)
         if df is None or df.empty:
-            return rows
-        # 取最近 5 天
-        for _, r in df.head(5).iterrows():
-            d = to_date(r.get("日期"))
-            if d is None:
-                continue
-            # 单位：亿元 → 元；负数自动转
-            net = to_float(r.get("当日成交净买额")) * 1e8
-            rows.append([
-                d, net, 0.0, 0.0,  # shanghai_net / shenzhen_net 暂无单独数据
-                datetime.datetime.now(),
-            ])
-        print(f"  北向资金历史: {len(rows)} 条（最近5天）")
-    except Exception as e:
-        print(f"  北向资金指数获取失败: {e}")
-    return rows
-
-
-def fetch_hsgt_hold(date_str: str) -> list:
-    """获取北向持股数据"""
-    import akshare as ak
-
-    rows = []
-    # 尝试多个 indicator 指标，任一成功即可
-    for indicator in ["5日排行", "10日排行", "3日排行"]:
-        try:
-            df = ak.stock_hsgt_hold_stock_em(market="北向", indicator=indicator)
-            if df is None or df.empty:
-                continue
-            trade_date = to_date(df.iloc[0].get("日期")) if len(df) > 0 else None
-            for _, r in df.iterrows():
-                code = str(r.get("代码", "")).strip().zfill(6)
-                if not code or code == "000000":
-                    continue
-                hold_amount = to_float(r.get("今日持股-市值")) * 1e4
-                hold_pct = to_float(r.get("今日持股-占流通股比"))
-                rows.append([
-                    trade_date, code, code, str(r.get("名称", ""))[:50],
-                    hold_amount, hold_pct,
-                    datetime.datetime.now(),
-                ])
-            print(f"  北向持股 [{indicator}]: {len(rows)} 条")
-            break  # 成功则退出
-        except Exception as e:
-            print(f"  北向持股 [{indicator}] 失败: {e}")
-            continue
-    if not rows:
-        print("  北向持股: 所有指标均失败（可能被反爬），跳过")
-    return rows
-
-
-# ─── 个股资金流（腾讯接口）─────────────────────────────────────
-
-def fetch_moneyflow_from_zt(df: pd.DataFrame, date_str: str) -> list:
-    """
-    从涨停池 DataFrame 提取资金情绪指标，作为资金流代理。
-    不依赖 eastmoney 资金流接口（该接口被反爬封锁）。
-    涨停池已有：换手率、量比、成交额、流通市值、总市值 等。
-    """
-    rows = []
-    for _, r in df.iterrows():
-        code = str(r.get("代码", "")).strip().zfill(6)
-        if not code or code == "000000":
-            continue
-        # 换手率(%)、量比、成交额(元)
-        turnover = to_float(r.get("换手率"))
-        vol_ratio = to_float(r.get("量比"))
-        amount = to_float(r.get("成交额"))
-        total_cap = to_float(r.get("总市值"))
-        float_cap = to_float(r.get("流通市值"))
-
-        rows.append([
-            code,
-            to_date(date_str),
-            code,
-            str(r.get("名称", "")),
-            to_float(r.get("最新价")),
-            to_float(r.get("涨跌幅")),
-            0.0,    # net_main (暂无)
-            0.0,    # net_main_pct
-            0.0,    # net_huge
-            0.0,    # net_big
-            turnover * 1e8 if turnover else 0.0,
-            vol_ratio * 1e8 if vol_ratio else 0.0,
-            datetime.datetime.now(),
-        ])
-    return rows
-
-
-# ─── 东方财富人气榜 ────────────────────────────────────────
-def fetch_hot_rank(date_str: str) -> list:
-    """
-    获取东方财富个股人气榜（市场热度排名）。
-    返回 rows: [rank, ts_code, code, name, trade_date, hot_value, update_time]
-    """
-    import akshare as ak
-
-    rows = []
-    today = to_date(date_str) or datetime.date.today()
-    try:
-        df = ak.stock_hot_rank_em()
-        if df is None or df.empty:
-            print("  人气榜: 无数据")
             return rows
         for _, r in df.iterrows():
             code = str(r.get("代码", "")).strip().zfill(6)
             if not code or code == "000000":
                 continue
             rows.append([
-                int(r.get("当前排名", 0) or 0),
                 code,
+                to_date(date_str),
                 code,
-                str(r.get("股票名称", ""))[:50],
-                today,
-                to_float(r.get("热度值")),
+                str(r.get("名称", "")),
+                to_float(r.get("最新价")),
+                to_float(r.get("涨跌幅")),
+                0.0,  # net_main
+                0.0,  # net_main_pct
+                0.0,  # net_huge
+                0.0,  # net_big
+                to_float(r.get("换手率")),
+                to_float(r.get("量比")),
                 datetime.datetime.now(),
             ])
-        print(f"  人气榜: {len(rows)} 条")
+        print(f"  资金情绪(涨停池代理): {len(rows)} 条")
     except Exception as e:
-        print(f"  人气榜获取失败: {e}")
+        print(f"  资金情绪获取失败: {e}")
     return rows
 
 
-# ─── 东方财富公告 ──────────────────────────────────────────
-def fetch_notice_report(date_str: str) -> list:
-    """
-    获取东方财富沪深京A股公告。
-    返回 rows: [ts_code, code, name, notice_type, notice_date, title, update_time]
-    """
-    import akshare as ak
+# ═══════════════════════════════════════════════════════════════
+# 保留：10. 公告  stock_notice_report
+# ╙══════════════════════════════════════════════════════════════
 
+def fetch_notice_report(date_str: str) -> list:
+    import akshare as ak
     rows = []
-    date_display = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
     try:
         df = ak.stock_notice_report(symbol="全部", date=date_str)
-        # 接口返回空时 big_df["代码"] 会抛 KeyError，需要健壮处理
         if df is None or df.empty:
-            print(f"  公告({date_display}): 无数据")
+            print(f"  公告({date_str[:4]}-{date_str[4:6]}-{date_str[6:]}): 无数据")
             return rows
-        # 安全地获取列名
-        col_code = "代码" if "代码" in df.columns else (
-            "股票代码" if "股票代码" in df.columns else None)
-        col_name = "股票简称" if "股票简称" in df.columns else (
-            "名称" if "名称" in df.columns else None)
+        col_code = "代码" if "代码" in df.columns else ("股票代码" if "股票代码" in df.columns else None)
+        col_name = "股票简称" if "股票简称" in df.columns else ("名称" if "名称" in df.columns else None)
         if not col_code:
-            print(f"  公告({date_display}): 未知列名 {list(df.columns)}")
+            print(f"  公告: 未知列名 {list(df.columns)}")
             return rows
         for _, r in df.iterrows():
             code = str(r.get(col_code, "")).strip().zfill(6)
@@ -400,241 +673,289 @@ def fetch_notice_report(date_str: str) -> list:
                 str(r.get("公告标题", ""))[:500],
                 datetime.datetime.now(),
             ])
-        print(f"  公告({date_display}): {len(rows)} 条")
+        print(f"  公告: {len(rows)} 条")
     except Exception as e:
         print(f"  公告获取失败: {e}")
     return rows
 
 
-# ─── CCTV新闻情绪 ─────────────────────────────────────────
-def fetch_cctv_news() -> list:
-    """
-    获取CCTV新闻标题作为市场情绪代理。
-    返回 rows: [news_date, title, update_time]
-    """
-    import akshare as ak
-
-    rows = []
-    try:
-        df = ak.news_cctv()
-        if df is None or df.empty:
-            print("  CCTV新闻: 无数据")
-            return rows
-        for _, r in df.iterrows():
-            news_date = str(r.get("date", ""))[:10]
-            if not news_date:
-                continue
-            rows.append([
-                news_date,
-                str(r.get("title", ""))[:500],
-                datetime.datetime.now(),
-            ])
-        print(f"  CCTV新闻: {len(rows)} 条")
-    except Exception as e:
-        print(f"  CCTV新闻获取失败: {e}")
-    return rows
-
-
-# ─── A股新闻情绪指数（数库，接口可能不可用）──────────────
-def fetch_news_sentiment_scope() -> list:
-    """
-    获取A股新闻情绪指数（数库数据）。
-    注：该接口依赖外部数据源，可能不可用。
-    返回 rows: [trade_date, sentiment_index, update_time]
-    """
-    import akshare as ak
-
-    rows = []
-    try:
-        df = ak.index_news_sentiment_scope()
-        if df is None or df.empty:
-            print("  新闻情绪指数: 无数据（数据源可能不可用）")
-            return rows
-        # 取最近 5 天
-        for _, r in df.head(5).iterrows():
-            d = to_date(r.get("日期"))
-            if d is None:
-                continue
-            rows.append([
-                d,
-                to_float(r.get("情绪指数")),
-                datetime.datetime.now(),
-            ])
-        print(f"  新闻情绪指数: {len(rows)} 条")
-    except Exception as e:
-        print(f"  新闻情绪指数获取失败（数据源不可用）: {e}")
-    return rows
-
-
-# ─── 主流程 ────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════
+# 主流程
+# ╙══════════════════════════════════════════════════════════════
 
 def main():
-    parser = argparse.ArgumentParser(description="市场情绪数据采集")
-    parser.add_argument("--date", default=None, help="指定日期 YYYYMMDD（默认今日）")
-    parser.add_argument("--dry-run", action="store_true", help="不写入数据库")
-    parser.add_argument("--skip-zt", action="store_true", help="跳过涨跌停")
-    parser.add_argument("--skip-hsgt", action="store_true", help="跳过北向资金")
-    parser.add_argument("--skip-moneyflow", action="store_true", help="跳过资金流")
-    parser.add_argument("--skip-hot-rank", action="store_true", help="跳过热度排名")
-    parser.add_argument("--skip-notice", action="store_true", help="跳过公告数据")
-    parser.add_argument("--skip-cctv-news", action="store_true", help="跳过CCTV新闻")
+    parser = argparse.ArgumentParser(description="市场情绪数据采集 v2")
+    parser.add_argument("--date",        default=None, help="指定日期 YYYYMMDD（默认今日）")
+    parser.add_argument("--start-date",  default=None, help="开始日期 YYYY-MM-DD")
+    parser.add_argument("--end-date",    default=None, help="结束日期 YYYY-MM-DD")
+    parser.add_argument("--dry-run",     action="store_true", help="不写入数据库")
+    parser.add_argument("--catchup",    type=int, default=0, help="补最近 N 天数据")
+    # 跳过选项
+    parser.add_argument("--skip-lhb",        action="store_true", help="跳过龙虎榜详情")
+    parser.add_argument("--skip-lhb-inst",  action="store_true", help="跳过龙虎榜机构")
+    parser.add_argument("--skip-margin",     action="store_true", help="跳过融资融券汇总")
+    parser.add_argument("--skip-margin-detail", action="store_true", help="跳过融资融券个股")
+    parser.add_argument("--skip-survey",    action="store_true", help="跳过机构调研")
+    parser.add_argument("--skip-block",     action="store_true", help="跳过大宗交易")
+    parser.add_argument("--skip-activity",  action="store_true", help="跳过市场活跃度")
+    parser.add_argument("--skip-zt",       action="store_true", help="跳过涨跌停池")
+    parser.add_argument("--skip-moneyflow", action="store_true", help="跳过资金情绪")
+    parser.add_argument("--skip-notice",    action="store_true", help="跳过公告")
     args = parser.parse_args()
 
+    # ── 日期范围模式：直接循环处理，不启动子进程 ──────────────
+    if args.start_date and args.end_date:
+        start_dt = datetime.datetime.strptime(args.start_date, "%Y-%m-%d").date()
+        end_dt   = datetime.datetime.strptime(args.end_date,   "%Y-%m-%d").date()
+        date_list = []
+        d = start_dt
+        while d <= end_dt:
+            date_list.append(d.strftime("%Y%m%d"))
+            d += datetime.timedelta(days=1)
+        print(f"=== 日期范围模式：{args.start_date} ~ {args.end_date}，共 {len(date_list)} 天 ===")
+        grand_start = datetime.datetime.now()
+        for ds in date_list:
+            print(f"\n{'=' * 60}")
+            print(f"  日期: {ds[:4]}-{ds[4:6]}-{ds[6:]}  [{date_list.index(ds)+1}/{len(date_list)}]")
+            print(f"{'=' * 60}")
+            process_single_date(args, ds)
+        grand_elapsed = (datetime.datetime.now() - grand_start).total_seconds()
+        print(f"\n{'=' * 60}")
+        print(f"  全部日期采集完成  总耗时 {grand_elapsed:.1f}s")
+        return
+
+    # 单日期 / catchup 模式：直接调用
     if args.date:
-        date_str = args.date  # YYYYMMDD
-        date_display = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
+        date_str = args.date
     else:
         today = datetime.date.today()
         date_str = today.strftime("%Y%m%d")
-        date_display = today.strftime("%Y-%m-%d")
+
+    # catchup 模式：循环补数据
+    if args.catchup > 0:
+        run_catchup(args, date_str)
+        return
+
+    process_single_date(args, date_str)
+
+
+def process_single_date(args, date_str: str):
+    """处理单日数据采集（供日期范围模式或单日模式调用）"""
+    date_disp = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
+    start_str = date_str
+    end_str   = date_str
 
     start = datetime.datetime.now()
     print("=" * 60)
-    print(f"  市场情绪数据采集  {date_display}")
+    print(f"  市场情绪数据采集  {date_disp}")
     print("=" * 60)
 
-    # ── 1. 涨跌停 ───────────────────────────────────────────────
-    zt_rows = []
+    # ── 1. 龙虎榜详情 ─────────────────────────────────────────
+    if not args.skip_lhb:
+        print("[INFO] 龙虎榜详情...")
+        rows = fetch_lhb_detail(start_str, end_str)
+        if rows:
+            _dual_write(
+                "stock_sentiment_lhb", rows,
+                ["code","name","trade_date","close","pct_change",
+                 "net_amount","buy_amount","sell_amount","total_amount",
+                 "market_amount","net_ratio","amount_ratio","turnover",
+                 "float_mv","reason","after_1d","after_2d","after_5d","after_10d","update_time"],
+                ["code","name","trade_date","close","pct_change",
+                 "net_amount","buy_amount","sell_amount","total_amount",
+                 "market_amount","net_ratio","amount_ratio","turnover",
+                 "float_mv","reason","after_1d","after_2d","after_5d","after_10d","update_time"],
+                ["code", "trade_date"],
+                dry_run=args.dry_run,
+            )
+        else:
+            print("  无龙虎榜数据（可能非交易日）")
+    else:
+        print("[SKIP] 龙虎榜详情已跳过")
+
+    # ── 2. 龙虎榜机构 ───────────────────────────────────────
+    if not args.skip_lhb_inst:
+        print("[INFO] 龙虎榜机构统计...")
+        rows = fetch_lhb_inst(start_str, end_str)
+        if rows:
+            _dual_write(
+                "stock_sentiment_lhb_inst", rows,
+                ["code","name","trade_date","close","pct_change",
+                 "buy_inst_cnt","sell_inst_cnt","buy_inst_amt","sell_inst_amt",
+                 "net_inst_amt","market_amount","net_inst_ratio",
+                 "turnover","float_mv","reason","update_time"],
+                ["code","name","trade_date","close","pct_change",
+                 "buy_inst_cnt","sell_inst_cnt","buy_inst_amt","sell_inst_amt",
+                 "net_inst_amt","market_amount","net_inst_ratio",
+                 "turnover","float_mv","reason","update_time"],
+                ["code", "trade_date"],
+                dry_run=args.dry_run,
+            )
+        else:
+            print("  无龙虎榜机构数据")
+    else:
+        print("[SKIP] 龙虎榜机构已跳过")
+
+    # ── 3. 融资融券汇总 ──────────────────────────────────────
+    if not args.skip_margin:
+        print("[INFO] 融资融券汇总（沪市）...")
+        rows = fetch_margin(start_str, end_str)
+        if rows:
+            _dual_write(
+                "stock_sentiment_margin", rows,
+                ["trade_date","margin_balance","margin_buy",
+                 "short_balance_vol","short_balance_amt","short_sell_vol",
+                 "margin_short_bal","update_time"],
+                ["trade_date","margin_balance","margin_buy",
+                 "short_balance_vol","short_balance_amt","short_sell_vol",
+                 "margin_short_bal","update_time"],
+                ["trade_date"],
+                dry_run=args.dry_run,
+            )
+        else:
+            print("  无融资融券汇总数据")
+    else:
+        print("[SKIP] 融资融券汇总已跳过")
+
+    # ── 4. 融资融券个股 ──────────────────────────────────────
+    if not args.skip_margin_detail:
+        print("[INFO] 融资融券个股（沪市）...")
+        rows = fetch_margin_detail(date_str)
+        if rows:
+            _dual_write(
+                "stock_sentiment_margin_detail", rows,
+                ["trade_date","code","name","margin_balance","margin_buy",
+                 "margin_repay","short_balance_vol","short_sell_vol",
+                 "short_repay_vol","update_time"],
+                ["trade_date","code","name","margin_balance","margin_buy",
+                 "margin_repay","short_balance_vol","short_sell_vol",
+                 "short_repay_vol","update_time"],
+                ["code", "trade_date"],
+                dry_run=args.dry_run,
+            )
+        else:
+            print("  无融资融券个股数据")
+    else:
+        print("[SKIP] 融资融券个股已跳过")
+
+    # ── 5. 机构调研 ─────────────────────────────────────────
+    if not args.skip_survey:
+        print(f"[INFO] 机构调研（公告日期 {date_disp}）...")
+        rows = fetch_survey(date_str)
+        if rows:
+            _dual_write(
+                "stock_sentiment_survey", rows,
+                ["code","name","price","pct_change","inst_count",
+                 "meeting_type","staff","location","meeting_date","notice_date","update_time"],
+                ["code","name","price","pct_change","inst_count",
+                 "meeting_type","staff","location","meeting_date","notice_date","update_time"],
+                ["code", "meeting_date", "notice_date"],
+                dry_run=args.dry_run,
+            )
+        else:
+            print("  无机构调研数据")
+    else:
+        print("[SKIP] 机构调研已跳过")
+
+    # ── 6. 大宗交易 ────────────────────────────────────────
+    if not args.skip_block:
+        print("[INFO] 大宗交易...")
+        rows = fetch_block_trade(start_str, end_str)
+        if rows:
+            _dual_write(
+                "stock_sentiment_block_trade", rows,
+                ["trade_date","code","name","price","volume","amount",
+                 "buy_branch","sell_branch","update_time"],
+                ["trade_date","code","name","price","volume","amount",
+                 "buy_branch","sell_branch","update_time"],
+                ["code", "trade_date", "price", "volume"],
+                dry_run=args.dry_run,
+            )
+        else:
+            print("  无大宗交易数据")
+    else:
+        print("[SKIP] 大宗交易已跳过")
+
+    # ── 7. 市场活跃度 ──────────────────────────────────────
+    if not args.skip_activity:
+        print("[INFO] 市场活跃度...")
+        rows = fetch_activity()
+        if rows:
+            _dual_write(
+                "stock_sentiment_activity", rows,
+                ["trade_date","up_count","zt_count","zt_real_count","zt_st_count",
+                 "down_count","dt_count","dt_real_count","dt_st_count",
+                 "flat_count","suspended_count","activity_ratio","update_time"],
+                ["trade_date","up_count","zt_count","zt_real_count","zt_st_count",
+                 "down_count","dt_count","dt_real_count","dt_st_count",
+                 "flat_count","suspended_count","activity_ratio","update_time"],
+                ["trade_date"],
+                dry_run=args.dry_run,
+            )
+        else:
+            print("  无市场活跃度数据")
+    else:
+        print("[SKIP] 市场活跃度已跳过")
+
+    # ── 8. 涨跌停池（保留）────────────────────────────────
     if not args.skip_zt:
         print(f"[INFO] 涨跌停池 ({date_str})...")
-        zt_rows, _, _ = fetch_zt_data(date_str)
-        total_zt = len(zt_rows)
-        if total_zt > 0:
+        zt_rows = fetch_zt_data(date_str)
+        if zt_rows:
             _dual_write(
                 "stock_sentiment_zt", zt_rows,
-                ["ts_code", "trade_date", "code", "name", "close",
-                 "pct_change", "zt_type", "reason", "is_new", "update_time"],
-                ["ts_code", "trade_date", "code", "name", "close",
-                 "pct_change", "zt_type", "reason", "is_new", "update_time"],
+                ["code","trade_date","ts_code","name","close",
+                 "pct_change","zt_type","reason","is_new","update_time"],
+                ["code","trade_date","ts_code","name","close",
+                 "pct_change","zt_type","reason","is_new","update_time"],
                 ["code", "trade_date", "zt_type"],
                 dry_run=args.dry_run,
             )
         else:
             print(f"  当日 ({date_str}) 无涨跌停数据（可能非交易日）")
     else:
-        print("[SKIP] 涨跌停已跳过")
+        print("[SKIP] 涨跌停池已跳过")
 
-    # ── 2. 北向资金指数 ─────────────────────────────────────────
-    if not args.skip_hsgt:
-        print("[INFO] 北向资金指数...")
-        hsgt_rows = fetch_hsgt_index(date_str)
-        if hsgt_rows:
+    # ── 9. 资金情绪代理（保留）───────────────────────────
+    if not args.skip_moneyflow and not args.skip_zt:
+        print("[INFO] 资金情绪（涨停池代理）...")
+        mf_rows = fetch_moneyflow_from_zt(date_str)
+        if mf_rows:
             _dual_write(
-                "stock_sentiment_hsgt", hsgt_rows,
-                ["trade_date", "north_net_inflow",
-                 "shanghai_net", "shenzhen_net", "update_time"],
-                ["trade_date", "north_net_inflow",
-                 "shanghai_net", "shenzhen_net", "update_time"],
-                ["trade_date"],
-                dry_run=args.dry_run,
-            )
-        else:
-            print("  无北向资金数据")
-    else:
-        print("[SKIP] 北向资金已跳过")
-
-    # ── 3. 北向持股 ─────────────────────────────────────────────
-    if not args.skip_hsgt:
-        print("[INFO] 北向持股...")
-        hold_rows = fetch_hsgt_hold(date_str)
-        if hold_rows:
-            _dual_write(
-                "stock_sentiment_hsgt_hold", hold_rows,
-                ["trade_date", "ts_code", "code", "name",
-                 "hold_amount", "hold_pct", "update_time"],
-                ["trade_date", "ts_code", "code", "name",
-                 "hold_amount", "hold_pct", "update_time"],
+                "stock_sentiment_moneyflow", mf_rows,
+                ["ts_code","trade_date","code","name","close",
+                 "pct_change","net_main","net_main_pct",
+                 "net_huge","net_big","net_medium","net_small",
+                 "update_time"],
+                ["ts_code","trade_date","code","name","close",
+                 "pct_change","net_main","net_main_pct",
+                 "net_huge","net_big","net_medium","net_small",
+                 "update_time"],
                 ["code", "trade_date"],
                 dry_run=args.dry_run,
             )
         else:
-            print("  无北向持股数据")
-    else:
-        print("[SKIP] 北向持股已跳过")
-
-    # ── 4. 资金情绪（从涨停池提取换手率/量比/成交额作为代理）─────
-    if not args.skip_moneyflow and not args.skip_zt:
-        print("[INFO] 资金情绪（涨停池量价代理指标）...")
-        if zt_rows:
-            import akshare as ak
-            try:
-                df_strong = ak.stock_zt_pool_strong_em(date=date_str)
-                if df_strong is not None and not df_strong.empty:
-                    mf_rows = fetch_moneyflow_from_zt(df_strong, date_str)
-                    if mf_rows:
-                        _dual_write(
-                            "stock_sentiment_moneyflow", mf_rows,
-                            ["ts_code", "trade_date", "code", "name", "close",
-                             "pct_change", "net_main", "net_main_pct",
-                             "net_huge", "net_big", "net_medium", "net_small", "update_time"],
-                            ["ts_code", "trade_date", "code", "name", "close",
-                             "pct_change", "net_main", "net_main_pct",
-                             "net_huge", "net_big", "net_medium", "net_small", "update_time"],
-                            ["code", "trade_date"],
-                            dry_run=args.dry_run,
-                        )
-                    else:
-                        print("  资金情绪: 无有效数据")
-                else:
-                    print("  涨停强势池为空，跳过资金情绪")
-            except Exception as e:
-                print(f"  资金情绪获取失败: {e}")
-        else:
-            print("  无涨停池数据，跳过资金情绪")
+            print("  资金情绪: 无有效数据")
     else:
         if args.skip_moneyflow:
             print("[SKIP] 资金情绪已跳过")
 
-    # ── 5. 东方财富人气榜 ───────────────────────────────────
-    if not args.skip_hot_rank:
-        print("[INFO] 东方财富人气榜...")
-        hr_rows = fetch_hot_rank(date_str)
-        if hr_rows:
-            _dual_write(
-                "stock_sentiment_hot_rank", hr_rows,
-                ["rank", "ts_code", "code", "name", "trade_date", "hot_value", "update_time"],
-                ["rank", "ts_code", "code", "name", "trade_date", "hot_value", "update_time"],
-                ["code", "trade_date"],
-                dry_run=args.dry_run,
-            )
-        else:
-            print("  人气榜: 无数据")
-    else:
-        print("[SKIP] 人气榜已跳过")
-
-    # ── 6. 东方财富公告 ─────────────────────────────────────
+    # ── 10. 公告（保留）─────────────────────────────────
     if not args.skip_notice:
-        print(f"[INFO] 东方财富公告 ({date_str})...")
+        print(f"[INFO] 公告 ({date_disp})...")
         notice_rows = fetch_notice_report(date_str)
         if notice_rows:
             _dual_write(
                 "stock_sentiment_notice", notice_rows,
-                ["ts_code", "code", "name", "notice_type", "notice_date", "title", "update_time"],
-                ["ts_code", "code", "name", "notice_type", "notice_date", "title", "update_time"],
+                ["ts_code","code","name","notice_type","notice_date","title","update_time"],
+                ["ts_code","code","name","notice_type","notice_date","title","update_time"],
                 ["code", "notice_date"],
                 dry_run=args.dry_run,
             )
         else:
-            print(f"  公告({date_str}): 无数据")
+            print(f"  公告({date_disp}): 无数据")
     else:
         print("[SKIP] 公告已跳过")
-
-    # ── 7. CCTV新闻 ─────────────────────────────────────────
-    if not args.skip_cctv_news:
-        print("[INFO] CCTV新闻...")
-        cctv_rows = fetch_cctv_news()
-        if cctv_rows:
-            _dual_write(
-                "stock_sentiment_cctv_news", cctv_rows,
-                ["news_date", "title", "update_time"],
-                ["news_date", "title", "update_time"],
-                ["news_date"],
-                dry_run=args.dry_run,
-            )
-        else:
-            print("  CCTV新闻: 无数据")
-    else:
-        print("[SKIP] CCTV新闻已跳过")
 
     elapsed = (datetime.datetime.now() - start).total_seconds()
     print("=" * 60)
@@ -642,5 +963,29 @@ def main():
     print("=" * 60)
 
 
+def run_catchup(args, latest_date_str: str):
+    """补数据模式：从 latest_date_str 往前推 N 天，逐个日期执行"""
+    n = args.catchup
+    print(f"=== 补数据模式：最近 {n} 个交易日 ===")
+    # 生成日期列表（简单处理：取最近 n 个自然日，脚本内部会跳过非交易日）
+    date_list = []
+    d = datetime.date.today()
+    for i in range(n):
+        dd = d - datetime.timedelta(days=i)
+        date_list.append(dd.strftime("%Y%m%d"))
+    date_list.reverse()
+
+    grand_start = datetime.datetime.now()
+    for idx, ds in enumerate(date_list):
+        print(f"\n{'=' * 60}")
+        print(f"  补数据: {ds[:4]}-{ds[4:6]}-{ds[6:]}  [{idx+1}/{len(date_list)}]")
+        print(f"{'=' * 60}")
+        process_single_date(args, ds)
+    grand_elapsed = (datetime.datetime.now() - grand_start).total_seconds()
+    print(f"\n{'=' * 60}")
+    print(f"  补数据完成  总耗时 {grand_elapsed:.1f}s")
+
+
 if __name__ == "__main__":
+    import os
     main()

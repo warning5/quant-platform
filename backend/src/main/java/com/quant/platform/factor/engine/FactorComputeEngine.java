@@ -466,7 +466,8 @@ public class FactorComputeEngine {
                 List<MarketDailyBar> history = batchData.getOrDefault(symbol, List.of());
                 BigDecimal value = computeSingleValue(factor, symbol, date, history);
                 if (value != null) {
-                    FactorValue fv = FactorValue.builder().factorCode(factor.getFactorCode()).symbol(symbol).calcDate(date).factorVal(value).createdAt(now).build();
+                    String code = parseCode(symbol);
+                    FactorValue fv = FactorValue.builder().factorCode(factor.getFactorCode()).symbol(code).calcDate(date).factorVal(value).createdAt(now).build();
                     results.add(fv);
                 }
             } catch (Exception e) {
@@ -474,6 +475,14 @@ public class FactorComputeEngine {
             }
         }
         return results;
+    }
+
+    /**
+     * 从 symbol（如 600619.SH）中提取纯代码（如 600619）
+     */
+    private String parseCode(String symbol) {
+        int dot = symbol.lastIndexOf('.');
+        return dot > 0 ? symbol.substring(0, dot) : symbol;
     }
 
     /**
@@ -497,7 +506,7 @@ public class FactorComputeEngine {
 
                 BigDecimal value = calculator.calculate(symbol, indicator);
                 if (value != null) {
-                    FactorValue fv = FactorValue.builder().factorCode(factorCode).symbol(symbol).calcDate(date).factorVal(value).createdAt(now).build();
+                    FactorValue fv = FactorValue.builder().factorCode(factorCode).symbol(code).calcDate(date).factorVal(value).createdAt(now).build();
                     results.add(fv);
                 }
             } catch (Exception e) {

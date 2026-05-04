@@ -29,7 +29,9 @@ import StockScreen from './pages/screen/StockScreen';
 import ChanScreen from './pages/chan/ChanScreen';
 import Manual from './pages/manual/Manual';
 import FinancialData from './pages/financial/FinancialData';
+import ResearchData from './pages/datadetail/ResearchData';
 import DataUpdate from './pages/dataupdate/DataUpdate';
+import StockAnalysis from './pages/analysis/StockAnalysis';
 
 const { Header, Sider, Content } = Layout;
 const { Title } = Typography;
@@ -41,8 +43,17 @@ function AppLayout() {
   const menuItems = [
     { key: '/', icon: <DashboardOutlined />, label: <Link to="/">总览</Link> },
     { key: '/market', icon: <StockOutlined />, label: <Link to="/market">行情数据</Link> },
-    { key: '/financial', icon: <AccountBookOutlined />, label: <Link to="/financial">财务数据</Link> },
     { key: '/data-update', icon: <CloudSyncOutlined />, label: <Link to="/data-update">数据更新</Link> },
+    {
+      key: 'data-detail',
+      icon: <AccountBookOutlined />,
+      label: '数据详情',
+      children: [
+        { key: '/data-detail/research', label: <Link to="/data-detail/research">研报数据</Link> },
+        { key: '/data-detail/financial', label: <Link to="/data-detail/financial">财务数据</Link> },
+      ],
+    },
+    { key: '/stock-analysis', icon: <StockOutlined />, label: <Link to="/stock-analysis">个股分析</Link> },
     { key: '/manual', icon: <BookOutlined />, label: <Link to="/manual">使用手册</Link> },
     {
       key: 'factors',
@@ -83,6 +94,7 @@ function AppLayout() {
     if (path.startsWith('/factor') || path === '/screen' || path === '/factor-weight-optimize') return ['factors'];
     if (path.startsWith('/strateg')) return ['strategies'];
     if (path.startsWith('/backtest')) return ['backtests'];
+    if (path.startsWith('/data-detail')) return ['data-detail'];
     return [];
   });
 
@@ -179,7 +191,8 @@ function AppLayout() {
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/market" element={<MarketList />} />
-            <Route path="/financial" element={<FinancialData />} />
+            <Route path="/data-detail/research" element={<ResearchData />} />
+            <Route path="/data-detail/financial" element={<FinancialData />} />
             <Route path="/data-update" element={<DataUpdate />} />
             <Route path="/factors" element={<FactorList />} />
             <Route path="/factors/new" element={<FactorEditor />} />
@@ -201,6 +214,7 @@ function AppLayout() {
             <Route path="/chan-screen" element={<ChanScreen />} />
             <Route path="/screen" element={<StockScreen />} />
             <Route path="/manual" element={<Manual />} />
+            <Route path="/stock-analysis" element={<StockAnalysis />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Content>

@@ -67,6 +67,8 @@ logging:
     org.springframework.web: INFO
 
 quant:
+  clickhouse:
+    enabled: true  # 分析模块 CH 查询开关
   backtest:
     thread-pool-size: 4
     max-concurrent-tasks: 10

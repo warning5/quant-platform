@@ -159,6 +159,22 @@ export const dataUpdateApi = {
   getSentimentCoverage: () => api.get('/data-update/sentiment/coverage'),
   getSentimentTableStats: (table) => api.get(`/data-update/sentiment/table-stats/${table}`),
   validateSentiment: () => api.get('/data-update/sentiment/validate'),
+  // 研报数据
+  getResearchCoverage: () => api.get('/data-update/research/coverage'),
+  validateResearch: () => api.get('/data-update/research/validate'),
+};
+
+// ===== 研报数据 API =====
+export const researchApi = {
+  getOverview: () => api.get('/research/overview'),
+  getList: (params) => api.get('/research/list', { params }),
+  checkStock: (code) => api.get(`/research/check/${code}`),
+};
+
+// ===== 个股分析 API =====
+export const stockAnalysisApi = {
+  getOverview: (code) => api.get('/analysis/overview', { params: { code } }),
+  getScoreRules: () => api.get('/analysis/score-rules'),
 };
 
 export default api;
