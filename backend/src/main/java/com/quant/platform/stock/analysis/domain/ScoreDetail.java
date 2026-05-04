@@ -1,6 +1,7 @@
 package com.quant.platform.stock.analysis.domain;
 
 import lombok.Data;
+
 import java.util.List;
 
 /**
