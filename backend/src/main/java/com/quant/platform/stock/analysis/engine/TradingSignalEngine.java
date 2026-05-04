@@ -12,7 +12,7 @@ import java.util.List;
 /**
  * 交易信号引擎（四维度评分 + 规则生成操作建议）
  * 
- * 评分维度：技术面(30) + 资金面(25) + 事件面(25) + 基本面(20) = 100分
+ * 评分维度：技术面(30) + 资金面(25) + 事件面(25) + 基本面(25) = 105分
  */
 @Slf4j
 @Component
@@ -44,7 +44,7 @@ public class TradingSignalEngine {
     private static final int TECH_WEIGHT = 30;
     private static final int MONEY_WEIGHT = 25;
     private static final int SENTIMENT_WEIGHT = 25;
-    private static final int FUNDAMENTAL_WEIGHT = 20;
+    private static final int FUNDAMENTAL_WEIGHT = 25;
     
     /**
      * 综合评分入口
@@ -190,8 +190,8 @@ public class TradingSignalEngine {
     }
     
     /**
-     * 计算基本面得分（满分20）
-     * 权重：ROE 4分 + PE 3分 + 营收增速 3分 + 净利增速 4分 + PB 3分 + 毛利率 3分
+     * 计算基本面得分（满分25）
+     * 权重：ROE 4分 + PE 3分 + 营收增速 3分 + 净利增速 4分 + PB 3分 + 毛利率 3分 + 研报评级 5分
      */
     private int calcFundamentalScore(FundamentalSignal fundamental) {
         if (fundamental == null) return 0;
@@ -232,7 +232,7 @@ public class TradingSignalEngine {
             }
         }
         
-        // 归母净利润增速（4分）— 新增
+        // 归母净利润增速（4分）
         if (fundamental.getNetProfitYoy() != null) {
             double np = fundamental.getNetProfitYoy().doubleValue();
             if (np >= NETPROFIT_YOY_GOOD) {
@@ -254,7 +254,7 @@ public class TradingSignalEngine {
             }
         }
         
-        // 毛利率（3分）— 新增
+        // 毛利率（3分）
         if (fundamental.getGrossMargin() != null) {
             double gm = fundamental.getGrossMargin().doubleValue();
             if (gm >= 40.0) {
@@ -265,6 +265,9 @@ public class TradingSignalEngine {
                 score += 1;
             }
         }
+        
+        // 研报评级（5分）— 从 fundamental.researchScore 注入
+        score += fundamental.getResearchScore();
         
         return Math.max(0, Math.min(FUNDAMENTAL_WEIGHT, score));
     }
@@ -457,9 +460,22 @@ public class TradingSignalEngine {
             else if (gm.doubleValue() > 0) gmScore = 1;
         }
         items.add(buildItem("毛利率", gm != null ? gm.setScale(2, RoundingMode.HALF_UP) + "%" : "-",
-                gmScore, 3, "毛利率≥40%=3分, ≥20%=2分, >0%=1分（仅供参考）"));
-        
+                gmScore, 3, "毛利率≥40%=3分, ≥20%=2分, >0%=1分"));
+
+        // 研报评级（5分）— 从 fundamental.researchScore 注入
+        int rScore = fundamental != null ? fundamental.getResearchScore() : 0;
+        items.add(buildItem("研报评级",
+                fundamental != null && fundamental.getResearchScore() > 0 ? ratingDesc(fundamental.getResearchScore()) : "暂无",
+                rScore, 5, "买入=5分, 增持=3分, 中性=1分, 其他=0分"));
+
         return items;
+    }
+
+    private String ratingDesc(int score) {
+        if (score >= 5) return "买入";
+        if (score >= 3) return "增持";
+        if (score >= 1) return "中性";
+        return "减持/卖出";
     }
     
     private ScoreDetail.ScoreItem buildItem(String label, String value, int score, int maxScore, String desc) {
@@ -481,28 +497,28 @@ public class TradingSignalEngine {
         String support = supportPrice != null ? supportPrice.setScale(2, RoundingMode.HALF_UP).toString() : null;
         String resistance = resistancePrice != null ? resistancePrice.setScale(2, RoundingMode.HALF_UP).toString() : null;
         
-        if (totalScore >= 80) {
+        if (totalScore >= 84) {
             signal.setAction("STRONG_BUY");
             signal.setActionName("强烈买入");
             signal.setPosition(80);
             signal.setConfidence(90);
             signal.setTiming(support != null ? "可分批建仓，回踩" + support + "附近加仓" : "可分批建仓，逢低加仓");
             signal.setRisks(resistance != null ? "关注" + resistance + "阻力位，突破加仓，回落减仓" : "注意高位回调风险，设置止损");
-        } else if (totalScore >= 60) {
+        } else if (totalScore >= 63) {
             signal.setAction("BUY");
             signal.setActionName("买入");
             signal.setPosition(50);
             signal.setConfidence(70);
             signal.setTiming(resistance != null ? "突破" + resistance + "后可加仓" : "可适量参与，突破关键阻力位后加仓");
             signal.setRisks(support != null ? "跌破" + support + "需止损" : "注意量能配合，若缩量上涨需谨慎");
-        } else if (totalScore >= 40) {
+        } else if (totalScore >= 42) {
             signal.setAction("HOLD");
             signal.setActionName("持有");
             signal.setPosition(30);
             signal.setConfidence(50);
             signal.setTiming("暂时观望，等待明确信号");
             signal.setRisks(support != null ? "若跌破" + support + "（近20日低点），考虑减仓" : "若跌破关键支撑位，考虑减仓");
-        } else if (totalScore >= 20) {
+        } else if (totalScore >= 21) {
             signal.setAction("REDUCE");
             signal.setActionName("减仓");
             signal.setPosition(10);
@@ -536,10 +552,10 @@ public class TradingSignalEngine {
                 "连续涨停(10分) + 炸板率(8分) + 强势股(7分)"));
         
         rules.add(new ScoreRule("基本面", FUNDAMENTAL_WEIGHT,
-                "ROE(6分) + PE估值(6分) + 营收增速(4分) + PB(4分)"));
+                "ROE(4分) + PE估值(3分) + 营收增速(3分) + 净利增速(4分) + PB(3分) + 毛利率(3分) + 研报评级(5分)"));
         
         rules.add(new ScoreRule("操作建议", 0,
-                "≥80分=强烈买入, ≥60分=买入, ≥40分=持有, ≥20分=减仓, <20分=清仓"));
+                "≥84分=强烈买入, ≥63分=买入, ≥42分=持有, ≥21分=减仓, <21分=清仓"));
         
         return rules;
     }

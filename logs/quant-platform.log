@@ -2533,3 +2533,288 @@ Identify and stop the process that's listening on port 8080 or configure this ap
 2026-05-04 18:40:03.710 [http-nio-8080-exec-10] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600619, totalScore=49, action=HOLD
 2026-05-04 18:43:19.062 [http-nio-8080-exec-5] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
 2026-05-04 18:43:19.775 [http-nio-8080-exec-5] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=53, action=HOLD
+2026-05-04 18:57:39.866 [http-nio-8080-exec-2] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-04 18:57:40.434 [http-nio-8080-exec-2] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=53, action=HOLD
+2026-05-04 18:58:27.892 [http-nio-8080-exec-9] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-04 18:58:28.516 [http-nio-8080-exec-9] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=53, action=HOLD
+2026-05-04 18:58:58.091 [http-nio-8080-exec-6] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-04 18:58:58.718 [http-nio-8080-exec-6] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=53, action=HOLD
+2026-05-04 19:00:31.298 [http-nio-8080-exec-5] ERROR c.q.p.c.e.GlobalExceptionHandler - Unexpected error
+org.springframework.web.servlet.resource.NoResourceFoundException: No static resource analysis/600619.
+	at org.springframework.web.servlet.resource.ResourceHttpRequestHandler.handleRequest(ResourceHttpRequestHandler.java:585)
+	at org.springframework.web.servlet.mvc.HttpRequestHandlerAdapter.handle(HttpRequestHandlerAdapter.java:52)
+	at org.springframework.web.servlet.DispatcherServlet.doDispatch(DispatcherServlet.java:1089)
+	at org.springframework.web.servlet.DispatcherServlet.doService(DispatcherServlet.java:979)
+	at org.springframework.web.servlet.FrameworkServlet.processRequest(FrameworkServlet.java:1014)
+	at org.springframework.web.servlet.FrameworkServlet.doGet(FrameworkServlet.java:903)
+	at jakarta.servlet.http.HttpServlet.service(HttpServlet.java:564)
+	at org.springframework.web.servlet.FrameworkServlet.service(FrameworkServlet.java:885)
+	at jakarta.servlet.http.HttpServlet.service(HttpServlet.java:658)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:205)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.apache.tomcat.websocket.server.WsFilter.doFilter(WsFilter.java:51)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:174)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.springframework.web.filter.RequestContextFilter.doFilterInternal(RequestContextFilter.java:100)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:174)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.springframework.web.filter.FormContentFilter.doFilterInternal(FormContentFilter.java:93)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:174)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.springframework.web.filter.CharacterEncodingFilter.doFilterInternal(CharacterEncodingFilter.java:201)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:174)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.apache.catalina.core.StandardWrapperValve.invoke(StandardWrapperValve.java:167)
+	at org.apache.catalina.core.StandardContextValve.invoke(StandardContextValve.java:90)
+	at org.apache.catalina.authenticator.AuthenticatorBase.invoke(AuthenticatorBase.java:482)
+	at org.apache.catalina.core.StandardHostValve.invoke(StandardHostValve.java:115)
+	at org.apache.catalina.valves.ErrorReportValve.invoke(ErrorReportValve.java:93)
+	at org.apache.catalina.core.StandardEngineValve.invoke(StandardEngineValve.java:74)
+	at org.apache.catalina.connector.CoyoteAdapter.service(CoyoteAdapter.java:344)
+	at org.apache.coyote.http11.Http11Processor.service(Http11Processor.java:391)
+	at org.apache.coyote.AbstractProcessorLight.process(AbstractProcessorLight.java:63)
+	at org.apache.coyote.AbstractProtocol$ConnectionHandler.process(AbstractProtocol.java:896)
+	at org.apache.tomcat.util.net.NioEndpoint$SocketProcessor.doRun(NioEndpoint.java:1744)
+	at org.apache.tomcat.util.net.SocketProcessorBase.run(SocketProcessorBase.java:52)
+	at org.apache.tomcat.util.threads.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1191)
+	at org.apache.tomcat.util.threads.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:659)
+	at org.apache.tomcat.util.threads.TaskThread$WrappingRunnable.run(TaskThread.java:63)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-05-04 19:00:48.701 [http-nio-8080-exec-8] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600619
+2026-05-04 19:00:49.342 [http-nio-8080-exec-8] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600619, totalScore=49, action=HOLD
+2026-05-04 19:00:55.983 [http-nio-8080-exec-2] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600619
+2026-05-04 19:00:56.586 [http-nio-8080-exec-2] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600619, totalScore=49, action=HOLD
+2026-05-04 19:01:05.381 [http-nio-8080-exec-4] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600619
+2026-05-04 19:01:06.031 [http-nio-8080-exec-4] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600619, totalScore=49, action=HOLD
+2026-05-04 20:25:53.467 [background-preinit] INFO  o.h.validator.internal.util.Version - HV000001: Hibernate Validator 8.0.1.Final
+2026-05-04 20:25:53.593 [main] INFO  c.q.p.QuantPlatformApplication - Starting QuantPlatformApplication using Java 21.0.7 with PID 23108 (C:\Users\warning5\WorkBuddy\Claw\quant-platform\backend\target\classes started by warning5 in C:\Users\warning5\WorkBuddy\Claw\quant-platform)
+2026-05-04 20:25:53.596 [main] INFO  c.q.p.QuantPlatformApplication - No active profile set, falling back to 1 default profile: "default"
+2026-05-04 20:25:55.266 [main] INFO  o.s.b.w.e.tomcat.TomcatWebServer - Tomcat initialized with port 8080 (http)
+2026-05-04 20:25:55.282 [main] INFO  o.a.coyote.http11.Http11NioProtocol - Initializing ProtocolHandler ["http-nio-8080"]
+2026-05-04 20:25:55.287 [main] INFO  o.a.catalina.core.StandardService - Starting service [Tomcat]
+2026-05-04 20:25:55.287 [main] INFO  o.a.catalina.core.StandardEngine - Starting Servlet engine: [Apache Tomcat/10.1.19]
+2026-05-04 20:25:55.404 [main] INFO  o.a.c.c.C.[.[localhost].[/api] - Initializing Spring embedded WebApplicationContext
+2026-05-04 20:25:55.405 [main] INFO  o.s.b.w.s.c.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 1644 ms
+2026-05-04 20:25:56.104 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 加载 code -> market 映射...
+2026-05-04 20:25:56.172 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Starting...
+2026-05-04 20:25:56.400 [main] INFO  com.zaxxer.hikari.pool.HikariPool - HikariPool-1 - Added connection com.mysql.cj.jdbc.ConnectionImpl@5a2f401a
+2026-05-04 20:25:56.400 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Start completed.
+2026-05-04 20:25:56.560 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 已加载 5490 只股票的 market 映射
+2026-05-04 20:25:56.560 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 已加载 5490 只股票的最新市值
+2026-05-04 20:25:56.912 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate] 脚本目录: C:\Users\warning5\WorkBuddy\Claw\quant-platform\scripts
+2026-05-04 20:25:56.912 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_stock_data.py : OK
+2026-05-04 20:25:56.912 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_stock_daily_baostock.py : OK
+2026-05-04 20:25:56.912 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_bj_stock_daily_qq.py : OK
+2026-05-04 20:25:56.912 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_index_daily_baostock.py : OK
+2026-05-04 20:25:56.912 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_dividend_baostock.py : OK
+2026-05-04 20:25:56.912 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_research_report.py : OK
+2026-05-04 20:25:57.061 [main] INFO  c.q.p.f.engine.FactorComputeEngine - Registered 36 financial factor calculators
+2026-05-04 20:25:57.273 [main] INFO  c.q.p.s.service.ScreenPresetService - Built-in screen presets initialized
+2026-05-04 20:25:57.706 [main] INFO  o.s.b.a.w.s.WelcomePageHandlerMapping - Adding welcome page: class path resource [static/index.html]
+2026-05-04 20:25:58.143 [main] INFO  o.a.coyote.http11.Http11NioProtocol - Starting ProtocolHandler ["http-nio-8080"]
+2026-05-04 20:25:58.163 [main] INFO  o.s.b.w.e.tomcat.TomcatWebServer - Tomcat started on port 8080 (http) with context path '/api'
+2026-05-04 20:25:58.170 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Starting...
+2026-05-04 20:25:58.170 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - BrokerAvailabilityEvent[available=true, SimpleBrokerMessageHandler [org.springframework.messaging.simp.broker.DefaultSubscriptionRegistry@7c39193f]]
+2026-05-04 20:25:58.171 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Started.
+2026-05-04 20:25:58.392 [main] INFO  c.q.p.QuantPlatformApplication - Started QuantPlatformApplication in 5.535 seconds (process running for 6.146)
+2026-05-04 20:25:58.504 [main] INFO  c.q.p.factor.service.FactorService - Builtin factors initialized
+2026-05-04 20:25:58.513 [main] INFO  c.q.p.s.s.StrategyDataInitializer - Checking strategy data initialization...
+2026-05-04 20:25:58.516 [main] INFO  c.q.p.s.s.StrategyDataInitializer - Strategy data already exists (6 strategies), skipping initialization
+2026-05-04 20:25:58.525 [main] INFO  c.q.p.s.service.StrategyService - Demo strategies already initialized, skipping
+2026-05-04 20:26:58.170 [MessageBroker-1] INFO  o.s.w.s.c.WebSocketMessageBrokerStats - WebSocketSession[0 current WS(0)-HttpStream(0)-HttpPoll(0), 0 total, 0 closed abnormally (0 connect failure, 0 send limit, 0 transport error)], stompSubProtocol[processed CONNECT(0)-CONNECTED(0)-DISCONNECT(0)], stompBrokerRelay[null], inboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0], outboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0], sockJsScheduler[pool size = 1, active threads = 1, queued tasks = 0, completed tasks = 0]
+2026-05-04 20:42:18.350 [SpringApplicationShutdownHook] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Stopping...
+2026-05-04 20:42:18.350 [SpringApplicationShutdownHook] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - BrokerAvailabilityEvent[available=false, SimpleBrokerMessageHandler [org.springframework.messaging.simp.broker.DefaultSubscriptionRegistry@7c39193f]]
+2026-05-04 20:42:18.350 [SpringApplicationShutdownHook] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Stopped.
+2026-05-04 20:42:18.360 [SpringApplicationShutdownHook] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Shutdown initiated...
+2026-05-04 20:42:18.362 [SpringApplicationShutdownHook] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Shutdown completed.
+2026-05-04 20:42:21.281 [background-preinit] INFO  o.h.validator.internal.util.Version - HV000001: Hibernate Validator 8.0.1.Final
+2026-05-04 20:42:21.395 [main] INFO  c.q.p.QuantPlatformApplication - Starting QuantPlatformApplication using Java 21.0.7 with PID 21672 (C:\Users\warning5\WorkBuddy\Claw\quant-platform\backend\target\classes started by warning5 in C:\Users\warning5\WorkBuddy\Claw\quant-platform)
+2026-05-04 20:42:21.396 [main] INFO  c.q.p.QuantPlatformApplication - No active profile set, falling back to 1 default profile: "default"
+2026-05-04 20:42:23.438 [main] INFO  o.s.b.w.e.tomcat.TomcatWebServer - Tomcat initialized with port 8080 (http)
+2026-05-04 20:42:23.453 [main] INFO  o.a.coyote.http11.Http11NioProtocol - Initializing ProtocolHandler ["http-nio-8080"]
+2026-05-04 20:42:23.453 [main] INFO  o.a.catalina.core.StandardService - Starting service [Tomcat]
+2026-05-04 20:42:23.453 [main] INFO  o.a.catalina.core.StandardEngine - Starting Servlet engine: [Apache Tomcat/10.1.19]
+2026-05-04 20:42:23.562 [main] INFO  o.a.c.c.C.[.[localhost].[/api] - Initializing Spring embedded WebApplicationContext
+2026-05-04 20:42:23.562 [main] INFO  o.s.b.w.s.c.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 1999 ms
+2026-05-04 20:42:24.353 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 加载 code -> market 映射...
+2026-05-04 20:42:24.415 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Starting...
+2026-05-04 20:42:24.826 [main] INFO  com.zaxxer.hikari.pool.HikariPool - HikariPool-1 - Added connection com.mysql.cj.jdbc.ConnectionImpl@5a2f401a
+2026-05-04 20:42:24.831 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Start completed.
+2026-05-04 20:42:25.099 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 已加载 5490 只股票的 market 映射
+2026-05-04 20:42:25.106 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 已加载 5490 只股票的最新市值
+2026-05-04 20:42:25.494 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate] 脚本目录: C:\Users\warning5\WorkBuddy\Claw\quant-platform\scripts
+2026-05-04 20:42:25.494 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_stock_data.py : OK
+2026-05-04 20:42:25.494 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_stock_daily_baostock.py : OK
+2026-05-04 20:42:25.494 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_bj_stock_daily_qq.py : OK
+2026-05-04 20:42:25.494 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_index_daily_baostock.py : OK
+2026-05-04 20:42:25.498 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_dividend_baostock.py : OK
+2026-05-04 20:42:25.498 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_research_report.py : OK
+2026-05-04 20:42:25.695 [main] INFO  c.q.p.f.engine.FactorComputeEngine - Registered 36 financial factor calculators
+2026-05-04 20:42:26.042 [main] INFO  c.q.p.s.service.ScreenPresetService - Built-in screen presets initialized
+2026-05-04 20:42:26.567 [main] INFO  o.s.b.a.w.s.WelcomePageHandlerMapping - Adding welcome page: class path resource [static/index.html]
+2026-05-04 20:42:27.136 [main] INFO  o.a.coyote.http11.Http11NioProtocol - Starting ProtocolHandler ["http-nio-8080"]
+2026-05-04 20:42:27.170 [main] INFO  o.s.b.w.e.tomcat.TomcatWebServer - Tomcat started on port 8080 (http) with context path '/api'
+2026-05-04 20:42:27.179 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Starting...
+2026-05-04 20:42:27.179 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - BrokerAvailabilityEvent[available=true, SimpleBrokerMessageHandler [org.springframework.messaging.simp.broker.DefaultSubscriptionRegistry@220f6a3c]]
+2026-05-04 20:42:27.179 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Started.
+2026-05-04 20:42:27.781 [main] INFO  c.q.p.QuantPlatformApplication - Started QuantPlatformApplication in 7.108 seconds (process running for 7.698)
+2026-05-04 20:42:27.884 [main] INFO  c.q.p.factor.service.FactorService - Builtin factors initialized
+2026-05-04 20:42:27.890 [main] INFO  c.q.p.s.s.StrategyDataInitializer - Checking strategy data initialization...
+2026-05-04 20:42:27.892 [main] INFO  c.q.p.s.s.StrategyDataInitializer - Strategy data already exists (6 strategies), skipping initialization
+2026-05-04 20:42:27.899 [main] INFO  c.q.p.s.service.StrategyService - Demo strategies already initialized, skipping
+2026-05-04 20:43:27.148 [MessageBroker-1] INFO  o.s.w.s.c.WebSocketMessageBrokerStats - WebSocketSession[0 current WS(0)-HttpStream(0)-HttpPoll(0), 0 total, 0 closed abnormally (0 connect failure, 0 send limit, 0 transport error)], stompSubProtocol[processed CONNECT(0)-CONNECTED(0)-DISCONNECT(0)], stompBrokerRelay[null], inboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0], outboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0], sockJsScheduler[pool size = 1, active threads = 1, queued tasks = 0, completed tasks = 0]
+2026-05-04 20:44:10.700 [http-nio-8080-exec-2] INFO  o.a.c.c.C.[.[localhost].[/api] - Initializing Spring DispatcherServlet 'dispatcherServlet'
+2026-05-04 20:44:10.700 [http-nio-8080-exec-2] INFO  o.s.web.servlet.DispatcherServlet - Initializing Servlet 'dispatcherServlet'
+2026-05-04 20:44:10.702 [http-nio-8080-exec-2] INFO  o.s.web.servlet.DispatcherServlet - Completed initialization in 1 ms
+2026-05-04 20:44:10.748 [http-nio-8080-exec-2] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-04 20:44:11.669 [http-nio-8080-exec-2] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=56, action=HOLD
+2026-05-04 20:59:43.238 [SpringApplicationShutdownHook] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Stopping...
+2026-05-04 20:59:43.238 [SpringApplicationShutdownHook] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - BrokerAvailabilityEvent[available=false, SimpleBrokerMessageHandler [org.springframework.messaging.simp.broker.DefaultSubscriptionRegistry@220f6a3c]]
+2026-05-04 20:59:43.238 [SpringApplicationShutdownHook] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Stopped.
+2026-05-04 20:59:43.249 [SpringApplicationShutdownHook] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Shutdown initiated...
+2026-05-04 20:59:43.252 [SpringApplicationShutdownHook] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Shutdown completed.
+2026-05-04 20:59:46.583 [background-preinit] INFO  o.h.validator.internal.util.Version - HV000001: Hibernate Validator 8.0.1.Final
+2026-05-04 20:59:46.688 [main] INFO  c.q.p.QuantPlatformApplication - Starting QuantPlatformApplication using Java 21.0.7 with PID 42056 (C:\Users\warning5\WorkBuddy\Claw\quant-platform\backend\target\classes started by warning5 in C:\Users\warning5\WorkBuddy\Claw\quant-platform)
+2026-05-04 20:59:46.690 [main] INFO  c.q.p.QuantPlatformApplication - No active profile set, falling back to 1 default profile: "default"
+2026-05-04 20:59:48.888 [main] INFO  o.s.b.w.e.tomcat.TomcatWebServer - Tomcat initialized with port 8080 (http)
+2026-05-04 20:59:48.911 [main] INFO  o.a.coyote.http11.Http11NioProtocol - Initializing ProtocolHandler ["http-nio-8080"]
+2026-05-04 20:59:48.913 [main] INFO  o.a.catalina.core.StandardService - Starting service [Tomcat]
+2026-05-04 20:59:48.914 [main] INFO  o.a.catalina.core.StandardEngine - Starting Servlet engine: [Apache Tomcat/10.1.19]
+2026-05-04 20:59:49.043 [main] INFO  o.a.c.c.C.[.[localhost].[/api] - Initializing Spring embedded WebApplicationContext
+2026-05-04 20:59:49.043 [main] INFO  o.s.b.w.s.c.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 2175 ms
+2026-05-04 20:59:49.670 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 加载 code -> market 映射...
+2026-05-04 20:59:49.734 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Starting...
+2026-05-04 20:59:50.057 [main] INFO  com.zaxxer.hikari.pool.HikariPool - HikariPool-1 - Added connection com.mysql.cj.jdbc.ConnectionImpl@5a2f401a
+2026-05-04 20:59:50.061 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Start completed.
+2026-05-04 20:59:50.200 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 已加载 5490 只股票的 market 映射
+2026-05-04 20:59:50.204 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 已加载 5490 只股票的最新市值
+2026-05-04 20:59:50.552 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate] 脚本目录: C:\Users\warning5\WorkBuddy\Claw\quant-platform\scripts
+2026-05-04 20:59:50.552 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_stock_data.py : OK
+2026-05-04 20:59:50.553 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_stock_daily_baostock.py : OK
+2026-05-04 20:59:50.553 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_bj_stock_daily_qq.py : OK
+2026-05-04 20:59:50.553 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_index_daily_baostock.py : OK
+2026-05-04 20:59:50.554 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_dividend_baostock.py : OK
+2026-05-04 20:59:50.555 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_research_report.py : OK
+2026-05-04 20:59:50.767 [main] INFO  c.q.p.f.engine.FactorComputeEngine - Registered 36 financial factor calculators
+2026-05-04 20:59:50.970 [main] INFO  c.q.p.s.service.ScreenPresetService - Built-in screen presets initialized
+2026-05-04 20:59:51.503 [main] INFO  o.s.b.a.w.s.WelcomePageHandlerMapping - Adding welcome page: class path resource [static/index.html]
+2026-05-04 20:59:52.045 [main] INFO  o.a.coyote.http11.Http11NioProtocol - Starting ProtocolHandler ["http-nio-8080"]
+2026-05-04 20:59:52.077 [main] INFO  o.s.b.w.e.tomcat.TomcatWebServer - Tomcat started on port 8080 (http) with context path '/api'
+2026-05-04 20:59:52.086 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Starting...
+2026-05-04 20:59:52.086 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - BrokerAvailabilityEvent[available=true, SimpleBrokerMessageHandler [org.springframework.messaging.simp.broker.DefaultSubscriptionRegistry@2648aa1b]]
+2026-05-04 20:59:52.087 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Started.
+2026-05-04 20:59:52.294 [main] INFO  c.q.p.QuantPlatformApplication - Started QuantPlatformApplication in 6.342 seconds (process running for 6.957)
+2026-05-04 20:59:52.359 [main] INFO  c.q.p.factor.service.FactorService - Builtin factors initialized
+2026-05-04 20:59:52.365 [main] INFO  c.q.p.s.s.StrategyDataInitializer - Checking strategy data initialization...
+2026-05-04 20:59:52.368 [main] INFO  c.q.p.s.s.StrategyDataInitializer - Strategy data already exists (6 strategies), skipping initialization
+2026-05-04 20:59:52.374 [main] INFO  c.q.p.s.service.StrategyService - Demo strategies already initialized, skipping
+2026-05-04 20:59:58.124 [http-nio-8080-exec-1] INFO  o.a.c.c.C.[.[localhost].[/api] - Initializing Spring DispatcherServlet 'dispatcherServlet'
+2026-05-04 20:59:58.124 [http-nio-8080-exec-1] INFO  o.s.web.servlet.DispatcherServlet - Initializing Servlet 'dispatcherServlet'
+2026-05-04 20:59:58.127 [http-nio-8080-exec-1] INFO  o.s.web.servlet.DispatcherServlet - Completed initialization in 3 ms
+2026-05-04 20:59:58.178 [http-nio-8080-exec-1] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-04 20:59:59.330 [http-nio-8080-exec-1] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=56, action=HOLD
+2026-05-04 21:00:52.063 [MessageBroker-1] INFO  o.s.w.s.c.WebSocketMessageBrokerStats - WebSocketSession[0 current WS(0)-HttpStream(0)-HttpPoll(0), 0 total, 0 closed abnormally (0 connect failure, 0 send limit, 0 transport error)], stompSubProtocol[processed CONNECT(0)-CONNECTED(0)-DISCONNECT(0)], stompBrokerRelay[null], inboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0], outboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0], sockJsScheduler[pool size = 1, active threads = 1, queued tasks = 0, completed tasks = 0]
+2026-05-04 21:01:06.857 [http-nio-8080-exec-6] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600619
+2026-05-04 21:01:07.587 [http-nio-8080-exec-6] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600619, totalScore=49, action=HOLD
+2026-05-04 21:01:12.698 [http-nio-8080-exec-7] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-04 21:01:13.350 [http-nio-8080-exec-7] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=56, action=HOLD
+2026-05-04 21:04:40.395 [SpringApplicationShutdownHook] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Stopping...
+2026-05-04 21:04:40.396 [SpringApplicationShutdownHook] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - BrokerAvailabilityEvent[available=false, SimpleBrokerMessageHandler [org.springframework.messaging.simp.broker.DefaultSubscriptionRegistry@2648aa1b]]
+2026-05-04 21:04:40.396 [SpringApplicationShutdownHook] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Stopped.
+2026-05-04 21:04:40.410 [SpringApplicationShutdownHook] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Shutdown initiated...
+2026-05-04 21:04:40.421 [SpringApplicationShutdownHook] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Shutdown completed.
+2026-05-04 21:04:44.520 [background-preinit] INFO  o.h.validator.internal.util.Version - HV000001: Hibernate Validator 8.0.1.Final
+2026-05-04 21:04:44.644 [main] INFO  c.q.p.QuantPlatformApplication - Starting QuantPlatformApplication using Java 21.0.7 with PID 26188 (C:\Users\warning5\WorkBuddy\Claw\quant-platform\backend\target\classes started by warning5 in C:\Users\warning5\WorkBuddy\Claw\quant-platform)
+2026-05-04 21:04:44.645 [main] INFO  c.q.p.QuantPlatformApplication - No active profile set, falling back to 1 default profile: "default"
+2026-05-04 21:04:46.832 [main] INFO  o.s.b.w.e.tomcat.TomcatWebServer - Tomcat initialized with port 8080 (http)
+2026-05-04 21:04:46.854 [main] INFO  o.a.coyote.http11.Http11NioProtocol - Initializing ProtocolHandler ["http-nio-8080"]
+2026-05-04 21:04:46.858 [main] INFO  o.a.catalina.core.StandardService - Starting service [Tomcat]
+2026-05-04 21:04:46.858 [main] INFO  o.a.catalina.core.StandardEngine - Starting Servlet engine: [Apache Tomcat/10.1.19]
+2026-05-04 21:04:46.975 [main] INFO  o.a.c.c.C.[.[localhost].[/api] - Initializing Spring embedded WebApplicationContext
+2026-05-04 21:04:46.976 [main] INFO  o.s.b.w.s.c.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 2142 ms
+2026-05-04 21:04:47.613 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 加载 code -> market 映射...
+2026-05-04 21:04:47.684 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Starting...
+2026-05-04 21:04:47.998 [main] INFO  com.zaxxer.hikari.pool.HikariPool - HikariPool-1 - Added connection com.mysql.cj.jdbc.ConnectionImpl@2b90cc1
+2026-05-04 21:04:48.001 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Start completed.
+2026-05-04 21:04:48.180 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 已加载 5490 只股票的 market 映射
+2026-05-04 21:04:48.185 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 已加载 5490 只股票的最新市值
+2026-05-04 21:04:48.478 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate] 脚本目录: C:\Users\warning5\WorkBuddy\Claw\quant-platform\scripts
+2026-05-04 21:04:48.478 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_stock_data.py : OK
+2026-05-04 21:04:48.478 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_stock_daily_baostock.py : OK
+2026-05-04 21:04:48.478 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_bj_stock_daily_qq.py : OK
+2026-05-04 21:04:48.479 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_index_daily_baostock.py : OK
+2026-05-04 21:04:48.479 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_dividend_baostock.py : OK
+2026-05-04 21:04:48.479 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_research_report.py : OK
+2026-05-04 21:04:48.662 [main] INFO  c.q.p.f.engine.FactorComputeEngine - Registered 36 financial factor calculators
+2026-05-04 21:04:48.829 [main] INFO  c.q.p.s.service.ScreenPresetService - Built-in screen presets initialized
+2026-05-04 21:04:49.354 [main] INFO  o.s.b.a.w.s.WelcomePageHandlerMapping - Adding welcome page: class path resource [static/index.html]
+2026-05-04 21:04:50.009 [main] INFO  o.a.coyote.http11.Http11NioProtocol - Starting ProtocolHandler ["http-nio-8080"]
+2026-05-04 21:04:50.039 [main] INFO  o.s.b.w.e.tomcat.TomcatWebServer - Tomcat started on port 8080 (http) with context path '/api'
+2026-05-04 21:04:50.045 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Starting...
+2026-05-04 21:04:50.046 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - BrokerAvailabilityEvent[available=true, SimpleBrokerMessageHandler [org.springframework.messaging.simp.broker.DefaultSubscriptionRegistry@230d013b]]
+2026-05-04 21:04:50.046 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Started.
+2026-05-04 21:04:50.169 [main] INFO  c.q.p.QuantPlatformApplication - Started QuantPlatformApplication in 6.284 seconds (process running for 6.859)
+2026-05-04 21:04:50.234 [main] INFO  c.q.p.factor.service.FactorService - Builtin factors initialized
+2026-05-04 21:04:50.241 [main] INFO  c.q.p.s.s.StrategyDataInitializer - Checking strategy data initialization...
+2026-05-04 21:04:50.243 [main] INFO  c.q.p.s.s.StrategyDataInitializer - Strategy data already exists (6 strategies), skipping initialization
+2026-05-04 21:04:50.250 [main] INFO  c.q.p.s.service.StrategyService - Demo strategies already initialized, skipping
+2026-05-04 21:04:54.107 [http-nio-8080-exec-2] INFO  o.a.c.c.C.[.[localhost].[/api] - Initializing Spring DispatcherServlet 'dispatcherServlet'
+2026-05-04 21:04:54.107 [http-nio-8080-exec-2] INFO  o.s.web.servlet.DispatcherServlet - Initializing Servlet 'dispatcherServlet'
+2026-05-04 21:04:54.110 [http-nio-8080-exec-2] INFO  o.s.web.servlet.DispatcherServlet - Completed initialization in 3 ms
+2026-05-04 21:04:54.177 [http-nio-8080-exec-2] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-04 21:04:55.201 [http-nio-8080-exec-2] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=56, action=HOLD
+2026-05-04 21:05:50.022 [MessageBroker-1] INFO  o.s.w.s.c.WebSocketMessageBrokerStats - WebSocketSession[0 current WS(0)-HttpStream(0)-HttpPoll(0), 0 total, 0 closed abnormally (0 connect failure, 0 send limit, 0 transport error)], stompSubProtocol[processed CONNECT(0)-CONNECTED(0)-DISCONNECT(0)], stompBrokerRelay[null], inboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0], outboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0], sockJsScheduler[pool size = 1, active threads = 1, queued tasks = 0, completed tasks = 0]
+2026-05-04 21:06:35.957 [SpringApplicationShutdownHook] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Stopping...
+2026-05-04 21:06:35.958 [SpringApplicationShutdownHook] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - BrokerAvailabilityEvent[available=false, SimpleBrokerMessageHandler [org.springframework.messaging.simp.broker.DefaultSubscriptionRegistry@230d013b]]
+2026-05-04 21:06:35.958 [SpringApplicationShutdownHook] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Stopped.
+2026-05-04 21:06:35.969 [SpringApplicationShutdownHook] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Shutdown initiated...
+2026-05-04 21:06:35.979 [SpringApplicationShutdownHook] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Shutdown completed.
+2026-05-04 21:07:44.255 [background-preinit] INFO  o.h.validator.internal.util.Version - HV000001: Hibernate Validator 8.0.1.Final
+2026-05-04 21:07:44.350 [main] INFO  c.q.p.QuantPlatformApplication - Starting QuantPlatformApplication using Java 21.0.7 with PID 41452 (C:\Users\warning5\WorkBuddy\Claw\quant-platform\backend\target\classes started by warning5 in C:\Users\warning5\WorkBuddy\Claw\quant-platform)
+2026-05-04 21:07:44.351 [main] INFO  c.q.p.QuantPlatformApplication - No active profile set, falling back to 1 default profile: "default"
+2026-05-04 21:07:46.475 [main] INFO  o.s.b.w.e.tomcat.TomcatWebServer - Tomcat initialized with port 8080 (http)
+2026-05-04 21:07:46.491 [main] INFO  o.a.coyote.http11.Http11NioProtocol - Initializing ProtocolHandler ["http-nio-8080"]
+2026-05-04 21:07:46.493 [main] INFO  o.a.catalina.core.StandardService - Starting service [Tomcat]
+2026-05-04 21:07:46.493 [main] INFO  o.a.catalina.core.StandardEngine - Starting Servlet engine: [Apache Tomcat/10.1.19]
+2026-05-04 21:07:46.582 [main] INFO  o.a.c.c.C.[.[localhost].[/api] - Initializing Spring embedded WebApplicationContext
+2026-05-04 21:07:46.583 [main] INFO  o.s.b.w.s.c.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 2056 ms
+2026-05-04 21:07:47.129 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 加载 code -> market 映射...
+2026-05-04 21:07:47.180 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Starting...
+2026-05-04 21:07:47.459 [main] INFO  com.zaxxer.hikari.pool.HikariPool - HikariPool-1 - Added connection com.mysql.cj.jdbc.ConnectionImpl@1c31de5d
+2026-05-04 21:07:47.461 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Start completed.
+2026-05-04 21:07:47.593 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 已加载 5490 只股票的 market 映射
+2026-05-04 21:07:47.597 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 已加载 5490 只股票的最新市值
+2026-05-04 21:07:47.932 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate] 脚本目录: C:\Users\warning5\WorkBuddy\Claw\quant-platform\scripts
+2026-05-04 21:07:47.933 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_stock_data.py : OK
+2026-05-04 21:07:47.933 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_stock_daily_baostock.py : OK
+2026-05-04 21:07:47.933 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_bj_stock_daily_qq.py : OK
+2026-05-04 21:07:47.933 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_index_daily_baostock.py : OK
+2026-05-04 21:07:47.935 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_dividend_baostock.py : OK
+2026-05-04 21:07:47.935 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_research_report.py : OK
+2026-05-04 21:07:48.142 [main] INFO  c.q.p.f.engine.FactorComputeEngine - Registered 36 financial factor calculators
+2026-05-04 21:07:48.314 [main] INFO  c.q.p.s.service.ScreenPresetService - Built-in screen presets initialized
+2026-05-04 21:07:48.897 [main] INFO  o.s.b.a.w.s.WelcomePageHandlerMapping - Adding welcome page: class path resource [static/index.html]
+2026-05-04 21:07:49.591 [main] INFO  o.a.coyote.http11.Http11NioProtocol - Starting ProtocolHandler ["http-nio-8080"]
+2026-05-04 21:07:49.602 [main] WARN  o.s.b.w.s.c.AnnotationConfigServletWebServerApplicationContext - Exception encountered during context initialization - cancelling refresh attempt: org.springframework.context.ApplicationContextException: Failed to start bean 'webServerStartStop'
+2026-05-04 21:07:49.607 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Shutdown initiated...
+2026-05-04 21:07:49.619 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Shutdown completed.
+2026-05-04 21:07:49.638 [main] INFO  o.s.b.a.l.ConditionEvaluationReportLogger - 
+
+Error starting ApplicationContext. To display the condition evaluation report re-run your application with 'debug' enabled.
+2026-05-04 21:07:49.669 [main] ERROR o.s.b.d.LoggingFailureAnalysisReporter - 
+
+***************************
+APPLICATION FAILED TO START
+***************************
+
+Description:
+
+Web server failed to start. Port 8080 was already in use.
+
+Action:
+
+Identify and stop the process that's listening on port 8080 or configure this application to listen on another port.
+

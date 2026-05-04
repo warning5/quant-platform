@@ -1,6 +1,6 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
-  Card, Row, Col, Tabs, Input, Button, Spin, Empty, Tooltip, Tag, Progress,
+  Card, Row, Col, Tabs, Input, AutoComplete, Button, Spin, Empty, Tooltip, Tag, Progress,
   Typography, Alert, Statistic, Table, Descriptions,
 } from 'antd';
 import {
@@ -42,9 +42,13 @@ export default function StockAnalysis() {
   const [inputCode, setInputCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [overview, setOverview] = useState(null);
+  const [researchData, setResearchData] = useState(null);
   const [error, setError] = useState(null);
   const [rulesVisible, setRulesVisible] = useState(false);
   const [rules, setRules] = useState(null);
+  const [suggestions, setSuggestions] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const searchTimerRef = useRef(null);
 
   // 从 URL 读取初始股票代码
   const urlCode = searchParams.get('code') || '';
@@ -75,7 +79,47 @@ export default function StockAnalysis() {
       .finally(() => setLoading(false));
   }, [inputCode, setSearchParams]);
 
+  // 联想搜索（防抖 300ms）
+  const handleSearchInput = useCallback((value) => {
+    setInputCode(value);
+    if (!value || value.trim().length < 1) {
+      setSuggestions([]);
+      return;
+    }
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(() => {
+      setSearchLoading(true);
+      stockAnalysisApi.searchStocks(value.trim())
+        .then(data => {
+          const opts = (data || []).map(item => ({
+            value: item.code,
+            label: `${item.code} - ${item.name || ''}`,
+          }));
+          setSuggestions(opts);
+        })
+        .catch(() => setSuggestions([]))
+        .finally(() => setSearchLoading(false));
+    }, 300);
+  }, []);
+
+  // 选中联想项
+  const handleAutoCompleteSelect = (value) => {
+    setInputCode(value);
+    doSearch(value);
+  };
+
   const handleSearch = () => doSearch();
+
+  // 加载研报分析数据
+  useEffect(() => {
+    if (!overview?.code) {
+      setResearchData(null);
+      return;
+    }
+    stockAnalysisApi.getResearchReport(overview.code)
+      .then(data => setResearchData(data))
+      .catch(() => setResearchData(null));
+  }, [overview?.code]);
 
   // 加载评分规则
   const showRules = useCallback(() => {
@@ -120,6 +164,11 @@ export default function StockAnalysis() {
       label: '基本面',
       children: <FundamentalTab data={overview.fundamentalSignal} />,
     },
+    {
+      key: 'research',
+      label: '研报分析',
+      children: <ResearchReportTab data={researchData} code={overview.code} />,
+    },
   ] : [];
 
   const changePct = overview ? parseChangePct(overview.changePercent) : 0;
@@ -130,12 +179,15 @@ export default function StockAnalysis() {
       <Card size="small" style={{ marginBottom: 16 }}>
         <Row align="middle" gutter={12}>
           <Col>
-            <Input
-              placeholder="输入股票代码，如 000001"
+            <AutoComplete
+              placeholder="输入股票代码或名称，如 000001 或 平安银行"
               value={inputCode}
-              onChange={e => setInputCode(e.target.value)}
-              onPressEnter={handleSearch}
-              style={{ width: 240 }}
+              options={suggestions}
+              onSearch={handleSearchInput}
+              onSelect={handleAutoCompleteSelect}
+              onPressEnter={() => doSearch(inputCode)}
+              style={{ width: 300 }}
+              notFoundContent={searchLoading ? <Spin size="small" /> : '未找到匹配股票'}
             />
           </Col>
           <Col>
@@ -607,3 +659,205 @@ function FundamentalTab({ data }) {
     </div>
   );
 }
+
+// ── 研报分析 Tab ─────────────────────────────────────────────────────
+function ResearchReportTab({ data, code }) {
+  if (!data) return <Empty description="暂无研报分析数据" />;
+
+  // epsForecast 可能是对象(dict)也可能为空，统一转数组按年份排序
+  const epsRaw = data.epsForecast;
+  const epsList = Array.isArray(epsRaw)
+    ? epsRaw
+    : (epsRaw ? Object.values(epsRaw) : []);
+
+  // 发布频率柱状图数据
+  const reportTrend = (data.reportTrend || []).map(t => ({
+    month: t.month || '',
+    cnt: t.cnt || t.count || 0,
+  }));
+  const maxCnt = reportTrend.length > 0 ? Math.max(...reportTrend.map(t => t.cnt)) : 0;
+
+  // 评级摘要 & 覆盖数据
+  const rs = data.ratingSummary || {};
+  const cov = data.coverage || {};
+  const ratingTrendData = data.ratingTrend || [];
+  // 覆盖机构数
+  const instCount = cov.institutionCount || (cov.institutions?.length || 0);
+  // 研报总数
+  const reportCount6m = data.reportCount6m || cov.reportCount6m || 0;
+
+  return (
+    <div>
+      {/* ── 第一行：三栏 ──────────────────────────────────────────── */}
+      <Row gutter={16} style={{ marginBottom: 16 }}>
+        {/* 左：评级共识 */}
+        <Col span={8}>
+          <Card size="small" title="评级共识" bodyStyle={{ padding: '12px 16px' }}>
+            <Tag color="blue" style={{ fontSize: 14, padding: '2px 12px' }}>{rs.latestRating || '-'}</Tag>
+            <Text type="secondary" style={{ marginLeft: 8 }}>{rs.consensusDesc}</Text>
+            <div style={{ marginTop: 12, marginBottom: 4, fontSize: 13 }}>买入+增持占比</div>
+            <Progress percent={rs.buyRatio ?? 0} strokeColor="#f5222d" showInfo format={p => `${p}%`} />
+          </Card>
+        </Col>
+
+        {/* 中：覆盖强度 */}
+        <Col span={7}>
+          <Card size="small" title="覆盖强度" bodyStyle={{ padding: '12px 16px' }}>
+            <Row gutter={[16, 8]}>
+              <Col span={8}><Text type="secondary">覆盖机构</Text></Col>
+              <Col span={8}><Text type="secondary">研报总数</Text></Col>
+              <Col span={8}><Text type="secondary">首次覆盖</Text></Col>
+              <Col span={8} style={{ fontWeight: 600, fontSize: 18 }}>{instCount}<span style={{ fontSize: 13, marginLeft: 2 }}>家</span></Col>
+              <Col span={8} style={{ fontWeight: 600, fontSize: 18 }}>{reportCount6m}<span style={{ fontSize: 13, marginLeft: 2 }}>篇</span></Col>
+              <Col span={8} style={{ fontWeight: 500, fontSize: 15 }}>{cov.firstCoverageDate || '-'}</Col>
+            </Row>
+          </Card>
+        </Col>
+
+        {/* 右：EPS 一致预期 */}
+        <Col span={9}>
+          <Card size="small" title="EPS 一致预期" bodyStyle={{ padding: '12px 16px' }}>
+            <Row gutter={12}>
+              {epsList.map((ep, i) => (
+                <Col span={8} key={ep.year || i} style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: 11, color: '#999', marginBottom: 4 }}>{ep.year} 年预测</div>
+                  <div style={{ fontWeight: 600, fontSize: 17, color: '#333' }}>
+                    ¥{ep.avgEps != null ? Number(ep.avgEps).toFixed(2) : '-'}
+                  </div>
+                  <div style={{ fontSize: 11, color: '#999' }}>
+                    PE: {ep.avgPe != null ? Number(ep.avgPe).toFixed(1) + 'x' : '-'}
+                  </div>
+                </Col>
+              ))}
+            </Row>
+          </Card>
+        </Col>
+      </Row>
+
+      {/* ── 第二行：两栏 ─────────────────────────────────────────── */}
+      <Row gutter={16}>
+        {/* 左：评级趋势表格 */}
+        <Col span={12}>
+          <Card size="small" title="评级趋势（近6个月）">
+            {ratingTrendData.length > 0 ? (
+              <Table
+                size="small"
+                pagination={false}
+                columns={[
+                  { title: '月份', dataIndex: 'month', width: 90 },
+                  {
+                    title: '买入', dataIndex: '买入',
+                    render: v => v != null && v > 0 ? <Tag color="red">{v}</Tag> : <span>-</span>,
+                    align: 'center',
+                  },
+                  {
+                    title: '增持', dataIndex: '增持',
+                    render: v => v != null && v > 0 ? <Tag color="blue">{v}</Tag> : <span>-</span>,
+                    align: 'center',
+                  },
+                  {
+                    title: '中性/持有', dataIndex: '持有',
+                    render: v => v != null && v > 0 ? v : <span>-</span>,
+                    align: 'center',
+                  },
+                ]}
+                dataSource={ratingTrendData}
+                rowKey="month"
+              />
+            ) : (
+              <Empty description="暂无评级趋势数据" />
+            )}
+          </Card>
+        </Col>
+
+        {/* 右：发布频率柱状图 */}
+        <Col span={12}>
+          <Card size="small" title="发布频率（近6个月）">
+            {reportTrend.length > 0 ? (
+              <div style={{ display: 'flex', alignItems: 'flex-end', height: 140, paddingBottom: 12, borderBottom: '1px solid #f0f0f0' }}>
+                {reportTrend.map((t, i) => (
+                  <div key={i} style={{ flex: 1, textAlign: 'center', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
+                    <div style={{
+                      background: '#1890ff',
+                      margin: '0 4px',
+                      height: maxCnt > 0 ? `${Math.max(t.cnt, 1) / maxCnt * 100}%` : '2px',
+                      borderRadius: '2px 2px 0 0',
+                      minHeight: 2,
+                    }} />
+                    <div style={{ fontSize: 10, color: '#999', marginTop: 4 }}>{t.month}</div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <Empty description="暂无发布频率数据" />
+            )}
+          </Card>
+        </Col>
+      </Row>
+
+      {/* ── 第三行：机构列表 + 研报列表 ──────────────────────────── */}
+      <Row gutter={16} style={{ marginTop: 16 }}>
+        {/* 左：涉及机构 */}
+        <Col span={8}>
+          <Card size="small" title={`涉及机构（${instCount} 家）`} bodyStyle={{ padding: 0, maxHeight: 420, overflowY: 'auto' }}>
+            {(cov.institutions || []).length > 0 ? (
+              <Table
+                size="small"
+                pagination={false}
+                dataSource={cov.institutions}
+                rowKey="institution"
+                columns={[
+                  { title: '机构名称', dataIndex: 'institution', ellipsis: true },
+                  {
+                    title: '研报数', dataIndex: 'report_count',
+                    width: 60, align: 'center',
+                    render: v => v != null ? v : '-',
+                  },
+                  { title: '首次覆盖', dataIndex: 'first_date', width: 100, align: 'center' },
+                ]}
+              />
+            ) : (
+              <Empty description="暂无机构数据" style={{ margin: 24 }} />
+            )}
+          </Card>
+        </Col>
+
+        {/* 右：具体研报列表 */}
+        <Col span={16}>
+          <Card size="small" title={`研报列表（最近 ${data.recentReports?.length || 0} 篇）`} bodyStyle={{ padding: 0, maxHeight: 420, overflowY: 'auto' }}>
+            {(data.recentReports || []).length > 0 ? (
+              <Table
+                size="small"
+                pagination={false}
+                dataSource={data.recentReports}
+                rowKey={(r) => r.reportDate + r.institution}
+                columns={[
+                  { title: '日期', dataIndex: 'reportDate', width: 105, align: 'center', sorter: (a,b) => (a.reportDate||'').localeCompare(b.reportDate||'') },
+                  { title: '机构', dataIndex: 'institution', width: 90, ellipsis: true },
+                  {
+                    title: '评级', dataIndex: 'rating',
+                    width: 70, align: 'center',
+                    render: v => {
+                      if (!v) return '-';
+                      const color = v === '买入' ? 'red' : v === '增持' ? 'blue' : v === '持有' ? 'default' : v === '减持' ? 'green' : v === '卖出' ? '#52c41a' : 'default';
+                      return <Tag color={color}>{v}</Tag>;
+                    },
+                  },
+                  { title: '标题', dataIndex: 'reportTitle', ellipsis: true,
+                    render: (t, r) => r.pdfUrl ? (
+                      <a href={r.pdfUrl} target="_blank" rel="noreferrer" style={{ fontSize: 13 }}>{t}</a>
+                    ) : t,
+                  },
+                ]}
+              />
+            ) : (
+              <Empty description="暂无研报数据" style={{ margin: 24 }} />
+            )}
+          </Card>
+        </Col>
+      </Row>
+    </div>
+  );
+}
+
+// ── 研报分析 Tab end ───────────────────────────────────────────────

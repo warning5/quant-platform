@@ -158,7 +158,6 @@ export default function ChanScreen() {
       dataIndex: col.dataIndex,
       key: col.key,
       width: 90,
-      render: getTagRenderer(col.key)(col.dataIndex === col.key ? undefined : undefined),
       // 实际渲染从 row 数据取
       render: (val, row) => {
         const tagFn = getTagRenderer(col.key);

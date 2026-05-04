@@ -1285,6 +1285,34 @@ class StockDailyDB:
                 )
                 return [(r["code"], r["market"]) for r in cur.fetchall()]
 
+    def update_stock_info_market_cap_batch(self, updates, batch_size=500):
+        """
+        批量更新 stock_info 表的 total_market_cap 字段。
+
+        参数:
+            updates: [(total_market_cap, code), ...] 列表
+            batch_size: 每批更新的记录数
+
+        返回: 更新的记录数
+        """
+        if not updates:
+            return 0
+
+        total_updated = 0
+        for i in range(0, len(updates), batch_size):
+            batch = updates[i:i + batch_size]
+            try:
+                with self._info_cursor() as cur:
+                    cur.executemany(
+                        "UPDATE stock_info SET total_market_cap = %s WHERE code = %s",
+                        batch
+                    )
+                    total_updated += cur.rowcount
+            except Exception as e:
+                print(f"  [WARN] 批量更新失败 (batch {i // batch_size + 1}): {e}")
+
+        return total_updated
+
 
 # ─── 工具函数 ──────────────────────────────────────────────────
 

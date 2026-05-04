@@ -49,4 +49,9 @@ public class FundamentalSignal {
      * 基本面评分
      */
     private int fundamentalScore;
+
+    /**
+     * 研报评分（0-5分，由最新评级映射，计入基本面总分）
+     */
+    private int researchScore;
 }

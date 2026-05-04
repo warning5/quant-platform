@@ -175,6 +175,8 @@ export const researchApi = {
 export const stockAnalysisApi = {
   getOverview: (code) => api.get('/analysis/overview', { params: { code } }),
   getScoreRules: () => api.get('/analysis/score-rules'),
+  getResearchReport: (code) => api.get('/analysis/research', { params: { code } }),
+  searchStocks: (keyword) => api.get('/analysis/search', { params: { keyword } }),
 };
 
 export default api;

@@ -86,6 +86,11 @@ public class AnalysisOverview {
     private FundamentalSignal fundamentalSignal;
 
     /**
+     * 研报信号（机构观点）
+     */
+    private ResearchSignal researchSignal;
+
+    /**
      * 分析结论（四维度综合文字结论）
      */
     private String conclusion;

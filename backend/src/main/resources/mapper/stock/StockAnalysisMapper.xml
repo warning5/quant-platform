@@ -60,5 +60,102 @@
         WHERE si.code = #{code}
         LIMIT 1
     </select>
-    
+
+    <!-- 查询研报数据（最近90天） -->
+    <select id="selectResearchSignal" resultType="com.quant.platform.stock.analysis.domain.ResearchSignal">
+        SELECT
+            (SELECT rating FROM stock_research_report 
+             WHERE code = #{code} AND rating IS NOT NULL AND rating != ''
+             ORDER BY report_date DESC LIMIT 1) as latestRating,
+            (SELECT COUNT(*) FROM stock_research_report 
+             WHERE code = #{code} 
+             AND report_date >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)) as reportCount
+        FROM dual
+    </select>
+
+    <!-- 查询研报明细列表（最近5条） -->
+    <select id="selectRecentResearchReports" resultType="java.util.Map">
+        SELECT
+            rating,
+            institution,
+            report_date as reportDate,
+            report_title as reportTitle,
+            eps_forecast as epsForecast
+        FROM stock_research_report
+        WHERE code = #{code}
+        ORDER BY report_date DESC
+        LIMIT 5
+    </select>
+
+    <!-- 查询研报明细列表（含EPS预测，指定条数） -->
+    <select id="selectRecentReportsWithEps" resultType="java.util.Map">
+        SELECT
+            rating,
+            institution,
+            report_date as reportDate,
+            report_title as reportTitle,
+            eps_forecast as epsForecast,
+            pdf_url as pdfUrl
+        FROM stock_research_report
+        WHERE code = #{code}
+        ORDER BY report_date DESC
+        LIMIT #{limit}
+    </select>
+
+    <!-- 评级趋势（近6个月） -->
+    <select id="selectRatingTrend" resultType="java.util.Map">
+        SELECT
+            DATE_FORMAT(report_date, '%Y-%m') AS month,
+            IFNULL(rating, '无评级') AS rating,
+            COUNT(*) AS cnt
+        FROM stock_research_report
+        WHERE code = #{code}
+          AND report_date >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
+        GROUP BY month, rating
+        ORDER BY month ASC
+    </select>
+
+    <!-- 研报数量月度趋势（近6个月） -->
+    <select id="selectReportCountByMonth" resultType="java.util.Map">
+        SELECT
+            DATE_FORMAT(report_date, '%Y-%m') AS month,
+            COUNT(*) AS cnt
+        FROM stock_research_report
+        WHERE code = #{code}
+          AND report_date >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
+        GROUP BY month
+        ORDER BY month ASC
+    </select>
+
+    <!-- 覆盖机构列表（去重） -->
+    <select id="selectCoverageInstitutions" resultType="java.util.Map">
+        SELECT
+            institution,
+            MIN(report_date) AS first_date,
+            COUNT(*) AS report_count
+        FROM stock_research_report
+        WHERE code = #{code}
+          AND institution IS NOT NULL
+          AND institution != ''
+        GROUP BY institution
+        ORDER BY report_count DESC
+        LIMIT 20
+    </select>
+
+    <!-- 首次覆盖日期 -->
+    <select id="selectFirstCoverageDate" resultType="String">
+        SELECT MIN(report_date) FROM stock_research_report
+        WHERE code = #{code} AND report_date IS NOT NULL
+    </select>
+
+    <!-- 股票联想搜索（按代码或名称模糊匹配） -->
+    <select id="searchStocks" resultType="java.util.Map">
+        SELECT code, name, market
+        FROM stock_info
+        WHERE code LIKE CONCAT('%', #{keyword}, '%')
+           OR name LIKE CONCAT('%', #{keyword}, '%')
+        ORDER BY code ASC
+        LIMIT 20
+    </select>
+
 </mapper>
