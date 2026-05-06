@@ -37,7 +37,7 @@ public class SentimentService {
     private static final Map<String, String> TABLE_NAMES = new LinkedHashMap<>();
     static {
         TABLE_NAMES.put("stock_sentiment_zt", "涨跌停池");
-        TABLE_NAMES.put("stock_sentiment_moneyflow", "资金情绪代理");
+        TABLE_NAMES.put("stock_sentiment_moneyflow", "资金流向");
         TABLE_NAMES.put("stock_sentiment_notice", "公告");
         TABLE_NAMES.put("stock_sentiment_lhb", "龙虎榜");
         TABLE_NAMES.put("stock_sentiment_lhb_inst", "龙虎榜机构明细");

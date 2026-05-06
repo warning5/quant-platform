@@ -7,11 +7,15 @@ import com.quant.platform.stock.analysis.mapper.StockAnalysisMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.*;
+import java.util.stream.Collectors;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -45,7 +49,12 @@ public class AnalysisService {
         if (stockInfo != null) {
             overview.setName((String) stockInfo.get("name"));
         }
-        
+
+        // 1.05 判断是否大盘蓝筹（总市值 ≥ 1000亿）
+        final boolean isBlueChip = stockInfo != null
+                && stockInfo.get("total_market_cap") instanceof BigDecimal
+                && ((BigDecimal) stockInfo.get("total_market_cap")).compareTo(new BigDecimal("100000000000")) >= 0;
+
         // 1.1 从 ClickHouse 获取最新价格（CH 有数据，MySQL stock_daily 为空）
         java.util.Map<String, Object> chPrice = analysisChMapper.selectLatestDailyBar(code);
         if (chPrice != null) {
@@ -112,7 +121,25 @@ public class AnalysisService {
         if (ret20d != null) {
             sentimentSignal.setIsStrongStock(ret20d.doubleValue() > 30);
         }
-        
+
+        // 4.5 所有股票补充融资余额（margin_detail 4.1万条，覆盖面广）
+        try {
+            BigDecimal marginChg = stockAnalysisMapper.selectMarginChangePct(code);
+            if (marginChg != null) sentimentSignal.setMarginChgPct(marginChg);
+        } catch (Exception e) { log.debug("融资余额变化查询失败: {}", e.getMessage()); }
+
+        // 4.6 大盘蓝筹补充事件面数据（机构净买入+机构调研）
+        if (isBlueChip) {
+            try {
+                BigDecimal lhbNet = stockAnalysisMapper.selectLhbInstitutionNet(code);
+                if (lhbNet != null) sentimentSignal.setLhbInstitutionNet(lhbNet);
+            } catch (Exception e) { log.debug("龙虎榜机构净买入查询失败: {}", e.getMessage()); }
+            try {
+                BigDecimal holderChg = stockAnalysisMapper.selectHolderChangePct(code);
+                if (holderChg != null) sentimentSignal.setHolderChangePct(holderChg);
+            } catch (Exception e) { log.debug("股东户数变化查询失败: {}", e.getMessage()); }
+        }
+
         // 5. 基本面信号（从MySQL查 roe/增速等，pe/pb 从CH补充）
         FundamentalSignal fundamentalSignal = stockAnalysisMapper.selectFundamentalSignal(code);
         if (fundamentalSignal == null) {
@@ -137,15 +164,18 @@ public class AnalysisService {
         int researchScore = calcResearchScore(researchSignal.getLatestRating());
         researchSignal.setResearchScore(researchScore);
         fundamentalSignal.setResearchScore(researchScore);
+        // 研报覆盖热度（近90天数量）
+        fundamentalSignal.setReportCount(researchSignal.getReportCount());
         // 查询最近5条研报明细
         researchSignal.setRecentReports(stockAnalysisMapper.selectRecentResearchReports(code));
         
         // 6. 调用规则引擎评分
         TradingSignal signal = tradingSignalEngine.evaluate(
-                code, 
+                code,
                 overview.getName() != null ? overview.getName() : code,
                 techSignal, moneySignal, sentimentSignal, fundamentalSignal,
-                supportPrice, resistancePrice);
+                supportPrice, resistancePrice,
+                isBlueChip);
         
         // 7. 填充总览
         overview.setTotalScore(signal.getTotalScore());
@@ -172,6 +202,9 @@ public class AnalysisService {
 
         // 7.1 生成综合分析结论
         overview.setConclusion(buildConclusion(overview, signal));
+
+        // 7.2 标记是否大盘蓝筹（供前端切换展示）
+        overview.setBlueChip(isBlueChip);
 
         log.info("个股分析完成: code={}, totalScore={}, action={}",
                 code, overview.getTotalScore(), overview.getAction());
@@ -227,7 +260,7 @@ public class AnalysisService {
     }
     
     /**
-     * 计算资金面信号（量比、换手率偏离）
+     * 计算资金面信号（量比、换手率偏离 + 主力资金流向）
      */
     private MoneyFlowSignal calcMoneyFlowSignal(String code) {
         MoneyFlowSignal signal = new MoneyFlowSignal();
@@ -284,6 +317,38 @@ public class AnalysisService {
             } else {
                 signal.setVolumeStatus("LOW");
             }
+        }
+        
+        // 从 CH stock_sentiment_moneyflow 获取主力资金流向
+        try {
+            java.util.Map<String, Object> mf = analysisChMapper.selectLatestMoneyFlow(code);
+            if (mf != null) {
+                if (mf.get("net_main") != null) {
+                    signal.setNetMain((BigDecimal) mf.get("net_main"));
+                }
+                if (mf.get("net_main_pct") != null) {
+                    signal.setNetMainPct((BigDecimal) mf.get("net_main_pct"));
+                }
+                if (mf.get("net_huge") != null) {
+                    signal.setNetHuge((BigDecimal) mf.get("net_huge"));
+                }
+                if (mf.get("net_big") != null) {
+                    signal.setNetBig((BigDecimal) mf.get("net_big"));
+                }
+                // 判断主力资金状态
+                if (signal.getNetMain() != null) {
+                    double nm = signal.getNetMain().doubleValue();
+                    if (nm > 0) {
+                        signal.setMainFlowStatus("INFLOW");
+                    } else if (nm < 0) {
+                        signal.setMainFlowStatus("OUTFLOW");
+                    } else {
+                        signal.setMainFlowStatus("NEUTRAL");
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.debug("获取资金流向数据失败: code={}, error={}", code, e.getMessage());
         }
         
         return signal;
@@ -586,5 +651,985 @@ public class AnalysisService {
             return Collections.emptyList();
         }
         return stockAnalysisMapper.searchStocks(keyword.trim());
+    }
+
+    /**
+     * 同业对比：获取同行业股票的 PE/PB/ROE/涨跌幅/评分
+     * @param code 股票代码
+     * @return 行业名称 + 同业列表（含当前股高亮）
+     */
+    public Map<String, Object> getPeerComparison(String code) {
+        Map<String, Object> result = new LinkedHashMap<>();
+
+        // 1. 获取该股票的行业
+        Map<String, Object> myInfo = stockAnalysisMapper.selectStockInfo(code);
+        String industry = myInfo != null ? (String) myInfo.get("industry") : null;
+        if (industry == null || industry.isBlank()) {
+            result.put("industry", "未知");
+            result.put("peers", Collections.emptyList());
+            return result;
+        }
+        result.put("industry", industry);
+
+        // 2. 获取同行业所有股票的基本信息（PE/PB/市值）
+        List<Map<String, Object>> peers = stockAnalysisMapper.selectIndustryPeers(industry);
+        if (peers == null || peers.isEmpty()) {
+            result.put("peers", Collections.emptyList());
+            return result;
+        }
+
+        // 3. 补充 CH 最新价格/涨跌幅数据
+        for (Map<String, Object> peer : peers) {
+            String peerCode = (String) peer.get("code");
+            try {
+                Map<String, Object> chBar = analysisChMapper.selectLatestDailyBar(peerCode);
+                if (chBar != null) {
+                    peer.put("changePercent", chBar.get("change_percent"));
+                    peer.put("closePrice", chBar.get("close_price"));
+                }
+            } catch (Exception e) {
+                log.debug("获取同业价格失败: {}", peerCode);
+            }
+        }
+
+        // 4. 排序：按总市值降序（大公司在前）
+        peers.sort((a, b) -> {
+            BigDecimal ma = a.get("total_market_cap") instanceof BigDecimal ?
+                    (BigDecimal) a.get("total_market_cap") : BigDecimal.ZERO;
+            BigDecimal mb = b.get("total_market_cap") instanceof BigDecimal ?
+                    (BigDecimal) b.get("total_market_cap") : BigDecimal.ZERO;
+            return mb.compareTo(ma);
+        });
+
+        // 5. 标记当前股票
+        result.put("peers", peers);
+        result.put("currentCode", code);
+        return result;
+    }
+
+    /**
+     * 估值历史分位：计算当前 PE/PB 在 N 年中的百分位排名
+     * @param code 股票代码
+     * @param years 回溯年数（默认3）
+     * @return pePercentile/pbPercentile/peCurrent/pbCurrent/peHistoryCount/pbHistoryCount
+     */
+    public Map<String, Object> getValuationPercentile(String code, int years) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        String normalized = normalizeCodeForDailyCH(code);
+
+        try {
+            // 从 CH 查询历史 PE/PB 序列（排除0值和null）
+            List<BigDecimal> peHistory = new ArrayList<>();
+            List<BigDecimal> pbHistory = new ArrayList<>();
+            BigDecimal currentPe = null;
+            BigDecimal currentPb = null;
+
+            String sql = """
+                SELECT pe_ttm, pb FROM stock.stock_daily
+                WHERE code = ?
+                  AND trade_date >= subtractYears(today(), ?)
+                  AND pe_ttm > 0 AND pe_ttm < 10000
+                  AND pb > 0 AND pb < 10000
+                ORDER BY trade_date ASC
+                """;
+            List<Map<String, Object>> rows = clickHouseJdbcTemplate.query(sql,
+                (rs, rowNum) -> {
+                    Map<String, Object> m = new HashMap<>();
+                    m.put("pe_ttm", rs.getBigDecimal("pe_ttm"));
+                    m.put("pb", rs.getBigDecimal("pb"));
+                    return m;
+                }, normalized, years);
+
+            for (Map<String, Object> row : rows) {
+                BigDecimal pe = (BigDecimal) row.get("pe_ttm");
+                BigDecimal pb = (BigDecimal) row.get("pb");
+                if (pe != null) peHistory.add(pe);
+                if (pb != null) pbHistory.add(pb);
+            }
+
+            if (!peHistory.isEmpty()) currentPe = peHistory.get(peHistory.size() - 1);
+            if (!pbHistory.isEmpty()) currentPb = pbHistory.get(pbHistory.size() - 1);
+
+            // 计算百分位：低于当前值的占比
+            double pePct = calcPercentile(peHistory, currentPe);
+            double pbPct = calcPercentile(pbHistory, currentPb);
+
+            result.put("pePercentile", Math.round(pePct * 10.0) / 10.0);
+            result.put("pbPercentile", Math.round(pbPct * 10.0) / 10.0);
+            result.put("peCurrent", currentPe);
+            result.put("pbCurrent", currentPb);
+            result.put("peHistoryCount", peHistory.size());
+            result.put("pbHistoryCount", pbHistory.size());
+            result.put("years", years);
+
+            // 分位描述
+            result.put("peDesc", percentileDesc(pePct));
+            result.put("pbDesc", percentileDesc(pbPct));
+        } catch (Exception e) {
+            log.error("查询估值分位失败: code={}, error={}", code, e.getMessage(), e);
+            result.put("error", "查询失败: " + e.getMessage());
+        }
+        return result;
+    }
+
+    /** 将前端短代码转为 CH stock_daily 无后缀格式 */
+    private String normalizeCodeForDailyCH(String code) {
+        if (code == null) return null;
+        String c = code.trim();
+        if (c.contains(".")) return c.split("\\.")[0];
+        return c;
+    }
+
+    private double calcPercentile(List<BigDecimal> history, BigDecimal current) {
+        if (history == null || history.isEmpty() || current == null) return 0;
+        int belowOrEqual = 0;
+        for (BigDecimal val : history) {
+            if (val != null && val.compareTo(current) <= 0) belowOrEqual++;
+        }
+        return (double) belowOrEqual / history.size() * 100.0;
+    }
+
+    private static String percentileDesc(double pct) {
+        if (pct >= 90) return "极高估（历史90%以上）";
+        if (pct >= 75) return "偏高（历史75%~90%）";
+        if (pct >= 50) return "中等偏上（50%~75%）";
+        if (pct >= 25) return "偏低（25%~50%）";
+        if (pct >= 10) return "很低估（10%~25%）";
+        return "极低估（历史10%以下）";
+    }
+
+    /** CH JDBC template 注入（用于直接 SQL） */
+    @Autowired(required = false)
+    @Qualifier("clickHouseJdbcTemplate")
+    private JdbcTemplate clickHouseJdbcTemplate;
+
+    /**
+     * 行业涨跌排行 + 概念板块排行
+     * 注意：MySQL stock_daily 为空表，涨跌幅从 ClickHouse 获取
+     * stock_concept 表仅在 MySQL 存在，概念排行需要先从 MySQL 取股票列表再聚合 CH 行情
+     */
+    public Map<String, Object> getSectorRanking() {
+        Map<String, Object> result = new LinkedHashMap<>();
+
+        // 1. 行业排行（纯 CH 查询：stock_info + stock_daily 都在 CH）
+        List<Map<String, Object>> industryList = Collections.emptyList();
+        String latestTradeDate = null;
+        try {
+            // 先查最新交易日（避免子查询）
+            latestTradeDate = clickHouseJdbcTemplate.queryForObject(
+                "SELECT MAX(trade_date) FROM stock.stock_daily", String.class);
+        } catch (Exception e) {
+            log.error("获取最新交易日失败: {}", e.getMessage());
+        }
+
+        if (latestTradeDate != null) {
+            try {
+                String industrySql = String.format("""
+                    SELECT
+                        si.industry,
+                        COUNT(*) as stockCount,
+                        AVG(sd.change_percent) as avgChangePct,
+                        median(sd.pe_ttm) as medianPe,
+                        median(sd.pb) as medianPb
+                    FROM stock_info si
+                      INNER JOIN (
+                        SELECT code, change_percent, pe_ttm, pb FROM stock.stock_daily
+                        WHERE trade_date = '%s'
+                      ) sd ON sd.code = si.code
+                    WHERE si.industry IS NOT NULL AND si.industry != ''
+                      AND si.market NOT IN ('BJ','北交所')
+                    GROUP BY si.industry
+                    ORDER BY avgChangePct DESC
+                    LIMIT 30
+                    """, latestTradeDate);
+            industryList = clickHouseJdbcTemplate.query(industrySql,
+                (rs, rowNum) -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("industry", rs.getString("industry"));
+                    m.put("stockCount", rs.getLong("stockCount"));
+                    Object avgChg = rs.getObject("avgChangePct");
+                    m.put("avgChangePct", avgChg instanceof Number ?
+                            BigDecimal.valueOf(((Number) avgChg).doubleValue()).setScale(2, RoundingMode.HALF_UP) : null);
+                    Object medPe = rs.getObject("medianPe");
+                    m.put("medianPe", medPe instanceof Number ?
+                            BigDecimal.valueOf(((Number) medPe).doubleValue()).setScale(1, RoundingMode.HALF_UP) : null);
+                    Object medPb = rs.getObject("medianPb");
+                    m.put("medianPb", medPb instanceof Number ?
+                            BigDecimal.valueOf(((Number) medPb).doubleValue()).setScale(2, RoundingMode.HALF_UP) : null);
+                    return m;
+                });
+            } catch (Exception e) {
+                log.error("查询行业排行失败: error={}", e.getMessage(), e);
+            }
+        }
+
+        // 在结果中返回最新交易日期（stock_concept 仅在 MySQL，但可一次 JOIN CH 聚合）
+        List<Map<String, Object>> conceptList = Collections.emptyList();
+        try {
+            // 先获取最新交易日期
+            String maxDateSql = "SELECT MAX(trade_date) as maxDate FROM stock.stock_daily";
+            String maxDate = clickHouseJdbcTemplate.queryForObject(maxDateSql, String.class);
+
+            if (maxDate != null) {
+                // 从 MySQL 取概念-股票映射
+                List<Map<String, Object>> concepts = stockAnalysisMapper.selectAllConcepts();
+                if (concepts != null && !concepts.isEmpty()) {
+                    // 收集所有涉及股票代码，构建 code→conceptName 的反向映射
+                    Map<String, String> codeToConcept = new LinkedHashMap<>();
+                    for (Map<String, Object> c : concepts) {
+                        String cname = (String) c.get("conceptName");
+                        String ccode = (String) c.get("code");
+                        codeToConcept.put(ccode, cname);
+                    }
+
+                    // 一次查出所有涉及股票的涨跌幅（限最新日期）
+                    Set<String> allCodes = codeToConcept.keySet();
+                    List<Map<String, Object>> conceptListRaw = new ArrayList<>();
+
+                    // CH IN 子句有长度限制，分批查询（每批500）
+                    List<String> codeList = new ArrayList<>(allCodes);
+                    Map<String, Map<String, Object>> codeChgMap = new HashMap<>();
+                    for (int i = 0; i < codeList.size(); i += 500) {
+                        List<String> batch = codeList.subList(i, Math.min(i + 500, codeList.size()));
+                        String inClause = String.join("','", batch);
+                        String batchSql = String.format("""
+                            SELECT code, change_percent as chg, pe_ttm, pb
+                            FROM stock.stock_daily
+                            WHERE code IN ('%s') AND trade_date = '%s'
+                            """, inClause, maxDate);
+                        List<Map<String, Object>> rows = clickHouseJdbcTemplate.query(batchSql,
+                            (rs, rowNum) -> {
+                                Map<String, Object> m = new HashMap<>();
+                                m.put("code", rs.getString("code"));
+                                m.put("chg", rs.getObject("chg"));
+                                m.put("pe", rs.getObject("pe_ttm"));
+                                m.put("pb", rs.getObject("pb"));
+                                return m;
+                            });
+                        for (Map<String, Object> r : rows) {
+                            codeChgMap.put((String) r.get("code"), r);
+                        }
+                    }
+
+                    // 按概念聚合
+                    Map<String, List<Double>> conceptChgs = new LinkedHashMap<>();
+                    Map<String, List<Double>> conceptPes = new LinkedHashMap<>();
+                    Map<String, List<Double>> conceptPbs = new LinkedHashMap<>();
+                    Map<String, Integer> conceptCounts = new LinkedHashMap<>();
+                    for (Map.Entry<String, String> e : codeToConcept.entrySet()) {
+                        String code = e.getKey();
+                        String cname = e.getValue();
+                        Map<String, Object> chgData = codeChgMap.get(code);
+                        if (chgData != null) {
+                            conceptChgs.computeIfAbsent(cname, k -> new ArrayList<>());
+                            conceptPes.computeIfAbsent(cname, k -> new ArrayList<>());
+                            conceptPbs.computeIfAbsent(cname, k -> new ArrayList<>());
+                            Object chg = chgData.get("chg");
+                            if (chg instanceof Number) conceptChgs.get(cname).add(((Number) chg).doubleValue());
+                            Object pe = chgData.get("pe");
+                            if (pe instanceof Number && ((Number) pe).doubleValue() > 0) conceptPes.get(cname).add(((Number) pe).doubleValue());
+                            Object pb = chgData.get("pb");
+                            if (pb instanceof Number && ((Number) pb).doubleValue() > 0) conceptPbs.get(cname).add(((Number) pb).doubleValue());
+                            conceptCounts.merge(cname, 1, Integer::sum);
+                        }
+                    }
+
+                    // 构建结果
+                    conceptList = new ArrayList<>();
+                    for (String cname : conceptChgs.keySet()) {
+                        List<Double> chgs = conceptChgs.get(cname);
+                        if (chgs.isEmpty()) continue;
+                        Map<String, Object> row = new LinkedHashMap<>();
+                        row.put("conceptName", cname);
+                        row.put("stockCount", conceptCounts.getOrDefault(cname, chgs.size()));
+                        double avgChg = chgs.stream().mapToDouble(v -> v).average().orElse(0);
+                        row.put("avgChangePct", BigDecimal.valueOf(avgChg).setScale(2, RoundingMode.HALF_UP));
+                        // 简易中位数（Java排序取中间值）
+                        List<Double> pes = conceptPes.getOrDefault(cname, Collections.emptyList());
+                        List<Double> pbs = conceptPbs.getOrDefault(cname, Collections.emptyList());
+                        row.put("medianPe", pes.isEmpty() ? null : BigDecimal.valueOf(median(pes)).setScale(1, RoundingMode.HALF_UP));
+                        row.put("medianPb", pbs.isEmpty() ? null : BigDecimal.valueOf(median(pbs)).setScale(2, RoundingMode.HALF_UP));
+                        conceptList.add(row);
+                    }
+                    conceptList.sort((a, b) -> {
+                        BigDecimal ma = a.get("avgChangePct") instanceof BigDecimal ? (BigDecimal) a.get("avgChangePct") : BigDecimal.ZERO;
+                        BigDecimal mb = b.get("avgChangePct") instanceof BigDecimal ? (BigDecimal) b.get("avgChangePct") : BigDecimal.ZERO;
+                        return mb.compareTo(ma);
+                    });
+                }
+            }
+        } catch (Exception e) {
+            log.error("查询概念排行失败: error={}", e.getMessage(), e);
+        }
+
+        result.put("industry", industryList != null ? industryList : Collections.emptyList());
+        result.put("concept", conceptList);
+        result.put("tradeDate", latestTradeDate);
+        return result;
+    }
+
+    /**
+     * 行业内个股排名 — CH查询 stock_info + stock_daily
+     */
+    public List<Map<String, Object>> getIndustryStocks(String industry, String sortBy, String sortOrder) {
+        // 白名单排序字段
+        Set<String> allowedSort = Set.of("changePercent", "peTtm", "pb", "totalMarketCap", "turnoverRate");
+        if (!allowedSort.contains(sortBy)) sortBy = "changePercent";
+        String order = "desc".equalsIgnoreCase(sortOrder) ? "DESC" : "ASC";
+
+        // CH字段映射
+        String chSortCol = switch (sortBy) {
+            case "changePercent" -> "sd.change_percent";
+            case "peTtm" -> "sd.pe_ttm";
+            case "pb" -> "sd.pb";
+            case "totalMarketCap" -> "si.total_market_cap";
+            case "turnoverRate" -> "sd.turnover_rate";
+            default -> "sd.change_percent";
+        };
+
+        String sql = String.format("""
+            SELECT si.code, si.name, si.industry,
+                   si.total_market_cap as totalMarketCap,
+                   sd.close_price as closePrice,
+                   sd.change_percent as changePercent,
+                   sd.pe_ttm as peTtm,
+                   sd.pb as pb,
+                   sd.turnover_rate as turnoverRate
+            FROM stock_info si
+              INNER JOIN (
+                SELECT code, close_price, change_percent, pe_ttm, pb, turnover_rate
+                FROM stock.stock_daily
+                WHERE trade_date = (SELECT MAX(trade_date) FROM stock.stock_daily)
+              ) sd ON sd.code = si.code
+            WHERE si.industry = ?
+              AND si.market NOT IN ('BJ','北交所')
+            ORDER BY %s %s
+            LIMIT 100
+            """, chSortCol, order);
+
+        return clickHouseJdbcTemplate.query(sql,
+            (rs, rowNum) -> {
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("code", rs.getString("code"));
+                m.put("name", rs.getString("name"));
+                m.put("industry", rs.getString("industry"));
+                m.put("totalMarketCap", rs.getBigDecimal("totalMarketCap"));
+                m.put("closePrice", rs.getBigDecimal("closePrice"));
+                m.put("changePercent", rs.getBigDecimal("changePercent"));
+                m.put("peTtm", rs.getBigDecimal("peTtm"));
+                m.put("pb", rs.getBigDecimal("pb"));
+                m.put("turnoverRate", rs.getBigDecimal("turnoverRate"));
+                return m;
+            }, industry);
+    }
+
+    /**
+     * 行业关联分析：Beta暴露 + 行业联动
+     * 计算个股与所属行业的 Beta、相关系数、行业涨跌联动
+     */
+    public Map<String, Object> getIndustryCorrelation(String code) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        String normalized = normalizeCodeForDailyCH(code);
+
+        // 1. 获取该股票所属行业
+        Map<String, Object> myInfo = stockAnalysisMapper.selectStockInfo(code);
+        String industry = myInfo != null ? (String) myInfo.get("industry") : null;
+        if (industry == null || industry.isBlank()) {
+            result.put("error", "未找到行业信息");
+            return result;
+        }
+        result.put("industry", industry);
+
+        // 2. 获取近60日个股收益率序列
+        List<DailyBarRow> bars = analysisChMapper.selectRecentDailyBars(code, 65);
+        if (bars == null || bars.size() < 20) {
+            result.put("error", "个股数据不足（需至少20日）");
+            return result;
+        }
+
+        // 计算日收益率
+        List<Double> stockReturns = new ArrayList<>();
+        for (int i = 1; i < bars.size(); i++) {
+            if (bars.get(i - 1).getClosePrice() != null && bars.get(i).getClosePrice() != null) {
+                double prev = bars.get(i - 1).getClosePrice().doubleValue();
+                double curr = bars.get(i).getClosePrice().doubleValue();
+                if (prev > 0) stockReturns.add((curr - prev) / prev);
+            }
+        }
+        if (stockReturns.size() < 20) {
+            result.put("error", "收益率数据不足");
+            return result;
+        }
+
+        // 3. 获取同行业所有股票近60日收益率 → 计算行业等权平均收益率
+        try {
+            String industryReturnSql = """
+                SELECT trade_date, AVG(change_percent) / 100 as avg_ret
+                FROM stock.stock_daily sd
+                INNER JOIN stock_info si ON si.code = sd.code
+                WHERE si.industry = ?
+                  AND si.market NOT IN ('BJ','北交所')
+                  AND sd.trade_date >= subtractDays(today(), 70)
+                GROUP BY trade_date
+                ORDER BY trade_date
+                """;
+            List<Map<String, Object>> indRows = clickHouseJdbcTemplate.query(industryReturnSql,
+                (rs, rowNum) -> {
+                    Map<String, Object> m = new HashMap<>();
+                    m.put("tradeDate", rs.getDate("trade_date").toLocalDate());
+                    m.put("avgRet", rs.getBigDecimal("avg_ret"));
+                    return m;
+                }, industry);
+
+            // 构建 industry return map
+            Map<java.time.LocalDate, Double> indRetMap = new LinkedHashMap<>();
+            for (Map<String, Object> r : indRows) {
+                java.time.LocalDate td = (java.time.LocalDate) r.get("tradeDate");
+                BigDecimal avgRet = (BigDecimal) r.get("avgRet");
+                if (avgRet != null) indRetMap.put(td, avgRet.doubleValue());
+            }
+
+            // 对齐日期序列
+            List<Double> alignedStock = new ArrayList<>();
+            List<Double> alignedInd = new ArrayList<>();
+            for (int i = 1; i < bars.size(); i++) {
+                java.time.LocalDate td = bars.get(i).getTradeDate();
+                if (td != null && indRetMap.containsKey(td) && i - 1 < stockReturns.size()) {
+                    alignedStock.add(stockReturns.get(i - 1));
+                    alignedInd.add(indRetMap.get(td));
+                }
+            }
+
+            if (alignedStock.size() >= 20) {
+                // 计算 Beta = Cov(stock, industry) / Var(industry)
+                double[] betaCorr = calcBetaAndCorrelation(alignedStock, alignedInd);
+                double beta = betaCorr[0];
+                double corr = betaCorr[1];
+
+                result.put("beta", Math.round(beta * 100.0) / 100.0);
+                result.put("correlation", Math.round(corr * 100.0) / 100.0);
+                result.put("sampleDays", alignedStock.size());
+
+                // Beta 解读
+                String betaDesc;
+                if (beta > 1.5) betaDesc = "高Beta（>1.5），弹性大，涨跌幅放大";
+                else if (beta > 1.0) betaDesc = "中高Beta，波动略大于行业";
+                else if (beta > 0.7) betaDesc = "中Beta，与行业基本同步";
+                else if (beta > 0.3) betaDesc = "低Beta，波动小于行业";
+                else betaDesc = "极低Beta，独立行情特征";
+                result.put("betaDesc", betaDesc);
+
+                // 相关系数解读
+                String corrDesc;
+                if (corr > 0.7) corrDesc = "高度联动，与行业同涨同跌";
+                else if (corr > 0.4) corrDesc = "中度联动，受行业影响较大";
+                else if (corr > 0.2) corrDesc = "弱联动，有一定独立性";
+                else corrDesc = "低联动，走势独立于行业";
+                result.put("corrDesc", corrDesc);
+
+                // 4. 近5日联动分析
+                List<Map<String, Object>> recentAlign = new ArrayList<>();
+                int n = alignedStock.size();
+                for (int i = Math.max(0, n - 5); i < n; i++) {
+                    Map<String, Object> day = new LinkedHashMap<>();
+                    day.put("dayIndex", i - Math.max(0, n - 5) + 1);
+                    day.put("stockRet", Math.round(alignedStock.get(i) * 10000.0) / 100.0);
+                    day.put("industryRet", Math.round(alignedInd.get(i) * 10000.0) / 100.0);
+                    // 超额收益
+                    day.put("excessRet", Math.round((alignedStock.get(i) - alignedInd.get(i)) * 10000.0) / 100.0);
+                    recentAlign.add(day);
+                }
+                result.put("recentAlignment", recentAlign);
+            } else {
+                result.put("error", "对齐数据不足（需至少20日）");
+            }
+        } catch (Exception e) {
+            log.error("行业关联分析失败: code={}, error={}", code, e.getMessage(), e);
+            result.put("error", "计算失败: " + e.getMessage());
+        }
+
+        // 5. 同行业近期涨跌分布
+        try {
+            String distSql = """
+                SELECT
+                    COUNT(*) as total,
+                    countIf(change_percent > 0) as upCount,
+                    countIf(change_percent < 0) as downCount,
+                    countIf(change_percent = 0) as flatCount,
+                    AVG(change_percent) as avgChange
+                FROM stock_info si
+                  INNER JOIN (
+                    SELECT code, change_percent FROM stock.stock_daily
+                    WHERE trade_date = (SELECT MAX(trade_date) FROM stock.stock_daily)
+                  ) sd ON sd.code = si.code
+                WHERE si.industry = ?
+                  AND si.market NOT IN ('BJ','北交所')
+                """;
+            Map<String, Object> dist = clickHouseJdbcTemplate.queryForMap(distSql, industry);
+            result.put("industryDist", dist);
+        } catch (Exception e) {
+            log.debug("行业分布查询失败: {}", e.getMessage());
+        }
+
+        return result;
+    }
+
+    /**
+     * 计算 Beta 和相关系数
+     */
+    private double[] calcBetaAndCorrelation(List<Double> x, List<Double> y) {
+        int n = x.size();
+        double meanX = x.stream().mapToDouble(Double::doubleValue).average().orElse(0);
+        double meanY = y.stream().mapToDouble(Double::doubleValue).average().orElse(0);
+
+        double covXY = 0, varX = 0, varY = 0;
+        for (int i = 0; i < n; i++) {
+            double dx = x.get(i) - meanX;
+            double dy = y.get(i) - meanY;
+            covXY += dx * dy;
+            varX += dx * dx;
+            varY += dy * dy;
+        }
+        covXY /= (n - 1);
+        varX /= (n - 1);
+        varY /= (n - 1);
+
+        double beta = varY > 0 ? covXY / varY : 0;
+        double corr = (varX > 0 && varY > 0) ? covXY / Math.sqrt(varX * varY) : 0;
+
+        return new double[]{beta, corr};
+    }
+
+    /**
+     * 涨跌停分析：历史涨停/跌停记录 + 涨停原因 + 炸板统计
+     */
+    public Map<String, Object> getLimitUpAnalysis(String code) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        String normalized = normalizeCodeForDailyCH(code);
+
+        // 1. 近期涨跌停记录（CH stock_sentiment_zt）
+        try {
+            String ztSql = """
+                SELECT trade_date, zt_type, reason, close as closePrice, pct_change as changePct
+                FROM stock.stock_sentiment_zt
+                WHERE code = ?
+                ORDER BY trade_date DESC
+                LIMIT 30
+                """;
+            List<Map<String, Object>> ztList = clickHouseJdbcTemplate.query(ztSql,
+                (rs, rowNum) -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("tradeDate", rs.getDate("trade_date").toString());
+                    m.put("ztType", rs.getString("zt_type"));
+                    m.put("reason", rs.getString("reason"));
+                    m.put("closePrice", rs.getBigDecimal("closePrice"));
+                    m.put("changePct", rs.getBigDecimal("changePct"));
+                    return m;
+                }, normalized);
+            result.put("records", ztList);
+
+            // 2. 统计汇总
+            String statsSql = """
+                SELECT
+                    countIf(zt_type = 'zt') as limitUpCount,
+                    countIf(zt_type = 'dt') as limitDownCount,
+                    countIf(zt_type = 'zbgc') as brokenCount,
+                    MIN(trade_date) as firstDate,
+                    MAX(trade_date) as lastDate
+                FROM stock.stock_sentiment_zt
+                WHERE code = ?
+                """;
+            Map<String, Object> stats = clickHouseJdbcTemplate.queryForMap(statsSql, normalized);
+            result.put("stats", stats);
+
+            // 3. 涨停原因统计
+            String reasonSql = """
+                SELECT reason, COUNT(*) as cnt
+                FROM stock.stock_sentiment_zt
+                WHERE code = ? AND zt_type = 'zt' AND reason != ''
+                GROUP BY reason
+                ORDER BY cnt DESC
+                LIMIT 10
+                """;
+            List<Map<String, Object>> reasons = clickHouseJdbcTemplate.query(reasonSql,
+                (rs, rowNum) -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("reason", rs.getString("reason"));
+                    m.put("count", rs.getLong("cnt"));
+                    return m;
+                }, normalized);
+            result.put("topReasons", reasons);
+
+        } catch (Exception e) {
+            log.error("涨跌停分析失败: code={}, error={}", code, e.getMessage(), e);
+            result.put("error", "查询失败: " + e.getMessage());
+        }
+
+        return result;
+    }
+
+    /**
+     * 大宗交易分析：历史记录 + 折价率 + 买卖营业部
+     */
+    public Map<String, Object> getBlockTradeAnalysis(String code) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        String normalized = normalizeCodeForDailyCH(code);
+
+        // 1. 近期大宗交易记录
+        try {
+            String btSql = """
+                SELECT trade_date, price, volume, amount, discount_rate,
+                       trade_count, change_pct, close_price, pct_of_float,
+                       buy_branch, sell_branch
+                FROM stock.stock_sentiment_block_trade
+                WHERE code = ?
+                ORDER BY trade_date DESC
+                LIMIT 30
+                """;
+            List<Map<String, Object>> btList = clickHouseJdbcTemplate.query(btSql,
+                (rs, rowNum) -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("tradeDate", rs.getDate("trade_date").toString());
+                    m.put("price", rs.getBigDecimal("price"));
+                    m.put("volume", rs.getBigDecimal("volume"));
+                    m.put("amount", rs.getBigDecimal("amount"));
+                    m.put("discountRate", rs.getBigDecimal("discount_rate"));
+                    m.put("tradeCount", rs.getObject("trade_count"));
+                    m.put("changePct", rs.getBigDecimal("change_pct"));
+                    m.put("closePrice", rs.getBigDecimal("close_price"));
+                    m.put("pctOfFloat", rs.getBigDecimal("pct_of_float"));
+                    m.put("buyBranch", rs.getString("buy_branch"));
+                    m.put("sellBranch", rs.getString("sell_branch"));
+                    return m;
+                }, normalized);
+            result.put("records", btList);
+
+            // 2. 统计汇总
+            String statsSql = """
+                SELECT
+                    COUNT(*) as totalCount,
+                    SUM(amount) as totalAmount,
+                    AVG(discount_rate) as avgDiscountRate,
+                    MIN(trade_date) as firstDate,
+                    MAX(trade_date) as lastDate
+                FROM stock.stock_sentiment_block_trade
+                WHERE code = ?
+                """;
+            Map<String, Object> stats = clickHouseJdbcTemplate.queryForMap(statsSql, normalized);
+            result.put("stats", stats);
+
+            // 3. 买方营业部统计
+            String buySql = """
+                SELECT buy_branch as branch, COUNT(*) as cnt, SUM(amount) as totalAmt
+                FROM stock.stock_sentiment_block_trade
+                WHERE code = ? AND buy_branch != ''
+                GROUP BY buy_branch
+                ORDER BY cnt DESC
+                LIMIT 10
+                """;
+            List<Map<String, Object>> buyBranches = clickHouseJdbcTemplate.query(buySql,
+                (rs, rowNum) -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("branch", rs.getString("branch"));
+                    m.put("count", rs.getLong("cnt"));
+                    m.put("totalAmount", rs.getBigDecimal("totalAmt"));
+                    return m;
+                }, normalized);
+            result.put("topBuyBranches", buyBranches);
+
+            // 4. 卖方营业部统计
+            String sellSql = """
+                SELECT sell_branch as branch, COUNT(*) as cnt, SUM(amount) as totalAmt
+                FROM stock.stock_sentiment_block_trade
+                WHERE code = ? AND sell_branch != ''
+                GROUP BY sell_branch
+                ORDER BY cnt DESC
+                LIMIT 10
+                """;
+            List<Map<String, Object>> sellBranches = clickHouseJdbcTemplate.query(sellSql,
+                (rs, rowNum) -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("branch", rs.getString("branch"));
+                    m.put("count", rs.getLong("cnt"));
+                    m.put("totalAmount", rs.getBigDecimal("totalAmt"));
+                    return m;
+                }, normalized);
+            result.put("topSellBranches", sellBranches);
+
+        } catch (Exception e) {
+            log.error("大宗交易分析失败: code={}, error={}", code, e.getMessage(), e);
+            result.put("error", "查询失败: " + e.getMessage());
+        }
+
+        return result;
+    }
+
+    /**
+     * 概念板块内个股排名 — MySQL取代码列表 + CH取行情
+     */
+    public List<Map<String, Object>> getConceptStocks(String conceptName, String sortBy, String sortOrder) {
+        Set<String> allowedSort = Set.of("changePercent", "peTtm", "pb", "totalMarketCap", "turnoverRate");
+        if (!allowedSort.contains(sortBy)) sortBy = "changePercent";
+        String order = "desc".equalsIgnoreCase(sortOrder) ? "DESC" : "ASC";
+
+        // 1. MySQL获取概念成分股代码列表
+        List<Map<String, Object>> conceptRows = stockAnalysisMapper.selectAllConcepts();
+        Set<String> codes = new TreeSet<>();
+        for (Map<String, Object> r : conceptRows) {
+            String cname = (String) r.get("conceptName");
+            if (conceptName.equals(cname)) {
+                codes.add((String) r.get("code"));
+            }
+        }
+        if (codes.isEmpty()) return Collections.emptyList();
+
+        // 2. CH批量查询行情
+        String inClause = String.join("','", codes);
+        String chSortCol = switch (sortBy) {
+            case "changePercent" -> "sd.change_percent";
+            case "peTtm" -> "sd.pe_ttm";
+            case "pb" -> "sd.pb";
+            case "totalMarketCap" -> "si.total_market_cap";
+            case "turnoverRate" -> "sd.turnover_rate";
+            default -> "sd.change_percent";
+        };
+
+        String sql = String.format("""
+            SELECT si.code, si.name,
+                   si.total_market_cap as totalMarketCap,
+                   sd.close_price as closePrice,
+                   sd.change_percent as changePercent,
+                   sd.pe_ttm as peTtm,
+                   sd.pb as pb,
+                   sd.turnover_rate as turnoverRate
+            FROM stock_info si
+              INNER JOIN (
+                SELECT code, close_price, change_percent, pe_ttm, pb, turnover_rate
+                FROM stock.stock_daily
+                WHERE trade_date = (SELECT MAX(trade_date) FROM stock.stock_daily)
+              ) sd ON sd.code = si.code
+            WHERE si.code IN ('%s')
+            ORDER BY %s %s
+            LIMIT 100
+            """, inClause, chSortCol, order);
+
+        return clickHouseJdbcTemplate.query(sql,
+            (rs, rowNum) -> {
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("code", rs.getString("code"));
+                m.put("name", rs.getString("name"));
+                m.put("totalMarketCap", rs.getBigDecimal("totalMarketCap"));
+                m.put("closePrice", rs.getBigDecimal("closePrice"));
+                m.put("changePercent", rs.getBigDecimal("changePercent"));
+                m.put("peTtm", rs.getBigDecimal("peTtm"));
+                m.put("pb", rs.getBigDecimal("pb"));
+                m.put("turnoverRate", rs.getBigDecimal("turnoverRate"));
+                return m;
+            });
+    }
+
+    // ─── 热门行业专题 ──────────────────────────────────────────────────
+
+    /** 热门板块定义（名称 + 图标色系） */
+    private static final List<String> HOT_CONCEPTS = List.of(
+        "人工智能", "半导体概念", "国产芯片", "算力/AI",
+        "储能概念", "光伏概念", "新能源车", "锂电池概念", "新能源",
+        "机器人概念", "人形机器人",
+        "军工", "低空经济", "医疗器械概念", "创新药",
+        "消费电子概念", "信创", "数字经济", "氢能源", "充电桩"
+    );
+
+    /**
+     * 热门行业专题概览
+     */
+    public List<Map<String, Object>> getHotSectors() {
+        List<Map<String, Object>> results = new ArrayList<>();
+
+        // 从 MySQL 获取概念→股票映射
+        List<Map<String, Object>> concepts = stockAnalysisMapper.selectAllConcepts();
+        Map<String, Set<String>> conceptCodes = new LinkedHashMap<>();
+        for (Map<String, Object> c : concepts) {
+            String cname = (String) c.get("conceptName");
+            String ccode = (String) c.get("code");
+            conceptCodes.computeIfAbsent(cname, k -> new TreeSet<>()).add(ccode);
+        }
+
+        // 最新交易日期
+        String latestDate = getLatestTradeDate();
+
+        for (String conceptName : HOT_CONCEPTS) {
+            Set<String> codes = conceptCodes.get(conceptName);
+            if (codes == null || codes.isEmpty()) continue;
+
+            try {
+                Map<String, Object> sector = new LinkedHashMap<>();
+                sector.put("conceptName", conceptName);
+                sector.put("stockCount", codes.size());
+
+                // 批量查 CH：涨跌幅/PE/PB/市值
+                String inClause = codes.stream()
+                    .filter(s -> s.matches("\\d{6}"))
+                    .collect(Collectors.joining("','", "'", "'"));
+                if (inClause.length() <= 2) continue;
+
+                String sql = String.format("""
+                    SELECT
+                        AVG(sd.change_percent) as avgChange,
+                        median(sd.pe_ttm) as medianPe,
+                        median(sd.pb) as medianPb,
+                        SUM(si.total_market_cap) as totalCap
+                    FROM stock.stock_daily sd
+                    JOIN stock.stock_info si ON sd.code = si.code
+                    WHERE sd.code IN (%s) AND sd.trade_date = '%s'
+                    """, inClause, latestDate);
+
+                clickHouseJdbcTemplate.query(sql, (rs) -> {
+                    Object avgChg = rs.getObject(1);
+                    sector.put("avgChange", avgChg instanceof Number ?
+                        BigDecimal.valueOf(((Number) avgChg).doubleValue()).setScale(2, RoundingMode.HALF_UP) : null);
+                    Object medPe = rs.getObject(2);
+                    sector.put("medianPe", medPe instanceof Number ?
+                        BigDecimal.valueOf(((Number) medPe).doubleValue()).setScale(1, RoundingMode.HALF_UP) : null);
+                    Object medPb = rs.getObject(3);
+                    sector.put("medianPb", medPb instanceof Number ?
+                        BigDecimal.valueOf(((Number) medPb).doubleValue()).setScale(2, RoundingMode.HALF_UP) : null);
+                    Object totalCap = rs.getObject(4);
+                    sector.put("totalMarketCap", totalCap instanceof Number ?
+                        BigDecimal.valueOf(((Number) totalCap).doubleValue()).setScale(0, RoundingMode.HALF_UP) : null);
+                });
+
+                // 涨幅前3龙头
+                String topSql = String.format("""
+                    SELECT sd.code, si.name, sd.change_percent as chg, si.total_market_cap as cap
+                    FROM stock.stock_daily sd
+                    JOIN stock.stock_info si ON sd.code = si.code
+                    WHERE sd.code IN (%s) AND sd.trade_date = '%s'
+                    ORDER BY sd.change_percent DESC LIMIT 3
+                    """, inClause, latestDate);
+                List<Map<String, Object>> topStocks = clickHouseJdbcTemplate.query(topSql,
+                    (rs, rowNum) -> {
+                        Map<String, Object> m = new LinkedHashMap<>();
+                        m.put("code", rs.getString(1));
+                        m.put("name", rs.getString(2));
+                        m.put("change", rs.getBigDecimal(3));
+                        return m;
+                    });
+                sector.put("topStocks", topStocks);
+
+                results.add(sector);
+            } catch (Exception e) {
+                log.warn("热门板块聚合跳过 {}: {}", conceptName, e.getMessage());
+            }
+        }
+
+        return results;
+    }
+
+    /**
+     * 热门行业专题详情
+     */
+    public Map<String, Object> getHotSectorDetail(String conceptName) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("conceptName", conceptName);
+
+        // 从 MySQL 获取概念下股票
+        List<Map<String, Object>> concepts = stockAnalysisMapper.selectAllConcepts();
+        Set<String> codes = new TreeSet<>();
+        for (Map<String, Object> c : concepts) {
+            if (conceptName.equals(c.get("conceptName"))) {
+                String code = (String) c.get("code");
+                if (code != null && code.matches("\\d{6}")) codes.add(code);
+            }
+        }
+        result.put("stockCount", codes.size());
+        if (codes.isEmpty()) {
+            result.put("error", "无成分股数据");
+            return result;
+        }
+
+        String latestDate = getLatestTradeDate();
+        String inClause = String.join("','", codes);
+
+        // 成分股列表（按涨跌幅排序）
+        String stockSql = String.format("""
+            SELECT sd.code, si.name, sd.close_price, sd.change_percent,
+                   sd.pe_ttm, sd.pb, sd.turnover_rate, si.total_market_cap,
+                   sd.volume
+            FROM stock.stock_daily sd
+            JOIN stock.stock_info si ON sd.code = si.code
+            WHERE sd.code IN ('%s') AND sd.trade_date = '%s'
+            ORDER BY sd.change_percent DESC
+            """, inClause, latestDate);
+        List<Map<String, Object>> stocks = clickHouseJdbcTemplate.query(stockSql,
+            (rs, rowNum) -> {
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("code", rs.getString(1));
+                m.put("name", rs.getString(2));
+                m.put("closePrice", rs.getBigDecimal(3));
+                m.put("changePercent", rs.getBigDecimal(4));
+                m.put("peTtm", rs.getBigDecimal(5));
+                m.put("pb", rs.getBigDecimal(6));
+                m.put("turnoverRate", rs.getBigDecimal(7));
+                Object cap = rs.getObject(8);
+                m.put("totalMarketCap", cap instanceof Number ?
+                    BigDecimal.valueOf(((Number) cap).doubleValue()).setScale(0, RoundingMode.HALF_UP) : null);
+                return m;
+            });
+        result.put("stocks", stocks);
+
+        // 概览统计
+        if (!stocks.isEmpty()) {
+            double avgChg = stocks.stream()
+                .filter(s -> s.get("changePercent") != null)
+                .mapToDouble(s -> ((BigDecimal) s.get("changePercent")).doubleValue())
+                .average().orElse(0);
+            long upCount = stocks.stream()
+                .filter(s -> s.get("changePercent") != null && ((BigDecimal) s.get("changePercent")).doubleValue() > 0)
+                .count();
+            result.put("avgChange", BigDecimal.valueOf(avgChg).setScale(2, RoundingMode.HALF_UP));
+            result.put("upCount", upCount);
+            result.put("downCount", stocks.size() - upCount);
+        }
+
+        // 近5日板块涨跌趋势（注意：ReplacingMergeTree 表不能直接用 OFFSET 取日期，
+        // 因为 OFFSET 按物理行偏移而非逻辑日期，需用子查询 DISTINCT）
+        String trendSql = String.format("""
+            SELECT sd.trade_date, AVG(sd.change_percent) as avgChg
+            FROM stock.stock_daily sd
+            WHERE sd.code IN ('%s')
+              AND sd.trade_date >= (SELECT trade_date FROM (
+                  SELECT DISTINCT trade_date FROM stock.stock_daily ORDER BY trade_date DESC LIMIT 6
+                ) ORDER BY trade_date ASC LIMIT 1)
+              AND sd.trade_date <= (SELECT MAX(trade_date) FROM stock.stock_daily)
+            GROUP BY sd.trade_date
+            ORDER BY sd.trade_date
+            """, inClause);
+        List<Map<String, Object>> trend = clickHouseJdbcTemplate.query(trendSql,
+            (rs, rowNum) -> {
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("date", rs.getString(1));
+                m.put("avgChange", rs.getBigDecimal(2).setScale(2, RoundingMode.HALF_UP));
+                return m;
+            });
+        result.put("trend", trend);
+
+        return result;
+    }
+
+    /** 获取最新交易日期 */
+    private String getLatestTradeDate() {
+        List<String> dates = clickHouseJdbcTemplate.query(
+            "SELECT MAX(trade_date) FROM stock.stock_daily",
+            (rs, rowNum) -> rs.getString(1));
+        return dates.isEmpty() ? "2026-01-01" : dates.get(0);
+    }
+
+    private double median(List<Double> values) {
+        if (values == null || values.isEmpty()) return 0;
+        List<Double> sorted = new ArrayList<>(values);
+        Collections.sort(sorted);
+        int n = sorted.size();
+        if (n % 2 == 1) return sorted.get(n / 2);
+        return (sorted.get(n / 2 - 1) + sorted.get(n / 2)) / 2.0;
     }
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-update_sentiment_data.py v2
+update_sentiment_data.py v3
 ========================
 拉取市场情绪数据并双写 ClickHouse + MySQL：
 
@@ -13,9 +13,9 @@ update_sentiment_data.py v2
     5. stock_sentiment_survey      机构调研
     6. stock_sentiment_block_trade 大宗交易
     7. stock_sentiment_activity    市场活跃度
-    8. stock_sentiment_zt         涨跌停池（保留）
-    9. stock_sentiment_moneyflow  资金情绪代理（保留，从涨停池提取）
-   10. stock_sentiment_notice     公告（保留）
+    8. stock_sentiment_zt         涨跌停池
+    9. stock_sentiment_moneyflow  资金流向（东方财富全市场个股，v3升级）
+   10. stock_sentiment_notice     公告
 
 用法：
   python update_sentiment_data.py                     # 全部
@@ -23,6 +23,7 @@ update_sentiment_data.py v2
   python update_sentiment_data.py --date 20260430     # 指定日期
   python update_sentiment_data.py --dry-run          # 不写库
   python update_sentiment_data.py --catchup 30        # 补最近30天数据
+  python update_sentiment_data.py --moneyflow-hist    # 历史资金流向补全（逐只股票）
 """
 
 import sys
@@ -34,6 +35,7 @@ import traceback
 import pandas as pd
 import clickhouse_connect
 import pymysql
+from db_helper import ch_dedup_filter
 
 # ─── 配置 ──────────────────────────────────────────────────────
 CH_CONFIG = dict(
@@ -82,86 +84,6 @@ def to_date(val):
 
 
 # ─── CH 写入 ─────────────────────────────────────────────────────
-
-def _ch_dedup_filter(table: str, rows: list, column_names: list, dedup_cols: list) -> list:
-    """查 CH FINAL 表预过滤已存在的行，返回待写入行列表"""
-    if not rows or not dedup_cols:
-        return rows
-    try:
-        from datetime import date as date_type
-        dedup_indices = [column_names.index(c) for c in dedup_cols]
-
-        # 收集本批次所有去重键值
-        row_keys = set()
-        for row in rows:
-            key = tuple(row[idx] for idx in dedup_indices)
-            row_keys.add(key)
-
-        if not row_keys:
-            return rows
-
-        # 归一化 date/datetime → date 对象（与 CH 存储格式一致）
-        def _norm_val(v):
-            if isinstance(v, datetime.datetime):
-                return v.date()
-            elif isinstance(v, str):
-                try:
-                    return date_type.fromisoformat(v)
-                except ValueError:
-                    return v
-            return v
-
-        norm_keys = set()
-        for key in row_keys:
-            norm_keys.add(tuple(_norm_val(v) for v in key))
-
-        # 按列收集去重列值，构建 WHERE IN 子句
-        col_vals = {col: set() for col in dedup_cols}
-        for key in norm_keys:
-            for i, col in enumerate(dedup_cols):
-                col_vals[col].add(key[i])
-
-        where_parts = []
-        for col in dedup_cols:
-            vals = col_vals[col]
-            if not vals:
-                continue
-            formatted = []
-            for v in vals:
-                if isinstance(v, date_type):
-                    formatted.append(f"'{v}'")
-                elif isinstance(v, str):
-                    formatted.append(f"'{v}'")
-                else:
-                    formatted.append(str(v))
-            where_parts.append(f"{col} IN ({', '.join(formatted)})")
-
-        query = (f"SELECT {', '.join(dedup_cols)} "
-                 f"FROM {table} FINAL WHERE {' AND '.join(where_parts)}")
-
-        client = clickhouse_connect.get_client(**CH_CONFIG)
-        result = client.query(query)
-        existing_keys = set(tuple(r) for r in result.result_rows)
-        client.close()
-
-        # 过滤 rows：只保留不存在的键
-        filtered = []
-        skipped = 0
-        for row in rows:
-            key = tuple(row[idx] for idx in dedup_indices)
-            norm_key = tuple(_norm_val(v) for v in key)
-            if norm_key not in existing_keys:
-                filtered.append(row)
-            else:
-                skipped += 1
-
-        if skipped:
-            print(f"  [CH] {table}: 跳过 {skipped} 条已存在记录（FINAL 预过滤）")
-        return filtered
-    except Exception as e:
-        print(f"  [WARN] {table} 预过滤失败，跳过去重: {e}")
-        return rows
-
 
 def _ch_batch_insert(table: str, rows: list, column_names: list, dry_run: bool = False) -> int:
     """写入 CH（不做预过滤，由 _dual_write 统一处理）"""
@@ -218,7 +140,7 @@ def _dual_write(table, rows, ch_columns, mysql_columns, mysql_unique, dry_run=Fa
         return
     # CH 预过滤：查 FINAL 表跳过已存在行，CH 和 MySQL 共用过滤结果
     if not dry_run and mysql_unique:
-        rows = _ch_dedup_filter(table, rows, ch_columns, mysql_unique)
+        rows = ch_dedup_filter(table, rows, ch_columns, mysql_unique)
     if not rows:
         print(f"  ≡ {table}: CH/MySQL 均已存在，跳过")
         return
@@ -444,21 +366,25 @@ def fetch_survey(notice_date: str) -> list:
 
 
 # ═══════════════════════════════════════════════════════════════
-# 6. 大宗交易  stock_dzjy_mrmx
+# 6. 大宗交易  stock_dzjy_mrtj（每日统计，含A股个股）
 # ║  返回字段: 序号/交易日期/证券代码/证券简称/
-# ║            成交价/成交量/成交额/买方营业部/卖方营业部
+# ║            涨跌幅/收盘价/成交价/折溢率/
+# ║            成交笔数/成交总量/成交总额/成交总额占流通市值比
 # ╙══════════════════════════════════════════════════════════════
 
 def fetch_block_trade(start_date: str, end_date: str) -> list:
     import akshare as ak
     rows = []
     try:
-        df = ak.stock_dzjy_mrmx(start_date=start_date, end_date=end_date)
+        df = ak.stock_dzjy_mrtj(start_date=start_date, end_date=end_date)
         if df is None or df.empty:
             return rows
         for _, r in df.iterrows():
             code = str(r.get("证券代码", "")).strip().zfill(6)
             if not code:
+                continue
+            # 只保留A股（0/3/6开头），过滤ETF/基金/REITs
+            if not (code.startswith("0") or code.startswith("3") or code.startswith("6")):
                 continue
             td = to_date(r.get("交易日期"))
             if td is None:
@@ -469,12 +395,15 @@ def fetch_block_trade(start_date: str, end_date: str) -> list:
                 str(r.get("证券简称", ""))[:50],
                 to_float(r.get("成交价")),
                 to_float(r.get("成交量")),
-                to_float(r.get("成交额")),
-                str(r.get("买方营业部", ""))[:100],
-                str(r.get("卖方营业部", ""))[:100],
+                to_float(r.get("成交总额")),
+                to_float(r.get("折溢率")),
+                int(to_float(r.get("成交笔数") or 0)),
+                to_float(r.get("涨跌幅")),
+                to_float(r.get("收盘价")),
+                to_float(r.get("成交总额/流通市值")),
                 datetime.datetime.now(),
             ])
-        print(f"  大宗交易: {len(rows)} 条")
+        print(f"  大宗交易: {len(rows)} 条(A股)")
     except Exception as e:
         print(f"  大宗交易获取失败: {e}")
     return rows
@@ -607,39 +536,109 @@ def fetch_zt_data(date_str: str) -> list:
 
 
 # ═══════════════════════════════════════════════════════════════
-# 保留：9. 资金情绪代理（从涨停池提取换手率/量比）
+# 9. 资金流向（东方财富全市场个股资金流）
+# ║  使用 stock_individual_fund_flow_rank 一次获取全市场数据
+# ║  列名: 序号/代码/名称/最新价/今日涨跌幅/
+# ║        今日主力净流入-净额/净占比/超大单净额/净占比/
+# ║        大单净额/净占比/中单净额/净占比/小单净额/净占比
 # ╙══════════════════════════════════════════════════════════════
 
-def fetch_moneyflow_from_zt(date_str: str) -> list:
-    """从涨停池提取换手率/量比/成交额作为资金情绪代理（保持与原12列表结构一致）"""
+def fetch_moneyflow_rank() -> list:
+    """获取全市场个股当日资金流向排行（东方财富）
+    返回 [ts_code, trade_date, code, name, close, pct_change,
+           net_main, net_main_pct, net_huge, net_big, net_medium, net_small,
+           update_time]
+    注意：该接口无日期列，trade_date 用最近一个交易日（从 stock_individual_fund_flow 探测）"""
     import akshare as ak
     rows = []
     try:
-        df = ak.stock_zt_pool_strong_em(date=date_str)
-        if df is None or df.empty:
+        # 1) 先用单只股票探测最新交易日
+        probe_df = ak.stock_individual_fund_flow(stock="600519", market="sh")
+        if probe_df is None or probe_df.empty:
+            print("  资金流向: 探测交易日失败")
             return rows
+        latest_date = to_date(probe_df["日期"].iloc[-1])
+        if latest_date is None:
+            print("  资金流向: 无法解析交易日")
+            return rows
+
+        # 2) 获取全市场资金流向排行
+        df = ak.stock_individual_fund_flow_rank(indicator="今日")
+        if df is None or df.empty:
+            print("  资金流向: 无数据")
+            return rows
+
+        # 自适应列名（"今日" / "3日" / "5日" / "10日" 前缀不同）
+        prefix = "今日"
+        col_code = "代码"
+        col_name = "名称"
+        col_close = "最新价"
+        col_pct = f"{prefix}涨跌幅"
+        col_net_main = f"{prefix}主力净流入-净额"
+        col_pct_main = f"{prefix}主力净流入-净占比"
+        col_net_huge = f"{prefix}超大单净流入-净额"
+        col_net_big = f"{prefix}大单净流入-净额"
+        col_net_medium = f"{prefix}中单净流入-净额"
+        col_net_small = f"{prefix}小单净流入-净额"
+
         for _, r in df.iterrows():
-            code = str(r.get("代码", "")).strip().zfill(6)
+            code = str(r.get(col_code, "")).strip().zfill(6)
             if not code or code == "000000":
                 continue
             rows.append([
-                code,
-                to_date(date_str),
-                code,
-                str(r.get("名称", "")),
-                to_float(r.get("最新价")),
-                to_float(r.get("涨跌幅")),
-                0.0,  # net_main
-                0.0,  # net_main_pct
-                0.0,  # net_huge
-                0.0,  # net_big
-                to_float(r.get("换手率")),
-                to_float(r.get("量比")),
-                datetime.datetime.now(),
+                code,                          # ts_code
+                latest_date,                   # trade_date
+                code,                          # code
+                str(r.get(col_name, "")),       # name
+                to_float(r.get(col_close)),     # close
+                to_float(r.get(col_pct)),       # pct_change
+                to_float(r.get(col_net_main)),  # net_main
+                to_float(r.get(col_pct_main)),  # net_main_pct
+                to_float(r.get(col_net_huge)),  # net_huge
+                to_float(r.get(col_net_big)),   # net_big
+                to_float(r.get(col_net_medium)),# net_medium
+                to_float(r.get(col_net_small)), # net_small
+                datetime.datetime.now(),        # update_time
             ])
-        print(f"  资金情绪(涨停池代理): {len(rows)} 条")
+        print(f"  资金流向(全市场): {len(rows)} 条  日期={latest_date}")
     except Exception as e:
-        print(f"  资金情绪获取失败: {e}")
+        print(f"  资金流向获取失败: {e}")
+        traceback.print_exc()
+    return rows
+
+
+def fetch_moneyflow_hist_single(code: str, market: str) -> list:
+    """获取单只股票近 120 天资金流向历史数据
+    返回 [ts_code, trade_date, code, name, close, pct_change,
+           net_main, net_main_pct, net_huge, net_big, net_medium, net_small,
+           update_time]"""
+    import akshare as ak
+    rows = []
+    try:
+        df = ak.stock_individual_fund_flow(stock=code, market=market)
+        if df is None or df.empty:
+            return rows
+        for _, r in df.iterrows():
+            td = to_date(r.get("日期"))
+            if td is None:
+                continue
+            rows.append([
+                code,                              # ts_code
+                td,                                # trade_date
+                code,                              # code
+                "",                                # name (历史数据不一定有)
+                to_float(r.get("收盘价")),          # close
+                to_float(r.get("涨跌幅")),          # pct_change
+                to_float(r.get("主力净流入-净额")),  # net_main
+                to_float(r.get("主力净流入-净占比")), # net_main_pct
+                to_float(r.get("超大单净流入-净额")), # net_huge
+                to_float(r.get("大单净流入-净额")),   # net_big
+                to_float(r.get("中单净流入-净额")),   # net_medium
+                to_float(r.get("小单净流入-净额")),   # net_small
+                datetime.datetime.now(),            # update_time
+            ])
+    except Exception as e:
+        pass  # 个别股票失败不打印，避免刷屏
     return rows
 
 
@@ -684,12 +683,14 @@ def fetch_notice_report(date_str: str) -> list:
 # ╙══════════════════════════════════════════════════════════════
 
 def main():
-    parser = argparse.ArgumentParser(description="市场情绪数据采集 v2")
+    parser = argparse.ArgumentParser(description="市场情绪数据采集 v3")
     parser.add_argument("--date",        default=None, help="指定日期 YYYYMMDD（默认今日）")
     parser.add_argument("--start-date",  default=None, help="开始日期 YYYY-MM-DD")
     parser.add_argument("--end-date",    default=None, help="结束日期 YYYY-MM-DD")
     parser.add_argument("--dry-run",     action="store_true", help="不写入数据库")
     parser.add_argument("--catchup",    type=int, default=0, help="补最近 N 天数据")
+    parser.add_argument("--moneyflow-hist", action="store_true", help="历史资金流向补全（逐只股票120天）")
+    parser.add_argument("--moneyflow-codes", default=None, help="指定股票代码补全历史资金流，逗号分隔")
     # 跳过选项
     parser.add_argument("--skip-lhb",        action="store_true", help="跳过龙虎榜详情")
     parser.add_argument("--skip-lhb-inst",  action="store_true", help="跳过龙虎榜机构")
@@ -699,9 +700,14 @@ def main():
     parser.add_argument("--skip-block",     action="store_true", help="跳过大宗交易")
     parser.add_argument("--skip-activity",  action="store_true", help="跳过市场活跃度")
     parser.add_argument("--skip-zt",       action="store_true", help="跳过涨跌停池")
-    parser.add_argument("--skip-moneyflow", action="store_true", help="跳过资金情绪")
+    parser.add_argument("--skip-moneyflow", action="store_true", help="跳过资金流向")
     parser.add_argument("--skip-notice",    action="store_true", help="跳过公告")
     args = parser.parse_args()
+
+    # ── 历史资金流向补全模式 ───────────────────────────────────
+    if args.moneyflow_hist:
+        run_moneyflow_hist(args)
+        return
 
     # ── 日期范围模式：直接循环处理，不启动子进程 ──────────────
     if args.start_date and args.end_date:
@@ -865,10 +871,12 @@ def process_single_date(args, date_str: str):
             _dual_write(
                 "stock_sentiment_block_trade", rows,
                 ["trade_date","code","name","price","volume","amount",
-                 "buy_branch","sell_branch","update_time"],
+                 "discount_rate","trade_count","change_pct",
+                 "close_price","pct_of_float","update_time"],
                 ["trade_date","code","name","price","volume","amount",
-                 "buy_branch","sell_branch","update_time"],
-                ["code", "trade_date", "price", "volume"],
+                 "discount_rate","trade_count","change_pct",
+                 "close_price","pct_of_float","update_time"],
+                ["code", "trade_date"],
                 dry_run=args.dry_run,
             )
         else:
@@ -916,10 +924,10 @@ def process_single_date(args, date_str: str):
     else:
         print("[SKIP] 涨跌停池已跳过")
 
-    # ── 9. 资金情绪代理（保留）───────────────────────────
-    if not args.skip_moneyflow and not args.skip_zt:
-        print("[INFO] 资金情绪（涨停池代理）...")
-        mf_rows = fetch_moneyflow_from_zt(date_str)
+    # ── 9. 资金流向（全市场个股）───────────────────────────
+    if not args.skip_moneyflow:
+        print("[INFO] 资金流向（东方财富全市场）...")
+        mf_rows = fetch_moneyflow_rank()
         if mf_rows:
             _dual_write(
                 "stock_sentiment_moneyflow", mf_rows,
@@ -935,10 +943,9 @@ def process_single_date(args, date_str: str):
                 dry_run=args.dry_run,
             )
         else:
-            print("  资金情绪: 无有效数据")
+            print("  资金流向: 无有效数据（可能非交易日）")
     else:
-        if args.skip_moneyflow:
-            print("[SKIP] 资金情绪已跳过")
+        print("[SKIP] 资金流向已跳过")
 
     # ── 10. 公告（保留）─────────────────────────────────
     if not args.skip_notice:
@@ -984,6 +991,111 @@ def run_catchup(args, latest_date_str: str):
     grand_elapsed = (datetime.datetime.now() - grand_start).total_seconds()
     print(f"\n{'=' * 60}")
     print(f"  补数据完成  总耗时 {grand_elapsed:.1f}s")
+
+
+def _get_market_prefix(code: str) -> str:
+    """根据股票代码判断市场前缀 (sh/sz/bj)"""
+    if code.startswith("6") or code.startswith("9"):
+        return "sh"
+    elif code.startswith("0") or code.startswith("3"):
+        return "sz"
+    elif code.startswith("4") or code.startswith("8"):
+        return "bj"
+    return "sz"  # 默认
+
+
+def run_moneyflow_hist(args):
+    """历史资金流向补全：并发拉取全市场股票近120天资金流数据
+    用法：
+      python update_sentiment_data.py --moneyflow-hist                     # 全市场
+      python update_sentiment_data.py --moneyflow-hist --moneyflow-codes 600519,000001  # 指定股票
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    # 获取股票列表（排除北交所 920 开头）
+    if args.moneyflow_codes:
+        codes = [c.strip().zfill(6) for c in args.moneyflow_codes.split(",")]
+        print(f"=== 历史资金流向补全: 指定 {len(codes)} 只股票 ===")
+    else:
+        conn = pymysql.connect(**MYSQL_CONFIG)
+        cur = conn.cursor()
+        cur.execute("SELECT DISTINCT code FROM stock_info WHERE code NOT LIKE '920%' ORDER BY code")
+        codes = [row[0] for row in cur.fetchall()]
+        cur.close()
+        conn.close()
+        print(f"=== 历史资金流向补全: 全市场 {len(codes)} 只股票（排除北交所 920）===")
+
+    moneyflow_columns = ["ts_code","trade_date","code","name","close",
+                          "pct_change","net_main","net_main_pct",
+                          "net_huge","net_big","net_medium","net_small",
+                          "update_time"]
+    moneyflow_unique = ["code", "trade_date"]
+
+    MAX_WORKERS = 8  # 并发数
+
+    def _fetch_one(code):
+        market = _get_market_prefix(code)
+        try:
+            return fetch_moneyflow_hist_single(code, market)
+        except Exception:
+            return None
+
+    grand_start = datetime.datetime.now()
+    total_written = 0
+    total_failed = 0
+    batch_rows = []
+    BATCH_FLUSH = 6000  # 约50只×120天
+
+    def flush_batch():
+        nonlocal batch_rows, total_written
+        if not batch_rows:
+            return
+        _dual_write(
+            "stock_sentiment_moneyflow", batch_rows,
+            moneyflow_columns, moneyflow_columns, moneyflow_unique,
+            dry_run=args.dry_run,
+        )
+        total_written += len(batch_rows)
+        batch_rows = []
+
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = {executor.submit(_fetch_one, code): code for code in codes}
+        done = 0
+
+        for future in as_completed(futures):
+            done += 1
+            code = futures[future]
+            if done % 100 == 0 or done == len(codes):
+                elapsed = (datetime.datetime.now() - grand_start).total_seconds()
+                speed = done / elapsed if elapsed > 0 else 0
+                eta = (len(codes) - done) / speed if speed > 0 else 0
+                print(f"  进度: {done}/{len(codes)}  "
+                      f"已写入={total_written}  失败={total_failed}  "
+                      f"速度={speed:.1f}只/s  预计剩余={eta/60:.1f}min")
+
+            try:
+                rows = future.result()
+                if rows:
+                    batch_rows.extend(rows)
+                    if len(batch_rows) >= BATCH_FLUSH:
+                        flush_batch()
+                else:
+                    total_failed += 1
+            except Exception:
+                total_failed += 1
+
+            # 限速
+            if done % MAX_WORKERS == 0:
+                time.sleep(0.3)
+
+    flush_batch()
+
+    grand_elapsed = (datetime.datetime.now() - grand_start).total_seconds()
+    print(f"\n{'=' * 60}")
+    print(f"  历史资金流向补全完成")
+    print(f"  总耗时 {grand_elapsed:.1f}s ({grand_elapsed/60:.1f}min)")
+    print(f"  写入 {total_written} 条  失败 {total_failed} 只")
+    print(f"{'=' * 60}")
 
 
 if __name__ == "__main__":

@@ -30,20 +30,133 @@ from datetime import date, datetime, timedelta
 from db_config import DB_BACKEND, MYSQL_CONFIG, CLICKHOUSE_CONFIG, get_backend_label
 
 
+def ch_dedup_filter(table: str, rows: list, column_names: list, dedup_cols: list) -> list:
+    """
+    查 CH FINAL 表预过滤已存在的行，返回待写入行列表。
+
+    通用去重预检函数，适用于所有 ReplacingMergeTree 表。
+    在批量 INSERT 前调用，避免重复写入。
+
+    Args:
+        table:       CH 表名（如 'stock_sentiment_zt' 或 'stock.stock_daily'）
+        rows:        待写入行列表，每行是 list，顺序与 column_names 对应
+        column_names: 列名列表，与 rows 中每行的字段顺序一一对应
+        dedup_cols:  去重列名列表（即表的 ORDER BY 列，如 ['code', 'trade_date']）
+
+    Returns:
+        过滤后的行列表（只保留 CH FINAL 表中不存在的行）
+        如果预检失败，返回原始 rows（优雅降级）
+    """
+    if not rows or not dedup_cols:
+        return rows
+    try:
+        from clickhouse_connect import get_client
+
+        # 找到去重列在 row 中的索引
+        dedup_indices = [column_names.index(c) for c in dedup_cols]
+
+        # 收集本批次所有去重键值
+        row_keys = set()
+        for row in rows:
+            key = tuple(row[idx] for idx in dedup_indices)
+            row_keys.add(key)
+
+        if not row_keys:
+            return rows
+
+        # 归一化 date/datetime → date 对象（与 CH 存储格式一致）
+        def _norm_val(v):
+            if isinstance(v, datetime):
+                return v.date()
+            elif isinstance(v, str):
+                try:
+                    return date.fromisoformat(v)
+                except ValueError:
+                    return v
+            return v
+
+        norm_keys = set()
+        for key in row_keys:
+            norm_keys.add(tuple(_norm_val(v) for v in key))
+
+        # 按列收集去重列值，构建 WHERE IN 子句
+        col_vals = {col: set() for col in dedup_cols}
+        for key in norm_keys:
+            for i, col in enumerate(dedup_cols):
+                col_vals[col].add(key[i])
+
+        where_parts = []
+        for col in dedup_cols:
+            vals = col_vals[col]
+            if not vals:
+                continue
+            formatted = []
+            for v in vals:
+                if isinstance(v, date):
+                    formatted.append(f"'{v}'")
+                elif isinstance(v, str):
+                    formatted.append(f"'{v}'")
+                else:
+                    formatted.append(str(v))
+            where_parts.append(f"{col} IN ({', '.join(formatted)})")
+
+        where_clause = " AND ".join(where_parts)
+        query = f"SELECT {', '.join(dedup_cols)} FROM {table} FINAL WHERE {where_clause}"
+
+        client = get_client(**CLICKHOUSE_CONFIG)
+        result = client.query(query)
+        client.close()
+
+        existing_keys = set(tuple(r) for r in result.result_rows)
+
+        # 过滤 rows：只保留不存在的键
+        filtered = []
+        skipped = 0
+        for row in rows:
+            key = tuple(row[idx] for idx in dedup_indices)
+            norm_key = tuple(_norm_val(v) for v in key)
+            if norm_key not in existing_keys:
+                filtered.append(row)
+            else:
+                skipped += 1
+
+        if skipped:
+            print(f"  [CH] {table}: 跳过 {skipped} 条已存在记录（FINAL 预过滤）")
+        return filtered
+    except Exception as e:
+        print(f"  [WARN] {table} 预过滤失败，跳过去重: {e}")
+        return rows
+
+
 class StockDailyDB:
-    """stock_daily 统一数据库操作类"""
+    """stock_daily 统一数据库操作类（支持股票表 stock_daily 和指数表 index_daily）"""
 
-    # ClickHouse 表名
+    # ─── ClickHouse 表名 ──────────────────────────────────────
+    # stock.stock_daily  — 股票日线（沪深+北交所个股，纯数字 code 如 600519）
+    # stock.index_daily — 指数日线（独立表，与股票物理隔离，避免 code 冲突如 000001=上证指数 vs 平安银行）
     CH_TABLE = "stock.stock_daily"
+    CH_INDEX_TABLE = "stock.index_daily"  # 指数日线（上证指数/沪深300/创业板指等，code 纯数字无前缀）
 
-    # stock_daily 的 18 个字段（id + 业务15列 + create_time + update_time）
-    # 注意：已移除 market_cap 和 circ_market_cap 字段
+    # ─── stock_daily / index_daily 共用字段（18列）────────────
     DAILY_COLUMNS = [
-        "id", "code", "trade_date", "name", "open_price", "close_price",
-        "high_price", "low_price", "pre_close", "volume", "amount",
-        "change_percent", "change_amount", "turnover_rate",
-        "pe_ttm", "pb",
-        "create_time", "update_time",
+        "id",              # 自增主键
+        "code",            # 股票代码（纯数字：000300=沪深300 / 600519=贵州茅台）
+        "trade_date",      # 交易日期
+        "name",            # 名称（指数名称如"上证指数"，或股票名称如"贵州茅台"）
+        "open_price",      # 开盘价
+        "close_price",     # 收盘价
+        "high_price",      # 最高价
+        "low_price",       # 最低价
+        "pre_close",       # 昨收价
+        "volume",          # 成交量（手/股）
+        "amount",          # 成交额（元）
+        "change_percent",  # 涨跌幅(%)
+        "change_amount",   # 涨跌额(元)
+        "turnover_rate",   # 换手率(%)（指数通常为 NULL）
+        "pe_ttm",          # 市盈率 TTM（指数通常为 NULL）
+        "pb",              # 市净率（指数通常为 NULL）
+        "create_time",     # 创建时间
+        "update_time",     # 更新时间（ReplacingMergeTree 版本列，新值覆盖旧值）
     ]
 
     def __init__(self):
@@ -231,19 +344,41 @@ class StockDailyDB:
                 row = cur.fetchone()
                 return row["max_date"] if row and row["max_date"] else None
 
-    def get_latest_date_by_code(self, code):
-        """获取某只股票的最新交易日"""
+    def _ch_norm_code(self, c):
+        """Normalize 股票代码：去掉交易所前缀，统一为纯数字。
+        sh.000001 / sz.399001 / bj.830xxx → 000001
+        .000001（残留）→ 000001
+        """
+        if not isinstance(c, str):
+            return c
+        if len(c) > 3 and c[2] == '.' and c[:2].upper() in ("SH", "SZ", "BJ"):
+            return c[3:]
+        if c.startswith('.'):
+            return c[1:]
+        return c
+
+    def get_latest_date_by_code(self, code, table="stock"):
+        """获取某只股票/指数的最新交易日（自动normalize code格式）。
+
+        参数:
+            code:  股票/指数代码
+            table: "stock" 查 stock_daily (默认), "index" 查 index_daily
+        """
+        # CH 主表 code 存纯数字，需要 normalize
+        code = self._ch_norm_code(code)
         if self.backend == "clickhouse":
+            target_table = self.CH_INDEX_TABLE if table == "index" else self.CH_TABLE
             r = self.ch_client.query(
-                f"SELECT MAX(trade_date) FROM {self.CH_TABLE} WHERE code = %(code)s",
+                f"SELECT MAX(trade_date) FROM {target_table} WHERE code = %(code)s",
                 parameters={"code": code},
             )
             val = r.result_rows[0][0]
             return val if val else None
         else:
+            target_table = "index_daily" if table == "index" else "stock_daily"
             with self.mysql_conn.cursor() as cur:
                 cur.execute(
-                    "SELECT MAX(trade_date) as max_date FROM stock_daily WHERE code = %s",
+                    f"SELECT MAX(trade_date) as max_date FROM {target_table} WHERE code = %s",
                     (code,),
                 )
                 row = cur.fetchone()
@@ -418,23 +553,32 @@ class StockDailyDB:
 
     # ─── stock_daily 写入 ─────────────────────────────────────
 
-    def upsert_daily(self, rows):
+    def upsert_daily(self, rows, table="stock"):
         """
-        批量 upsert 日线数据。
+        批量 upsert 日线数据（统一入口，自动路由到 CH 或 MySQL）。
 
         ClickHouse: 直接 INSERT，依赖 ReplacingMergeTree 自动去重（update_time 为版本列）。
-        不再使用 ALTER TABLE DELETE mutation，彻底避免 TOO_MANY_MUTATIONS 问题。
         MySQL: ON DUPLICATE KEY UPDATE 覆盖。
 
+        参数:
+            rows:  待写入的行列表（list of dict）
+            table: 目标表选择
+              - "stock" (默认): stock_daily 表 — 股票日线（沪深+北交所个股）
+              - "index":       index_daily 表 — 指数日线（上证指数/沪深300等）
+
         返回: 插入的行数
+
+        注意：CH 和 MySQL 不会双写，由 DB_BACKEND 环境变量决定后端。
+              index_daily 在 CH 和 MySQL 中表结构完全一致（18列），
+              但数据独立维护（Python 脚本根据 DB_BACKEND 只写其一）。
         """
         if not rows:
             return 0
 
         if self.backend == "clickhouse":
-            return self._ch_insert_rows(rows)
+            return self._ch_insert_rows(rows, table=table)
         else:
-            return self._mysql_upsert_rows(rows)
+            return self._mysql_upsert_rows(rows, table=table)
 
     def _ch_delete_rows(self, rows):
         """已废弃：不再使用 ALTER TABLE DELETE mutation。保留此方法仅为兼容旧调用，实际为空操作。
@@ -442,9 +586,13 @@ class StockDailyDB:
         """
         pass  # no-op: 不产生任何 mutation
 
-    def _ch_insert_rows(self, rows):
+    def _ch_insert_rows(self, rows, table="stock"):
         """
         ClickHouse: 批量幂等写入。返回实际写入主表的行数。
+
+        参数:
+            rows:  待写入的行列表（list of dict）
+            table: "stock" 写入 stock_daily (默认), "index" 写入 index_daily
 
         直接 INSERT（ch_client.insert），写入前先查 FINAL 表过滤已存在的 (code, trade_date)。
         原因：ReplacingMergeTree 的自动去重只在后台合并时生效，查询不加 FINAL 会看到重复行。
@@ -458,12 +606,13 @@ class StockDailyDB:
         if not rows:
             return 0
 
+        # ─── 根据参数选择目标表（CH 侧）───────────────────────
+        # table="stock" → stock.stock_daily  （股票日线）
+        # table="index" → stock.index_daily （指数日线，与股票物理隔离避免 code 冲突）
+        target_table = self.CH_INDEX_TABLE if table == "index" else self.CH_TABLE
+
         now_dt = datetime.now()
-        # CH 主表 code 存纯数字（无 sh/sz/bj 前缀），写入前统一 normalize
-        def _norm_code(c):
-            if isinstance(c, str) and len(c) > 2 and c[:2].upper() in ("SH", "SZ", "BJ"):
-                return c[2:]
-            return c
+        # 使用实例方法 _ch_norm_code（统一 code 格式）
 
         biz_cols = [
             "id", "code", "trade_date", "name", "open_price", "close_price",
@@ -477,7 +626,7 @@ class StockDailyDB:
         codes_in_batch = set()
         dates_in_batch = set()
         for row in rows:
-            c = _norm_code(row.get("code", ""))
+            c = self._ch_norm_code(row.get("code", ""))
             d = row.get("trade_date")
             if isinstance(d, str):
                 d = date.fromisoformat(d)
@@ -498,7 +647,7 @@ class StockDailyDB:
                     code_ph = ", ".join(f"'{c}'" for c in code_chunk)
                     date_ph = ", ".join(f"'{d}'" for d in date_list)
                     r = self.ch_client.query(
-                        f"SELECT code, trade_date FROM {self.CH_TABLE} FINAL "
+                        f"SELECT code, trade_date FROM {target_table} FINAL "
                         f"WHERE code IN ({code_ph}) AND trade_date IN ({date_ph})"
                     )
                     for row_data in r.result_rows:
@@ -515,7 +664,7 @@ class StockDailyDB:
             batch = rows[i : i + batch_size]
             insert_rows = []
             for row in batch:
-                code_val = _norm_code(row.get("code", ""))
+                code_val = self._ch_norm_code(row.get("code", ""))
                 td_val = row.get("trade_date")
                 if isinstance(td_val, str):
                     td_val = date.fromisoformat(td_val)
@@ -534,7 +683,7 @@ class StockDailyDB:
                 for col in biz_cols[1:]:
                     val = row.get(col)
                     if col == "code":
-                        val = _norm_code(val)  # ← 统一去前缀
+                        val = self._ch_norm_code(val)  # ← 统一去前缀
                     if col == "trade_date":
                         if isinstance(val, str):
                             val = date.fromisoformat(val)
@@ -570,8 +719,8 @@ class StockDailyDB:
             if not insert_rows:
                 continue
             try:
-                # 直接 INSERT 到主表
-                self.ch_client.insert(self.CH_TABLE, insert_rows, column_names=self.DAILY_COLUMNS)
+                # 直接 INSERT 到目标表
+                self.ch_client.insert(target_table, insert_rows, column_names=self.DAILY_COLUMNS)
                 total_inserted += len(insert_rows)
             except Exception as e:
                 print(f"  [ERROR] ClickHouse 插入失败 (批次 {i // batch_size + 1}): {e}")
@@ -580,15 +729,40 @@ class StockDailyDB:
             print(f"    [CH] 跳过 {skipped} 条已存在记录（FINAL 去重）")
         return total_inserted
 
-    def _mysql_upsert_rows(self, rows):
-        """MySQL: 批量 UPSERT"""
+    def _mysql_upsert_rows(self, rows, table="stock"):
+        """
+        MySQL: 批量 UPSERT（INSERT + ON DUPLICATE KEY UPDATE）
+
+        table 参数控制目标表：
+          - "stock" (默认): stock_daily 表 — 股票日线（沪深+北交所个股）
+          - "index":       index_daily 表 — 指数日线（上证指数/沪深300等，独立表）
+
+        注意：index_daily 与 stock_daily 同构（18列，PK=code+trade_date），
+              但物理隔离，避免 000001 等代码与股票冲突。
+        """
+        # ─── 根据参数选择目标表 ──────────────────────────────
+        target_table = "index_daily" if table == "index" else "stock_daily"
         # 注意：已移除 market_cap 和 circ_market_cap 字段
-        INSERT_SQL = """
-        INSERT INTO stock_daily
-        (code, name, trade_date, open_price, close_price,
-         high_price, low_price, pre_close, volume, amount, change_percent,
-         change_amount, turnover_rate, pe_ttm, pb,
-         create_time, update_time)
+        INSERT_SQL = f"""
+        INSERT INTO {target_table}
+        -- 股票日线 / 指数日线共用字段（18列，两表结构完全一致）
+        (code,            -- 股票/指数代码
+         name,            -- 名称
+         trade_date,      -- 交易日期
+         open_price,      -- 开盘价
+         close_price,     -- 收盘价
+         high_price,      -- 最高价
+         low_price,       -- 最低价
+         pre_close,       -- 昨收价
+         volume,          -- 成交量
+         amount,          -- 成交额
+         change_percent,  -- 涨跌幅(%)
+         change_amount,   -- 涨跌额(元)
+         turnover_rate,   -- 换手率(%)，指数通常 NULL
+         pe_ttm,          -- 市盈率 TTM，指数通常 NULL
+         pb,              -- 市净率，指数通常 NULL
+         create_time,     -- 创建时间
+         update_time)     -- 更新时间
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
         ON DUPLICATE KEY UPDATE
             name = VALUES(name),

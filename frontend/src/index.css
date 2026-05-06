@@ -114,18 +114,24 @@ body {
   background: #fff;
 }
 
-/* ── 通用浅色 Tooltip ───────────────────────────────────── */
-.tip-light .ant-tooltip-inner {
-  background: #fff;
-  color: #333;
+/* ── 全局 Tooltip 白色样式 ──────────────────────────────── */
+.ant-tooltip .ant-tooltip-inner {
+  background: #fff !important;
+  color: #333 !important;
   font-size: 13px;
   line-height: 1.8;
   box-shadow: 0 6px 16px rgba(0,0,0,0.12), 0 3px 6px rgba(0,0,0,0.08);
-  border-radius: 8px;
-  padding: 12px 16px;
+  border-radius: 10px;
+  padding: 10px 14px;
+  border: 1px solid #e8e8e8;
 }
-.tip-light .ant-tooltip-arrow-content {
-  background: #fff;
+.ant-tooltip .ant-tooltip-arrow-content {
+  background: #fff !important;
+}
+
+/* ── 宽版 Tooltip（PE/PB 说明等长内容）─── */
+.tip-wide .ant-tooltip-inner {
+  max-width: 520px !important;
 }
 
 /* ── 使用手册菜单收起样式 ─────────────────────────────────────── */

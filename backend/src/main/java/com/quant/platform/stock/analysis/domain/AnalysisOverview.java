@@ -94,4 +94,9 @@ public class AnalysisOverview {
      * 分析结论（四维度综合文字结论）
      */
     private String conclusion;
+
+    /**
+     * 是否大盘蓝筹（总市值 ≥ 1000亿）
+     */
+    private boolean blueChip;
 }

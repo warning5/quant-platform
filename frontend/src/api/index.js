@@ -16,7 +16,14 @@ api.interceptors.response.use(
     return res.data.data;
   },
   (err) => {
-    message.error(err.response?.data?.message || err.message || '网络错误');
+    // 优先取后端返回的业务错误信息，避免暴露 HTTP 状态码等技术细节
+    const serverMsg = err.response?.data?.message || err.response?.data?.error;
+    if (serverMsg) {
+      message.error(serverMsg);
+    } else if (!err.response) {
+      message.error('网络连接失败，请检查网络');
+    }
+    // 不再默认弹出 err.message（如 "Request failed with status code 500"）
     return Promise.reject(err);
   }
 );
@@ -66,6 +73,18 @@ export const factorApi = {
   chanScreen: (params) => api.get('/factors/chan-screen', { params, timeout: 30000 }),
   // 缠论筛选元数据（动态获取因子定义）
   chanScreenMeta: () => api.get('/factors/chan-screen/meta'),
+  // P1: 因子IC/IR批量分析
+  batchIcIrAnalysis: (factorCodes, startDate, endDate, forwardDays = 5) =>
+    api.post('/factors/ic-ir-analysis', null, {
+      params: { factorCodes: factorCodes.join(','), startDate, endDate, forwardDays },
+      timeout: 180000,
+    }),
+  // P1: 单因子IC趋势
+  getIcTrend: (factorCode, startDate, endDate, forwardDays = 5) =>
+    api.get(`/factors/${factorCode}/ic-trend`, {
+      params: { startDate, endDate, forwardDays },
+      timeout: 120000,
+    }),
 };
 
 // ===== 策略 API =====
@@ -76,6 +95,18 @@ export const strategyApi = {
   update: (id, data) => api.put(`/strategies/${id}`, data),
   delete: (id) => api.delete(`/strategies/${id}`),
   changeStatus: (id, status) => api.patch(`/strategies/${id}/status`, null, { params: { status } }),
+};
+
+// ===== 模拟盘 API =====
+export const paperTradingApi = {
+  create: (strategyId, strategyCode, initialCapital) =>
+    api.post('/paper-trading/create', null, { params: { strategyId, strategyCode, initialCapital } }),
+  list: () => api.get('/paper-trading/list'),
+  getDetail: (paperId) => api.get(`/paper-trading/${paperId}`),
+  generateSignals: (paperId) => api.post(`/paper-trading/${paperId}/generate-signals`),
+  executeSignal: (signalId) => api.post(`/paper-trading/signals/${signalId}/execute`),
+  getSignals: (paperId) => api.get(`/paper-trading/${paperId}/signals`),
+  updateStatus: (paperId, status) => api.patch(`/paper-trading/${paperId}/status`, null, { params: { status } }),
 };
 
 // ===== 回测 API =====
@@ -177,6 +208,19 @@ export const stockAnalysisApi = {
   getScoreRules: () => api.get('/analysis/score-rules'),
   getResearchReport: (code) => api.get('/analysis/research', { params: { code } }),
   searchStocks: (keyword) => api.get('/analysis/search', { params: { keyword } }),
+  getPeerComparison: (code) => api.get('/analysis/peers', { params: { code } }),
+  getValuationPercentile: (code, years = 3) => api.get('/analysis/valuation-percentile', { params: { code, years } }),
+  getSectorRanking: () => api.get('/analysis/sector-ranking'),
+  getIndustryStocks: (industry, sortBy = 'changePercent', sortOrder = 'desc') =>
+    api.get('/analysis/industry-stocks', { params: { industry, sortBy, sortOrder } }),
+  getConceptStocks: (conceptName, sortBy = 'changePercent', sortOrder = 'desc') =>
+    api.get('/analysis/concept-stocks', { params: { conceptName, sortBy, sortOrder } }),
+  getIndustryCorrelation: (code) => api.get('/analysis/industry-correlation', { params: { code } }),
+  getLimitUpAnalysis: (code) => api.get('/analysis/limit-up', { params: { code } }),
+  getBlockTradeAnalysis: (code) => api.get('/analysis/block-trade', { params: { code } }),
+  // 热门行业专题
+  getHotSectors: () => api.get('/analysis/hot-sectors'),
+  getHotSectorDetail: (conceptName) => api.get('/analysis/hot-sectors/detail', { params: { conceptName } }),
 };
 
 export default api;

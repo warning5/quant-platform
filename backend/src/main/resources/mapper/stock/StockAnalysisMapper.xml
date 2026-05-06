@@ -41,21 +41,65 @@
     
     <!-- 查询事件面数据 -->
     <select id="selectSentimentSignal" resultType="com.quant.platform.stock.analysis.domain.SentimentSignal">
-        SELECT 
-            0 as limitUpDays,
+        SELECT
+            -- 近10日涨停天数（只统计zt_type='zt'，按日期去重）
+            COALESCE((
+                SELECT COUNT(DISTINCT trade_date) FROM stock_sentiment_zt
+                WHERE code = #{code}
+                  AND trade_date >= DATE_SUB(CURDATE(), INTERVAL 10 DAY)
+                  AND zt_type = 'zt'
+            ), 0) as limitUpDays,
             0 as limitUpStrength,
-            (SELECT COUNT(*) FROM stock_sentiment_zt 
-             WHERE code = #{code} AND zt_type = 'zbgc' 
+            -- 近20日炸板次数
+            (SELECT COUNT(DISTINCT trade_date) FROM stock_sentiment_zt
+             WHERE code = #{code} AND zt_type = 'zbgc'
              AND trade_date >= DATE_SUB(CURDATE(), INTERVAL 20 DAY)) as brokenLimitUpCount20,
-            0.0 as brokenLimitUpRate,
-            FALSE as isStrongStock
+            -- 炸板率 = 炸板天数 / (涨停天数+炸板天数) * 100（只看涨停相关）
+            COALESCE((
+                SELECT CASE WHEN zt_total > 0 THEN ROUND(zbgc_days * 100.0 / zt_total, 1) ELSE 0 END
+                FROM (
+                    SELECT
+                        (SELECT COUNT(DISTINCT trade_date) FROM stock_sentiment_zt
+                         WHERE code = #{code} AND zt_type IN ('zt', 'zbgc')
+                         AND trade_date >= DATE_SUB(CURDATE(), INTERVAL 20 DAY)) as zt_total,
+                        (SELECT COUNT(DISTINCT trade_date) FROM stock_sentiment_zt
+                         WHERE code = #{code} AND zt_type = 'zbgc'
+                         AND trade_date >= DATE_SUB(CURDATE(), INTERVAL 20 DAY)) as zbgc_days
+                ) t
+            ), 0.0) as brokenLimitUpRate,
+            FALSE as isStrongStock,
+            -- 龙虎榜净买入（近20日）
+            (SELECT COALESCE(SUM(net_amount), 0) FROM stock_sentiment_lhb
+             WHERE code = #{code}
+               AND trade_date >= DATE_SUB(CURDATE(), INTERVAL 20 DAY)) as lhbNetAmount,
+            -- 龙虎榜上榜次数（近20日）
+            (SELECT COUNT(*) FROM stock_sentiment_lhb
+             WHERE code = #{code}
+               AND trade_date >= DATE_SUB(CURDATE(), INTERVAL 20 DAY)) as lhbAppearCount,
+            -- 正面公告数（近30日：回购/增持/业绩预增/股权激励）
+            (SELECT COUNT(*) FROM stock_sentiment_notice
+             WHERE code = #{code}
+               AND notice_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+               AND (title LIKE '%回购%' OR title LIKE '%增持%'
+                    OR title LIKE '%预增%' OR title LIKE '%股权激励%'
+                    OR title LIKE '%业绩快报%' OR title LIKE '%业绩预告%预增%')) as noticePositiveCount,
+            -- 负面公告数（近30日：减持/定增/业绩预降/被调查）
+            (SELECT COUNT(*) FROM stock_sentiment_notice
+             WHERE code = #{code}
+               AND notice_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+               AND (title LIKE '%减持%' OR title LIKE '%定增%'
+                    OR title LIKE '%预降%' OR title LIKE '%预亏%'
+                    OR title LIKE '%被调查%' OR title LIKE '%立案%'
+                    OR title LIKE '%行政处罚%' OR title LIKE '%退市%')) as noticeNegativeCount
         FROM dual
     </select>
     
-    <!-- 查询股票基本信息（仅从 stock_info 取名称，价格从 CH 获取） -->
+    <!-- 查询股票基本信息（仅从 stock_info 取名称+行业+总市值，价格从 CH 获取） -->
     <select id="selectStockInfo" resultType="java.util.Map">
-        SELECT 
-            si.name
+        SELECT
+            si.name,
+            si.industry,
+            si.total_market_cap
         FROM stock_info si
         WHERE si.code = #{code}
         LIMIT 1
@@ -156,6 +200,93 @@
            OR name LIKE CONCAT('%', #{keyword}, '%')
         ORDER BY code ASC
         LIMIT 20
+    </select>
+
+    <!-- 同业对比：获取同行业股票基本信息（PE/PB/市值/ROE等） -->
+    <select id="selectIndustryPeers" resultType="java.util.Map">
+        SELECT
+            si.code,
+            si.name,
+            si.market,
+            si.industry,
+            si.pe_ttm as peTtm,
+            si.pb as pb,
+            si.total_market_cap as totalMarketCap,
+            si.float_market_cap as floatMarketCap
+        FROM stock_info si
+        WHERE si.industry = #{industry}
+          AND si.code NOT LIKE '%.BJ'
+        ORDER BY si.total_market_cap DESC
+    </select>
+    <select id="selectIndustryRanking" resultType="java.util.Map">
+        SELECT
+            si.industry,
+            COUNT(*) as stockCount,
+            AVG(sd.change_percent) as avgChangePct
+        FROM stock_info si
+          LEFT JOIN (
+            SELECT code, change_percent FROM stock_daily
+            WHERE trade_date = (SELECT MAX(trade_date) FROM stock_daily)
+          ) sd ON sd.code = si.code
+        WHERE si.industry IS NOT NULL AND si.industry != ''
+          AND si.market NOT IN ('BJ','北交所')
+        GROUP BY si.industry
+        ORDER BY avgChangePct DESC
+        LIMIT 30
+    </select>
+
+    <!-- 概念板块涨跌排行 -->
+    <select id="selectConceptRanking" resultType="java.util.Map">
+        SELECT
+            sc.concept_name as conceptName,
+            COUNT(*) as stockCount,
+            AVG(sd.change_percent) as avgChangePct
+        FROM stock_concept sc
+          LEFT JOIN (
+            SELECT code, change_percent FROM stock_daily
+            WHERE trade_date = (SELECT MAX(trade_date) FROM stock_daily)
+          ) sd ON sd.code = sc.code
+        GROUP BY sc.concept_name
+        ORDER BY avgChangePct DESC
+        LIMIT 30
+    </select>
+
+    <!-- 查询所有概念板块股票映射 -->
+    <select id="selectAllConcepts" resultType="java.util.Map">
+        SELECT
+            sc.concept_name as conceptName,
+            sc.code
+        FROM stock_concept sc
+        ORDER BY sc.concept_name, sc.code
+    </select>
+
+    <!-- 大盘蓝筹：融资余额变化百分比（最新 vs 5日前） -->
+    <select id="selectMarginChangePct" resultType="java.math.BigDecimal">
+        SELECT
+            (b.latest_balance - b.past_balance) / b.past_balance * 100 as chgPct
+        FROM (
+            SELECT
+                (SELECT margin_balance FROM stock_sentiment_margin_detail WHERE code = #{code} ORDER BY trade_date DESC LIMIT 1) as latest_balance,
+                (SELECT margin_balance FROM stock_sentiment_margin_detail WHERE code = #{code} ORDER BY trade_date DESC LIMIT 1 OFFSET 4) as past_balance
+        ) b
+        WHERE b.past_balance IS NOT NULL
+          AND b.past_balance != 0
+    </select>
+
+    <!-- 大盘蓝筹：龙虎榜机构净买入（最近20日） -->
+    <select id="selectLhbInstitutionNet" resultType="java.math.BigDecimal">
+        SELECT COALESCE(SUM(net_inst_amt), 0) as netAmount
+        FROM stock_sentiment_lhb_inst
+        WHERE code = #{code}
+          AND trade_date >= DATE_SUB(CURDATE(), INTERVAL 20 DAY)
+    </select>
+
+    <!-- 大盘蓝筹：机构调研热度（最近90天调研次数，替代股东户数） -->
+    <select id="selectHolderChangePct" resultType="java.math.BigDecimal">
+        SELECT COUNT(*) as surveyCount
+        FROM stock_sentiment_survey
+        WHERE code = #{code}
+          AND meeting_date >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)
     </select>
 
 </mapper>

@@ -125,7 +125,7 @@ const renderTaskConfig = (task, updateType) => {
     if (task.configFetchBlockTrade !== false) tags.push(<Tag key="block" color="orange">大宗交易</Tag>);
     if (task.configFetchActivity !== false) tags.push(<Tag key="activity" color="purple">市场活跃度</Tag>);
     if (task.configFetchZtPool !== false) tags.push(<Tag key="ztpool" color="red">涨跌停池</Tag>);
-    if (task.configFetchMoneyflow !== false) tags.push(<Tag key="moneyflow" color="magenta">资金情绪代理</Tag>);
+    if (task.configFetchMoneyflow !== false) tags.push(<Tag key="moneyflow" color="magenta">资金流向</Tag>);
     if (task.configFetchNotice !== false) tags.push(<Tag key="notice" color="volcano">公告</Tag>);
   } else if (updateType === 'RESEARCH') {
     if (task.configForce) tags.push(<Tag key="force" color="red">强制重新采集</Tag>);
@@ -1480,7 +1480,7 @@ function DataUpdate() {
             <Col span={7}>
               <Statistic
                 title="数据表"
-                formatter={() => <Text style={{ fontSize: 12 }}>涨跌停/龙虎榜/融资融券/机构调研/大宗交易/市场活跃度</Text>}
+                formatter={() => <Text style={{ fontSize: 12, whiteSpace: 'nowrap' }}>涨跌停/龙虎榜/融资融券/机构调研/大宗交易/市场活跃度/资金流向/公告</Text>}
                 valueStyle={{ fontSize: 12 }}
               />
             </Col>
@@ -1504,9 +1504,12 @@ function DataUpdate() {
                         <span style={{ fontSize: 11, color: '#8c8c8c', fontWeight: 400, marginLeft: 4 }}>
                           条 · {
                             table.minDate && table.maxDate
-                              ? (table.minDate.length > 7
-                                  ? `${table.minDate?.slice(5, 10)}~${table.maxDate?.slice(5, 10)}`
-                                  : `${table.minDate}~${table.maxDate}`)
+                              ? (() => {
+                                  const minStr = table.minDate.slice(5);
+                                  const maxStr = table.maxDate.slice(5);
+                                  const crossYear = table.minDate.slice(0, 4) !== table.maxDate.slice(0, 4);
+                                  return crossYear ? `${table.minDate}~${table.maxDate}` : `${minStr}~${maxStr}`;
+                                })()
                               : ''
                           }
                         </span>
@@ -1568,7 +1571,7 @@ function DataUpdate() {
                     <Checkbox>涨跌停池</Checkbox>
                   </Form.Item>
                   <Form.Item name="fetchMoneyflow" valuePropName="checked" style={{ marginBottom: 0 }}>
-                    <Checkbox>资金情绪代理</Checkbox>
+                    <Checkbox>资金流向</Checkbox>
                   </Form.Item>
                   <Form.Item name="fetchNotice" valuePropName="checked" style={{ marginBottom: 0 }}>
                     <Checkbox>公告</Checkbox>

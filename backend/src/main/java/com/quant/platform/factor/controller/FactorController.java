@@ -6,6 +6,7 @@ import com.quant.platform.factor.domain.FactorDefinition;
 import com.quant.platform.factor.domain.FactorTestReport;
 import com.quant.platform.factor.domain.FactorValue;
 import com.quant.platform.factor.engine.FactorComputeEngine;
+import com.quant.platform.factor.service.FactorAnalysisService;
 import com.quant.platform.factor.service.FactorCorrelationService;
 import com.quant.platform.factor.service.FactorService;
 import com.quant.platform.factor.service.FactorWeightOptimizeService;
@@ -34,6 +35,7 @@ public class FactorController {
     private final FactorService factorService;
     private final FactorCorrelationService correlationService;
     private final FactorWeightOptimizeService factorWeightOptimizeService;
+    private final FactorAnalysisService factorAnalysisService;
     private final SimpMessagingTemplate messagingTemplate;
     private final FactorComputeEngine computeEngine;
 
@@ -299,5 +301,47 @@ public class FactorController {
                         penDir, trend, buySell,
                         hubPosMin, hubPosMax, penCountMin, penCountMax,
                         keyword, page, size));
+    }
+
+    // ─── P1：因子 IC/IR 批量分析 ─────────────────────────────────────────────
+
+    /**
+     * 批量计算因子 IC/IR
+     * POST /factors/ic-ir-analysis?factorCodes=MOM20,VOL20,SIZE&startDate=2024-01-01&endDate=2025-01-01&forwardDays=5
+     */
+    @PostMapping("/ic-ir-analysis")
+    @Operation(summary = "批量计算因子IC/IR（P1）：Spearman秩相关 + 信息比率")
+    public ApiResponse<List<Map<String, Object>>> batchIcIrAnalysis(
+            @RequestParam String factorCodes,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @RequestParam(defaultValue = "5") int forwardDays) {
+        if (forwardDays < 1 || forwardDays > 60) {
+            throw new IllegalArgumentException("forwardDays须在1~60之间");
+        }
+        List<String> codes = Arrays.asList(factorCodes.split(","));
+        if (codes.size() > 20) {
+            throw new IllegalArgumentException("单次最多分析20个因子");
+        }
+        return ApiResponse.success(
+                factorAnalysisService.batchCalcIcIr(codes, startDate.toString(), endDate.toString(), forwardDays));
+    }
+
+    /**
+     * 单因子 IC 趋势（含时间线）
+     * GET /factors/{factorCode}/ic-trend?startDate=2024-01-01&endDate=2025-01-01&forwardDays=5
+     */
+    @GetMapping("/{factorCode}/ic-trend")
+    @Operation(summary = "单因子IC趋势（P1）：IC时间线 + 有效性评估")
+    public ApiResponse<Map<String, Object>> icTrend(
+            @PathVariable String factorCode,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @RequestParam(defaultValue = "5") int forwardDays) {
+        if (forwardDays < 1 || forwardDays > 60) {
+            throw new IllegalArgumentException("forwardDays须在1~60之间");
+        }
+        return ApiResponse.success(
+                factorAnalysisService.getFactorIcTrend(factorCode, startDate.toString(), endDate.toString(), forwardDays));
     }
 }

@@ -5,7 +5,7 @@ import {
   FundOutlined, ThunderboltOutlined, LineChartOutlined,
   DashboardOutlined, BarChartOutlined, StockOutlined,
   MenuFoldOutlined, MenuUnfoldOutlined, FilterOutlined, BookOutlined,
-  PartitionOutlined, AccountBookOutlined, CloudSyncOutlined,
+  PartitionOutlined, AccountBookOutlined, CloudSyncOutlined, RocketOutlined,
 } from '@ant-design/icons';
 
 import Dashboard from './pages/Dashboard';
@@ -18,6 +18,7 @@ import FactorMonitor from './pages/factors/FactorMonitor';
 import StrategyList from './pages/strategies/StrategyList';
 import StrategyDetail from './pages/strategies/StrategyDetail';
 import StrategyEditor from './pages/strategies/StrategyEditor';
+import PaperTradingPage from './pages/strategies/PaperTradingPage';
 import BacktestList from './pages/backtest/BacktestList';
 import BacktestReport from './pages/backtest/BacktestReport';
 import BacktestCreate from './pages/backtest/BacktestCreate';
@@ -25,6 +26,7 @@ import BacktestRunning from './pages/backtest/BacktestRunning';
 import BacktestCompare from './pages/backtest/BacktestCompare';
 import ParamOptimize from './pages/backtest/ParamOptimize';
 import FactorWeightOptimize from './pages/factors/FactorWeightOptimize';
+import FactorIcIrAnalysis from './pages/factors/FactorIcIrAnalysis';
 import StockScreen from './pages/screen/StockScreen';
 import ChanScreen from './pages/chan/ChanScreen';
 import Manual from './pages/manual/Manual';
@@ -32,6 +34,8 @@ import FinancialData from './pages/financial/FinancialData';
 import ResearchData from './pages/datadetail/ResearchData';
 import DataUpdate from './pages/dataupdate/DataUpdate';
 import StockAnalysis from './pages/analysis/StockAnalysis';
+import SectorRanking from './pages/market/SectorRanking';
+import HotSectorPage from './pages/market/HotSectorPage';
 
 const { Header, Sider, Content } = Layout;
 const { Title } = Typography;
@@ -54,6 +58,8 @@ function AppLayout() {
       ],
     },
     { key: '/stock-analysis', icon: <StockOutlined />, label: <Link to="/stock-analysis">个股分析</Link> },
+    { key: '/sector-ranking', icon: <BarChartOutlined />, label: <Link to="/sector-ranking">行业排行</Link> },
+    { key: '/hot-sectors', icon: <RocketOutlined />, label: <Link to="/hot-sectors">热门行业</Link> },
     { key: '/manual', icon: <BookOutlined />, label: <Link to="/manual">使用手册</Link> },
     {
       key: 'factors',
@@ -63,6 +69,7 @@ function AppLayout() {
         { key: '/factors', label: <Link to="/factors">因子列表</Link> },
         { key: '/factor-monitor', label: <Link to="/factor-monitor">因子计算</Link> },
         { key: '/factor-correlation', label: <Link to="/factor-correlation">因子相关性</Link> },
+        { key: '/factor-ic-ir', label: <Link to="/factor-ic-ir">IC/IR 分析</Link> },
         { key: '/factor-weight-optimize', label: <Link to="/factor-weight-optimize">权重优化</Link> },
         { key: '/chan-screen', label: <Link to="/chan-screen">缠论筛选</Link> },
         { key: '/screen', label: <Link to="/screen">因子策略</Link> },
@@ -74,6 +81,7 @@ function AppLayout() {
       label: '策略管理',
       children: [
         { key: '/strategies', label: <Link to="/strategies">策略列表</Link> },
+        { key: '/paper-trading', label: <Link to="/paper-trading">模拟盘</Link> },
       ],
     },
     {
@@ -91,8 +99,8 @@ function AppLayout() {
   const selectedKeys = [location.pathname];
   const [openKeys, setOpenKeys] = useState(() => {
     const path = window.location.pathname;
-    if (path.startsWith('/factor') || path === '/screen' || path === '/factor-weight-optimize') return ['factors'];
-    if (path.startsWith('/strateg')) return ['strategies'];
+    if (path.startsWith('/factor') || path === '/screen' || path === '/factor-weight-optimize' || path === '/factor-ic-ir') return ['factors'];
+    if (path.startsWith('/strateg') || path === '/paper-trading') return ['strategies'];
     if (path.startsWith('/backtest')) return ['backtests'];
     if (path.startsWith('/data-detail')) return ['data-detail'];
     return [];
@@ -204,6 +212,7 @@ function AppLayout() {
             <Route path="/strategies/new" element={<StrategyEditor />} />
             <Route path="/strategies/:id" element={<StrategyDetail />} />
             <Route path="/strategies/:id/edit" element={<StrategyEditor />} />
+            <Route path="/paper-trading" element={<PaperTradingPage />} />
             <Route path="/backtests" element={<BacktestList />} />
             <Route path="/backtests/new" element={<BacktestCreate />} />
             <Route path="/backtests/compare" element={<BacktestCompare />} />
@@ -211,10 +220,13 @@ function AppLayout() {
             <Route path="/backtests/:taskId/running" element={<BacktestRunning />} />
             <Route path="/backtests/:taskId/report" element={<BacktestReport />} />
             <Route path="/factor-weight-optimize" element={<FactorWeightOptimize defaultFactorCodes={[]} />} />
+            <Route path="/factor-ic-ir" element={<FactorIcIrAnalysis />} />
             <Route path="/chan-screen" element={<ChanScreen />} />
             <Route path="/screen" element={<StockScreen />} />
             <Route path="/manual" element={<Manual />} />
             <Route path="/stock-analysis" element={<StockAnalysis />} />
+            <Route path="/sector-ranking" element={<SectorRanking />} />
+            <Route path="/hot-sectors" element={<HotSectorPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Content>

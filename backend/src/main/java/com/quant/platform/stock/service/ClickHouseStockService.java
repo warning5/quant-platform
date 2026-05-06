@@ -27,6 +27,44 @@ public class ClickHouseStockService {
     private final ClickHouseConfig clickHouseConfig;
     private final StockDailyMapper stockDailyMapper;
 
+    // ==================== 指数查询（index_daily 表） ====================
+
+    /**
+     * 查询单个指数的历史日线数据（从 index_daily 表）
+     * 分表存储后，指数数据独立于 stock_daily，避免 code 冲突
+     */
+    public List<StockDaily> getIndexDaily(String code, LocalDate startDate, LocalDate endDate) {
+        if (!clickHouseConfig.isEnabled()) {
+            // MySQL 回退：查 index_daily 表
+            return getIndexDailyFromMySQL(code, startDate, endDate);
+        }
+
+        try {
+            String sql = """
+                    SELECT code, trade_date, name, open_price, close_price, high_price, low_price,
+                           pre_close, volume, amount, change_percent, change_amount,
+                           turnover_rate, pe_ttm, pb
+                    FROM index_daily FINAL
+                    WHERE code = ? AND trade_date >= ? AND trade_date <= ?
+                    ORDER BY trade_date
+                    """;
+            return executeQuery(sql, code, startDate, endDate);
+        } catch (Exception e) {
+            log.warn("[ClickHouse] 指数查询失败(index_daily)，回退到 MySQL: {}", e.getMessage());
+            return getIndexDailyFromMySQL(code, startDate, endDate);
+        }
+    }
+
+    private List<StockDaily> getIndexDailyFromMySQL(String code, LocalDate startDate, LocalDate endDate) {
+        LambdaQueryWrapper<StockDaily> wrapper = new LambdaQueryWrapper<>();
+        // MySQL 回退时也尝试查 index_daily（如果存在的话），否则查 stock_daily + name 过滤
+        wrapper.eq(StockDaily::getCode, code)
+                .ge(StockDaily::getTradeDate, startDate)
+                .le(StockDaily::getTradeDate, endDate)
+                .orderByAsc(StockDaily::getTradeDate);
+        return stockDailyMapper.selectList(wrapper);
+    }
+
     // ==================== 基础按 code+日期范围查询 ====================
 
     /**

@@ -217,22 +217,25 @@ public class MarketDataService {
 
     /**
      * 获取单个标的在指定日期区间的K线（供回测引擎加载基准使用）
-     * 自动识别指数代码：若 code 在 INDEX_NAME_MAP 中，则按 code + name 精确查询指数数据，
+     * 自动识别指数代码：若 code 在 INDEX_NAME_MAP 中，则从 index_daily 表查询，
      * 避免与同代码个股混淆（如 000001 上证指数 vs 000001 平安银行）。
+     * 分表后不再需要 name 过滤 workaround。
      */
     public List<MarketDailyBar> getBarsInRange(String symbol, LocalDate startDate, LocalDate endDate) {
         String code = parseCode(symbol);
         String market = parseMarket(symbol);
         String indexName = INDEX_NAME_MAP.get(code);
 
-        List<StockDaily> dailies = clickHouseStockService.getStockDaily(code, startDate, endDate);
-
         if (indexName != null) {
-            // 指数：按 name 精确匹配，避免查到同代码个股
-            dailies = dailies.stream()
-                    .filter(sd -> indexName.equals(sd.getName()))
-                    .toList();
+            // 指数：直接查 index_daily 表（纯股票数据，无 code 冲突）
+            List<StockDaily> dailies = clickHouseStockService.getIndexDaily(code, startDate, endDate);
+            return dailies.stream()
+                    .map(sd -> toMarketBar(sd, market))
+                    .collect(Collectors.toList());
         }
+
+        // 股票：查 stock_daily 表
+        List<StockDaily> dailies = clickHouseStockService.getStockDaily(code, startDate, endDate);
 
         return dailies.stream()
                 .map(sd -> toMarketBar(sd, market))

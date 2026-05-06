@@ -6,6 +6,7 @@ import com.quant.platform.stock.analysis.domain.SentimentSignal;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 
@@ -91,4 +92,44 @@ public interface StockAnalysisMapper {
      * 返回：code, name, market
      */
     List<Map<String, Object>> searchStocks(@Param("keyword") String keyword);
+
+    /**
+     * 同业对比：获取同行业股票基本信息
+     * 返回：code, name, market, industry, peTtm, pb, totalMarketCap, floatMarketCap
+     */
+    List<Map<String, Object>> selectIndustryPeers(@Param("industry") String industry);
+
+    /**
+     * 行业涨跌排行（按行业聚合）
+     */
+    List<Map<String, Object>> selectIndustryRanking();
+
+    /**
+     * 概念板块涨跌排行
+     */
+    List<Map<String, Object>> selectConceptRanking();
+
+    /**
+     * 查询所有概念板块及其股票映射（从 MySQL stock_concept）
+     * 返回：conceptName, code
+     */
+    List<Map<String, Object>> selectAllConcepts();
+
+    /**
+     * 大盘蓝筹事件面：融资余额变化百分比（最新 vs 5日前）
+     * 返回：chgPct（百分比）
+     */
+    BigDecimal selectMarginChangePct(@Param("code") String code);
+
+    /**
+     * 大盘蓝筹事件面：龙虎榜机构净买入（最近20日）
+     * 返回：netAmount（元，买入-卖出合计）
+     */
+    BigDecimal selectLhbInstitutionNet(@Param("code") String code);
+
+    /**
+     * 大盘蓝筹事件面：股东户数变化百分比（最新 vs 一季度前）
+     * 返回：chgPct（百分比，负值=筹码集中）
+     */
+    BigDecimal selectHolderChangePct(@Param("code") String code);
 }

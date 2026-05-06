@@ -12,6 +12,8 @@ import { stockAnalysisApi } from '../../api';
 
 const { Title, Text, Paragraph } = Typography;
 
+
+
 // ── 辅助：操作建议对应的颜色 ─────────────────────────────────────────────
 const actionColor = (action) => {
   if (!action) return 'default';
@@ -43,6 +45,11 @@ export default function StockAnalysis() {
   const [loading, setLoading] = useState(false);
   const [overview, setOverview] = useState(null);
   const [researchData, setResearchData] = useState(null);
+  const [peerData, setPeerData] = useState(null);
+  const [valuationData, setValuationData] = useState(null);
+  const [industryCorrData, setIndustryCorrData] = useState(null);
+  const [limitUpData, setLimitUpData] = useState(null);
+  const [blockTradeData, setBlockTradeData] = useState(null);
   const [error, setError] = useState(null);
   const [rulesVisible, setRulesVisible] = useState(false);
   const [rules, setRules] = useState(null);
@@ -110,15 +117,66 @@ export default function StockAnalysis() {
 
   const handleSearch = () => doSearch();
 
+  // AutoComplete 按 Enter 触发搜索
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      doSearch(inputCode);
+    }
+  };
+
   // 加载研报分析数据
   useEffect(() => {
-    if (!overview?.code) {
-      setResearchData(null);
-      return;
-    }
+    if (!overview?.code) { setResearchData(null); return; }
     stockAnalysisApi.getResearchReport(overview.code)
       .then(data => setResearchData(data))
       .catch(() => setResearchData(null));
+  }, [overview?.code]);
+
+  // 加载同业对比数据
+  useEffect(() => {
+    if (!overview?.code) { setPeerData(null); return; }
+    stockAnalysisApi.getPeerComparison(overview.code)
+      .then(data => {
+        console.log('[PeerComparison] data:', data);
+        setPeerData(data);
+      })
+      .catch(e => {
+        console.error('[PeerComparison] error:', e);
+        setPeerData(null);
+      });
+  }, [overview?.code]);
+
+  // 加载估值分位数据
+  useEffect(() => {
+    if (!overview?.code) { setValuationData(null); return; }
+    stockAnalysisApi.getValuationPercentile(overview.code, 3)
+      .then(data => setValuationData(data))
+      .catch(() => setValuationData(null));
+  }, [overview?.code]);
+
+  // 加载行业关联数据
+  useEffect(() => {
+    if (!overview?.code) { setIndustryCorrData(null); return; }
+    stockAnalysisApi.getIndustryCorrelation(overview.code)
+      .then(data => setIndustryCorrData(data))
+      .catch(() => setIndustryCorrData(null));
+  }, [overview?.code]);
+
+  // 加载涨跌停分析数据
+  useEffect(() => {
+    if (!overview?.code) { setLimitUpData(null); return; }
+    stockAnalysisApi.getLimitUpAnalysis(overview.code)
+      .then(data => setLimitUpData(data))
+      .catch(() => setLimitUpData(null));
+  }, [overview?.code]);
+
+  // 加载大宗交易分析数据
+  useEffect(() => {
+    if (!overview?.code) { setBlockTradeData(null); return; }
+    stockAnalysisApi.getBlockTradeAnalysis(overview.code)
+      .then(data => setBlockTradeData(data))
+      .catch(() => setBlockTradeData(null));
   }, [overview?.code]);
 
   // 加载评分规则
@@ -142,32 +200,67 @@ export default function StockAnalysis() {
     return isNaN(n) ? 0 : n;
   };
 
+  // ── Tab 标签（带问号说明）────────────────────────────────
+  const tabLabel = (label, tooltip) => (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+      {label}
+      <Tooltip title={tooltip} placement="top" className="tip-light">
+        <QuestionCircleOutlined style={{ fontSize: 12, color: '#bbb', cursor: 'pointer' }} />
+      </Tooltip>
+    </span>
+  );
+
   // Tab 项
   const tabItems = overview ? [
     {
       key: 'tech',
-      label: '技术面',
+      label: tabLabel('技术面', '通过均线排列、MACD、RSI、缠论信号等技术指标，判断股票短期走势和买卖时机。适合把握趋势和择时。'),
       children: <TechTab data={overview.techSignal} />,
     },
     {
       key: 'money',
-      label: '资金面',
+      label: tabLabel('资金面', '通过量比、换手率偏离指标，捕捉资金异动信号。放量上涨通常为积极信号，缩量下跌需警惕。'),
       children: <MoneyFlowTab data={overview.moneySignal} />,
     },
     {
       key: 'sentiment',
-      label: '事件面',
-      children: <SentimentTab data={overview.sentimentSignal} />,
+      label: tabLabel('事件面', '通过涨停连板、炸板率、阶段涨幅等市场情绪指标，判断当前市场热度和投机氛围，辅助规避炒作风险。'),
+      children: <SentimentTab data={overview.sentimentSignal} isBlueChip={!!overview.blueChip} />,
     },
     {
       key: 'fundamental',
-      label: '基本面',
+      label: tabLabel('基本面', '通过PE、PB、ROE、营收/净利增速等财务指标，评估公司内在价值和成长性。适合中长期投资参考。'),
       children: <FundamentalTab data={overview.fundamentalSignal} />,
     },
     {
       key: 'research',
-      label: '研报分析',
+      label: tabLabel('研报分析', '汇总券商研报的评级分布、覆盖机构、EPS一致预期，了解专业机构对股票的看法和定价锚点。'),
       children: <ResearchReportTab data={researchData} code={overview.code} />,
+    },
+    {
+      key: 'peers',
+      label: tabLabel('同业对比', '将目标股票与同行业可比公司进行PE、PB、市值、涨跌幅的横向对比，快速定位估值相对高低。'),
+      children: <PeerComparisonTab data={peerData} code={overview.code} />,
+    },
+    {
+      key: 'valuation',
+      label: tabLabel('估值分位', '显示PE/PB在当前股票近N年历史数据中的分位数，判断当前估值处于历史底部还是顶部区域，辅助择时。'),
+      children: <ValuationTab data={valuationData} code={overview.code} />,
+    },
+    {
+      key: 'industry-corr',
+      label: tabLabel('行业关联', '分析个股与所属行业的Beta暴露和联动关系。Beta>1说明弹性大于行业，相关系数反映走势同步性，帮助理解行业风险敞口。'),
+      children: <IndustryCorrelationTab data={industryCorrData} code={overview.code} />,
+    },
+    {
+      key: 'limit-up',
+      label: tabLabel('涨跌停', '展示涨停/跌停历史记录、涨停原因统计、炸板情况。涨停是强势信号，但炸板率高说明封板不稳。'),
+      children: <LimitUpTab data={limitUpData} code={overview.code} />,
+    },
+    {
+      key: 'block-trade',
+      label: tabLabel('大宗交易', '展示大宗交易历史、折价率、买卖营业部统计。大宗交易折价率高可能暗示大股东减持意愿，买方营业部集中说明机构承接。'),
+      children: <BlockTradeTab data={blockTradeData} code={overview.code} />,
     },
   ] : [];
 
@@ -184,9 +277,9 @@ export default function StockAnalysis() {
               value={inputCode}
               options={suggestions}
               onSearch={handleSearchInput}
-              onSelect={handleAutoCompleteSelect}
-              onPressEnter={() => doSearch(inputCode)}
-              style={{ width: 300 }}
+      onSelect={handleAutoCompleteSelect}
+      onKeyDown={handleKeyDown}
+      style={{ width: 300 }}
               notFoundContent={searchLoading ? <Spin size="small" /> : '未找到匹配股票'}
             />
           </Col>
@@ -201,7 +294,7 @@ export default function StockAnalysis() {
             </Button>
           </Col>
           <Col flex="auto" style={{ textAlign: 'right' }}>
-            <Tooltip title="查看评分规则">
+            <Tooltip title="查看评分规则" className="tip-light">
               <QuestionCircleOutlined
                 style={{ fontSize: 16, cursor: 'pointer' }}
                 onClick={showRules}
@@ -244,7 +337,7 @@ export default function StockAnalysis() {
                 </Text>
               </Col>
               <Col flex="auto" style={{ textAlign: 'right' }}>
-                <Tooltip title={overview.risks || ''}>
+                <Tooltip title={overview.risks || ''} className="tip-light">
                   <Tag
                     color={actionColor(overview.actionName)}
                     style={{ fontSize: 16, padding: '4px 16px' }}
@@ -260,7 +353,7 @@ export default function StockAnalysis() {
               <Col span={8}>
                 <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>
                   综合评分
-                  <Tooltip title="点击查看评分规则">
+                <Tooltip title="查看评分规则" className="tip-light">
                     <QuestionCircleOutlined
                       style={{ marginLeft: 4, cursor: 'pointer' }}
                       onClick={showRules}
@@ -299,7 +392,7 @@ export default function StockAnalysis() {
                           <div key={i}>{item.label}: {item.value} ({item.score}/{item.maxScore})</div>
                         ))}
                       </div>
-                    }>
+                    } className="tip-light">
                       <div>
                         <Text style={{ fontSize: 12 }}>{detail.dimensionName}：{detail.score}/{detail.maxScore}</Text>
                         <Progress
@@ -483,13 +576,42 @@ function TechTab({ data }) {
 function MoneyFlowTab({ data }) {
   if (!data) return <Empty description="暂无资金面数据" />;
 
+  const nmVal = data.netMain ?? 0;
+  const nmPctVal = data.netMainPct ?? 0;
   const vrVal = data.volumeRatio ?? 0;
-  const vrColor = vrVal >= 2.0 ? 'red' : vrVal >= 1.5 ? 'volcano' : 'green';
-  const vrScore = vrVal >= 2.0 ? 12 : vrVal >= 1.5 ? 8 : vrVal >= 1.0 ? 4 : 0;
-
   const tdVal = data.turnoverDeviation ?? 0;
+
+  // 主力净流入评分（10分）
+  const absNm = Math.abs(nmVal);
+  const nmScore = nmVal >= 5e8 ? 10 : nmVal >= 1e8 ? 7 : nmVal > 0 ? 5 : nmVal > -1e8 ? 2 : 0;
+  const nmColor = nmVal > 0 ? 'red' : nmVal < 0 ? 'green' : 'default';
+
+  // 主力净流入占比评分（8分）
+  const pctScore = nmPctVal >= 10 ? 8 : nmPctVal >= 5 ? 6 : nmPctVal > 0 ? 4 : nmPctVal > -5 ? 2 : 0;
+  const pctColor = nmPctVal > 0 ? 'red' : nmPctVal < 0 ? 'green' : 'default';
+
+  // 量比评分（4分）
+  const vrScore = vrVal >= 2.0 ? 4 : vrVal >= 1.5 ? 3 : vrVal >= 1.0 ? 2 : 0;
+  const vrColor = vrVal >= 2.0 ? 'red' : vrVal >= 1.5 ? 'volcano' : 'green';
+
+  // 换手率偏离评分（3分）
+  const tdScore = tdVal > 0 ? 3 : tdVal > -2 ? 2 : 1;
   const tdColor = tdVal > 3.0 ? 'red' : tdVal > 0 ? 'volcano' : 'green';
-  const tdScore = tdVal > 0 ? 13 : tdVal > -2.0 ? 8 : 5;
+
+  // 格式化金额
+  const fmtMoney = (v) => {
+    if (v == null) return '-';
+    const absV = Math.abs(v);
+    const sign = v >= 0 ? '+' : '';
+    if (absV >= 1e8) return sign + (v / 1e8).toFixed(2) + '亿';
+    if (absV >= 1e4) return sign + (v / 1e4).toFixed(2) + '万';
+    return sign + v.toFixed(0) + '元';
+  };
+
+  // 主力资金状态
+  const flowStatus = data.mainFlowStatus;
+  const flowLabel = flowStatus === 'INFLOW' ? '主力流入' : flowStatus === 'OUTFLOW' ? '主力流出' : '暂无数据';
+  const flowColor = flowStatus === 'INFLOW' ? 'red' : flowStatus === 'OUTFLOW' ? 'green' : 'default';
 
   return (
     <div>
@@ -497,20 +619,44 @@ function MoneyFlowTab({ data }) {
         display: 'flex', padding: '4px 0', gap: 12,
         borderBottom: '2px solid #e8e8e8', fontWeight: 600, fontSize: 12, color: '#999',
       }}>
-        <span style={{ width: 100, flexShrink: 0 }}>指标</span>
+        <span style={{ width: 110, flexShrink: 0 }}>指标</span>
         <span style={{ width: 80, flexShrink: 0, textAlign: 'center' }}>当前值</span>
         <span style={{ width: 60, flexShrink: 0, textAlign: 'center' }}>评分</span>
         <span style={{ flex: 1 }}>说明</span>
       </div>
       <IndicatorRow
+        label="主力净流入" value={data.netMain != null ? fmtMoney(data.netMain) : '暂无数据'} color={nmColor}
+        score={nmScore} maxScore={10}
+        desc="主力资金(超大单+大单)当日净流入额。>5亿=10分，>1亿=7分，>0=5分，>-1亿=2分"
+      />
+      <IndicatorRow
+        label="主力净流入占比" value={data.netMainPct != null ? `${data.netMainPct.toFixed(2)}%` : '暂无数据'} color={pctColor}
+        score={pctScore} maxScore={8}
+        desc="主力净流入占成交额比例。>10%=8分，>5%=6分，>0%=4分，>-5%=2分"
+      />
+      <IndicatorRow
+        label="超大单净流入" value={data.netHuge != null ? fmtMoney(data.netHuge) : '-'} 
+        color={data.netHuge > 0 ? 'red' : data.netHuge < 0 ? 'green' : 'default'}
+        desc="超大单（>100万元）当日净流入额，反映机构资金动向"
+      />
+      <IndicatorRow
+        label="大单净流入" value={data.netBig != null ? fmtMoney(data.netBig) : '-'} 
+        color={data.netBig > 0 ? 'red' : data.netBig < 0 ? 'green' : 'default'}
+        desc="大单（20~100万元）当日净流入额，反映大户资金动向"
+      />
+      <IndicatorRow
+        label="主力资金状态" value={flowLabel} color={flowColor}
+        desc="综合主力净流入方向判断。流入=大资金积极介入，流出=大资金撤离"
+      />
+      <IndicatorRow
         label="量比" value={data.volumeRatio?.toFixed(2) ?? '-'} color={vrColor}
-        score={vrScore} maxScore={12}
-        desc="今日成交额/近5日均值。>=2.0放量(12分)，>=1.5温和(8分)，>=1.0正常(4分)"
+        score={vrScore} maxScore={4}
+        desc="今日成交额/近5日均值。≥2.0放量(4分)，≥1.5温和(3分)，≥1.0正常(2分)"
       />
       <IndicatorRow
         label="换手率偏离" value={data.turnoverDeviation ? `${data.turnoverDeviation.toFixed(2)}%` : '-'} color={tdColor}
-        score={tdScore} maxScore={13}
-        desc="今日换手率与20日均值的偏离。>0%活跃提升(13分)，>-2%正常(8分)，<=-2%低迷(5分)"
+        score={tdScore} maxScore={3}
+        desc="今日换手率与20日均值的偏离。>0%=3分，>-2%=2分，≤-2%=1分"
       />
       <IndicatorRow
         label="当日换手率" value={data.turnoverRate ? `${data.turnoverRate.toFixed(2)}%` : '-'} color='default'
@@ -537,9 +683,83 @@ function MoneyFlowTab({ data }) {
 }
 
 // ── 事件面 Tab ─────────────────────────────────────────────────────────────
-function SentimentTab({ data }) {
+function SentimentTab({ data, isBlueChip }) {
   if (!data) return <Empty description="暂无事件面数据" />;
 
+  // 大盘蓝筹模式：显示融资余额/龙虎榜机构/机构调研
+  if (isBlueChip) {
+    const marginChg = data.marginChgPct ?? null;
+    const lhbNet = data.lhbInstitutionNet ?? null;
+    const surveyCnt = data.holderChangePct ?? null; // 复用字段存调研次数
+
+    // 融资余额评分
+    let marginScore = 0;
+    if (marginChg != null) {
+      if (marginChg > 5) marginScore = 8;
+      else if (marginChg > 2) marginScore = 5;
+      else if (marginChg > 0) marginScore = 3;
+      else if (marginChg > -3) marginScore = 1;
+    }
+    // 龙虎榜评分
+    let lhbScore = 0;
+    if (lhbNet != null) {
+      if (lhbNet > 50e6) lhbScore = 8;
+      else if (lhbNet > 10e6) lhbScore = 5;
+      else if (lhbNet > 0) lhbScore = 3;
+      else if (lhbNet > -10e6) lhbScore = 1;
+    }
+    // 机构调研评分
+    let surveyScore = 0;
+    if (surveyCnt != null) {
+      if (surveyCnt >= 10) surveyScore = 9;
+      else if (surveyCnt >= 5) surveyScore = 6;
+      else if (surveyCnt >= 2) surveyScore = 3;
+      else if (surveyCnt >= 1) surveyScore = 1;
+    }
+
+    const fmtMargin = marginChg != null ? `${marginChg.toFixed(2)}%` : '-';
+    const fmtLhb = lhbNet != null ? `${(lhbNet / 1e4).toFixed(0)}万` : '-';
+    const fmtSurvey = surveyCnt != null ? `${surveyCnt}次` : '-';
+
+    return (
+      <div>
+        <div style={{
+          display: 'flex', padding: '4px 0', gap: 12,
+          borderBottom: '2px solid #e8e8e8', fontWeight: 600, fontSize: 12, color: '#999',
+        }}>
+          <span style={{ width: 110, flexShrink: 0 }}>指标</span>
+          <span style={{ width: 80, flexShrink: 0, textAlign: 'center' }}>当前值</span>
+          <span style={{ width: 60, flexShrink: 0, textAlign: 'center' }}>评分</span>
+          <span style={{ flex: 1 }}>说明</span>
+        </div>
+        <IndicatorRow
+          label="融资余额变化" value={fmtMargin}
+          color={marginChg != null && marginChg > 0 ? 'red' : marginChg != null ? 'green' : 'default'}
+          score={marginScore} maxScore={8}
+          desc="融资余额变化率。>5%=8分(看多), >2%=5分, >0%=3分"
+        />
+        <IndicatorRow
+          label="龙虎榜机构净买" value={fmtLhb}
+          color={lhbNet != null && lhbNet > 0 ? 'red' : lhbNet != null ? 'green' : 'default'}
+          score={lhbScore} maxScore={8}
+          desc="20日龙虎榜机构净买入。>5000万=8分, >1000万=5分"
+        />
+        <IndicatorRow
+          label="机构调研热度" value={fmtSurvey}
+          color={surveyCnt != null && surveyCnt >= 5 ? 'red' : surveyCnt != null ? 'volcano' : 'default'}
+          score={surveyScore} maxScore={9}
+          desc="90天内机构调研次数。≥10次=9分(高度关注), ≥5次=6分"
+        />
+        <div style={{ marginTop: 12, padding: '8px 0', borderTop: '2px solid #e8e8e8' }}>
+          <Text strong style={{ fontSize: 14 }}>
+            事件面得分：{data.sentimentScore ?? '-'}/25
+          </Text>
+        </div>
+      </div>
+    );
+  }
+
+  // 小盘股默认模式：连续涨停/炸板率/强势股
   const luDays = data.limitUpDays ?? 0;
   const brRate = data.brokenLimitUpRate ?? 0;
 
@@ -589,6 +809,7 @@ function FundamentalTab({ data }) {
   const revVal = data.revenueYoy ?? 0;
   const npVal = data.netProfitYoy ?? 0;
   const gmVal = data.grossMargin ?? 0;
+  const rcVal = data.reportCount ?? 0;  // 研报覆盖热度(90天篇数)
 
   // 评分逻辑（与后端 TradingSignalEngine.calcFundamentalScore 一致）
   const peScore = peVal > 0 && peVal < 15 ? 3 : peVal < 40 ? 2 : peVal < 100 ? 1 : 0;
@@ -603,6 +824,8 @@ function FundamentalTab({ data }) {
   const npMax = 4;
   const gmScore = gmVal >= 40 ? 3 : gmVal >= 20 ? 2 : gmVal > 0 ? 1 : 0;
   const gmMax = 3;
+  const rcScore = rcVal >= 10 ? 4 : rcVal >= 5 ? 3 : rcVal >= 2 ? 2 : rcVal >= 1 ? 1 : 0;
+  const rcMax = 4;
 
   return (
     <div>
@@ -651,9 +874,15 @@ function FundamentalTab({ data }) {
         score={gmScore} maxScore={gmMax}
         desc="毛利率=(营收-成本)/营收。≥40%(3分), ≥20%(2分), >0%(1分)"
       />
+      <IndicatorRow
+        label="研报覆盖热度" value={`${rcVal}篇(90天)`}
+        color={rcVal >= 5 ? 'green' : rcVal >= 1 ? 'default' : 'default'}
+        score={rcScore} maxScore={rcMax}
+        desc="近90天研报数量，反映机构关注度。≥10篇(4分), ≥5篇(3分), ≥2篇(2分), ≥1篇(1分), 0篇(0分)"
+      />
       <div style={{ marginTop: 12, padding: '8px 0', borderTop: '2px solid #e8e8e8' }}>
         <Text strong style={{ fontSize: 14 }}>
-          基本面得分：{data.fundamentalScore ?? '-'}/20
+          基本面得分：{data.fundamentalScore ?? '-'}/29
         </Text>
       </div>
     </div>
@@ -861,3 +1090,508 @@ function ResearchReportTab({ data, code }) {
 }
 
 // ── 研报分析 Tab end ───────────────────────────────────────────────
+
+// ── 同业对比 Tab ─────────────────────────────────────────────────────
+function PeerComparisonTab({ data, code }) {
+  console.log('[PeerComparisonTab] render, data:', data, 'code:', code);
+  if (!data) return <Empty description="暂无同业数据" />;
+
+  const peers = data.peers || [];
+  const industry = data.industry || '未知';
+
+  // 格式化市值（元 → 亿元）
+  const formatCap = (v) => {
+    if (v == null || v === '') return '-';
+    const num = Number(v);
+    if (isNaN(num)) return '-';
+    return (num / 1e8).toFixed(1) + '亿';
+  };
+
+  // 格式化涨跌幅
+  const formatPct = (v) => {
+    if (v == null) return '-';
+    const num = Number(v);
+    if (isNaN(num)) return '-';
+    return num.toFixed(2) + '%';
+  };
+
+  const columns = [
+    { title: '代码', dataIndex: 'code', width: 90,
+      render: (val, row) => val === code ?
+        <Text strong style={{ color: '#1890ff' }}>{val}</Text> : <a href={`?code=${val}`} style={{ fontSize: 13 }}>{val}</a>,
+    },
+    { title: '名称', dataIndex: 'name', width: 100, ellipsis: true },
+    {
+      title: 'PE(TTM)', dataIndex: 'peTtm',
+      width: 85, align: 'center', sorter: (a, b) => (Number(a.peTtm) || 0) - (Number(b.peTtm) || 0),
+      render: v => v != null ? Number(v).toFixed(1) : '-',
+    },
+    {
+      title: 'PB', dataIndex: 'pb',
+      width: 70, align: 'center', sorter: (a, b) => (Number(a.pb) || 0) - (Number(b.pb) || 0),
+      render: v => v != null ? Number(v).toFixed(2) : '-',
+    },
+    {
+      title: '总市值(亿)', dataIndex: 'totalMarketCap',
+      width: 105, align: 'right', sorter: (a, b) => (Number(a.totalMarketCap) || 0) - (Number(b.totalMarketCap) || 0),
+      render: v => formatCap(v),
+    },
+    {
+      title: '涨跌幅', dataIndex: 'changePercent',
+      width: 95, align: 'center', sorter: (a, b) => (Number(a.changePercent) || 0) - (Number(b.changePercent) || 0),
+      render: v => {
+        if (v == null) return '-';
+        const n = Number(v);
+        return <span style={{ color: n >= 0 ? '#f5222d' : '#52c41a', fontWeight: 500 }}>{n.toFixed(2)}%</span>;
+      },
+    },
+  ];
+
+  return (
+    <div>
+      <Alert message={`行业：${industry}，共 ${peers.length} 只股票（按市值排序，蓝色高亮为当前股）`} type="info" showIcon style={{ marginBottom: 12 }} />
+      <Table
+        size="small"
+        dataSource={peers}
+        columns={columns}
+        rowKey="code"
+        pagination={{ pageSize: 15, size: 'small' }}
+        scroll={{ x: 650 }}
+        rowClassName={(r) => r.code === code ? 'ant-table-row-selected' : ''}
+      />
+    </div>
+  );
+}
+
+// ── 估值分位 Tab ──────────────────────────────────────────────────────
+function ValuationTab({ data, code }) {
+  if (!data) return <Empty description="暂无估值分位数据" />;
+  if (data.error) return <Alert type="error" message={data.error} showIcon />;
+
+  const pePct = data.pePercentile ?? 0;
+  const pbPct = data.pbPercentile ?? 0;
+
+  // 分位→颜色
+  const colorOf = (p) =>
+    p >= 80 ? '#cf1322' : p >= 50 ? '#fa8c16' : p >= 20 ? '#1890ff' : '#389e0d';
+
+  // 分位→文字标签
+  const labelOf = (p) =>
+    p >= 80 ? '高估' : p >= 50 ? '偏贵' : p >= 20 ? '合理' : '低估';
+
+  // ── PE 解释 Tooltip ──
+  const peTooltip = (
+    <div style={{ width: 480, fontSize: 12, lineHeight: '20px', color: '#333' }}>
+      <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>PE(TTM) 是什么？</div>
+      <div style={{ marginBottom: 8 }}>
+        <span style={{ fontWeight: 500 }}>市盈率（滚动）</span>＝ 股价 ÷ 近12个月每股收益
+      </div>
+      <div style={{ marginBottom: 4, fontWeight: 500 }}>怎么看分位？</div>
+      <div style={{ color: '#666', marginBottom: 8 }}>
+        显示当前PE在<span style={{ color: '#999' }}>过去N年</span>所有交易日中的历史位置。<br/>
+        <span style={{ color: '#389e0d' }}>分位越低</span>＝相对历史越便宜；<span style={{ color: '#cf1322' }}>分位越高</span>＝相对历史越贵。
+      </div>
+      <div style={{ marginBottom: 4, fontWeight: 500 }}>参考意义</div>
+      <div style={{ color: '#666' }}>
+        • 分位 &lt; 20%：处于历史底部区域，安全边际较高<br/>
+        • 分位 20%~50%：估值偏低，可考虑布局<br/>
+        • 分位 50%~80%：估值偏高，谨慎追高<br/>
+        • 分位 &gt; 80%：处于历史高位，警惕回调风险
+      </div>
+    </div>
+  );
+
+  // ── PB 解释 Tooltip ──
+  const pbTooltip = (
+    <div style={{ width: 480, fontSize: 12, lineHeight: '20px', color: '#333' }}>
+      <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>PB 是什么？</div>
+      <div style={{ marginBottom: 8 }}>
+        <span style={{ fontWeight: 500 }}>市净率</span>＝ 股价 ÷ 每股净资产（账面价值）
+      </div>
+      <div style={{ marginBottom: 4, fontWeight: 500 }}>怎么看分位？</div>
+      <div style={{ color: '#666', marginBottom: 8 }}>
+        显示当前PB在<span style={{ color: '#999' }}>过去N年</span>所有交易日中的历史位置。<br/>
+        PB适合评估<span style={{ color: '#666' }}>金融、重资产</span>行业（银行/钢铁/煤炭等）。
+      </div>
+      <div style={{ marginBottom: 4, fontWeight: 500 }}>参考意义</div>
+      <div style={{ color: '#666' }}>
+        • 分位 &lt; 20%：破净或接近破净，安全边际高<br/>
+        • 分位 20%~50%：净资产折价，适合价值投资<br/>
+        • 分位 &gt; 80%：市价远超净资产，警惕泡沫
+      </div>
+    </div>
+  );
+
+  // 单个指标行
+  const Row = ({ label, tooltip, pct, current, precision, tooltipStyle }) => (
+    <div style={{
+      display: 'flex', alignItems: 'center',
+      padding: '12px 0', borderBottom: '1px solid #f5f5f5', gap: 12,
+    }}>
+      {/* 指标名 + 问号 */}
+      <span style={{ width: 90, flexShrink: 0, fontWeight: 500, color: '#333', display: 'flex', alignItems: 'center', gap: 2 }}>
+        {label}
+        <Tooltip title={tooltip} placement="right" overlayInnerStyle={{ width: 500, maxWidth: 520, background: '#fff', color: '#333', fontSize: 12, lineHeight: '20px', boxShadow: '0 6px 16px rgba(0,0,0,0.12), 0 3px 6px rgba(0,0,0,0.08)', borderRadius: 10, padding: '10px 14px', border: '1px solid #e8e8e8' }}>
+          <QuestionCircleOutlined style={{ fontSize: 12, color: '#bbb', cursor: 'pointer' }} />
+        </Tooltip>
+      </span>
+
+      {/* 分位数字 */}
+      <span style={{
+        width: 100, flexShrink: 0, textAlign: 'center',
+        fontSize: 26, fontWeight: 600, color: colorOf(pct),
+        fontVariantNumeric: 'tabular-nums',
+      }}>
+        {pct.toFixed(1)}<span style={{ fontSize: 14, fontWeight: 400 }}>%</span>
+      </span>
+
+      {/* 当前值 */}
+      <span style={{ width: 100, flexShrink: 0, textAlign: 'center', fontSize: 14, color: '#333' }}>
+        {current != null ? Number(current).toFixed(precision) : '-'}
+      </span>
+
+      {/* 估值水平标签 */}
+      <span style={{
+        width: 72, flexShrink: 0, textAlign: 'center',
+        fontSize: 12, fontWeight: 500,
+        color: colorOf(pct),
+        background: colorOf(pct) + '12',
+        border: `1px solid ${colorOf(pct)}30`,
+        borderRadius: 4, padding: '1px 0',
+      }}>{labelOf(pct)}</span>
+    </div>
+  );
+
+  return (
+    <div>
+      {/* 表头 */}
+      <div style={{
+        display: 'flex', padding: '4px 0 6px', gap: 12,
+        borderBottom: '2px solid #e8e8e8', fontWeight: 600, fontSize: 12, color: '#999',
+      }}>
+        <span style={{ width: 90, flexShrink: 0 }}>指标</span>
+        <span style={{ width: 100, flexShrink: 0, textAlign: 'center' }}>历史分位</span>
+        <span style={{ width: 100, flexShrink: 0, textAlign: 'center' }}>当前值</span>
+        <span style={{ width: 72, flexShrink: 0, textAlign: 'center' }}>估值水平</span>
+      </div>
+
+      <Row label="PE(TTM)" tooltip={peTooltip} pct={pePct} current={data.peCurrent} precision={1} />
+      <Row label="PB"       tooltip={pbTooltip}  pct={pbPct} current={data.pbCurrent} precision={2} />
+
+      <div style={{ marginTop: 8, fontSize: 11, color: '#bbb', lineHeight: '18px' }}>
+        {code} · 近{data.years || 3}年历史分位 · PE样本{data.peHistoryCount || 0}日 / PB样本{data.pbHistoryCount || 0}日<br/>
+        分位定义：当前值在历史数据中的相对位置，&lt;20%低估 · 20%~50%合理 · 50%~80%偏贵 · &gt;80%高估
+      </div>
+    </div>
+  );
+}
+
+// ── 行业关联 Tab ──────────────────────────────────────────────────────
+function IndustryCorrelationTab({ data, code }) {
+  if (!data) return <Empty description="暂无行业关联数据" />;
+  if (data.error) return <Alert type="warning" message={data.error} showIcon />;
+
+  const beta = data.beta ?? 0;
+  const corr = data.correlation ?? 0;
+  const sampleDays = data.sampleDays || 0;
+  const industry = data.industry || '-';
+  const dist = data.industryDist || {};
+  const recentAlign = data.recentAlignment || [];
+
+  // Beta 颜色
+  const betaColor = beta > 1.5 ? '#f5222d' : beta > 1.0 ? '#fa8c16' : beta > 0.5 ? '#1890ff' : '#52c41a';
+  // 相关系数颜色
+  const corrColor = corr > 0.7 ? '#f5222d' : corr > 0.4 ? '#fa8c16' : corr > 0.2 ? '#1890ff' : '#52c41a';
+
+  const total = Number(dist.total || 0);
+  const upCount = Number(dist.upCount || 0);
+  const downCount = Number(dist.downCount || 0);
+
+  return (
+    <div>
+      {/* 第一行：三指标卡 */}
+      <Row gutter={16} style={{ marginBottom: 16 }}>
+        <Col span={8}>
+          <Card size="small" bodyStyle={{ padding: '12px 16px', textAlign: 'center' }}>
+            <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>Beta系数</div>
+            <div style={{ fontSize: 28, fontWeight: 600, color: betaColor }}>{beta}</div>
+            <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>{data.betaDesc || '-'}</div>
+          </Card>
+        </Col>
+        <Col span={8}>
+          <Card size="small" bodyStyle={{ padding: '12px 16px', textAlign: 'center' }}>
+            <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>行业相关系数</div>
+            <div style={{ fontSize: 28, fontWeight: 600, color: corrColor }}>{corr}</div>
+            <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>{data.corrDesc || '-'}</div>
+          </Card>
+        </Col>
+        <Col span={8}>
+          <Card size="small" bodyStyle={{ padding: '12px 16px', textAlign: 'center' }}>
+            <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>行业分布（今日）</div>
+            <div style={{ fontSize: 16, fontWeight: 500 }}>
+              <span style={{ color: '#f5222d' }}>{upCount}涨</span>
+              <span style={{ color: '#999', margin: '0 6px' }}>·</span>
+              <span style={{ color: '#52c41a' }}>{downCount}跌</span>
+            </div>
+            <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
+              {industry} · 共{total}只
+            </div>
+          </Card>
+        </Col>
+      </Row>
+
+      {/* 近5日联动 */}
+      {recentAlign.length > 0 && (
+        <Card size="small" title="近5日超额收益（vs行业）" style={{ marginBottom: 16 }}>
+          <Table
+            size="small"
+            pagination={false}
+            dataSource={recentAlign}
+            rowKey="dayIndex"
+            columns={[
+              { title: '第N日', dataIndex: 'dayIndex', width: 60, align: 'center' },
+              {
+                title: '个股收益%', dataIndex: 'stockRet',
+                width: 100, align: 'center',
+                render: v => <span style={{ color: v >= 0 ? '#f5222d' : '#52c41a' }}>{v?.toFixed(2)}%</span>,
+              },
+              {
+                title: '行业收益%', dataIndex: 'industryRet',
+                width: 100, align: 'center',
+                render: v => <span style={{ color: v >= 0 ? '#f5222d' : '#52c41a' }}>{v?.toFixed(2)}%</span>,
+              },
+              {
+                title: '超额收益%', dataIndex: 'excessRet',
+                width: 100, align: 'center',
+                render: v => <span style={{ color: v >= 0 ? '#f5222d' : '#52c41a', fontWeight: 600 }}>{v >= 0 ? '+' : ''}{v?.toFixed(2)}%</span>,
+              },
+            ]}
+          />
+        </Card>
+      )}
+
+      <div style={{ fontSize: 11, color: '#bbb' }}>
+        {code} · 行业: {industry} · 样本: {sampleDays}日 · Beta基于个股收益对行业等权收益回归
+      </div>
+    </div>
+  );
+}
+
+// ── 涨跌停 Tab ──────────────────────────────────────────────────────
+function LimitUpTab({ data, code }) {
+  if (!data) return <Empty description="暂无涨跌停数据" />;
+  if (data.error) return <Alert type="warning" message={data.error} showIcon />;
+
+  const records = data.records || [];
+  const stats = data.stats || {};
+  const topReasons = data.topReasons || [];
+
+  const ztTypeMap = { zt: '涨停', dt: '跌停', zbgc: '炸板' };
+  const ztColorMap = { zt: 'red', dt: 'green', zbgc: 'volcano' };
+
+  const formatMoney = (v) => {
+    if (v == null) return '-';
+    return (Number(v) / 1e8).toFixed(2) + '亿';
+  };
+
+  return (
+    <div>
+      {/* 统计卡 */}
+      <Row gutter={16} style={{ marginBottom: 16 }}>
+        <Col span={6}>
+          <Card size="small" bodyStyle={{ padding: '12px 16px', textAlign: 'center' }}>
+            <div style={{ fontSize: 12, color: '#999' }}>涨停次数</div>
+            <div style={{ fontSize: 24, fontWeight: 600, color: '#f5222d' }}>{stats.limitUpCount || 0}</div>
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card size="small" bodyStyle={{ padding: '12px 16px', textAlign: 'center' }}>
+            <div style={{ fontSize: 12, color: '#999' }}>跌停次数</div>
+            <div style={{ fontSize: 24, fontWeight: 600, color: '#52c41a' }}>{stats.limitDownCount || 0}</div>
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card size="small" bodyStyle={{ padding: '12px 16px', textAlign: 'center' }}>
+            <div style={{ fontSize: 12, color: '#999' }}>炸板次数</div>
+            <div style={{ fontSize: 24, fontWeight: 600, color: '#fa8c16' }}>{stats.brokenCount || 0}</div>
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card size="small" bodyStyle={{ padding: '12px 16px', textAlign: 'center' }}>
+            <div style={{ fontSize: 12, color: '#999' }}>统计区间</div>
+            <div style={{ fontSize: 13, fontWeight: 500, color: '#333' }}>
+              {stats.firstDate ? stats.firstDate.toString().slice(0,10) : '-'} ~ {stats.lastDate ? stats.lastDate.toString().slice(0,10) : '-'}
+            </div>
+          </Card>
+        </Col>
+      </Row>
+
+      {/* 涨停原因 Top */}
+      {topReasons.length > 0 && (
+        <Card size="small" title="涨停原因（Top10）" style={{ marginBottom: 16 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {topReasons.map((r, i) => (
+              <Tag key={i} color="red" style={{ fontSize: 13 }}>
+                {r.reason} ({r.count}次)
+              </Tag>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* 历史记录表 */}
+      <Card size="small" title="涨跌停记录（近30条）">
+        {records.length > 0 ? (
+          <Table
+            size="small"
+            pagination={{ pageSize: 10, size: 'small' }}
+            dataSource={records}
+            rowKey={(r, i) => r.tradeDate + r.ztType + i}
+            columns={[
+              { title: '日期', dataIndex: 'tradeDate', width: 110, align: 'center' },
+              {
+                title: '类型', dataIndex: 'ztType', width: 70, align: 'center',
+                render: v => <Tag color={ztColorMap[v] || 'default'}>{ztTypeMap[v] || v}</Tag>,
+              },
+              {
+                title: '涨跌幅%', dataIndex: 'changePct', width: 90, align: 'center',
+                render: v => v != null ? <span style={{ color: Number(v) >= 0 ? '#f5222d' : '#52c41a' }}>{Number(v).toFixed(2)}%</span> : '-',
+              },
+              { title: '收盘价', dataIndex: 'closePrice', width: 80, align: 'center',
+                render: v => v != null ? Number(v).toFixed(2) : '-',
+              },
+              { title: '原因', dataIndex: 'reason', ellipsis: true,
+                render: v => v || '-',
+              },
+            ]}
+          />
+        ) : (
+          <Empty description="该股无涨跌停记录" />
+        )}
+      </Card>
+    </div>
+  );
+}
+
+// ── 大宗交易 Tab ──────────────────────────────────────────────────────
+function BlockTradeTab({ data, code }) {
+  if (!data) return <Empty description="暂无大宗交易数据" />;
+  if (data.error) return <Alert type="warning" message={data.error} showIcon />;
+
+  const records = data.records || [];
+  const stats = data.stats || {};
+  const topBuy = data.topBuyBranches || [];
+  const topSell = data.topSellBranches || [];
+
+  const formatAmt = (v) => {
+    if (v == null) return '-';
+    const n = Number(v);
+    if (n >= 1e8) return (n / 1e8).toFixed(2) + '亿';
+    if (n >= 1e4) return (n / 1e4).toFixed(0) + '万';
+    return n.toFixed(0) + '元';
+  };
+
+  const avgDiscount = stats.avgDiscountRate != null ? Number(stats.avgDiscountRate) : null;
+
+  return (
+    <div>
+      {/* 统计卡 */}
+      <Row gutter={16} style={{ marginBottom: 16 }}>
+        <Col span={6}>
+          <Card size="small" bodyStyle={{ padding: '12px 16px', textAlign: 'center' }}>
+            <div style={{ fontSize: 12, color: '#999' }}>交易笔数</div>
+            <div style={{ fontSize: 24, fontWeight: 600, color: '#333' }}>{stats.totalCount || 0}</div>
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card size="small" bodyStyle={{ padding: '12px 16px', textAlign: 'center' }}>
+            <div style={{ fontSize: 12, color: '#999' }}>累计金额</div>
+            <div style={{ fontSize: 20, fontWeight: 600, color: '#333' }}>{formatAmt(stats.totalAmount)}</div>
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card size="small" bodyStyle={{ padding: '12px 16px', textAlign: 'center' }}>
+            <div style={{ fontSize: 12, color: '#999' }}>平均折价率</div>
+            <div style={{ fontSize: 24, fontWeight: 600, color: avgDiscount != null && avgDiscount < 0 ? '#52c41a' : '#f5222d' }}>
+              {avgDiscount != null ? (avgDiscount * 100).toFixed(2) + '%' : '-'}
+            </div>
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card size="small" bodyStyle={{ padding: '12px 16px', textAlign: 'center' }}>
+            <div style={{ fontSize: 12, color: '#999' }}>统计区间</div>
+            <div style={{ fontSize: 13, fontWeight: 500, color: '#333' }}>
+              {stats.firstDate ? stats.firstDate.toString().slice(0,10) : '-'} ~ {stats.lastDate ? stats.lastDate.toString().slice(0,10) : '-'}
+            </div>
+          </Card>
+        </Col>
+      </Row>
+
+      {/* 买卖营业部 */}
+      <Row gutter={16} style={{ marginBottom: 16 }}>
+        <Col span={12}>
+          <Card size="small" title="买方营业部（Top10）" bodyStyle={{ padding: 0 }}>
+            {topBuy.length > 0 ? (
+              <Table size="small" pagination={false} dataSource={topBuy} rowKey="branch"
+                columns={[
+                  { title: '营业部', dataIndex: 'branch', ellipsis: true },
+                  { title: '次数', dataIndex: 'count', width: 50, align: 'center' },
+                  { title: '金额', dataIndex: 'totalAmount', width: 80, align: 'right', render: v => formatAmt(v) },
+                ]}
+              />
+            ) : <Empty description="暂无数据" style={{ margin: 16 }} />}
+          </Card>
+        </Col>
+        <Col span={12}>
+          <Card size="small" title="卖方营业部（Top10）" bodyStyle={{ padding: 0 }}>
+            {topSell.length > 0 ? (
+              <Table size="small" pagination={false} dataSource={topSell} rowKey="branch"
+                columns={[
+                  { title: '营业部', dataIndex: 'branch', ellipsis: true },
+                  { title: '次数', dataIndex: 'count', width: 50, align: 'center' },
+                  { title: '金额', dataIndex: 'totalAmount', width: 80, align: 'right', render: v => formatAmt(v) },
+                ]}
+              />
+            ) : <Empty description="暂无数据" style={{ margin: 16 }} />}
+          </Card>
+        </Col>
+      </Row>
+
+      {/* 交易记录表 */}
+      <Card size="small" title="大宗交易记录（近30条）">
+        {records.length > 0 ? (
+          <Table
+            size="small"
+            pagination={{ pageSize: 10, size: 'small' }}
+            dataSource={records}
+            rowKey={(r, i) => r.tradeDate + r.price + i}
+            scroll={{ x: 900 }}
+            columns={[
+              { title: '日期', dataIndex: 'tradeDate', width: 110, align: 'center' },
+              { title: '成交价', dataIndex: 'price', width: 80, align: 'center',
+                render: v => v != null ? Number(v).toFixed(2) : '-',
+              },
+              { title: '成交量', dataIndex: 'volume', width: 90, align: 'right',
+                render: v => v != null ? (Number(v) / 1e4).toFixed(0) + '万' : '-',
+              },
+              { title: '成交额', dataIndex: 'amount', width: 90, align: 'right',
+                render: v => formatAmt(v),
+              },
+              {
+                title: '折价率', dataIndex: 'discountRate', width: 80, align: 'center',
+                render: v => v != null ? <span style={{ color: Number(v) < 0 ? '#52c41a' : '#f5222d' }}>{(Number(v) * 100).toFixed(2)}%</span> : '-',
+              },
+              { title: '占流通股%', dataIndex: 'pctOfFloat', width: 90, align: 'center',
+                render: v => v != null ? (Number(v) * 100).toFixed(3) + '%' : '-',
+              },
+              { title: '买方', dataIndex: 'buyBranch', width: 120, ellipsis: true },
+              { title: '卖方', dataIndex: 'sellBranch', width: 120, ellipsis: true },
+            ]}
+          />
+        ) : (
+          <Empty description="该股无大宗交易记录" />
+        )}
+      </Card>
+    </div>
+  );
+}

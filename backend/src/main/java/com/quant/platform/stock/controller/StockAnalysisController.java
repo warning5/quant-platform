@@ -140,6 +140,203 @@ public class StockAnalysisController {
         }
     }
 
+    /**
+     * 同业对比
+     * GET /api/analysis/peers?code=600519
+     * 返回：行业名称 + 同业列表（PE/PB/市值/涨跌幅）
+     */
+    @GetMapping("/peers")
+    public ResponseEntity<?> getPeerComparison(@RequestParam String code) {
+        if (analysisService == null) {
+            return ResponseEntity.status(503).body(errorBody("分析服务不可用，ClickHouse未启用"));
+        }
+        if (code == null || code.trim().isEmpty()) {
+            return ResponseEntity.badRequest().body(errorBody("股票代码不能为空"));
+        }
+        try {
+            Map<String, Object> data = analysisService.getPeerComparison(code.trim());
+            return ResponseEntity.ok(new ApiResponse<>(data));
+        } catch (Exception e) {
+            log.error("同业对比失败: code={}, error={}", code, e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(errorBody("同业对比失败：" + e.getMessage()));
+        }
+    }
+
+    /**
+     * 估值历史分位
+     * GET /api/analysis/valuation-percentile?code=600519&years=3
+     * 返回：pePercentile/pbPercentile/peCurrent/pbCurrent + 分位描述
+     */
+    @GetMapping("/valuation-percentile")
+    public ResponseEntity<?> getValuationPercentile(@RequestParam String code,
+                                                     @RequestParam(defaultValue = "3") int years) {
+        if (analysisService == null) {
+            return ResponseEntity.status(503).body(errorBody("分析服务不可用，ClickHouse未启用"));
+        }
+        if (code == null || code.trim().isEmpty()) {
+            return ResponseEntity.badRequest().body(errorBody("股票代码不能为空"));
+        }
+        try {
+            Map<String, Object> data = analysisService.getValuationPercentile(code.trim(), years);
+            return ResponseEntity.ok(new ApiResponse<>(data));
+        } catch (Exception e) {
+            log.error("估值分位查询失败: code={}, error={}", code, e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(errorBody("估值分位查询失败：" + e.getMessage()));
+        }
+    }
+
+    /**
+     * 行业/概念板块涨跌排行
+     * GET /api/analysis/sector-ranking
+     */
+    @GetMapping("/sector-ranking")
+    public ResponseEntity<?> getSectorRanking() {
+        if (analysisService == null) {
+            return ResponseEntity.status(503).body(errorBody("分析服务不可用，ClickHouse未启用"));
+        }
+        try {
+            Map<String, Object> data = analysisService.getSectorRanking();
+            return ResponseEntity.ok(new ApiResponse<>(data));
+        } catch (Exception e) {
+            log.error("板块排行查询失败: error={}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(errorBody("板块排行查询失败：" + e.getMessage()));
+        }
+    }
+
+    /**
+     * 行业内个股排名
+     * GET /api/analysis/industry-stocks?industry=白酒&sortBy=changePercent&sortOrder=desc
+     */
+    @GetMapping("/industry-stocks")
+    public ResponseEntity<?> getIndustryStocks(
+            @RequestParam String industry,
+            @RequestParam(defaultValue = "changePercent") String sortBy,
+            @RequestParam(defaultValue = "desc") String sortOrder) {
+        if (analysisService == null) {
+            return ResponseEntity.status(503).body(errorBody("分析服务不可用，ClickHouse未启用"));
+        }
+        try {
+            List<Map<String, Object>> data = analysisService.getIndustryStocks(industry, sortBy, sortOrder);
+            return ResponseEntity.ok(new ApiResponse<>(data));
+        } catch (Exception e) {
+            log.error("行业内个股查询失败: error={}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(errorBody("行业内个股查询失败：" + e.getMessage()));
+        }
+    }
+
+    /**
+     * 概念板块内个股排名
+     * GET /api/analysis/concept-stocks?conceptName=算力/AI&sortBy=changePercent&sortOrder=desc
+     */
+    @GetMapping("/concept-stocks")
+    public ResponseEntity<?> getConceptStocks(
+            @RequestParam String conceptName,
+            @RequestParam(defaultValue = "changePercent") String sortBy,
+            @RequestParam(defaultValue = "desc") String sortOrder) {
+        if (analysisService == null) {
+            return ResponseEntity.status(503).body(errorBody("分析服务不可用，ClickHouse未启用"));
+        }
+        try {
+            List<Map<String, Object>> data = analysisService.getConceptStocks(conceptName, sortBy, sortOrder);
+            return ResponseEntity.ok(new ApiResponse<>(data));
+        } catch (Exception e) {
+            log.error("概念板块个股查询失败: error={}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(errorBody("概念板块个股查询失败：" + e.getMessage()));
+        }
+    }
+
+    /**
+     * 行业关联分析（Beta暴露+行业联动）
+     * GET /api/analysis/industry-correlation?code=600519
+     */
+    @GetMapping("/industry-correlation")
+    public ResponseEntity<?> getIndustryCorrelation(@RequestParam String code) {
+        if (analysisService == null) {
+            return ResponseEntity.status(503).body(errorBody("分析服务不可用，ClickHouse未启用"));
+        }
+        try {
+            Map<String, Object> data = analysisService.getIndustryCorrelation(code.trim());
+            return ResponseEntity.ok(new ApiResponse<>(data));
+        } catch (Exception e) {
+            log.error("行业关联分析失败: code={}, error={}", code, e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(errorBody("行业关联分析失败：" + e.getMessage()));
+        }
+    }
+
+    /**
+     * 涨跌停分析
+     * GET /api/analysis/limit-up?code=600519
+     */
+    @GetMapping("/limit-up")
+    public ResponseEntity<?> getLimitUpAnalysis(@RequestParam String code) {
+        if (analysisService == null) {
+            return ResponseEntity.status(503).body(errorBody("分析服务不可用，ClickHouse未启用"));
+        }
+        try {
+            Map<String, Object> data = analysisService.getLimitUpAnalysis(code.trim());
+            return ResponseEntity.ok(new ApiResponse<>(data));
+        } catch (Exception e) {
+            log.error("涨跌停分析失败: code={}, error={}", code, e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(errorBody("涨跌停分析失败：" + e.getMessage()));
+        }
+    }
+
+    /**
+     * 大宗交易分析
+     * GET /api/analysis/block-trade?code=600519
+     */
+    @GetMapping("/block-trade")
+    public ResponseEntity<?> getBlockTradeAnalysis(@RequestParam String code) {
+        if (analysisService == null) {
+            return ResponseEntity.status(503).body(errorBody("分析服务不可用，ClickHouse未启用"));
+        }
+        try {
+            Map<String, Object> data = analysisService.getBlockTradeAnalysis(code.trim());
+            return ResponseEntity.ok(new ApiResponse<>(data));
+        } catch (Exception e) {
+            log.error("大宗交易分析失败: code={}, error={}", code, e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(errorBody("大宗交易分析失败：" + e.getMessage()));
+        }
+    }
+
+    /**
+     * 热门行业专题概览
+     * GET /api/analysis/hot-sectors
+     * 返回：各热门板块聚合数据（涨跌/资金/龙头/估值）
+     */
+    @GetMapping("/hot-sectors")
+    public ResponseEntity<?> getHotSectors() {
+        if (analysisService == null) {
+            return ResponseEntity.status(503).body(errorBody("分析服务不可用，ClickHouse未启用"));
+        }
+        try {
+            List<Map<String, Object>> data = analysisService.getHotSectors();
+            return ResponseEntity.ok(new ApiResponse<>(data));
+        } catch (Exception e) {
+            log.error("热门行业查询失败: error={}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(errorBody("热门行业查询失败：" + e.getMessage()));
+        }
+    }
+
+    /**
+     * 热门行业专题详情
+     * GET /api/analysis/hot-sectors/{conceptName}
+     * 返回：板块成分股 + 龙头 + 资金流向 + 近5日涨跌
+     */
+    @GetMapping("/hot-sectors/detail")
+    public ResponseEntity<?> getHotSectorDetail(@RequestParam String conceptName) {
+        if (analysisService == null) {
+            return ResponseEntity.status(503).body(errorBody("分析服务不可用，ClickHouse未启用"));
+        }
+        try {
+            Map<String, Object> data = analysisService.getHotSectorDetail(conceptName);
+            return ResponseEntity.ok(new ApiResponse<>(data));
+        } catch (Exception e) {
+            log.error("热门行业详情查询失败: conceptName={}, error={}", conceptName, e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(errorBody("热门行业详情查询失败：" + e.getMessage()));
+        }
+    }
+
     private Map<String, Object> errorBody(String message) {
         Map<String, Object> body = new HashMap<>();
         body.put("error", message);

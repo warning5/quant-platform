@@ -257,11 +257,10 @@ def process_index(db, code, start_date, end_date, force=False):
 
     code, name, market, bs_code = info
 
-    # 检查最新日期（通过 db_helper）
+    # 检查最新日期（通过 db_helper，查 index_daily 表）
     if not force:
-        # 指数 code 在 stock_daily 中格式为 "sh.000001" / "sz.399006"
-        bs_style_code = bs_code  # 已经是 "sh.000001" 格式
-        latest_date = db.get_latest_date_by_code(bs_style_code)
+        # index_daily 中 code 为纯数字格式（如 000001）
+        latest_date = db.get_latest_date_by_code(code, table="index")
         if latest_date:
             if hasattr(latest_date, 'strftime'):
                 db_next = (latest_date + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -293,10 +292,10 @@ def process_index(db, code, start_date, end_date, force=False):
         print(f"  [{code}] {name} | 无新增数据")
         return 0, 0
 
-    # 构建 dict 列表，通过 db_helper 写入（双写 MySQL+ClickHouse）
-    row_dicts = [build_row_dict(bs_code, name, market, r) for r in rows]
+    # 构建 dict 列表，通过 db_helper 写入 index_daily 表（分表存储）
+    row_dicts = [build_row_dict(code, name, market, r) for r in rows]
     try:
-        inserted = db.upsert_daily(row_dicts)
+        inserted = db.upsert_daily(row_dicts, table="index")
     except Exception as e:
         print(f"    [ERROR] 写入失败: {e}")
         return 0, len(rows)
@@ -306,21 +305,23 @@ def process_index(db, code, start_date, end_date, force=False):
 
 
 def show_summary():
-    """显示指数数据概况"""
+    """显示指数数据概况（从 index_daily 表读取）"""
     db = StockDailyDB()
     try:
         print(f"\n{'=' * 65}")
-        print(f"  指数数据概况 (stock_daily 表, 后端: {get_backend_label()})")
+        print(f"  指数数据概况 (index_daily 表, 后端: {get_backend_label()})")
         print(f"{'=' * 65}")
         print(f"  {'代码':<12s} {'名称':<10s} {'记录数':>8s} {'起始日期':<12s} {'最新日期':<12s}")
         print(f"  {'─' * 55}")
 
+        index_table = db.CH_INDEX_TABLE if db.backend == "clickhouse" else "index_daily"
+
         for code, name, market, bs_code in BUILTIN_INDICES:
-            # 使用 bs_code（如 sh.000001）查询
+            # index_daily 中 code 为纯数字
             if db.backend == "clickhouse":
                 r = db.ch_client.query(
                     f"SELECT count() as cnt, MIN(trade_date) as min_date, MAX(trade_date) as max_date "
-                    f"FROM {db.CH_TABLE} WHERE code = '{bs_code}'"
+                    f"FROM {index_table} WHERE code = '{code}'"
                 )
                 row = r.result_rows[0] if r.result_rows else (0, None, None)
                 cnt = row[0]
@@ -330,9 +331,9 @@ def show_summary():
                 import pymysql
                 with db.mysql_conn.cursor() as cur:
                     cur.execute(
-                        "SELECT COUNT(*) as cnt, MIN(trade_date) as min_date, MAX(trade_date) as max_date "
-                        "FROM stock_daily WHERE code = %s",
-                        (bs_code,)
+                        f"SELECT COUNT(*) as cnt, MIN(trade_date) as min_date, MAX(trade_date) as max_date "
+                        f"FROM index_daily WHERE code = %s",
+                        (code,)
                     )
                     row = cur.fetchone()
                     cnt = row["cnt"]

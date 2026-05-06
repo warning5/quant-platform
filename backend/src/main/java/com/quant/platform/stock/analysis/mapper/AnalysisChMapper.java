@@ -176,6 +176,35 @@ public class AnalysisChMapper {
     }
 
     /**
+     * 查询最新一日资金流向数据（从 stock_sentiment_moneyflow 表）
+     * 返回：net_main, net_main_pct, net_huge, net_big
+     */
+    public java.util.Map<String, Object> selectLatestMoneyFlow(String code) {
+        String sql = """
+            SELECT net_main, net_main_pct, net_huge, net_big
+            FROM stock.stock_sentiment_moneyflow
+            WHERE code = ?
+            ORDER BY trade_date DESC
+            LIMIT 1
+            """;
+        try {
+            String normalized = normalizeCodeForDaily(code);
+            return clickHouseJdbcTemplate.queryForObject(sql,
+                    (rs, rowNum) -> {
+                        java.util.Map<String, Object> map = new java.util.HashMap<>();
+                        map.put("net_main", rs.getBigDecimal("net_main"));
+                        map.put("net_main_pct", rs.getBigDecimal("net_main_pct"));
+                        map.put("net_huge", rs.getBigDecimal("net_huge"));
+                        map.put("net_big", rs.getBigDecimal("net_big"));
+                        return map;
+                    }, normalized);
+        } catch (Exception e) {
+            log.warn("查询资金流向失败: code={}, error={}", code, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
      * 计算20日涨跌幅（用于判断强势股）
      * 返回百分比，如 15.5 表示涨15.5%
      */

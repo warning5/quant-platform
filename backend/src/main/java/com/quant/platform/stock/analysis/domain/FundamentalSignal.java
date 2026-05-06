@@ -54,4 +54,9 @@ public class FundamentalSignal {
      * 研报评分（0-5分，由最新评级映射，计入基本面总分）
      */
     private int researchScore;
+
+    /**
+     * 近90天研报数量（用于研报覆盖热度评分，0-4分）
+     */
+    private int reportCount;
 }
