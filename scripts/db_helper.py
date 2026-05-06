@@ -636,25 +636,44 @@ class StockDailyDB:
                 codes_in_batch.add(c)
                 dates_in_batch.add(d)
 
+        # 日期统一格式化为字符串，避免 Python date 对象转 str 时类型不匹配 CH Date 类型
+        def _fmt_date(d):
+            return d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)
+
+        dedup_ok = False  # 标记预过滤是否成功
         if codes_in_batch and dates_in_batch:
-            try:
-                code_list = sorted(codes_in_batch)
-                date_list = sorted(dates_in_batch)
-                # 分批查 FINAL，避免 IN clause 过长
-                ch_batch = 500
-                for ci in range(0, len(code_list), ch_batch):
-                    code_chunk = code_list[ci:ci + ch_batch]
-                    code_ph = ", ".join(f"'{c}'" for c in code_chunk)
-                    date_ph = ", ".join(f"'{d}'" for d in date_list)
-                    r = self.ch_client.query(
-                        f"SELECT code, trade_date FROM {target_table} FINAL "
-                        f"WHERE code IN ({code_ph}) AND trade_date IN ({date_ph})"
-                    )
-                    for row_data in r.result_rows:
-                        existing_keys.add((str(row_data[0]), row_data[1]))
-            except Exception as e:
-                print(f"  [WARN] FINAL 预查询失败，跳过去重: {e}")
-                existing_keys = set()  # 查不到就不去重，全量写入
+            code_list = sorted(codes_in_batch)
+            date_str_list = sorted(_fmt_date(d) for d in dates_in_batch)
+            ch_batch = 500
+            max_retries = 1
+            for attempt in range(max_retries + 1):
+                try:
+                    existing_keys = set()  # 每次重试清空，重新查询
+                    for ci in range(0, len(code_list), ch_batch):
+                        code_chunk = code_list[ci:ci + ch_batch]
+                        code_ph = ", ".join(f"'{c}'" for c in code_chunk)
+                        date_ph = ", ".join(f"'{d}'" for d in date_str_list)
+                        r = self.ch_client.query(
+                            f"SELECT code, trade_date FROM {target_table} FINAL "
+                            f"WHERE code IN ({code_ph}) AND trade_date IN ({date_ph})"
+                        )
+                        for row_data in r.result_rows:
+                            # CH 返回的 trade_date 是 datetime.date 或 str，统一处理
+                            rc = str(row_data[0])
+                            rd = row_data[1]
+                            if hasattr(rd, "strftime"):
+                                rd = _fmt_date(rd)
+                            existing_keys.add((rc, rd))
+                    dedup_ok = True
+                    break  # 查询成功，跳出重试循环
+                except Exception as e:
+                    if attempt < max_retries:
+                        print(f"  [WARN] FINAL 预查询失败(第{attempt+1}次)，重试: {e}")
+                        import time as _t; _t.sleep(0.5)
+                    else:
+                        print(f"  [ERROR] FINAL 预查询失败({max_retries+1}次均失败): {e}")
+                        print(f"  [ERROR] 为避免重复写入，本次批量插入中止！")
+                        return 0  # 预过滤失败则不写入，宁可少写不可重复写
 
         # 分批：2000条/批
         batch_size = 2000
@@ -671,8 +690,9 @@ class StockDailyDB:
                 elif isinstance(td_val, datetime):
                     td_val = td_val.date()
 
-                # 跳过已存在且数据完整的行（无需重复写入）
-                key = (code_val, td_val)
+                # 跳过已存在的行（无需重复写入）
+                # key 的日期用字符串格式，与 existing_keys 保持一致
+                key = (code_val, _fmt_date(td_val))
                 if key in existing_keys:
                     skipped += 1
                     continue
