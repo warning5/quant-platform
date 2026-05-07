@@ -36,6 +36,11 @@ public class ScoreDetail {
     private List<ScoreItem> items;
     
     /**
+     * 数据时间范围说明（供前端 tooltip 展示）
+     */
+    private String dataRange;
+    
+    /**
      * 评分项
      */
     @Data

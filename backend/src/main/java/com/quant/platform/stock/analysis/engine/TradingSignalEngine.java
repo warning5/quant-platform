@@ -26,9 +26,11 @@ public class TradingSignalEngine {
     private static final double NET_MAIN_HIGH = 5e8;       // 主力净流入>5亿=强
     private static final double NET_MAIN_MED = 1e8;        // 主力净流入>1亿=中
     private static final double NET_MAIN_LOW = -1e8;       // 主力净流入<-1亿=弱
+    private static final double NET_MAIN_VLOW = -3e8;      // 主力净流入<-3亿=严重流出
     private static final double NET_MAIN_PCT_HIGH = 10.0;  // 主力净流入占比>10%=强
     private static final double NET_MAIN_PCT_MED = 5.0;    // 主力净流入占比>5%=中
     private static final double NET_MAIN_PCT_LOW = -5.0;   // 主力净流入占比<-5%=弱
+    private static final double NET_MAIN_PCT_VLOW = -10.0;  // 主力净流入占比<-10%=严重流出
 
     // ========== 基本面阈值 ==========
     private static final double ROE_THRESHOLD = 10.0;         // ROE>10%为优质
@@ -162,8 +164,10 @@ public class TradingSignalEngine {
                 score += 5;  // 小幅流入
             } else if (nm > NET_MAIN_LOW) {
                 score += 2;  // 小幅流出（>-1亿）
+            } else if (nm > NET_MAIN_VLOW) {
+                score += 1;  // 中度流出（>-3亿）
             }
-            // ≤-1亿流出 = 0分
+            // ≤-3亿严重流出 = 0分
         }
         
         // 主力净流入占比（8分）— 相对比例，消除市值大小偏差
@@ -177,8 +181,10 @@ public class TradingSignalEngine {
                 score += 4;  // 占比>0%，小幅
             } else if (pct > NET_MAIN_PCT_LOW) {
                 score += 2;  // 占比>-5%，温和流出
+            } else if (pct > NET_MAIN_PCT_VLOW) {
+                score += 1;  // 占比>-10%，中度流出
             }
-            // ≤-5% = 0分
+            // ≤-10% = 0分
         }
         
         // 量比（4分）— 成交活跃度
@@ -472,6 +478,7 @@ public class TradingSignalEngine {
         techDetail.setScore(techScore);
         techDetail.setMaxScore(TECH_WEIGHT);
         techDetail.setItems(buildTechItems(tech));
+        techDetail.setDataRange("缠论最新1条 + 均线/MACD近120日 + RSI14日");
         details.add(techDetail);
         
         // 资金面明细
@@ -481,6 +488,7 @@ public class TradingSignalEngine {
         moneyDetail.setScore(moneyScore);
         moneyDetail.setMaxScore(MONEY_WEIGHT);
         moneyDetail.setItems(buildMoneyItems(money));
+        moneyDetail.setDataRange("当日主力净流入 + 量比(当日/5日均) + 换手率偏离(当日-20日均)");
         details.add(moneyDetail);
         
         // 事件面明细
@@ -490,6 +498,7 @@ public class TradingSignalEngine {
         sentimentDetail.setScore(sentimentScore);
         sentimentDetail.setMaxScore(SENTIMENT_WEIGHT);
         sentimentDetail.setItems(isBlueChip ? buildSentimentItemsBlueChip(sentiment) : buildSentimentItems(sentiment));
+        sentimentDetail.setDataRange("近10日涨停 + 最新龙虎榜 + 融资余额(最新) + 近90天研报");
         details.add(sentimentDetail);
         
         // 基本面明细
@@ -499,6 +508,7 @@ public class TradingSignalEngine {
         fundDetail.setScore(fundamentalScore);
         fundDetail.setMaxScore(FUNDAMENTAL_WEIGHT);
         fundDetail.setItems(buildFundamentalItems(fundamental));
+        fundDetail.setDataRange("最新一期财报 + 最新研报评级 + 近90天研报覆盖");
         details.add(fundDetail);
         
         return details;
@@ -543,9 +553,10 @@ public class TradingSignalEngine {
             else if (v >= NET_MAIN_MED) nmScore = 7;
             else if (v > 0) nmScore = 5;
             else if (v > NET_MAIN_LOW) nmScore = 2;
+            else if (v > NET_MAIN_VLOW) nmScore = 1;
         }
         items.add(buildItem("主力净流入", nm != null ? formatMoneyFlow(nm) : "暂无数据",
-                nmScore, 10, ">5亿=10分, >1亿=7分, >0=5分, >-1亿=2分, ≤-1亿=0分"));
+                nmScore, 10, ">5亿=10分, >1亿=7分, >0=5分, >-1亿=2分, >-3亿=1分, ≤-3亿=0分"));
 
         // 主力净流入占比（8分）
         BigDecimal nmPct = money != null ? money.getNetMainPct() : null;
@@ -556,9 +567,10 @@ public class TradingSignalEngine {
             else if (v >= NET_MAIN_PCT_MED) pctScore = 6;
             else if (v > 0) pctScore = 4;
             else if (v > NET_MAIN_PCT_LOW) pctScore = 2;
+            else if (v > NET_MAIN_PCT_VLOW) pctScore = 1;
         }
         items.add(buildItem("主力净流入占比", nmPct != null ? nmPct.setScale(2, RoundingMode.HALF_UP) + "%" : "暂无数据",
-                pctScore, 8, ">10%=8分, >5%=6分, >0%=4分, >-5%=2分, ≤-5%=0分"));
+                pctScore, 8, ">10%=8分, >5%=6分, >0%=4分, >-5%=2分, >-10%=1分, ≤-10%=0分"));
 
         // 量比（4分）
         BigDecimal vr = money != null ? money.getVolumeRatio() : null;
@@ -901,6 +913,91 @@ public class TradingSignalEngine {
             signal.setTiming("建议清仓离场，等待更好机会");
             signal.setRisks("多项指标走弱，风险较高");
         }
+
+        // 计算反转条件（减仓/清仓时，列出回到更高档位需满足的条件）
+        computeReversalConditions(signal);
+    }
+
+    /**
+     * 计算反转条件：当操作为减仓/清仓时，列出将评分提升到更高档位需要满足的条件
+     */
+    private void computeReversalConditions(TradingSignal signal) {
+        String action = signal.getAction();
+        if (!"REDUCE".equals(action) && !"CLEAR".equals(action)) {
+            signal.setReversalConditions(null);
+            return;
+        }
+
+        List<String> conditions = new ArrayList<>();
+        List<ScoreDetail> details = signal.getScoreDetails();
+        if (details == null) {
+            signal.setReversalConditions(null);
+            return;
+        }
+
+        for (ScoreDetail d : details) {
+            double pct = d.getMaxScore() > 0 ? (double) d.getScore() / d.getMaxScore() : 0;
+            if (pct >= 0.6) continue; // 该维度分数够高，不需要反转条件
+
+            String dim = d.getDimension();
+            if ("tech".equals(dim)) {
+                if (d.getItems() != null) {
+                    for (ScoreDetail.ScoreItem item : d.getItems()) {
+                        if (item.getScore() == 0) {
+                            conditions.add(mapReversalLabel(item.getLabel()));
+                        }
+                    }
+                }
+            } else if ("money".equals(dim)) {
+                conditions.add("主力净流入转正");
+                conditions.add("量比>1.5");
+            } else if ("sentiment".equals(dim)) {
+                conditions.add("出现涨停");
+                conditions.add("龙虎榜净买入");
+            } else if ("fundamental".equals(dim)) {
+                conditions.add("ROE>10%");
+                conditions.add("营收增速>20%");
+            }
+        }
+
+        if (conditions.isEmpty()) {
+            signal.setReversalConditions(null);
+        } else {
+            // 去重，最多列4条
+            List<String> unique = conditions.stream().distinct().limit(4).collect(java.util.stream.Collectors.toList());
+            signal.setReversalConditions(String.join("、", unique) + "后可关注介入时机");
+        }
+    }
+
+    /**
+     * 将英文指标名映射为中文反转条件描述
+     */
+    private String mapReversalLabel(String label) {
+        return switch (label) {
+            case "缠论信号" -> "缠论信号转买入";
+            case "趋势状态" -> "趋势转牛市";
+            case "均线多头" -> "均线转多头排列";
+            case "MACD金叉" -> "MACD金叉";
+            case "主力净流入" -> "主力净流入转正";
+            case "主力净流入占比" -> "主力净流入占比转正";
+            case "量比" -> "量比>1.5";
+            case "换手率偏离" -> "换手率偏离转正";
+            case "连续涨停" -> "出现涨停";
+            case "炸板率" -> "炸板率降低";
+            case "强势股" -> "进入强势股区间";
+            case "龙虎榜" -> "龙虎榜净买入";
+            case "融资余额变化" -> "融资余额回升";
+            case "公告事件" -> "正面公告增加";
+            case "ROE" -> "ROE>10%";
+            case "PE(TTM)" -> "PE回归合理区间";
+            case "营收增速" -> "营收增速>20%";
+            case "净利增速" -> "净利增速>20%";
+            case "PB" -> "PB<5";
+            case "毛利率" -> "毛利率改善";
+            case "研报评级" -> "研报评级提升";
+            case "研报覆盖热度" -> "研报覆盖增加";
+            default -> label + "改善";
+        };
     }
     
     /**
@@ -910,22 +1007,27 @@ public class TradingSignalEngine {
         List<ScoreRule> rules = new ArrayList<>();
         
         rules.add(new ScoreRule("技术面", TECH_WEIGHT,
-                "缠论信号(12分) + 趋势状态(8分) + 均线多头(5分) + MACD金叉(5分)"));
+                "缠论信号(12分) + 趋势状态(8分) + 均线多头(5分) + MACD金叉(5分)",
+                "缠论最新1条 + 均线/MACD近120日 + RSI14日"));
         
         rules.add(new ScoreRule("资金面", MONEY_WEIGHT,
                 "主力净流入(10分)：>5亿=10分, >1亿=7分, >0=5分, >-1亿=2分\n" +
                 "主力净流入占比(8分)：>10%=8分, >5%=6分, >0%=4分, >-5%=2分\n" +
                 "量比(4分)：≥2.0=4分, ≥1.5=3分, ≥1.0=2分\n" +
-                "换手率偏离(3分)：>0%=3分, >-2%=2分, ≤-2%=1分"));
+                "换手率偏离(3分)：>0%=3分, >-2%=2分, ≤-2%=1分",
+                "当日主力净流入 + 量比(当日/5日均) + 换手率偏离(当日-20日均)"));
         
         rules.add(new ScoreRule("事件面", SENTIMENT_WEIGHT,
-                "连续涨停(10分) + 炸板率(8分) + 强势股(7分)"));
+                "连续涨停(5分) + 炸板率(5分) + 强势股(4分) + 龙虎榜(4分) + 融资余额(3分) + 公告事件(4分)",
+                "近10日涨停 + 最新龙虎榜 + 融资余额(最新) + 近90天研报"));
         
         rules.add(new ScoreRule("基本面", FUNDAMENTAL_WEIGHT,
-                "ROE(4分) + PE估值(3分) + 营收增速(3分) + 净利增速(4分) + PB(3分) + 毛利率(3分) + 研报评级(5分) + 研报覆盖热度(4分)"));
+                "ROE(4分) + PE估值(3分) + 营收增速(3分) + 净利增速(4分) + PB(3分) + 毛利率(3分) + 研报评级(5分) + 研报覆盖热度(4分)",
+                "最新一期财报 + 最新研报评级 + 近90天研报覆盖"));
         
         rules.add(new ScoreRule("操作建议", 0,
-                "≥84分=强烈买入, ≥63分=买入, ≥42分=持有, ≥21分=减仓, <21分=清仓"));
+                "≥84分=强烈买入, ≥63分=买入, ≥42分=持有, ≥21分=减仓, <21分=清仓",
+                "-"));
         
         return rules;
     }
@@ -938,11 +1040,13 @@ public class TradingSignalEngine {
         private String dimension;
         private int maxScore;
         private String rule;
-        
-        public ScoreRule(String dimension, int maxScore, String rule) {
+        private String dataRange;
+
+        public ScoreRule(String dimension, int maxScore, String rule, String dataRange) {
             this.dimension = dimension;
             this.maxScore = maxScore;
             this.rule = rule;
+            this.dataRange = dataRange;
         }
     }
 }

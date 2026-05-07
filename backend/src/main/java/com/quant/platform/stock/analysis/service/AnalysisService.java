@@ -184,6 +184,7 @@ public class AnalysisService {
         overview.setPosition(signal.getPosition());
         overview.setTiming(signal.getTiming());
         overview.setRisks(signal.getRisks());
+        overview.setReversalConditions(signal.getReversalConditions());
         overview.setScoreDetails(signal.getScoreDetails());
         // 回写各维度分数到 Signal 对象
         for (ScoreDetail detail : signal.getScoreDetails()) {
@@ -213,7 +214,7 @@ public class AnalysisService {
     }
 
     /**
-     * 根据四维度评分生成文字结论
+     * 根据四维度评分生成文字结论（含关键判断依据）
      */
     private String buildConclusion(AnalysisOverview o, TradingSignal signal) {
         StringBuilder sb = new StringBuilder();
@@ -224,17 +225,11 @@ public class AnalysisService {
         sb.append("建议【").append(signal.getActionName()).append("】");
         sb.append("，建议仓位").append(signal.getPosition()).append("%。");
 
-        // 四维度简述
+        // 四维度：输出关键判断依据，而非笼统的"强/弱"
         if (o.getScoreDetails() != null) {
             for (var d : o.getScoreDetails()) {
-                String level;
-                double pct = (double) d.getScore() / d.getMaxScore();
-                if (pct >= 0.8) level = "强";
-                else if (pct >= 0.6) level = "较强";
-                else if (pct >= 0.4) level = "一般";
-                else if (pct >= 0.2) level = "较弱";
-                else level = "弱";
-                sb.append(d.getDimensionName()).append("表现").append(level).append("；");
+                String reason = buildDimensionReason(d, o);
+                sb.append(d.getDimensionName()).append("：").append(reason).append("；");
             }
         }
 
@@ -243,6 +238,59 @@ public class AnalysisService {
             sb.append("注意：").append(o.getRisks());
         }
         return sb.toString();
+    }
+
+    /**
+     * 生成单维度的一句话判断依据（只输出有信息的指标，英文状态转中文）
+     */
+    private String buildDimensionReason(ScoreDetail d, AnalysisOverview o) {
+        double pct = d.getMaxScore() > 0 ? (double) d.getScore() / d.getMaxScore() : 0;
+        String level;
+        if (pct >= 0.8) level = "强";
+        else if (pct >= 0.6) level = "较强";
+        else if (pct >= 0.4) level = "一般";
+        else if (pct >= 0.2) level = "较弱";
+        else level = "弱";
+
+        // 取各维度最有价值的判断依据（优先取有分数的item，最多2个）
+        List<String> parts = new ArrayList<>();
+        if (d.getItems() != null) {
+            for (var item : d.getItems()) {
+                if (item.getScore() > 0 && item.getValue() != null
+                        && !item.getValue().equals("-") && !item.getValue().equals("暂无数据")) {
+                    parts.add(mapChinese(item.getLabel()) + mapChinese(item.getValue()));
+                }
+                if (parts.size() >= 2) break;
+            }
+            // 如果没找到有分的，取前2个非空的
+            if (parts.isEmpty()) {
+                for (var item : d.getItems()) {
+                    if (item.getValue() != null && !item.getValue().equals("-") && !item.getValue().equals("暂无数据")) {
+                        parts.add(mapChinese(item.getLabel()) + mapChinese(item.getValue()));
+                    }
+                    if (parts.size() >= 2) break;
+                }
+            }
+        }
+        return level + (parts.isEmpty() ? "" : "（" + String.join("，", parts) + "）");
+    }
+
+    /**
+     * 将英文状态码映射为中文，普通文本原样返回
+     */
+    private String mapChinese(String v) {
+        if (v == null) return "";
+        return switch (v) {
+            case "BUY" -> "买入";
+            case "SELL" -> "卖出";
+            case "HOLD" -> "持有";
+            case "BULLISH" -> "牛市";
+            case "SIDEWAYS" -> "横盘";
+            case "BEARISH" -> "熊市";
+            case "是" -> "是";
+            case "否" -> "否";
+            default -> v;
+        };
     }
 
     /**
@@ -264,16 +312,16 @@ public class AnalysisService {
      */
     private MoneyFlowSignal calcMoneyFlowSignal(String code) {
         MoneyFlowSignal signal = new MoneyFlowSignal();
-        
+
         // 获取最近30日数据
         List<DailyBarRow> bars = analysisChMapper.selectRecentDailyBars(code, 30);
         if (bars == null || bars.isEmpty()) {
             return signal;
         }
-        
+
         // 最新一日数据
         DailyBarRow latest = bars.get(bars.size() - 1);
-        
+
         // 计算量比（当日成交量 / 5日均量）
         if (latest.getVolume() != null && bars.size() >= 6) {
             long sum5 = 0;
@@ -289,6 +337,10 @@ public class AnalysisService {
         }
         
         // 计算换手率偏离（当日换手率 - 20日平均换手率）
+        // 当日换手率只要有值就设置（不依赖20日均值计算条件）
+        if (latest.getTurnoverRate() != null) {
+            signal.setTurnoverRate(latest.getTurnoverRate());
+        }
         if (latest.getTurnoverRate() != null && bars.size() >= 21) {
             double sum20 = 0;
             int count = 0;
@@ -304,7 +356,6 @@ public class AnalysisService {
                         latest.getTurnoverRate().subtract(BigDecimal.valueOf(avg20)));
                 signal.setTurnoverRate5d(BigDecimal.valueOf(avg20));
             }
-            signal.setTurnoverRate(latest.getTurnoverRate());
         }
         
         // 判断量能状态
@@ -1133,6 +1184,11 @@ public class AnalysisService {
                 for (int i = Math.max(0, n - 5); i < n; i++) {
                     Map<String, Object> day = new LinkedHashMap<>();
                     day.put("dayIndex", i - Math.max(0, n - 5) + 1);
+                    // 取对应的交易日期
+                    int barIdx = i + 1; // alignedStock 从 bars[1] 开始（i=1 对应 bars[1]）
+                    if (barIdx < bars.size() && bars.get(barIdx).getTradeDate() != null) {
+                        day.put("tradeDate", bars.get(barIdx).getTradeDate().toString());
+                    }
                     day.put("stockRet", Math.round(alignedStock.get(i) * 10000.0) / 100.0);
                     day.put("industryRet", Math.round(alignedInd.get(i) * 10000.0) / 100.0);
                     // 超额收益

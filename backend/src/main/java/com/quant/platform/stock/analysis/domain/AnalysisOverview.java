@@ -94,7 +94,12 @@ public class AnalysisOverview {
      * 分析结论（四维度综合文字结论）
      */
     private String conclusion;
-
+    
+    /**
+     * 反转条件（减仓/清仓时，列出回到买入信号需满足的条件）
+     */
+    private String reversalConditions;
+    
     /**
      * 是否大盘蓝筹（总市值 ≥ 1000亿）
      */

@@ -391,6 +391,11 @@ export default function StockAnalysis() {
                         {detail.items?.map((item, i) => (
                           <div key={i}>{item.label}: {item.value} ({item.score}/{item.maxScore})</div>
                         ))}
+                        {detail.dataRange && (
+                          <div style={{ marginTop: 4, borderTop: '1px solid #555', paddingTop: 4 }}>
+                            数据范围：{detail.dataRange}
+                          </div>
+                        )}
                       </div>
                     } className="tip-light">
                       <div>
@@ -413,6 +418,13 @@ export default function StockAnalysis() {
             {overview.risks && (
               <div style={{ marginTop: 12, padding: '8px 12px', background: '#fffbe6', borderRadius: 4, fontSize: 13, color: '#d48806' }}>
                 <span style={{ fontWeight: 500 }}>风险提示：</span>{overview.risks}
+              </div>
+            )}
+
+            {/* 反转条件 - 减仓/清仓时显示介入参考 */}
+            {overview.reversalConditions && (
+              <div style={{ marginTop: 8, padding: '8px 12px', background: '#e6fffb', borderRadius: 4, fontSize: 13, color: '#08979c' }}>
+                <span style={{ fontWeight: 500 }}>介入参考：</span>{overview.reversalConditions}
               </div>
             )}
           </Card>
@@ -583,11 +595,11 @@ function MoneyFlowTab({ data }) {
 
   // 主力净流入评分（10分）
   const absNm = Math.abs(nmVal);
-  const nmScore = nmVal >= 5e8 ? 10 : nmVal >= 1e8 ? 7 : nmVal > 0 ? 5 : nmVal > -1e8 ? 2 : 0;
+  const nmScore = nmVal >= 5e8 ? 10 : nmVal >= 1e8 ? 7 : nmVal > 0 ? 5 : nmVal > -1e8 ? 2 : nmVal > -3e8 ? 1 : 0;
   const nmColor = nmVal > 0 ? 'red' : nmVal < 0 ? 'green' : 'default';
 
   // 主力净流入占比评分（8分）
-  const pctScore = nmPctVal >= 10 ? 8 : nmPctVal >= 5 ? 6 : nmPctVal > 0 ? 4 : nmPctVal > -5 ? 2 : 0;
+  const pctScore = nmPctVal >= 10 ? 8 : nmPctVal >= 5 ? 6 : nmPctVal > 0 ? 4 : nmPctVal > -5 ? 2 : nmPctVal > -10 ? 1 : 0;
   const pctColor = nmPctVal > 0 ? 'red' : nmPctVal < 0 ? 'green' : 'default';
 
   // 量比评分（4分）
@@ -627,12 +639,12 @@ function MoneyFlowTab({ data }) {
       <IndicatorRow
         label="主力净流入" value={data.netMain != null ? fmtMoney(data.netMain) : '暂无数据'} color={nmColor}
         score={nmScore} maxScore={10}
-        desc="主力资金(超大单+大单)当日净流入额。>5亿=10分，>1亿=7分，>0=5分，>-1亿=2分"
+        desc="主力资金(超大单+大单)当日净流入额。>5亿=10分，>1亿=7分，>0=5分，>-1亿=2分，>-3亿=1分"
       />
       <IndicatorRow
         label="主力净流入占比" value={data.netMainPct != null ? `${data.netMainPct.toFixed(2)}%` : '暂无数据'} color={pctColor}
         score={pctScore} maxScore={8}
-        desc="主力净流入占成交额比例。>10%=8分，>5%=6分，>0%=4分，>-5%=2分"
+        desc="主力净流入占成交额比例。>10%=8分，>5%=6分，>0%=4分，>-5%=2分，>-10%=1分"
       />
       <IndicatorRow
         label="超大单净流入" value={data.netHuge != null ? fmtMoney(data.netHuge) : '-'} 
@@ -759,9 +771,42 @@ function SentimentTab({ data, isBlueChip }) {
     );
   }
 
-  // 小盘股默认模式：连续涨停/炸板率/强势股
+  // 小盘股默认模式：连续涨停(5)/炸板率(5)/强势股(4)/龙虎榜(4)/融资余额(3)/公告事件(4)=25
   const luDays = data.limitUpDays ?? 0;
   const brRate = data.brokenLimitUpRate ?? 0;
+  const luScore = luDays >= 3 ? 5 : luDays >= 2 ? 4 : luDays >= 1 ? 2 : 0;
+  const brScore = brRate < 10 ? 5 : brRate < 30 ? 3 : brRate < 50 ? 1 : 0;
+  const strongScore = data.isStrongStock ? 4 : 0;
+
+  // 龙虎榜评分
+  let lhbScore = 0;
+  let lhbDisplay = '-';
+  if (data.lhbAppearCount > 0) {
+    if (data.lhbNetAmount > 0) {
+      lhbScore = 4;
+      lhbDisplay = `上榜${data.lhbAppearCount}次,净买入`;
+    } else {
+      lhbScore = 1;
+      lhbDisplay = `上榜${data.lhbAppearCount}次,净卖出`;
+    }
+  } else {
+    lhbDisplay = '未上榜';
+  }
+
+  // 融资余额变化评分
+  const mcpVal = data.marginChgPct ?? null;
+  let mcpScore = 0;
+  if (mcpVal != null) {
+    if (mcpVal > 5) mcpScore = 3;
+    else if (mcpVal > 2) mcpScore = 2;
+    else if (mcpVal > 0) mcpScore = 1;
+  }
+
+  // 公告事件评分
+  const posCount = data.noticePositiveCount ?? 0;
+  const negCount = data.noticeNegativeCount ?? 0;
+  const eventNet = posCount - negCount;
+  const eventScore = eventNet >= 3 ? 4 : eventNet >= 1 ? 2 : 0;
 
   return (
     <div>
@@ -769,26 +814,44 @@ function SentimentTab({ data, isBlueChip }) {
         display: 'flex', padding: '4px 0', gap: 12,
         borderBottom: '2px solid #e8e8e8', fontWeight: 600, fontSize: 12, color: '#999',
       }}>
-        <span style={{ width: 100, flexShrink: 0 }}>指标</span>
+        <span style={{ width: 110, flexShrink: 0 }}>指标</span>
         <span style={{ width: 80, flexShrink: 0, textAlign: 'center' }}>当前值</span>
         <span style={{ width: 60, flexShrink: 0, textAlign: 'center' }}>评分</span>
         <span style={{ flex: 1 }}>说明</span>
       </div>
       <IndicatorRow
-        label="连续涨停" value={`${luDays}天`} color={luDays >= 2 ? 'red' : luDays >= 1 ? 'volcano' : 'default'}
-        score={luDays >= 2 ? 10 : luDays >= 1 ? 5 : 0} maxScore={10}
-        desc="连续涨停天数。2天及以上=强势(10分)，1天=较强(5分)"
+        label="连续涨停" value={`${luDays}天`} color={luDays >= 3 ? 'red' : luDays >= 2 ? 'volcano' : luDays >= 1 ? 'blue' : 'default'}
+        score={luScore} maxScore={5}
+        desc="近10日连续涨停天数。≥3天=5分, 2天=4分, 1天=2分"
       />
       <IndicatorRow
-        label="炸板率" value={data.brokenLimitUpRate?.toFixed(1) ? `${data.brokenLimitUpRate.toFixed(1)}%` : '-'}
+        label="炸板率" value={data.brokenLimitUpRate != null ? `${brRate.toFixed(1)}%` : '-'}
         color={brRate < 10 ? 'green' : brRate > 30 ? 'red' : 'volcano'}
-        score={brRate < 10 ? 8 : 0} maxScore={8}
-        desc="20日内炸板次数/涨停次数。<10%=封板强(8分)，>30%=封板弱"
+        score={brScore} maxScore={5}
+        desc="炸板次数/涨停次数。<10%=5分(封板强), <30%=3分, <50%=1分"
       />
       <IndicatorRow
         label="强势股" value={data.isStrongStock ? '是' : '否'} color={data.isStrongStock ? 'red' : 'default'}
-        score={data.isStrongStock ? 7 : 0} maxScore={7}
-        desc="20日涨幅>30%=强势(7分)。强势股惯性上涨概率更高"
+        score={strongScore} maxScore={4}
+        desc="20日涨幅>30%=强势(4分)"
+      />
+      <IndicatorRow
+        label="龙虎榜" value={lhbDisplay}
+        color={lhbScore >= 4 ? 'red' : lhbScore >= 1 ? 'volcano' : 'default'}
+        score={lhbScore} maxScore={4}
+        desc="上榜+净买入=4分, 上榜+净卖出=1分"
+      />
+      <IndicatorRow
+        label="融资余额变化" value={mcpVal != null ? `${mcpVal.toFixed(2)}%` : '-'}
+        color={mcpVal != null && mcpVal > 0 ? 'red' : mcpVal != null ? 'green' : 'default'}
+        score={mcpScore} maxScore={3}
+        desc="融资余额变化率。>5%=3分, >2%=2分, >0%=1分"
+      />
+      <IndicatorRow
+        label="公告事件" value={`正面${posCount}/负面${negCount}`}
+        color={eventNet >= 1 ? 'red' : eventNet < 0 ? 'green' : 'default'}
+        score={eventScore} maxScore={4}
+        desc="正面-负面公告数。≥3=4分, ≥1=2分"
       />
       <div style={{ marginTop: 12, padding: '8px 0', borderTop: '2px solid #e8e8e8' }}>
         <Text strong style={{ fontSize: 14 }}>
@@ -824,6 +887,10 @@ function FundamentalTab({ data }) {
   const npMax = 4;
   const gmScore = gmVal >= 40 ? 3 : gmVal >= 20 ? 2 : gmVal > 0 ? 1 : 0;
   const gmMax = 3;
+  const rsVal = data.researchScore ?? 0;
+  const rsScore = rsVal >= 5 ? 5 : rsVal >= 3 ? 3 : rsVal >= 1 ? 1 : 0;
+  const rsMax = 5;
+  const rsLabel = rsVal >= 5 ? '买入' : rsVal >= 3 ? '增持' : rsVal >= 1 ? '中性' : '暂无';
   const rcScore = rcVal >= 10 ? 4 : rcVal >= 5 ? 3 : rcVal >= 2 ? 2 : rcVal >= 1 ? 1 : 0;
   const rcMax = 4;
 
@@ -873,6 +940,12 @@ function FundamentalTab({ data }) {
         color={gmVal >= 40 ? 'green' : gmVal >= 20 ? 'default' : 'default'}
         score={gmScore} maxScore={gmMax}
         desc="毛利率=(营收-成本)/营收。≥40%(3分), ≥20%(2分), >0%(1分)"
+      />
+      <IndicatorRow
+        label="研报评级" value={rsLabel}
+        color={rsVal >= 5 ? 'red' : rsVal >= 3 ? 'volcano' : 'default'}
+        score={rsScore} maxScore={rsMax}
+        desc="综合研报评级。买入=5分, 增持=3分, 中性=1分, 其他=0分"
       />
       <IndicatorRow
         label="研报覆盖热度" value={`${rcVal}篇(90天)`}
@@ -1313,21 +1386,36 @@ function IndustryCorrelationTab({ data, code }) {
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={8}>
           <Card size="small" bodyStyle={{ padding: '12px 16px', textAlign: 'center' }}>
-            <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>Beta系数</div>
+            <div style={{ fontSize: 12, color: '#999', marginBottom: 4, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 4 }}>
+              Beta系数
+              <Tooltip title="衡量个股相对于所属行业的波动敏感度。Beta>1 表示个股波动大于行业（高弹性），Beta<1 表示波动小于行业（防御性）。例如 Beta=0.63 意味着行业涨跌1%时，个股平均波动0.63%。">
+                <QuestionCircleOutlined style={{ fontSize: 11, color: '#bbb', cursor: 'pointer' }} />
+              </Tooltip>
+            </div>
             <div style={{ fontSize: 28, fontWeight: 600, color: betaColor }}>{beta}</div>
             <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>{data.betaDesc || '-'}</div>
           </Card>
         </Col>
         <Col span={8}>
           <Card size="small" bodyStyle={{ padding: '12px 16px', textAlign: 'center' }}>
-            <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>行业相关系数</div>
+            <div style={{ fontSize: 12, color: '#999', marginBottom: 4, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 4 }}>
+              行业相关系数
+              <Tooltip title="衡量个股与行业指数价格走势的线性相关程度，范围 -1 到 1。>0.7 强联动（几乎同步），0.3~0.7 中等相关，<0.3 弱相关（有独立行情）。例如 0.4 表示个股不完全跟随行业，有自己的独立逻辑。">
+                <QuestionCircleOutlined style={{ fontSize: 11, color: '#bbb', cursor: 'pointer' }} />
+              </Tooltip>
+            </div>
             <div style={{ fontSize: 28, fontWeight: 600, color: corrColor }}>{corr}</div>
             <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>{data.corrDesc || '-'}</div>
           </Card>
         </Col>
         <Col span={8}>
           <Card size="small" bodyStyle={{ padding: '12px 16px', textAlign: 'center' }}>
-            <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>行业分布（今日）</div>
+            <div style={{ fontSize: 12, color: '#999', marginBottom: 4, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 4 }}>
+              行业分布（今日）
+              <Tooltip title="所属行业今日整体涨跌分布。涨/跌家数反映板块情绪，可用于判断个股是否跑赢板块内多数股票。">
+                <QuestionCircleOutlined style={{ fontSize: 11, color: '#bbb', cursor: 'pointer' }} />
+              </Tooltip>
+            </div>
             <div style={{ fontSize: 16, fontWeight: 500 }}>
               <span style={{ color: '#f5222d' }}>{upCount}涨</span>
               <span style={{ color: '#999', margin: '0 6px' }}>·</span>
@@ -1348,8 +1436,18 @@ function IndustryCorrelationTab({ data, code }) {
             pagination={false}
             dataSource={recentAlign}
             rowKey="dayIndex"
+            style={{ border: '1px solid #f0f0f0', borderRadius: 6 }}
+            className="industry-excess-table"
             columns={[
-              { title: '第N日', dataIndex: 'dayIndex', width: 60, align: 'center' },
+              {
+                title: '第N日', dataIndex: 'dayIndex', width: 80, align: 'center',
+                render: (v, row) => (
+                  <div>
+                    <div>第{v}日</div>
+                    <div style={{ fontSize: 11, color: '#999' }}>{row.tradeDate || '-'}</div>
+                  </div>
+                ),
+              },
               {
                 title: '个股收益%', dataIndex: 'stockRet',
                 width: 100, align: 'center',
@@ -1365,6 +1463,19 @@ function IndustryCorrelationTab({ data, code }) {
                 width: 100, align: 'center',
                 render: v => <span style={{ color: v >= 0 ? '#f5222d' : '#52c41a', fontWeight: 600 }}>{v >= 0 ? '+' : ''}{v?.toFixed(2)}%</span>,
               },
+              {
+                title: '解读', dataIndex: 'excessRet',
+                width: 120, align: 'center',
+                render: v => {
+                  if (v == null) return '-';
+                  const t = Number(v);
+                  if (t > 3) return <span style={{ color: '#f5222d' }}>大幅跑赢</span>;
+                  if (t > 1) return <span style={{ color: '#fa8c16' }}>跑赢行业</span>;
+                  if (t > -1) return <span style={{ color: '#999' }}>基本同步</span>;
+                  if (t > -3) return <span style={{ color: '#1890ff' }}>跑输行业</span>;
+                  return <span style={{ color: '#52c41a' }}>大幅跑输</span>;
+                },
+              },
             ]}
           />
         </Card>
@@ -1373,6 +1484,19 @@ function IndustryCorrelationTab({ data, code }) {
       <div style={{ fontSize: 11, color: '#bbb' }}>
         {code} · 行业: {industry} · 样本: {sampleDays}日 · Beta基于个股收益对行业等权收益回归
       </div>
+      <style>{`
+        .industry-excess-table .ant-table-thead > tr > th,
+        .industry-excess-table .ant-table-tbody > tr > td {
+          border-right: 1px solid #f0f0f0;
+        }
+        .industry-excess-table .ant-table-thead > tr > th:last-child,
+        .industry-excess-table .ant-table-tbody > tr > td:last-child {
+          border-right: none;
+        }
+        .industry-excess-table .ant-table-tbody > tr > td {
+          padding: 6px 8px;
+        }
+      `}</style>
     </div>
   );
 }

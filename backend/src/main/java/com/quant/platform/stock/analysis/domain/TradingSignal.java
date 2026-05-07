@@ -66,6 +66,11 @@ public class TradingSignal {
     private String risks;
     
     /**
+     * 反转条件（减仓/清仓时，列出回到买入信号需满足的条件）
+     */
+    private String reversalConditions;
+    
+    /**
      * 技术面信号
      */
     private TechSignal techSignal;

@@ -133,10 +133,13 @@ public class AnalysisChMapper {
      */
     public List<DailyBarRow> selectRecentDailyBars(String code, int days) {
         // ClickHouse 用 subtractDays() 替代 MySQL 的 DATE_SUB()
+        // 注意：CH JDBC 驱动不识别 AS 别名，ResultSetMetaData 返回原始列名
+        // 必须用手动 RowMapper 映射，不能用 BeanPropertyRowMapper
         String sql = """
             SELECT
                 code, trade_date, open_price, close_price, high_price, low_price,
-                pre_close, volume, amount, change_percent, turnover_rate, pe_ttm, pb
+                pre_close, volume, amount, change_percent,
+                turnover_rate, pe_ttm, pb
             FROM stock.stock_daily
             WHERE code = ?
               AND trade_date >= (SELECT subtractDays(MAX(trade_date), ?) FROM stock.stock_daily WHERE code = ?)
@@ -144,8 +147,23 @@ public class AnalysisChMapper {
             """;
         try {
             String normalized = normalizeCodeForDaily(code);
-            return clickHouseJdbcTemplate.query(sql,
-                    new BeanPropertyRowMapper<>(DailyBarRow.class), normalized, days, normalized);
+            return clickHouseJdbcTemplate.query(sql, (rs, rowNum) -> {
+                DailyBarRow row = new DailyBarRow();
+                row.setCode(rs.getString("code"));
+                row.setTradeDate(rs.getDate("trade_date").toLocalDate());
+                row.setOpenPrice(rs.getBigDecimal("open_price"));
+                row.setClosePrice(rs.getBigDecimal("close_price"));
+                row.setHighPrice(rs.getBigDecimal("high_price"));
+                row.setLowPrice(rs.getBigDecimal("low_price"));
+                row.setPreClose(rs.getBigDecimal("pre_close"));
+                row.setVolume(rs.getLong("volume"));
+                row.setAmount(rs.getBigDecimal("amount"));
+                row.setChangePercent(rs.getBigDecimal("change_percent"));
+                row.setTurnoverRate(rs.getBigDecimal("turnover_rate"));
+                row.setPeTtm(rs.getBigDecimal("pe_ttm"));
+                row.setPb(rs.getBigDecimal("pb"));
+                return row;
+            }, normalized, days, normalized);
         } catch (Exception e) {
             log.warn("查询日线数据失败: code={}, error={}", code, e.getMessage());
             return new ArrayList<>();
