@@ -66,9 +66,8 @@ public class FactorAnalysisService {
      * 获取因子IC/IR趋势数据（单个因子）
      */
     public Map<String, Object> getFactorIcTrend(String factorCode, String startDate, String endDate, int forwardDays) {
-        Map<String, Object> result = calcSingleFactorIcIr(factorCode, startDate, endDate, forwardDays);
         // icTimeline 已包含在 result 中
-        return result;
+        return calcSingleFactorIcIr(factorCode, startDate, endDate, forwardDays);
     }
 
     /**
@@ -262,7 +261,7 @@ public class FactorAnalysisService {
 
         if (targetDates.isEmpty()) return Collections.emptyMap();
 
-        String targetDate = targetDates.get(0);
+        String targetDate = targetDates.getFirst();
 
         // 用目标交易日查询收盘价
         String priceSql = String.format(
@@ -313,7 +312,7 @@ public class FactorAnalysisService {
         Integer[] indices = new Integer[n];
         for (int i = 0; i < n; i++) indices[i] = i;
 
-        Arrays.sort(indices, (a, b) -> Double.compare(values.get(a), values.get(b)));
+        Arrays.sort(indices, Comparator.comparingDouble(values::get));
 
         int[] ranks = new int[n];
         for (int i = 0; i < n; i++) {

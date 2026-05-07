@@ -467,8 +467,7 @@ public class ParamOptimizeService {
     /**
      * 将参数应用到回测任务（动态参数覆盖策略定义中的值）
      */
-    private void applyParams(BacktestTask task, StrategyDefinition baseSt,
-                             Map<String, Object> params) throws Exception {
+    private void applyParams(BacktestTask task, StrategyDefinition baseSt, Map<String, Object> params) {
         // 遍历优化参数，正确设置到 BacktestTask
         for (Map.Entry<String, Object> e : params.entrySet()) {
             switch (e.getKey()) {

@@ -69,5 +69,15 @@ public class ScoreDetail {
          * 说明
          */
         private String desc;
+        
+        /**
+         * 是否仅展示不参与评分（参考指标）
+         */
+        private boolean infoOnly;
+        
+        /**
+         * 标签颜色（red/green/blue/volcano/default）
+         */
+        private String color;
     }
 }

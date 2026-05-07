@@ -313,8 +313,8 @@ public class AnalysisService {
     private MoneyFlowSignal calcMoneyFlowSignal(String code) {
         MoneyFlowSignal signal = new MoneyFlowSignal();
 
-        // 获取最近30日数据
-        List<DailyBarRow> bars = analysisChMapper.selectRecentDailyBars(code, 30);
+        // 获取最近40个自然日数据（确保≥25个交易日，满足20日均换手率计算）
+        List<DailyBarRow> bars = analysisChMapper.selectRecentDailyBars(code, 40);
         if (bars == null || bars.isEmpty()) {
             return signal;
         }
@@ -1325,32 +1325,32 @@ public class AnalysisService {
     }
 
     /**
-     * 大宗交易分析：历史记录 + 折价率 + 买卖营业部
+     * 大宗交易分析：逐笔明细 + 统计汇总 + 买卖营业部
      */
     public Map<String, Object> getBlockTradeAnalysis(String code) {
         Map<String, Object> result = new LinkedHashMap<>();
         String normalized = normalizeCodeForDailyCH(code);
 
-        // 1. 近期大宗交易记录
+        // 1. 近期大宗交易逐笔记录
         try {
             String btSql = """
-                SELECT trade_date, price, volume, amount, discount_rate,
-                       trade_count, change_pct, close_price, pct_of_float,
+                SELECT trade_date, seq_no, price, volume, amount, discount_rate,
+                       change_pct, close_price, pct_of_float,
                        buy_branch, sell_branch
-                FROM stock.stock_sentiment_block_trade
+                FROM stock.stock_sentiment_block_trade FINAL
                 WHERE code = ?
-                ORDER BY trade_date DESC
-                LIMIT 30
+                ORDER BY trade_date DESC, seq_no
+                LIMIT 50
                 """;
             List<Map<String, Object>> btList = clickHouseJdbcTemplate.query(btSql,
                 (rs, rowNum) -> {
                     Map<String, Object> m = new LinkedHashMap<>();
                     m.put("tradeDate", rs.getDate("trade_date").toString());
+                    m.put("seqNo", rs.getInt("seq_no"));
                     m.put("price", rs.getBigDecimal("price"));
                     m.put("volume", rs.getBigDecimal("volume"));
                     m.put("amount", rs.getBigDecimal("amount"));
                     m.put("discountRate", rs.getBigDecimal("discount_rate"));
-                    m.put("tradeCount", rs.getObject("trade_count"));
                     m.put("changePct", rs.getBigDecimal("change_pct"));
                     m.put("closePrice", rs.getBigDecimal("close_price"));
                     m.put("pctOfFloat", rs.getBigDecimal("pct_of_float"));
@@ -1360,7 +1360,7 @@ public class AnalysisService {
                 }, normalized);
             result.put("records", btList);
 
-            // 2. 统计汇总
+            // 2. 统计汇总（从逐笔聚合）
             String statsSql = """
                 SELECT
                     COUNT(*) as totalCount,
@@ -1368,16 +1368,16 @@ public class AnalysisService {
                     AVG(discount_rate) as avgDiscountRate,
                     MIN(trade_date) as firstDate,
                     MAX(trade_date) as lastDate
-                FROM stock.stock_sentiment_block_trade
+                FROM stock.stock_sentiment_block_trade FINAL
                 WHERE code = ?
                 """;
             Map<String, Object> stats = clickHouseJdbcTemplate.queryForMap(statsSql, normalized);
             result.put("stats", stats);
 
-            // 3. 买方营业部统计
+            // 3. 买方营业部统计（从逐笔聚合）
             String buySql = """
                 SELECT buy_branch as branch, COUNT(*) as cnt, SUM(amount) as totalAmt
-                FROM stock.stock_sentiment_block_trade
+                FROM stock.stock_sentiment_block_trade FINAL
                 WHERE code = ? AND buy_branch != ''
                 GROUP BY buy_branch
                 ORDER BY cnt DESC
@@ -1393,10 +1393,10 @@ public class AnalysisService {
                 }, normalized);
             result.put("topBuyBranches", buyBranches);
 
-            // 4. 卖方营业部统计
+            // 4. 卖方营业部统计（从逐笔聚合）
             String sellSql = """
                 SELECT sell_branch as branch, COUNT(*) as cnt, SUM(amount) as totalAmt
-                FROM stock.stock_sentiment_block_trade
+                FROM stock.stock_sentiment_block_trade FINAL
                 WHERE code = ? AND sell_branch != ''
                 GROUP BY sell_branch
                 ORDER BY cnt DESC

@@ -140,7 +140,9 @@ export default function MarketList() {
         formatter: params => {
           const k = params.find(p => p.seriesName === 'K线');
           if (!k) return '';
-          const [o, c, l, h] = k.value;
+          // ECharts candlestick: k.data 或 k.value 可能含 dataIndex 前缀
+          const raw = k.data || k.value;
+          const [o, c, l, h] = Array.isArray(raw) && raw.length > 4 ? raw.slice(-4) : raw;
           const d = params[0].axisValue;
           const vol = vols[k.dataIndex]?.value ?? '-';
           return `<b>${d}</b><br/>开: ${o?.toFixed(2)}&nbsp;&nbsp;收: ${c?.toFixed(2)}<br/>低: ${l?.toFixed(2)}&nbsp;&nbsp;高: ${h?.toFixed(2)}<br/>成交量: ${(vol / 10000).toFixed(0)}万手`;

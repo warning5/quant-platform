@@ -1368,3 +1368,926 @@ org.springframework.web.servlet.resource.NoResourceFoundException: No static res
 2026-05-07 09:22:21.547 [SpringApplicationShutdownHook] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Stopped.
 2026-05-07 09:22:21.565 [SpringApplicationShutdownHook] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Shutdown initiated...
 2026-05-07 09:22:21.568 [SpringApplicationShutdownHook] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Shutdown completed.
+2026-05-07 18:45:32.349 [background-preinit] INFO  o.h.validator.internal.util.Version - HV000001: Hibernate Validator 8.0.1.Final
+2026-05-07 18:45:32.540 [main] INFO  c.q.p.QuantPlatformApplication - Starting QuantPlatformApplication using Java 21.0.7 with PID 21464 (C:\Users\warning5\WorkBuddy\Claw\quant-platform\backend\target\classes started by warning5 in C:\Users\warning5\WorkBuddy\Claw\quant-platform)
+2026-05-07 18:45:32.541 [main] INFO  c.q.p.QuantPlatformApplication - No active profile set, falling back to 1 default profile: "default"
+2026-05-07 18:45:35.693 [main] INFO  o.s.b.w.e.tomcat.TomcatWebServer - Tomcat initialized with port 8080 (http)
+2026-05-07 18:45:35.716 [main] INFO  o.a.coyote.http11.Http11NioProtocol - Initializing ProtocolHandler ["http-nio-8080"]
+2026-05-07 18:45:35.716 [main] INFO  o.a.catalina.core.StandardService - Starting service [Tomcat]
+2026-05-07 18:45:35.716 [main] INFO  o.a.catalina.core.StandardEngine - Starting Servlet engine: [Apache Tomcat/10.1.19]
+2026-05-07 18:45:35.858 [main] INFO  o.a.c.c.C.[.[localhost].[/api] - Initializing Spring embedded WebApplicationContext
+2026-05-07 18:45:35.858 [main] INFO  o.s.b.w.s.c.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 3062 ms
+2026-05-07 18:45:36.668 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 加载 code -> market 映射...
+2026-05-07 18:45:36.730 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Starting...
+2026-05-07 18:45:37.043 [main] INFO  com.zaxxer.hikari.pool.HikariPool - HikariPool-1 - Added connection com.mysql.cj.jdbc.ConnectionImpl@420b55ed
+2026-05-07 18:45:37.048 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Start completed.
+2026-05-07 18:45:37.256 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 已加载 5490 只股票的 market 映射
+2026-05-07 18:45:37.258 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 已加载 5490 只股票的最新市值
+2026-05-07 18:45:37.594 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate] 脚本目录: C:\Users\warning5\WorkBuddy\Claw\quant-platform\scripts
+2026-05-07 18:45:37.594 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_stock_data.py : OK
+2026-05-07 18:45:37.594 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_stock_daily_baostock.py : OK
+2026-05-07 18:45:37.594 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_bj_stock_daily_qq.py : OK
+2026-05-07 18:45:37.594 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_index_daily_baostock.py : OK
+2026-05-07 18:45:37.594 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_dividend_baostock.py : OK
+2026-05-07 18:45:37.594 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_research_report.py : OK
+2026-05-07 18:45:37.766 [main] INFO  c.q.p.f.engine.FactorComputeEngine - Registered 36 financial factor calculators
+2026-05-07 18:45:37.994 [main] INFO  c.q.p.s.service.ScreenPresetService - Built-in screen presets initialized
+2026-05-07 18:45:38.550 [main] INFO  o.s.b.a.w.s.WelcomePageHandlerMapping - Adding welcome page: class path resource [static/index.html]
+2026-05-07 18:45:39.242 [main] INFO  o.a.coyote.http11.Http11NioProtocol - Starting ProtocolHandler ["http-nio-8080"]
+2026-05-07 18:45:39.268 [main] INFO  o.s.b.w.e.tomcat.TomcatWebServer - Tomcat started on port 8080 (http) with context path '/api'
+2026-05-07 18:45:39.277 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Starting...
+2026-05-07 18:45:39.277 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - BrokerAvailabilityEvent[available=true, SimpleBrokerMessageHandler [org.springframework.messaging.simp.broker.DefaultSubscriptionRegistry@4023d23f]]
+2026-05-07 18:45:39.277 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Started.
+2026-05-07 18:45:39.723 [main] INFO  c.q.p.QuantPlatformApplication - Started QuantPlatformApplication in 8.289 seconds (process running for 9.708)
+2026-05-07 18:45:39.845 [main] INFO  c.q.p.factor.service.FactorService - Builtin factors initialized
+2026-05-07 18:45:39.857 [main] INFO  c.q.p.s.s.StrategyDataInitializer - Checking strategy data initialization...
+2026-05-07 18:45:39.862 [main] INFO  c.q.p.s.s.StrategyDataInitializer - Strategy data already exists (6 strategies), skipping initialization
+2026-05-07 18:45:39.870 [main] INFO  c.q.p.s.service.StrategyService - Demo strategies already initialized, skipping
+2026-05-07 18:45:54.854 [http-nio-8080-exec-1] INFO  o.a.c.c.C.[.[localhost].[/api] - Initializing Spring DispatcherServlet 'dispatcherServlet'
+2026-05-07 18:45:54.859 [http-nio-8080-exec-1] INFO  o.s.web.servlet.DispatcherServlet - Initializing Servlet 'dispatcherServlet'
+2026-05-07 18:45:54.859 [http-nio-8080-exec-1] INFO  o.s.web.servlet.DispatcherServlet - Completed initialization in 0 ms
+2026-05-07 18:46:01.488 [http-nio-8080-exec-8] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-07 18:46:02.962 [http-nio-8080-exec-8] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=37, action=REDUCE
+2026-05-07 18:46:03.130 [http-nio-8080-exec-10] INFO  c.q.p.s.a.service.AnalysisService - 获取研报分析: code=600519
+2026-05-07 18:46:39.249 [MessageBroker-1] INFO  o.s.w.s.c.WebSocketMessageBrokerStats - WebSocketSession[0 current WS(0)-HttpStream(0)-HttpPoll(0), 0 total, 0 closed abnormally (0 connect failure, 0 send limit, 0 transport error)], stompSubProtocol[processed CONNECT(0)-CONNECTED(0)-DISCONNECT(0)], stompBrokerRelay[null], inboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0], outboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0], sockJsScheduler[pool size = 1, active threads = 1, queued tasks = 0, completed tasks = 0]
+2026-05-07 18:49:44.237 [http-nio-8080-exec-5] ERROR c.q.p.c.e.GlobalExceptionHandler - Unexpected error
+org.springframework.web.servlet.resource.NoResourceFoundException: No static resource analysis/600519.
+	at org.springframework.web.servlet.resource.ResourceHttpRequestHandler.handleRequest(ResourceHttpRequestHandler.java:585)
+	at org.springframework.web.servlet.mvc.HttpRequestHandlerAdapter.handle(HttpRequestHandlerAdapter.java:52)
+	at org.springframework.web.servlet.DispatcherServlet.doDispatch(DispatcherServlet.java:1089)
+	at org.springframework.web.servlet.DispatcherServlet.doService(DispatcherServlet.java:979)
+	at org.springframework.web.servlet.FrameworkServlet.processRequest(FrameworkServlet.java:1014)
+	at org.springframework.web.servlet.FrameworkServlet.doGet(FrameworkServlet.java:903)
+	at jakarta.servlet.http.HttpServlet.service(HttpServlet.java:564)
+	at org.springframework.web.servlet.FrameworkServlet.service(FrameworkServlet.java:885)
+	at jakarta.servlet.http.HttpServlet.service(HttpServlet.java:658)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:205)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.apache.tomcat.websocket.server.WsFilter.doFilter(WsFilter.java:51)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:174)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.springframework.web.filter.RequestContextFilter.doFilterInternal(RequestContextFilter.java:100)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:174)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.springframework.web.filter.FormContentFilter.doFilterInternal(FormContentFilter.java:93)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:174)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.springframework.web.filter.CharacterEncodingFilter.doFilterInternal(CharacterEncodingFilter.java:201)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:174)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.apache.catalina.core.StandardWrapperValve.invoke(StandardWrapperValve.java:167)
+	at org.apache.catalina.core.StandardContextValve.invoke(StandardContextValve.java:90)
+	at org.apache.catalina.authenticator.AuthenticatorBase.invoke(AuthenticatorBase.java:482)
+	at org.apache.catalina.core.StandardHostValve.invoke(StandardHostValve.java:115)
+	at org.apache.catalina.valves.ErrorReportValve.invoke(ErrorReportValve.java:93)
+	at org.apache.catalina.core.StandardEngineValve.invoke(StandardEngineValve.java:74)
+	at org.apache.catalina.connector.CoyoteAdapter.service(CoyoteAdapter.java:344)
+	at org.apache.coyote.http11.Http11Processor.service(Http11Processor.java:391)
+	at org.apache.coyote.AbstractProcessorLight.process(AbstractProcessorLight.java:63)
+	at org.apache.coyote.AbstractProtocol$ConnectionHandler.process(AbstractProtocol.java:896)
+	at org.apache.tomcat.util.net.NioEndpoint$SocketProcessor.doRun(NioEndpoint.java:1744)
+	at org.apache.tomcat.util.net.SocketProcessorBase.run(SocketProcessorBase.java:52)
+	at org.apache.tomcat.util.threads.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1191)
+	at org.apache.tomcat.util.threads.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:659)
+	at org.apache.tomcat.util.threads.TaskThread$WrappingRunnable.run(TaskThread.java:63)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-05-07 18:49:49.110 [http-nio-8080-exec-6] ERROR c.q.p.c.e.GlobalExceptionHandler - Unexpected error
+org.springframework.web.servlet.resource.NoResourceFoundException: No static resource analysis/600519.
+	at org.springframework.web.servlet.resource.ResourceHttpRequestHandler.handleRequest(ResourceHttpRequestHandler.java:585)
+	at org.springframework.web.servlet.mvc.HttpRequestHandlerAdapter.handle(HttpRequestHandlerAdapter.java:52)
+	at org.springframework.web.servlet.DispatcherServlet.doDispatch(DispatcherServlet.java:1089)
+	at org.springframework.web.servlet.DispatcherServlet.doService(DispatcherServlet.java:979)
+	at org.springframework.web.servlet.FrameworkServlet.processRequest(FrameworkServlet.java:1014)
+	at org.springframework.web.servlet.FrameworkServlet.doGet(FrameworkServlet.java:903)
+	at jakarta.servlet.http.HttpServlet.service(HttpServlet.java:564)
+	at org.springframework.web.servlet.FrameworkServlet.service(FrameworkServlet.java:885)
+	at jakarta.servlet.http.HttpServlet.service(HttpServlet.java:658)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:205)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.apache.tomcat.websocket.server.WsFilter.doFilter(WsFilter.java:51)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:174)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.springframework.web.filter.RequestContextFilter.doFilterInternal(RequestContextFilter.java:100)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:174)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.springframework.web.filter.FormContentFilter.doFilterInternal(FormContentFilter.java:93)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:174)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.springframework.web.filter.CharacterEncodingFilter.doFilterInternal(CharacterEncodingFilter.java:201)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:174)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.apache.catalina.core.StandardWrapperValve.invoke(StandardWrapperValve.java:167)
+	at org.apache.catalina.core.StandardContextValve.invoke(StandardContextValve.java:90)
+	at org.apache.catalina.authenticator.AuthenticatorBase.invoke(AuthenticatorBase.java:482)
+	at org.apache.catalina.core.StandardHostValve.invoke(StandardHostValve.java:115)
+	at org.apache.catalina.valves.ErrorReportValve.invoke(ErrorReportValve.java:93)
+	at org.apache.catalina.core.StandardEngineValve.invoke(StandardEngineValve.java:74)
+	at org.apache.catalina.connector.CoyoteAdapter.service(CoyoteAdapter.java:344)
+	at org.apache.coyote.http11.Http11Processor.service(Http11Processor.java:391)
+	at org.apache.coyote.AbstractProcessorLight.process(AbstractProcessorLight.java:63)
+	at org.apache.coyote.AbstractProtocol$ConnectionHandler.process(AbstractProtocol.java:896)
+	at org.apache.tomcat.util.net.NioEndpoint$SocketProcessor.doRun(NioEndpoint.java:1744)
+	at org.apache.tomcat.util.net.SocketProcessorBase.run(SocketProcessorBase.java:52)
+	at org.apache.tomcat.util.threads.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1191)
+	at org.apache.tomcat.util.threads.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:659)
+	at org.apache.tomcat.util.threads.TaskThread$WrappingRunnable.run(TaskThread.java:63)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-05-07 18:49:58.260 [http-nio-8080-exec-7] ERROR c.q.p.c.e.GlobalExceptionHandler - Unexpected error
+org.springframework.web.servlet.resource.NoResourceFoundException: No static resource stock/analysis/600519.
+	at org.springframework.web.servlet.resource.ResourceHttpRequestHandler.handleRequest(ResourceHttpRequestHandler.java:585)
+	at org.springframework.web.servlet.mvc.HttpRequestHandlerAdapter.handle(HttpRequestHandlerAdapter.java:52)
+	at org.springframework.web.servlet.DispatcherServlet.doDispatch(DispatcherServlet.java:1089)
+	at org.springframework.web.servlet.DispatcherServlet.doService(DispatcherServlet.java:979)
+	at org.springframework.web.servlet.FrameworkServlet.processRequest(FrameworkServlet.java:1014)
+	at org.springframework.web.servlet.FrameworkServlet.doGet(FrameworkServlet.java:903)
+	at jakarta.servlet.http.HttpServlet.service(HttpServlet.java:564)
+	at org.springframework.web.servlet.FrameworkServlet.service(FrameworkServlet.java:885)
+	at jakarta.servlet.http.HttpServlet.service(HttpServlet.java:658)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:205)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.apache.tomcat.websocket.server.WsFilter.doFilter(WsFilter.java:51)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:174)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.springframework.web.filter.RequestContextFilter.doFilterInternal(RequestContextFilter.java:100)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:174)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.springframework.web.filter.FormContentFilter.doFilterInternal(FormContentFilter.java:93)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:174)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.springframework.web.filter.CharacterEncodingFilter.doFilterInternal(CharacterEncodingFilter.java:201)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:174)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.apache.catalina.core.StandardWrapperValve.invoke(StandardWrapperValve.java:167)
+	at org.apache.catalina.core.StandardContextValve.invoke(StandardContextValve.java:90)
+	at org.apache.catalina.authenticator.AuthenticatorBase.invoke(AuthenticatorBase.java:482)
+	at org.apache.catalina.core.StandardHostValve.invoke(StandardHostValve.java:115)
+	at org.apache.catalina.valves.ErrorReportValve.invoke(ErrorReportValve.java:93)
+	at org.apache.catalina.core.StandardEngineValve.invoke(StandardEngineValve.java:74)
+	at org.apache.catalina.connector.CoyoteAdapter.service(CoyoteAdapter.java:344)
+	at org.apache.coyote.http11.Http11Processor.service(Http11Processor.java:391)
+	at org.apache.coyote.AbstractProcessorLight.process(AbstractProcessorLight.java:63)
+	at org.apache.coyote.AbstractProtocol$ConnectionHandler.process(AbstractProtocol.java:896)
+	at org.apache.tomcat.util.net.NioEndpoint$SocketProcessor.doRun(NioEndpoint.java:1744)
+	at org.apache.tomcat.util.net.SocketProcessorBase.run(SocketProcessorBase.java:52)
+	at org.apache.tomcat.util.threads.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1191)
+	at org.apache.tomcat.util.threads.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:659)
+	at org.apache.tomcat.util.threads.TaskThread$WrappingRunnable.run(TaskThread.java:63)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-05-07 18:50:20.357 [http-nio-8080-exec-8] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-07 18:50:21.176 [http-nio-8080-exec-8] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=37, action=REDUCE
+2026-05-07 18:51:57.835 [http-nio-8080-exec-3] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-07 18:51:58.471 [http-nio-8080-exec-3] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=37, action=REDUCE
+2026-05-07 18:52:00.271 [http-nio-8080-exec-1] INFO  c.q.p.s.a.service.AnalysisService - 获取研报分析: code=600519
+2026-05-07 18:52:05.633 [http-nio-8080-exec-10] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-07 18:52:06.281 [http-nio-8080-exec-10] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=37, action=REDUCE
+2026-05-07 18:52:06.484 [http-nio-8080-exec-1] INFO  c.q.p.s.a.service.AnalysisService - 获取研报分析: code=600519
+2026-05-07 18:52:45.797 [http-nio-8080-exec-2] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-07 18:52:46.430 [http-nio-8080-exec-2] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=37, action=REDUCE
+2026-05-07 18:52:48.303 [http-nio-8080-exec-1] INFO  c.q.p.s.a.service.AnalysisService - 获取研报分析: code=600519
+2026-05-07 18:52:51.803 [http-nio-8080-exec-9] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-07 18:52:52.583 [http-nio-8080-exec-9] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=37, action=REDUCE
+2026-05-07 18:52:52.849 [http-nio-8080-exec-1] INFO  c.q.p.s.a.service.AnalysisService - 获取研报分析: code=600519
+2026-05-07 18:55:02.073 [background-preinit] INFO  o.h.validator.internal.util.Version - HV000001: Hibernate Validator 8.0.1.Final
+2026-05-07 18:55:02.196 [main] INFO  c.q.p.QuantPlatformApplication - Starting QuantPlatformApplication using Java 21.0.7 with PID 39884 (C:\Users\warning5\WorkBuddy\Claw\quant-platform\backend\target\classes started by warning5 in C:\Users\warning5\WorkBuddy\Claw\quant-platform)
+2026-05-07 18:55:02.197 [main] INFO  c.q.p.QuantPlatformApplication - No active profile set, falling back to 1 default profile: "default"
+2026-05-07 18:55:04.045 [main] INFO  o.s.b.w.e.tomcat.TomcatWebServer - Tomcat initialized with port 8080 (http)
+2026-05-07 18:55:04.056 [main] INFO  o.a.coyote.http11.Http11NioProtocol - Initializing ProtocolHandler ["http-nio-8080"]
+2026-05-07 18:55:04.061 [main] INFO  o.a.catalina.core.StandardService - Starting service [Tomcat]
+2026-05-07 18:55:04.061 [main] INFO  o.a.catalina.core.StandardEngine - Starting Servlet engine: [Apache Tomcat/10.1.19]
+2026-05-07 18:55:04.156 [main] INFO  o.a.c.c.C.[.[localhost].[/api] - Initializing Spring embedded WebApplicationContext
+2026-05-07 18:55:04.157 [main] INFO  o.s.b.w.s.c.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 1791 ms
+2026-05-07 18:55:04.612 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 加载 code -> market 映射...
+2026-05-07 18:55:04.653 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Starting...
+2026-05-07 18:55:04.887 [main] INFO  com.zaxxer.hikari.pool.HikariPool - HikariPool-1 - Added connection com.mysql.cj.jdbc.ConnectionImpl@6fe5da76
+2026-05-07 18:55:04.890 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Start completed.
+2026-05-07 18:55:05.057 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 已加载 5490 只股票的 market 映射
+2026-05-07 18:55:05.061 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 已加载 5490 只股票的最新市值
+2026-05-07 18:55:05.340 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate] 脚本目录: C:\Users\warning5\WorkBuddy\Claw\quant-platform\scripts
+2026-05-07 18:55:05.340 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_stock_data.py : OK
+2026-05-07 18:55:05.340 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_stock_daily_baostock.py : OK
+2026-05-07 18:55:05.340 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_bj_stock_daily_qq.py : OK
+2026-05-07 18:55:05.340 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_index_daily_baostock.py : OK
+2026-05-07 18:55:05.340 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_dividend_baostock.py : OK
+2026-05-07 18:55:05.340 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_research_report.py : OK
+2026-05-07 18:55:05.456 [main] INFO  c.q.p.f.engine.FactorComputeEngine - Registered 36 financial factor calculators
+2026-05-07 18:55:05.648 [main] INFO  c.q.p.s.service.ScreenPresetService - Built-in screen presets initialized
+2026-05-07 18:55:06.219 [main] INFO  o.s.b.a.w.s.WelcomePageHandlerMapping - Adding welcome page: class path resource [static/index.html]
+2026-05-07 18:55:06.833 [main] INFO  o.a.coyote.http11.Http11NioProtocol - Starting ProtocolHandler ["http-nio-8080"]
+2026-05-07 18:55:06.874 [main] INFO  o.s.b.w.e.tomcat.TomcatWebServer - Tomcat started on port 8080 (http) with context path '/api'
+2026-05-07 18:55:06.881 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Starting...
+2026-05-07 18:55:06.881 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - BrokerAvailabilityEvent[available=true, SimpleBrokerMessageHandler [org.springframework.messaging.simp.broker.DefaultSubscriptionRegistry@7348e75e]]
+2026-05-07 18:55:06.881 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Started.
+2026-05-07 18:55:07.064 [main] INFO  c.q.p.QuantPlatformApplication - Started QuantPlatformApplication in 5.719 seconds (process running for 6.578)
+2026-05-07 18:55:07.153 [main] INFO  c.q.p.factor.service.FactorService - Builtin factors initialized
+2026-05-07 18:55:07.185 [main] INFO  c.q.p.s.s.StrategyDataInitializer - Checking strategy data initialization...
+2026-05-07 18:55:07.189 [main] INFO  c.q.p.s.s.StrategyDataInitializer - Strategy data already exists (6 strategies), skipping initialization
+2026-05-07 18:55:07.198 [main] INFO  c.q.p.s.service.StrategyService - Demo strategies already initialized, skipping
+2026-05-07 18:56:06.834 [MessageBroker-1] INFO  o.s.w.s.c.WebSocketMessageBrokerStats - WebSocketSession[0 current WS(0)-HttpStream(0)-HttpPoll(0), 0 total, 0 closed abnormally (0 connect failure, 0 send limit, 0 transport error)], stompSubProtocol[processed CONNECT(0)-CONNECTED(0)-DISCONNECT(0)], stompBrokerRelay[null], inboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0], outboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0], sockJsScheduler[pool size = 1, active threads = 1, queued tasks = 0, completed tasks = 0]
+2026-05-07 18:56:11.472 [http-nio-8080-exec-1] INFO  o.a.c.c.C.[.[localhost].[/api] - Initializing Spring DispatcherServlet 'dispatcherServlet'
+2026-05-07 18:56:11.473 [http-nio-8080-exec-1] INFO  o.s.web.servlet.DispatcherServlet - Initializing Servlet 'dispatcherServlet'
+2026-05-07 18:56:11.478 [http-nio-8080-exec-1] INFO  o.s.web.servlet.DispatcherServlet - Completed initialization in 5 ms
+2026-05-07 18:56:11.525 [http-nio-8080-exec-1] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-07 18:56:12.782 [http-nio-8080-exec-1] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=40, action=REDUCE
+2026-05-07 18:56:20.476 [http-nio-8080-exec-2] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-07 18:56:21.244 [http-nio-8080-exec-2] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=40, action=REDUCE
+2026-05-07 18:56:32.166 [http-nio-8080-exec-3] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-07 18:56:32.875 [http-nio-8080-exec-3] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=40, action=REDUCE
+2026-05-07 18:56:42.821 [http-nio-8080-exec-5] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-07 18:56:43.621 [http-nio-8080-exec-5] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=40, action=REDUCE
+2026-05-07 18:59:21.689 [http-nio-8080-exec-7] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-07 18:59:22.529 [http-nio-8080-exec-7] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=40, action=REDUCE
+2026-05-07 19:00:31.611 [background-preinit] INFO  o.h.validator.internal.util.Version - HV000001: Hibernate Validator 8.0.1.Final
+2026-05-07 19:00:31.722 [main] INFO  c.q.p.QuantPlatformApplication - Starting QuantPlatformApplication using Java 21.0.7 with PID 18652 (C:\Users\warning5\WorkBuddy\Claw\quant-platform\backend\target\classes started by warning5 in C:\Users\warning5\WorkBuddy\Claw\quant-platform)
+2026-05-07 19:00:31.723 [main] INFO  c.q.p.QuantPlatformApplication - No active profile set, falling back to 1 default profile: "default"
+2026-05-07 19:00:34.029 [main] INFO  o.s.b.w.e.tomcat.TomcatWebServer - Tomcat initialized with port 8080 (http)
+2026-05-07 19:00:34.051 [main] INFO  o.a.coyote.http11.Http11NioProtocol - Initializing ProtocolHandler ["http-nio-8080"]
+2026-05-07 19:00:34.054 [main] INFO  o.a.catalina.core.StandardService - Starting service [Tomcat]
+2026-05-07 19:00:34.055 [main] INFO  o.a.catalina.core.StandardEngine - Starting Servlet engine: [Apache Tomcat/10.1.19]
+2026-05-07 19:00:34.155 [main] INFO  o.a.c.c.C.[.[localhost].[/api] - Initializing Spring embedded WebApplicationContext
+2026-05-07 19:00:34.156 [main] INFO  o.s.b.w.s.c.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 2246 ms
+2026-05-07 19:00:34.701 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 加载 code -> market 映射...
+2026-05-07 19:00:34.761 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Starting...
+2026-05-07 19:00:35.091 [main] INFO  com.zaxxer.hikari.pool.HikariPool - HikariPool-1 - Added connection com.mysql.cj.jdbc.ConnectionImpl@4f8900b0
+2026-05-07 19:00:35.094 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Start completed.
+2026-05-07 19:00:35.229 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 已加载 5490 只股票的 market 映射
+2026-05-07 19:00:35.232 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 已加载 5490 只股票的最新市值
+2026-05-07 19:00:35.647 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate] 脚本目录: C:\Users\warning5\WorkBuddy\Claw\quant-platform\scripts
+2026-05-07 19:00:35.648 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_stock_data.py : OK
+2026-05-07 19:00:35.649 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_stock_daily_baostock.py : OK
+2026-05-07 19:00:35.649 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_bj_stock_daily_qq.py : OK
+2026-05-07 19:00:35.649 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_index_daily_baostock.py : OK
+2026-05-07 19:00:35.649 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_dividend_baostock.py : OK
+2026-05-07 19:00:35.649 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_research_report.py : OK
+2026-05-07 19:00:35.831 [main] INFO  c.q.p.f.engine.FactorComputeEngine - Registered 36 financial factor calculators
+2026-05-07 19:00:36.054 [main] INFO  c.q.p.s.service.ScreenPresetService - Built-in screen presets initialized
+2026-05-07 19:00:36.700 [main] INFO  o.s.b.a.w.s.WelcomePageHandlerMapping - Adding welcome page: class path resource [static/index.html]
+2026-05-07 19:00:37.362 [main] INFO  o.a.coyote.http11.Http11NioProtocol - Starting ProtocolHandler ["http-nio-8080"]
+2026-05-07 19:00:37.388 [main] INFO  o.s.b.w.e.tomcat.TomcatWebServer - Tomcat started on port 8080 (http) with context path '/api'
+2026-05-07 19:00:37.395 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Starting...
+2026-05-07 19:00:37.395 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - BrokerAvailabilityEvent[available=true, SimpleBrokerMessageHandler [org.springframework.messaging.simp.broker.DefaultSubscriptionRegistry@1368e2f7]]
+2026-05-07 19:00:37.396 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Started.
+2026-05-07 19:00:37.582 [main] INFO  c.q.p.QuantPlatformApplication - Started QuantPlatformApplication in 6.653 seconds (process running for 7.289)
+2026-05-07 19:00:37.657 [main] INFO  c.q.p.factor.service.FactorService - Builtin factors initialized
+2026-05-07 19:00:37.664 [main] INFO  c.q.p.s.s.StrategyDataInitializer - Checking strategy data initialization...
+2026-05-07 19:00:37.666 [main] INFO  c.q.p.s.s.StrategyDataInitializer - Strategy data already exists (6 strategies), skipping initialization
+2026-05-07 19:00:37.673 [main] INFO  c.q.p.s.service.StrategyService - Demo strategies already initialized, skipping
+2026-05-07 19:00:43.751 [http-nio-8080-exec-1] INFO  o.a.c.c.C.[.[localhost].[/api] - Initializing Spring DispatcherServlet 'dispatcherServlet'
+2026-05-07 19:00:43.751 [http-nio-8080-exec-1] INFO  o.s.web.servlet.DispatcherServlet - Initializing Servlet 'dispatcherServlet'
+2026-05-07 19:00:43.751 [http-nio-8080-exec-1] INFO  o.s.web.servlet.DispatcherServlet - Completed initialization in 0 ms
+2026-05-07 19:00:43.826 [http-nio-8080-exec-1] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-07 19:00:44.857 [http-nio-8080-exec-1] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=40, action=REDUCE
+2026-05-07 19:00:45.089 [http-nio-8080-exec-2] INFO  c.q.p.s.a.service.AnalysisService - 获取研报分析: code=600519
+2026-05-07 19:01:37.382 [MessageBroker-1] INFO  o.s.w.s.c.WebSocketMessageBrokerStats - WebSocketSession[0 current WS(0)-HttpStream(0)-HttpPoll(0), 0 total, 0 closed abnormally (0 connect failure, 0 send limit, 0 transport error)], stompSubProtocol[processed CONNECT(0)-CONNECTED(0)-DISCONNECT(0)], stompBrokerRelay[null], inboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0], outboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0], sockJsScheduler[pool size = 1, active threads = 1, queued tasks = 0, completed tasks = 0]
+2026-05-07 19:01:57.390 [http-nio-8080-exec-7] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-07 19:01:57.917 [http-nio-8080-exec-7] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=40, action=REDUCE
+2026-05-07 19:01:57.980 [http-nio-8080-exec-9] INFO  c.q.p.s.a.service.AnalysisService - 获取研报分析: code=600519
+2026-05-07 19:02:37.817 [http-nio-8080-exec-4] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-07 19:02:38.465 [http-nio-8080-exec-4] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=40, action=REDUCE
+2026-05-07 19:02:38.534 [http-nio-8080-exec-1] INFO  c.q.p.s.a.service.AnalysisService - 获取研报分析: code=600519
+2026-05-07 19:21:40.713 [http-nio-8080-exec-10] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-07 19:21:41.510 [http-nio-8080-exec-10] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=40, action=REDUCE
+2026-05-07 19:21:42.945 [http-nio-8080-exec-4] INFO  c.q.p.s.a.service.AnalysisService - 获取研报分析: code=600519
+2026-05-07 19:21:43.055 [http-nio-8080-exec-8] ERROR c.q.p.s.a.service.AnalysisService - 大宗交易分析失败: code=600519, error=PreparedStatementCallback; bad SQL grammar [SELECT trade_date, price, volume, amount, discount_rate,
+       trade_count, change_pct, close_price, pct_of_float,
+       buy_branch, sell_branch
+FROM stock.stock_sentiment_block_trade
+WHERE code = ?
+ORDER BY trade_date DESC
+LIMIT 30
+]
+org.springframework.jdbc.BadSqlGrammarException: PreparedStatementCallback; bad SQL grammar [SELECT trade_date, price, volume, amount, discount_rate,
+       trade_count, change_pct, close_price, pct_of_float,
+       buy_branch, sell_branch
+FROM stock.stock_sentiment_block_trade
+WHERE code = ?
+ORDER BY trade_date DESC
+LIMIT 30
+]
+	at org.springframework.jdbc.support.SQLStateSQLExceptionTranslator.doTranslate(SQLStateSQLExceptionTranslator.java:112)
+	at org.springframework.jdbc.support.AbstractFallbackSQLExceptionTranslator.translate(AbstractFallbackSQLExceptionTranslator.java:107)
+	at org.springframework.jdbc.support.AbstractFallbackSQLExceptionTranslator.translate(AbstractFallbackSQLExceptionTranslator.java:116)
+	at org.springframework.jdbc.core.JdbcTemplate.translateException(JdbcTemplate.java:1548)
+	at org.springframework.jdbc.core.JdbcTemplate.execute(JdbcTemplate.java:677)
+	at org.springframework.jdbc.core.JdbcTemplate.query(JdbcTemplate.java:723)
+	at org.springframework.jdbc.core.JdbcTemplate.query(JdbcTemplate.java:754)
+	at org.springframework.jdbc.core.JdbcTemplate.query(JdbcTemplate.java:767)
+	at org.springframework.jdbc.core.JdbcTemplate.query(JdbcTemplate.java:825)
+	at com.quant.platform.stock.analysis.service.AnalysisService.getBlockTradeAnalysis(AnalysisService.java:1345)
+	at com.quant.platform.stock.controller.StockAnalysisController.getBlockTradeAnalysis(StockAnalysisController.java:294)
+	at java.base/jdk.internal.reflect.DirectMethodHandleAccessor.invoke(DirectMethodHandleAccessor.java:103)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at org.springframework.web.method.support.InvocableHandlerMethod.doInvoke(InvocableHandlerMethod.java:259)
+	at org.springframework.web.method.support.InvocableHandlerMethod.invokeForRequest(InvocableHandlerMethod.java:192)
+	at org.springframework.web.servlet.mvc.method.annotation.ServletInvocableHandlerMethod.invokeAndHandle(ServletInvocableHandlerMethod.java:118)
+	at org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerAdapter.invokeHandlerMethod(RequestMappingHandlerAdapter.java:920)
+	at org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerAdapter.handleInternal(RequestMappingHandlerAdapter.java:830)
+	at org.springframework.web.servlet.mvc.method.AbstractHandlerMethodAdapter.handle(AbstractHandlerMethodAdapter.java:87)
+	at org.springframework.web.servlet.DispatcherServlet.doDispatch(DispatcherServlet.java:1089)
+	at org.springframework.web.servlet.DispatcherServlet.doService(DispatcherServlet.java:979)
+	at org.springframework.web.servlet.FrameworkServlet.processRequest(FrameworkServlet.java:1014)
+	at org.springframework.web.servlet.FrameworkServlet.doGet(FrameworkServlet.java:903)
+	at jakarta.servlet.http.HttpServlet.service(HttpServlet.java:564)
+	at org.springframework.web.servlet.FrameworkServlet.service(FrameworkServlet.java:885)
+	at jakarta.servlet.http.HttpServlet.service(HttpServlet.java:658)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:205)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.apache.tomcat.websocket.server.WsFilter.doFilter(WsFilter.java:51)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:174)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.springframework.web.filter.RequestContextFilter.doFilterInternal(RequestContextFilter.java:100)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:174)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.springframework.web.filter.FormContentFilter.doFilterInternal(FormContentFilter.java:93)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:174)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.springframework.web.filter.CharacterEncodingFilter.doFilterInternal(CharacterEncodingFilter.java:201)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:174)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.apache.catalina.core.StandardWrapperValve.invoke(StandardWrapperValve.java:167)
+	at org.apache.catalina.core.StandardContextValve.invoke(StandardContextValve.java:90)
+	at org.apache.catalina.authenticator.AuthenticatorBase.invoke(AuthenticatorBase.java:482)
+	at org.apache.catalina.core.StandardHostValve.invoke(StandardHostValve.java:115)
+	at org.apache.catalina.valves.ErrorReportValve.invoke(ErrorReportValve.java:93)
+	at org.apache.catalina.core.StandardEngineValve.invoke(StandardEngineValve.java:74)
+	at org.apache.catalina.connector.CoyoteAdapter.service(CoyoteAdapter.java:344)
+	at org.apache.coyote.http11.Http11Processor.service(Http11Processor.java:391)
+	at org.apache.coyote.AbstractProcessorLight.process(AbstractProcessorLight.java:63)
+	at org.apache.coyote.AbstractProtocol$ConnectionHandler.process(AbstractProtocol.java:896)
+	at org.apache.tomcat.util.net.NioEndpoint$SocketProcessor.doRun(NioEndpoint.java:1744)
+	at org.apache.tomcat.util.net.SocketProcessorBase.run(SocketProcessorBase.java:52)
+	at org.apache.tomcat.util.threads.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1191)
+	at org.apache.tomcat.util.threads.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:659)
+	at org.apache.tomcat.util.threads.TaskThread$WrappingRunnable.run(TaskThread.java:63)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+Caused by: java.sql.BatchUpdateException: Code: 47. DB::Exception: Unknown expression identifier `trade_count` in scope SELECT trade_date, price, volume, amount, discount_rate, trade_count, change_pct, close_price, pct_of_float, buy_branch, sell_branch FROM stock.stock_sentiment_block_trade WHERE code = '600519' ORDER BY trade_date DESC LIMIT 30. (UNKNOWN_IDENTIFIER) (version 26.5.1.110 (official build))
+
+	at com.clickhouse.jdbc.SqlExceptionUtils.batchUpdateError(SqlExceptionUtils.java:107)
+	at com.clickhouse.jdbc.internal.SqlBasedPreparedStatement.executeAny(SqlBasedPreparedStatement.java:223)
+	at com.clickhouse.jdbc.internal.SqlBasedPreparedStatement.executeQuery(SqlBasedPreparedStatement.java:286)
+	at org.springframework.jdbc.core.JdbcTemplate$1.doInPreparedStatement(JdbcTemplate.java:732)
+	at org.springframework.jdbc.core.JdbcTemplate.execute(JdbcTemplate.java:658)
+	... 54 common frames omitted
+2026-05-07 19:27:00.178 [SpringApplicationShutdownHook] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Stopping...
+2026-05-07 19:27:00.178 [SpringApplicationShutdownHook] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - BrokerAvailabilityEvent[available=false, SimpleBrokerMessageHandler [org.springframework.messaging.simp.broker.DefaultSubscriptionRegistry@1368e2f7]]
+2026-05-07 19:27:00.179 [SpringApplicationShutdownHook] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Stopped.
+2026-05-07 19:27:00.194 [SpringApplicationShutdownHook] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Shutdown initiated...
+2026-05-07 19:27:00.198 [SpringApplicationShutdownHook] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Shutdown completed.
+2026-05-07 19:27:07.590 [background-preinit] INFO  o.h.validator.internal.util.Version - HV000001: Hibernate Validator 8.0.1.Final
+2026-05-07 19:27:07.731 [main] INFO  c.q.p.QuantPlatformApplication - Starting QuantPlatformApplication using Java 21.0.7 with PID 27192 (C:\Users\warning5\WorkBuddy\Claw\quant-platform\backend\target\classes started by warning5 in C:\Users\warning5\WorkBuddy\Claw\quant-platform)
+2026-05-07 19:27:07.732 [main] INFO  c.q.p.QuantPlatformApplication - No active profile set, falling back to 1 default profile: "default"
+2026-05-07 19:27:09.890 [main] INFO  o.s.b.w.e.tomcat.TomcatWebServer - Tomcat initialized with port 8080 (http)
+2026-05-07 19:27:09.904 [main] INFO  o.a.coyote.http11.Http11NioProtocol - Initializing ProtocolHandler ["http-nio-8080"]
+2026-05-07 19:27:09.906 [main] INFO  o.a.catalina.core.StandardService - Starting service [Tomcat]
+2026-05-07 19:27:09.906 [main] INFO  o.a.catalina.core.StandardEngine - Starting Servlet engine: [Apache Tomcat/10.1.19]
+2026-05-07 19:27:10.005 [main] INFO  o.a.c.c.C.[.[localhost].[/api] - Initializing Spring embedded WebApplicationContext
+2026-05-07 19:27:10.005 [main] INFO  o.s.b.w.s.c.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 2091 ms
+2026-05-07 19:27:10.609 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 加载 code -> market 映射...
+2026-05-07 19:27:10.675 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Starting...
+2026-05-07 19:27:10.938 [main] INFO  com.zaxxer.hikari.pool.HikariPool - HikariPool-1 - Added connection com.mysql.cj.jdbc.ConnectionImpl@42edde25
+2026-05-07 19:27:10.949 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Start completed.
+2026-05-07 19:27:11.055 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 已加载 5490 只股票的 market 映射
+2026-05-07 19:27:11.059 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 已加载 5490 只股票的最新市值
+2026-05-07 19:27:11.377 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate] 脚本目录: C:\Users\warning5\WorkBuddy\Claw\quant-platform\scripts
+2026-05-07 19:27:11.378 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_stock_data.py : OK
+2026-05-07 19:27:11.378 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_stock_daily_baostock.py : OK
+2026-05-07 19:27:11.378 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_bj_stock_daily_qq.py : OK
+2026-05-07 19:27:11.379 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_index_daily_baostock.py : OK
+2026-05-07 19:27:11.379 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_dividend_baostock.py : OK
+2026-05-07 19:27:11.379 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_research_report.py : OK
+2026-05-07 19:27:11.562 [main] INFO  c.q.p.f.engine.FactorComputeEngine - Registered 36 financial factor calculators
+2026-05-07 19:27:11.784 [main] INFO  c.q.p.s.service.ScreenPresetService - Built-in screen presets initialized
+2026-05-07 19:27:12.256 [main] INFO  o.s.b.a.w.s.WelcomePageHandlerMapping - Adding welcome page: class path resource [static/index.html]
+2026-05-07 19:27:12.897 [main] INFO  o.a.coyote.http11.Http11NioProtocol - Starting ProtocolHandler ["http-nio-8080"]
+2026-05-07 19:27:12.932 [main] INFO  o.s.b.w.e.tomcat.TomcatWebServer - Tomcat started on port 8080 (http) with context path '/api'
+2026-05-07 19:27:12.942 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Starting...
+2026-05-07 19:27:12.943 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - BrokerAvailabilityEvent[available=true, SimpleBrokerMessageHandler [org.springframework.messaging.simp.broker.DefaultSubscriptionRegistry@7ee3a2ed]]
+2026-05-07 19:27:12.944 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Started.
+2026-05-07 19:27:13.152 [main] INFO  c.q.p.QuantPlatformApplication - Started QuantPlatformApplication in 6.258 seconds (process running for 6.857)
+2026-05-07 19:27:13.234 [main] INFO  c.q.p.factor.service.FactorService - Builtin factors initialized
+2026-05-07 19:27:13.244 [main] INFO  c.q.p.s.s.StrategyDataInitializer - Checking strategy data initialization...
+2026-05-07 19:27:13.246 [main] INFO  c.q.p.s.s.StrategyDataInitializer - Strategy data already exists (6 strategies), skipping initialization
+2026-05-07 19:27:13.253 [main] INFO  c.q.p.s.service.StrategyService - Demo strategies already initialized, skipping
+2026-05-07 19:27:20.921 [http-nio-8080-exec-1] INFO  o.a.c.c.C.[.[localhost].[/api] - Initializing Spring DispatcherServlet 'dispatcherServlet'
+2026-05-07 19:27:20.921 [http-nio-8080-exec-1] INFO  o.s.web.servlet.DispatcherServlet - Initializing Servlet 'dispatcherServlet'
+2026-05-07 19:27:20.923 [http-nio-8080-exec-1] INFO  o.s.web.servlet.DispatcherServlet - Completed initialization in 2 ms
+2026-05-07 19:27:20.971 [http-nio-8080-exec-1] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-07 19:27:22.101 [http-nio-8080-exec-1] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=41, action=REDUCE
+2026-05-07 19:27:22.327 [http-nio-8080-exec-9] INFO  c.q.p.s.a.service.AnalysisService - 获取研报分析: code=600519
+2026-05-07 19:28:12.897 [MessageBroker-1] INFO  o.s.w.s.c.WebSocketMessageBrokerStats - WebSocketSession[0 current WS(0)-HttpStream(0)-HttpPoll(0), 0 total, 0 closed abnormally (0 connect failure, 0 send limit, 0 transport error)], stompSubProtocol[processed CONNECT(0)-CONNECTED(0)-DISCONNECT(0)], stompBrokerRelay[null], inboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0], outboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0], sockJsScheduler[pool size = 1, active threads = 1, queued tasks = 0, completed tasks = 0]
+2026-05-07 19:41:14.348 [http-nio-8080-exec-8] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-07 19:41:15.141 [http-nio-8080-exec-8] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=41, action=REDUCE
+2026-05-07 19:41:15.406 [http-nio-8080-exec-3] INFO  c.q.p.s.a.service.AnalysisService - 获取研报分析: code=600519
+2026-05-07 19:54:52.962 [http-nio-8080-exec-7] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-07 19:54:53.619 [http-nio-8080-exec-7] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=41, action=REDUCE
+2026-05-07 19:54:55.427 [http-nio-8080-exec-2] INFO  c.q.p.s.a.service.AnalysisService - 获取研报分析: code=600519
+2026-05-07 19:55:18.864 [http-nio-8080-exec-5] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-07 19:55:19.583 [http-nio-8080-exec-5] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=41, action=REDUCE
+2026-05-07 19:55:19.858 [http-nio-8080-exec-2] INFO  c.q.p.s.a.service.AnalysisService - 获取研报分析: code=600519
+2026-05-07 19:55:42.630 [http-nio-8080-exec-1] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-07 19:55:43.307 [http-nio-8080-exec-1] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=41, action=REDUCE
+2026-05-07 19:55:44.562 [http-nio-8080-exec-5] INFO  c.q.p.s.a.service.AnalysisService - 获取研报分析: code=600519
+2026-05-07 19:56:34.777 [http-nio-8080-exec-8] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-07 19:56:35.513 [http-nio-8080-exec-8] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=41, action=REDUCE
+2026-05-07 19:56:36.819 [http-nio-8080-exec-1] INFO  c.q.p.s.a.service.AnalysisService - 获取研报分析: code=600519
+2026-05-07 19:58:03.810 [http-nio-8080-exec-10] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-07 19:58:04.462 [http-nio-8080-exec-10] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=41, action=REDUCE
+2026-05-07 19:58:05.995 [http-nio-8080-exec-8] INFO  c.q.p.s.a.service.AnalysisService - 获取研报分析: code=600519
+2026-05-07 19:58:12.911 [MessageBroker-1] INFO  o.s.w.s.c.WebSocketMessageBrokerStats - WebSocketSession[0 current WS(0)-HttpStream(0)-HttpPoll(0), 0 total, 0 closed abnormally (0 connect failure, 0 send limit, 0 transport error)], stompSubProtocol[processed CONNECT(0)-CONNECTED(0)-DISCONNECT(0)], stompBrokerRelay[null], inboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0], outboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0], sockJsScheduler[pool size = 2, active threads = 1, queued tasks = 0, completed tasks = 1]
+2026-05-07 19:59:02.772 [http-nio-8080-exec-7] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-07 19:59:03.438 [http-nio-8080-exec-7] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=41, action=REDUCE
+2026-05-07 19:59:05.032 [http-nio-8080-exec-8] INFO  c.q.p.s.a.service.AnalysisService - 获取研报分析: code=600519
+2026-05-07 20:01:51.788 [http-nio-8080-exec-5] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-07 20:01:52.459 [http-nio-8080-exec-5] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=41, action=REDUCE
+2026-05-07 20:01:53.966 [http-nio-8080-exec-8] INFO  c.q.p.s.a.service.AnalysisService - 获取研报分析: code=600519
+2026-05-07 20:08:30.975 [http-nio-8080-exec-1] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-07 20:08:31.637 [http-nio-8080-exec-1] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=41, action=REDUCE
+2026-05-07 20:08:31.888 [http-nio-8080-exec-8] INFO  c.q.p.s.a.service.AnalysisService - 获取研报分析: code=600519
+2026-05-07 20:10:41.334 [SpringApplicationShutdownHook] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Stopping...
+2026-05-07 20:10:41.334 [SpringApplicationShutdownHook] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - BrokerAvailabilityEvent[available=false, SimpleBrokerMessageHandler [org.springframework.messaging.simp.broker.DefaultSubscriptionRegistry@7ee3a2ed]]
+2026-05-07 20:10:41.334 [SpringApplicationShutdownHook] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Stopped.
+2026-05-07 20:10:41.345 [SpringApplicationShutdownHook] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Shutdown initiated...
+2026-05-07 20:10:41.349 [SpringApplicationShutdownHook] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Shutdown completed.
+2026-05-07 20:10:44.174 [background-preinit] INFO  o.h.validator.internal.util.Version - HV000001: Hibernate Validator 8.0.1.Final
+2026-05-07 20:10:44.288 [main] INFO  c.q.p.QuantPlatformApplication - Starting QuantPlatformApplication using Java 21.0.7 with PID 56900 (C:\Users\warning5\WorkBuddy\Claw\quant-platform\backend\target\classes started by warning5 in C:\Users\warning5\WorkBuddy\Claw\quant-platform)
+2026-05-07 20:10:44.289 [main] INFO  c.q.p.QuantPlatformApplication - No active profile set, falling back to 1 default profile: "default"
+2026-05-07 20:10:46.538 [main] INFO  o.s.b.w.e.tomcat.TomcatWebServer - Tomcat initialized with port 8080 (http)
+2026-05-07 20:10:46.553 [main] INFO  o.a.coyote.http11.Http11NioProtocol - Initializing ProtocolHandler ["http-nio-8080"]
+2026-05-07 20:10:46.554 [main] INFO  o.a.catalina.core.StandardService - Starting service [Tomcat]
+2026-05-07 20:10:46.555 [main] INFO  o.a.catalina.core.StandardEngine - Starting Servlet engine: [Apache Tomcat/10.1.19]
+2026-05-07 20:10:46.680 [main] INFO  o.a.c.c.C.[.[localhost].[/api] - Initializing Spring embedded WebApplicationContext
+2026-05-07 20:10:46.680 [main] INFO  o.s.b.w.s.c.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 2210 ms
+2026-05-07 20:10:47.281 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 加载 code -> market 映射...
+2026-05-07 20:10:47.346 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Starting...
+2026-05-07 20:10:47.643 [main] INFO  com.zaxxer.hikari.pool.HikariPool - HikariPool-1 - Added connection com.mysql.cj.jdbc.ConnectionImpl@47ffdbba
+2026-05-07 20:10:47.647 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Start completed.
+2026-05-07 20:10:47.789 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 已加载 5490 只股票的 market 映射
+2026-05-07 20:10:47.791 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 已加载 5490 只股票的最新市值
+2026-05-07 20:10:48.148 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate] 脚本目录: C:\Users\warning5\WorkBuddy\Claw\quant-platform\scripts
+2026-05-07 20:10:48.148 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_stock_data.py : OK
+2026-05-07 20:10:48.149 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_stock_daily_baostock.py : OK
+2026-05-07 20:10:48.149 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_bj_stock_daily_qq.py : OK
+2026-05-07 20:10:48.149 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_index_daily_baostock.py : OK
+2026-05-07 20:10:48.150 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_dividend_baostock.py : OK
+2026-05-07 20:10:48.151 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_research_report.py : OK
+2026-05-07 20:10:48.323 [main] INFO  c.q.p.f.engine.FactorComputeEngine - Registered 36 financial factor calculators
+2026-05-07 20:10:48.558 [main] INFO  c.q.p.s.service.ScreenPresetService - Built-in screen presets initialized
+2026-05-07 20:10:49.188 [main] INFO  o.s.b.a.w.s.WelcomePageHandlerMapping - Adding welcome page: class path resource [static/index.html]
+2026-05-07 20:10:50.125 [main] INFO  o.a.coyote.http11.Http11NioProtocol - Starting ProtocolHandler ["http-nio-8080"]
+2026-05-07 20:10:50.148 [main] INFO  o.s.b.w.e.tomcat.TomcatWebServer - Tomcat started on port 8080 (http) with context path '/api'
+2026-05-07 20:10:50.154 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Starting...
+2026-05-07 20:10:50.154 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - BrokerAvailabilityEvent[available=true, SimpleBrokerMessageHandler [org.springframework.messaging.simp.broker.DefaultSubscriptionRegistry@af94b0b]]
+2026-05-07 20:10:50.155 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Started.
+2026-05-07 20:10:50.301 [main] INFO  c.q.p.QuantPlatformApplication - Started QuantPlatformApplication in 6.795 seconds (process running for 7.396)
+2026-05-07 20:10:50.382 [main] INFO  c.q.p.factor.service.FactorService - Builtin factors initialized
+2026-05-07 20:10:50.391 [main] INFO  c.q.p.s.s.StrategyDataInitializer - Checking strategy data initialization...
+2026-05-07 20:10:50.393 [main] INFO  c.q.p.s.s.StrategyDataInitializer - Strategy data already exists (6 strategies), skipping initialization
+2026-05-07 20:10:50.398 [main] INFO  c.q.p.s.service.StrategyService - Demo strategies already initialized, skipping
+2026-05-07 20:10:55.406 [http-nio-8080-exec-1] INFO  o.a.c.c.C.[.[localhost].[/api] - Initializing Spring DispatcherServlet 'dispatcherServlet'
+2026-05-07 20:10:55.406 [http-nio-8080-exec-1] INFO  o.s.web.servlet.DispatcherServlet - Initializing Servlet 'dispatcherServlet'
+2026-05-07 20:10:55.409 [http-nio-8080-exec-1] INFO  o.s.web.servlet.DispatcherServlet - Completed initialization in 3 ms
+2026-05-07 20:10:55.469 [http-nio-8080-exec-1] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-07 20:10:56.701 [http-nio-8080-exec-1] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=41, action=REDUCE
+2026-05-07 20:11:50.150 [MessageBroker-1] INFO  o.s.w.s.c.WebSocketMessageBrokerStats - WebSocketSession[0 current WS(0)-HttpStream(0)-HttpPoll(0), 0 total, 0 closed abnormally (0 connect failure, 0 send limit, 0 transport error)], stompSubProtocol[processed CONNECT(0)-CONNECTED(0)-DISCONNECT(0)], stompBrokerRelay[null], inboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0], outboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0], sockJsScheduler[pool size = 1, active threads = 1, queued tasks = 0, completed tasks = 0]
+2026-05-07 20:41:50.158 [MessageBroker-1] INFO  o.s.w.s.c.WebSocketMessageBrokerStats - WebSocketSession[0 current WS(0)-HttpStream(0)-HttpPoll(0), 0 total, 0 closed abnormally (0 connect failure, 0 send limit, 0 transport error)], stompSubProtocol[processed CONNECT(0)-CONNECTED(0)-DISCONNECT(0)], stompBrokerRelay[null], inboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0], outboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0], sockJsScheduler[pool size = 2, active threads = 1, queued tasks = 0, completed tasks = 1]
+2026-05-07 21:11:13.717 [http-nio-8080-exec-4] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-07 21:11:14.485 [http-nio-8080-exec-4] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=41, action=REDUCE
+2026-05-07 21:11:16.123 [http-nio-8080-exec-5] INFO  c.q.p.s.a.service.AnalysisService - 获取研报分析: code=600519
+2026-05-07 21:11:50.171 [MessageBroker-2] INFO  o.s.w.s.c.WebSocketMessageBrokerStats - WebSocketSession[0 current WS(0)-HttpStream(0)-HttpPoll(0), 0 total, 0 closed abnormally (0 connect failure, 0 send limit, 0 transport error)], stompSubProtocol[processed CONNECT(0)-CONNECTED(0)-DISCONNECT(0)], stompBrokerRelay[null], inboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0], outboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0], sockJsScheduler[pool size = 3, active threads = 1, queued tasks = 0, completed tasks = 2]
+2026-05-07 21:18:54.857 [http-nio-8080-exec-2] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-07 21:18:55.512 [http-nio-8080-exec-2] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=41, action=REDUCE
+2026-05-07 21:18:57.327 [http-nio-8080-exec-5] INFO  c.q.p.s.a.service.AnalysisService - 获取研报分析: code=600519
+2026-05-07 21:19:17.584 [http-nio-8080-exec-1] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-07 21:19:18.223 [http-nio-8080-exec-1] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=41, action=REDUCE
+2026-05-07 21:19:18.365 [http-nio-8080-exec-5] INFO  c.q.p.s.a.service.AnalysisService - 获取研报分析: code=600519
+2026-05-07 21:33:57.725 [http-nio-8080-exec-6] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-07 21:33:58.296 [http-nio-8080-exec-6] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=41, action=REDUCE
+2026-05-07 21:33:59.644 [http-nio-8080-exec-5] INFO  c.q.p.s.a.service.AnalysisService - 获取研报分析: code=600519
+2026-05-07 21:34:06.877 [http-nio-8080-exec-8] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-07 21:34:07.435 [http-nio-8080-exec-8] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=41, action=REDUCE
+2026-05-07 21:34:07.606 [http-nio-8080-exec-5] INFO  c.q.p.s.a.service.AnalysisService - 获取研报分析: code=600519
+2026-05-07 21:34:30.743 [http-nio-8080-exec-7] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-07 21:34:31.301 [http-nio-8080-exec-7] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=41, action=REDUCE
+2026-05-07 21:34:32.332 [http-nio-8080-exec-8] INFO  c.q.p.s.a.service.AnalysisService - 获取研报分析: code=600519
+2026-05-07 21:35:01.565 [http-nio-8080-exec-4] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-07 21:35:02.076 [http-nio-8080-exec-4] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=41, action=REDUCE
+2026-05-07 21:35:03.085 [http-nio-8080-exec-8] INFO  c.q.p.s.a.service.AnalysisService - 获取研报分析: code=600519
+2026-05-07 21:37:26.555 [http-nio-8080-exec-5] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-07 21:37:27.239 [http-nio-8080-exec-5] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=41, action=REDUCE
+2026-05-07 21:37:27.287 [http-nio-8080-exec-2] INFO  c.q.p.s.a.service.AnalysisService - 获取研报分析: code=600519
+2026-05-07 21:38:46.615 [http-nio-8080-exec-3] ERROR c.q.p.c.e.GlobalExceptionHandler - Unexpected error
+org.springframework.web.servlet.resource.NoResourceFoundException: No static resource analysis/600519.
+	at org.springframework.web.servlet.resource.ResourceHttpRequestHandler.handleRequest(ResourceHttpRequestHandler.java:585)
+	at org.springframework.web.servlet.mvc.HttpRequestHandlerAdapter.handle(HttpRequestHandlerAdapter.java:52)
+	at org.springframework.web.servlet.DispatcherServlet.doDispatch(DispatcherServlet.java:1089)
+	at org.springframework.web.servlet.DispatcherServlet.doService(DispatcherServlet.java:979)
+	at org.springframework.web.servlet.FrameworkServlet.processRequest(FrameworkServlet.java:1014)
+	at org.springframework.web.servlet.FrameworkServlet.doGet(FrameworkServlet.java:903)
+	at jakarta.servlet.http.HttpServlet.service(HttpServlet.java:564)
+	at org.springframework.web.servlet.FrameworkServlet.service(FrameworkServlet.java:885)
+	at jakarta.servlet.http.HttpServlet.service(HttpServlet.java:658)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:205)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.apache.tomcat.websocket.server.WsFilter.doFilter(WsFilter.java:51)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:174)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.springframework.web.filter.RequestContextFilter.doFilterInternal(RequestContextFilter.java:100)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:174)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.springframework.web.filter.FormContentFilter.doFilterInternal(FormContentFilter.java:93)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:174)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.springframework.web.filter.CharacterEncodingFilter.doFilterInternal(CharacterEncodingFilter.java:201)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:174)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.apache.catalina.core.StandardWrapperValve.invoke(StandardWrapperValve.java:167)
+	at org.apache.catalina.core.StandardContextValve.invoke(StandardContextValve.java:90)
+	at org.apache.catalina.authenticator.AuthenticatorBase.invoke(AuthenticatorBase.java:482)
+	at org.apache.catalina.core.StandardHostValve.invoke(StandardHostValve.java:115)
+	at org.apache.catalina.valves.ErrorReportValve.invoke(ErrorReportValve.java:93)
+	at org.apache.catalina.core.StandardEngineValve.invoke(StandardEngineValve.java:74)
+	at org.apache.catalina.connector.CoyoteAdapter.service(CoyoteAdapter.java:344)
+	at org.apache.coyote.http11.Http11Processor.service(Http11Processor.java:391)
+	at org.apache.coyote.AbstractProcessorLight.process(AbstractProcessorLight.java:63)
+	at org.apache.coyote.AbstractProtocol$ConnectionHandler.process(AbstractProtocol.java:896)
+	at org.apache.tomcat.util.net.NioEndpoint$SocketProcessor.doRun(NioEndpoint.java:1744)
+	at org.apache.tomcat.util.net.SocketProcessorBase.run(SocketProcessorBase.java:52)
+	at org.apache.tomcat.util.threads.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1191)
+	at org.apache.tomcat.util.threads.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:659)
+	at org.apache.tomcat.util.threads.TaskThread$WrappingRunnable.run(TaskThread.java:63)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-05-07 21:38:51.612 [http-nio-8080-exec-6] ERROR c.q.p.c.e.GlobalExceptionHandler - Unexpected error
+org.springframework.web.servlet.resource.NoResourceFoundException: No static resource analysis/600519.
+	at org.springframework.web.servlet.resource.ResourceHttpRequestHandler.handleRequest(ResourceHttpRequestHandler.java:585)
+	at org.springframework.web.servlet.mvc.HttpRequestHandlerAdapter.handle(HttpRequestHandlerAdapter.java:52)
+	at org.springframework.web.servlet.DispatcherServlet.doDispatch(DispatcherServlet.java:1089)
+	at org.springframework.web.servlet.DispatcherServlet.doService(DispatcherServlet.java:979)
+	at org.springframework.web.servlet.FrameworkServlet.processRequest(FrameworkServlet.java:1014)
+	at org.springframework.web.servlet.FrameworkServlet.doGet(FrameworkServlet.java:903)
+	at jakarta.servlet.http.HttpServlet.service(HttpServlet.java:564)
+	at org.springframework.web.servlet.FrameworkServlet.service(FrameworkServlet.java:885)
+	at jakarta.servlet.http.HttpServlet.service(HttpServlet.java:658)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:205)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.apache.tomcat.websocket.server.WsFilter.doFilter(WsFilter.java:51)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:174)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.springframework.web.filter.RequestContextFilter.doFilterInternal(RequestContextFilter.java:100)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:174)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.springframework.web.filter.FormContentFilter.doFilterInternal(FormContentFilter.java:93)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:174)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.springframework.web.filter.CharacterEncodingFilter.doFilterInternal(CharacterEncodingFilter.java:201)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:174)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.apache.catalina.core.StandardWrapperValve.invoke(StandardWrapperValve.java:167)
+	at org.apache.catalina.core.StandardContextValve.invoke(StandardContextValve.java:90)
+	at org.apache.catalina.authenticator.AuthenticatorBase.invoke(AuthenticatorBase.java:482)
+	at org.apache.catalina.core.StandardHostValve.invoke(StandardHostValve.java:115)
+	at org.apache.catalina.valves.ErrorReportValve.invoke(ErrorReportValve.java:93)
+	at org.apache.catalina.core.StandardEngineValve.invoke(StandardEngineValve.java:74)
+	at org.apache.catalina.connector.CoyoteAdapter.service(CoyoteAdapter.java:344)
+	at org.apache.coyote.http11.Http11Processor.service(Http11Processor.java:391)
+	at org.apache.coyote.AbstractProcessorLight.process(AbstractProcessorLight.java:63)
+	at org.apache.coyote.AbstractProtocol$ConnectionHandler.process(AbstractProtocol.java:896)
+	at org.apache.tomcat.util.net.NioEndpoint$SocketProcessor.doRun(NioEndpoint.java:1744)
+	at org.apache.tomcat.util.net.SocketProcessorBase.run(SocketProcessorBase.java:52)
+	at org.apache.tomcat.util.threads.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1191)
+	at org.apache.tomcat.util.threads.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:659)
+	at org.apache.tomcat.util.threads.TaskThread$WrappingRunnable.run(TaskThread.java:63)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-05-07 21:38:56.337 [http-nio-8080-exec-1] ERROR c.q.p.c.e.GlobalExceptionHandler - Unexpected error
+org.springframework.web.servlet.resource.NoResourceFoundException: No static resource stock/analysis/600519.
+	at org.springframework.web.servlet.resource.ResourceHttpRequestHandler.handleRequest(ResourceHttpRequestHandler.java:585)
+	at org.springframework.web.servlet.mvc.HttpRequestHandlerAdapter.handle(HttpRequestHandlerAdapter.java:52)
+	at org.springframework.web.servlet.DispatcherServlet.doDispatch(DispatcherServlet.java:1089)
+	at org.springframework.web.servlet.DispatcherServlet.doService(DispatcherServlet.java:979)
+	at org.springframework.web.servlet.FrameworkServlet.processRequest(FrameworkServlet.java:1014)
+	at org.springframework.web.servlet.FrameworkServlet.doGet(FrameworkServlet.java:903)
+	at jakarta.servlet.http.HttpServlet.service(HttpServlet.java:564)
+	at org.springframework.web.servlet.FrameworkServlet.service(FrameworkServlet.java:885)
+	at jakarta.servlet.http.HttpServlet.service(HttpServlet.java:658)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:205)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.apache.tomcat.websocket.server.WsFilter.doFilter(WsFilter.java:51)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:174)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.springframework.web.filter.RequestContextFilter.doFilterInternal(RequestContextFilter.java:100)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:174)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.springframework.web.filter.FormContentFilter.doFilterInternal(FormContentFilter.java:93)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:174)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.springframework.web.filter.CharacterEncodingFilter.doFilterInternal(CharacterEncodingFilter.java:201)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:174)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.apache.catalina.core.StandardWrapperValve.invoke(StandardWrapperValve.java:167)
+	at org.apache.catalina.core.StandardContextValve.invoke(StandardContextValve.java:90)
+	at org.apache.catalina.authenticator.AuthenticatorBase.invoke(AuthenticatorBase.java:482)
+	at org.apache.catalina.core.StandardHostValve.invoke(StandardHostValve.java:115)
+	at org.apache.catalina.valves.ErrorReportValve.invoke(ErrorReportValve.java:93)
+	at org.apache.catalina.core.StandardEngineValve.invoke(StandardEngineValve.java:74)
+	at org.apache.catalina.connector.CoyoteAdapter.service(CoyoteAdapter.java:344)
+	at org.apache.coyote.http11.Http11Processor.service(Http11Processor.java:391)
+	at org.apache.coyote.AbstractProcessorLight.process(AbstractProcessorLight.java:63)
+	at org.apache.coyote.AbstractProtocol$ConnectionHandler.process(AbstractProtocol.java:896)
+	at org.apache.tomcat.util.net.NioEndpoint$SocketProcessor.doRun(NioEndpoint.java:1744)
+	at org.apache.tomcat.util.net.SocketProcessorBase.run(SocketProcessorBase.java:52)
+	at org.apache.tomcat.util.threads.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1191)
+	at org.apache.tomcat.util.threads.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:659)
+	at org.apache.tomcat.util.threads.TaskThread$WrappingRunnable.run(TaskThread.java:63)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-05-07 21:39:02.098 [http-nio-8080-exec-5] ERROR c.q.p.c.e.GlobalExceptionHandler - Unexpected error
+org.springframework.web.servlet.resource.NoResourceFoundException: No static resource stock/analysis/600519.
+	at org.springframework.web.servlet.resource.ResourceHttpRequestHandler.handleRequest(ResourceHttpRequestHandler.java:585)
+	at org.springframework.web.servlet.mvc.HttpRequestHandlerAdapter.handle(HttpRequestHandlerAdapter.java:52)
+	at org.springframework.web.servlet.DispatcherServlet.doDispatch(DispatcherServlet.java:1089)
+	at org.springframework.web.servlet.DispatcherServlet.doService(DispatcherServlet.java:979)
+	at org.springframework.web.servlet.FrameworkServlet.processRequest(FrameworkServlet.java:1014)
+	at org.springframework.web.servlet.FrameworkServlet.doGet(FrameworkServlet.java:903)
+	at jakarta.servlet.http.HttpServlet.service(HttpServlet.java:564)
+	at org.springframework.web.servlet.FrameworkServlet.service(FrameworkServlet.java:885)
+	at jakarta.servlet.http.HttpServlet.service(HttpServlet.java:658)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:205)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.apache.tomcat.websocket.server.WsFilter.doFilter(WsFilter.java:51)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:174)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.springframework.web.filter.RequestContextFilter.doFilterInternal(RequestContextFilter.java:100)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:174)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.springframework.web.filter.FormContentFilter.doFilterInternal(FormContentFilter.java:93)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:174)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.springframework.web.filter.CharacterEncodingFilter.doFilterInternal(CharacterEncodingFilter.java:201)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:174)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.apache.catalina.core.StandardWrapperValve.invoke(StandardWrapperValve.java:167)
+	at org.apache.catalina.core.StandardContextValve.invoke(StandardContextValve.java:90)
+	at org.apache.catalina.authenticator.AuthenticatorBase.invoke(AuthenticatorBase.java:482)
+	at org.apache.catalina.core.StandardHostValve.invoke(StandardHostValve.java:115)
+	at org.apache.catalina.valves.ErrorReportValve.invoke(ErrorReportValve.java:93)
+	at org.apache.catalina.core.StandardEngineValve.invoke(StandardEngineValve.java:74)
+	at org.apache.catalina.connector.CoyoteAdapter.service(CoyoteAdapter.java:344)
+	at org.apache.coyote.http11.Http11Processor.service(Http11Processor.java:391)
+	at org.apache.coyote.AbstractProcessorLight.process(AbstractProcessorLight.java:63)
+	at org.apache.coyote.AbstractProtocol$ConnectionHandler.process(AbstractProtocol.java:896)
+	at org.apache.tomcat.util.net.NioEndpoint$SocketProcessor.doRun(NioEndpoint.java:1744)
+	at org.apache.tomcat.util.net.SocketProcessorBase.run(SocketProcessorBase.java:52)
+	at org.apache.tomcat.util.threads.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1191)
+	at org.apache.tomcat.util.threads.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:659)
+	at org.apache.tomcat.util.threads.TaskThread$WrappingRunnable.run(TaskThread.java:63)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-05-07 21:39:35.185 [http-nio-8080-exec-2] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-07 21:39:35.961 [http-nio-8080-exec-2] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=41, action=REDUCE
+2026-05-07 21:40:09.412 [SpringApplicationShutdownHook] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Stopping...
+2026-05-07 21:40:09.413 [SpringApplicationShutdownHook] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - BrokerAvailabilityEvent[available=false, SimpleBrokerMessageHandler [org.springframework.messaging.simp.broker.DefaultSubscriptionRegistry@af94b0b]]
+2026-05-07 21:40:09.413 [SpringApplicationShutdownHook] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Stopped.
+2026-05-07 21:40:09.428 [SpringApplicationShutdownHook] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Shutdown initiated...
+2026-05-07 21:40:09.431 [SpringApplicationShutdownHook] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Shutdown completed.
+2026-05-07 21:40:26.945 [background-preinit] INFO  o.h.validator.internal.util.Version - HV000001: Hibernate Validator 8.0.1.Final
+2026-05-07 21:40:27.149 [main] INFO  c.q.p.QuantPlatformApplication - Starting QuantPlatformApplication using Java 21.0.7 with PID 51708 (C:\Users\warning5\WorkBuddy\Claw\quant-platform\backend\target\classes started by warning5 in C:\Users\warning5\WorkBuddy\Claw\quant-platform)
+2026-05-07 21:40:27.150 [main] INFO  c.q.p.QuantPlatformApplication - No active profile set, falling back to 1 default profile: "default"
+2026-05-07 21:40:29.490 [main] INFO  o.s.b.w.e.tomcat.TomcatWebServer - Tomcat initialized with port 8080 (http)
+2026-05-07 21:40:29.513 [main] INFO  o.a.coyote.http11.Http11NioProtocol - Initializing ProtocolHandler ["http-nio-8080"]
+2026-05-07 21:40:29.515 [main] INFO  o.a.catalina.core.StandardService - Starting service [Tomcat]
+2026-05-07 21:40:29.515 [main] INFO  o.a.catalina.core.StandardEngine - Starting Servlet engine: [Apache Tomcat/10.1.19]
+2026-05-07 21:40:29.644 [main] INFO  o.a.c.c.C.[.[localhost].[/api] - Initializing Spring embedded WebApplicationContext
+2026-05-07 21:40:29.644 [main] INFO  o.s.b.w.s.c.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 2294 ms
+2026-05-07 21:40:30.564 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 加载 code -> market 映射...
+2026-05-07 21:40:30.633 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Starting...
+2026-05-07 21:40:31.023 [main] INFO  com.zaxxer.hikari.pool.HikariPool - HikariPool-1 - Added connection com.mysql.cj.jdbc.ConnectionImpl@5e95b0ab
+2026-05-07 21:40:31.027 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Start completed.
+2026-05-07 21:40:31.204 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 已加载 5490 只股票的 market 映射
+2026-05-07 21:40:31.210 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 已加载 5490 只股票的最新市值
+2026-05-07 21:40:31.226 [main] WARN  o.s.b.w.s.c.AnnotationConfigServletWebServerApplicationContext - Exception encountered during context initialization - cancelling refresh attempt: org.springframework.beans.factory.UnsatisfiedDependencyException: Error creating bean with name 'backtestController' defined in file [C:\Users\warning5\WorkBuddy\Claw\quant-platform\backend\target\classes\com\quant\platform\backtest\controller\BacktestController.class]: Unsatisfied dependency expressed through constructor parameter 0: Error creating bean with name 'backtestService' defined in file [C:\Users\warning5\WorkBuddy\Claw\quant-platform\backend\target\classes\com\quant\platform\backtest\service\BacktestService.class]: Unsatisfied dependency expressed through constructor parameter 2: Error creating bean with name 'backtestEngine' defined in file [C:\Users\warning5\WorkBuddy\Claw\quant-platform\backend\target\classes\com\quant\platform\backtest\engine\BacktestEngine.class]: Unsatisfied dependency expressed through constructor parameter 3: Error creating bean with name 'factorValueMapper' defined in file [C:\Users\warning5\WorkBuddy\Claw\quant-platform\backend\target\classes\com\quant\platform\factor\mapper\FactorValueMapper.class]: com/quant/platform/factor/domain/FactorValue$FactorValueBuilder
+2026-05-07 21:40:31.226 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Shutdown initiated...
+2026-05-07 21:40:31.244 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Shutdown completed.
+2026-05-07 21:40:31.247 [main] INFO  o.a.catalina.core.StandardService - Stopping service [Tomcat]
+2026-05-07 21:40:31.263 [main] INFO  o.s.b.a.l.ConditionEvaluationReportLogger - 
+
+Error starting ApplicationContext. To display the condition evaluation report re-run your application with 'debug' enabled.
+2026-05-07 21:40:31.298 [main] ERROR o.s.boot.SpringApplication - Application run failed
+org.springframework.beans.factory.UnsatisfiedDependencyException: Error creating bean with name 'backtestController' defined in file [C:\Users\warning5\WorkBuddy\Claw\quant-platform\backend\target\classes\com\quant\platform\backtest\controller\BacktestController.class]: Unsatisfied dependency expressed through constructor parameter 0: Error creating bean with name 'backtestService' defined in file [C:\Users\warning5\WorkBuddy\Claw\quant-platform\backend\target\classes\com\quant\platform\backtest\service\BacktestService.class]: Unsatisfied dependency expressed through constructor parameter 2: Error creating bean with name 'backtestEngine' defined in file [C:\Users\warning5\WorkBuddy\Claw\quant-platform\backend\target\classes\com\quant\platform\backtest\engine\BacktestEngine.class]: Unsatisfied dependency expressed through constructor parameter 3: Error creating bean with name 'factorValueMapper' defined in file [C:\Users\warning5\WorkBuddy\Claw\quant-platform\backend\target\classes\com\quant\platform\factor\mapper\FactorValueMapper.class]: com/quant/platform/factor/domain/FactorValue$FactorValueBuilder
+	at org.springframework.beans.factory.support.ConstructorResolver.createArgumentArray(ConstructorResolver.java:798)
+	at org.springframework.beans.factory.support.ConstructorResolver.autowireConstructor(ConstructorResolver.java:237)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.autowireConstructor(AbstractAutowireCapableBeanFactory.java:1355)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.createBeanInstance(AbstractAutowireCapableBeanFactory.java:1192)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.doCreateBean(AbstractAutowireCapableBeanFactory.java:562)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.createBean(AbstractAutowireCapableBeanFactory.java:522)
+	at org.springframework.beans.factory.support.AbstractBeanFactory.lambda$doGetBean$0(AbstractBeanFactory.java:325)
+	at org.springframework.beans.factory.support.DefaultSingletonBeanRegistry.getSingleton(DefaultSingletonBeanRegistry.java:234)
+	at org.springframework.beans.factory.support.AbstractBeanFactory.doGetBean(AbstractBeanFactory.java:323)
+	at org.springframework.beans.factory.support.AbstractBeanFactory.getBean(AbstractBeanFactory.java:199)
+	at org.springframework.beans.factory.support.DefaultListableBeanFactory.preInstantiateSingletons(DefaultListableBeanFactory.java:975)
+	at org.springframework.context.support.AbstractApplicationContext.finishBeanFactoryInitialization(AbstractApplicationContext.java:959)
+	at org.springframework.context.support.AbstractApplicationContext.refresh(AbstractApplicationContext.java:624)
+	at org.springframework.boot.web.servlet.context.ServletWebServerApplicationContext.refresh(ServletWebServerApplicationContext.java:146)
+	at org.springframework.boot.SpringApplication.refresh(SpringApplication.java:754)
+	at org.springframework.boot.SpringApplication.refreshContext(SpringApplication.java:456)
+	at org.springframework.boot.SpringApplication.run(SpringApplication.java:334)
+	at org.springframework.boot.SpringApplication.run(SpringApplication.java:1354)
+	at org.springframework.boot.SpringApplication.run(SpringApplication.java:1343)
+	at com.quant.platform.QuantPlatformApplication.main(QuantPlatformApplication.java:16)
+Caused by: org.springframework.beans.factory.UnsatisfiedDependencyException: Error creating bean with name 'backtestService' defined in file [C:\Users\warning5\WorkBuddy\Claw\quant-platform\backend\target\classes\com\quant\platform\backtest\service\BacktestService.class]: Unsatisfied dependency expressed through constructor parameter 2: Error creating bean with name 'backtestEngine' defined in file [C:\Users\warning5\WorkBuddy\Claw\quant-platform\backend\target\classes\com\quant\platform\backtest\engine\BacktestEngine.class]: Unsatisfied dependency expressed through constructor parameter 3: Error creating bean with name 'factorValueMapper' defined in file [C:\Users\warning5\WorkBuddy\Claw\quant-platform\backend\target\classes\com\quant\platform\factor\mapper\FactorValueMapper.class]: com/quant/platform/factor/domain/FactorValue$FactorValueBuilder
+	at org.springframework.beans.factory.support.ConstructorResolver.createArgumentArray(ConstructorResolver.java:798)
+	at org.springframework.beans.factory.support.ConstructorResolver.autowireConstructor(ConstructorResolver.java:237)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.autowireConstructor(AbstractAutowireCapableBeanFactory.java:1355)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.createBeanInstance(AbstractAutowireCapableBeanFactory.java:1192)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.doCreateBean(AbstractAutowireCapableBeanFactory.java:562)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.createBean(AbstractAutowireCapableBeanFactory.java:522)
+	at org.springframework.beans.factory.support.AbstractBeanFactory.lambda$doGetBean$0(AbstractBeanFactory.java:325)
+	at org.springframework.beans.factory.support.DefaultSingletonBeanRegistry.getSingleton(DefaultSingletonBeanRegistry.java:234)
+	at org.springframework.beans.factory.support.AbstractBeanFactory.doGetBean(AbstractBeanFactory.java:323)
+	at org.springframework.beans.factory.support.AbstractBeanFactory.getBean(AbstractBeanFactory.java:199)
+	at org.springframework.beans.factory.config.DependencyDescriptor.resolveCandidate(DependencyDescriptor.java:254)
+	at org.springframework.beans.factory.support.DefaultListableBeanFactory.doResolveDependency(DefaultListableBeanFactory.java:1443)
+	at org.springframework.beans.factory.support.DefaultListableBeanFactory.resolveDependency(DefaultListableBeanFactory.java:1353)
+	at org.springframework.beans.factory.support.ConstructorResolver.resolveAutowiredArgument(ConstructorResolver.java:907)
+	at org.springframework.beans.factory.support.ConstructorResolver.createArgumentArray(ConstructorResolver.java:785)
+	... 19 common frames omitted
+Caused by: org.springframework.beans.factory.UnsatisfiedDependencyException: Error creating bean with name 'backtestEngine' defined in file [C:\Users\warning5\WorkBuddy\Claw\quant-platform\backend\target\classes\com\quant\platform\backtest\engine\BacktestEngine.class]: Unsatisfied dependency expressed through constructor parameter 3: Error creating bean with name 'factorValueMapper' defined in file [C:\Users\warning5\WorkBuddy\Claw\quant-platform\backend\target\classes\com\quant\platform\factor\mapper\FactorValueMapper.class]: com/quant/platform/factor/domain/FactorValue$FactorValueBuilder
+	at org.springframework.beans.factory.support.ConstructorResolver.createArgumentArray(ConstructorResolver.java:798)
+	at org.springframework.beans.factory.support.ConstructorResolver.autowireConstructor(ConstructorResolver.java:237)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.autowireConstructor(AbstractAutowireCapableBeanFactory.java:1355)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.createBeanInstance(AbstractAutowireCapableBeanFactory.java:1192)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.doCreateBean(AbstractAutowireCapableBeanFactory.java:562)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.createBean(AbstractAutowireCapableBeanFactory.java:522)
+	at org.springframework.beans.factory.support.AbstractBeanFactory.lambda$doGetBean$0(AbstractBeanFactory.java:325)
+	at org.springframework.beans.factory.support.DefaultSingletonBeanRegistry.getSingleton(DefaultSingletonBeanRegistry.java:234)
+	at org.springframework.beans.factory.support.AbstractBeanFactory.doGetBean(AbstractBeanFactory.java:323)
+	at org.springframework.beans.factory.support.AbstractBeanFactory.getBean(AbstractBeanFactory.java:199)
+	at org.springframework.beans.factory.config.DependencyDescriptor.resolveCandidate(DependencyDescriptor.java:254)
+	at org.springframework.beans.factory.support.DefaultListableBeanFactory.doResolveDependency(DefaultListableBeanFactory.java:1443)
+	at org.springframework.beans.factory.support.DefaultListableBeanFactory.resolveDependency(DefaultListableBeanFactory.java:1353)
+	at org.springframework.beans.factory.support.ConstructorResolver.resolveAutowiredArgument(ConstructorResolver.java:907)
+	at org.springframework.beans.factory.support.ConstructorResolver.createArgumentArray(ConstructorResolver.java:785)
+	... 33 common frames omitted
+Caused by: org.springframework.beans.factory.BeanCreationException: Error creating bean with name 'factorValueMapper' defined in file [C:\Users\warning5\WorkBuddy\Claw\quant-platform\backend\target\classes\com\quant\platform\factor\mapper\FactorValueMapper.class]: com/quant/platform/factor/domain/FactorValue$FactorValueBuilder
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.initializeBean(AbstractAutowireCapableBeanFactory.java:1786)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.doCreateBean(AbstractAutowireCapableBeanFactory.java:600)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.createBean(AbstractAutowireCapableBeanFactory.java:522)
+	at org.springframework.beans.factory.support.AbstractBeanFactory.lambda$doGetBean$0(AbstractBeanFactory.java:325)
+	at org.springframework.beans.factory.support.DefaultSingletonBeanRegistry.getSingleton(DefaultSingletonBeanRegistry.java:234)
+	at org.springframework.beans.factory.support.AbstractBeanFactory.doGetBean(AbstractBeanFactory.java:323)
+	at org.springframework.beans.factory.support.AbstractBeanFactory.getBean(AbstractBeanFactory.java:199)
+	at org.springframework.beans.factory.config.DependencyDescriptor.resolveCandidate(DependencyDescriptor.java:254)
+	at org.springframework.beans.factory.support.DefaultListableBeanFactory.doResolveDependency(DefaultListableBeanFactory.java:1443)
+	at org.springframework.beans.factory.support.DefaultListableBeanFactory.resolveDependency(DefaultListableBeanFactory.java:1353)
+	at org.springframework.beans.factory.support.ConstructorResolver.resolveAutowiredArgument(ConstructorResolver.java:907)
+	at org.springframework.beans.factory.support.ConstructorResolver.createArgumentArray(ConstructorResolver.java:785)
+	... 47 common frames omitted
+Caused by: java.lang.NoClassDefFoundError: com/quant/platform/factor/domain/FactorValue$FactorValueBuilder
+	at java.base/java.lang.Class.getDeclaredMethods0(Native Method)
+	at java.base/java.lang.Class.privateGetDeclaredMethods(Class.java:3578)
+	at java.base/java.lang.Class.getDeclaredMethods(Class.java:2676)
+	at org.apache.ibatis.reflection.Reflector.getClassMethods(Reflector.java:292)
+	at org.apache.ibatis.reflection.Reflector.<init>(Reflector.java:71)
+	at java.base/java.util.concurrent.ConcurrentHashMap.computeIfAbsent(ConcurrentHashMap.java:1708)
+	at org.apache.ibatis.util.MapUtil.computeIfAbsent(MapUtil.java:36)
+	at org.apache.ibatis.reflection.DefaultReflectorFactory.findForClass(DefaultReflectorFactory.java:44)
+	at org.apache.ibatis.reflection.MetaClass.<init>(MetaClass.java:39)
+	at org.apache.ibatis.reflection.MetaClass.forClass(MetaClass.java:43)
+	at org.apache.ibatis.builder.SqlSourceBuilder$ParameterMappingTokenHandler.buildParameterMapping(SqlSourceBuilder.java:106)
+	at org.apache.ibatis.builder.SqlSourceBuilder$ParameterMappingTokenHandler.handleToken(SqlSourceBuilder.java:89)
+	at org.apache.ibatis.parsing.GenericTokenParser.parse(GenericTokenParser.java:76)
+	at org.apache.ibatis.builder.SqlSourceBuilder.parse(SqlSourceBuilder.java:51)
+	at org.apache.ibatis.scripting.defaults.RawSqlSource.<init>(RawSqlSource.java:46)
+	at org.apache.ibatis.scripting.xmltags.XMLLanguageDriver.createSqlSource(XMLLanguageDriver.java:61)
+	at com.baomidou.mybatisplus.core.MybatisXMLLanguageDriver.createSqlSource(MybatisXMLLanguageDriver.java:68)
+	at com.baomidou.mybatisplus.core.MybatisMapperAnnotationBuilder.buildSqlSourceFromStrings(MybatisMapperAnnotationBuilder.java:633)
+	at com.baomidou.mybatisplus.core.MybatisMapperAnnotationBuilder.buildSqlSource(MybatisMapperAnnotationBuilder.java:622)
+	at com.baomidou.mybatisplus.core.MybatisMapperAnnotationBuilder.lambda$parseStatement$2(MybatisMapperAnnotationBuilder.java:291)
+	at java.base/java.util.Optional.ifPresent(Optional.java:178)
+	at com.baomidou.mybatisplus.core.MybatisMapperAnnotationBuilder.parseStatement(MybatisMapperAnnotationBuilder.java:290)
+	at com.baomidou.mybatisplus.core.MybatisMapperAnnotationBuilder.parse(MybatisMapperAnnotationBuilder.java:112)
+	at com.baomidou.mybatisplus.core.MybatisMapperRegistry.addMapper(MybatisMapperRegistry.java:90)
+	at com.baomidou.mybatisplus.core.MybatisConfiguration.addMapper(MybatisConfiguration.java:129)
+	at org.mybatis.spring.mapper.MapperFactoryBean.checkDaoConfig(MapperFactoryBean.java:80)
+	at org.springframework.dao.support.DaoSupport.afterPropertiesSet(DaoSupport.java:44)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.invokeInitMethods(AbstractAutowireCapableBeanFactory.java:1833)
+	at org.springframework.beans.factory.support.AbstractAutowireCapableBeanFactory.initializeBean(AbstractAutowireCapableBeanFactory.java:1782)
+	... 58 common frames omitted
+Caused by: java.lang.ClassNotFoundException: com.quant.platform.factor.domain.FactorValue$FactorValueBuilder
+	at java.base/jdk.internal.loader.BuiltinClassLoader.loadClass(BuiltinClassLoader.java:641)
+	at java.base/jdk.internal.loader.ClassLoaders$AppClassLoader.loadClass(ClassLoaders.java:188)
+	at java.base/java.lang.ClassLoader.loadClass(ClassLoader.java:526)
+	... 87 common frames omitted
+2026-05-07 21:41:17.101 [background-preinit] INFO  o.h.validator.internal.util.Version - HV000001: Hibernate Validator 8.0.1.Final
+2026-05-07 21:41:17.217 [main] INFO  c.q.p.QuantPlatformApplication - Starting QuantPlatformApplication using Java 21.0.7 with PID 32656 (C:\Users\warning5\WorkBuddy\Claw\quant-platform\backend\target\classes started by warning5 in C:\Users\warning5\WorkBuddy\Claw\quant-platform)
+2026-05-07 21:41:17.218 [main] INFO  c.q.p.QuantPlatformApplication - No active profile set, falling back to 1 default profile: "default"
+2026-05-07 21:41:19.327 [main] INFO  o.s.b.w.e.tomcat.TomcatWebServer - Tomcat initialized with port 8080 (http)
+2026-05-07 21:41:19.347 [main] INFO  o.a.coyote.http11.Http11NioProtocol - Initializing ProtocolHandler ["http-nio-8080"]
+2026-05-07 21:41:19.349 [main] INFO  o.a.catalina.core.StandardService - Starting service [Tomcat]
+2026-05-07 21:41:19.349 [main] INFO  o.a.catalina.core.StandardEngine - Starting Servlet engine: [Apache Tomcat/10.1.19]
+2026-05-07 21:41:19.462 [main] INFO  o.a.c.c.C.[.[localhost].[/api] - Initializing Spring embedded WebApplicationContext
+2026-05-07 21:41:19.463 [main] INFO  o.s.b.w.s.c.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 2054 ms
+2026-05-07 21:41:19.964 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 加载 code -> market 映射...
+2026-05-07 21:41:20.016 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Starting...
+2026-05-07 21:41:20.296 [main] INFO  com.zaxxer.hikari.pool.HikariPool - HikariPool-1 - Added connection com.mysql.cj.jdbc.ConnectionImpl@77d95e5a
+2026-05-07 21:41:20.300 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Start completed.
+2026-05-07 21:41:20.427 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 已加载 5490 只股票的 market 映射
+2026-05-07 21:41:20.430 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 已加载 5490 只股票的最新市值
+2026-05-07 21:41:20.819 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate] 脚本目录: C:\Users\warning5\WorkBuddy\Claw\quant-platform\scripts
+2026-05-07 21:41:20.820 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_stock_data.py : OK
+2026-05-07 21:41:20.820 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_stock_daily_baostock.py : OK
+2026-05-07 21:41:20.820 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_bj_stock_daily_qq.py : OK
+2026-05-07 21:41:20.820 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_index_daily_baostock.py : OK
+2026-05-07 21:41:20.820 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_dividend_baostock.py : OK
+2026-05-07 21:41:20.821 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_research_report.py : OK
+2026-05-07 21:41:21.005 [main] INFO  c.q.p.f.engine.FactorComputeEngine - Registered 36 financial factor calculators
+2026-05-07 21:41:21.275 [main] INFO  c.q.p.s.service.ScreenPresetService - Built-in screen presets initialized
+2026-05-07 21:41:21.768 [main] INFO  o.s.b.a.w.s.WelcomePageHandlerMapping - Adding welcome page: class path resource [static/index.html]
+2026-05-07 21:41:22.261 [main] INFO  o.a.coyote.http11.Http11NioProtocol - Starting ProtocolHandler ["http-nio-8080"]
+2026-05-07 21:41:22.287 [main] INFO  o.s.b.w.e.tomcat.TomcatWebServer - Tomcat started on port 8080 (http) with context path '/api'
+2026-05-07 21:41:22.293 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Starting...
+2026-05-07 21:41:22.294 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - BrokerAvailabilityEvent[available=true, SimpleBrokerMessageHandler [org.springframework.messaging.simp.broker.DefaultSubscriptionRegistry@27e3dc9a]]
+2026-05-07 21:41:22.294 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Started.
+2026-05-07 21:41:22.469 [main] INFO  c.q.p.QuantPlatformApplication - Started QuantPlatformApplication in 6.016 seconds (process running for 6.643)
+2026-05-07 21:41:22.543 [main] INFO  c.q.p.factor.service.FactorService - Builtin factors initialized
+2026-05-07 21:41:22.550 [main] INFO  c.q.p.s.s.StrategyDataInitializer - Checking strategy data initialization...
+2026-05-07 21:41:22.552 [main] INFO  c.q.p.s.s.StrategyDataInitializer - Strategy data already exists (6 strategies), skipping initialization
+2026-05-07 21:41:22.556 [main] INFO  c.q.p.s.service.StrategyService - Demo strategies already initialized, skipping
+2026-05-07 21:42:07.203 [http-nio-8080-exec-1] INFO  o.a.c.c.C.[.[localhost].[/api] - Initializing Spring DispatcherServlet 'dispatcherServlet'
+2026-05-07 21:42:07.203 [http-nio-8080-exec-1] INFO  o.s.web.servlet.DispatcherServlet - Initializing Servlet 'dispatcherServlet'
+2026-05-07 21:42:07.208 [http-nio-8080-exec-1] INFO  o.s.web.servlet.DispatcherServlet - Completed initialization in 5 ms
+2026-05-07 21:42:07.291 [http-nio-8080-exec-1] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-07 21:42:08.634 [http-nio-8080-exec-1] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=41, action=REDUCE
+2026-05-07 21:42:08.959 [http-nio-8080-exec-6] INFO  c.q.p.s.a.service.AnalysisService - 获取研报分析: code=600519
+2026-05-07 21:42:22.272 [MessageBroker-1] INFO  o.s.w.s.c.WebSocketMessageBrokerStats - WebSocketSession[0 current WS(0)-HttpStream(0)-HttpPoll(0), 0 total, 0 closed abnormally (0 connect failure, 0 send limit, 0 transport error)], stompSubProtocol[processed CONNECT(0)-CONNECTED(0)-DISCONNECT(0)], stompBrokerRelay[null], inboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0], outboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0], sockJsScheduler[pool size = 1, active threads = 1, queued tasks = 0, completed tasks = 0]
+2026-05-07 21:44:47.692 [http-nio-8080-exec-5] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-07 21:44:48.379 [http-nio-8080-exec-5] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=41, action=REDUCE
+2026-05-07 21:44:49.751 [http-nio-8080-exec-10] INFO  c.q.p.s.a.service.AnalysisService - 获取研报分析: code=600519
+2026-05-07 21:44:55.587 [http-nio-8080-exec-2] INFO  c.q.p.s.a.service.AnalysisService - 开始分析个股: code=600519
+2026-05-07 21:44:56.227 [http-nio-8080-exec-2] INFO  c.q.p.s.a.service.AnalysisService - 个股分析完成: code=600519, totalScore=41, action=REDUCE
+2026-05-07 21:44:56.427 [http-nio-8080-exec-10] INFO  c.q.p.s.a.service.AnalysisService - 获取研报分析: code=600519
+2026-05-07 21:55:12.036 [http-nio-8080-exec-2] INFO  c.q.p.dataupdate.DataUpdateService - [DataCoverage] 数据概览查询完成
+2026-05-07 21:57:55.230 [http-nio-8080-exec-6] ERROR c.q.p.c.e.GlobalExceptionHandler - Unexpected error
+org.springframework.web.servlet.resource.NoResourceFoundException: No static resource analysis/kline.
+	at org.springframework.web.servlet.resource.ResourceHttpRequestHandler.handleRequest(ResourceHttpRequestHandler.java:585)
+	at org.springframework.web.servlet.mvc.HttpRequestHandlerAdapter.handle(HttpRequestHandlerAdapter.java:52)
+	at org.springframework.web.servlet.DispatcherServlet.doDispatch(DispatcherServlet.java:1089)
+	at org.springframework.web.servlet.DispatcherServlet.doService(DispatcherServlet.java:979)
+	at org.springframework.web.servlet.FrameworkServlet.processRequest(FrameworkServlet.java:1014)
+	at org.springframework.web.servlet.FrameworkServlet.doGet(FrameworkServlet.java:903)
+	at jakarta.servlet.http.HttpServlet.service(HttpServlet.java:564)
+	at org.springframework.web.servlet.FrameworkServlet.service(FrameworkServlet.java:885)
+	at jakarta.servlet.http.HttpServlet.service(HttpServlet.java:658)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:205)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.apache.tomcat.websocket.server.WsFilter.doFilter(WsFilter.java:51)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:174)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.springframework.web.filter.RequestContextFilter.doFilterInternal(RequestContextFilter.java:100)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:174)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.springframework.web.filter.FormContentFilter.doFilterInternal(FormContentFilter.java:93)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:174)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.springframework.web.filter.CharacterEncodingFilter.doFilterInternal(CharacterEncodingFilter.java:201)
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116)
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:174)
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:149)
+	at org.apache.catalina.core.StandardWrapperValve.invoke(StandardWrapperValve.java:167)
+	at org.apache.catalina.core.StandardContextValve.invoke(StandardContextValve.java:90)
+	at org.apache.catalina.authenticator.AuthenticatorBase.invoke(AuthenticatorBase.java:482)
+	at org.apache.catalina.core.StandardHostValve.invoke(StandardHostValve.java:115)
+	at org.apache.catalina.valves.ErrorReportValve.invoke(ErrorReportValve.java:93)
+	at org.apache.catalina.core.StandardEngineValve.invoke(StandardEngineValve.java:74)
+	at org.apache.catalina.connector.CoyoteAdapter.service(CoyoteAdapter.java:344)
+	at org.apache.coyote.http11.Http11Processor.service(Http11Processor.java:391)
+	at org.apache.coyote.AbstractProcessorLight.process(AbstractProcessorLight.java:63)
+	at org.apache.coyote.AbstractProtocol$ConnectionHandler.process(AbstractProtocol.java:896)
+	at org.apache.tomcat.util.net.NioEndpoint$SocketProcessor.doRun(NioEndpoint.java:1744)
+	at org.apache.tomcat.util.net.SocketProcessorBase.run(SocketProcessorBase.java:52)
+	at org.apache.tomcat.util.threads.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1191)
+	at org.apache.tomcat.util.threads.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:659)
+	at org.apache.tomcat.util.threads.TaskThread$WrappingRunnable.run(TaskThread.java:63)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+2026-05-07 22:12:22.282 [MessageBroker-1] INFO  o.s.w.s.c.WebSocketMessageBrokerStats - WebSocketSession[0 current WS(0)-HttpStream(0)-HttpPoll(0), 1 total, 0 closed abnormally (0 connect failure, 0 send limit, 0 transport error)], stompSubProtocol[processed CONNECT(1)-CONNECTED(1)-DISCONNECT(0)], stompBrokerRelay[null], inboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 12], outboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 2], sockJsScheduler[pool size = 2, active threads = 1, queued tasks = 0, completed tasks = 1]

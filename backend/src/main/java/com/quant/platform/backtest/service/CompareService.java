@@ -28,7 +28,6 @@ public class CompareService {
      * @param taskIds 多个回测任务ID列表
      * @return 包含 metrics(指标表) 和 curves(净值曲线) 的 Map
      */
-    @SuppressWarnings("unchecked")
     public Map<String, Object> compare(List<Long> taskIds) {
         List<Map<String, Object>> metrics = new ArrayList<>();
         List<Map<String, Object>> curves = new ArrayList<>();

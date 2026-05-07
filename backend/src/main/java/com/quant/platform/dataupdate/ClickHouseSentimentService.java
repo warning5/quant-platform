@@ -95,7 +95,7 @@ public class ClickHouseSentimentService {
     /**
      * 从 ClickHouse 查询情绪数据概览
      */
-    private Map<String, Object> queryCoverageFromClickHouse() throws Exception {
+    private Map<String, Object> queryCoverageFromClickHouse() {
         Map<String, Object> result = new LinkedHashMap<>();
         int totalRecords = 0;
         int tableCount = 0;

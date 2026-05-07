@@ -185,8 +185,7 @@ public class AnalysisChMapper {
         try {
             String withSuffix = normalizeCode(code);
             String noSuffix = normalizeCodeForDaily(code);
-            BigDecimal rsi = clickHouseJdbcTemplate.queryForObject(sql, BigDecimal.class, withSuffix, noSuffix, withSuffix, noSuffix);
-            return rsi;
+            return clickHouseJdbcTemplate.queryForObject(sql, BigDecimal.class, withSuffix, noSuffix, withSuffix, noSuffix);
         } catch (Exception e) {
             log.warn("查询RSI失败: code={}, error={}", code, e.getMessage());
             return null;

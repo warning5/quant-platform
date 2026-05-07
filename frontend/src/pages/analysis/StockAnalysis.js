@@ -215,22 +215,22 @@ export default function StockAnalysis() {
     {
       key: 'tech',
       label: tabLabel('技术面', '通过均线排列、MACD、RSI、缠论信号等技术指标，判断股票短期走势和买卖时机。适合把握趋势和择时。'),
-      children: <TechTab data={overview.techSignal} />,
+      children: <ScoreDetailTab detail={overview.scoreDetails?.find(d => d.dimension === 'tech')} />,
     },
     {
       key: 'money',
       label: tabLabel('资金面', '通过量比、换手率偏离指标，捕捉资金异动信号。放量上涨通常为积极信号，缩量下跌需警惕。'),
-      children: <MoneyFlowTab data={overview.moneySignal} />,
+      children: <ScoreDetailTab detail={overview.scoreDetails?.find(d => d.dimension === 'money')} />,
     },
     {
       key: 'sentiment',
       label: tabLabel('事件面', '通过涨停连板、炸板率、阶段涨幅等市场情绪指标，判断当前市场热度和投机氛围，辅助规避炒作风险。'),
-      children: <SentimentTab data={overview.sentimentSignal} isBlueChip={!!overview.blueChip} />,
+      children: <ScoreDetailTab detail={overview.scoreDetails?.find(d => d.dimension === 'sentiment')} />,
     },
     {
       key: 'fundamental',
       label: tabLabel('基本面', '通过PE、PB、ROE、营收/净利增速等财务指标，评估公司内在价值和成长性。适合中长期投资参考。'),
-      children: <FundamentalTab data={overview.fundamentalSignal} />,
+      children: <ScoreDetailTab detail={overview.scoreDetails?.find(d => d.dimension === 'fundamental')} />,
     },
     {
       key: 'research',
@@ -486,49 +486,18 @@ function IndicatorRow({ label, value, score, maxScore, desc, color }) {
         </Tag>
       </span>
       <span style={{ width: 60, flexShrink: 0, textAlign: 'center', fontSize: 13, color: '#666' }}>
-        {score !== undefined ? `${score}/${maxScore}` : ''}
+        {score !== undefined && maxScore > 0 ? `${score}/${maxScore}` : ''}
       </span>
       <span style={{ flex: 1, fontSize: 12, color: '#999' }}>{desc || ''}</span>
     </div>
   );
 }
 
-// ── 技术面 Tab ─────────────────────────────────────────────────────────────
-function TechTab({ data }) {
-  if (!data) return <Empty description="暂无技术面数据" />;
-
-  const getChanSignalText = (sig) => {
-    if (sig === 'BUY') return '买入';
-    if (sig === 'SELL') return '卖出';
-    return '持有';
-  };
-  const getChanSignalColor = (sig) => {
-    if (sig === 'BUY') return 'red';
-    if (sig === 'SELL') return 'green';
-    return 'default';
-  };
-
-  const getTrendText = (trend) => {
-    if (trend === 'BULLISH') return '上涨';
-    if (trend === 'BEARISH') return '下跌';
-    if (trend === 'SIDEWAYS') return '盘整';
-    return '-';
-  };
-  const getTrendColor = (trend) => {
-    if (trend === 'BULLISH') return 'red';
-    if (trend === 'BEARISH') return 'green';
-    return 'blue';
-  };
-
-  const getPenDirText = (dir) => {
-    if (dir === '1' || dir === 1 || dir === 'UP') return '向上';
-    if (dir === '-1' || dir === -1 || dir === 'DOWN') return '向下';
-    return '-';
-  };
-  const isPenUp = (dir) => dir === '1' || dir === 1 || dir === 'UP';
-
-  const rsiVal = data.rsi ?? 0;
-  const rsiColor = rsiVal > 70 ? 'red' : rsiVal < 30 ? 'green' : 'blue';
+// ── 通用评分明细 Tab（消费 overview.scoreDetails[维度].items） ─────────
+function ScoreDetailTab({ detail }) {
+  if (!detail || !detail.items || detail.items.length === 0) {
+    return <Empty description="暂无数据" />;
+  }
 
   return (
     <div>
@@ -542,420 +511,24 @@ function TechTab({ data }) {
         <span style={{ width: 60, flexShrink: 0, textAlign: 'center' }}>评分</span>
         <span style={{ flex: 1 }}>说明</span>
       </div>
-      <IndicatorRow
-        label="缠论信号" value={getChanSignalText(data.chanSignal)} color={getChanSignalColor(data.chanSignal)}
-        score={data.chanSignal === 'BUY' ? 12 : data.chanSignal === 'SELL' ? -5 : 0} maxScore={12}
-        desc="缠论买卖点信号。BUY=买点(12分), SELL=卖点(-5分), HOLD=持有(0分)"
-      />
-      <IndicatorRow
-        label="趋势状态" value={getTrendText(data.trend)} color={getTrendColor(data.trend)}
-        score={data.trend === 'BULLISH' ? 8 : data.trend === 'SIDEWAYS' ? 4 : 0} maxScore={8}
-        desc="走势类型判断。BULLISH=上涨(8分), SIDEWAYS=盘整(4分), BEARISH=下跌(0分)"
-      />
-      <IndicatorRow
-        label="笔方向" value={getPenDirText(data.penDir)} color={isPenUp(data.penDir) ? 'red' : 'green'}
-        desc="当前笔的方向。向上笔=多方主导，向下笔=空方主导"
-      />
-      <IndicatorRow
-        label="笔数" value={data.penCount ?? '-'} color='default'
-        desc="近期笔的数量。笔数少=走势简洁趋势明确，笔数多=震荡频繁"
-      />
-      <IndicatorRow
-        label="均线多头" value={data.maBullish ? '是' : '否'} color={data.maBullish ? 'red' : 'default'}
-        score={data.maBullish ? 5 : 0} maxScore={5}
-        desc="MA5>MA10>MA20>MA60 呈多头排列=5分，表示中短期趋势向上"
-      />
-      <IndicatorRow
-        label="MACD金叉" value={data.macdGolden ? '是' : '否'} color={data.macdGolden ? 'red' : 'default'}
-        score={data.macdGolden ? 5 : 0} maxScore={5}
-        desc="DIF从下方穿越DEA=5分，是经典的短期看多信号"
-      />
-      <IndicatorRow
-        label="RSI14" value={data.rsi?.toFixed(1) ?? '-'} color={rsiColor}
-        desc="14日相对强弱指标。>70超买(红色)，<30超卖(绿色)，30~70正常(蓝色)"
-      />
+
+      {/* 所有指标（后端决定顺序和infoOnly标记） */}
+      {detail.items.map((it, i) => (
+        <IndicatorRow
+          key={i}
+          label={it.label}
+          value={it.value}
+          score={it.score}
+          maxScore={it.maxScore}
+          desc={it.desc}
+          color={it.color || 'default'}
+        />
+      ))}
+
       {/* 总分 */}
       <div style={{ marginTop: 12, padding: '8px 0', borderTop: '2px solid #e8e8e8' }}>
         <Text strong style={{ fontSize: 14 }}>
-          技术面得分：{data.techScore ?? '-'}/30
-        </Text>
-      </div>
-    </div>
-  );
-}
-
-// ── 资金面 Tab ─────────────────────────────────────────────────────────────
-function MoneyFlowTab({ data }) {
-  if (!data) return <Empty description="暂无资金面数据" />;
-
-  const nmVal = data.netMain ?? 0;
-  const nmPctVal = data.netMainPct ?? 0;
-  const vrVal = data.volumeRatio ?? 0;
-  const tdVal = data.turnoverDeviation ?? 0;
-
-  // 主力净流入评分（10分）
-  const absNm = Math.abs(nmVal);
-  const nmScore = nmVal >= 5e8 ? 10 : nmVal >= 1e8 ? 7 : nmVal > 0 ? 5 : nmVal > -1e8 ? 2 : nmVal > -3e8 ? 1 : 0;
-  const nmColor = nmVal > 0 ? 'red' : nmVal < 0 ? 'green' : 'default';
-
-  // 主力净流入占比评分（8分）
-  const pctScore = nmPctVal >= 10 ? 8 : nmPctVal >= 5 ? 6 : nmPctVal > 0 ? 4 : nmPctVal > -5 ? 2 : nmPctVal > -10 ? 1 : 0;
-  const pctColor = nmPctVal > 0 ? 'red' : nmPctVal < 0 ? 'green' : 'default';
-
-  // 量比评分（4分）
-  const vrScore = vrVal >= 2.0 ? 4 : vrVal >= 1.5 ? 3 : vrVal >= 1.0 ? 2 : 0;
-  const vrColor = vrVal >= 2.0 ? 'red' : vrVal >= 1.5 ? 'volcano' : 'green';
-
-  // 换手率偏离评分（3分）
-  const tdScore = tdVal > 0 ? 3 : tdVal > -2 ? 2 : 1;
-  const tdColor = tdVal > 3.0 ? 'red' : tdVal > 0 ? 'volcano' : 'green';
-
-  // 格式化金额
-  const fmtMoney = (v) => {
-    if (v == null) return '-';
-    const absV = Math.abs(v);
-    const sign = v >= 0 ? '+' : '';
-    if (absV >= 1e8) return sign + (v / 1e8).toFixed(2) + '亿';
-    if (absV >= 1e4) return sign + (v / 1e4).toFixed(2) + '万';
-    return sign + v.toFixed(0) + '元';
-  };
-
-  // 主力资金状态
-  const flowStatus = data.mainFlowStatus;
-  const flowLabel = flowStatus === 'INFLOW' ? '主力流入' : flowStatus === 'OUTFLOW' ? '主力流出' : '暂无数据';
-  const flowColor = flowStatus === 'INFLOW' ? 'red' : flowStatus === 'OUTFLOW' ? 'green' : 'default';
-
-  return (
-    <div>
-      <div style={{
-        display: 'flex', padding: '4px 0', gap: 12,
-        borderBottom: '2px solid #e8e8e8', fontWeight: 600, fontSize: 12, color: '#999',
-      }}>
-        <span style={{ width: 110, flexShrink: 0 }}>指标</span>
-        <span style={{ width: 80, flexShrink: 0, textAlign: 'center' }}>当前值</span>
-        <span style={{ width: 60, flexShrink: 0, textAlign: 'center' }}>评分</span>
-        <span style={{ flex: 1 }}>说明</span>
-      </div>
-      <IndicatorRow
-        label="主力净流入" value={data.netMain != null ? fmtMoney(data.netMain) : '暂无数据'} color={nmColor}
-        score={nmScore} maxScore={10}
-        desc="主力资金(超大单+大单)当日净流入额。>5亿=10分，>1亿=7分，>0=5分，>-1亿=2分，>-3亿=1分"
-      />
-      <IndicatorRow
-        label="主力净流入占比" value={data.netMainPct != null ? `${data.netMainPct.toFixed(2)}%` : '暂无数据'} color={pctColor}
-        score={pctScore} maxScore={8}
-        desc="主力净流入占成交额比例。>10%=8分，>5%=6分，>0%=4分，>-5%=2分，>-10%=1分"
-      />
-      <IndicatorRow
-        label="超大单净流入" value={data.netHuge != null ? fmtMoney(data.netHuge) : '-'} 
-        color={data.netHuge > 0 ? 'red' : data.netHuge < 0 ? 'green' : 'default'}
-        desc="超大单（>100万元）当日净流入额，反映机构资金动向"
-      />
-      <IndicatorRow
-        label="大单净流入" value={data.netBig != null ? fmtMoney(data.netBig) : '-'} 
-        color={data.netBig > 0 ? 'red' : data.netBig < 0 ? 'green' : 'default'}
-        desc="大单（20~100万元）当日净流入额，反映大户资金动向"
-      />
-      <IndicatorRow
-        label="主力资金状态" value={flowLabel} color={flowColor}
-        desc="综合主力净流入方向判断。流入=大资金积极介入，流出=大资金撤离"
-      />
-      <IndicatorRow
-        label="量比" value={data.volumeRatio?.toFixed(2) ?? '-'} color={vrColor}
-        score={vrScore} maxScore={4}
-        desc="今日成交额/近5日均值。≥2.0放量(4分)，≥1.5温和(3分)，≥1.0正常(2分)"
-      />
-      <IndicatorRow
-        label="换手率偏离" value={data.turnoverDeviation ? `${data.turnoverDeviation.toFixed(2)}%` : '-'} color={tdColor}
-        score={tdScore} maxScore={3}
-        desc="今日换手率与20日均值的偏离。>0%=3分，>-2%=2分，≤-2%=1分"
-      />
-      <IndicatorRow
-        label="当日换手率" value={data.turnoverRate ? `${data.turnoverRate.toFixed(2)}%` : '-'} color='default'
-        desc="当日成交量/流通股本。高换手=交投活跃，低换手=交易清淡"
-      />
-      <IndicatorRow
-        label="量能状态" value={
-          data.volumeStatus === 'HIGH' ? '放量' :
-          data.volumeStatus === 'MEDIUM' ? '温和放量' :
-          data.volumeStatus === 'LOW' ? '缩量' : '-'
-        } color={
-          data.volumeStatus === 'HIGH' ? 'red' :
-          data.volumeStatus === 'MEDIUM' ? 'volcano' : 'green'
-        }
-        desc="综合量比和换手率的量能判断。放量=资金积极介入，缩量=观望情绪浓厚"
-      />
-      <div style={{ marginTop: 12, padding: '8px 0', borderTop: '2px solid #e8e8e8' }}>
-        <Text strong style={{ fontSize: 14 }}>
-          资金面得分：{data.moneyScore ?? '-'}/25
-        </Text>
-      </div>
-    </div>
-  );
-}
-
-// ── 事件面 Tab ─────────────────────────────────────────────────────────────
-function SentimentTab({ data, isBlueChip }) {
-  if (!data) return <Empty description="暂无事件面数据" />;
-
-  // 大盘蓝筹模式：显示融资余额/龙虎榜机构/机构调研
-  if (isBlueChip) {
-    const marginChg = data.marginChgPct ?? null;
-    const lhbNet = data.lhbInstitutionNet ?? null;
-    const surveyCnt = data.holderChangePct ?? null; // 复用字段存调研次数
-
-    // 融资余额评分
-    let marginScore = 0;
-    if (marginChg != null) {
-      if (marginChg > 5) marginScore = 8;
-      else if (marginChg > 2) marginScore = 5;
-      else if (marginChg > 0) marginScore = 3;
-      else if (marginChg > -3) marginScore = 1;
-    }
-    // 龙虎榜评分
-    let lhbScore = 0;
-    if (lhbNet != null) {
-      if (lhbNet > 50e6) lhbScore = 8;
-      else if (lhbNet > 10e6) lhbScore = 5;
-      else if (lhbNet > 0) lhbScore = 3;
-      else if (lhbNet > -10e6) lhbScore = 1;
-    }
-    // 机构调研评分
-    let surveyScore = 0;
-    if (surveyCnt != null) {
-      if (surveyCnt >= 10) surveyScore = 9;
-      else if (surveyCnt >= 5) surveyScore = 6;
-      else if (surveyCnt >= 2) surveyScore = 3;
-      else if (surveyCnt >= 1) surveyScore = 1;
-    }
-
-    const fmtMargin = marginChg != null ? `${marginChg.toFixed(2)}%` : '-';
-    const fmtLhb = lhbNet != null ? `${(lhbNet / 1e4).toFixed(0)}万` : '-';
-    const fmtSurvey = surveyCnt != null ? `${surveyCnt}次` : '-';
-
-    return (
-      <div>
-        <div style={{
-          display: 'flex', padding: '4px 0', gap: 12,
-          borderBottom: '2px solid #e8e8e8', fontWeight: 600, fontSize: 12, color: '#999',
-        }}>
-          <span style={{ width: 110, flexShrink: 0 }}>指标</span>
-          <span style={{ width: 80, flexShrink: 0, textAlign: 'center' }}>当前值</span>
-          <span style={{ width: 60, flexShrink: 0, textAlign: 'center' }}>评分</span>
-          <span style={{ flex: 1 }}>说明</span>
-        </div>
-        <IndicatorRow
-          label="融资余额变化" value={fmtMargin}
-          color={marginChg != null && marginChg > 0 ? 'red' : marginChg != null ? 'green' : 'default'}
-          score={marginScore} maxScore={8}
-          desc="融资余额变化率。>5%=8分(看多), >2%=5分, >0%=3分"
-        />
-        <IndicatorRow
-          label="龙虎榜机构净买" value={fmtLhb}
-          color={lhbNet != null && lhbNet > 0 ? 'red' : lhbNet != null ? 'green' : 'default'}
-          score={lhbScore} maxScore={8}
-          desc="20日龙虎榜机构净买入。>5000万=8分, >1000万=5分"
-        />
-        <IndicatorRow
-          label="机构调研热度" value={fmtSurvey}
-          color={surveyCnt != null && surveyCnt >= 5 ? 'red' : surveyCnt != null ? 'volcano' : 'default'}
-          score={surveyScore} maxScore={9}
-          desc="90天内机构调研次数。≥10次=9分(高度关注), ≥5次=6分"
-        />
-        <div style={{ marginTop: 12, padding: '8px 0', borderTop: '2px solid #e8e8e8' }}>
-          <Text strong style={{ fontSize: 14 }}>
-            事件面得分：{data.sentimentScore ?? '-'}/25
-          </Text>
-        </div>
-      </div>
-    );
-  }
-
-  // 小盘股默认模式：连续涨停(5)/炸板率(5)/强势股(4)/龙虎榜(4)/融资余额(3)/公告事件(4)=25
-  const luDays = data.limitUpDays ?? 0;
-  const brRate = data.brokenLimitUpRate ?? 0;
-  const luScore = luDays >= 3 ? 5 : luDays >= 2 ? 4 : luDays >= 1 ? 2 : 0;
-  const brScore = brRate < 10 ? 5 : brRate < 30 ? 3 : brRate < 50 ? 1 : 0;
-  const strongScore = data.isStrongStock ? 4 : 0;
-
-  // 龙虎榜评分
-  let lhbScore = 0;
-  let lhbDisplay = '-';
-  if (data.lhbAppearCount > 0) {
-    if (data.lhbNetAmount > 0) {
-      lhbScore = 4;
-      lhbDisplay = `上榜${data.lhbAppearCount}次,净买入`;
-    } else {
-      lhbScore = 1;
-      lhbDisplay = `上榜${data.lhbAppearCount}次,净卖出`;
-    }
-  } else {
-    lhbDisplay = '未上榜';
-  }
-
-  // 融资余额变化评分
-  const mcpVal = data.marginChgPct ?? null;
-  let mcpScore = 0;
-  if (mcpVal != null) {
-    if (mcpVal > 5) mcpScore = 3;
-    else if (mcpVal > 2) mcpScore = 2;
-    else if (mcpVal > 0) mcpScore = 1;
-  }
-
-  // 公告事件评分
-  const posCount = data.noticePositiveCount ?? 0;
-  const negCount = data.noticeNegativeCount ?? 0;
-  const eventNet = posCount - negCount;
-  const eventScore = eventNet >= 3 ? 4 : eventNet >= 1 ? 2 : 0;
-
-  return (
-    <div>
-      <div style={{
-        display: 'flex', padding: '4px 0', gap: 12,
-        borderBottom: '2px solid #e8e8e8', fontWeight: 600, fontSize: 12, color: '#999',
-      }}>
-        <span style={{ width: 110, flexShrink: 0 }}>指标</span>
-        <span style={{ width: 80, flexShrink: 0, textAlign: 'center' }}>当前值</span>
-        <span style={{ width: 60, flexShrink: 0, textAlign: 'center' }}>评分</span>
-        <span style={{ flex: 1 }}>说明</span>
-      </div>
-      <IndicatorRow
-        label="连续涨停" value={`${luDays}天`} color={luDays >= 3 ? 'red' : luDays >= 2 ? 'volcano' : luDays >= 1 ? 'blue' : 'default'}
-        score={luScore} maxScore={5}
-        desc="近10日连续涨停天数。≥3天=5分, 2天=4分, 1天=2分"
-      />
-      <IndicatorRow
-        label="炸板率" value={data.brokenLimitUpRate != null ? `${brRate.toFixed(1)}%` : '-'}
-        color={brRate < 10 ? 'green' : brRate > 30 ? 'red' : 'volcano'}
-        score={brScore} maxScore={5}
-        desc="炸板次数/涨停次数。<10%=5分(封板强), <30%=3分, <50%=1分"
-      />
-      <IndicatorRow
-        label="强势股" value={data.isStrongStock ? '是' : '否'} color={data.isStrongStock ? 'red' : 'default'}
-        score={strongScore} maxScore={4}
-        desc="20日涨幅>30%=强势(4分)"
-      />
-      <IndicatorRow
-        label="龙虎榜" value={lhbDisplay}
-        color={lhbScore >= 4 ? 'red' : lhbScore >= 1 ? 'volcano' : 'default'}
-        score={lhbScore} maxScore={4}
-        desc="上榜+净买入=4分, 上榜+净卖出=1分"
-      />
-      <IndicatorRow
-        label="融资余额变化" value={mcpVal != null ? `${mcpVal.toFixed(2)}%` : '-'}
-        color={mcpVal != null && mcpVal > 0 ? 'red' : mcpVal != null ? 'green' : 'default'}
-        score={mcpScore} maxScore={3}
-        desc="融资余额变化率。>5%=3分, >2%=2分, >0%=1分"
-      />
-      <IndicatorRow
-        label="公告事件" value={`正面${posCount}/负面${negCount}`}
-        color={eventNet >= 1 ? 'red' : eventNet < 0 ? 'green' : 'default'}
-        score={eventScore} maxScore={4}
-        desc="正面-负面公告数。≥3=4分, ≥1=2分"
-      />
-      <div style={{ marginTop: 12, padding: '8px 0', borderTop: '2px solid #e8e8e8' }}>
-        <Text strong style={{ fontSize: 14 }}>
-          事件面得分：{data.sentimentScore ?? '-'}/25
-        </Text>
-      </div>
-    </div>
-  );
-}
-
-// ── 基本面 Tab ─────────────────────────────────────────────────────────────
-function FundamentalTab({ data }) {
-  if (!data) return <Empty description="暂无基本面数据" />;
-
-  const peVal = data.peTtm ?? 0;
-  const roeVal = data.roe ?? 0;
-  const pbVal = data.pb ?? 0;
-  const revVal = data.revenueYoy ?? 0;
-  const npVal = data.netProfitYoy ?? 0;
-  const gmVal = data.grossMargin ?? 0;
-  const rcVal = data.reportCount ?? 0;  // 研报覆盖热度(90天篇数)
-
-  // 评分逻辑（与后端 TradingSignalEngine.calcFundamentalScore 一致）
-  const peScore = peVal > 0 && peVal < 15 ? 3 : peVal < 40 ? 2 : peVal < 100 ? 1 : 0;
-  const peMax = 3;
-  const roeScore = roeVal > 10 ? 4 : roeVal > 5 ? 2 : 0;
-  const roeMax = 4;
-  const pbScore = pbVal > 0 && pbVal < 3 ? 3 : pbVal < 5 ? 2 : 0;
-  const pbMax = 3;
-  const revScore = revVal > 20 ? 3 : revVal > 10 ? 2 : revVal > 0 ? 1 : 0;
-  const revMax = 3;
-  const npScore = npVal > 20 ? 4 : npVal > 10 ? 3 : npVal > 0 ? 2 : 0;
-  const npMax = 4;
-  const gmScore = gmVal >= 40 ? 3 : gmVal >= 20 ? 2 : gmVal > 0 ? 1 : 0;
-  const gmMax = 3;
-  const rsVal = data.researchScore ?? 0;
-  const rsScore = rsVal >= 5 ? 5 : rsVal >= 3 ? 3 : rsVal >= 1 ? 1 : 0;
-  const rsMax = 5;
-  const rsLabel = rsVal >= 5 ? '买入' : rsVal >= 3 ? '增持' : rsVal >= 1 ? '中性' : '暂无';
-  const rcScore = rcVal >= 10 ? 4 : rcVal >= 5 ? 3 : rcVal >= 2 ? 2 : rcVal >= 1 ? 1 : 0;
-  const rcMax = 4;
-
-  return (
-    <div>
-      <div style={{
-        display: 'flex', padding: '4px 0', gap: 12,
-        borderBottom: '2px solid #e8e8e8', fontWeight: 600, fontSize: 12, color: '#999',
-      }}>
-        <span style={{ width: 100, flexShrink: 0 }}>指标</span>
-        <span style={{ width: 80, flexShrink: 0, textAlign: 'center' }}>当前值</span>
-        <span style={{ width: 60, flexShrink: 0, textAlign: 'center' }}>评分</span>
-        <span style={{ flex: 1 }}>说明</span>
-      </div>
-      <IndicatorRow
-        label="PE(TTM)" value={data.peTtm?.toFixed(2) ?? '-'}
-        color={peVal > 0 && peVal < 15 ? 'green' : peVal >= 40 ? 'red' : 'default'}
-        score={peScore} maxScore={peMax}
-        desc="滚动市盈率。<15低估(3分), 15~40合理(2分), 40~100偏高(1分), >100极高(0分)"
-      />
-      <IndicatorRow
-        label="PB" value={data.pb?.toFixed(2) ?? '-'}
-        color={pbVal > 0 && pbVal < 3 ? 'green' : pbVal >= 5 ? 'red' : 'default'}
-        score={pbScore} maxScore={pbMax}
-        desc="市净率。<3低风险(3分), 3~5适中(2分), >5偏高(0分)"
-      />
-      <IndicatorRow
-        label="ROE" value={data.roe ? `${data.roe.toFixed(2)}%` : '-'}
-        color={roeVal > 10 ? 'green' : 'default'}
-        score={roeScore} maxScore={roeMax}
-        desc="净资产收益率。>10%(4分), >5%(2分), 其余(0分)"
-      />
-      <IndicatorRow
-        label="营收增速" value={data.revenueYoy ? `${data.revenueYoy.toFixed(2)}%` : '-'}
-        color={revVal > 0 ? 'red' : 'green'}
-        score={revScore} maxScore={revMax}
-        desc="营收同比增速。>20%(3分), >10%(2分), >0%(1分), 负值(0分)"
-      />
-      <IndicatorRow
-        label="净利增速" value={data.netProfitYoy ? `${data.netProfitYoy.toFixed(2)}%` : '-'}
-        color={npVal > 0 ? 'red' : 'green'}
-        score={npScore} maxScore={npMax}
-        desc="归母净利润同比增速。>20%(4分), >10%(3分), >0%(2分), 负值(0分)"
-      />
-      <IndicatorRow
-        label="毛利率" value={data.grossMargin ? `${data.grossMargin.toFixed(2)}%` : '-'}
-        color={gmVal >= 40 ? 'green' : gmVal >= 20 ? 'default' : 'default'}
-        score={gmScore} maxScore={gmMax}
-        desc="毛利率=(营收-成本)/营收。≥40%(3分), ≥20%(2分), >0%(1分)"
-      />
-      <IndicatorRow
-        label="研报评级" value={rsLabel}
-        color={rsVal >= 5 ? 'red' : rsVal >= 3 ? 'volcano' : 'default'}
-        score={rsScore} maxScore={rsMax}
-        desc="综合研报评级。买入=5分, 增持=3分, 中性=1分, 其他=0分"
-      />
-      <IndicatorRow
-        label="研报覆盖热度" value={`${rcVal}篇(90天)`}
-        color={rcVal >= 5 ? 'green' : rcVal >= 1 ? 'default' : 'default'}
-        score={rcScore} maxScore={rcMax}
-        desc="近90天研报数量，反映机构关注度。≥10篇(4分), ≥5篇(3分), ≥2篇(2分), ≥1篇(1分), 0篇(0分)"
-      />
-      <div style={{ marginTop: 12, padding: '8px 0', borderTop: '2px solid #e8e8e8' }}>
-        <Text strong style={{ fontSize: 14 }}>
-          基本面得分：{data.fundamentalScore ?? '-'}/29
+          {detail.dimensionName}：{detail.score ?? '-'}/{detail.maxScore}
         </Text>
       </div>
     </div>
@@ -1614,6 +1187,13 @@ function BlockTradeTab({ data, code }) {
     if (n >= 1e4) return (n / 1e4).toFixed(0) + '万';
     return n.toFixed(0) + '元';
   };
+  const formatVolume = (v) => {
+    if (v == null) return '-';
+    const n = Number(v);
+    if (n >= 1e8) return (n / 1e8).toFixed(2) + '亿股';
+    if (n >= 1e4) return (n / 1e4).toFixed(2) + '万股';
+    return n.toFixed(0) + '股';
+  };
 
   const avgDiscount = stats.avgDiscountRate != null ? Number(stats.avgDiscountRate) : null;
 
@@ -1682,7 +1262,7 @@ function BlockTradeTab({ data, code }) {
       </Row>
 
       {/* 交易记录表 */}
-      <Card size="small" title="大宗交易记录（近30条）">
+      <Card size="small" title="大宗交易记录（近50笔）">
         {records.length > 0 ? (
           <Table
             size="small"
@@ -1696,7 +1276,7 @@ function BlockTradeTab({ data, code }) {
                 render: v => v != null ? Number(v).toFixed(2) : '-',
               },
               { title: '成交量', dataIndex: 'volume', width: 90, align: 'right',
-                render: v => v != null ? (Number(v) / 1e4).toFixed(0) + '万' : '-',
+                render: v => formatVolume(v),
               },
               { title: '成交额', dataIndex: 'amount', width: 90, align: 'right',
                 render: v => formatAmt(v),

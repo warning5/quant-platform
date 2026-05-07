@@ -366,44 +366,53 @@ def fetch_survey(notice_date: str) -> list:
 
 
 # ═══════════════════════════════════════════════════════════════
-# 6. 大宗交易  stock_dzjy_mrtj（每日统计，含A股个股）
+# 6. 大宗交易  stock_dzjy_mrmx（逐笔明细，A股含营业部）
 # ║  返回字段: 序号/交易日期/证券代码/证券简称/
 # ║            涨跌幅/收盘价/成交价/折溢率/
-# ║            成交笔数/成交总量/成交总额/成交总额占流通市值比
+# ║            成交量(股)/成交额(元)/成交额占流通市值比/
+# ║            买方营业部/卖方营业部
+# ║  逐笔存储，同一股票同一天多笔分别记录(seq_no区分)
 # ╙══════════════════════════════════════════════════════════════
 
 def fetch_block_trade(start_date: str, end_date: str) -> list:
     import akshare as ak
     rows = []
     try:
-        df = ak.stock_dzjy_mrtj(start_date=start_date, end_date=end_date)
+        df = ak.stock_dzjy_mrmx(symbol="A股", start_date=start_date, end_date=end_date)
         if df is None or df.empty:
             return rows
+        # 逐笔存储，按(code, trade_date)分配seq_no
+        from collections import defaultdict
+        seq_counter = defaultdict(int)
         for _, r in df.iterrows():
             code = str(r.get("证券代码", "")).strip().zfill(6)
             if not code:
                 continue
-            # 只保留A股（0/3/6开头），过滤ETF/基金/REITs
-            if not (code.startswith("0") or code.startswith("3") or code.startswith("6")):
-                continue
             td = to_date(r.get("交易日期"))
             if td is None:
                 continue
+            key = (code, str(td))
+            seq_counter[key] += 1
             rows.append([
-                td,
-                code,
-                str(r.get("证券简称", ""))[:50],
-                to_float(r.get("成交价")),
-                to_float(r.get("成交量")),
-                to_float(r.get("成交总额")),
-                to_float(r.get("折溢率")),
-                int(to_float(r.get("成交笔数") or 0)),
-                to_float(r.get("涨跌幅")),
-                to_float(r.get("收盘价")),
-                to_float(r.get("成交总额/流通市值")),
-                datetime.datetime.now(),
+                seq_counter[key],                     # seq_no
+                td,                                    # trade_date
+                code,                                  # code
+                str(r.get("证券简称", ""))[:50],       # name
+                to_float(r.get("成交价")),              # price(元)
+                to_float(r.get("成交量")),              # volume(股)
+                to_float(r.get("成交额")),              # amount(元)
+                to_float(r.get("折溢率")),              # discount_rate
+                to_float(r.get("涨跌幅")),              # change_pct
+                to_float(r.get("收盘价")),              # close_price
+                to_float(r.get("成交额/流通市值")),     # pct_of_float
+                str(r.get("买方营业部", "")).strip()[:200],  # buy_branch
+                str(r.get("卖方营业部", "")).strip()[:200],  # sell_branch
+                datetime.datetime.now(),               # update_time
             ])
-        print(f"  大宗交易: {len(rows)} 条(A股)")
+        print(f"  大宗交易: {len(rows)} 笔(A股逐笔)")
+    except TypeError as e:
+        # mrmx 在非交易日返回 None，触发 'NoneType' object is not subscriptable
+        print(f"  大宗交易: 无数据（可能非交易日）")
     except Exception as e:
         print(f"  大宗交易获取失败: {e}")
     return rows
@@ -870,13 +879,13 @@ def process_single_date(args, date_str: str):
         if rows:
             _dual_write(
                 "stock_sentiment_block_trade", rows,
-                ["trade_date","code","name","price","volume","amount",
-                 "discount_rate","trade_count","change_pct",
-                 "close_price","pct_of_float","update_time"],
-                ["trade_date","code","name","price","volume","amount",
-                 "discount_rate","trade_count","change_pct",
-                 "close_price","pct_of_float","update_time"],
-                ["code", "trade_date"],
+                ["seq_no","trade_date","code","name","price","volume","amount",
+                 "discount_rate","change_pct","close_price","pct_of_float",
+                 "buy_branch","sell_branch","update_time"],
+                ["seq_no","trade_date","code","name","price","volume","amount",
+                 "discount_rate","change_pct","close_price","pct_of_float",
+                 "buy_branch","sell_branch","update_time"],
+                ["code", "trade_date", "seq_no"],
                 dry_run=args.dry_run,
             )
         else:

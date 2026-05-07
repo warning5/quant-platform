@@ -490,8 +490,8 @@ public class PriceAdvisorService {
         }
 
         // 风险摘要
-        if (risks.size() > 0 && !risks.get(0).contains("未见明显风险")) {
-            reason.append("。注意：").append(risks.get(0));
+        if (!risks.isEmpty() && !risks.getFirst().contains("未见明显风险")) {
+            reason.append("。注意：").append(risks.getFirst());
         }
 
         return reason.toString();

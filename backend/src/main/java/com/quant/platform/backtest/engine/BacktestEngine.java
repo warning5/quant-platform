@@ -140,7 +140,7 @@ public class BacktestEngine {
     /**
      * 执行回测核心逻辑
      */
-    private BacktestResult executeBacktest(BacktestTask task, StrategyDefinition strategy) throws Exception {
+    private BacktestResult executeBacktest(BacktestTask task, StrategyDefinition strategy) {
         LocalDate startDate = task.getStartDate();
         LocalDate endDate = task.getEndDate();
         double initialCapital = task.getInitialCapital().doubleValue();
