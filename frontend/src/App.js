@@ -195,7 +195,7 @@ function AppLayout() {
           </Space>
         </Header>
 
-        <Content style={{ margin: '16px', minHeight: 280 }}>
+        <Content style={{ margin: 16, minHeight: 280 }}>
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/market" element={<MarketList />} />

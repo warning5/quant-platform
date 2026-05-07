@@ -145,12 +145,12 @@ export default function SectorRanking() {
   // 个股下钻视图
   if (drillDown) {
     return (
-      <div style={{ padding: 16 }}>
+      <div style={{ padding: '4px 16px 16px 16px', marginTop: -20 }}>
         <Button type="link" icon={<ArrowLeftOutlined />} onClick={() => { setDrillDown(null); setStocks([]); }}
           style={{ marginBottom: 12, paddingLeft: 0 }}>
           返回行业排行
         </Button>
-        <Title level={4} style={{ marginBottom: 16 }}>
+        <Title level={4} style={{ marginBottom: 12 }}>
           <StockOutlined style={{ marginRight: 8 }} />
           {drillDown.type === 'industry' ? '行业' : '概念'}：{drillDown.name}
           <Text type="secondary" style={{ fontSize: 14, marginLeft: 12 }}>({stocks.length}只股票)</Text>
@@ -196,14 +196,14 @@ export default function SectorRanking() {
   ];
 
   return (
-    <div style={{ padding: 16 }}>
-      <Title level={4} style={{ marginBottom: 16 }}>
+      <div style={{ padding: '4px 16px 16px 16px', marginTop: -20 }}>
+        <Title level={4} style={{ marginBottom: 12 }}>
         <StockOutlined style={{ marginRight: 8 }} />行业涨跌排行
       </Title>
-      <Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
+      <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
         点击行业/概念名称可查看成分股排名{tradeDate ? ` · 数据日期：${tradeDate}` : ''}
       </Text>
-      <Row gutter={16} style={{ marginBottom: 16 }}>
+      <Row gutter={16} style={{ marginBottom: 12 }}>
         <Col span={6}>
           <Card size="small">
             <Statistic title="行业上涨" value={upIndustries} valueStyle={{ color: '#f5222d' }} prefix={<ArrowUpOutlined />} suffix={`/ ${industry.length}`} />

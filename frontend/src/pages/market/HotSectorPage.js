@@ -215,7 +215,7 @@ export default function HotSectorPage() {
   });
 
   return (
-    <div style={{ padding: 16 }}>
+    <div style={{ padding: '4px 16px 16px 16px', marginTop: -20 }}>
       <Title level={4} style={{ marginBottom: 4 }}>
         <RocketOutlined style={{ marginRight: 8 }} />
         热门行业专题

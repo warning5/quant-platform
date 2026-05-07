@@ -32,8 +32,17 @@ from collections import defaultdict
 from datetime import date
 
 import pymysql
+import clickhouse_connect
 
-DB_CONFIG = {
+CH_CONFIG = {
+    "host": "localhost",
+    "port": 8123,
+    "username": "default",
+    "password": "123456",
+    "database": "stock",
+}
+
+MYSQL_CONFIG = {
     "host": "localhost",
     "port": 3306,
     "user": "root",
@@ -45,43 +54,58 @@ DB_CONFIG = {
 ALL_FACTORS = ["MOM20", "MOM60", "VOL20", "TURN20", "SIZE", "RSI5", "BOLL_POS", "VPCORR20"]
 
 
-def load_stock_daily(conn):
+def load_stock_daily():
     """加载全部 stock_daily，按 code 分组，按 trade_date 排序
     市值因子(SIZE)从 stock_info.total_market_cap 获取（已移除 stock_daily.market_cap 字段）
     """
     print("[1/4] 加载 stock_daily 数据...")
-    cur = conn.cursor()
+    ch_client = clickhouse_connect.get_client(**CH_CONFIG)
+    mysql_conn = pymysql.connect(**MYSQL_CONFIG)
+    
+    try:
+        # 从 MySQL 加载 stock_info 的市值（单位：元，转为万元）
+        mysql_cur = mysql_conn.cursor()
+        mysql_cur.execute("SELECT code, total_market_cap FROM stock_info WHERE total_market_cap IS NOT NULL AND total_market_cap > 0")
+        info_mcap = {code: float(mcap) / 10000 for code, mcap in mysql_cur.fetchall()}  # 元→万元
+        mysql_cur.close()
+        
+        # 从 ClickHouse 加载 stock_daily
+        result = ch_client.query("""
+            SELECT code, trade_date, close_price, turnover_rate, volume
+            FROM stock_daily
+            WHERE close_price IS NOT NULL AND close_price > 0
+            ORDER BY code, trade_date
+        """)
+        rows = result.result_rows
+        
+        # 按 code 分组
+        data = defaultdict(list)
+        for code, td, close, turnover, vol in rows:
+            data[code].append({
+                "date": td,
+                "close": float(close),
+                "turnover": float(turnover) if turnover else 0.0,
+                "volume": float(vol) if vol else 0.0,
+                "market_cap": info_mcap.get(code, 0.0),  # 从 stock_info 获取（万元）
+            })
+        print(f"  加载 {len(rows):,} 条, {len(data)} 只股票")
+        return data
+    finally:
+        ch_client.close()
+        mysql_conn.close()
 
-    # 先加载 stock_info 的市值（单位：元，转为万元与历史保持一致）
-    cur.execute("SELECT code, total_market_cap FROM stock_info WHERE total_market_cap IS NOT NULL AND total_market_cap > 0")
-    info_mcap = {code: float(mcap) / 10000 for code, mcap in cur.fetchall()}  # 元→万元
 
-    cur.execute("""
-        SELECT code, trade_date, close_price, turnover_rate, volume
-        FROM stock_daily
-        WHERE close_price IS NOT NULL AND close_price > 0
-        ORDER BY code, trade_date
-    """)
-    rows = cur.fetchall()
-    # 按 code 分组
-    data = defaultdict(list)
-    for code, td, close, turnover, vol in rows:
-        data[code].append({
-            "date": td,
-            "close": float(close),
-            "turnover": float(turnover) if turnover else 0.0,
-            "volume": float(vol) if vol else 0.0,
-            "market_cap": info_mcap.get(code, 0.0),  # 从 stock_info 获取（万元）
-        })
-    print(f"  加载 {len(rows):,} 条, {len(data)} 只股票")
-    return data
-
-
-def load_code_market(conn):
+def load_code_market():
     """加载 code -> market 映射"""
-    cur = conn.cursor()
-    cur.execute("SELECT code, market FROM stock_info")
-    return {code: market for code, market in cur.fetchall()}
+    mysql_conn = pymysql.connect(**MYSQL_CONFIG)
+    try:
+        cur = mysql_conn.cursor()
+        cur.execute("SELECT code, market FROM stock_info")
+        result = {code: market for code, market in cur.fetchall()}
+        cur.close()
+        return result
+    finally:
+        mysql_conn.close()
 
 
 # ==================== 因子计算函数 ====================
@@ -183,7 +207,10 @@ def calc_vp_corr20(history):
     sum_x2 = sum(p * p for p in prices)
     sum_y2 = sum(v * v for v in vols)
     num = n * sum_xy - sum_x * sum_y
-    den = math.sqrt((n * sum_x2 - sum_x ** 2) * (n * sum_y2 - sum_y ** 2))
+    den_sq = (n * sum_x2 - sum_x ** 2) * (n * sum_y2 - sum_y ** 2)
+    if den_sq <= 0:
+        return 0.0
+    den = math.sqrt(den_sq)
     if den == 0:
         return 0.0
     return num / den
@@ -241,65 +268,63 @@ def compute_all_factors(stock_data, factors, start_date, end_date):
     return results
 
 
-def normalize_factors(conn, factor_data, code_market_map, batch_size=5000):
+def normalize_factors(factor_data, code_market_map, batch_size=5000):
     """
     横截面归一化: Z-Score + 百分位排名
-    写入 factor_value 表
+    写入 ClickHouse factor_value 表
     """
     print("[3/4] 横截面归一化并写入数据库...")
-    cur = conn.cursor()
+    ch_client = clickhouse_connect.get_client(**CH_CONFIG)
 
-    for fc, values in factor_data.items():
-        # 按日期分组
-        date_groups = defaultdict(list)
-        for code, td, val in values:
-            date_groups[td].append((code, val))
+    try:
+        for fc, values in factor_data.items():
+            # 按日期分组
+            date_groups = defaultdict(list)
+            for code, td, val in values:
+                date_groups[td].append((code, val))
 
-        batch = []
-        total_written = 0
+            batch = []
+            total_written = 0
 
-        for td in sorted(date_groups.keys()):
-            items = date_groups[td]
-            raw_vals = [v for _, v in items]
+            for td in sorted(date_groups.keys()):
+                items = date_groups[td]
+                raw_vals = [v for _, v in items]
 
-            # Z-Score
-            mean = sum(raw_vals) / len(raw_vals)
-            std = math.sqrt(sum((v - mean) ** 2 for v in raw_vals) / len(raw_vals)) if len(raw_vals) > 1 else 0
+                # Z-Score
+                mean = sum(raw_vals) / len(raw_vals)
+                std = math.sqrt(sum((v - mean) ** 2 for v in raw_vals) / len(raw_vals)) if len(raw_vals) > 1 else 0
 
-            # 百分位排名
-            sorted_vals = sorted(raw_vals)
-
-            for code, val in items:
-                z = 0.0 if std == 0 else (val - mean) / std
                 # 百分位排名
-                rank = sorted_vals.index(val)
-                pct = rank / (len(sorted_vals) - 1) if len(sorted_vals) > 1 else 0.5
+                sorted_vals = sorted(raw_vals)
 
-                market = code_market_map.get(code, "")
-                symbol = f"{code}.{market}" if market else code
+                for code, val in items:
+                    z = 0.0 if std == 0 else (val - mean) / std
+                    # 百分位排名
+                    rank = sorted_vals.index(val)
+                    pct = rank / (len(sorted_vals) - 1) if len(sorted_vals) > 1 else 0.5
 
-                batch.append((fc, symbol, td, round(val, 8), round(pct, 6), round(z, 6)))
+                    market = code_market_map.get(code, "")
+                    symbol = f"{code}.{market}" if market else code
 
-                if len(batch) >= batch_size:
-                    _insert_batch(cur, conn, batch)
-                    total_written += len(batch)
-                    batch = []
+                    batch.append((fc, symbol, td, round(val, 8), round(pct, 6), round(z, 6)))
 
-        if batch:
-            _insert_batch(cur, conn, batch)
-            total_written += len(batch)
+                    if len(batch) >= batch_size:
+                        _insert_batch(ch_client, batch)
+                        total_written += len(batch)
+                        batch = []
 
-        print(f"  {fc}: 写入 {total_written:,} 条")
+            if batch:
+                _insert_batch(ch_client, batch)
+                total_written += len(batch)
+
+            print(f"  {fc}: 写入 {total_written:,} 条")
+    finally:
+        ch_client.close()
 
 
-def _insert_batch(cur, conn, batch):
-    """批量 INSERT"""
-    sql = """
-        INSERT INTO factor_value (factor_code, symbol, calc_date, factor_val, rank_value, z_score, created_at)
-        VALUES (%s, %s, %s, %s, %s, %s, NOW())
-    """
-    cur.executemany(sql, batch)
-    conn.commit()
+def _insert_batch(ch_client, batch):
+    """批量 INSERT 到 ClickHouse"""
+    ch_client.insert("factor_value", batch, column_names=["factor_code", "symbol", "calc_date", "factor_val", "rank_value", "z_score"])
 
 
 def main():
@@ -315,42 +340,43 @@ def main():
     start_date = date.fromisoformat(args.start_date)
     end_date = date.fromisoformat(args.end_date) if args.end_date else None
 
-    conn = pymysql.connect(**DB_CONFIG)
-    try:
-        code_market_map = load_code_market(conn)
-        stock_data = load_stock_daily(conn)
+    code_market_map = load_code_market()
+    stock_data = load_stock_daily()
 
-        # 确定结束日期
-        if end_date is None:
-            max_date = max(h[-1]["date"] for h in stock_data.values())
-            end_date = max_date
-            print(f"  数据范围: {start_date} ~ {end_date}")
+    # 确定结束日期
+    if end_date is None:
+        max_date = max(h[-1]["date"] for h in stock_data.values())
+        end_date = max_date
+        print(f"  数据范围: {start_date} ~ {end_date}")
 
-        # 计算因子
-        factor_data = compute_all_factors(stock_data, args.factors, start_date, end_date)
+    # 计算因子
+    factor_data = compute_all_factors(stock_data, args.factors, start_date, end_date)
 
-        if args.dry_run:
-            print("[DRY-RUN] 跳过数据库写入")
-            for fc, values in factor_data.items():
-                print(f"  {fc}: {len(values):,} 条")
-            return
+    if args.dry_run:
+        print("[DRY-RUN] 跳过数据库写入")
+        for fc, values in factor_data.items():
+            print(f"  {fc}: {len(values):,} 条")
+        return
 
-        # 清空旧数据
-        if not args.skip_clear:
-            print("[3/4] 清空旧 factor_value 数据...")
-            cur = conn.cursor()
+    # 清空旧数据（ClickHouse）
+    if not args.skip_clear:
+        print("[2/4] 清空旧 factor_value 数据...")
+        ch_client = clickhouse_connect.get_client(**CH_CONFIG)
+        try:
             for fc in args.factors:
-                cur.execute("DELETE FROM factor_value WHERE factor_code = %s", (fc,))
-                print(f"  删除 {fc}: {cur.rowcount:,} 条")
-            conn.commit()
+                result = ch_client.query(f"SELECT count() FROM factor_value WHERE factor_code = '{fc}'")
+                count = result.first_row[0]
+                if count > 0:
+                    ch_client.command(f"ALTER TABLE factor_value DELETE WHERE factor_code = '{fc}'")
+                    print(f"  删除 {fc}: {count:,} 条")
+            print("  注意: ClickHouse 删除是异步的，数据会延迟清理")
+        finally:
+            ch_client.close()
 
-        # 写入并归一化
-        normalize_factors(conn, factor_data, code_market_map, batch_size=args.batch_size)
+    # 写入并归一化
+    normalize_factors(factor_data, code_market_map, batch_size=args.batch_size)
 
-        print("\n[DONE] 因子全量计算完成!")
-
-    finally:
-        conn.close()
+    print("\n[DONE] 因子全量计算完成!")
 
 
 if __name__ == "__main__":

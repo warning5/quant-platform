@@ -78,19 +78,23 @@ function PaperList({ onSelect }) {
             <ThunderboltOutlined style={{ marginRight: 8 }} />
             模拟盘交易
           </Title>
-          <Tooltip title={
-            <div style={{ maxWidth: 320 }}>
-              <p style={{ margin: '0 0 6px' }}><b>什么是模拟盘？</b></p>
-              <p style={{ margin: '0 0 6px' }}>基于策略因子配置，生成买卖信号，手动确认执行，追踪持仓和净值变化。无需真实交易即可验证策略效果。</p>
-              <p style={{ margin: '0 0 6px' }}><b>使用流程：</b></p>
-              <p style={{ margin: '0 0 4px' }}>1. 先在"策略列表"创建策略（配置因子+权重）</p>
-              <p style={{ margin: '0 0 4px' }}>2. 新建模拟盘，选择策略和初始资金</p>
-              <p style={{ margin: '0 0 4px' }}>3. 点击"生成信号" → 系统按因子排名推荐买卖</p>
-              <p style={{ margin: '0 0 4px' }}>4. 手动确认执行信号 → 系统建仓/清仓</p>
-              <p style={{ margin: '0 0 6px' }}>5. 查看净值曲线和持仓盈亏，评估策略效果</p>
-              <p style={{ margin: 0 }}><b>价值：</b>零成本验证策略，避免实盘试错。累计IC持续上升的策略更值得实盘。</p>
-            </div>
-          } placement="right">
+          <Tooltip
+            title={
+              <div style={{ maxWidth: 520 }}>
+                <p style={{ margin: '0 0 6px' }}><b>什么是模拟盘？</b></p>
+                <p style={{ margin: '0 0 6px' }}>基于策略因子配置，生成买卖信号，手动确认执行，追踪持仓和净值变化。无需真实交易即可验证策略效果。</p>
+                <p style={{ margin: '0 0 6px' }}><b>使用流程：</b></p>
+                <p style={{ margin: '0 0 4px' }}>1. 先在"策略列表"创建策略（配置因子+权重）</p>
+                <p style={{ margin: '0 0 4px' }}>2. 新建模拟盘，选择策略和初始资金</p>
+                <p style={{ margin: '0 0 4px' }}>3. 点击"生成信号" → 系统按因子排名推荐买卖</p>
+                <p style={{ margin: '0 0 4px' }}>4. 手动确认执行信号 → 系统建仓/清仓</p>
+                <p style={{ margin: '0 0 6px' }}>5. 查看净值曲线和持仓盈亏，评估策略效果</p>
+                <p style={{ margin: 0 }}><b>价值：</b>零成本验证策略，避免实盘试错。累计IC持续上升的策略更值得实盘。</p>
+              </div>
+            }
+            placement="right"
+            overlayStyle={{ maxWidth: 520 }}
+          >
             <InfoCircleOutlined style={{ marginLeft: 8, color: '#bbb', fontSize: 16, cursor: 'pointer' }} />
           </Tooltip>
         </div>
