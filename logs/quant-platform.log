@@ -2291,3 +2291,61 @@ org.springframework.web.servlet.resource.NoResourceFoundException: No static res
 	at org.apache.tomcat.util.threads.TaskThread$WrappingRunnable.run(TaskThread.java:63)
 	at java.base/java.lang.Thread.run(Thread.java:1583)
 2026-05-07 22:12:22.282 [MessageBroker-1] INFO  o.s.w.s.c.WebSocketMessageBrokerStats - WebSocketSession[0 current WS(0)-HttpStream(0)-HttpPoll(0), 1 total, 0 closed abnormally (0 connect failure, 0 send limit, 0 transport error)], stompSubProtocol[processed CONNECT(1)-CONNECTED(1)-DISCONNECT(0)], stompBrokerRelay[null], inboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 12], outboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 2], sockJsScheduler[pool size = 2, active threads = 1, queued tasks = 0, completed tasks = 1]
+2026-05-07 22:17:33.465 [http-nio-8080-exec-2] INFO  c.q.p.dataupdate.DataUpdateService - [DataCoverage] 数据概览查询完成
+2026-05-07 22:17:44.727 [http-nio-8080-exec-9] INFO  c.q.p.d.DataUpdateController - 启动数据更新任务: source=ALL, market=ALL, startDate=2026-05-07, endDate=2026-05-07
+2026-05-07 22:17:44.744 [data-update-TASK-1778163464728] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate] 进程已启动, PID=9260, cmd=[python, -u, update_index_daily_baostock.py, --start-date, 2026-05-07, --end-date, 2026-05-07]
+2026-05-07 22:17:56.329 [data-update-TASK-1778163464728] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate] 任务 TASK-1778163464728 结束, 状态: SUCCESS
+2026-05-07 22:18:23.478 [http-nio-8080-exec-10] INFO  c.q.p.d.DataUpdateController - 启动数据更新任务: source=ALL, market=ALL, startDate=2026-05-07, endDate=2026-05-07
+2026-05-07 22:18:23.492 [data-update-TASK-1778163503479] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate] 进程已启动, PID=55504, cmd=[python, -u, update_sentiment_data.py, --start-date, 2026-05-07, --end-date, 2026-05-07]
+2026-05-07 22:19:33.044 [data-update-TASK-1778163503479] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate] 任务 TASK-1778163503479 结束, 状态: SUCCESS
+2026-05-07 22:20:13.296 [http-nio-8080-exec-1] INFO  c.q.p.d.DataUpdateController - 启动数据更新任务: source=ALL, market=ALL, startDate=2026-04-07, endDate=2026-05-07
+2026-05-07 22:20:13.306 [data-update-TASK-1778163613296] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate] 启动任务 TASK-1778163613296: [python, -u, update_research_report.py, --start-date, 2026-04-07, --end-date, 2026-05-07]
+2026-05-07 22:20:13.318 [data-update-TASK-1778163613296] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate] 进程已启动, PID=30452, cmd=[python, -u, update_research_report.py, --start-date, 2026-04-07, --end-date, 2026-05-07]
+2026-05-07 22:21:33.940 [http-nio-8080-exec-3] INFO  c.q.p.dataupdate.DataUpdateService - [DataCoverage] 数据概览查询完成
+2026-05-07 22:35:30.149 [http-nio-8080-exec-3] INFO  c.q.p.dataupdate.DataUpdateService - [DataCoverage] 数据概览查询完成
+2026-05-07 22:37:14.807 [http-nio-8080-exec-8] INFO  c.q.p.dataupdate.DataUpdateService - [DataCoverage] 数据概览查询完成
+2026-05-07 22:42:22.284 [MessageBroker-2] INFO  o.s.w.s.c.WebSocketMessageBrokerStats - WebSocketSession[0 current WS(0)-HttpStream(0)-HttpPoll(0), 5 total, 0 closed abnormally (0 connect failure, 0 send limit, 0 transport error)], stompSubProtocol[processed CONNECT(5)-CONNECTED(5)-DISCONNECT(0)], stompBrokerRelay[null], inboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 60], outboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 9054], sockJsScheduler[pool size = 3, active threads = 1, queued tasks = 0, completed tasks = 2]
+2026-05-07 22:50:34.035 [SpringApplicationShutdownHook] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Stopping...
+2026-05-07 22:50:34.035 [SpringApplicationShutdownHook] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - BrokerAvailabilityEvent[available=false, SimpleBrokerMessageHandler [org.springframework.messaging.simp.broker.DefaultSubscriptionRegistry@27e3dc9a]]
+2026-05-07 22:50:34.035 [SpringApplicationShutdownHook] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Stopped.
+2026-05-07 22:50:34.048 [SpringApplicationShutdownHook] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Shutdown initiated...
+2026-05-07 22:50:34.050 [SpringApplicationShutdownHook] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Shutdown completed.
+2026-05-07 22:50:43.036 [background-preinit] INFO  o.h.validator.internal.util.Version - HV000001: Hibernate Validator 8.0.1.Final
+2026-05-07 22:50:43.146 [main] INFO  c.q.p.QuantPlatformApplication - Starting QuantPlatformApplication using Java 21.0.7 with PID 48768 (C:\Users\warning5\WorkBuddy\Claw\quant-platform\backend\target\classes started by warning5 in C:\Users\warning5\WorkBuddy\Claw\quant-platform)
+2026-05-07 22:50:43.147 [main] INFO  c.q.p.QuantPlatformApplication - No active profile set, falling back to 1 default profile: "default"
+2026-05-07 22:50:45.256 [main] INFO  o.s.b.w.e.tomcat.TomcatWebServer - Tomcat initialized with port 8080 (http)
+2026-05-07 22:50:45.273 [main] INFO  o.a.coyote.http11.Http11NioProtocol - Initializing ProtocolHandler ["http-nio-8080"]
+2026-05-07 22:50:45.277 [main] INFO  o.a.catalina.core.StandardService - Starting service [Tomcat]
+2026-05-07 22:50:45.277 [main] INFO  o.a.catalina.core.StandardEngine - Starting Servlet engine: [Apache Tomcat/10.1.19]
+2026-05-07 22:50:45.402 [main] INFO  o.a.c.c.C.[.[localhost].[/api] - Initializing Spring embedded WebApplicationContext
+2026-05-07 22:50:45.403 [main] INFO  o.s.b.w.s.c.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 2067 ms
+2026-05-07 22:50:45.959 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 加载 code -> market 映射...
+2026-05-07 22:50:46.028 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Starting...
+2026-05-07 22:50:46.318 [main] INFO  com.zaxxer.hikari.pool.HikariPool - HikariPool-1 - Added connection com.mysql.cj.jdbc.ConnectionImpl@33e8e146
+2026-05-07 22:50:46.321 [main] INFO  com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Start completed.
+2026-05-07 22:50:46.472 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 已加载 5490 只股票的 market 映射
+2026-05-07 22:50:46.474 [main] INFO  c.q.p.m.service.MarketDataService - [MarketDataService] 已加载 5490 只股票的最新市值
+2026-05-07 22:50:46.801 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate] 脚本目录: C:\Users\warning5\WorkBuddy\Claw\quant-platform\scripts
+2026-05-07 22:50:46.802 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_stock_data.py : OK
+2026-05-07 22:50:46.802 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_stock_daily_baostock.py : OK
+2026-05-07 22:50:46.802 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_bj_stock_daily_qq.py : OK
+2026-05-07 22:50:46.803 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_index_daily_baostock.py : OK
+2026-05-07 22:50:46.803 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_dividend_baostock.py : OK
+2026-05-07 22:50:46.803 [main] INFO  c.q.p.dataupdate.DataUpdateService - [DataUpdate]   update_research_report.py : OK
+2026-05-07 22:50:46.985 [main] INFO  c.q.p.f.engine.FactorComputeEngine - Registered 36 financial factor calculators
+2026-05-07 22:50:47.200 [main] INFO  c.q.p.s.service.ScreenPresetService - Built-in screen presets initialized
+2026-05-07 22:50:47.804 [main] INFO  o.s.b.a.w.s.WelcomePageHandlerMapping - Adding welcome page: class path resource [static/index.html]
+2026-05-07 22:50:48.486 [main] INFO  o.a.coyote.http11.Http11NioProtocol - Starting ProtocolHandler ["http-nio-8080"]
+2026-05-07 22:50:48.519 [main] INFO  o.s.b.w.e.tomcat.TomcatWebServer - Tomcat started on port 8080 (http) with context path '/api'
+2026-05-07 22:50:48.527 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Starting...
+2026-05-07 22:50:48.528 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - BrokerAvailabilityEvent[available=true, SimpleBrokerMessageHandler [org.springframework.messaging.simp.broker.DefaultSubscriptionRegistry@3fd6dfbc]]
+2026-05-07 22:50:48.529 [main] INFO  o.s.m.s.b.SimpleBrokerMessageHandler - Started.
+2026-05-07 22:50:48.761 [main] INFO  c.q.p.QuantPlatformApplication - Started QuantPlatformApplication in 6.437 seconds (process running for 7.094)
+2026-05-07 22:50:48.843 [main] INFO  c.q.p.factor.service.FactorService - Builtin factors initialized
+2026-05-07 22:50:48.857 [main] INFO  c.q.p.s.s.StrategyDataInitializer - Checking strategy data initialization...
+2026-05-07 22:50:48.860 [main] INFO  c.q.p.s.s.StrategyDataInitializer - Strategy data already exists (6 strategies), skipping initialization
+2026-05-07 22:50:48.866 [main] INFO  c.q.p.s.service.StrategyService - Demo strategies already initialized, skipping
+2026-05-07 22:51:48.499 [MessageBroker-1] INFO  o.s.w.s.c.WebSocketMessageBrokerStats - WebSocketSession[0 current WS(0)-HttpStream(0)-HttpPoll(0), 0 total, 0 closed abnormally (0 connect failure, 0 send limit, 0 transport error)], stompSubProtocol[processed CONNECT(0)-CONNECTED(0)-DISCONNECT(0)], stompBrokerRelay[null], inboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0], outboundChannel[pool size = 0, active threads = 0, queued tasks = 0, completed tasks = 0], sockJsScheduler[pool size = 1, active threads = 1, queued tasks = 0, completed tasks = 0]
+2026-05-07 22:55:14.189 [http-nio-8080-exec-1] INFO  o.a.c.c.C.[.[localhost].[/api] - Initializing Spring DispatcherServlet 'dispatcherServlet'
+2026-05-07 22:55:14.190 [http-nio-8080-exec-1] INFO  o.s.web.servlet.DispatcherServlet - Initializing Servlet 'dispatcherServlet'
+2026-05-07 22:55:14.192 [http-nio-8080-exec-1] INFO  o.s.web.servlet.DispatcherServlet - Completed initialization in 1 ms

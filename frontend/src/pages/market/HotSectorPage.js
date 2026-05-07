@@ -184,14 +184,18 @@ function SectorDetail({ conceptName, onBack }) {
 // ─── 主组件 ───────────────────────────────────────────────────────────────────
 export default function HotSectorPage() {
   const [loading, setLoading] = useState(true);
+  const [tradeDate, setTradeDate] = useState(null);
   const [sectors, setSectors] = useState([]);
   const [selectedSector, setSelectedSector] = useState(null);
 
   useEffect(() => {
     setLoading(true);
     stockAnalysisApi.getHotSectors()
-      .then(d => setSectors(d || []))
-      .catch(() => setSectors([]))
+      .then(d => {
+        setTradeDate(d?.tradeDate || null);
+        setSectors(d?.sectors || []);
+      })
+      .catch(() => { setTradeDate(null); setSectors([]); })
       .finally(() => setLoading(false));
   }, []);
 
@@ -212,10 +216,15 @@ export default function HotSectorPage() {
 
   return (
     <div style={{ padding: 16 }}>
-      <Title level={4} style={{ marginBottom: 16 }}>
+      <Title level={4} style={{ marginBottom: 4 }}>
         <RocketOutlined style={{ marginRight: 8 }} />
         热门行业专题
       </Title>
+      {tradeDate && (
+        <div style={{ marginBottom: 16, color: '#8c8c8c', fontSize: 13 }}>
+          数据日期：{tradeDate}
+        </div>
+      )}
 
       {/* 分类概览 */}
       {Object.keys(catStats).length > 0 && (

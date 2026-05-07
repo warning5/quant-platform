@@ -1484,12 +1484,6 @@ function DataUpdate() {
                 valueStyle={{ fontSize: 12 }}
               />
             </Col>
-            {isRunning && (
-              <Col span={8}>
-                <Statistic title="状态" formatter={() => statusTag('RUNNING')}
-                  valueStyle={{ fontSize: 14 }} />
-              </Col>
-            )}
           </Row>
           {/* 各表详细统计 */}
           {sentimentCoverage?.tables && sentimentCoverage.tables.length > 0 && (

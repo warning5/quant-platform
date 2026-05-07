@@ -1497,8 +1497,9 @@ public class AnalysisService {
 
     /**
      * 热门行业专题概览
+     * 返回 Map，包含 tradeDate 和 sectors
      */
-    public List<Map<String, Object>> getHotSectors() {
+    public Map<String, Object> getHotSectors() {
         List<Map<String, Object>> results = new ArrayList<>();
 
         // 从 MySQL 获取概念→股票映射
@@ -1578,7 +1579,10 @@ public class AnalysisService {
             }
         }
 
-        return results;
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("tradeDate", latestDate);
+        result.put("sectors", results);
+        return result;
     }
 
     /**

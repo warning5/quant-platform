@@ -310,7 +310,7 @@ public class StockAnalysisController {
             return ResponseEntity.status(503).body(errorBody("分析服务不可用，ClickHouse未启用"));
         }
         try {
-            List<Map<String, Object>> data = analysisService.getHotSectors();
+            Map<String, Object> data = analysisService.getHotSectors();
             return ResponseEntity.ok(new ApiResponse<>(data));
         } catch (Exception e) {
             log.error("热门行业查询失败: error={}", e.getMessage(), e);
