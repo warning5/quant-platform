@@ -6,7 +6,7 @@ const { Title, Paragraph, Text } = Typography;
 
 export function ManualFactors() {
   return (
-    <section id="factors" style={{ paddingBottom: 32 }}>
+    <section id="factors" style={{ paddingBottom: 16 }}>
       <Title level={2}><FundOutlined /> 因子基础</Title>
       <Paragraph>
         因子是量化投资的核心概念，用于描述股票的某种属性或特征。平台支持多种类型的因子，包括内置因子和自定义因子。
@@ -91,7 +91,7 @@ export function ManualFactors() {
 
 export function ManualFactorMonitor() {
   return (
-    <section id="factor-monitor" style={{ paddingBottom: 32 }}>
+    <section id="factor-monitor" style={{ paddingBottom: 16 }}>
       <Title level={2}><CloudSyncOutlined /> 因子计算监控</Title>
       <Paragraph>
         因子计算监控页面用于批量计算因子值。用户可以选择要计算的因子、日期范围，系统自动批量计算并存储到数据库。
@@ -167,7 +167,7 @@ export function ManualFactorMonitor() {
 
 export function ManualFactorDetail() {
   return (
-    <section id="factor-detail" style={{ paddingBottom: 32 }}>
+    <section id="factor-detail" style={{ paddingBottom: 16 }}>
       <Title level={2}><SearchOutlined /> 因子值查看</Title>
       <Paragraph>
         因子值查看页面用于查看单只股票或全市场的因子值分布。支持时间序列分析和截面分布分析。
@@ -205,7 +205,7 @@ export function ManualFactorDetail() {
 
 export function ManualFactorCreate() {
   return (
-    <section id="factor-create" style={{ paddingBottom: 32 }}>
+    <section id="factor-create" style={{ paddingBottom: 16 }}>
       <Title level={2}><PlusOutlined /> 新建因子</Title>
       <Paragraph>
         平台支持通过 Groovy 脚本自定义因子。点击「因子管理」→「新建因子」即可进入因子创建页面。
@@ -346,4 +346,4 @@ return sum / Math.min(5, n);`}</Text>
   );
 }
 
-export default { ManualFactors, ManualFactorMonitor, ManualFactorDetail, ManualFactorCreate };
+// 以上函数均已通过 `export function` 命名导出

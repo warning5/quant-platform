@@ -51,7 +51,7 @@ const PRESET_STYLE_COLORS = {
 
 export function ManualStrategies() {
   return (
-    <section id="strategies" style={{ paddingBottom: 32 }}>
+    <section id="strategies" style={{ paddingBottom: 16 }}>
       <Title level={2}><ThunderboltOutlined /> 策略管理</Title>
       <Paragraph>
         策略管理模块用于定义和编辑量化交易策略。用户可以创建自己的选股策略，
@@ -159,7 +159,7 @@ export function ManualStrategies() {
 
 export function ManualBacktests() {
   return (
-    <section id="backtests" style={{ paddingBottom: 32 }}>
+    <section id="backtests" style={{ paddingBottom: 16 }}>
       <Title level={2}>策略回测</Title>
       <Paragraph>
         策略回测模块用于验证策略的历史表现。通过在历史数据上模拟交易，
@@ -365,7 +365,7 @@ export function ManualBacktests() {
 
 export function ManualBacktestCompare() {
   return (
-    <section id="backtest-compare" style={{ paddingBottom: 32 }}>
+    <section id="backtest-compare" style={{ paddingBottom: 16 }}>
       <Title level={2}>策略对比</Title>
       <Paragraph>
         策略对比模块用于同时比较多个策略的回测表现，帮助投资者选择最优策略。
@@ -458,4 +458,4 @@ export function ManualBacktestCompare() {
   );
 }
 
-export default { ManualStrategies, ManualBacktests, ManualBacktestCompare };
+// 以上函数均已通过 `export function` 命名导出

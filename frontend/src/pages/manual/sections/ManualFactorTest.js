@@ -570,4 +570,4 @@ export function ManualFactorStrategy() {
   );
 }
 
-export default { ManualFactorTest, ManualFactorOrthogonalize, ManualFactorDecay, ManualFactorCorrelation, ManualFactorStrategy };
+// 以上函数均已通过 `export function` 命名导出

@@ -18,7 +18,7 @@ const { Title, Paragraph, Text } = Typography;
  */
 export function ManualChanScreen() {
   return (
-    <section id="chan-screen" style={{ paddingBottom: 32 }}>
+    <section id="chan-screen" style={{ paddingBottom: 16 }}>
       <Title level={2}><StockOutlined /> 缠论结构筛选</Title>
       <Paragraph>
         缠论结构筛选是基于缠论理论，从全市场股票中筛选出处于特定「结构状态」的标的。

@@ -112,19 +112,19 @@ export default function Manual() {
   ];
 
   return (
-    <div style={{ maxWidth: 1400, margin: '0 auto', padding: '24px' }}>
+    <div style={{ maxWidth: 1400, margin: '0 auto', padding: '12px 24px 24px' }}>
       <div style={{
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        marginBottom: 24
+        marginBottom: 12
       }}>
-        <Title level={3} style={{ margin: 0 }}>使用手册</Title>
-        <Text type="secondary">量化因子平台完整操作指南</Text>
+        <Title level={3} style={{ margin: 0, fontSize: 20 }}>使用手册</Title>
+        <Text type="secondary" style={{ fontSize: 13 }}>量化因子平台完整操作指南</Text>
       </div>
 
       {/* 顶部导航菜单 */}
-      <Card style={{ marginBottom: 24 }}>
+      <Card size="small" style={{ marginBottom: 12 }} bodyStyle={{ padding: '8px 12px' }}>
         <Menu
           mode="horizontal"
           selectedKeys={[]}
