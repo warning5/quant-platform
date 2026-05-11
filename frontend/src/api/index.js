@@ -155,6 +155,10 @@ export const paperTradingApi = {
   executeSignal: (signalId) => api.post(`/paper-trading/signals/${signalId}/execute`),
   getSignals: (paperId) => api.get(`/paper-trading/${paperId}/signals`),
   updateStatus: (paperId, status) => api.patch(`/paper-trading/${paperId}/status`, null, { params: { status } }),
+  // 批量执行所有待处理信号
+  executeAllSignals: (paperId) => api.post(`/paper-trading/${paperId}/execute-all-signals`),
+  // 处理分红送股
+  processDividends: (paperId) => api.post(`/paper-trading/${paperId}/process-dividends`),
 };
 
 // ===== 回测 API =====

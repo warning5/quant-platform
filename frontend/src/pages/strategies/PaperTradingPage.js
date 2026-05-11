@@ -167,6 +167,8 @@ function PaperDetail({ paperId, onBack }) {
   const [signals, setSignals] = useState([]);
   const [genLoading, setGenLoading] = useState(false);
   const [execLoading, setExecLoading] = useState(null);
+  const [batchExecLoading, setBatchExecLoading] = useState(false);
+  const [dividendLoading, setDividendLoading] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -205,6 +207,34 @@ function PaperDetail({ paperId, onBack }) {
       // 错误信息由 axios 拦截器统一展示，此处不再重复
     } finally {
       setExecLoading(null);
+    }
+  };
+
+  // 批量执行所有待处理信号
+  const handleBatchExecute = async () => {
+    setBatchExecLoading(true);
+    try {
+      const results = await paperTradingApi.executeAllSignals(paperId);
+      message.success(`批量执行完成，共 ${results?.length || 0} 笔交易`);
+      load();
+    } catch (e) {
+      // 错误信息由 axios 拦截器统一展示
+    } finally {
+      setBatchExecLoading(false);
+    }
+  };
+
+  // 处理分红送股
+  const handleProcessDividends = async () => {
+    setDividendLoading(true);
+    try {
+      await paperTradingApi.processDividends(paperId);
+      message.success('分红处理完成');
+      load();
+    } catch (e) {
+      // 错误信息由 axios 拦截器统一展示
+    } finally {
+      setDividendLoading(false);
     }
   };
 
@@ -286,9 +316,17 @@ function PaperDetail({ paperId, onBack }) {
         <Col span={4}><Card size="small"><Statistic title="累计收益" value={cumulativeReturn * 100} suffix="%" precision={2} valueStyle={{ color: chgColor(cumulativeReturn) }} /></Card></Col>
         <Col span={4}><Card size="small"><Statistic title="持仓数" value={paper.positionCount} /></Card></Col>
         <Col span={4}><Card size="small"><Statistic title="可用资金" value={paper.currentCapital} prefix="¥" /></Card></Col>
-        <Col span={4} style={{ display: 'flex', alignItems: 'center' }}>
-          <Button type="primary" icon={<SendOutlined />} onClick={handleGenerate} loading={genLoading} block>
+        <Col span={4} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Button type="primary" icon={<SendOutlined />} onClick={handleGenerate} loading={genLoading}>
             生成信号
+          </Button>
+          <Button onClick={handleBatchExecute} loading={batchExecLoading}>
+            一键执行
+          </Button>
+        </Col>
+        <Col span={4} style={{ display: 'flex', alignItems: 'center' }}>
+          <Button onClick={handleProcessDividends} loading={dividendLoading}>
+            处理分红
           </Button>
         </Col>
       </Row>

@@ -70,4 +70,18 @@ public class PaperTradingController {
             @RequestParam String status) {
         return ApiResponse.success(paperTradingService.updateStatus(paperId, status));
     }
+
+    @PostMapping("/{paperId}/execute-all-signals")
+    @Operation(summary = "批量执行所有待处理信号")
+    public ApiResponse<List<PaperPosition>> executeAllSignals(@PathVariable Long paperId) {
+        return ApiResponse.success("批量执行完成",
+            paperTradingService.executeAllSignals(paperId));
+    }
+
+    @PostMapping("/{paperId}/process-dividends")
+    @Operation(summary = "处理分红送股（按除权除息日结算）")
+    public ApiResponse<Void> processDividends(@PathVariable Long paperId) {
+        paperTradingService.processDividends(paperId);
+        return ApiResponse.success("分红处理完成", null);
+    }
 }

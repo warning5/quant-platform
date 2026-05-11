@@ -9,12 +9,14 @@ import {
   ManualParamOptimize,
   ManualFromBacktestToTrading,
 } from './sections/ManualParamOptimize.js';
+import { ManualPaperTrading } from './sections/ManualPaperTrading.js';
 const { Title, Text, Paragraph } = Typography;
 
 const strategyNav = [
   { id: 'strategies',            label: '策略管理', color: 'blue'     },
   { id: 'backtests',             label: '策略回测', color: 'green'    },
   { id: 'backtest-compare',      label: '策略对比', color: 'orange'   },
+  { id: 'paper-trading',         label: '模拟盘交易', color: 'cyan'     },
   { id: 'param-optimize',        label: '参数优化', color: 'purple'   },
   { id: 'from-backtest-to-trading', label: '实盘对接', color: 'red'      },
 ];
@@ -45,6 +47,7 @@ export default function ManualStrategyPage() {
 
       <Card>
         <ManualStrategies />
+        <ManualPaperTrading />
         <ManualBacktests />
         <ManualBacktestCompare />
         <ManualParamOptimize />
