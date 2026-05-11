@@ -292,7 +292,6 @@ function DataUpdate() {
   const [missingLoading, setMissingLoading] = useState(false);
   const [missingStats, setMissingStats] = useState(null);
   const [missingPageSize, setMissingPageSize] = useState(50);
-  const [tradingDates, setTradingDates] = useState([]);
 
   const handleCheckMissing = async () => {
     setMissingLoading(true);
@@ -612,20 +611,28 @@ function DataUpdate() {
     return day >= 1 && day <= 5;
   };
 
-  // tradingDates 加载完成后，默认日期设为最近一个交易日
-  // 逻辑：
-  //   18:00 后 + 今天是工作日 → 选今天（即使数据未更新，方便检查缺失）
-  //   18:00 前 → 选 tradingDates[0]（最新有数据的日期）
-  //   今天是周末 → 选 tradingDates[0]
+  // 默认日期：18:00 后+工作日→今天，其他→前一个交易日（基于日历，非数据库）
   useEffect(() => {
-    if (tradingDates && tradingDates.length > 0) {
-      const now = dayjs();
-      const after18 = now.hour() >= 18;
-      const targetDate = (after18 && isPotentialTradingDay()) ? now : dayjs(tradingDates[0]);
-      setMissingDate(targetDate);
-      setMissingIndexDate(targetDate);
+    const now = dayjs();
+    const after18 = now.hour() >= 18;
+
+    let targetDate;
+    if (after18 && isPotentialTradingDay()) {
+      targetDate = now;
+    } else {
+      // 找今天之前最近的一个工作日（周一~周五）
+      let d = now;
+      while (true) {
+        d = d.subtract(1, 'day');
+        const dow = d.day(); // 0=周日, 1=周一, ..., 6=周六
+        if (dow >= 1 && dow <= 5) break;
+      }
+      targetDate = d;
     }
-  }, [tradingDates]);
+
+    setMissingDate(targetDate);
+    setMissingIndexDate(targetDate);
+  }, []);
 
   useEffect(() => {
     if (indexTask?.status === 'RUNNING') {
@@ -662,7 +669,6 @@ function DataUpdate() {
     fetchFinancialCoverage();
     fetchSentimentCoverage();
     fetchResearchCoverage();
-    dataUpdateApi.getTradingDates(365).then(res => setTradingDates(res || [])).catch(() => {});
     dataUpdateApi.getMissingStats(dayjs().tz().subtract(1, 'day').format('YYYY-MM-DD'))
       .then(res => setMissingStats(res)).catch(() => {});
     dataUpdateApi.getDefaultDates().then(res => {

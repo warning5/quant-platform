@@ -2,10 +2,11 @@ import React, { useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
 import { Layout, Menu, Typography, Space, Badge, Button, Tooltip } from 'antd';
 import {
-  FundOutlined, ThunderboltOutlined, LineChartOutlined,
+  FundOutlined, FundViewOutlined, ThunderboltOutlined,
   DashboardOutlined, BarChartOutlined, StockOutlined,
   MenuFoldOutlined, MenuUnfoldOutlined, FilterOutlined, BookOutlined,
-  PartitionOutlined, AccountBookOutlined, CloudSyncOutlined, RocketOutlined,
+  PartitionOutlined, AccountBookOutlined,
+  SearchOutlined, HistoryOutlined,
 } from '@ant-design/icons';
 
 import Dashboard from './pages/Dashboard';
@@ -54,35 +55,8 @@ function AppLayout() {
 
   const menuItems = [
     { key: '/', icon: <DashboardOutlined />, label: <Link to="/">总览</Link> },
-    { key: '/market', icon: <StockOutlined />, label: <Link to="/market">行情数据</Link> },
-    { key: '/data-update', icon: <CloudSyncOutlined />, label: <Link to="/data-update">数据更新</Link> },
-    {
-      key: 'data-detail',
-      icon: <AccountBookOutlined />,
-      label: '数据详情',
-      children: [
-        { key: '/data-detail/research', label: <Link to="/data-detail/research">研报数据</Link> },
-        { key: '/data-detail/financial', label: <Link to="/data-detail/financial">财务数据</Link> },
-      ],
-    },
-    { key: '/stock-analysis', icon: <StockOutlined />, label: <Link to="/stock-analysis">个股分析</Link> },
-    { key: '/sector-ranking', icon: <BarChartOutlined />, label: <Link to="/sector-ranking">行业排行</Link> },
-    { key: '/hot-sectors', icon: <RocketOutlined />, label: <Link to="/hot-sectors">热门行业</Link> },
-    {
-      key: 'manual',
-      icon: <BookOutlined />,
-      label: '使用手册',
-      children: [
-        { key: '/manual/overview', label: <Link to="/manual/overview">平台概述</Link> },
-        { key: '/manual/data-update', label: <Link to="/manual/data-update">数据更新</Link> },
-        { key: '/manual/data-detail', label: <Link to="/manual/data-detail">数据详情</Link> },
-        { key: '/manual/stock-analysis', label: <Link to="/manual/stock-analysis">个股分析</Link> },
-        { key: '/manual/factors', label: <Link to="/manual/factors">因子管理</Link> },
-        { key: '/manual/strategy', label: <Link to="/manual/strategy">策略管理</Link> },
-        { key: '/manual/backtest', label: <Link to="/manual/backtest">回测管理</Link> },
-        { key: '/manual/others', label: <Link to="/manual/others">其它</Link> },
-      ],
-    },
+    { key: '/market', icon: <FundViewOutlined />, label: <Link to="/market">行情数据</Link> },
+    { key: '/stock-analysis', icon: <SearchOutlined />, label: <Link to="/stock-analysis">个股分析</Link> },
     {
       key: 'factors',
       icon: <FundOutlined />,
@@ -108,12 +82,39 @@ function AppLayout() {
     },
     {
       key: 'backtests',
-      icon: <LineChartOutlined />,
+      icon: <HistoryOutlined />,
       label: '回测管理',
       children: [
         { key: '/backtests', label: <Link to="/backtests">回测列表</Link> },
         { key: '/backtests/compare', label: <Link to="/backtests/compare">策略对比</Link> },
         { key: '/backtests/param-optimize', label: <Link to="/backtests/param-optimize">参数优化</Link> },
+      ],
+    },
+    {
+      key: 'data-info',
+      icon: <AccountBookOutlined />,
+      label: '数据信息',
+      children: [
+        { key: '/data-update', label: <Link to="/data-update">数据更新</Link> },
+        { key: '/data-detail/financial', label: <Link to="/data-detail/financial">财务数据</Link> },
+        { key: '/data-detail/research', label: <Link to="/data-detail/research">研报数据</Link> },
+        { key: '/sector-ranking', label: <Link to="/sector-ranking">行业排行</Link> },
+        { key: '/hot-sectors', label: <Link to="/hot-sectors">热门行业</Link> },
+      ],
+    },
+    {
+      key: 'manual',
+      icon: <BookOutlined />,
+      label: '使用手册',
+      children: [
+        { key: '/manual/overview', label: <Link to="/manual/overview">平台概述</Link> },
+        { key: '/manual/data-update', label: <Link to="/manual/data-update">数据更新</Link> },
+        { key: '/manual/data-detail', label: <Link to="/manual/data-detail">数据详情</Link> },
+        { key: '/manual/stock-analysis', label: <Link to="/manual/stock-analysis">个股分析</Link> },
+        { key: '/manual/factors', label: <Link to="/manual/factors">因子管理</Link> },
+        { key: '/manual/strategy', label: <Link to="/manual/strategy">策略管理</Link> },
+        { key: '/manual/backtest', label: <Link to="/manual/backtest">回测管理</Link> },
+        { key: '/manual/others', label: <Link to="/manual/others">其它</Link> },
       ],
     },
   ];
@@ -124,7 +125,8 @@ function AppLayout() {
     if (path.startsWith('/factor') || path === '/screen' || path === '/factor-weight-optimize' || path === '/factor-ic-ir') return ['factors'];
     if (path.startsWith('/strateg') || path === '/paper-trading') return ['strategies'];
     if (path.startsWith('/backtest')) return ['backtests'];
-    if (path.startsWith('/data-detail')) return ['data-detail'];
+    if (path.startsWith('/data-detail')) return ['data-info'];
+    if (path === '/data-update' || path === '/sector-ranking' || path === '/hot-sectors') return ['data-info'];
     if (path.startsWith('/manual/')) return ['manual'];
     return [];
   });
