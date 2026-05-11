@@ -10,7 +10,7 @@ import {
   SafetyCertificateOutlined, ThunderboltOutlined, RobotOutlined, ArrowLeftOutlined
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
-import { financialApi, marketApi } from '../../api';
+import { financialApi, marketApi, silentConfig } from '../../api';
 
 const { Title, Text } = Typography;
 
@@ -136,7 +136,7 @@ function StylePicksCards({ onSelect }) {
         setHotData(h);
         setQuantData(q);
       })
-      .catch(() => message.error('加载选股数据失败'))
+      .catch(() => message.error('选股数据加载失败，请稍后重试'))
       .finally(() => setLoading(false));
   }, []);
 
@@ -374,9 +374,9 @@ export default function FinancialData() {
   const loadOverview = useCallback(() => {
     if (!selectedCode) return;
     setOverviewLoading(true);
-    financialApi.getOverview(selectedCode)
+    financialApi.getOverview(selectedCode, silentConfig)
       .then(res => setOverview(res))
-      .catch(() => message.error('加载财务概览失败'))
+      .catch(() => setOverview(null))
       .finally(() => setOverviewLoading(false));
   }, [selectedCode]);
 
@@ -385,11 +385,11 @@ export default function FinancialData() {
     if (!selectedCode) return;
     setTableLoading(true);
     Promise.all([
-      financialApi.getIncome(selectedCode, 30),
-      financialApi.getBalance(selectedCode, 30),
-      financialApi.getCashflow(selectedCode, 30),
-      financialApi.getIndicator(selectedCode, 30),
-      financialApi.getTrend(selectedCode),
+      financialApi.getIncome(selectedCode, 30, silentConfig),
+      financialApi.getBalance(selectedCode, 30, silentConfig),
+      financialApi.getCashflow(selectedCode, 30, silentConfig),
+      financialApi.getIndicator(selectedCode, 30, silentConfig),
+      financialApi.getTrend(selectedCode, silentConfig),
     ])
       .then(([inc, bal, cf, ind, trend]) => {
         setIncomeData(inc || []);
@@ -398,7 +398,7 @@ export default function FinancialData() {
         setIndicatorData(ind || []);
         setTrendData(trend || []);
       })
-      .catch(() => message.error('加载财务数据失败'))
+      .catch(() => {})
       .finally(() => setTableLoading(false));
   }, [selectedCode]);
 

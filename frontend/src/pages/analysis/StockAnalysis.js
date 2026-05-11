@@ -8,7 +8,7 @@ import {
   ArrowUpOutlined, ArrowDownOutlined,
 } from '@ant-design/icons';
 import { useSearchParams } from 'react-router-dom';
-import { stockAnalysisApi } from '../../api';
+import { stockAnalysisApi, silentConfig } from '../../api';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -79,8 +79,8 @@ export default function StockAnalysis() {
       .then(data => {
         setOverview(data);
       })
-      .catch(e => {
-        setError(e.message || '查询失败');
+      .catch(() => {
+        setError('查询失败，请稍后重试');
         setOverview(null);
       })
       .finally(() => setLoading(false));
@@ -128,7 +128,7 @@ export default function StockAnalysis() {
   // 加载研报分析数据
   useEffect(() => {
     if (!overview?.code) { setResearchData(null); return; }
-    stockAnalysisApi.getResearchReport(overview.code)
+    stockAnalysisApi.getResearchReport(overview.code, silentConfig)
       .then(data => setResearchData(data))
       .catch(() => setResearchData(null));
   }, [overview?.code]);
@@ -136,13 +136,11 @@ export default function StockAnalysis() {
   // 加载同业对比数据
   useEffect(() => {
     if (!overview?.code) { setPeerData(null); return; }
-    stockAnalysisApi.getPeerComparison(overview.code)
+    stockAnalysisApi.getPeerComparison(overview.code, silentConfig)
       .then(data => {
-        console.log('[PeerComparison] data:', data);
         setPeerData(data);
       })
-      .catch(e => {
-        console.error('[PeerComparison] error:', e);
+      .catch(() => {
         setPeerData(null);
       });
   }, [overview?.code]);
@@ -150,7 +148,7 @@ export default function StockAnalysis() {
   // 加载估值分位数据
   useEffect(() => {
     if (!overview?.code) { setValuationData(null); return; }
-    stockAnalysisApi.getValuationPercentile(overview.code, 3)
+    stockAnalysisApi.getValuationPercentile(overview.code, 3, silentConfig)
       .then(data => setValuationData(data))
       .catch(() => setValuationData(null));
   }, [overview?.code]);
@@ -158,7 +156,7 @@ export default function StockAnalysis() {
   // 加载行业关联数据
   useEffect(() => {
     if (!overview?.code) { setIndustryCorrData(null); return; }
-    stockAnalysisApi.getIndustryCorrelation(overview.code)
+    stockAnalysisApi.getIndustryCorrelation(overview.code, silentConfig)
       .then(data => setIndustryCorrData(data))
       .catch(() => setIndustryCorrData(null));
   }, [overview?.code]);
@@ -166,7 +164,7 @@ export default function StockAnalysis() {
   // 加载涨跌停分析数据
   useEffect(() => {
     if (!overview?.code) { setLimitUpData(null); return; }
-    stockAnalysisApi.getLimitUpAnalysis(overview.code)
+    stockAnalysisApi.getLimitUpAnalysis(overview.code, silentConfig)
       .then(data => setLimitUpData(data))
       .catch(() => setLimitUpData(null));
   }, [overview?.code]);
@@ -174,7 +172,7 @@ export default function StockAnalysis() {
   // 加载大宗交易分析数据
   useEffect(() => {
     if (!overview?.code) { setBlockTradeData(null); return; }
-    stockAnalysisApi.getBlockTradeAnalysis(overview.code)
+    stockAnalysisApi.getBlockTradeAnalysis(overview.code, silentConfig)
       .then(data => setBlockTradeData(data))
       .catch(() => setBlockTradeData(null));
   }, [overview?.code]);

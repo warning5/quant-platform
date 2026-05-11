@@ -46,7 +46,7 @@ export default function BacktestList() {
         setSelectedRowKeys([]);
         fetchData();
       })
-      .catch(() => message.error('删除失败'));
+      .catch(() => message.error('删除失败，请稍后重试'));
   };
 
   const handleDelete = (id) => {

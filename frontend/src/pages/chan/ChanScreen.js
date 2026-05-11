@@ -88,7 +88,7 @@ export default function ChanScreen() {
         setRangeFilters(defaultRanges);
         setCheckboxFilters(defaultCheckbox);
       })
-      .catch(e => message.error('加载缠论因子元数据失败: ' + (e.message || e)))
+      .catch(() => message.error('加载缠论因子元数据失败，请稍后重试'))
       .finally(() => setMetaLoading(false));
   }, []);
 

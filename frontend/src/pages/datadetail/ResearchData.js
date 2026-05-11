@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Card, Table, Tag, Space, Typography, Row, Col, Statistic, Input, Button, Popconfirm, message, Spin, Tooltip } from 'antd';
 import { SearchOutlined, ReloadOutlined, FileTextOutlined, BankOutlined, CalendarOutlined, QuestionCircleOutlined, DeleteOutlined } from '@ant-design/icons';
-import { researchApi } from '../../api';
+import { researchApi, silentConfig } from '../../api';
 
 const { Title, Text } = Typography;
 
@@ -47,7 +47,7 @@ function ResearchData() {
   // 加载概览数据
   const fetchOverview = () => {
     setLoading(true);
-    researchApi.getOverview()
+    researchApi.getOverview(silentConfig)
       .then(data => {
         if (data && data.totalCount !== undefined) {
           setOverview(data);
@@ -56,7 +56,6 @@ function ResearchData() {
         }
       })
       .catch(() => {
-        message.error('加载概览数据失败');
         setOverview({ totalCount: 0, stockCount: 0, latestDate: null });
       })
       .finally(() => setLoading(false));
@@ -75,7 +74,7 @@ function ResearchData() {
   // 加载研报列表
   const fetchReports = (pageNum = 1, size = pageSize) => {
     setTableLoading(true);
-    researchApi.getList({ page: pageNum, size, keyword })
+    researchApi.getList({ page: pageNum, size, keyword }, silentConfig)
       .then(data => {
         const normalized = (data.list || []).map(norm).filter(r => r.reportTitle && r.reportTitle.trim());
         setReports(normalized);
@@ -83,7 +82,7 @@ function ResearchData() {
         setPage(pageNum);
         setSelectedRowKeys([]);
       })
-      .catch(() => message.error('加载研报列表失败'))
+      .catch(() => {})
       .finally(() => setTableLoading(false));
   };
 
@@ -95,12 +94,12 @@ function ResearchData() {
     }
     setCheckLoading(true);
     setCheckResult(null);
-    researchApi.checkStock(checkCode.trim())
+    researchApi.checkStock(checkCode.trim(), silentConfig)
       .then(data => {
         if (data.reports) data.reports = data.reports.map(norm);
         setCheckResult(data);
       })
-      .catch(() => message.error('查询失败'))
+      .catch(() => message.error('未找到该股票的研报数据'))
       .finally(() => setCheckLoading(false));
   };
 
@@ -127,7 +126,7 @@ function ResearchData() {
         message.error(data.message || '删除失败');
       }
     } catch (e) {
-      message.error('删除请求失败: ' + e.message);
+      message.error('删除失败，请稍后重试');
     } finally {
       setDeleteLoading(false);
     }

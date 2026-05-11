@@ -433,7 +433,7 @@ function FactorMonitor() {
       setTimeout(fetchData, 2000);
     } catch (e) {
       if (e?.errorFields) return; // form validation error
-      message.error('触发计算失败: ' + (e?.message || '未知错误'));
+      message.error('触发计算失败，请稍后重试');
     } finally {
       setComputeLoading(false);
     }

@@ -291,9 +291,7 @@ export default function FactorDetail() {
         setSelectedRowKeys([]);
         loadFactor();
       })
-      .catch(err => {
-        message.error('批量删除失败: ' + err.message);
-      })
+      .catch(() => message.error('批量删除失败，请稍后重试'))
       .finally(() => setBatchDeleteLoading(false));
   };
 
@@ -443,7 +441,7 @@ export default function FactorDetail() {
           testStompRef.current?.deactivate();
           loadFactor();
           if (r.status === 'COMPLETED') message.success('因子检测完成！');
-          else message.error('检测失败: ' + r.errorMessage);
+          else message.error('因子检测失败，请稍后重试');
         }
       }).catch(() => {
         // 报告已被删除，停止轮询

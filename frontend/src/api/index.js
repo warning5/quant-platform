@@ -6,27 +6,75 @@ const api = axios.create({
   timeout: 30000,
 });
 
+// 友好错误提示映射：对服务器内部错误统一显示友好文案
+const FRIENDLY_ERRORS = {
+  500: '服务暂时不可用，请稍后重试',
+  502: '服务正在维护中，请稍后重试',
+  503: '服务繁忙，请稍后重试',
+  504: '服务响应超时，请稍后重试',
+  429: '请求过于频繁，请稍后重试',
+};
+
 api.interceptors.response.use(
   (res) => {
     if (res.data.code !== 200) {
-      message.error(res.data.message || '操作失败');
-      return Promise.reject(new Error(res.data.message));
+      // 业务错误：不暴露原始后端异常栈，只显示简短中文提示
+      const msg = res.data.message || '操作失败';
+      // 过滤掉包含技术细节的错误信息（如 Java 异常类名、SQL 等）
+      const isTechError = /Exception|Error:|at\s+\w+\.\w+|SQL|NullPointerException|HttpRequestMethodNotSupportedException/i.test(msg);
+      const friendlyMsg = isTechError ? '数据处理异常，请稍后重试' : msg;
+      // silent 模式：不弹全局 message，由页面自行处理
+      if (!res.config?._silent) {
+        message.error(friendlyMsg);
+      }
+      return Promise.reject(new Error(friendlyMsg));
     }
     // 统一返回 res.data.data，code=200 时 data 字段才是真正的响应体
     return res.data.data;
   },
   (err) => {
-    // 优先取后端返回的业务错误信息，避免暴露 HTTP 状态码等技术细节
-    const serverMsg = err.response?.data?.message || err.response?.data?.error;
-    if (serverMsg) {
-      message.error(serverMsg);
+    const status = err.response?.status;
+    const silent = err.config?._silent;
+    if (status && FRIENDLY_ERRORS[status]) {
+      // HTTP 5xx / 429 等错误：统一友好提示（silent 模式不弹）
+      if (!silent) message.error(FRIENDLY_ERRORS[status]);
+    } else if (status === 401) {
+      if (!silent) message.error('登录已过期，请重新登录');
+    } else if (status === 403) {
+      if (!silent) message.error('无权限访问');
+    } else if (status === 404) {
+      if (!silent) message.error('请求的资源不存在');
     } else if (!err.response) {
-      message.error('网络连接失败，请检查网络');
+      // 无响应 = 网络断开或超时
+      if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
+        if (!silent) message.error('请求超时，请稍后重试');
+      } else {
+        if (!silent) message.error('网络连接失败，请检查网络');
+      }
+    } else {
+      // 其他 HTTP 错误：不暴露状态码
+      if (!silent) message.error('请求失败，请稍后重试');
     }
-    // 不再默认弹出 err.message（如 "Request failed with status code 500"）
     return Promise.reject(err);
   }
 );
+
+// 静默请求配置：axios 请求时传入此配置，拦截器会自动抑制 message.error 弹出
+// 用法：
+//   api.get('/url', { ...silentConfig, params: {...} })
+//   api.post('/url', data, silentConfig)
+export const silentConfig = { _silent: true };
+
+// 高阶包装：将已发出的 axios 请求包装为静默模式（通过 _silent 标记）
+// 用法：silent(api.get(...)).then(...).catch(...)
+export const silent = (promise) => {
+  if (promise && typeof promise.then === 'function') {
+    // axios 返回的 Promise 本身没有 config，但拦截器已经通过 err.config?._silent 判断过了
+    // 此函数作为语法兼容保留，实际更推荐使用 silentConfig 参数方式
+    return promise.catch(err => Promise.reject(err));
+  }
+  return promise;
+};
 
 // ===== 因子 API =====
 export const factorApi = {
@@ -153,12 +201,12 @@ export const marketApi = {
 
 // ===== 财务数据 API =====
 export const financialApi = {
-  getOverview: (code) => api.get(`/financial/overview/${code}`),
-  getIncome: (code, limit = 20) => api.get(`/financial/income/${code}`, { params: { limit } }),
-  getBalance: (code, limit = 20) => api.get(`/financial/balance/${code}`, { params: { limit } }),
-  getCashflow: (code, limit = 20) => api.get(`/financial/cashflow/${code}`, { params: { limit } }),
-  getIndicator: (code, limit = 20) => api.get(`/financial/indicator/${code}`, { params: { limit } }),
-  getTrend: (code) => api.get(`/financial/trend/${code}`),
+  getOverview: (code, config) => api.get(`/financial/overview/${code}`, config),
+  getIncome: (code, limit = 20, config) => api.get(`/financial/income/${code}`, { ...config, params: { limit } }),
+  getBalance: (code, limit = 20, config) => api.get(`/financial/balance/${code}`, { ...config, params: { limit } }),
+  getCashflow: (code, limit = 20, config) => api.get(`/financial/cashflow/${code}`, { ...config, params: { limit } }),
+  getIndicator: (code, limit = 20, config) => api.get(`/financial/indicator/${code}`, { ...config, params: { limit } }),
+  getTrend: (code, config) => api.get(`/financial/trend/${code}`, config),
   getStockList: (keyword, page = 0, size = 20) =>
     api.get('/financial/stocks', { params: { keyword, page, size } }),
   getStockCount: () => api.get('/financial/stocks/count'),
@@ -197,27 +245,27 @@ export const dataUpdateApi = {
 
 // ===== 研报数据 API =====
 export const researchApi = {
-  getOverview: () => api.get('/research/overview'),
-  getList: (params) => api.get('/research/list', { params }),
-  checkStock: (code) => api.get(`/research/check/${code}`),
+  getOverview: (config) => api.get('/research/overview', config),
+  getList: (params, config) => api.get('/research/list', { ...config, params }),
+  checkStock: (code, config) => api.get(`/research/check/${code}`, config),
 };
 
 // ===== 个股分析 API =====
 export const stockAnalysisApi = {
   getOverview: (code) => api.get('/analysis/overview', { params: { code } }),
   getScoreRules: () => api.get('/analysis/score-rules'),
-  getResearchReport: (code) => api.get('/analysis/research', { params: { code } }),
+  getResearchReport: (code, config) => api.get('/analysis/research', { ...config, params: { code } }),
   searchStocks: (keyword) => api.get('/analysis/search', { params: { keyword } }),
-  getPeerComparison: (code) => api.get('/analysis/peers', { params: { code } }),
-  getValuationPercentile: (code, years = 3) => api.get('/analysis/valuation-percentile', { params: { code, years } }),
+  getPeerComparison: (code, config) => api.get('/analysis/peers', { ...config, params: { code } }),
+  getValuationPercentile: (code, years = 3, config) => api.get('/analysis/valuation-percentile', { ...config, params: { code, years } }),
   getSectorRanking: () => api.get('/analysis/sector-ranking'),
   getIndustryStocks: (industry, sortBy = 'changePercent', sortOrder = 'desc') =>
     api.get('/analysis/industry-stocks', { params: { industry, sortBy, sortOrder } }),
   getConceptStocks: (conceptName, sortBy = 'changePercent', sortOrder = 'desc') =>
     api.get('/analysis/concept-stocks', { params: { conceptName, sortBy, sortOrder } }),
-  getIndustryCorrelation: (code) => api.get('/analysis/industry-correlation', { params: { code } }),
-  getLimitUpAnalysis: (code) => api.get('/analysis/limit-up', { params: { code } }),
-  getBlockTradeAnalysis: (code) => api.get('/analysis/block-trade', { params: { code } }),
+  getIndustryCorrelation: (code, config) => api.get('/analysis/industry-correlation', { ...config, params: { code } }),
+  getLimitUpAnalysis: (code, config) => api.get('/analysis/limit-up', { ...config, params: { code } }),
+  getBlockTradeAnalysis: (code, config) => api.get('/analysis/block-trade', { ...config, params: { code } }),
   // 热门行业专题
   getHotSectors: () => api.get('/analysis/hot-sectors'),
   getHotSectorDetail: (conceptName) => api.get('/analysis/hot-sectors/detail', { params: { conceptName } }),

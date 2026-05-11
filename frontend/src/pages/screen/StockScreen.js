@@ -474,7 +474,7 @@ export default function StockScreen() {
       })));
       message.success(`已加载「${preset.presetName}」组合`);
     } catch (e) {
-      message.error('预设组合解析失败');
+      message.error('预设组合解析失败，请检查数据格式');
     }
   }, [presets]);
 

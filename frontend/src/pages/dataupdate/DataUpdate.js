@@ -12,7 +12,7 @@ import {
   LineChartOutlined, GiftOutlined, FileTextOutlined
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import { dataUpdateApi, financialApi } from '../../api/index';
+import { dataUpdateApi, financialApi, silentConfig } from '../../api/index';
 
 const { Text, Title } = Typography;
 const { RangePicker } = DatePicker;
@@ -255,7 +255,7 @@ function DataUpdate() {
       const res = await dataUpdateApi.getMissingIndices(dateStr);
       setMissingIndices(res || []);
     } catch (e) {
-      message.error('查询失败');
+      message.error('数据查询失败，请稍后重试');
     } finally {
       setMissingIndexLoading(false);
     }
@@ -279,7 +279,7 @@ function DataUpdate() {
       setMissingDividendStats(statsRes);
       setMissingDividendStocks(stocksRes || []);
     } catch (e) {
-      message.error('查询失败');
+      message.error('分红数据查询失败，请稍后重试');
     } finally {
       setMissingDividendLoading(false);
     }
@@ -304,7 +304,7 @@ function DataUpdate() {
       setMissingStocks(missingRes || []);
       setMissingStats(statsRes);
     } catch (e) {
-      message.error('查询失败');
+      message.error('缺失数据查询失败，请稍后重试');
     } finally {
       setMissingLoading(false);
     }
@@ -757,7 +757,7 @@ function DataUpdate() {
       }
     } catch (e) {
       if (e.message && !e.message.includes('validateFields')) {
-        message.error(e.message || '启动失败');
+        message.error('任务启动失败，请稍后重试');
       }
     }
   };
@@ -775,7 +775,7 @@ function DataUpdate() {
       await dataUpdateApi.cancelTask(task.taskId);
       message.info('任务已取消');
     } catch (e) {
-      message.error('取消失败');
+      message.error('取消任务失败，请稍后重试');
     }
   };
 
@@ -792,8 +792,7 @@ function DataUpdate() {
         message.warning('校验结果为空');
       }
     } catch (e) {
-      const msg = e.response?.data?.message || e.message || '校验失败';
-      message.error(`校验失败: ${msg}`);
+      message.error('财务数据校验失败，请稍后重试');
     } finally {
       setFinancialValidateLoading(false);
     }
@@ -811,8 +810,7 @@ function DataUpdate() {
         message.warning('校验结果为空');
       }
     } catch (e) {
-      const msg = e.response?.data?.message || e.message || '校验失败';
-      message.error(`校验失败: ${msg}`);
+      message.error('情绪数据校验失败，请稍后重试');
     } finally {
       setSentimentValidateLoading(false);
     }

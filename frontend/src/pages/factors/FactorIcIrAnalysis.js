@@ -158,7 +158,7 @@ export default function FactorIcIrAnalysis() {
       );
       setResults(data || []);
     } catch (e) {
-      message.error('IC/IR 分析失败: ' + (e.message || '未知错误'));
+      message.error('IC/IR 分析失败，请稍后重试');
     } finally {
       setLoading(false);
     }
@@ -178,7 +178,7 @@ export default function FactorIcIrAnalysis() {
       );
       setTrendData(data);
     } catch (e) {
-      message.error('IC趋势查询失败');
+      message.error('IC趋势查询失败，请稍后重试');
     } finally {
       setTrendLoading(false);
     }

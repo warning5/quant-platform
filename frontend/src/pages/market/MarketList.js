@@ -9,7 +9,7 @@ import {
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import dayjs from 'dayjs';
-import { marketApi } from '../../api';
+import { marketApi, silentConfig } from '../../api';
 
 const { Title, Text } = Typography;
 const { RangePicker } = DatePicker;
@@ -47,7 +47,7 @@ export default function MarketList() {
       .then(res => {
         setOverview(res);
       })
-      .catch(() => message.error('加载概览失败'))
+      .catch(() => message.error('行情数据加载失败，请稍后重试'))
       .finally(() => setOvLoading(false));
   }, []);
 
@@ -94,7 +94,7 @@ export default function MarketList() {
     setKlineLoading(true);
     marketApi.getBars(selectedSymbol, dateRange[0].format('YYYY-MM-DD'), dateRange[1].format('YYYY-MM-DD'))
       .then(res => setKlineData(res || []))
-      .catch(() => message.error('加载K线失败'))
+      .catch(() => setKlineData([]))
       .finally(() => setKlineLoading(false));
   }, [selectedSymbol, dateRange]);
 
@@ -111,7 +111,7 @@ export default function MarketList() {
         setCrossTotal(d.total || 0);
         setCrossPage(d.page || 1);
       })
-      .catch(() => message.error('加载截面数据失败'))
+      .catch(() => setCrossData([]))
       .finally(() => setCrossLoading(false));
   }, [overview?.latestDate]);
 
