@@ -52,11 +52,7 @@ public class FactorComputeEngine {
     private final ObjectMapper objectMapper;
     private final StockFinancialIndicatorMapper financialIndicatorMapper;
     @org.springframework.beans.factory.annotation.Autowired
-    private com.quant.platform.financial.mapper.StockIncomeMapper stockIncomeMapper;
-    @org.springframework.beans.factory.annotation.Autowired
-    private com.quant.platform.financial.mapper.StockBalanceMapper stockBalanceMapper;
-    @org.springframework.beans.factory.annotation.Autowired
-    private com.quant.platform.financial.mapper.StockCashflowMapper stockCashflowMapper;
+    private FinancialFactors financialFactorsBean;
 
     private final Map<String, FactorCalculator> builtinCalculators = new HashMap<>();
     private final Map<String, FinancialFactorCalculator> financialCalculators = new HashMap<>();
@@ -198,16 +194,18 @@ public class FactorComputeEngine {
         registerFinancial(new FinancialFactors.FreeCashFlowCalc());
         registerFinancial(new FinancialFactors.FreeCashFlowToOpCfCalc());
         registerFinancial(new FinancialFactors.FreeCashFlowToNpCalc());
-        // 需联查原始表的财务因子（非静态内部类，需手动注入 Mapper）
-        FinancialFactors financialFactors = new FinancialFactors();
-        // 手动注入 Mapper（因为 FinancialFactors 不是通过 Spring 创建的）
-        financialFactors.setStockIncomeMapper(stockIncomeMapper);
-        financialFactors.setStockBalanceMapper(stockBalanceMapper);
-        financialFactors.setStockCashflowMapper(stockCashflowMapper);
-        registerFinancial(financialFactors.new RoicCalc());
-        registerFinancial(financialFactors.new InterestCoverageCalc());
-        registerFinancial(financialFactors.new OperatingCfToDebtCalc());
-        log.info("Registered {} financial factor calculators", financialCalculators.size());
+        // 需联查原始表的财务因子（非静态内部类，延迟到@PostConstruct注册以确保bean已注入）
+        // RoicCalc / InterestCoverageCalc / OperatingCfToDebtCalc 在 registerDeferred() 中注册
+        log.info("Registered {} financial factor calculators (static)", financialCalculators.size());
+    }
+
+    @jakarta.annotation.PostConstruct
+    private void registerDeferred() {
+        // 非静态内部类需要外部类实例（Spring Bean），必须在注入完成后注册
+        registerFinancial(financialFactorsBean.new RoicCalc());
+        registerFinancial(financialFactorsBean.new InterestCoverageCalc());
+        registerFinancial(financialFactorsBean.new OperatingCfToDebtCalc());
+        log.info("Registered {} financial factor calculators (total, after deferred)", financialCalculators.size());
     }
 
     private void registerBuiltin(FactorCalculator calc) {
@@ -525,8 +523,7 @@ public class FactorComputeEngine {
         return results;
     }
 
-    /**
-     * 财务因子全量计算（基于财报报告期，而非交易日）
+    /**（基于财报报告期，而非交易日）
      */
     private void computeFinancialFactorSync(String factorCode, LocalDate startDate, LocalDate endDate, List<String> symbols) {
         FinancialFactorCalculator calculator = financialCalculators.get(factorCode);
@@ -731,7 +728,6 @@ public class FactorComputeEngine {
                     results.add(fv);
                 }
             } catch (Exception e) {
-                // 单只股票失败不影响整体
             }
         }
         return results;
@@ -770,7 +766,6 @@ public class FactorComputeEngine {
                     results.add(fv);
                 }
             } catch (Exception e) {
-                // 单只股票失败不影响整体
             }
         }
         return results;

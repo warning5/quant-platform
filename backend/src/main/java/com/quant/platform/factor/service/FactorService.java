@@ -256,16 +256,14 @@ public class FactorService {
     }
 
     /**
-     * 删除指定因子的所有因子值
+     * 删除指定因子的所有因子值（只删 ClickHouse，不删 MySQL）
      */
     @Transactional
     public int deleteFactorValues(Long factorId) {
         FactorDefinition factor = getById(factorId);
-        LambdaQueryWrapper<FactorValue> wrapper = new LambdaQueryWrapper<FactorValue>()
-                .eq(FactorValue::getFactorCode, factor.getFactorCode());
-        int deleted = factorValueMapper.delete(wrapper);
-        log.info("Deleted {} factor values for [{}]", deleted, factor.getFactorCode());
-        return deleted;
+        long deleted = clickHouseFactorValueService.deleteByFactorCode(factor.getFactorCode());
+        log.info("已删除 ClickHouse 中因子 [{}] 的值，约 {} 条（异步）", factor.getFactorCode(), deleted);
+        return (int) Math.min(deleted, Integer.MAX_VALUE);
     }
 
     /**

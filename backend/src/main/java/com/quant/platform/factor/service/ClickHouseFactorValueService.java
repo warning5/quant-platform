@@ -459,6 +459,43 @@ public class ClickHouseFactorValueService {
         return 0;
     }
 
+    /**
+     * 按因子代码删除 ClickHouse 因子值（异步ALTER TABLE DELETE）
+     * @return 删除前的记录数（用于前端提示）
+     */
+    public long deleteByFactorCode(String factorCode) {
+        if (!clickHouseConfig.isEnabled()) {
+            return 0L;
+        }
+        // 先查删除前数量
+        long countBefore = 0L;
+        String countSql = "SELECT count() FROM stock.factor_value FINAL WHERE factor_code = ?";
+        try (Connection conn = getConnection();
+             PreparedStatement stmt = conn.prepareStatement(countSql)) {
+            stmt.setString(1, factorCode);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    countBefore = rs.getLong(1);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[ClickHouse] deleteByFactorCode 计数失败: {}", e.getMessage());
+        }
+
+        // 异步删除（ALTER TABLE DELETE WHERE）
+        String deleteSql = "ALTER TABLE stock.factor_value DELETE WHERE factor_code = ?";
+        try (Connection conn = getConnection();
+             PreparedStatement stmt = conn.prepareStatement(deleteSql)) {
+            stmt.setString(1, factorCode);
+            stmt.executeUpdate();
+            log.info("[ClickHouse] 已提交异步删除任务: factor_code={}, 删除前数量={}", factorCode, countBefore);
+        } catch (Exception e) {
+            log.error("[ClickHouse] deleteByFactorCode 删除失败: {}", e.getMessage(), e);
+            throw new RuntimeException("ClickHouse 删除失败: " + e.getMessage(), e);
+        }
+        return countBefore;
+    }
+
     // ==================== 辅助方法 ====================
 
     private com.quant.platform.factor.domain.FactorValue convertResultSet(ResultSet rs) throws SQLException {
