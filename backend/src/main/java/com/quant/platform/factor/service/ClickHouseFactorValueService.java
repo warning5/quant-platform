@@ -102,7 +102,7 @@ public class ClickHouseFactorValueService {
                        count() AS value_count,
                        min(calc_date) AS min_date,
                        max(calc_date) AS max_date
-                FROM stock.factor_value
+                FROM stock.factor_value FINAL
                 WHERE factor_code IN (%s)
                 GROUP BY factor_code
                 """, placeholders);
@@ -211,11 +211,11 @@ public class ClickHouseFactorValueService {
                     .append("') AS ").append(code.toLowerCase());
         }
         sqlBuilder.append(", max(calc_date) AS latest_date\n");
-        sqlBuilder.append("  FROM stock.factor_value\n");
+        sqlBuilder.append("  FROM stock.factor_value FINAL\n");
         sqlBuilder.append("  WHERE factor_code IN (").append(factorInClause).append(")\n");
         sqlBuilder.append("    AND calc_date = (\n");
         sqlBuilder.append("      SELECT max(calc_date)\n");
-        sqlBuilder.append("      FROM stock.factor_value\n");
+        sqlBuilder.append("      FROM stock.factor_value FINAL\n");
         sqlBuilder.append("      WHERE factor_code = '").append(firstFactorCode.replace("'", "''")).append("'\n");
         sqlBuilder.append("    )\n");
         sqlBuilder.append("  GROUP BY symbol, calc_date\n");
@@ -289,7 +289,7 @@ public class ClickHouseFactorValueService {
         }
         String sql = """
                 SELECT DISTINCT calc_date
-                FROM stock.factor_value
+                FROM stock.factor_value FINAL
                 WHERE factor_code = ? AND calc_date >= ? AND calc_date <= ?
                 ORDER BY calc_date
                 """;
@@ -356,7 +356,7 @@ public class ClickHouseFactorValueService {
             String factorCode, java.time.LocalDate calcDate) {
         String sql = """
                 SELECT id, factor_code, symbol, calc_date, factor_val, rank_value, z_score, created_at
-                FROM stock.factor_value
+                FROM stock.factor_value FINAL
                 WHERE factor_code = ? AND calc_date = ?
                 ORDER BY symbol
                 """;
@@ -384,7 +384,7 @@ public class ClickHouseFactorValueService {
             String factorCode, java.time.LocalDate startDate, java.time.LocalDate endDate) {
         String sql = """
                 SELECT id, factor_code, symbol, calc_date, factor_val, rank_value, z_score, created_at
-                FROM stock.factor_value
+                FROM stock.factor_value FINAL
                 WHERE factor_code = ? AND calc_date >= ? AND calc_date <= ?
                 ORDER BY calc_date, symbol
                 """;
@@ -417,7 +417,7 @@ public class ClickHouseFactorValueService {
                        max(calc_date) AS max_date,
                        count(DISTINCT calc_date) AS days,
                        count(DISTINCT symbol) AS stocks
-                FROM stock.factor_value
+                FROM stock.factor_value FINAL
                 GROUP BY factor_code
                 """;
 
@@ -444,7 +444,7 @@ public class ClickHouseFactorValueService {
     }
 
     private long queryTotalCountFromCH() {
-        String sql = "SELECT count() FROM stock.factor_value";
+        String sql = "SELECT count() FROM stock.factor_value FINAL";
         try (Connection conn = getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql);
              ResultSet rs = stmt.executeQuery()) {

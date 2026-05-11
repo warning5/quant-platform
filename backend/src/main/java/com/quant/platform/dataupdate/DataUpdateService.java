@@ -511,6 +511,7 @@ public class DataUpdateService {
         if (request.isDailyOnly()) cmd.add("--daily-only");
         if (request.isInfoOnly()) cmd.add("--info-only");
         if (request.isResume()) cmd.add("--resume");
+        if (request.isForce()) cmd.add("--force");
         if (request.getLimit() != null && request.getLimit() > 0) {
             cmd.add("--limit");
             cmd.add(request.getLimit().toString());
@@ -581,6 +582,7 @@ public class DataUpdateService {
         if ("DIVIDEND".equals(updateType)) {
             cmd.add("update_dividend_baostock.py");
             if (request.isResume()) cmd.add("--resume");
+            if (request.isForce()) cmd.add("--force");
             if (request.getLimit() != null && request.getLimit() > 0) {
                 cmd.add("--limit");
                 cmd.add(request.getLimit().toString());

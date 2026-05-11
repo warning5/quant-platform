@@ -111,37 +111,54 @@ public class TradingSignalEngine {
     
     /**
      * 计算技术面得分（满分30）
+     * 权重：缠论信号(6) + 趋势状态(8) + 均线多头(6) + MACD金叉(5) + RSI14(5) = 30
+     * 允许负分（最低 -3，当缠论卖出且其他全0时）
      */
     private int calcTechScore(TechSignal tech) {
         if (tech == null) return 0;
-        
+
         int score = 0;
-        
-        // 缠论买卖信号（12分）
+
+        // 缠论买卖信号（6分）— 降权，原12分占比过大
         if ("BUY".equals(tech.getChanSignal())) {
-            score += 12;
+            score += 6;
         } else if ("SELL".equals(tech.getChanSignal())) {
-            score -= 5; // 卖出信号扣分
+            score -= 3; // 卖出信号扣分
         }
-        
+
         // 趋势状态（8分）
         if ("BULLISH".equals(tech.getTrend())) {
             score += 8;
         } else if ("SIDEWAYS".equals(tech.getTrend())) {
             score += 4;
         }
-        
-        // 均线多头（5分）
+
+        // 均线多头（6分）
         if (Boolean.TRUE.equals(tech.getMaBullish())) {
-            score += 5;
+            score += 6;
         }
-        
+
         // MACD金叉（5分）
         if (Boolean.TRUE.equals(tech.getMacdGolden())) {
             score += 5;
         }
-        
-        return Math.max(0, Math.min(TECH_WEIGHT, score));
+
+        // RSI14（5分）— 从参考项升级为计分项
+        BigDecimal rsi = tech != null ? tech.getRsi() : null;
+        if (rsi != null) {
+            double rsiVal = rsi.doubleValue();
+            if (rsiVal < 30) {
+                score += 5;   // 超卖区=超跌反弹机会
+            } else if (rsiVal < 50) {
+                score += 3;   // 偏弱但未超卖
+            } else if (rsiVal <= 70) {
+                score += 2;   // 正常区间中性
+            } else if (rsiVal > 70) {
+                score += 1;   // 超买区不加分或轻微扣分，给1分保底
+            }
+        }
+
+        return Math.max(-TECH_WEIGHT, Math.min(TECH_WEIGHT, score));
     }
     
     /**
@@ -517,13 +534,13 @@ public class TradingSignalEngine {
     private List<ScoreDetail.ScoreItem> buildTechItems(TechSignal tech) {
         List<ScoreDetail.ScoreItem> items = new ArrayList<>();
 
-        // 缠论信号（12分）
+        // 缠论信号（6分）— 降权
         String chanSignal = tech != null ? tech.getChanSignal() : null;
         String chanDisplay = "BUY".equals(chanSignal) ? "买入" : "SELL".equals(chanSignal) ? "卖出" : "持有";
-        int chanScore = "BUY".equals(chanSignal) ? 12 : "SELL".equals(chanSignal) ? -5 : 0;
+        int chanScore = "BUY".equals(chanSignal) ? 6 : "SELL".equals(chanSignal) ? -3 : 0;
         String chanColor = "BUY".equals(chanSignal) ? "red" : "SELL".equals(chanSignal) ? "green" : "default";
-        items.add(buildItem("缠论信号", chanDisplay, chanScore, 12,
-                "缠论买卖信号：买入=12分, 卖出=-5分, 持有=0分", false, chanColor));
+        items.add(buildItem("缠论信号", chanDisplay, chanScore, 6,
+                "缠论买卖信号：买入=6分, 卖出=-3分, 持有=0分", false, chanColor));
 
         // 趋势状态（8分）
         String trend = tech != null ? tech.getTrend() : null;
@@ -533,15 +550,29 @@ public class TradingSignalEngine {
         items.add(buildItem("趋势状态", trendDisplay, trendScore, 8,
                 "上涨=8分, 盘整=4分, 下跌=0分", false, trendColor));
 
-        // 均线多头（5分）
+        // 均线多头（6分）
         boolean maBullish = tech != null && Boolean.TRUE.equals(tech.getMaBullish());
-        items.add(buildItem("均线多头", maBullish ? "是" : "否", maBullish ? 5 : 0, 5,
-                "均线多头排列=5分", false, maBullish ? "red" : "default"));
+        items.add(buildItem("均线多头", maBullish ? "是" : "否", maBullish ? 6 : 0, 6,
+                "均线多头排列=6分", false, maBullish ? "red" : "default"));
 
         // MACD金叉（5分）
         boolean macdGolden = tech != null && Boolean.TRUE.equals(tech.getMacdGolden());
         items.add(buildItem("MACD金叉", macdGolden ? "是" : "否", macdGolden ? 5 : 0, 5,
                 "MACD金叉=5分", false, macdGolden ? "red" : "default"));
+
+        // RSI14（5分）— 从参考项升级为计分项
+        BigDecimal rsi = tech != null ? tech.getRsi() : null;
+        double rsiVal = rsi != null ? rsi.doubleValue() : 0;
+        int rsiScore = 0;
+        if (rsi != null) {
+            if (rsiVal < 30) rsiScore = 5;       // 超卖→反弹机会
+            else if (rsiVal < 50) rsiScore = 3;   // 偏弱
+            else if (rsiVal <= 70) rsiScore = 2;  // 正常
+            else rsiScore = 1;                     // 超买
+        }
+        String rsiColor = rsiVal > 70 ? "red" : rsiVal < 30 ? "green" : "blue";
+        items.add(buildItem("RSI14", rsi != null ? rsi.setScale(1, RoundingMode.HALF_UP).toString() : "-", rsiScore, 5,
+                "<30超卖=5分, 30~50偏弱=3分, 50~70正常=2分, >70超买=1分", false, rsiColor));
 
         // === 参考指标（不参与评分） ===
         String penDir = tech != null && tech.getPenDir() != null ? tech.getPenDir() : null;
@@ -554,12 +585,6 @@ public class TradingSignalEngine {
         Integer penCount = tech != null ? tech.getPenCount() : null;
         items.add(buildItem("笔数", penCount != null ? penCount.toString() : "-", 0, 0,
                 "近期笔的数量。笔数少=走势简洁趋势明确，笔数多=震荡频繁", true, "default"));
-
-        BigDecimal rsi = tech != null ? tech.getRsi() : null;
-        double rsiVal = rsi != null ? rsi.doubleValue() : 0;
-        String rsiColor = rsiVal > 70 ? "red" : rsiVal < 30 ? "green" : "blue";
-        items.add(buildItem("RSI14", rsi != null ? rsi.setScale(1, RoundingMode.HALF_UP).toString() : "-", 0, 0,
-                "14日相对强弱指标。>70超买(红色)，<30超卖(绿色)，30~70正常(蓝色)", true, rsiColor));
 
         return items;
     }

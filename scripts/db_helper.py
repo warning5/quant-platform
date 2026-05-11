@@ -30,6 +30,27 @@ from datetime import date, datetime, timedelta
 from db_config import DB_BACKEND, MYSQL_CONFIG, CLICKHOUSE_CONFIG, get_backend_label
 
 
+# ─── 公共工具函数（日线脚本共享）─────────────────────────────
+def to_float(value):
+    """安全转 float，空值/空串返回 None"""
+    if value is None or value == "" or value == {}:
+        return None
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return None
+
+
+def to_int(value):
+    """安全转 int，空值/空串返回 None"""
+    if value is None or value == "" or value == {}:
+        return None
+    try:
+        return int(float(value))
+    except (ValueError, TypeError):
+        return None
+
+
 def ch_dedup_filter(table: str, rows: list, column_names: list, dedup_cols: list) -> list:
     """
     查 CH FINAL 表预过滤已存在的行，返回待写入行列表。
@@ -121,7 +142,8 @@ def ch_dedup_filter(table: str, rows: list, column_names: list, dedup_cols: list
                 skipped += 1
 
         if skipped:
-            print(f"  [CH] {table}: 跳过 {skipped} 条已存在记录（FINAL 预过滤）")
+            pass  # 静默跳过，不输出日志
+            # print(f"  [CH] {table}: 跳过 {skipped} 条已存在记录（FINAL 预过滤）")
         return filtered
     except Exception as e:
         print(f"  [WARN] {table} 预过滤失败，跳过去重: {e}")
@@ -313,7 +335,7 @@ class StockDailyDB:
         if self.backend == "clickhouse":
             # 回查 30 个交易日，避免 CH 数据有缺口时找不到前收
             r = self.ch_client.query(
-                f"SELECT close_price FROM {self.CH_TABLE} "
+                f"SELECT close_price FROM {self.CH_TABLE} FINAL "
                 f"WHERE code = %(code)s "
                 f"  AND trade_date < %(td)s "
                 f"  AND trade_date >= %(td)s - INTERVAL 30 DAY "
@@ -335,7 +357,7 @@ class StockDailyDB:
     def get_latest_date(self):
         """获取 stock_daily 中最新交易日"""
         if self.backend == "clickhouse":
-            r = self.ch_client.query(f"SELECT MAX(trade_date) FROM {self.CH_TABLE}")
+            r = self.ch_client.query(f"SELECT MAX(trade_date) FROM {self.CH_TABLE} FINAL")
             val = r.result_rows[0][0]
             return val if val else None
         else:
@@ -369,7 +391,7 @@ class StockDailyDB:
         if self.backend == "clickhouse":
             target_table = self.CH_INDEX_TABLE if table == "index" else self.CH_TABLE
             r = self.ch_client.query(
-                f"SELECT MAX(trade_date) FROM {target_table} WHERE code = %(code)s",
+                f"SELECT MAX(trade_date) FROM {target_table} FINAL WHERE code = %(code)s",
                 parameters={"code": code},
             )
             val = r.result_rows[0][0]
@@ -378,7 +400,7 @@ class StockDailyDB:
             target_table = "index_daily" if table == "index" else "stock_daily"
             with self.mysql_conn.cursor() as cur:
                 cur.execute(
-                    f"SELECT MAX(trade_date) as max_date FROM {target_table} WHERE code = %s",
+                    f"SELECT MAX(trade_date) as max_date FROM {target_table} FINAL WHERE code = %s",
                     (code,),
                 )
                 row = cur.fetchone()
@@ -408,7 +430,7 @@ class StockDailyDB:
             placeholders = ", ".join([f"'{c}'" for c in normalized_codes])
             r = self.ch_client.query(
                 f"SELECT code, MAX(trade_date) AS max_date "
-                f"FROM {self.CH_TABLE} WHERE code IN ({placeholders}) GROUP BY code"
+                f"FROM {self.CH_TABLE} FINAL WHERE code IN ({placeholders}) GROUP BY code"
             )
             for row in r.result_rows:
                 original_code = code_map.get(row[0], row[0])
@@ -436,7 +458,7 @@ class StockDailyDB:
 
         if self.backend == "clickhouse":
             r = self.ch_client.query(
-                f"SELECT MAX(trade_date) FROM {self.CH_TABLE} "
+                f"SELECT MAX(trade_date) FROM {self.CH_TABLE} FINAL "
                 f"WHERE code = %(code)s AND trade_date BETWEEN %(sd)s AND %(ed)s",
                 parameters={"code": code, "sd": start_date, "ed": end_date},
             )
@@ -479,7 +501,7 @@ class StockDailyDB:
             placeholders = ", ".join([f"'{c}'" for c in normalized_codes])
             r = self.ch_client.query(
                 f"SELECT code, MAX(trade_date) AS max_date "
-                f"FROM {self.CH_TABLE} "
+                f"FROM {self.CH_TABLE} FINAL "
                 f"WHERE code IN ({placeholders}) AND trade_date BETWEEN '{start_date}' AND '{end_date}' "
                 f"GROUP BY code"
             )
@@ -509,7 +531,7 @@ class StockDailyDB:
         """
         if self.backend == "clickhouse":
             r = self.ch_client.query(
-                f"SELECT MAX(trade_date) AS d FROM {self.CH_TABLE} "
+                f"SELECT MAX(trade_date) AS d FROM {self.CH_TABLE} FINAL "
                 f"WHERE trade_date <= %(d)s",
                 parameters={"d": end_date},
             )
@@ -538,7 +560,7 @@ class StockDailyDB:
 
         if self.backend == "clickhouse":
             r = self.ch_client.query(
-                f"SELECT count() FROM {self.CH_TABLE} "
+                f"SELECT count() FROM {self.CH_TABLE} FINAL "
                 f"WHERE code = %(code)s AND trade_date = %(td)s",
                 parameters={"code": ch_code, "td": trade_date},
             )
@@ -553,7 +575,7 @@ class StockDailyDB:
 
     # ─── stock_daily 写入 ─────────────────────────────────────
 
-    def upsert_daily(self, rows, table="stock"):
+    def upsert_daily(self, rows, table="stock", force=False):
         """
         批量 upsert 日线数据（统一入口，自动路由到 CH 或 MySQL）。
 
@@ -565,6 +587,7 @@ class StockDailyDB:
             table: 目标表选择
               - "stock" (默认): stock_daily 表 — 股票日线（沪深+北交所个股）
               - "index":       index_daily 表 — 指数日线（上证指数/沪深300等）
+            force: 是否强制写入（跳过预过滤，直接INSERT覆盖）
 
         返回: 插入的行数
 
@@ -576,7 +599,7 @@ class StockDailyDB:
             return 0
 
         if self.backend == "clickhouse":
-            return self._ch_insert_rows(rows, table=table)
+            return self._ch_insert_rows(rows, table=table, force=force)
         else:
             return self._mysql_upsert_rows(rows, table=table)
 
@@ -586,13 +609,14 @@ class StockDailyDB:
         """
         pass  # no-op: 不产生任何 mutation
 
-    def _ch_insert_rows(self, rows, table="stock"):
+    def _ch_insert_rows(self, rows, table="stock", force=False):
         """
         ClickHouse: 批量幂等写入。返回实际写入主表的行数。
 
         参数:
             rows:  待写入的行列表（list of dict）
             table: "stock" 写入 stock_daily (默认), "index" 写入 index_daily
+            force: 是否强制写入（跳过预过滤，直接INSERT覆盖）
 
         直接 INSERT（ch_client.insert），写入前先查 FINAL 表过滤已存在的 (code, trade_date)。
         原因：ReplacingMergeTree 的自动去重只在后台合并时生效，查询不加 FINAL 会看到重复行。
@@ -602,6 +626,8 @@ class StockDailyDB:
         - 降低 OPTIMIZE TABLE 的频率需求
 
         对于已存在但需要更新的行，仍然直接 INSERT（update_time 版本列保证覆盖）。
+
+        当 force=True 时，跳过预过滤，直接写入所有行（依赖 ReplacingMergeTree 去重）。
         """
         if not rows:
             return 0
@@ -623,57 +649,59 @@ class StockDailyDB:
 
         # ── 预过滤：查 FINAL 表，找出已存在的 (code, trade_date) ──
         existing_keys = set()
-        codes_in_batch = set()
-        dates_in_batch = set()
-        for row in rows:
-            c = self._ch_norm_code(row.get("code", ""))
-            d = row.get("trade_date")
-            if isinstance(d, str):
-                d = date.fromisoformat(d)
-            elif isinstance(d, datetime):
-                d = d.date()
-            if c:
-                codes_in_batch.add(c)
-                dates_in_batch.add(d)
-
+        
         # 日期统一格式化为字符串，避免 Python date 对象转 str 时类型不匹配 CH Date 类型
         def _fmt_date(d):
             return d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)
+        
+        if not force:
+            codes_in_batch = set()
+            dates_in_batch = set()
+            for row in rows:
+                c = self._ch_norm_code(row.get("code", ""))
+                d = row.get("trade_date")
+                if isinstance(d, str):
+                    d = date.fromisoformat(d)
+                elif isinstance(d, datetime):
+                    d = d.date()
+                if c:
+                    codes_in_batch.add(c)
+                    dates_in_batch.add(d)
 
-        dedup_ok = False  # 标记预过滤是否成功
-        if codes_in_batch and dates_in_batch:
-            code_list = sorted(codes_in_batch)
-            date_str_list = sorted(_fmt_date(d) for d in dates_in_batch)
-            ch_batch = 500
-            max_retries = 1
-            for attempt in range(max_retries + 1):
-                try:
-                    existing_keys = set()  # 每次重试清空，重新查询
-                    for ci in range(0, len(code_list), ch_batch):
-                        code_chunk = code_list[ci:ci + ch_batch]
-                        code_ph = ", ".join(f"'{c}'" for c in code_chunk)
-                        date_ph = ", ".join(f"'{d}'" for d in date_str_list)
-                        r = self.ch_client.query(
-                            f"SELECT code, trade_date FROM {target_table} FINAL "
-                            f"WHERE code IN ({code_ph}) AND trade_date IN ({date_ph})"
-                        )
-                        for row_data in r.result_rows:
-                            # CH 返回的 trade_date 是 datetime.date 或 str，统一处理
-                            rc = str(row_data[0])
-                            rd = row_data[1]
-                            if hasattr(rd, "strftime"):
-                                rd = _fmt_date(rd)
-                            existing_keys.add((rc, rd))
-                    dedup_ok = True
-                    break  # 查询成功，跳出重试循环
-                except Exception as e:
-                    if attempt < max_retries:
-                        print(f"  [WARN] FINAL 预查询失败(第{attempt+1}次)，重试: {e}")
-                        import time as _t; _t.sleep(0.5)
-                    else:
-                        print(f"  [ERROR] FINAL 预查询失败({max_retries+1}次均失败): {e}")
-                        print(f"  [ERROR] 为避免重复写入，本次批量插入中止！")
-                        return 0  # 预过滤失败则不写入，宁可少写不可重复写
+            dedup_ok = False  # 标记预过滤是否成功
+            if codes_in_batch and dates_in_batch:
+                code_list = sorted(codes_in_batch)
+                date_str_list = sorted(_fmt_date(d) for d in dates_in_batch)
+                ch_batch = 500
+                max_retries = 1
+                for attempt in range(max_retries + 1):
+                    try:
+                        existing_keys = set()  # 每次重试清空，重新查询
+                        for ci in range(0, len(code_list), ch_batch):
+                            code_chunk = code_list[ci:ci + ch_batch]
+                            code_ph = ", ".join(f"'{c}'" for c in code_chunk)
+                            date_ph = ", ".join(f"'{d}'" for d in date_str_list)
+                            r = self.ch_client.query(
+                                f"SELECT code, trade_date FROM {target_table} FINAL "
+                                f"WHERE code IN ({code_ph}) AND trade_date IN ({date_ph})"
+                            )
+                            for row_data in r.result_rows:
+                                # CH 返回的 trade_date 是 datetime.date 或 str，统一处理
+                                rc = str(row_data[0])
+                                rd = row_data[1]
+                                if hasattr(rd, "strftime"):
+                                    rd = _fmt_date(rd)
+                                existing_keys.add((rc, rd))
+                        dedup_ok = True
+                        break  # 查询成功，跳出重试循环
+                    except Exception as e:
+                        if attempt < max_retries:
+                            print(f"  [WARN] FINAL 预查询失败(第{attempt+1}次)，重试: {e}")
+                            import time as _t; _t.sleep(0.5)
+                        else:
+                            print(f"  [ERROR] FINAL 预查询失败({max_retries+1}次均失败): {e}")
+                            print(f"  [ERROR] 为避免重复写入，本次批量插入中止！")
+                            return 0  # 预过滤失败则不写入，宁可少写不可重复写
 
         # 分批：2000条/批
         batch_size = 2000
@@ -693,7 +721,7 @@ class StockDailyDB:
                 # 跳过已存在的行（无需重复写入）
                 # key 的日期用字符串格式，与 existing_keys 保持一致
                 key = (code_val, _fmt_date(td_val))
-                if key in existing_keys:
+                if (not force) and key in existing_keys:
                     skipped += 1
                     continue
 
@@ -746,7 +774,8 @@ class StockDailyDB:
                 print(f"  [ERROR] ClickHouse 插入失败 (批次 {i // batch_size + 1}): {e}")
 
         if skipped > 0:
-            print(f"    [CH] 跳过 {skipped} 条已存在记录（FINAL 去重）")
+            pass  # 静默跳过，不输出日志
+            # print(f"    [CH] 跳过 {skipped} 条已存在记录（FINAL 去重）")
         return total_inserted
 
     def _mysql_upsert_rows(self, rows, table="stock"):
@@ -1107,7 +1136,7 @@ class StockDailyDB:
         """
         if self.backend == "clickhouse":
             r = self.ch_client.query(
-                f"SELECT DISTINCT toString(trade_date) FROM {self.CH_TABLE} "
+                f"SELECT DISTINCT toString(trade_date) FROM {self.CH_TABLE} FINAL "
                 f"WHERE code = %(code)s "
                 f"AND (pe_ttm IS NULL OR pb IS NULL) "
                 f"ORDER BY trade_date",
@@ -1137,7 +1166,7 @@ class StockDailyDB:
 
         if self.backend == "clickhouse":
             r = self.ch_client.query(
-                f"SELECT toString(trade_date) FROM {self.CH_TABLE} "
+                f"SELECT toString(trade_date) FROM {self.CH_TABLE} FINAL "
                 f"WHERE code = %(code)s ORDER BY trade_date",
                 parameters={"code": ch_code},
             )
@@ -1170,7 +1199,7 @@ class StockDailyDB:
         if self.backend == "clickhouse":
             placeholders = ", ".join(f"'{c}'" for c in normalized_codes)
             r = self.ch_client.query(
-                f"SELECT code, toString(trade_date) as td FROM {self.CH_TABLE} "
+                f"SELECT code, toString(trade_date) as td FROM {self.CH_TABLE} FINAL "
                 f"WHERE code IN ({placeholders}) ORDER BY code, trade_date"
             )
             result = {c: [] for c in codes}
@@ -1211,7 +1240,7 @@ class StockDailyDB:
             placeholders = ", ".join(f"'{c}'" for c in normalized_codes)
             r = self.ch_client.query(
                 f"SELECT code, MIN(trade_date) as mn, MAX(trade_date) as mx "
-                f"FROM {self.CH_TABLE} "
+                f"FROM {self.CH_TABLE} FINAL "
                 f"WHERE code IN ({placeholders}) "
                 f"AND (pe_ttm IS NULL OR pb IS NULL) "
                 f"GROUP BY code"
@@ -1248,7 +1277,7 @@ class StockDailyDB:
         """
         if self.backend == "clickhouse":
             r = self.ch_client.query(
-                f"SELECT DISTINCT d.code FROM {self.CH_TABLE} d "
+                f"SELECT DISTINCT d.code FROM {self.CH_TABLE} FINAL d "
                 f"WHERE d.trade_date = %(td)s "
                 f"AND (d.pe_ttm IS NULL OR d.pb IS NULL)",
                 parameters={"td": trade_date}
@@ -1279,7 +1308,7 @@ class StockDailyDB:
         """
         if self.backend == "clickhouse":
             r = self.ch_client.query(
-                f"SELECT DISTINCT code FROM {self.CH_TABLE} "
+                f"SELECT DISTINCT code FROM {self.CH_TABLE} FINAL "
                 f"WHERE (pe_ttm IS NULL OR pb IS NULL) "
                 f"AND code NOT LIKE '%.%' "
                 f"ORDER BY code"
@@ -1313,8 +1342,81 @@ class StockDailyDB:
             )
             return {row["code"]: row["market"] for row in cur.fetchall()}
 
-    # 注意：update_valuation 相关方法已删除，因为不再使用 market_cap 和 circ_market_cap 字段
-    # 如需更新 pe_ttm 和 pb，请直接在日线数据写入时提供
+    def update_valuation_batch(self, batch_updates):
+        """批量更新 pe_ttm / pb 字段（ClickHouse INSERT 覆盖方式）。
+
+        Args:
+            batch_updates: list of tuple (pe_ttm, _, _, pb, code, trade_date)
+                           其中 _ 为占位（兼容旧接口格式），实际只用到 [0]=pe, [4]=pb, [5]=code, [6]=date
+        Returns:
+            int: 写入的记录数
+        """
+        if not batch_updates:
+            return 0
+
+        if self.backend == "clickhouse":
+            table = self.CH_TABLE
+            now_dt = datetime.now()
+            insert_rows = []
+            for item in batch_updates:
+                # (pe_ttm, None, None, pb, code, trade_date)
+                pe_val = item[0]
+                pb_val = item[3]
+                code = item[4]
+                trade_date = item[5]
+
+                # 读取原行完整数据
+                try:
+                    sel = self.ch_client.query(
+                        f"SELECT {', '.join(self.DAILY_COLUMNS)} FROM {table} FINAL "
+                        f"WHERE code = %(code)s AND toString(trade_date) = %(td)s",
+                        parameters={"code": code, "td": str(trade_date)}
+                    )
+                    if not sel.result_rows:
+                        continue
+                    orig = sel.result_rows[0]
+                    row_dict = dict(zip(self.DAILY_COLUMNS, orig))
+                except Exception:
+                    continue
+
+                # 打补丁
+                if pe_val is not None:
+                    row_dict['pe_ttm'] = float(pe_val)
+                if pb_val is not None:
+                    row_dict['pb'] = float(pb_val)
+                row_dict['update_time'] = now_dt
+
+                vals = [row_dict.get(col) for col in self.DAILY_COLUMNS]
+                insert_rows.append(vals)
+
+            if insert_rows:
+                ins_batch = 5000
+                for j in range(0, len(insert_rows), ins_batch):
+                    self.ch_client.insert(table, insert_rows[j:j+ins_batch],
+                                          column_names=self.DAILY_COLUMNS)
+                return len(insert_rows)
+            return 0
+        else:
+            # MySQL: 直接 UPDATE
+            total = 0
+            with self.mysql_conn.cursor() as cur:
+                for item in batch_updates:
+                    pe_val, _, _, pb_val, code, trade_date = item
+                    set_parts = []
+                    params = []
+                    if pe_val is not None:
+                        set_parts.append("pe_ttm = %s")
+                        params.append(float(pe_val))
+                    if pb_val is not None:
+                        set_parts.append("pb = %s")
+                        params.append(float(pb_val))
+                    if set_parts:
+                        params.extend([code, trade_date])
+                        sql = f"UPDATE stock_daily SET {', '.join(set_parts)} WHERE code = %s AND trade_date = %s"
+                        cur.execute(sql, params)
+                        total += cur.rowcount
+            self.mysql_conn.commit()
+            return total
 
     # ─── 数据概况 ──────────────────────────────────────────────
 
@@ -1327,7 +1429,7 @@ class StockDailyDB:
                 f"  count(DISTINCT code) as stocks, "
                 f"  MIN(trade_date) as min_date, "
                 f"  MAX(trade_date) as max_date "
-                f"FROM {self.CH_TABLE}"
+                f"FROM {self.CH_TABLE} FINAL"
             )
             row = r.result_rows[0]
             return {
@@ -1354,13 +1456,13 @@ class StockDailyDB:
                 ("pe_ttm", "市盈率TTM"), ("pb", "市净率"),
             ]
             r_total = self.ch_client.query(
-                f"SELECT count() FROM {self.CH_TABLE} WHERE trade_date >= '{since}'"
+                f"SELECT count() FROM {self.CH_TABLE} FINAL WHERE trade_date >= '{since}'"
             )
             total = r_total.result_rows[0][0]
             result = []
             for col, label in fields:
                 r = self.ch_client.query(
-                    f"SELECT count() FROM {self.CH_TABLE} "
+                    f"SELECT count() FROM {self.CH_TABLE} FINAL "
                     f"WHERE trade_date >= '{since}' AND {col} IS NOT NULL AND {col} != 0"
                 )
                 cnt = r.result_rows[0][0]
@@ -1396,7 +1498,7 @@ class StockDailyDB:
         if self.backend == "clickhouse":
             # 直接从 CH 查当天所有 code（不依赖 MySQL stock_daily）
             r_all = self.ch_client.query(
-                f"SELECT DISTINCT code FROM {self.CH_TABLE} "
+                f"SELECT DISTINCT code FROM {self.CH_TABLE} FINAL "
                 f"WHERE trade_date = toDate('{trade_date}') ORDER BY code"
             )
             all_codes = [row[0] for row in r_all.result_rows]
@@ -1416,7 +1518,7 @@ class StockDailyDB:
             # 在 CH 中查缺失 PE/PB 的 code
             codes_str = ",".join(f"'{c}'" for c in all_codes)
             r = self.ch_client.query(
-                f"SELECT DISTINCT code FROM {self.CH_TABLE} "
+                f"SELECT DISTINCT code FROM {self.CH_TABLE} FINAL "
                 f"WHERE trade_date = toDate('{trade_date}') "
                 f"AND code IN ({codes_str}) "
                 f"AND (pe_ttm IS NULL OR pb IS NULL) "
@@ -1448,7 +1550,7 @@ class StockDailyDB:
         if self.backend == "clickhouse":
             # 查出所有有日线数据但 PE/PB 为空的 code（排除指数）
             r = self.ch_client.query(
-                f"SELECT DISTINCT code FROM {self.CH_TABLE} "
+                f"SELECT DISTINCT code FROM {self.CH_TABLE} FINAL "
                 f"WHERE (pe_ttm IS NULL OR pb IS NULL) "
                 f"  AND close_price IS NOT NULL AND close_price > 0 "
                 f"  AND code NOT LIKE '%.%' "

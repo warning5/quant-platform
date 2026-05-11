@@ -85,7 +85,8 @@ public class DataUpdateRequest {
     private Integer yearEnd;
 
     /**
-     * 财务数据：强制重新采集
+     * 强制重新写入（跳过去重预过滤，直接INSERT覆盖）
+     * 适用于：日线数据强制覆盖、财务数据强制重新采集
      */
     private boolean force = false;
 

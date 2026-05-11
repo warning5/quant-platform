@@ -24,7 +24,7 @@ from datetime import datetime, timedelta
 import requests
 
 from db_config import get_backend_label
-from db_helper import StockDailyDB
+from db_helper import StockDailyDB, to_float, to_int
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -103,23 +103,7 @@ def fetch_bj_stock_history(code, start_date, end_date):
     return all_rows if all_rows else None
 
 
-def to_float(value):
-    try:
-        if value is None or value == '' or value == {}:
-            return None
-        return float(value)
-    except:
-        return None
-
-
-def to_int(value):
-    try:
-        if value is None or value == '' or value == {}:
-            return None
-        return int(float(value))
-    except:
-        return None
-
+# to_float / to_int 已从 db_helper 导入，不再本地定义
 
 # ── 腾讯实时行情批量快照（内联，无外部依赖）──────────────────────────────
 _QQ_HEADERS = {
@@ -275,6 +259,7 @@ def main():
     parser.add_argument("--batch-size", type=int, default=20, help="每批处理的股票数 (默认:20)")
     parser.add_argument("--delay", type=float, default=0.3, help="批次间延迟秒数 (默认:0.3)")
     parser.add_argument("--resume", action="store_true", help="断点续传(跳过已有数据的股票)")
+    parser.add_argument("--force", action="store_true", help="强制写入(跳过去重预过滤，直接INSERT覆盖)")
     parser.add_argument("--pool", type=str, default=None,
                        choices=["SH300", "SZ50", "ZZ500", "ZZ1000", "STAR50"],
                        help="股票池筛选 (SH300/SZ50/ZZ500/ZZ1000/STAR50)")
@@ -359,7 +344,7 @@ def main():
                 # 直接从预取好的快照映射中取（无需逐只请求腾讯接口）
                 snapshot = all_snapshots.get(code, {})
                 daily_rows = build_daily_rows(db, code, name, market, rows, snapshot=snapshot)
-                n = db.upsert_daily(daily_rows)
+                n = db.upsert_daily(daily_rows, force=args.force)
                 total_success += n
                 total_skipped += len(daily_rows) - n
                 if i % 10 == 0 or i <= 5:
@@ -393,11 +378,11 @@ def main():
             print(f"\n补全 change 字段（pre_close/change_percent/change_amount）...")
             try:
                 from field_completer import complete_fields
-                # force_full_scan=True: 全量扫描所有缺失估值的股票，不限于本次更新的股票
+                bj_stock_list = [(c, "BJ") for c, n, m in stocks]
                 n = complete_fields(db, code=args.code if args.code else None,
-                                    stock_list=None,
+                                    stock_list=bj_stock_list if not args.code else None,
                                     skip_valuation=False,
-                                    force_full_scan=(not args.code))
+                                    force_full_scan=False)
                 print(f"  补全完成: {n} 条")
             except Exception as e:
                 print(f"  [WARN] change 字段补全异常（不影响日线数据）: {e}")

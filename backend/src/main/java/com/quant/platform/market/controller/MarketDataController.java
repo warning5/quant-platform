@@ -61,17 +61,6 @@ public class MarketDataController {
     }
 
     /**
-     * 获取交易日历
-     */
-    @GetMapping("/trading-dates")
-    @Operation(summary = "获取交易日历")
-    public ApiResponse<List<LocalDate>> getTradingDates(
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
-        return ApiResponse.success(marketDataService.getTradingDates(startDate, endDate));
-    }
-
-    /**
      * 远程搜索股票（前端 Select 用）
      */
     @GetMapping("/search")
@@ -80,24 +69,5 @@ public class MarketDataController {
             @RequestParam String keyword,
             @RequestParam(defaultValue = "20") int limit) {
         return ApiResponse.success(marketDataService.searchSymbols(keyword, limit));
-    }
-
-    /**
-     * 获取所有股票代码列表
-     */
-    @GetMapping("/symbols")
-    @Operation(summary = "获取所有股票代码列表")
-    public ApiResponse<List<String>> getAllSymbols() {
-        return ApiResponse.success(marketDataService.getAllSymbols());
-    }
-
-    /**
-     * 批量导入行情数据
-     */
-    @PostMapping("/import")
-    @Operation(summary = "批量导入行情数据")
-    public ApiResponse<Map<String, Object>> importBars(@RequestBody List<MarketDailyBar> bars) {
-        int count = marketDataService.importBars(bars);
-        return ApiResponse.success("导入成功", Map.of("count", count));
     }
 }

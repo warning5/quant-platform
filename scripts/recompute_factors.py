@@ -123,7 +123,7 @@ def load_stock_daily():
 
         result = ch_client.query("""
             SELECT code, trade_date, close_price, turnover_rate, volume
-            FROM stock_daily
+            FROM stock_daily FINAL
             WHERE close_price IS NOT NULL AND close_price > 0
             ORDER BY code, trade_date
         """)
@@ -661,7 +661,7 @@ def clear_old_factors(factor_codes):
     ch_client = clickhouse_connect.get_client(**CH_CONFIG)
     try:
         for fc in factor_codes:
-            result = ch_client.query(f"SELECT count() FROM factor_value WHERE factor_code = '{fc}'")
+            result = ch_client.query(f"SELECT count() FROM factor_value FINAL WHERE factor_code = '{fc}'")
             count = result.first_row[0]
             if count > 0:
                 ch_client.command(f"ALTER TABLE factor_value DELETE WHERE factor_code = '{fc}'")

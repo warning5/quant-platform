@@ -85,6 +85,7 @@ function FactorMonitor() {
   const wsRef = useRef(null);
   const logContainerRef = useRef(null);
   const pushLogRef = useRef(null); // 稳定引用，避免闭包问题
+  const fetchDebounceRef = useRef(null);          // debounce 刷新定时器
 
   // 添加日志（新日志在底部）
   const pushLog = useCallback((text, type = 'info', ts) => {
@@ -222,6 +223,9 @@ function FactorMonitor() {
                   });
                   // 清除该因子的 ETA 缓存
                   setFactorEtaSecData(prev => { const next = { ...prev }; delete next[data.factorCode]; return next; });
+                  // 计算完成后自动刷新列表状态（debounce 500ms，避免批量完成时频繁刷新）
+                  clearTimeout(fetchDebounceRef.current);
+                  fetchDebounceRef.current = setTimeout(() => fetchData(), 500);
                 }
               }
             }
@@ -248,6 +252,7 @@ function FactorMonitor() {
 
     wsRef.current = ws;
     return () => {
+      clearTimeout(fetchDebounceRef.current);
       if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
         try { ws.send(stompFrame('DISCONNECT')); } catch {}
         ws.close();

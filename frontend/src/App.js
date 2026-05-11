@@ -29,7 +29,6 @@ import ParamOptimize from './pages/backtest/ParamOptimize';
 import FactorWeightOptimize from './pages/factors/FactorWeightOptimize';
 import FactorIcIrAnalysis from './pages/factors/FactorIcIrAnalysis';
 import StockScreen from './pages/screen/StockScreen';
-import ChanScreen from './pages/chan/ChanScreen';
 import ManualOverviewPage from './pages/manual/ManualOverviewPage';
 import ManualDataUpdatePage from './pages/manual/ManualDataUpdatePage';
 import ManualDataDetailPage from './pages/manual/ManualDataDetailPage';
@@ -44,7 +43,6 @@ import ResearchData from './pages/datadetail/ResearchData';
 import DataUpdate from './pages/dataupdate/DataUpdate';
 import StockAnalysis from './pages/analysis/StockAnalysis';
 import SectorRanking from './pages/market/SectorRanking';
-import HotSectorPage from './pages/market/HotSectorPage';
 
 const { Header, Sider, Content } = Layout;
 const { Title } = Typography;
@@ -67,7 +65,7 @@ function AppLayout() {
         { key: '/factor-correlation', label: <Link to="/factor-correlation">因子相关性</Link> },
         { key: '/factor-ic-ir', label: <Link to="/factor-ic-ir">IC/IR 分析</Link> },
         { key: '/factor-weight-optimize', label: <Link to="/factor-weight-optimize">权重优化</Link> },
-        { key: '/chan-screen', label: <Link to="/chan-screen">缠论筛选</Link> },
+        { key: '/screen#chan', label: <Link to="/screen#chan">缠论筛选</Link> },
         { key: '/screen', label: <Link to="/screen">因子策略</Link> },
       ],
     },
@@ -99,7 +97,7 @@ function AppLayout() {
         { key: '/data-detail/financial', label: <Link to="/data-detail/financial">财务数据</Link> },
         { key: '/data-detail/research', label: <Link to="/data-detail/research">研报数据</Link> },
         { key: '/sector-ranking', label: <Link to="/sector-ranking">行业排行</Link> },
-        { key: '/hot-sectors', label: <Link to="/hot-sectors">热门行业</Link> },
+        { key: '/sector-ranking#card', label: <Link to="/sector-ranking#card">热门行业</Link> },
       ],
     },
     {
@@ -246,7 +244,7 @@ function AppLayout() {
             <Route path="/backtests/:taskId/report" element={<BacktestReport />} />
             <Route path="/factor-weight-optimize" element={<FactorWeightOptimize defaultFactorCodes={[]} />} />
             <Route path="/factor-ic-ir" element={<FactorIcIrAnalysis />} />
-            <Route path="/chan-screen" element={<ChanScreen />} />
+            <Route path="/chan-screen" element={<Navigate to="/screen" replace />} />
             <Route path="/screen" element={<StockScreen />} />
             <Route path="/manual/overview" element={<ManualOverviewPage />} />
             <Route path="/manual/data-update" element={<ManualDataUpdatePage />} />
@@ -258,7 +256,7 @@ function AppLayout() {
             <Route path="/manual/others" element={<ManualOthersPage />} />
             <Route path="/stock-analysis" element={<StockAnalysis />} />
             <Route path="/sector-ranking" element={<SectorRanking />} />
-            <Route path="/hot-sectors" element={<HotSectorPage />} />
+            <Route path="/hot-sectors" element={<Navigate to="/sector-ranking" replace />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Content>

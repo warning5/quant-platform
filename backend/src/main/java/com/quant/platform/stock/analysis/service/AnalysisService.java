@@ -776,7 +776,7 @@ public class AnalysisService {
             BigDecimal currentPb = null;
 
             String sql = """
-                SELECT pe_ttm, pb FROM stock.stock_daily
+                SELECT pe_ttm, pb FROM stock.stock_daily FINAL
                 WHERE code = ?
                   AND trade_date >= subtractYears(today(), ?)
                   AND pe_ttm > 0 AND pe_ttm < 10000
@@ -868,7 +868,7 @@ public class AnalysisService {
         try {
             // 先查最新交易日（避免子查询）
             latestTradeDate = clickHouseJdbcTemplate.queryForObject(
-                "SELECT MAX(trade_date) FROM stock.stock_daily", String.class);
+                "SELECT MAX(trade_date) FROM stock.stock_daily FINAL", String.class);
         } catch (Exception e) {
             log.error("获取最新交易日失败: {}", e.getMessage());
         }
@@ -884,7 +884,7 @@ public class AnalysisService {
                         median(sd.pb) as medianPb
                     FROM stock_info si
                       INNER JOIN (
-                        SELECT code, change_percent, pe_ttm, pb FROM stock.stock_daily
+                        SELECT code, change_percent, pe_ttm, pb FROM stock.stock_daily FINAL
                         WHERE trade_date = '%s'
                       ) sd ON sd.code = si.code
                     WHERE si.industry IS NOT NULL AND si.industry != ''
@@ -918,7 +918,7 @@ public class AnalysisService {
         List<Map<String, Object>> conceptList = Collections.emptyList();
         try {
             // 先获取最新交易日期
-            String maxDateSql = "SELECT MAX(trade_date) as maxDate FROM stock.stock_daily";
+            String maxDateSql = "SELECT MAX(trade_date) as maxDate FROM stock.stock_daily FINAL";
             String maxDate = clickHouseJdbcTemplate.queryForObject(maxDateSql, String.class);
 
             if (maxDate != null) {
@@ -945,7 +945,7 @@ public class AnalysisService {
                         String inClause = String.join("','", batch);
                         String batchSql = String.format("""
                             SELECT code, change_percent as chg, pe_ttm, pb
-                            FROM stock.stock_daily
+                            FROM stock.stock_daily FINAL
                             WHERE code IN ('%s') AND trade_date = '%s'
                             """, inClause, maxDate);
                         List<Map<String, Object>> rows = clickHouseJdbcTemplate.query(batchSql,
@@ -1049,8 +1049,8 @@ public class AnalysisService {
             FROM stock_info si
               INNER JOIN (
                 SELECT code, close_price, change_percent, pe_ttm, pb, turnover_rate
-                FROM stock.stock_daily
-                WHERE trade_date = (SELECT MAX(trade_date) FROM stock.stock_daily)
+                FROM stock.stock_daily FINAL
+                WHERE trade_date = (SELECT MAX(trade_date) FROM stock.stock_daily FINAL)
               ) sd ON sd.code = si.code
             WHERE si.industry = ?
               AND si.market NOT IN ('BJ','北交所')
@@ -1116,7 +1116,7 @@ public class AnalysisService {
         try {
             String industryReturnSql = """
                 SELECT trade_date, AVG(change_percent) / 100 as avg_ret
-                FROM stock.stock_daily sd
+                FROM stock.stock_daily sd FINAL
                 INNER JOIN stock_info si ON si.code = sd.code
                 WHERE si.industry = ?
                   AND si.market NOT IN ('BJ','北交所')
@@ -1215,8 +1215,8 @@ public class AnalysisService {
                     AVG(change_percent) as avgChange
                 FROM stock_info si
                   INNER JOIN (
-                    SELECT code, change_percent FROM stock.stock_daily
-                    WHERE trade_date = (SELECT MAX(trade_date) FROM stock.stock_daily)
+                    SELECT code, change_percent FROM stock.stock_daily FINAL
+                    WHERE trade_date = (SELECT MAX(trade_date) FROM stock.stock_daily FINAL)
                   ) sd ON sd.code = si.code
                 WHERE si.industry = ?
                   AND si.market NOT IN ('BJ','北交所')
@@ -1461,8 +1461,8 @@ public class AnalysisService {
             FROM stock_info si
               INNER JOIN (
                 SELECT code, close_price, change_percent, pe_ttm, pb, turnover_rate
-                FROM stock.stock_daily
-                WHERE trade_date = (SELECT MAX(trade_date) FROM stock.stock_daily)
+                FROM stock.stock_daily FINAL
+                WHERE trade_date = (SELECT MAX(trade_date) FROM stock.stock_daily FINAL)
               ) sd ON sd.code = si.code
             WHERE si.code IN ('%s')
             ORDER BY %s %s
@@ -1535,7 +1535,7 @@ public class AnalysisService {
                         median(sd.pe_ttm) as medianPe,
                         median(sd.pb) as medianPb,
                         SUM(si.total_market_cap) as totalCap
-                    FROM stock.stock_daily sd
+                    FROM stock.stock_daily sd FINAL
                     JOIN stock.stock_info si ON sd.code = si.code
                     WHERE sd.code IN (%s) AND sd.trade_date = '%s'
                     """, inClause, latestDate);
@@ -1558,7 +1558,7 @@ public class AnalysisService {
                 // 涨幅前3龙头
                 String topSql = String.format("""
                     SELECT sd.code, si.name, sd.change_percent as chg, si.total_market_cap as cap
-                    FROM stock.stock_daily sd
+                    FROM stock.stock_daily sd FINAL
                     JOIN stock.stock_info si ON sd.code = si.code
                     WHERE sd.code IN (%s) AND sd.trade_date = '%s'
                     ORDER BY sd.change_percent DESC LIMIT 3
@@ -1615,7 +1615,7 @@ public class AnalysisService {
             SELECT sd.code, si.name, sd.close_price, sd.change_percent,
                    sd.pe_ttm, sd.pb, sd.turnover_rate, si.total_market_cap,
                    sd.volume
-            FROM stock.stock_daily sd
+            FROM stock.stock_daily sd FINAL
             JOIN stock.stock_info si ON sd.code = si.code
             WHERE sd.code IN ('%s') AND sd.trade_date = '%s'
             ORDER BY sd.change_percent DESC
@@ -1655,12 +1655,12 @@ public class AnalysisService {
         // 因为 OFFSET 按物理行偏移而非逻辑日期，需用子查询 DISTINCT）
         String trendSql = String.format("""
             SELECT sd.trade_date, AVG(sd.change_percent) as avgChg
-            FROM stock.stock_daily sd
+            FROM stock.stock_daily sd FINAL
             WHERE sd.code IN ('%s')
               AND sd.trade_date >= (SELECT trade_date FROM (
-                  SELECT DISTINCT trade_date FROM stock.stock_daily ORDER BY trade_date DESC LIMIT 6
+                  SELECT DISTINCT trade_date FROM stock.stock_daily FINAL ORDER BY trade_date DESC LIMIT 6
                 ) ORDER BY trade_date ASC LIMIT 1)
-              AND sd.trade_date <= (SELECT MAX(trade_date) FROM stock.stock_daily)
+              AND sd.trade_date <= (SELECT MAX(trade_date) FROM stock.stock_daily FINAL)
             GROUP BY sd.trade_date
             ORDER BY sd.trade_date
             """, inClause);
@@ -1679,7 +1679,7 @@ public class AnalysisService {
     /** 获取最新交易日期 */
     private String getLatestTradeDate() {
         List<String> dates = clickHouseJdbcTemplate.query(
-            "SELECT MAX(trade_date) FROM stock.stock_daily",
+            "SELECT MAX(trade_date) FROM stock.stock_daily FINAL",
             (rs, rowNum) -> rs.getString(1));
         return dates.isEmpty() ? "2026-01-01" : dates.get(0);
     }

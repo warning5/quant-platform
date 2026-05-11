@@ -192,10 +192,6 @@ export const marketApi = {
     api.get('/market/search', { params: { keyword, limit } }),
   getBars: (symbol, startDate, endDate) =>
     api.get(`/market/bars/${symbol}`, { params: { startDate, endDate } }),
-  getTradingDates: (startDate, endDate) =>
-    api.get('/market/trading-dates', { params: { startDate, endDate } }),
-  getSymbols: () => api.get('/market/symbols'),
-  importBars: (bars) => api.post('/market/import', bars),
 };
 
 

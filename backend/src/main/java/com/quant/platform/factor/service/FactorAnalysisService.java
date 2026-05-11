@@ -215,7 +215,7 @@ public class FactorAnalysisService {
         if (inClause.length() <= 2) return Collections.emptyMap(); // 空集合
 
         String sql = String.format(
-            "SELECT code, close_price FROM stock.stock_daily WHERE code IN (%s) AND trade_date = ?",
+            "SELECT code, close_price FROM stock.stock_daily FINAL WHERE code IN (%s) AND trade_date = ?",
             inClause);
 
         Map<String, Double> prices = new HashMap<>();
@@ -243,11 +243,11 @@ public class FactorAnalysisService {
         String tradingDateSql;
         if (forwardDays == 1) {
             // 简化：下一个交易日
-            tradingDateSql = "SELECT MIN(trade_date) AS td FROM stock.stock_daily WHERE trade_date > ?";
+            tradingDateSql = "SELECT MIN(trade_date) AS td FROM stock.stock_daily FINAL WHERE trade_date > ?";
         } else {
             // 第 N 个交易日：取 trade_date > calcDate 的第 forwardDays 个
             tradingDateSql = String.format("""
-                SELECT trade_date AS td FROM stock.stock_daily
+                SELECT trade_date AS td FROM stock.stock_daily FINAL
                 WHERE trade_date > ?
                 GROUP BY trade_date
                 ORDER BY trade_date ASC
@@ -265,7 +265,7 @@ public class FactorAnalysisService {
 
         // 用目标交易日查询收盘价
         String priceSql = String.format(
-            "SELECT code, close_price FROM stock.stock_daily WHERE code IN (%s) AND trade_date = ?",
+            "SELECT code, close_price FROM stock.stock_daily FINAL WHERE code IN (%s) AND trade_date = ?",
             inClause);
 
         Map<String, Double> prices = new HashMap<>();

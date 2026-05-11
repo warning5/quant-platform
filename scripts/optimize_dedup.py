@@ -15,7 +15,7 @@ print('这将会强制合并去重，耗时可能较长，请等待...\n')
 t0 = time.time()
 
 # 先查去重前的行数
-r_before = client.query("SELECT count() FROM stock.stock_daily")
+r_before = client.query("SELECT count() FROM stock.stock_daily FINAL")
 count_before = r_before.result_rows[0][0]
 print(f'去重前行数: {count_before:,}')
 
@@ -31,7 +31,7 @@ except Exception as e:
     print(f'  耗时: {elapsed:.1f}s')
 
 # 查去重后的行数
-r_after = client.query("SELECT count() FROM stock.stock_daily")
+r_after = client.query("SELECT count() FROM stock.stock_daily FINAL")
 count_after = r_after.result_rows[0][0]
 print(f'\n去重后行数: {count_after:,}')
 print(f'删除重复行数: {count_before - count_after:,}')

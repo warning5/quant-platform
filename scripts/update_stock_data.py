@@ -345,6 +345,7 @@ def main():
 
     # ─── 执行控制 ───
     parser.add_argument("--resume", action="store_true", help="断点续传（跳过已有数据的股票）")
+    parser.add_argument("--force", action="store_true", help="强制写入（跳过去重预过滤，直接INSERT覆盖）")
     parser.add_argument("--batch-size", type=int, default=10, help="每批股票数 (默认:10)")
     parser.add_argument("--delay", type=float, default=0.3, help="批次间延迟秒数 (默认:0.3)")
     parser.add_argument("--skip-bj-info", action="store_true", help="更新 stock_info 时跳过北交所")
@@ -383,6 +384,8 @@ def main():
         extra_args += ["--limit", str(args.limit)]
     if args.resume:
         extra_args.append("--resume")
+    if args.force:
+        extra_args.append("--force")
     if args.batch_size != 10:
         extra_args += ["--batch-size", str(args.batch_size)]
     if args.delay != 0.3:
@@ -401,6 +404,8 @@ def main():
         print(f"  指定股票:   {args.code}")
     if args.resume:
         print(f"  断点续传:   是")
+    if args.force:
+        print(f"  强制写入:   是")
     if args.limit > 0:
         print(f"  数量限制:   前 {args.limit} 只")
     if args.daily_only:

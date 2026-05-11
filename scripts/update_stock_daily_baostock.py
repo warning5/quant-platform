@@ -23,7 +23,7 @@ import baostock as bs
 
 # ─── 数据库操作封装 ──────────────────────────────────────────────
 from db_config import get_backend_label
-from db_helper import StockDailyDB
+from db_helper import StockDailyDB, to_float, to_int
 
 
 def get_baostock_code(code, market):
@@ -126,23 +126,7 @@ def fetch_stock_history(code, name, market, start_date, end_date, max_retries=2,
     return None
 
 
-def to_float(value):
-    try:
-        if value is None or value == "":
-            return None
-        return float(value)
-    except:
-        return None
-
-
-def to_int(value):
-    try:
-        if value is None or value == "":
-            return None
-        return int(float(value))
-    except:
-        return None
-
+# to_float / to_int 已从 db_helper 导入，不再本地定义
 
 def build_daily_rows(db, code, name, market, df):
     """
@@ -225,6 +209,7 @@ def main():
     parser.add_argument("--batch-size", type=int, default=10, help="每批处理的股票数 (默认:10)")
     parser.add_argument("--delay", type=float, default=0.3, help="批次间延迟秒数 (默认:0.3)")
     parser.add_argument("--resume", action="store_true", help="断点续传(跳过已有数据的股票)")
+    parser.add_argument("--force", action="store_true", help="强制写入(跳过去重预过滤，直接INSERT覆盖)")
     parser.add_argument("--pool", type=str, default=None,
                        choices=["SH300", "SZ50", "ZZ500", "ZZ1000", "STAR50"],
                        help="股票池筛选 (SH300/SZ50/ZZ500/ZZ1000/STAR50)")
@@ -236,9 +221,9 @@ def main():
         end_date = datetime.now().date()
     start_date = datetime.strptime(args.start_date, "%Y-%m-%d").date()
 
-    print("=" * 80)
+    print("=" * 70)
     print(f"stock_daily 数据更新脚本 (Baostock -> {get_backend_label()})")
-    print("=" * 80)
+    print("=" * 70)
     print(f"数据源: Baostock")
     print(f"存储后端: {get_backend_label()}")
     print(f"日期范围: {start_date} ~ {end_date}")
@@ -246,7 +231,8 @@ def main():
     print(f"批次大小: {args.batch_size}")
     print(f"批次延迟: {args.delay}秒")
     print(f"断点续传: {'是' if args.resume else '否'}")
-    print("-" * 80)
+    print(f"强制写入: {'是' if args.force else '否'}")
+    print("-" * 70)
 
     # 登录 Baostock
     print("\n正在登录 Baostock...")
@@ -353,7 +339,7 @@ def main():
 
                 if df is not None and len(df) > 0:
                     rows = build_daily_rows(db, code, name, market, df)
-                    n = db.upsert_daily(rows)
+                    n = db.upsert_daily(rows, force=args.force)
                     total_success += n
                     total_skipped += len(df) - n
                     processed_codes.append((code, market))
@@ -373,14 +359,14 @@ def main():
         # 统计
         elapsed = time.time() - start_time
         print(f"\n完成")
-        print("-" * 80)
+        print("-" * 70)
         print(f"总耗时: {elapsed:.1f} 秒")
         print(f"处理股票: {len(stocks)} 只")
         print(f"成功记录: {total_success:,} 条")
         print(f"跳过已存在: {total_skipped} 条")
         print(f"失败记录: {total_failed} 条")
         print(f"无数据: {total_no_data} 只")
-        print("=" * 80)
+        print("=" * 70)
 
         # ─── 自动补全 change 字段 ────────────────────────────────────
         if total_success > 0:

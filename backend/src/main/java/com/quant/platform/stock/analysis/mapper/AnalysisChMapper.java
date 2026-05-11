@@ -2,6 +2,8 @@ package com.quant.platform.stock.analysis.mapper;
 
 import com.quant.platform.stock.analysis.domain.DailyBarRow;
 import com.quant.platform.stock.analysis.domain.TechSignal;
+import com.quant.platform.stock.entity.StockDaily;
+import com.quant.platform.stock.service.ClickHouseStockService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -10,12 +12,16 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 
 /**
  * 分析模块 ClickHouse 查询 Mapper
  * 仅当 quant.clickhouse.enabled=true 时加载
+ *
+ * 日线数据查询已统一委托给 ClickHouseStockService（不再直接 SQL 查 stock_daily）。
+ * 本类只保留 factor_value / moneyflow 等分析专用表的查询。
  */
 @Slf4j
 @Repository
@@ -23,9 +29,12 @@ import java.util.List;
 public class AnalysisChMapper {
     
     private final JdbcTemplate clickHouseJdbcTemplate;
+    private final ClickHouseStockService stockService;
     
-    public AnalysisChMapper(@Qualifier("clickHouseJdbcTemplate") JdbcTemplate clickHouseJdbcTemplate) {
+    public AnalysisChMapper(@Qualifier("clickHouseJdbcTemplate") JdbcTemplate clickHouseJdbcTemplate,
+                            ClickHouseStockService stockService) {
         this.clickHouseJdbcTemplate = clickHouseJdbcTemplate;
+        this.stockService = stockService;
     }
 
     /**
@@ -66,6 +75,7 @@ public class AnalysisChMapper {
         String withSuffix = normalizeCode(code);
         String noSuffix = normalizeCodeForDaily(code);
 
+        // 注意：SELECT 里全是聚合函数(MAX/argMax)，不需要 GROUP BY，天然返回一行
         String sql = """
             SELECT
                 '%s' as code,
@@ -75,15 +85,36 @@ public class AnalysisChMapper {
                 argMax(CASE WHEN factor_code = 'CHAN_BUY_SELL' THEN factor_val END, calc_date) as chan_signal,
                 argMax(CASE WHEN factor_code = 'CHAN_HUB_POS' THEN factor_val END, calc_date) as hub_pos,
                 argMax(CASE WHEN factor_code = 'CHAN_PEN_COUNT' THEN factor_val END, calc_date) as pen_count
-            FROM stock.factor_value
+            FROM stock.factor_value FINAL
             WHERE (symbol = ? OR symbol = ?)
               AND factor_code IN ('CHAN_PEN_DIR','CHAN_TREND','CHAN_BUY_SELL','CHAN_HUB_POS','CHAN_PEN_COUNT')
-            GROUP BY '%s'
-            """.formatted(noSuffix, noSuffix);
+            """.formatted(noSuffix);
 
         try {
-            List<TechSignal> results = clickHouseJdbcTemplate.query(sql,
-                    new BeanPropertyRowMapper<>(TechSignal.class), withSuffix, noSuffix);
+            // 不用 BeanPropertyRowMapper：CH 返回 Float64，
+            // 但 TechSignal 的 penDir/trend/chanSignal/hubPos 是 String，
+            // penCount 是 Integer，直接映射会失败 → 手写 RowMapper 做类型转换
+            List<TechSignal> results = clickHouseJdbcTemplate.query(sql, (rs, rowNum) -> {
+                TechSignal t = new TechSignal();
+                t.setCode(noSuffix);
+                Object td = rs.getObject("trade_date");
+                if (td != null) {
+                    try { t.setTradeDate(java.time.LocalDate.parse(td.toString())); }
+                    catch (Exception ignored) {}
+                }
+                // CH 返回 Float64 → 转 String（CHAN_PEN_DIR/CHAN_TREND 等）
+                Object pd = rs.getObject("pen_dir");
+                t.setPenDir(pd != null ? String.valueOf((long) Math.round(((Number) pd).doubleValue())) : null);
+                Object tr = rs.getObject("trend");
+                t.setTrend(tr != null ? String.valueOf((long) Math.round(((Number) tr).doubleValue())) : null);
+                Object cs = rs.getObject("chan_signal");
+                t.setChanSignal(cs != null ? String.valueOf((long) Math.round(((Number) cs).doubleValue())) : null);
+                Object hp = rs.getObject("hub_pos");
+                t.setHubPos(hp != null ? String.valueOf(((Number) hp).doubleValue()) : null);
+                Object pc = rs.getObject("pen_count");
+                t.setPenCount(pc != null ? ((Number) pc).intValue() : null);
+                return t;
+            }, withSuffix, noSuffix);
             if (!results.isEmpty()) {
                 return results.get(0);
             }
@@ -95,75 +126,66 @@ public class AnalysisChMapper {
 
     /**
      * 查询股票最新日线数据（价格、涨跌幅等）
-     * 用于填充 AnalysisOverview 的 price / changePercent
+     * 委托 ClickHouseStockService（统一查询层），不再直接 SQL
      */
     public java.util.Map<String, Object> selectLatestDailyBar(String code) {
-        String sql = """
-            SELECT
-                close_price,
-                change_percent,
-                pe_ttm,
-                pb
-            FROM stock.stock_daily
-            WHERE code = ?
-            ORDER BY trade_date DESC
-            LIMIT 1
-            """;
         try {
-            String normalized = normalizeCodeForDaily(code);
-            return clickHouseJdbcTemplate.queryForObject(sql,
-                    (rs, rowNum) -> {
-                        java.util.Map<String, Object> map = new java.util.HashMap<>();
-                        map.put("close_price", rs.getBigDecimal("close_price"));
-                        map.put("change_percent", rs.getBigDecimal("change_percent"));
-                        map.put("pe_ttm", rs.getBigDecimal("pe_ttm"));
-                        map.put("pb", rs.getBigDecimal("pb"));
-                        return map;
-                    }, normalized);
+            String noSuffix = normalizeCodeForDaily(code);
+            LocalDate end = LocalDate.now();
+            LocalDate start = end.minusDays(10);
+            List<StockDaily> dailies = stockService.getStockDaily(noSuffix, start, end);
+            if (dailies != null && !dailies.isEmpty()) {
+                // 取最近一条（getStockDaily 已按 trade_date DESC 排序）
+                StockDaily latest = dailies.get(0);
+                java.util.Map<String, Object> map = new java.util.HashMap<>();
+                map.put("close_price", latest.getClosePrice());
+                map.put("change_percent", latest.getChangePercent());
+                map.put("pe_ttm", latest.getPeTtm());
+                map.put("pb", latest.getPb());
+                return map;
+            }
         } catch (Exception e) {
             log.warn("查询最新日线失败: code={}, error={}", code, e.getMessage());
-            return null;
         }
+        return null;
     }
     
     /**
-     * 查询日线数据（用于计算量比、换手率偏离）
-     * 获取最近N日数据
-     * CH 不支持参数化 LIMIT，改为在 SQL 中直接用子查询限定日期范围
+     * 查询日线数据（用于计算量比、换手率偏离、技术指标）
+     * 委托 ClickHouseStockService（统一查询层）
      */
     public List<DailyBarRow> selectRecentDailyBars(String code, int days) {
-        // ClickHouse 用 subtractDays() 替代 MySQL 的 DATE_SUB()
-        // 注意：CH JDBC 驱动不识别 AS 别名，ResultSetMetaData 返回原始列名
-        // 必须用手动 RowMapper 映射，不能用 BeanPropertyRowMapper
-        String sql = """
-            SELECT
-                code, trade_date, open_price, close_price, high_price, low_price,
-                pre_close, volume, amount, change_percent,
-                turnover_rate, pe_ttm, pb
-            FROM stock.stock_daily
-            WHERE code = ?
-              AND trade_date >= (SELECT subtractDays(MAX(trade_date), ?) FROM stock.stock_daily WHERE code = ?)
-            ORDER BY trade_date
-            """;
         try {
-            String normalized = normalizeCodeForDaily(code);
-            return clickHouseJdbcTemplate.query(sql, (rs, rowNum) -> {
+            String noSuffix = normalizeCodeForDaily(code);
+            LocalDate end = LocalDate.now();
+            // 多取一些天数确保有足够交易日数据
+            int calDays = (int) Math.ceil(days * 7.0 / 5) + 10;
+            LocalDate start = end.minusDays(calDays);
+            List<StockDaily> dailies = stockService.getStockDaily(noSuffix, start, end);
+
+            if (dailies == null || dailies.isEmpty()) {
+                return new ArrayList<>();
+            }
+
+            List<DailyBarRow> result = new ArrayList<>();
+            for (StockDaily sd : dailies) {
                 DailyBarRow row = new DailyBarRow();
-                row.setCode(rs.getString("code"));
-                row.setTradeDate(rs.getDate("trade_date").toLocalDate());
-                row.setOpenPrice(rs.getBigDecimal("open_price"));
-                row.setClosePrice(rs.getBigDecimal("close_price"));
-                row.setHighPrice(rs.getBigDecimal("high_price"));
-                row.setLowPrice(rs.getBigDecimal("low_price"));
-                row.setPreClose(rs.getBigDecimal("pre_close"));
-                row.setVolume(rs.getLong("volume"));
-                row.setAmount(rs.getBigDecimal("amount"));
-                row.setChangePercent(rs.getBigDecimal("change_percent"));
-                row.setTurnoverRate(rs.getBigDecimal("turnover_rate"));
-                row.setPeTtm(rs.getBigDecimal("pe_ttm"));
-                row.setPb(rs.getBigDecimal("pb"));
-                return row;
-            }, normalized, days, normalized);
+                row.setCode(sd.getCode());
+                row.setTradeDate(sd.getTradeDate());
+                row.setOpenPrice(sd.getOpenPrice());
+                row.setClosePrice(sd.getClosePrice());
+                row.setHighPrice(sd.getHighPrice());
+                row.setLowPrice(sd.getLowPrice());
+                row.setPreClose(sd.getPreClose());
+                row.setVolume(sd.getVolume() != null ? sd.getVolume().longValue() : null);
+                row.setAmount(sd.getAmount());
+                row.setChangePercent(sd.getChangePercent());
+                row.setTurnoverRate(sd.getTurnoverRate());
+                row.setPeTtm(sd.getPeTtm());
+                row.setPb(sd.getPb());
+                result.add(row);
+            }
+            return result;
         } catch (Exception e) {
             log.warn("查询日线数据失败: code={}, error={}", code, e.getMessage());
             return new ArrayList<>();
@@ -177,9 +199,9 @@ public class AnalysisChMapper {
     public BigDecimal selectLatestRsi(String code) {
         // 数据库中实际 factor_code 为 RSI5 / RSI14，此处用 RSI14（个股分析常用）
         String sql = """
-            SELECT factor_val AS rsi FROM stock.factor_value
+            SELECT factor_val AS rsi FROM stock.factor_value FINAL
             WHERE (symbol = ? OR symbol = ?) AND factor_code = 'RSI14'
-              AND calc_date = (SELECT MAX(calc_date) FROM stock.factor_value WHERE (symbol = ? OR symbol = ?) AND factor_code = 'RSI14')
+              AND calc_date = (SELECT MAX(calc_date) FROM stock.factor_value FINAL WHERE (symbol = ? OR symbol = ?) AND factor_code = 'RSI14')
             LIMIT 1
             """;
         try {
@@ -199,8 +221,7 @@ public class AnalysisChMapper {
     public java.util.Map<String, Object> selectLatestMoneyFlow(String code) {
         String sql = """
             SELECT net_main, net_main_pct, net_huge, net_big
-            FROM stock.stock_sentiment_moneyflow
-            WHERE code = ?
+            FROM stock.stock_sentiment_moneyflow FINAL             WHERE code = ?
             ORDER BY trade_date DESC
             LIMIT 1
             """;
@@ -223,27 +244,31 @@ public class AnalysisChMapper {
 
     /**
      * 计算20日涨跌幅（用于判断强势股）
-     * 返回百分比，如 15.5 表示涨15.5%
+     * 委托 ClickHouseStockService 获取数据后内存计算
      */
     public BigDecimal select20dReturn(String code) {
-        String sql = """
-            SELECT
-                (latest.close_price - old.close_price) / old.close_price * 100 AS ret_20d
-            FROM (
-                SELECT close_price FROM stock.stock_daily
-                WHERE code = ? ORDER BY trade_date DESC LIMIT 1
-            ) AS latest,
-            (
-                SELECT close_price FROM stock.stock_daily
-                WHERE code = ? ORDER BY trade_date DESC LIMIT 1 OFFSET 20
-            ) AS old
-            """;
         try {
-            String normalized = normalizeCodeForDaily(code);
-            return clickHouseJdbcTemplate.queryForObject(sql, BigDecimal.class, normalized, normalized);
+            String noSuffix = normalizeCodeForDaily(code);
+            LocalDate end = LocalDate.now();
+            // 多取30天确保有足够交易日
+            LocalDate start = end.minusDays(40);
+            List<StockDaily> dailies = stockService.getStockDaily(noSuffix, start, end);
+            if (dailies == null || dailies.isEmpty()) return null;
+            // 取最新一条
+            BigDecimal latestClose = dailies.get(0).getClosePrice();
+            if (latestClose == null) return null;
+            // 找第21条（约20个交易日前的收盘价）
+            if (dailies.size() > 20) {
+                BigDecimal oldClose = dailies.get(20).getClosePrice();
+                if (oldClose != null && oldClose.compareTo(BigDecimal.ZERO) != 0) {
+                    return latestClose.subtract(oldClose)
+                            .divide(oldClose, 4, java.math.RoundingMode.HALF_UP)
+                            .multiply(new BigDecimal("100"));
+                }
+            }
         } catch (Exception e) {
             log.warn("查询20日涨跌幅失败: code={}, error={}", code, e.getMessage());
-            return null;
         }
+        return null;
     }
 }

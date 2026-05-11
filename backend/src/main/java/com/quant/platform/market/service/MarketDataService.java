@@ -352,8 +352,4 @@ public class MarketDataService {
         int dot = symbol.lastIndexOf('.');
         return dot > 0 ? symbol.substring(dot + 1) : null;
     }
-
-    public int importBars(List<MarketDailyBar> bars) {
-        return 0;
-    }
 }

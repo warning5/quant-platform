@@ -838,7 +838,7 @@ function DataUpdate() {
         <Card title="股票日线配置" size="small" style={{ marginBottom: 16 }}>
           <Form form={form} layout="inline" initialValues={{
             source: 'ALL', market: 'ALL', stockPool: 'ALL',
-            excludeSt: false, resume: false, dailyOnly: false, infoOnly: false,
+            excludeSt: false, resume: false, force: false, dailyOnly: false, infoOnly: false,
           }}>
             <Row gutter={[16, 12]} style={{ width: '100%' }}>
               <Col>
@@ -876,6 +876,9 @@ function DataUpdate() {
                   </Form.Item>
                   <Form.Item name="resume" valuePropName="checked" style={{ marginBottom: 0 }}>
                     <Checkbox>断点续传</Checkbox>
+                  </Form.Item>
+                  <Form.Item name="force" valuePropName="checked" style={{ marginBottom: 0 }}>
+                    <Checkbox>强制写入</Checkbox>
                   </Form.Item>
                 </Space>
               </Col>

@@ -57,7 +57,7 @@ import baostock as bs
 
 # 切换到脚本目录，确保能 import db_helper
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from db_helper import StockDailyDB
+from db_helper import StockDailyDB, to_float, to_int
 from db_config import get_backend_label
 
 # 腾讯证券接口（备用数据源，用于 Baostock 未收录的指数如科创50）
@@ -211,8 +211,8 @@ def build_row_dict(code, name, market, row):
 
     row 格式: [date, open, high, low, close, volume, amount, preclose, turn, pctChg]
     """
-    def _f(v): return float(v) if v not in (None, "", "null") else None
-    def _i(v): return int(float(v)) if v not in (None, "", "null") else None
+    def _f(v): return to_float(v)
+    def _i(v): return to_int(v)
 
     date_str      = row[0]
     open_price    = _f(row[1])
@@ -308,9 +308,9 @@ def show_summary():
     """显示指数数据概况（从 index_daily 表读取）"""
     db = StockDailyDB()
     try:
-        print(f"\n{'=' * 65}")
+        print(f"\n{'=' * 70}")
         print(f"  指数数据概况 (index_daily 表, 后端: {get_backend_label()})")
-        print(f"{'=' * 65}")
+        print(f"{'=' * 70}")
         print(f"  {'代码':<12s} {'名称':<10s} {'记录数':>8s} {'起始日期':<12s} {'最新日期':<12s}")
         print(f"  {'─' * 55}")
 
@@ -321,7 +321,7 @@ def show_summary():
             if db.backend == "clickhouse":
                 r = db.ch_client.query(
                     f"SELECT count() as cnt, MIN(trade_date) as min_date, MAX(trade_date) as max_date "
-                    f"FROM {index_table} WHERE code = '{code}'"
+                    f"FROM {index_table} FINAL WHERE code = '{code}'"
                 )
                 row = r.result_rows[0] if r.result_rows else (0, None, None)
                 cnt = row[0]
@@ -343,7 +343,7 @@ def show_summary():
             print(f"  {code:<12s} {name:<10s} {cnt:>8,d} {min_d:<12s} {max_d:<12s}")
 
         print(f"  {'─' * 55}")
-        print(f"{'=' * 65}\n")
+        print(f"{'=' * 70}\n")
     finally:
         db.close()
 
@@ -423,14 +423,14 @@ def main():
 
     # ─── 开始更新 ───
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"\n{'#' * 65}")
+    print(f"\n{'=' * 70}")
     print(f"  指数日线数据更新 (Baostock)")
     print(f"  时间: {now_str}")
     print(f"  数据库后端: {get_backend_label()}")
-    print(f"{'#' * 65}")
+    print(f"{'=' * 70}")
     print(f"  日期范围: {start_date} ~ {end_date}")
     print(f"  指数数量: {len(codes)} 个")
-    print(f"{'#' * 65}\n")
+    print(f"{'=' * 70}\n")
 
     # 登录 Baostock
     lg = bs.login()
@@ -462,12 +462,12 @@ def main():
         bs.logout()
 
     elapsed = time.time() - total_start
-    print(f"\n{'#' * 65}")
+    print(f"\n{'=' * 70}")
     print(f"  指数数据更新完成")
-    print(f"{'#' * 65}")
+    print(f"{'=' * 70}")
     print(f"  新增/更新: {total_inserted} 条")
     print(f"  总耗时:    {elapsed:.1f}s")
-    print(f"{'#' * 65}\n")
+    print(f"{'=' * 70}\n")
 
     return 0
 

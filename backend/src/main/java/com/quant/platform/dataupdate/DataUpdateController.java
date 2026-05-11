@@ -174,7 +174,7 @@ public class DataUpdateController {
             // ClickHouse 无 stock_info，所以：① 一次查出该日全部已有 codes
             //                                   ② 用 codeToMarket / codeToListDate 缓存映射区分市场和上市日
             Set<String> existingCodes = new HashSet<>();
-            String chSql = "SELECT DISTINCT code FROM stock.stock_daily WHERE trade_date = '" + date + "'";
+            String chSql = "SELECT DISTINCT code FROM stock.stock_daily FINAL WHERE trade_date = '" + date + "'";
             List<Map<String, Object>> rows = clickHouseStockService.queryForList(chSql);
             for (Map<String, Object> row : rows) {
                 Object codeVal = row.get("code");
@@ -280,7 +280,7 @@ public class DataUpdateController {
         // 2. 获取该日 stock_daily 中已有数据的 codes
         Set<String> existingCodes = new HashSet<>();
         if (clickHouseConfig.isEnabled()) {
-            String chSql = "SELECT DISTINCT code FROM stock.stock_daily WHERE trade_date = '" + date + "'";
+            String chSql = "SELECT DISTINCT code FROM stock.stock_daily FINAL WHERE trade_date = '" + date + "'";
             List<Map<String, Object>> rows = clickHouseStockService.queryForList(chSql);
             for (Map<String, Object> row : rows) {
                 Object codeVal = row.get("code");

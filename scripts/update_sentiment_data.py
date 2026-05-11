@@ -756,6 +756,16 @@ def main():
 
 def process_single_date(args, date_str: str):
     """处理单日数据采集（供日期范围模式或单日模式调用）"""
+    # 防写未来日期校验：拒绝写入 trade_date > today 的数据
+    today = datetime.date.today()
+    try:
+        req_date = datetime.date(int(date_str[:4]), int(date_str[4:6]), int(date_str[6:]))
+        if req_date > today:
+            print(f"[SKIP] 日期 {date_str} 是未来日期，跳过 (today={today.isoformat()})")
+            return
+    except (ValueError, IndexError):
+        print(f"[WARN] 无效日期格式: {date_str}，跳过")
+
     date_disp = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
     start_str = date_str
     end_str   = date_str

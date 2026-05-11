@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   Card, Button, Space, Typography, Table, Tag, InputNumber, Select,
   DatePicker, Row, Col, Statistic, Divider, Tooltip, Badge,
-  Empty, Spin, message, Progress, Alert, Form, Popover, Modal, Input, Slider,
+  Empty, Spin, message, Progress, Alert, Form, Popover, Modal, Input, Slider, Tabs, Checkbox,
 } from 'antd';
 import {
   PlusOutlined, DeleteOutlined, PlayCircleOutlined, FilterOutlined,
@@ -10,10 +10,10 @@ import {
   SaveOutlined, CopyOutlined, StarOutlined, WarningOutlined,
   SafetyCertificateOutlined, ArrowUpOutlined, ArrowDownOutlined,
   PlusSquareOutlined, MinusSquareOutlined, ThunderboltOutlined, LineChartOutlined, FundOutlined,
-  MenuFoldOutlined, MenuUnfoldOutlined, RiseOutlined,
+  MenuFoldOutlined, MenuUnfoldOutlined, RiseOutlined, StockOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import api from '../../api';
+import api, { factorApi } from '../../api';
 
 const { Title, Text, Paragraph } = Typography;
 const { Option } = Select;
@@ -763,6 +763,14 @@ export default function StockScreen() {
         </Space>
       </div>
 
+      <Tabs
+        defaultActiveKey="multifactor"
+        size="small"
+        items={[
+          {
+            key: 'multifactor',
+            label: <span><FilterOutlined /> 多因子选股</span>,
+            children: (
       <div style={{ display: 'flex', gap: 16, width: '100%' }}>
         {/* ══ 左侧配置区（通过 width 过渡折叠）══ */}
         <div style={{
@@ -1260,6 +1268,15 @@ export default function StockScreen() {
           )}
         </div>
       </div>
+            ),
+          },
+          {
+            key: 'chan',
+            label: <span><StockOutlined /> 缠论结构筛选</span>,
+            children: <ChanScreenTab />,
+          },
+        ]}
+      />
 
       {/* ── 保存组合弹窗 ─────────────────────────────────────────── */}
       <Modal
@@ -1308,3 +1325,282 @@ const paramLabelStyle = {
   display: 'flex',
   alignItems: 'center',
 };
+
+/* ── 缠论筛选辅助函数（从 ChanScreen.js 迁移）─────────────────────── */
+const chanFmtVal = (v, prec = 2) => {
+  if (v == null) return '-';
+  const n = Number(v);
+  if (Number.isNaN(n)) return v;
+  return n.toFixed(prec);
+};
+const chanPenDirTag = (v) => {
+  if (v == null) return '-';
+  const n = Number(v);
+  return n > 0
+    ? <Tag color="red">▲ 上升</Tag>
+    : <Tag color="green">▼ 下降</Tag>;
+};
+const chanTrendTag = (v) => {
+  if (v == null) return '-';
+  const n = Number(v);
+  if (n === 1)  return <Tag color="red">  上涨</Tag>;
+  if (n === 0)  return <Tag color="blue"> 盘整</Tag>;
+  return <Tag color="green">下跌</Tag>;
+};
+const chanBuySellTag = (v) => {
+  if (v == null) return '-';
+  const n = Number(v);
+  if (n > 0) return <Tag color="volcano">{n}买</Tag>;
+  if (n < 0) return <Tag color="cyan">  {Math.abs(n)}卖</Tag>;
+  return '-';
+};
+const getChanTagRenderer = (code) => {
+  const c = code.toUpperCase();
+  if (c === 'CHAN_PEN_DIR')   return chanPenDirTag;
+  if (c === 'CHAN_TREND')     return chanTrendTag;
+  if (c === 'CHAN_BUY_SELL')  return chanBuySellTag;
+  return (v) => v == null ? '-' : <Text>{chanFmtVal(v, 3)}</Text>;
+};
+
+/* ── 缠论筛选 Tab 组件 ─────────────────────────────────────────────── */
+function ChanScreenTab() {
+  const [meta, setMeta]                 = useState(null);
+  const [metaLoading, setMetaLoading]   = useState(true);
+  const [checkboxFilters, setCheckboxFilters] = useState({});
+  const [rangeFilters, setRangeFilters]       = useState({});
+  const [keyword, setKeyword]                 = useState('');
+  const [page, setPage]                       = useState(1);
+  const [pageSize, setPageSize]               = useState(20);
+  const [loading, setLoading]   = useState(false);
+  const [data, setData]         = useState(null);
+  const [error, setError]       = useState(null);
+  const [helpVisible, setHelpVisible] = useState(false);
+
+  useEffect(() => {
+    factorApi.chanScreenMeta()
+      .then(res => {
+        setMeta(res);
+        const defaultRanges = {};
+        const defaultCheckbox = {};
+        (res.factors || []).forEach(f => {
+          if (f.controlType === 'slider') {
+            defaultRanges[f.code] = [f.min ?? 0, f.max ?? 100];
+          } else if (f.controlType === 'checkbox') {
+            defaultCheckbox[f.code] = [];
+          }
+        });
+        setRangeFilters(defaultRanges);
+        setCheckboxFilters(defaultCheckbox);
+      })
+      .catch(() => message.error('加载缠论因子元数据失败，请稍后重试'))
+      .finally(() => setMetaLoading(false));
+  }, []);
+
+  const buildChanParams = useCallback((newPage, newPageSize) => {
+    const params = {};
+    Object.entries(checkboxFilters).forEach(([code, vals]) => {
+      if (vals && vals.length > 0) {
+        const p = code.toUpperCase();
+        if (p === 'CHAN_PEN_DIR')   params.penDir   = vals.join(',');
+        if (p === 'CHAN_TREND')     params.trend    = vals.join(',');
+        if (p === 'CHAN_BUY_SELL')  params.buySell  = vals.join(',');
+      }
+    });
+    Object.entries(rangeFilters).forEach(([code, range]) => {
+      if (!range) return;
+      const p = code.toUpperCase();
+      if (p === 'CHAN_HUB_POS') {
+        if (range[0] > 0)  params.hubPosMin   = range[0];
+        if (range[1] < 1)  params.hubPosMax   = range[1];
+      }
+      if (p === 'CHAN_PEN_COUNT') {
+        if (range[0] > 1)  params.penCountMin = range[0];
+        if (range[1] < 100) params.penCountMax = range[1];
+      }
+    });
+    if (keyword.trim()) params.keyword = keyword.trim();
+    params.page = newPage - 1;
+    params.size = newPageSize;
+    return params;
+  }, [checkboxFilters, rangeFilters, keyword]);
+
+  const doChanSearch = useCallback((newPage = 1, newPageSize = pageSize) => {
+    setLoading(true);
+    setError(null);
+    setPage(newPage);
+    setPageSize(newPageSize);
+    const params = buildChanParams(newPage, newPageSize);
+    factorApi.chanScreen(params)
+      .then(res => setData(res))
+      .catch(e => setError(e.message || '筛选失败'))
+      .finally(() => setLoading(false));
+  }, [buildChanParams, pageSize]);
+
+  const buildChanColumns = useCallback(() => {
+    if (!meta || !meta.columns) return [];
+    const baseCols = [
+      { title: '代码', dataIndex: 'ts_code', key: 'ts_code', width: 100,
+        render: v => <Text strong copyable={{ text: v }}>{v}</Text> },
+      { title: '名称', dataIndex: 'name', key: 'name', width: 90, ellipsis: true },
+      { title: '数据日期', dataIndex: 'calc_date', key: 'date', width: 110 },
+    ];
+    const factorCols = (meta.columns || []).map(col => ({
+      title: col.title, dataIndex: col.dataIndex, key: col.key, width: 90,
+      render: (val, row) => { const tagFn = getChanTagRenderer(col.key); return tagFn(row[col.dataIndex]); },
+    }));
+    return [...baseCols, ...factorCols];
+  }, [meta]);
+
+  const renderChanFilterControls = () => {
+    if (!meta || !meta.factors) return null;
+    return meta.factors.map(factor => {
+      if (factor.controlType === 'checkbox') {
+        return (
+          <Col span={12} key={factor.code}>
+            <Text type="secondary" style={{ display: 'block', marginBottom: 4 }}>{factor.name}</Text>
+            <Checkbox.Group
+              options={factor.options || []}
+              value={checkboxFilters[factor.code] || []}
+              onChange={(vals) => setCheckboxFilters(prev => ({ ...prev, [factor.code]: vals }))}
+              style={{ gap: 16, flexWrap: 'wrap' }}
+            />
+            {!(checkboxFilters[factor.code] || []).length && (
+              <Text type="secondary" style={{ fontSize: 12 }}>（不限）</Text>
+            )}
+          </Col>
+        );
+      }
+      if (factor.controlType === 'slider') {
+        const range = rangeFilters[factor.code] || [factor.min ?? 0, factor.max ?? 100];
+        const p = factor.code.toUpperCase();
+        const isPercent = p === 'CHAN_HUB_POS';
+        const isPenCount = p === 'CHAN_PEN_COUNT';
+        return (
+          <Col span={12} key={factor.code}>
+            <Text type="secondary" style={{ display: 'block', marginBottom: 4 }}>
+              {factor.name}：{isPercent
+                ? `${range[0].toFixed(2)} ~ ${range[1].toFixed(2)}`
+                : `${range[0]} ~ ${range[1]}`
+              }
+            </Text>
+            <Slider
+              range
+              min={factor.min ?? 0}
+              max={isPercent ? 1 : (isPenCount ? 100 : 100)}
+              step={isPercent ? 0.01 : 1}
+              value={range}
+              onChange={(vals) => setRangeFilters(prev => ({ ...prev, [factor.code]: vals }))}
+              tooltip={{ formatter: v => isPercent ? v.toFixed(2) : v }}
+              style={{ maxWidth: 400 }}
+            />
+          </Col>
+        );
+      }
+      return null;
+    });
+  };
+
+  const total = data?.total || 0;
+  const list  = data?.list  || [];
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+        <Title level={4} style={{ margin: 0 }}>
+          <StockOutlined style={{ marginRight: 8 }} />
+          缠论结构筛选
+        </Title>
+        <Tooltip title="查看使用说明">
+          <QuestionCircleOutlined
+            style={{ fontSize: 16, color: '#1677ff', cursor: 'pointer', flexShrink: 0 }}
+            onClick={() => setHelpVisible(true)}
+          />
+        </Tooltip>
+      </div>
+
+      {metaLoading ? (
+        <Card size="small" style={{ marginBottom: 16 }}><Spin tip="加载因子定义..." /></Card>
+      ) : (
+        <>
+          <Card size="small" style={{ marginBottom: 16 }}>
+            <Row gutter={[16, 12]}>
+              {renderChanFilterControls()}
+              <Col span={12}>
+                <Space>
+                  <Input placeholder="搜索代码或名称关键词" value={keyword}
+                    onChange={e => setKeyword(e.target.value)} onPressEnter={() => doChanSearch(1)}
+                    style={{ width: 220 }} allowClear />
+                  <Button type="primary" icon={<FilterOutlined />} onClick={() => doChanSearch(1)} loading={loading}>筛选</Button>
+                  <Button icon={<ReloadOutlined />} onClick={() => {
+                    const defaults = {}; const cbDefaults = {};
+                    (meta?.factors || []).forEach(f => {
+                      if (f.controlType === 'slider') defaults[f.code] = [f.min ?? 0, f.max ?? (f.code.toUpperCase() === 'CHAN_HUB_POS' ? 1 : 100)];
+                      else cbDefaults[f.code] = [];
+                    });
+                    setCheckboxFilters(cbDefaults); setRangeFilters(defaults); setKeyword(''); setData(null);
+                  }}>重置</Button>
+                </Space>
+              </Col>
+            </Row>
+          </Card>
+
+          <Card title={`筛选结果（共 ${total} 只）`} size="small">
+            <Spin spinning={loading}>
+              {!data && !error ? (
+                <Empty description="请设置筛选条件后点击「筛选」" />
+              ) : error ? (
+                <Text type="danger">{error}</Text>
+              ) : (
+                <Table dataSource={list} columns={buildChanColumns()} rowKey="ts_code" size="small"
+                  pagination={{
+                    current: page, pageSize: pageSize, total: total,
+                    showSizeChanger: true, pageSizeOptions: ['10', '20', '50'],
+                    onChange: (p, ps) => doChanSearch(p, ps),
+                  }}
+                  scroll={{ x: 700 }} />
+              )}
+            </Spin>
+          </Card>
+        </>
+      )}
+
+      <Modal title="缠论结构筛选 · 使用说明" open={helpVisible} onCancel={() => setHelpVisible(false)}
+        footer={null} width={900}>
+        <div style={{ fontSize: 13, lineHeight: 1.8 }}>
+          <Alert type="info" showIcon style={{ marginBottom: 16 }} message="这是做什么的"
+            description="缠论结构筛选是基于缠论理论，从全市场股票中筛选出处于特定「结构状态」的标的。
+            比如：当前有哪些股票刚出现「1买」买点？哪些处于「上涨走势+中枢上半区」？
+            省去逐个翻图分析的时间，直接给出符合条件的股票清单。" />
+          {meta && meta.factors && meta.factors.length > 0 && (
+            <>
+              <Title level={5}>筛选维度说明</Title>
+              <ul style={{ paddingLeft: 20 }}>
+                {meta.factors.map(f => (
+                  <li key={f.code}>
+                    <Text strong>{f.name}</Text>
+                    {f.description && <Text type="secondary">：{f.description}</Text>}
+                    {f.options && f.options.length > 0 && (
+                      <Text type="secondary">（{f.options.map(o => o.label).join(' / ')}）</Text>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          <Title level={5}>使用流程</Title>
+          <ul style={{ paddingLeft: 20 }}>
+            <li>确保缠论因子已计算（因子管理 → 因子监控，确认缠论因子有数据）</li>
+            <li>设置筛选条件（各条件间为「且」关系，建议先宽松再逐步收紧）</li>
+            <li>点击「筛选」查看结果，可用关键词进一步过滤</li>
+            <li>结合买卖点信号和中枢位置辅助买卖决策</li>
+          </ul>
+          <Alert type="warning" showIcon style={{ marginTop: 8 }} message="增减缠论因子的影响"
+            description="缠论筛选页面已改为动态化，新增/删除/重命名缠论因子后自动生效，无需修改代码。
+            但新增因子需要在因子计算引擎中实现计算逻辑，且在「因子管理」中激活后才会出现在筛选中。" />
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════════ */

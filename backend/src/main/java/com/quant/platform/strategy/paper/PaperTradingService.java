@@ -165,8 +165,7 @@ public class PaperTradingService {
             if (clickHouseJdbcTemplate != null) {
                 try {
                     String sql = String.format("""
-                        SELECT symbol, rank_value FROM stock.factor_value
-                        WHERE factor_code = '%s' AND calc_date = '%s'
+                        SELECT symbol, rank_value FROM stock.factor_value FINAL                         WHERE factor_code = '%s' AND calc_date = '%s'
                           AND rank_value IS NOT NULL
                         """, factorCode, latestDate);
                     clickHouseJdbcTemplate.query(sql, (rs) -> {
@@ -384,7 +383,7 @@ public class PaperTradingService {
     private String getLatestTradeDate() {
         if (clickHouseJdbcTemplate == null) return LocalDate.now().toString();
         List<String> dates = clickHouseJdbcTemplate.query(
-            "SELECT MAX(trade_date) FROM stock.stock_daily",
+            "SELECT MAX(trade_date) FROM stock.stock_daily FINAL",
             (rs, rowNum) -> rs.getString(1));
         return dates.isEmpty() ? LocalDate.now().toString() : dates.getFirst();
     }
@@ -393,7 +392,7 @@ public class PaperTradingService {
         if (clickHouseJdbcTemplate == null) return BigDecimal.ZERO;
         try {
             String sql = String.format(
-                "SELECT close_price FROM stock.stock_daily WHERE code = '%s' AND trade_date = '%s'",
+                "SELECT close_price FROM stock.stock_daily FINAL WHERE code = '%s' AND trade_date = '%s'",
                 code, date);
             List<BigDecimal> prices = clickHouseJdbcTemplate.query(sql,
                 (rs, rowNum) -> rs.getBigDecimal("close_price"));
