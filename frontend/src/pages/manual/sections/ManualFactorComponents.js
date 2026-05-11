@@ -19,7 +19,7 @@ export function ManualFactors() {
         <Col><Tag color="green">质量 QUALITY</Tag></Col>
         <Col><Tag color="orange">波动率 VOLATILITY</Tag></Col>
         <Col><Tag color="purple">技术 TECHNICAL</Tag></Col>
-        <Col><Tag color="cyan">基本面 FUNDAMENTAL</Tag></Col>
+        <Col><Tag color="green">财务 FINANCIAL</Tag></Col>
         <Col><Tag color="magenta">情绪 SENTIMENT</Tag></Col>
         <Col><Tag color="red">缠论 CHANTHEORY</Tag></Col>
         <Col><Tag>自定义 CUSTOM</Tag></Col>

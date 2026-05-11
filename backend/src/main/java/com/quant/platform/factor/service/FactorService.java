@@ -134,31 +134,31 @@ public class FactorService {
                 new String[]{"MTM_PCT", "动量百分比", "6日价格变动百分比", "MOMENTUM"},
                 new String[]{"WAD", "威廉斯累积派发", "累积价格方向变动量", "VOLUME_PRICE"},
                 // 新增25个财务因子 (2026-04-16)
-                new String[]{"FIN_GROSS_MARGIN", "毛利率", "最近年报毛利率(%)", "FUNDAMENTAL"},
-                new String[]{"FIN_NET_MARGIN", "净利率", "最近年报净利率(%)", "FUNDAMENTAL"},
-                new String[]{"FIN_ROE", "净资产收益率", "最近年报ROE(%)", "FUNDAMENTAL"},
-                new String[]{"FIN_ROA", "总资产收益率", "最近年报ROA(%)", "FUNDAMENTAL"},
-                new String[]{"FIN_TOTAL_COST_RATIO", "营业成本率", "营业总成本/营业总收入(%)", "FUNDAMENTAL"},
-                new String[]{"FIN_PERIOD_EXPENSE_RATIO", "期间费用率", "毛利率-净利率(%)", "FUNDAMENTAL"},
-                new String[]{"FIN_EBIT_MARGIN", "EBIT利润率", "EBIT/营业总收入(%)", "FUNDAMENTAL"},
-                new String[]{"FIN_REVENUE_YOY", "营收同比增长率", "最近年报营业收入同比增速(%)", "FUNDAMENTAL"},
-                new String[]{"FIN_NET_PROFIT_YOY", "净利润同比增长率", "最近年报净利润同比增速(%)", "FUNDAMENTAL"},
-                new String[]{"FIN_OPERATING_PROFIT_YOY", "营业利润同比增长率", "最近年报营业利润同比增速(%)", "FUNDAMENTAL"},
-                new String[]{"FIN_TOTAL_ASSETS_YOY", "总资产同比增长率", "最近年报总资产同比增速(%)", "FUNDAMENTAL"},
-                new String[]{"FIN_EPS_YOY", "每股收益同比增长率", "最近年报EPS同比增速(%)", "FUNDAMENTAL"},
-                new String[]{"FIN_CURRENT_RATIO", "流动比率", "最近年报流动比率", "FUNDAMENTAL"},
-                new String[]{"FIN_QUICK_RATIO", "速动比率", "最近年报速动比率", "FUNDAMENTAL"},
-                new String[]{"FIN_DEBT_TO_ASSET", "资产负债率", "最近年报资产负债率(%)", "FUNDAMENTAL"},
-                new String[]{"FIN_DEBT_TO_EQUITY", "产权比率", "最近年报负债/权益比率", "FUNDAMENTAL"},
-                new String[]{"FIN_AR_TURNOVER", "应收账款周转率", "最近年报应收账款周转率(次)", "FUNDAMENTAL"},
-                new String[]{"FIN_AR_TURNOVER_DAYS", "应收账款周转天数", "最近年报应收账款周转天数", "FUNDAMENTAL"},
-                new String[]{"FIN_ASSETS_TURNOVER", "总资产周转率", "最近年报总资产周转率(次)", "FUNDAMENTAL"},
-                new String[]{"FIN_INVENTORY_TURNOVER", "存货周转率", "最近年报存货周转率(次)", "FUNDAMENTAL"},
-                new String[]{"FIN_INVENTORY_TURNOVER_DAYS", "存货周转天数", "最近年报存货周转天数", "FUNDAMENTAL"},
-                new String[]{"FIN_CF_TO_NP", "经营现金流/净利润", "最近年报经营现金流/净利润", "FUNDAMENTAL"},
-                new String[]{"FIN_CF_PER_SHARE", "每股经营现金流", "最近年报每股经营现金流(元)", "FUNDAMENTAL"},
-                new String[]{"FIN_CF_TO_REVENUE", "经营现金流/营收", "最近年报经营现金流/营业总收入", "FUNDAMENTAL"},
-                new String[]{"FIN_BPS", "每股净资产", "最近年报每股净资产BPS(元)", "FUNDAMENTAL"},
+                new String[]{"FIN_GROSS_MARGIN", "毛利率", "最近年报毛利率(%)", "FINANCIAL"},
+                new String[]{"FIN_NET_MARGIN", "净利率", "最近年报净利率(%)", "FINANCIAL"},
+                new String[]{"FIN_ROE", "净资产收益率", "最近年报ROE(%)", "FINANCIAL"},
+                new String[]{"FIN_ROA", "总资产收益率", "最近年报ROA(%)", "FINANCIAL"},
+                new String[]{"FIN_TOTAL_COST_RATIO", "营业成本率", "营业总成本/营业总收入(%)", "FINANCIAL"},
+                new String[]{"FIN_PERIOD_EXPENSE_RATIO", "期间费用率", "毛利率-净利率(%)", "FINANCIAL"},
+                new String[]{"FIN_EBIT_MARGIN", "EBIT利润率", "EBIT/营业总收入(%)", "FINANCIAL"},
+                new String[]{"FIN_REVENUE_YOY", "营收同比增长率", "最近年报营业收入同比增速(%)", "FINANCIAL"},
+                new String[]{"FIN_NET_PROFIT_YOY", "净利润同比增长率", "最近年报净利润同比增速(%)", "FINANCIAL"},
+                new String[]{"FIN_OPERATING_PROFIT_YOY", "营业利润同比增长率", "最近年报营业利润同比增速(%)", "FINANCIAL"},
+                new String[]{"FIN_TOTAL_ASSETS_YOY", "总资产同比增长率", "最近年报总资产同比增速(%)", "FINANCIAL"},
+                new String[]{"FIN_EPS_YOY", "每股收益同比增长率", "最近年报EPS同比增速(%)", "FINANCIAL"},
+                new String[]{"FIN_CURRENT_RATIO", "流动比率", "最近年报流动比率", "FINANCIAL"},
+                new String[]{"FIN_QUICK_RATIO", "速动比率", "最近年报速动比率", "FINANCIAL"},
+                new String[]{"FIN_DEBT_TO_ASSET", "资产负债率", "最近年报资产负债率(%)", "FINANCIAL"},
+                new String[]{"FIN_DEBT_TO_EQUITY", "产权比率", "最近年报负债/权益比率", "FINANCIAL"},
+                new String[]{"FIN_AR_TURNOVER", "应收账款周转率", "最近年报应收账款周转率(次)", "FINANCIAL"},
+                new String[]{"FIN_AR_TURNOVER_DAYS", "应收账款周转天数", "最近年报应收账款周转天数", "FINANCIAL"},
+                new String[]{"FIN_ASSETS_TURNOVER", "总资产周转率", "最近年报总资产周转率(次)", "FINANCIAL"},
+                new String[]{"FIN_INVENTORY_TURNOVER", "存货周转率", "最近年报存货周转率(次)", "FINANCIAL"},
+                new String[]{"FIN_INVENTORY_TURNOVER_DAYS", "存货周转天数", "最近年报存货周转天数", "FINANCIAL"},
+                new String[]{"FIN_CF_TO_NP", "经营现金流/净利润", "最近年报经营现金流/净利润", "FINANCIAL"},
+                new String[]{"FIN_CF_PER_SHARE", "每股经营现金流", "最近年报每股经营现金流(元)", "FINANCIAL"},
+                new String[]{"FIN_CF_TO_REVENUE", "经营现金流/营收", "最近年报经营现金流/营业总收入", "FINANCIAL"},
+                new String[]{"FIN_BPS", "每股净资产", "最近年报每股净资产BPS(元)", "FINANCIAL"},
                 // 新增质量因子 (2026-04-16)
                 new String[]{"FIN_ROE_STABILITY", "ROE稳定性", "ROE/ROA比率，越低说明杠杆越低盈利越稳定", "QUALITY"},
                 new String[]{"FIN_EARNINGS_QUALITY", "盈余质量", "经营现金流/净利润，越接近1利润含金量越高", "QUALITY"},
@@ -723,18 +723,14 @@ public class FactorService {
     public Map<String, Object> getMonitorData() {
         long now = System.currentTimeMillis();
         Map<String, Object> cached = monitorCache;
-        log.info("[getMonitorData] enter, cached={}, age={}ms", cached != null ? "yes" : "null", cached != null ? (now - monitorCacheTs) : -1);
 
-        // 1. 缓存有效，直接返回（无锁，最快路径）
+        // 1. 缓存有效，直接返回
         if (cached != null && (now - monitorCacheTs) < MONITOR_CACHE_TTL) {
-            log.info("[getMonitorData] returning cached data");
             return cached;
         }
 
-        // 2. 缓存过期，提交后台刷新任务（不阻塞当前请求）
-        boolean submitted = false;
+        // 2. 缓存过期/不存在，确保刷新任务已提交
         if (monitorRefreshing.compareAndSet(false, true)) {
-            submitted = true;
             monitorRefreshExecutor.submit(() -> {
                 try {
                     Map<String, Object> fresh = loadMonitorDataFromDb();
@@ -749,13 +745,27 @@ public class FactorService {
             });
         }
 
-        // 3. 立即返回（有缓存返回缓存，没缓存返回空数据避免阻塞）
+        // 3. 有缓存先用过期缓存兜底（避免前端拿到空数据）
         if (cached != null) {
-            log.info("[getMonitorData] returning stale cache (refresh submitted={})", submitted);
             return cached;
         }
-        // 极端情况：首次调用且刷新任务未完成，返回空数据
-        log.info("[getMonitorData] NO cache, returning empty data (refresh submitted={})", submitted);
+
+        // 4. 首次加载：同步等待刷新完成（最多等5秒）
+        try {
+            long deadline = System.currentTimeMillis() + 5000;
+            while (monitorCache == null && System.currentTimeMillis() < deadline) {
+                Thread.sleep(100);
+            }
+            if (monitorCache != null) {
+                log.info("[getMonitorData] first-load sync wait OK");
+                return monitorCache;
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+
+        // 5. 超时，返回空数据
+        log.warn("[getMonitorData] first-load timeout, returning empty");
         return Map.of("totalRecords", 0L, "factors", java.util.Collections.emptyList());
     }
 

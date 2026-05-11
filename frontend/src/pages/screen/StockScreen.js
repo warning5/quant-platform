@@ -22,12 +22,12 @@ const { TextArea } = Input;
 /* ── 常量 ─────────────────────────────────────────────────────────── */
 const CATEGORY_COLOR = {
   MOMENTUM: 'blue', VALUE: 'gold', QUALITY: 'green', VOLATILITY: 'orange',
-  TECHNICAL: 'purple', FUNDAMENTAL: 'cyan', SENTIMENT: 'magenta',
+  TECHNICAL: 'purple', FINANCIAL: 'green', SENTIMENT: 'magenta',
   LIQUIDITY: 'volcano', VOLUME_PRICE: 'geekblue', CUSTOM: 'default',
 };
 const CATEGORY_LABEL = {
   MOMENTUM: '动量', VALUE: '价值', QUALITY: '质量', VOLATILITY: '波动率',
-  TECHNICAL: '技术', FUNDAMENTAL: '基本面', SENTIMENT: '情绪',
+  TECHNICAL: '技术', FINANCIAL: '财务', SENTIMENT: '情绪',
   LIQUIDITY: '流动性', VOLUME_PRICE: '量价', CUSTOM: '自定义',
 };
 

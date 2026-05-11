@@ -51,9 +51,17 @@ public class FactorComputeEngine {
     private final SimpMessagingTemplate messagingTemplate;
     private final ObjectMapper objectMapper;
     private final StockFinancialIndicatorMapper financialIndicatorMapper;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.quant.platform.financial.mapper.StockIncomeMapper stockIncomeMapper;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.quant.platform.financial.mapper.StockBalanceMapper stockBalanceMapper;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.quant.platform.financial.mapper.StockCashflowMapper stockCashflowMapper;
 
     private final Map<String, FactorCalculator> builtinCalculators = new HashMap<>();
     private final Map<String, FinancialFactorCalculator> financialCalculators = new HashMap<>();
+
+    private FinancialFactors financialFactors;
 
     @Resource
     private ClickHouseConfig clickHouseConfig;
@@ -192,6 +200,15 @@ public class FactorComputeEngine {
         registerFinancial(new FinancialFactors.FreeCashFlowCalc());
         registerFinancial(new FinancialFactors.FreeCashFlowToOpCfCalc());
         registerFinancial(new FinancialFactors.FreeCashFlowToNpCalc());
+        // 需联查原始表的财务因子（非静态内部类，需手动注入 Mapper）
+        financialFactors = new FinancialFactors();
+        // 手动注入 Mapper（因为 FinancialFactors 不是通过 Spring 创建的）
+        financialFactors.setStockIncomeMapper(stockIncomeMapper);
+        financialFactors.setStockBalanceMapper(stockBalanceMapper);
+        financialFactors.setStockCashflowMapper(stockCashflowMapper);
+        registerFinancial(financialFactors.new RoicCalc());
+        registerFinancial(financialFactors.new InterestCoverageCalc());
+        registerFinancial(financialFactors.new OperatingCfToDebtCalc());
         log.info("Registered {} financial factor calculators", financialCalculators.size());
     }
 
@@ -245,6 +262,21 @@ public class FactorComputeEngine {
     public void computeFactorIncremental(FactorDefinition factor, LocalDate startDate, LocalDate endDate, List<String> symbols) {
         String code = factor.getFactorCode();
 
+        // 先加入 runningFactors，确保在所有退出路径都能被清理
+        runningFactors.add(code);
+
+        // 财务因子走专门的增量计算逻辑（基于财报报告期，而非交易日）
+        if (financialCalculators.containsKey(code)) {
+            try {
+                computeFinancialFactorIncremental(code, startDate, endDate, symbols);
+            } finally {
+                runningFactors.remove(code);
+            }
+            return;
+        }
+
+        // === 以下是技术因子的增量计算逻辑 ===
+
         // 获取所有需要计算的交易日
         List<LocalDate> tradingDates = marketDataService.getTradingDates(startDate, endDate);
 
@@ -277,6 +309,8 @@ public class FactorComputeEngine {
 
         if (newDates.isEmpty()) {
             sendProgress(code, "DONE", 100, "增量计算：无新日期需要计算（已有数据到 " + (existingDates.isEmpty() ? "无" : Collections.max(existingDates)) + "）");
+            // 统一由 finally 块清理 runningFactors
+            runningFactors.remove(code);
             return;
         }
 
@@ -286,9 +320,8 @@ public class FactorComputeEngine {
         int totalStocks = symbols.size();
         long totalTasks = (long) totalDates * totalStocks;
 
-        // 先加入 runningFactors，再计算线程数（不依赖 sendProgress 的副作用）
-        runningFactors.add(code);
-        // ── 并行参数 ──
+        try {
+            // ── 并行参数 ──
         // HikariCP maximum-pool-size=30，需为 backtestTaskExecutor(20) + 自身预留
         int maxInternalThreads = Math.max(1, 30 / Math.max(runningFactors.size(), 1) - 2);
         int threads = Math.min(Math.max(Runtime.getRuntime().availableProcessors() / 2, 1), Math.min(2, maxInternalThreads));
@@ -351,6 +384,223 @@ public class FactorComputeEngine {
         sendProgress(code, "DONE", 100, String.format("[增量] 全部完成，新增 %,d 条", rowsInserted.get()));
 
         log.info("[{}] incremental done: {} new dates, {} rows", code, totalDates, rowsInserted.get());
+        } finally {
+            // 确保 runningFactors 被清理（无论正常完成还是异常退出）
+            runningFactors.remove(code);
+        }
+    }
+
+    /**
+     * 财务因子增量计算（基于财报报告期，而非交易日）
+     *
+     * 财务数据每年只有 4 份报告（一季报、半年报、三季报、年报），
+     * 因此只需要在财报的 end_date 上计算，而不是按每个交易日计算。
+     */
+    private void computeFinancialFactorIncremental(String factorCode, LocalDate startDate, LocalDate endDate, List<String> symbols) {
+        FinancialFactorCalculator calculator = financialCalculators.get(factorCode);
+        if (calculator == null) {
+            log.error("[{}] 财务因子计算器未找到", factorCode);
+            return;
+        }
+
+        // 获取所有财报报告期（end_date），按日期范围过滤
+        LambdaQueryWrapper<StockFinancialIndicator> wrapper = new LambdaQueryWrapper<>();
+        wrapper.ge(StockFinancialIndicator::getEndDate, startDate)
+               .le(StockFinancialIndicator::getEndDate, endDate)
+               .select(StockFinancialIndicator::getEndDate)
+               .groupBy(StockFinancialIndicator::getEndDate)
+               .orderByAsc(StockFinancialIndicator::getEndDate);
+        List<LocalDate> reportDates = financialIndicatorMapper.selectList(wrapper)
+                .stream()
+                .map(StockFinancialIndicator::getEndDate)
+                .distinct()
+                .sorted()
+                .toList();
+
+        if (reportDates.isEmpty()) {
+            sendProgress(factorCode, "DONE", 100, "财务因子计算：无财报数据（" + startDate + " ~ " + endDate + "）");
+            return;
+        }
+
+        // 获取已有数据的日期（用于跳过）
+        Set<LocalDate> existingDates;
+        try {
+            List<FactorValue> existingValues = clickHouseFactorValueService.findByFactorCodeAndDateRange(
+                    factorCode, reportDates.getFirst(), reportDates.getLast());
+            existingDates = existingValues.stream()
+                    .map(FactorValue::getCalcDate)
+                    .collect(Collectors.toSet());
+        } catch (Exception e) {
+            log.warn("[{}] 查询已有数据失败，使用空集合: {}", factorCode, e.getMessage());
+            existingDates = Collections.emptySet();
+        }
+
+        final Set<LocalDate> existingDatesFinal = existingDates;
+        List<LocalDate> newDates = reportDates.stream()
+                .filter(d -> !existingDatesFinal.contains(d))
+                .toList();
+
+        if (newDates.isEmpty()) {
+            sendProgress(factorCode, "DONE", 100, "财务因子：无新报告期需要计算（已有数据到 " + (existingDatesFinal.isEmpty() ? "无" : Collections.max(existingDatesFinal)) + "）");
+            return;
+        }
+
+        log.info("[{}] financial incremental: total {} report dates, {} new (skipping {} existing)",
+                factorCode, reportDates.size(), newDates.size(), existingDates.size());
+
+        int totalDates = newDates.size();
+        int totalStocks = symbols.size();
+        long totalTasks = (long) totalDates * totalStocks;
+
+        sendProgress(factorCode, "COMPUTING", 0, String.format("[财务] 开始计算 [%s]，新增 %d 个报告期 × %d 只股票 = %,d 条", factorCode, totalDates, totalStocks, totalTasks));
+
+        AtomicLong rowsInserted = new AtomicLong(0);
+        long startTimeMs = System.currentTimeMillis();
+
+        List<FactorValue> writeBuffer = new ArrayList<>(2000);
+        final int BATCH_SIZE = 500;
+
+        for (int i = 0; i < newDates.size(); i++) {
+            LocalDate reportDate = newDates.get(i);
+            List<FactorValue> dayValues = computeOneDateFinancialForReportDate(factorCode, reportDate, symbols, calculator);
+            if (dayValues != null && !dayValues.isEmpty()) {
+                writeBuffer.addAll(dayValues);
+                rowsInserted.addAndGet(dayValues.size());
+            }
+
+            if (writeBuffer.size() >= BATCH_SIZE || i == newDates.size() - 1) {
+                if (!writeBuffer.isEmpty()) {
+                    batchSaveWithRetry(writeBuffer, factorCode);
+                    writeBuffer.clear();
+                }
+            }
+
+            // 发送进度
+            int pct = (int) ((double) (i + 1) / totalDates * 90);
+            long elapsed = System.currentTimeMillis() - startTimeMs;
+            double speed = elapsed > 0 ? (double) (i + 1) / elapsed * 1000 : 0;
+            int remaining = totalDates - i - 1;
+            long etaSec = speed > 0 ? (long) (remaining / speed) : 0;
+            sendProgress(factorCode, "COMPUTING", pct, String.format("[财务] %d/%d 报告期 (%d%%) | 已写 %,d 行 | 剩余约 %s", i + 1, totalDates, pct, rowsInserted.get(), formatEta(etaSec)), etaSec);
+        }
+
+        // 归一化
+        sendProgress(factorCode, "COMPUTING", 91, String.format("财务因子写入完成，%,d 条。开始归一化...", rowsInserted.get()));
+        normalizeFactorValues(factorCode, newDates);
+        sendProgress(factorCode, "DONE", 100, String.format("[财务] 全部完成，新增 %,d 条", rowsInserted.get()));
+        log.info("[{}] financial incremental done: {} new dates, {} rows", factorCode, totalDates, rowsInserted.get());
+    }
+
+    /**
+     * 为单个财报报告期计算财务因子（对应一个日期，多只股票）
+     */
+    private List<FactorValue> computeOneDateFinancialForReportDate(String factorCode, LocalDate reportDate, List<String> symbols, FinancialFactorCalculator calculator) {
+        List<FactorValue> results = new ArrayList<>(symbols.size());
+        LocalDateTime now = LocalDateTime.now();
+
+        for (String symbol : symbols) {
+            try {
+                String code = symbol.contains(".") ? symbol.substring(0, symbol.indexOf('.')) : symbol;
+                LambdaQueryWrapper<StockFinancialIndicator> wrapper = new LambdaQueryWrapper<>();
+                wrapper.eq(StockFinancialIndicator::getCode, code)
+                       .le(StockFinancialIndicator::getEndDate, reportDate)
+                       .orderByDesc(StockFinancialIndicator::getEndDate)
+                       .last("LIMIT 1");
+                StockFinancialIndicator indicator = financialIndicatorMapper.selectOne(wrapper);
+
+                if (indicator == null) continue;
+
+                BigDecimal value = calculator.calculate(code, indicator);
+                if (value != null) {
+                    FactorValue fv = FactorValue.builder()
+                            .factorCode(factorCode)
+                            .symbol(code)
+                            .calcDate(reportDate)  // 使用财报报告期作为 calcDate
+                            .factorVal(value)
+                            .createdAt(now)
+                            .build();
+                    results.add(fv);
+                }
+            } catch (Exception e) {
+                // 单只股票失败不影响整体
+            }
+        }
+        return results;
+    }
+
+    /**
+     * 财务因子全量计算（基于财报报告期，而非交易日）
+     */
+    private void computeFinancialFactorSync(String factorCode, LocalDate startDate, LocalDate endDate, List<String> symbols) {
+        FinancialFactorCalculator calculator = financialCalculators.get(factorCode);
+        if (calculator == null) {
+            log.error("[{}] 财务因子计算器未找到", factorCode);
+            return;
+        }
+
+        // 获取所有财报报告期（end_date），按日期范围过滤
+        LambdaQueryWrapper<StockFinancialIndicator> wrapper = new LambdaQueryWrapper<>();
+        wrapper.ge(StockFinancialIndicator::getEndDate, startDate)
+               .le(StockFinancialIndicator::getEndDate, endDate)
+               .select(StockFinancialIndicator::getEndDate)
+               .groupBy(StockFinancialIndicator::getEndDate)
+               .orderByAsc(StockFinancialIndicator::getEndDate);
+        List<LocalDate> reportDates = financialIndicatorMapper.selectList(wrapper)
+                .stream()
+                .map(StockFinancialIndicator::getEndDate)
+                .distinct()
+                .sorted()
+                .toList();
+
+        if (reportDates.isEmpty()) {
+            sendProgress(factorCode, "DONE", 100, "财务因子：无财报数据（" + startDate + " ~ " + endDate + "）");
+            return;
+        }
+
+        int totalDates = reportDates.size();
+        int totalStocks = symbols.size();
+        long totalTasks = (long) totalDates * totalStocks;
+
+        log.info("Clearing existing factor values for [{}] between {} and {}", factorCode, startDate, endDate);
+        self.deleteExistingValues(factorCode, startDate, endDate);
+
+        sendProgress(factorCode, "COMPUTING", 0, String.format("[财务全量] 开始计算 [%s]，共 %d 个报告期 × %d 只股票 = %,d 条", factorCode, totalDates, totalStocks, totalTasks));
+
+        AtomicLong rowsInserted = new AtomicLong(0);
+        long startTimeMs = System.currentTimeMillis();
+
+        List<FactorValue> writeBuffer = new ArrayList<>(2000);
+        final int BATCH_SIZE = 500;
+
+        for (int i = 0; i < reportDates.size(); i++) {
+            LocalDate reportDate = reportDates.get(i);
+            List<FactorValue> dayValues = computeOneDateFinancialForReportDate(factorCode, reportDate, symbols, calculator);
+            if (dayValues != null && !dayValues.isEmpty()) {
+                writeBuffer.addAll(dayValues);
+                rowsInserted.addAndGet(dayValues.size());
+            }
+
+            if (writeBuffer.size() >= BATCH_SIZE || i == reportDates.size() - 1) {
+                if (!writeBuffer.isEmpty()) {
+                    batchSaveWithRetry(writeBuffer, factorCode);
+                    writeBuffer.clear();
+                }
+            }
+
+            // 发送进度
+            int pct = (int) ((double) (i + 1) / totalDates * 90);
+            long elapsed = System.currentTimeMillis() - startTimeMs;
+            double speed = elapsed > 0 ? (double) (i + 1) / elapsed * 1000 : 0;
+            int remaining = totalDates - i - 1;
+            long etaSec = speed > 0 ? (long) (remaining / speed) : 0;
+            sendProgress(factorCode, "COMPUTING", pct, String.format("[财务全量] %d/%d 报告期 (%d%%) | 已写 %,d 行 | 剩余约 %s", i + 1, totalDates, pct, rowsInserted.get(), formatEta(etaSec)), etaSec);
+        }
+
+        // 归一化
+        sendProgress(factorCode, "COMPUTING", 91, String.format("财务因子写入完成，%,d 条。开始归一化...", rowsInserted.get()));
+        normalizeFactorValues(factorCode, reportDates);
+        sendProgress(factorCode, "DONE", 100, String.format("[财务全量] 全部完成，共 %,d 条", rowsInserted.get()));
+        log.info("[{}] financial sync done: {} dates, {} rows", factorCode, totalDates, rowsInserted.get());
     }
 
     /**
@@ -360,10 +610,19 @@ public class FactorComputeEngine {
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
     public void computeFactorSync(FactorDefinition factor, LocalDate startDate, LocalDate endDate, List<String> symbols) {
 
-        // 显式加入 runningFactors，不依赖 sendProgress 副作用
+        // 显式加入 runningFactors，确保在所有退出路径都能被清理
         runningFactors.add(factor.getFactorCode());
 
-        // 先清除该时间段的旧数据
+        try {
+            // 财务因子走专门的计算逻辑（基于财报报告期，而非交易日）
+            if (financialCalculators.containsKey(factor.getFactorCode())) {
+                computeFinancialFactorSync(factor.getFactorCode(), startDate, endDate, symbols);
+                return;
+            }
+
+            // === 以下是技术因子的全量计算逻辑 ===
+
+            // 先清除该时间段的旧数据
         log.info("Clearing existing factor values for [{}] between {} and {}", factor.getFactorCode(), startDate, endDate);
         self.deleteExistingValues(factor.getFactorCode(), startDate, endDate);
 
@@ -441,6 +700,10 @@ public class FactorComputeEngine {
         sendProgress(factor.getFactorCode(), "DONE", 100, String.format("归一化完成，共处理 %d 个交易日，写入 %,d 条因子值", totalDates, rowsInserted.get()));
 
         log.info("[{}] computation done: {} dates, {} rows", factor.getFactorCode(), totalDates, rowsInserted.get());
+        } finally {
+            // 确保 runningFactors 被清理（无论正常完成还是异常退出）
+            runningFactors.remove(factor.getFactorCode());
+        }
     }
 
     /**

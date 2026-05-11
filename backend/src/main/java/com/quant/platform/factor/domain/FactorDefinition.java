@@ -114,6 +114,7 @@ public class FactorDefinition implements Serializable {
         VOLATILITY,     // 波动率因子
         TECHNICAL,      // 技术因子
         FUNDAMENTAL,    // 基本面因子
+        FINANCIAL,      // 财务因子
         SENTIMENT,      // 情绪因子
         CHANTHEORY,     // 缠论因子
         LIQUIDITY,      // 流动性因子

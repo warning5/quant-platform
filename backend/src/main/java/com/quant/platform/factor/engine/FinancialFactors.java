@@ -1,10 +1,18 @@
 package com.quant.platform.factor.engine;
 
+import com.quant.platform.financial.entity.StockBalance;
+import com.quant.platform.financial.entity.StockCashflow;
 import com.quant.platform.financial.entity.StockFinancialIndicator;
+import com.quant.platform.financial.entity.StockIncome;
+import com.quant.platform.financial.mapper.StockBalanceMapper;
+import com.quant.platform.financial.mapper.StockCashflowMapper;
+import com.quant.platform.financial.mapper.StockIncomeMapper;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 
 /**
  * 财务因子实现集合
@@ -14,6 +22,20 @@ import java.math.RoundingMode;
 public class FinancialFactors {
 
     private static final int SCALE = 8;
+
+    @Autowired
+    private StockIncomeMapper stockIncomeMapper;
+
+    @Autowired
+    private StockBalanceMapper stockBalanceMapper;
+
+    @Autowired
+    private StockCashflowMapper stockCashflowMapper;
+
+    // 手动注入 Setter（供 FactorComputeEngine 调用）
+    public void setStockIncomeMapper(StockIncomeMapper m) { this.stockIncomeMapper = m; }
+    public void setStockBalanceMapper(StockBalanceMapper m) { this.stockBalanceMapper = m; }
+    public void setStockCashflowMapper(StockCashflowMapper m) { this.stockCashflowMapper = m; }
 
     // ======================== 盈利能力因子 ========================
 
@@ -623,5 +645,145 @@ public class FinancialFactors {
             return ind.getRevenueYoy().multiply(ind.getNetProfitMargin())
                     .divide(BigDecimal.valueOf(100), SCALE, RoundingMode.HALF_UP);
         }
+    }
+
+    // ======================== 需联查原始表的三因子 ========================
+
+    /**
+     * ROIC 投入资本回报率 (%)
+     * ROIC = EBIT / 投入资本 × 100
+     * EBIT ≈ 利润总额 + 财务费用
+     * 投入资本 ≈ 总权益 + 总负债（简化版）
+     */
+    public class RoicCalc implements FinancialFactorCalculator {
+        @Override
+        public String getFactorCode() {
+            return "FIN_ROIC";
+        }
+
+        @Override
+        public BigDecimal calculate(String code, StockFinancialIndicator ind) {
+            if (ind == null || ind.getEndDate() == null) return null;
+
+            // 查利润表：totalProfit, financeExpense, incomeTax, netProfitInclMinority
+            StockIncome inc = queryIncome(code, ind.getEndDate());
+            // 查资产负债表：totalEquity, totalLiabilities
+            StockBalance bal = queryBalance(code, ind.getEndDate());
+
+            if (inc == null || bal == null) return null;
+
+            BigDecimal totalProfit = inc.getTotalProfit();
+            BigDecimal financeExpense = inc.getFinanceExpense();
+            BigDecimal totalEquity = bal.getTotalEquity();
+            BigDecimal totalLiabilities = bal.getTotalLiabilities();
+
+            if (totalProfit == null || financeExpense == null || totalEquity == null || totalLiabilities == null) return null;
+            if (financeExpense.compareTo(BigDecimal.ZERO) == 0) return null;
+
+            // EBIT ≈ totalProfit + financeExpense
+            BigDecimal ebit = totalProfit.add(financeExpense);
+            // 投入资本 ≈ 总权益 + 总负债
+            BigDecimal investedCap = totalEquity.add(totalLiabilities);
+            if (investedCap.compareTo(BigDecimal.ZERO) == 0) return null;
+
+            return ebit.divide(investedCap, SCALE, RoundingMode.HALF_UP)
+                    .multiply(BigDecimal.valueOf(100));
+        }
+    }
+
+    /**
+     * 利息保障倍数 = (利润总额 + 财务费用) / |财务费用|
+     */
+    public class InterestCoverageCalc implements FinancialFactorCalculator {
+        @Override
+        public String getFactorCode() {
+            return "FIN_INTEREST_COVERAGE";
+        }
+
+        @Override
+        public BigDecimal calculate(String code, StockFinancialIndicator ind) {
+            if (ind == null || ind.getEndDate() == null) return null;
+
+            StockIncome inc = queryIncome(code, ind.getEndDate());
+            if (inc == null) return null;
+
+            BigDecimal totalProfit = inc.getTotalProfit();
+            BigDecimal financeExpense = inc.getFinanceExpense();
+
+            if (totalProfit == null || financeExpense == null) return null;
+            if (financeExpense.compareTo(BigDecimal.ZERO) == 0) return null;
+
+            BigDecimal numerator = totalProfit.add(financeExpense);
+            BigDecimal denominator = financeExpense.abs();
+
+            return numerator.divide(denominator, SCALE, RoundingMode.HALF_UP);
+        }
+    }
+
+    /**
+     * 经营现金流/总负债 (%)
+     * = 经营活动现金流净额 / 总负债 × 100
+     */
+    public class OperatingCfToDebtCalc implements FinancialFactorCalculator {
+        @Override
+        public String getFactorCode() {
+            return "FIN_OPERATING_CF_TO_DEBT";
+        }
+
+        @Override
+        public BigDecimal calculate(String code, StockFinancialIndicator ind) {
+            if (ind == null || ind.getEndDate() == null) return null;
+
+            // 查现金流量表：netOperateCf
+            StockCashflow cf = queryCashflow(code, ind.getEndDate());
+            // 查资产负债表：totalLiabilities
+            StockBalance bal = queryBalance(code, ind.getEndDate());
+
+            if (cf == null || bal == null) return null;
+
+            BigDecimal netOperateCf = cf.getNetOperateCf();
+            BigDecimal totalLiabilities = bal.getTotalLiabilities();
+
+            if (netOperateCf == null || totalLiabilities == null) return null;
+            if (totalLiabilities.compareTo(BigDecimal.ZERO) == 0) return null;
+
+            return netOperateCf.divide(totalLiabilities, SCALE, RoundingMode.HALF_UP)
+                    .multiply(BigDecimal.valueOf(100));
+        }
+    }
+
+    // ======================== 联查辅助方法 ========================
+
+    private StockIncome queryIncome(String code, LocalDate endDate) {
+        if (code == null || endDate == null) return null;
+        return stockIncomeMapper.selectOne(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<StockIncome>()
+                        .eq(StockIncome::getCode, code)
+                        .le(StockIncome::getEndDate, endDate)
+                        .orderByDesc(StockIncome::getEndDate)
+                        .last("LIMIT 1")
+        );
+    }
+
+    private StockBalance queryBalance(String code, LocalDate endDate) {
+        if (code == null || endDate == null) return null;
+        return stockBalanceMapper.selectOne(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<StockBalance>()
+                        .eq(StockBalance::getCode, code)
+                        .le(StockBalance::getEndDate, endDate)
+                        .orderByDesc(StockBalance::getEndDate)
+                        .last("LIMIT 1")
+        );
+    }
+
+    private StockCashflow queryCashflow(String code, LocalDate endDate) {
+        if (code == null || endDate == null) return null;
+        return stockCashflowMapper.selectOne(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<StockCashflow>()
+                        .eq(StockCashflow::getCode, code)
+                        .le(StockCashflow::getEndDate, endDate)
+                        .orderByDesc(StockCashflow::getEndDate)
+                        .last("LIMIT 1")
+        );
     }
 }

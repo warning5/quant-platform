@@ -27,7 +27,7 @@ const CATEGORY_COLORS = {
   VOLATILITY: '#f472b6',
   VOLUME_PRICE: '#34d399',
   VALUE: '#a78bfa',
-  FUNDAMENTAL: '#22c55e',
+  FINANCIAL: '#22c55e',
   QUALITY: '#facc15',
   SENTIMENT: '#ef4444',
   LIQUIDITY: '#94a3b8',
@@ -37,16 +37,20 @@ const CATEGORY_LABELS = {
   MOMENTUM: '动量',
   VOLATILITY: '波动率',
   VOLUME_PRICE: '量价',
-  VALUE: '价值',
-  FUNDAMENTAL: '基本面',
-  QUALITY: '质量',
-  SENTIMENT: '情绪',
-  LIQUIDITY: '流动性',
-  CHANTHEORY: '缠论',
+  VALUE:      '价值',
+  FINANCIAL:   '财务',
+  QUALITY:     '质量',
+  SENTIMENT:   '情绪',
+  LIQUIDITY:   '流动性',
+  CHANTHEORY:  '缠论',
 };
 
 const TARGET_DAYS = 310;
 const TARGET_STOCKS = 5280;
+// 财务因子目标报告期数：每年4个季报窗口 × 3年覆盖 = 12个报告期
+const TARGET_REPORT_PERIODS = 12;
+// 财务因子分类识别
+const FINANCIAL_CATEGORIES = ['FINANCIAL'];
 
 function FactorMonitor() {
   const [factors, setFactors] = useState([]);
@@ -357,10 +361,22 @@ function FactorMonitor() {
     const cnt = Number(s.cnt) || 0;
     const days = Number(s.days) || 0;
     const stocks = Number(s.stocks) || 0;
-    // 进度以交易日为准：days / TARGET_DAYS
-    // isDone：有数据且交易日达标或接近达标
-    const pct = days > 0 ? Math.min(100, Math.round(days / TARGET_DAYS * 100)) : 0;
-    const isDone = cnt > 0 && days >= TARGET_DAYS - 5;
+    // 财务因子按报告期数量判断完成度；日频因子按交易日数量
+    // fallback: category 为空时通过 factor_code 前缀识别（后端 selectFactorStats 未返回 category）
+    const isFinancial = FINANCIAL_CATEGORIES.includes(f.category)
+      || f.code.startsWith('FIN_')
+      || f.code.startsWith('CHAN_');
+    let pct, isDone;
+    if (isFinancial) {
+      // 财务因子：报告期数量 vs 目标报告期数（季报+年报约每年4期，2年=8期为合理目标）
+      // 有数据即视为基本完成（财务因子随财报发布一次性写入，非日频累积）
+      pct = days > 0 ? Math.min(100, Math.round(days / TARGET_REPORT_PERIODS * 100)) : 0;
+      isDone = cnt > 0 && days >= 4; // 至少覆盖1年4个报告期即算完成
+    } else {
+      // 日频因子：交易日数量 vs 目标交易日数
+      pct = days > 0 ? Math.min(100, Math.round(days / TARGET_DAYS * 100)) : 0;
+      isDone = cnt > 0 && days >= TARGET_DAYS - 5;
+    }
     // isRunning 只依赖后端真实状态（/running API + WebSocket），不再用数据完整性推断
     // 原因：后端重启后，有数据但没算完的因子会被误判为"计算中"
     const isRunning = runningFactorCodes.has(f.code);
@@ -513,17 +529,17 @@ function FactorMonitor() {
       width: 180,
       sorter: (a, b) => a.pct - b.pct,
       render: (pct, row) => (
-        row.cnt > 0
+        // 正在计算：优先用 WebSocket 实时进度，不用 cnt 判断是否有数据
+        row.isRunning
           ? <Space size={4}>
-              <Progress
-                percent={Math.round(pct)}
-                size="small"
-                strokeColor={row.color}
-                style={{ width: 100, marginBottom: 0 }}
-                format={p => <span style={{ fontSize: 11 }}>{p}%</span>}
-              />
+              <Progress percent={Math.round(pct)} strokeColor={row.color} style={{ width: 100, marginBottom: 0 }}
+                format={p => <span style={{ fontSize: 11 }}>{p}%</span>} />
+              <span style={{ fontSize: 10, color: '#8c8c8c' }}>计算中</span>
             </Space>
-          : <Text type="secondary" style={{ fontSize: 12 }}>未计算</Text>
+          : row.cnt > 0
+            ? <Progress percent={Math.round(pct)} strokeColor={row.color} style={{ width: 140, marginBottom: 0 }}
+                format={p => <span style={{ fontSize: 11 }}>{p}%</span>} />
+            : <Text type="secondary" style={{ fontSize: 12 }}>未计算</Text>
       ),
     },
     {

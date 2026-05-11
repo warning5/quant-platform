@@ -48,6 +48,9 @@ public class StockIncome implements Serializable {
     @TableField("income_tax")
     private BigDecimal incomeTax;
 
+    @TableField("finance_expense")
+    private BigDecimal financeExpense;
+
     @TableField("net_profit")
     private BigDecimal netProfit;
 
