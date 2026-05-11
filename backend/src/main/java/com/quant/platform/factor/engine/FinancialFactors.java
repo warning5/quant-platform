@@ -7,6 +7,8 @@ import com.quant.platform.financial.entity.StockIncome;
 import com.quant.platform.financial.mapper.StockBalanceMapper;
 import com.quant.platform.financial.mapper.StockCashflowMapper;
 import com.quant.platform.financial.mapper.StockIncomeMapper;
+import lombok.Setter;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -18,11 +20,14 @@ import java.time.LocalDate;
  * 财务因子实现集合
  * 包含25个基本面因子：盈利、成长、偿债、营运、现金流、每股指标
  */
+@Setter
+@Slf4j
 @Component
 public class FinancialFactors {
 
     private static final int SCALE = 8;
 
+    // 手动注入 Setter（供 FactorComputeEngine 调用）
     @Autowired
     private StockIncomeMapper stockIncomeMapper;
 
@@ -32,12 +37,40 @@ public class FinancialFactors {
     @Autowired
     private StockCashflowMapper stockCashflowMapper;
 
-    // 手动注入 Setter（供 FactorComputeEngine 调用）
-    public void setStockIncomeMapper(StockIncomeMapper m) { this.stockIncomeMapper = m; }
-    public void setStockBalanceMapper(StockBalanceMapper m) { this.stockBalanceMapper = m; }
-    public void setStockCashflowMapper(StockCashflowMapper m) { this.stockCashflowMapper = m; }
-
     // ======================== 盈利能力因子 ========================
+
+    private StockIncome queryIncome(String code, LocalDate endDate) {
+        if (code == null || endDate == null) return null;
+        return stockIncomeMapper.selectOne(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<StockIncome>()
+                        .eq(StockIncome::getCode, code)
+                        .le(StockIncome::getEndDate, endDate)
+                        .orderByDesc(StockIncome::getEndDate)
+                        .last("LIMIT 1")
+        );
+    }
+
+    private StockBalance queryBalance(String code, LocalDate endDate) {
+        if (code == null || endDate == null) return null;
+        return stockBalanceMapper.selectOne(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<StockBalance>()
+                        .eq(StockBalance::getCode, code)
+                        .le(StockBalance::getEndDate, endDate)
+                        .orderByDesc(StockBalance::getEndDate)
+                        .last("LIMIT 1")
+        );
+    }
+
+    private StockCashflow queryCashflow(String code, LocalDate endDate) {
+        if (code == null || endDate == null) return null;
+        return stockCashflowMapper.selectOne(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<StockCashflow>()
+                        .eq(StockCashflow::getCode, code)
+                        .le(StockCashflow::getEndDate, endDate)
+                        .orderByDesc(StockCashflow::getEndDate)
+                        .last("LIMIT 1")
+        );
+    }
 
     /**
      * 毛利率 (%)
@@ -99,6 +132,8 @@ public class FinancialFactors {
         }
     }
 
+    // ======================== 成长能力因子 ========================
+
     /**
      * 营业总成本/营业总收入 = 100 - 毛利率
      */
@@ -150,8 +185,6 @@ public class FinancialFactors {
         }
     }
 
-    // ======================== 成长能力因子 ========================
-
     /**
      * 营业收入同比增长率 (%)
      */
@@ -181,6 +214,8 @@ public class FinancialFactors {
             return ind.getNetProfitYoy();
         }
     }
+
+    // ======================== 偿债能力因子 ========================
 
     /**
      * 营业利润同比增长率 (%)
@@ -227,8 +262,6 @@ public class FinancialFactors {
         }
     }
 
-    // ======================== 偿债能力因子 ========================
-
     /**
      * 流动比率
      */
@@ -243,6 +276,8 @@ public class FinancialFactors {
             return ind.getCurrentRatio();
         }
     }
+
+    // ======================== 营运能力因子 ========================
 
     /**
      * 速动比率
@@ -292,8 +327,6 @@ public class FinancialFactors {
         }
     }
 
-    // ======================== 营运能力因子 ========================
-
     /**
      * 应收账款周转率（次）= 365 / 周转天数
      */
@@ -325,6 +358,8 @@ public class FinancialFactors {
             return ind.getArTurnoverDays();
         }
     }
+
+    // ======================== 现金流因子 ========================
 
     /**
      * 总资产周转率（次）
@@ -371,7 +406,7 @@ public class FinancialFactors {
         }
     }
 
-    // ======================== 现金流因子 ========================
+    // ======================== 每股指标因子 ========================
 
     /**
      * 经营现金流/净利润
@@ -387,6 +422,8 @@ public class FinancialFactors {
             return ind.getOperatingCfToNp();
         }
     }
+
+    // ======================== 质量因子 (QUALITY) ========================
 
     /**
      * 每股经营现金流 ≈ 经营现金流/净利润 × 每股收益
@@ -422,8 +459,6 @@ public class FinancialFactors {
         }
     }
 
-    // ======================== 每股指标因子 ========================
-
     /**
      * 每股净资产 BPS
      */
@@ -438,8 +473,6 @@ public class FinancialFactors {
             return ind.getBps();
         }
     }
-
-    // ======================== 质量因子 (QUALITY) ========================
 
     /**
      * ROE稳定性 - 用ROE绝对值近似（多期ROE标准差需要多期数据，单期用ROE质量代理）
@@ -475,6 +508,8 @@ public class FinancialFactors {
             return ind.getOperatingCfToNp();
         }
     }
+
+    // ======================== 自由现金流因子 ========================
 
     /**
      * 毛利率稳定性代理 - 毛利率越高说明定价权越强（质量越好的代理指标）
@@ -532,7 +567,7 @@ public class FinancialFactors {
         }
     }
 
-    // ======================== 自由现金流因子 ========================
+    // ======================== 价值因子 (VALUE - 财务数据部分) ========================
 
     /**
      * 自由现金流(亿元) — 经营现金流+投资现金流，正值说明公司能产生自由现金
@@ -593,7 +628,7 @@ public class FinancialFactors {
         }
     }
 
-    // ======================== 价值因子 (VALUE - 财务数据部分) ========================
+    // ======================== 需联查原始表的三因子 ========================
 
     /**
      * 盈利收益率代理 = 净利率 / BPS 的倒数（不依赖市价）
@@ -647,7 +682,7 @@ public class FinancialFactors {
         }
     }
 
-    // ======================== 需联查原始表的三因子 ========================
+    // ======================== 联查辅助方法 ========================
 
     /**
      * ROIC 投入资本回报率 (%)
@@ -677,7 +712,8 @@ public class FinancialFactors {
             BigDecimal totalEquity = bal.getTotalEquity();
             BigDecimal totalLiabilities = bal.getTotalLiabilities();
 
-            if (totalProfit == null || financeExpense == null || totalEquity == null || totalLiabilities == null) return null;
+            if (totalProfit == null || financeExpense == null || totalEquity == null || totalLiabilities == null)
+                return null;
             if (financeExpense.compareTo(BigDecimal.ZERO) == 0) return null;
 
             // EBIT ≈ totalProfit + financeExpense
@@ -739,6 +775,12 @@ public class FinancialFactors {
             // 查资产负债表：totalLiabilities
             StockBalance bal = queryBalance(code, ind.getEndDate());
 
+            // 调试日志（首次运行后可删除）
+            if (code.equals("600519")) {
+                log.info("[FIN_OPERATING_CF_TO_DEBT] code={}, endDate={}, cf={}, bal={}, cashflowMapper={}",
+                        code, ind.getEndDate(), cf, bal, stockCashflowMapper);
+            }
+
             if (cf == null || bal == null) return null;
 
             BigDecimal netOperateCf = cf.getNetOperateCf();
@@ -750,40 +792,5 @@ public class FinancialFactors {
             return netOperateCf.divide(totalLiabilities, SCALE, RoundingMode.HALF_UP)
                     .multiply(BigDecimal.valueOf(100));
         }
-    }
-
-    // ======================== 联查辅助方法 ========================
-
-    private StockIncome queryIncome(String code, LocalDate endDate) {
-        if (code == null || endDate == null) return null;
-        return stockIncomeMapper.selectOne(
-                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<StockIncome>()
-                        .eq(StockIncome::getCode, code)
-                        .le(StockIncome::getEndDate, endDate)
-                        .orderByDesc(StockIncome::getEndDate)
-                        .last("LIMIT 1")
-        );
-    }
-
-    private StockBalance queryBalance(String code, LocalDate endDate) {
-        if (code == null || endDate == null) return null;
-        return stockBalanceMapper.selectOne(
-                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<StockBalance>()
-                        .eq(StockBalance::getCode, code)
-                        .le(StockBalance::getEndDate, endDate)
-                        .orderByDesc(StockBalance::getEndDate)
-                        .last("LIMIT 1")
-        );
-    }
-
-    private StockCashflow queryCashflow(String code, LocalDate endDate) {
-        if (code == null || endDate == null) return null;
-        return stockCashflowMapper.selectOne(
-                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<StockCashflow>()
-                        .eq(StockCashflow::getCode, code)
-                        .le(StockCashflow::getEndDate, endDate)
-                        .orderByDesc(StockCashflow::getEndDate)
-                        .last("LIMIT 1")
-        );
     }
 }

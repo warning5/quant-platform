@@ -61,8 +61,6 @@ public class FactorComputeEngine {
     private final Map<String, FactorCalculator> builtinCalculators = new HashMap<>();
     private final Map<String, FinancialFactorCalculator> financialCalculators = new HashMap<>();
 
-    private FinancialFactors financialFactors;
-
     @Resource
     private ClickHouseConfig clickHouseConfig;
     // 自注入，用于内部调用时走代理（解决 @Transactional 自调用失效）
@@ -201,7 +199,7 @@ public class FactorComputeEngine {
         registerFinancial(new FinancialFactors.FreeCashFlowToOpCfCalc());
         registerFinancial(new FinancialFactors.FreeCashFlowToNpCalc());
         // 需联查原始表的财务因子（非静态内部类，需手动注入 Mapper）
-        financialFactors = new FinancialFactors();
+        FinancialFactors financialFactors = new FinancialFactors();
         // 手动注入 Mapper（因为 FinancialFactors 不是通过 Spring 创建的）
         financialFactors.setStockIncomeMapper(stockIncomeMapper);
         financialFactors.setStockBalanceMapper(stockBalanceMapper);
@@ -392,7 +390,6 @@ public class FactorComputeEngine {
 
     /**
      * 财务因子增量计算（基于财报报告期，而非交易日）
-     *
      * 财务数据每年只有 4 份报告（一季报、半年报、三季报、年报），
      * 因此只需要在财报的 end_date 上计算，而不是按每个交易日计算。
      */
@@ -463,7 +460,7 @@ public class FactorComputeEngine {
         for (int i = 0; i < newDates.size(); i++) {
             LocalDate reportDate = newDates.get(i);
             List<FactorValue> dayValues = computeOneDateFinancialForReportDate(factorCode, reportDate, symbols, calculator);
-            if (dayValues != null && !dayValues.isEmpty()) {
+            if (!dayValues.isEmpty()) {
                 writeBuffer.addAll(dayValues);
                 rowsInserted.addAndGet(dayValues.size());
             }
@@ -575,7 +572,7 @@ public class FactorComputeEngine {
         for (int i = 0; i < reportDates.size(); i++) {
             LocalDate reportDate = reportDates.get(i);
             List<FactorValue> dayValues = computeOneDateFinancialForReportDate(factorCode, reportDate, symbols, calculator);
-            if (dayValues != null && !dayValues.isEmpty()) {
+            if (!dayValues.isEmpty()) {
                 writeBuffer.addAll(dayValues);
                 rowsInserted.addAndGet(dayValues.size());
             }

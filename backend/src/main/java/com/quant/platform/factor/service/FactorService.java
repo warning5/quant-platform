@@ -39,7 +39,6 @@ public class FactorService {
     private final FactorDefinitionMapper factorMapper;
     private final FactorValueMapper factorValueMapper;
     private final ClickHouseFactorValueService clickHouseFactorValueService;
-    private final ClickHouseConfig clickHouseConfig;
     private final FactorTestReportMapper testReportMapper;
     private final FactorComputeEngine computeEngine;
     private final ScriptedFactorEngine scriptedEngine;
@@ -595,7 +594,7 @@ public class FactorService {
                 .collect(java.util.stream.Collectors.toMap(
                         s -> s.getCode() + "." + (s.getMarket() != null ? s.getMarket() : ""),
                         StockInfo::getName,
-                        (a, b) -> a));
+                        (a, _) -> a));
 
         return factorSymbols.stream()
                 .filter(nameMap::containsKey)
@@ -641,7 +640,7 @@ public class FactorService {
                     .collect(java.util.stream.Collectors.toMap(
                             StockInfo::getCode,
                             s -> s.getName() != null ? s.getName() : "",
-                            (a, b) -> a));
+                            (a, _) -> a));
             // 构建 symbol -> name 映射
             for (String sym : allSymbols) {
                 String code = sym.contains(".") ? sym.substring(0, sym.indexOf('.')) : sym;
