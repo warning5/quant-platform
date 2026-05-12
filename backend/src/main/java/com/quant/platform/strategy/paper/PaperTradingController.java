@@ -84,4 +84,11 @@ public class PaperTradingController {
         paperTradingService.processDividends(paperId);
         return ApiResponse.success("分红处理完成", null);
     }
+
+    @DeleteMapping("/{paperId}")
+    @Operation(summary = "删除模拟盘（及关联的持仓、信号、净值）")
+    public ApiResponse<Void> delete(@PathVariable Long paperId) {
+        paperTradingService.deletePaperTrading(paperId);
+        return ApiResponse.success("模拟盘已删除", null);
+    }
 }

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Card, Row, Col, Statistic, Button, Input, Select, DatePicker, Form,
-  Checkbox, Tag, Typography, Space, Alert, Table, Tooltip, Progress, Badge, message, Divider, Tabs, Spin
+  Checkbox, Tag, Typography, Space, Alert, Table, Tooltip, Progress, Badge, message, Divider, Tabs, Spin, Modal, Popconfirm
 } from 'antd';
 import {
   PlayCircleOutlined, StopOutlined, ReloadOutlined,
@@ -9,7 +9,8 @@ import {
   FilterOutlined, SearchOutlined, CloudSyncOutlined,
   DatabaseOutlined, RiseOutlined, FallOutlined,
   CalendarOutlined, BarChartOutlined, PieChartOutlined, DollarOutlined,
-  LineChartOutlined, GiftOutlined, FileTextOutlined
+  LineChartOutlined, GiftOutlined, FileTextOutlined, DeleteOutlined, ExclamationCircleOutlined,
+  LockOutlined
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { dataUpdateApi, financialApi, silentConfig } from '../../api/index';
@@ -235,6 +236,136 @@ function DataUpdate() {
   const researchCoverageFetchedRef = useRef(false);
   const [researchValidateResult, setResearchValidateResult] = useState(null);
   const [researchValidateLoading, setResearchValidateLoading] = useState(false);
+
+  // ========== 退市股票清理 ==========
+  const [delistedStocks, setDelistedStocks] = useState([]);
+  const [delistedLoading, setDelistedLoading] = useState(false);
+  const [delistedCleaning, setDelistedCleaning] = useState(false);
+  const [delistedCleanedCodes, setDelistedCleanedCodes] = useState([]);
+  const [selectedDelistedKeys, setSelectedDelistedKeys] = useState([]);
+
+  const fetchDelistedStocks = useCallback(async () => {
+    setDelistedLoading(true);
+    try {
+      const res = await dataUpdateApi.getDelistedStocks(30);
+      setDelistedStocks((res || []).map((s, i) => ({ ...s, key: i })));
+    } catch (e) {
+      message.error('查询退市股票失败');
+    } finally {
+      setDelistedLoading(false);
+    }
+  }, []);
+
+  const handleCleanDelisted = (codes) => {
+    Modal.confirm({
+      title: '确认清理退市股票',
+      icon: <ExclamationCircleOutlined />,
+      content: (
+        <div>
+          <p>将清理以下 <strong>{codes.length}</strong> 只股票的全部数据：</p>
+          <ul style={{ margin: '8px 0', paddingLeft: 20 }}>
+            {codes.map(c => {
+              const s = delistedStocks.find(x => x.code === c);
+              return <li key={c}>{c} {s?.name || ''}</li>;
+            })}
+          </ul>
+          <p style={{ color: '#ff4d4f' }}>此操作不可逆，将同时删除 stock_info、stock_daily、factor_value、moneyflow 中的相关数据。</p>
+        </div>
+      ),
+      okText: '确认清理',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        setDelistedCleaning(true);
+        try {
+          const res = await dataUpdateApi.cleanDelistedStocks(codes);
+          setDelistedCleanedCodes(codes);
+          message.success(`清理完成，共删除 ${(res?.totalDeleted || 0).toLocaleString()} 条数据`);
+          // 刷新列表
+          setTimeout(() => fetchDelistedStocks(), 2000);
+        } catch (e) {
+          message.error('清理失败：' + (e?.response?.data?.message || e.message));
+        } finally {
+          setDelistedCleaning(false);
+        }
+      },
+    });
+  };
+
+  const delistedColumns = [
+    { title: '股票代码', dataIndex: 'code', width: 100 },
+    { title: '名称', dataIndex: 'name', width: 120,
+      render: (v) => v?.includes('退') ? <Tag color="error">{v}</Tag> : <span>{v}</span> },
+    { title: '市场', dataIndex: 'market', width: 70, align: 'center',
+      render: (v) => <Tag color={MARKET_COLORS[v]}>{MARKET_NAMES[v]}</Tag> },
+    { title: '退市日期', dataIndex: 'out_date', width: 120,
+      render: (v) => v ? <Tag color="error">{v}</Tag> : '-' },
+    { title: '最后交易日', dataIndex: 'max_date', width: 120 },
+    { title: '停牌天数', dataIndex: 'days_inactive', width: 100, align: 'center',
+      render: (v) => <Tag color={v >= 60 ? 'error' : v >= 30 ? 'warning' : 'processing'}>{v} 天</Tag> },
+    { title: '日线数据', dataIndex: 'daily_rows', width: 100, align: 'right',
+      render: (v) => v?.toLocaleString() },
+    { title: '因子数据', dataIndex: 'factor_rows', width: 100, align: 'right',
+      render: (v) => v?.toLocaleString() },
+    { title: '资金流数据', dataIndex: 'moneyflow_rows', width: 100, align: 'right',
+      render: (v) => (v || 0).toLocaleString() },
+  ];
+
+  const renderDelistedTab = () => (
+    <div>
+      <Alert
+        message="通过 Baostock 差分检测系统中已退市的股票（stock_info 中存在但 Baostock 已不包含）"
+        type="info"
+        showIcon
+        style={{ marginBottom: 16 }}
+      />
+      <Table
+        dataSource={delistedStocks}
+        columns={delistedColumns}
+        loading={delistedLoading}
+        size="small"
+        pagination={false}
+        rowSelection={{
+          type: 'checkbox',
+          selectedRowKeys: selectedDelistedKeys,
+          onChange: (keys) => setSelectedDelistedKeys(keys),
+          getCheckboxProps: (record) => ({
+            name: record.code,
+          }),
+        }}
+        footer={() => {
+          const selectedRows = delistedStocks.filter(s => selectedDelistedKeys.includes(s.key));
+          return (
+          <Space>
+            <span>已选择 {selectedRows.length} 只股票</span>
+            <Popconfirm
+              title="确认清理选中的股票？"
+              description="此操作将删除 stock_info、stock_daily、factor_value、moneyflow 中的相关数据，不可撤销。"
+              onConfirm={() => handleCleanDelisted(selectedRows.map(r => r.code))}
+              okText="确认清理"
+              cancelText="取消"
+              okButtonProps={{ danger: true }}
+              disabled={selectedRows.length === 0 || delistedCleaning}
+            >
+              <Button
+                type="primary"
+                danger
+                icon={<DeleteOutlined />}
+                loading={delistedCleaning}
+                disabled={selectedRows.length === 0}
+              >
+                清理选中股票
+              </Button>
+            </Popconfirm>
+            <Button icon={<ReloadOutlined />} onClick={fetchDelistedStocks} loading={delistedLoading}>
+              刷新
+            </Button>
+          </Space>
+          );
+        }}
+      />
+    </div>
+  );
 
   const [wsConnected, setWsConnected] = useState(false);
 
@@ -705,6 +836,14 @@ function DataUpdate() {
 
   // ========== 提交任务 ==========
   const handleSubmit = async (updateType) => {
+    // 检查是否已有其它任务在运行
+    const runningTask = [dailyTask, indexTask, dividendTask, financialTask, sentimentTask, researchTask]
+      .find(t => t?.status === 'RUNNING');
+    if (runningTask) {
+      message.warning('已有数据更新任务正在运行，请等待完成后再启动新任务');
+      return;
+    }
+
     try {
       const currentForm = updateType === 'INDEX' ? indexForm
         : updateType === 'DIVIDEND' ? dividendForm
@@ -820,6 +959,11 @@ function DataUpdate() {
   const markets = coverage?.markets || [];
 
   // ========== Tab 切换 ==========
+  // 页面初始化时根据当前 tab 加载数据
+  useEffect(() => {
+    if (activeTab === 'DELISTED') fetchDelistedStocks();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const onTabChange = (key) => {
     setActiveTab(key);
     localStorage.setItem('quant-dataupdate-active-tab', key);
@@ -828,6 +972,7 @@ function DataUpdate() {
     if (key === 'FINANCIAL') fetchFinancialCoverage();
     if (key === 'SENTIMENT') fetchSentimentCoverage();
     if (key === 'RESEARCH') fetchResearchCoverage();
+    if (key === 'DELISTED') fetchDelistedStocks();
   };
 
   // ========== 股票日线 Tab ==========
@@ -886,7 +1031,7 @@ function DataUpdate() {
             <Row style={{ width: '100%' }}>
               <Col>
                 <Space size={12}>
-                  <Button type="primary" icon={<PlayCircleOutlined />}
+                  <Button type="primary" icon={isRunning ? <LockOutlined /> : <PlayCircleOutlined />}
                     onClick={() => handleSubmit('DAILY')} disabled={isRunning}>
                     开始更新
                   </Button>
@@ -1003,7 +1148,7 @@ function DataUpdate() {
             <Row style={{ width: '100%' }}>
               <Col>
                 <Space size={12}>
-                  <Button type="primary" icon={<PlayCircleOutlined />}
+                  <Button type="primary" icon={isRunning ? <LockOutlined /> : <PlayCircleOutlined />}
                     onClick={() => handleSubmit('INDEX')} disabled={isRunning}>
                     开始更新
                   </Button>
@@ -1155,7 +1300,7 @@ function DataUpdate() {
             <Row gutter={[16, 12]} style={{ width: '100%', marginTop: 8 }}>
               <Col>
                 <Space size={12}>
-                  <Button type="primary" icon={<PlayCircleOutlined />}
+                  <Button type="primary" icon={isRunning ? <LockOutlined /> : <PlayCircleOutlined />}
                     onClick={() => handleSubmit('FINANCIAL')} disabled={isRunning}>
                     开始采集
                   </Button>
@@ -1341,7 +1486,7 @@ function DataUpdate() {
             <Row style={{ width: '100%' }}>
               <Col>
                 <Space size={12}>
-                  <Button type="primary" icon={<PlayCircleOutlined />}
+                  <Button type="primary" icon={isRunning ? <LockOutlined /> : <PlayCircleOutlined />}
                     onClick={() => handleSubmit('DIVIDEND')} disabled={isRunning}>
                     开始更新
                   </Button>
@@ -1583,7 +1728,7 @@ function DataUpdate() {
             <Row style={{ width: '100%' }}>
               <Col>
                 <Space size={12}>
-                  <Button type="primary" icon={<PlayCircleOutlined />}
+                  <Button type="primary" icon={isRunning ? <LockOutlined /> : <PlayCircleOutlined />}
                     onClick={() => handleSubmit('SENTIMENT')} disabled={isRunning}>
                     开始采集
                   </Button>
@@ -1732,7 +1877,7 @@ function DataUpdate() {
             <Row gutter={[16, 12]} style={{ width: '100%', marginTop: 8 }}>
               <Col>
                 <Space size={12}>
-                  <Button type="primary" icon={<PlayCircleOutlined />}
+                  <Button type="primary" icon={isRunning ? <LockOutlined /> : <PlayCircleOutlined />}
                     onClick={() => handleSubmit('RESEARCH')} disabled={isRunning}>
                     开始采集
                   </Button>
@@ -2041,6 +2186,12 @@ function DataUpdate() {
               forceRender: true,
               label: <span><FileTextOutlined /> 研报数据</span>,
               children: <div style={{ padding: '16px 0' }}>{renderResearchTab()}</div>,
+            },
+            {
+              key: 'DELISTED',
+              forceRender: false,
+              label: <span><DeleteOutlined /> 退市清理</span>,
+              children: <div style={{ padding: '16px 0' }}>{renderDelistedTab()}</div>,
             },
           ]}
         />

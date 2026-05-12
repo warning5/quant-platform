@@ -866,7 +866,7 @@ function FactorMonitor() {
         />
         <Form form={form} layout="vertical" initialValues={{
           incremental: true,
-          dateRange: [dayjs('2019-01-02'), dayjs()],
+          dateRange: [dayjs('2025-01-01'), dayjs()],
           factorCodes: pendingFactors.slice(0, 8).map(f => f.code),
         }}>
           <Form.Item label="选择因子" name="factorCodes" rules={[
@@ -914,11 +914,37 @@ function FactorMonitor() {
               <Button size="small" onClick={() => form.setFieldsValue({ factorCodes: [] })}>清空</Button>
             </Col>
           </Row>
+          {/* 按分类选择未完成因子 */}
+          <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {Object.entries(CATEGORY_LABELS).map(([cat, label]) => {
+              const pending = pendingFactors.filter(f => f.category === cat);
+              if (pending.length === 0) return null;
+              return (
+                <Tag
+                  key={cat}
+                  color={CATEGORY_COLORS[cat]}
+                  style={{ cursor: 'pointer', userSelect: 'none' }}
+                  onClick={() => {
+                    const current = form.getFieldValue('factorCodes') || [];
+                    const codes = pending.map(f => f.code);
+                    // 切换：如果该分类已全部选中则移除，否则追加
+                    const allSelected = codes.every(c => current.includes(c));
+                    const next = allSelected
+                      ? current.filter(c => !codes.includes(c))
+                      : [...new Set([...current, ...codes])].slice(0, 8);
+                    form.setFieldsValue({ factorCodes: next });
+                  }}
+                >
+                  {label}({pending.length})
+                </Tag>
+              );
+            })}
+          </div>
           <Divider style={{ margin: '12px 0' }} />
           <Form.Item label="计算日期范围" name="dateRange" rules={[{ required: true }]}>
             <RangePicker
               style={{ width: '100%' }}
-              disabledDate={(current) => current && (current.isBefore(dayjs('2019-01-02')) || current.isAfter(dayjs()))}
+              disabledDate={(current) => current && (current.isBefore(dayjs('2025-01-01')) || current.isAfter(dayjs()))}
             />
           </Form.Item>
           <Form.Item

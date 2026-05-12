@@ -278,7 +278,7 @@ function PresetDescPopover({ presetName }) {
       trigger="hover"
       placement="rightTop"
       getPopupContainer={() => document.body}
-      overlayStyle={{ zIndex: 99999 }}
+      styles={{ root: { zIndex: 99999 } }}
     >
       <InfoCircleOutlined style={{ color: '#1677ff', cursor: 'pointer', marginLeft: 4 }} />
     </Popover>

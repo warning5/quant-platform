@@ -364,7 +364,7 @@ export default function MarketList() {
                         </div>
                       </div>
                     }
-                    overlayStyle={{ maxWidth: 420 }}
+                    styles={{ root: { maxWidth: 420 } }}
                     overlayInnerStyle={{ padding: '12px 16px' }}
                     color="#fff"
                   >

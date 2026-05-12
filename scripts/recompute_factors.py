@@ -28,7 +28,8 @@
   python scripts/recompute_factors.py                              # 全部技术+波动率因子
   python scripts/recompute_factors.py --factors MOM20 MOM60         # 指定因子
   python scripts/recompute_factors.py --fin                        # 财务因子
-  python scripts/recompute_factors.py --all                        # 全部因子(技术+财务)
+  python scripts/recompute_factors.py --all-factors             # 全部因子(技术+财务)
+  python scripts/recompute_factors.py --all-factors --incremental  # 增量: 只补新增日期
   python scripts/recompute_factors.py --start-date 2024-01-01
   python scripts/recompute_factors.py --dry-run
 """
@@ -671,6 +672,27 @@ def clear_old_factors(factor_codes):
         ch_client.close()
 
 
+def get_last_computed_dates(factor_codes):
+    """
+    查询 CH factor_value 表，返回各因子已计算到的最新日期。
+    用于增量计算: 从该日期之后开始，只补新增部分。
+    """
+    if not factor_codes:
+        return {}
+    ch_client = clickhouse_connect.get_client(**CH_CONFIG)
+    try:
+        codes_str = "', '".join(factor_codes)
+        result = ch_client.query(f"""
+            SELECT factor_code, max(calc_date) as last_date
+            FROM factor_value
+            WHERE factor_code IN ('{codes_str}')
+            GROUP BY factor_code
+        """)
+        return {row[0]: row[1] for row in result.result_rows}
+    finally:
+        ch_client.close()
+
+
 # ==================== Main ====================
 
 def main():
@@ -684,6 +706,7 @@ def main():
     parser.add_argument("--batch-size", type=int, default=5000, help="INSERT 批量大小")
     parser.add_argument("--dry-run", action="store_true", help="只计算不写入")
     parser.add_argument("--skip-clear", action="store_true", help="不清空旧数据")
+    parser.add_argument("--incremental", action="store_true", help="增量模式: 自动从各因子最新已有日期开始计算，不清空旧数据")
     args = parser.parse_args()
 
     start_date = date.fromisoformat(args.start_date)
@@ -705,12 +728,35 @@ def main():
     tech_fc = [f for f in target_factors if f in TECH_FACTOR_FUNCS]
     fin_fc = [f for f in target_factors if f in FIN_FACTORS]
 
+    # ---- 增量模式: 自动从各因子最新已有日期开始 ----
+    if args.incremental:
+        last_dates = get_last_computed_dates(target_factors)
+        if last_dates:
+            from datetime import timedelta
+            # 日频因子: 取所有技术因子的最新日期（统一用最早的那个，避免漏算）
+            tech_last = min((last_dates[f] for f in tech_fc if f in last_dates), default=None)
+            if tech_last:
+                # 从最新日期的下一个交易日开始算（避免重复）
+                # stock_daily 是交易日历，这里简化处理：加1天然后让 compute_tech_factors 自己过滤
+                inc_start = tech_last + timedelta(days=1)
+                if inc_start > start_date:
+                    start_date = inc_start
+                    print(f"[增量] 日频因子从 {start_date} 开始 (之前最新: {tech_last})")
+            else:
+                print("[增量] 未找到已有日频因子数据，将全量计算")
+        else:
+            print("[增量] 未找到已有因子数据，将全量计算")
+
     print(f"\n{'='*60}")
     print(f"因子计算任务:")
     print(f"  日频因子({len(tech_fc)}): {tech_fc}")
     print(f"  财务因子({len(fin_fc)}): {fin_fc}")
-    print(f"  日期范围: {args.start_date} ~ {args.end_date or '最新'}")
+    print(f"  日期范围: {start_date} ~ {args.end_date or '最新'}")
+    print(f"  模式: {'增量' if args.incremental else '全量'}")
     print(f"{'='*60}\n")
+
+    # 增量模式下不执行 clear_old_factors（skip-clear=True）
+    do_clear = not args.skip_clear and not args.incremental
 
     code_market_map = load_code_market()
     all_results = {}
@@ -731,7 +777,7 @@ def main():
                 print(f"  {fc}: {len(vals):,} 条")
             all_results.update(factor_data)
         else:
-            if not args.skip_clear:
+            if do_clear:
                 clear_old_factors(tech_fc)
             normalize_and_write(factor_data, code_market_map, batch_size=args.batch_size)
 
@@ -748,11 +794,12 @@ def main():
                 print(f"  {fc}: {len(vals):,} 条")
             all_results.update(fin_factor_data)
         else:
-            if not args.skip_clear:
+            if do_clear:
                 clear_old_factors(fin_fc)
             normalize_and_write(fin_factor_data, code_market_map, batch_size=args.batch_size)
 
-    print("\n[DONE] 因子全量计算完成!")
+    mode_str = "增量" if args.incremental else "全量"
+    print(f"\n[DONE] 因子计算完成 ({mode_str}模式)!")
 
 
 if __name__ == "__main__":

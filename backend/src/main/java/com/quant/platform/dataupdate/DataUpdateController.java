@@ -13,6 +13,11 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
 import java.util.*;
+import java.io.*;
+import java.nio.charset.StandardCharsets;
+
+import org.springframework.beans.factory.annotation.Value;
+import jakarta.annotation.PostConstruct;
 
 /**
  * 数据更新管理 API
@@ -28,7 +33,35 @@ public class DataUpdateController {
     private final JdbcTemplate jdbcTemplate;
     private final com.quant.platform.stock.mapper.StockInfoMapper stockInfoMapper;
     private final ClickHouseStockService clickHouseStockService;
-    private final ClickHouseConfig clickHouseConfig;
+    private final com.quant.platform.config.ClickHouseConfig clickHouseConfig;
+
+    @Value("${quant.data-update.python-path:python}")
+    private String pythonPath;
+
+    @Value("${quant.data-update.script-dir:scripts}")
+    private String scriptDir;
+
+    private String resolvedScriptDir;
+
+    /** 退市股票查询缓存（结果 + 过期时间），1 小时有效 */
+    private volatile List<Map<String, Object>> delistedCache;
+    private volatile long delistedCacheTime = 0;
+    private static final long DELISTED_CACHE_TTL_MS = 3600_000; // 1 hour
+
+    @PostConstruct
+    public void init() {
+        java.io.File dir = new java.io.File(scriptDir);
+        if (!dir.isAbsolute()) {
+            dir = java.nio.file.Paths.get(System.getProperty("user.dir"), scriptDir).toFile();
+        }
+        if (dir.exists() && dir.isDirectory()) {
+            resolvedScriptDir = dir.getAbsolutePath();
+            log.info("[DataUpdate] 脚本目录: {}", resolvedScriptDir);
+        } else {
+            log.error("[DataUpdate] 脚本目录不存在: {}", dir.getAbsolutePath());
+            resolvedScriptDir = null;
+        }
+    }
 
     @GetMapping("/default-dates")
     @Operation(summary = "获取默认更新日期范围")
@@ -401,6 +434,157 @@ public class DataUpdateController {
         } catch (Exception e) {
             log.error("研报数据校验失败", e);
             return ApiResponse.error("研报数据校验失败: " + e.getMessage());
+        }
+    }
+
+    // ==================== 退市股票清理 ====================
+
+    /**
+     * 调用 find_delisted_stocks.py 脚本获取退市股票列表
+     */
+    private String runFindDelistedScript() throws Exception {
+        if (resolvedScriptDir == null) {
+            throw new IllegalStateException("脚本目录未配置，请在 application.yml 中设置 quant.data-update.script-dir");
+        }
+        java.io.File script = new java.io.File(resolvedScriptDir, "find_delisted_stocks.py");
+        if (!script.exists()) {
+            throw new java.io.FileNotFoundException("脚本不存在: " + script.getAbsolutePath());
+        }
+
+        ProcessBuilder pb = new ProcessBuilder(pythonPath, script.getAbsolutePath());
+        pb.directory(new java.io.File(resolvedScriptDir));
+        pb.redirectErrorStream(false);
+        // 强制 Python 使用 UTF-8 输出，避免 Windows 默认 GBK 导致中文乱码
+        pb.environment().put("PYTHONIOENCODING", "utf-8");
+        Process p = pb.start();
+
+        // 读取 stdout（JSON 输出）
+        String json;
+        try (BufferedReader br = new BufferedReader(
+                new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = br.readLine()) != null) {
+                sb.append(line);
+            }
+            json = sb.toString().trim();
+        }
+
+        int rc = p.waitFor();
+        if (rc != 0) {
+            String err;
+            try (BufferedReader er = new BufferedReader(
+                    new InputStreamReader(p.getErrorStream(), StandardCharsets.UTF_8))) {
+                err = String.join("\n", er.lines().toArray(String[]::new));
+            }
+            log.error("[find_delisted] 脚本执行失败 (rc={}): {}", rc, err);
+            throw new RuntimeException("脚本执行失败: " + err);
+        }
+
+        if (json.isEmpty()) {
+            return "[]";
+        }
+        return json;
+    }
+
+    @GetMapping("/delisted/list")
+    @Operation(summary = "查询退市股票列表（通过 Baostock 差分，缓存 1 小时）")
+    public ApiResponse<List<Map<String, Object>>> listDelistedStocks(
+            @RequestParam(defaultValue = "30") int inactiveDays) {
+        try {
+            // 缓存命中
+            long now = System.currentTimeMillis();
+            if (delistedCache != null && (now - delistedCacheTime) < DELISTED_CACHE_TTL_MS) {
+                log.debug("[退市查询] 命中缓存，剩余 {} 分钟",
+                        (DELISTED_CACHE_TTL_MS - (now - delistedCacheTime)) / 60_000);
+                return ApiResponse.success(delistedCache);
+            }
+            // 缓存过期，调用 Python 脚本
+            String json = runFindDelistedScript();
+            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            List<Map<String, Object>> stocks = mapper.readValue(json,
+                    mapper.getTypeFactory().constructCollectionType(List.class, Map.class));
+            delistedCache = stocks;
+            delistedCacheTime = System.currentTimeMillis();
+            log.info("[退市查询] 脚本执行完毕，结果已缓存 ({} 只)", stocks.size());
+            return ApiResponse.success(stocks);
+        } catch (Exception e) {
+            log.error("查询退市股票列表失败", e);
+            return ApiResponse.error("查询失败: " + e.getMessage());
+        }
+    }
+
+    @PostMapping("/delisted/clean")
+    @Operation(summary = "清理退市股票数据")
+    public ApiResponse<Map<String, Object>> cleanDelistedStocks(@RequestBody List<String> codes) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        try {
+            if (codes == null || codes.isEmpty()) {
+                return ApiResponse.error("请选择要清理的股票");
+            }
+            // 清除退市查询缓存
+            delistedCache = null;
+            delistedCacheTime = 0;
+
+            result.put("cleanedCodes", codes);
+            result.put("codeCount", codes.size());
+            int totalDeleted = 0;
+
+            // 1. MySQL stock_info 删除
+            try {
+                String placeholders = String.join(",", codes.stream().map(c -> "?").toArray(String[]::new));
+                int deleted = jdbcTemplate.update(
+                        "DELETE FROM stock_info WHERE code IN (" + placeholders + ")", codes.toArray());
+                result.put("stockInfoDeleted", deleted);
+                totalDeleted += deleted;
+            } catch (Exception e) {
+                log.error("删除 MySQL stock_info 失败", e);
+                result.put("stockInfoError", e.getMessage());
+            }
+
+            // 2. ClickHouse 各表删除
+            String[] chTables = {
+                "stock_daily", "factor_value", "stock_sentiment_moneyflow"
+            };
+            // stock_daily 和 moneyflow 用 code 字段，factor_value 用 symbol 字段
+            Map<String, String> codeColumns = new LinkedHashMap<>();
+            codeColumns.put("stock_daily", "code");
+            codeColumns.put("factor_value", "symbol");
+            codeColumns.put("stock_sentiment_moneyflow", "code");
+
+            for (Map.Entry<String, String> entry : codeColumns.entrySet()) {
+                String table = entry.getKey();
+                String col = entry.getValue();
+                try {
+                    // 先查删除前数量
+                    String ph = String.join(",", codes.stream().map(c -> "?").toArray(String[]::new));
+                    Object bc = clickHouseStockService.queryForObject(
+                            "SELECT count() FROM stock." + table + " FINAL WHERE " + col + " IN (" + ph + ")",
+                            codes.toArray());
+                    Long beforeCount = bc != null ? ((Number) bc).longValue() : 0L;
+                    result.put(table + "_before", beforeCount);
+
+                    if (beforeCount != null && beforeCount > 0) {
+                        String inClause = String.join(",", codes.stream().map(c -> "'" + c + "'").toArray(String[]::new));
+                        String deleteSql = "ALTER TABLE stock." + table + " DELETE WHERE " + col + " IN (" + inClause + ")";
+                        clickHouseStockService.executeDdl(deleteSql);
+                        result.put(table + "_deleted", beforeCount);
+                        totalDeleted += beforeCount;
+                    } else {
+                        result.put(table + "_deleted", 0);
+                    }
+                } catch (Exception e) {
+                    log.error("删除 CH {} 失败", table, e);
+                    result.put(table + "_error", e.getMessage());
+                }
+            }
+
+            result.put("totalDeleted", totalDeleted);
+            log.info("[退市清理] 完成: codes={}, 总删除 {}", codes, totalDeleted);
+            return ApiResponse.success(result);
+        } catch (Exception e) {
+            log.error("退市清理失败", e);
+            return ApiResponse.error("清理失败: " + e.getMessage());
         }
     }
 }

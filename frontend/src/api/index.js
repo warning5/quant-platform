@@ -159,6 +159,8 @@ export const paperTradingApi = {
   executeAllSignals: (paperId) => api.post(`/paper-trading/${paperId}/execute-all-signals`),
   // 处理分红送股
   processDividends: (paperId) => api.post(`/paper-trading/${paperId}/process-dividends`),
+  // 删除模拟盘
+  delete: (paperId) => api.delete(`/paper-trading/${paperId}`),
 };
 
 // ===== 回测 API =====
@@ -241,6 +243,9 @@ export const dataUpdateApi = {
   // 研报数据
   getResearchCoverage: () => api.get('/data-update/research/coverage'),
   validateResearch: () => api.get('/data-update/research/validate'),
+  // 退市清理
+  getDelistedStocks: (inactiveDays = 30) => api.get('/data-update/delisted/list', { params: { inactiveDays } }),
+  cleanDelistedStocks: (codes) => api.post('/data-update/delisted/clean', codes),
 };
 
 // ===== 研报数据 API =====

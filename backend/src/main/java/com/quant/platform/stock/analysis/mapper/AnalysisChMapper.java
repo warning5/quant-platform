@@ -135,8 +135,8 @@ public class AnalysisChMapper {
             LocalDate start = end.minusDays(10);
             List<StockDaily> dailies = stockService.getStockDaily(noSuffix, start, end);
             if (dailies != null && !dailies.isEmpty()) {
-                // 取最近一条（getStockDaily 已按 trade_date DESC 排序）
-                StockDaily latest = dailies.get(0);
+                // getStockDaily 返回按 trade_date ASC 排序，取最后一条即最新交易日
+                StockDaily latest = dailies.get(dailies.size() - 1);
                 java.util.Map<String, Object> map = new java.util.HashMap<>();
                 map.put("close_price", latest.getClosePrice());
                 map.put("change_percent", latest.getChangePercent());

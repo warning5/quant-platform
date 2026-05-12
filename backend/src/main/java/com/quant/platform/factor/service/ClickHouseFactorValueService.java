@@ -323,22 +323,20 @@ public class ClickHouseFactorValueService {
 
         String sql = """
                 INSERT INTO stock.factor_value
-                (id, factor_code, symbol, calc_date, factor_val, rank_value, z_score, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (factor_code, symbol, calc_date, factor_val, rank_value, z_score, created_at, update_time)
+                VALUES (?, ?, ?, ?, ?, ?, now(), now())
                 """;
 
         try (Connection conn = getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
 
             for (com.quant.platform.factor.domain.FactorValue fv : values) {
-                stmt.setLong(1, fv.getId() != null ? fv.getId() : 0);
-                stmt.setString(2, fv.getFactorCode());
-                stmt.setString(3, fv.getSymbol());
-                stmt.setString(4, fv.getCalcDate().toString());
-                setBigDecimal(stmt, 5, fv.getFactorVal());
-                setBigDecimal(stmt, 6, fv.getRankValue());
-                setBigDecimal(stmt, 7, fv.getZScore());
-                setLocalDateTime(stmt, 8, fv.getCreatedAt());
+                stmt.setString(1, fv.getFactorCode());
+                stmt.setString(2, fv.getSymbol());
+                stmt.setString(3, fv.getCalcDate().toString());
+                setBigDecimal(stmt, 4, fv.getFactorVal());
+                setBigDecimal(stmt, 5, fv.getRankValue());
+                setBigDecimal(stmt, 6, fv.getZScore());
                 stmt.addBatch();
             }
 
@@ -494,6 +492,262 @@ public class ClickHouseFactorValueService {
             throw new RuntimeException("ClickHouse 删除失败: " + e.getMessage(), e);
         }
         return countBefore;
+    }
+
+    /**
+     * 按因子代码+日期范围删除 ClickHouse 因子值（异步ALTER TABLE DELETE）
+     * 用于重算前清除旧数据，避免重复写入导致 ReplacingMergeTree 物理行膨胀。
+     *
+     * @return 删除前的记录数
+     */
+    public long deleteByFactorCodeAndDateRange(String factorCode, String startDate, String endDate) {
+        if (!clickHouseConfig.isEnabled()) {
+            return 0L;
+        }
+        // 先查删除前数量
+        long countBefore = 0L;
+        String countSql = "SELECT count() FROM stock.factor_value FINAL WHERE factor_code = ? AND calc_date >= ? AND calc_date <= ?";
+        try (Connection conn = getConnection();
+             PreparedStatement stmt = conn.prepareStatement(countSql)) {
+            stmt.setString(1, factorCode);
+            stmt.setString(2, startDate);
+            stmt.setString(3, endDate);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    countBefore = rs.getLong(1);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[ClickHouse] deleteByFactorCodeAndDateRange 计数失败: {}", e.getMessage());
+        }
+
+        if (countBefore == 0) {
+            log.info("[ClickHouse] deleteByFactorCodeAndDateRange: {} {}~{} 无数据，跳过删除", factorCode, startDate, endDate);
+            return 0L;
+        }
+
+        // 异步删除（ALTER TABLE DELETE WHERE）
+        String deleteSql = "ALTER TABLE stock.factor_value DELETE WHERE factor_code = ? AND calc_date >= ? AND calc_date <= ?";
+        try (Connection conn = getConnection();
+             PreparedStatement stmt = conn.prepareStatement(deleteSql)) {
+            stmt.setString(1, factorCode);
+            stmt.setString(2, startDate);
+            stmt.setString(3, endDate);
+            stmt.executeUpdate();
+            log.info("[ClickHouse] 已提交异步删除任务: factor_code={}, {}~{}, 删除前数量={}", factorCode, startDate, endDate, countBefore);
+        } catch (Exception e) {
+            log.error("[ClickHouse] deleteByFactorCodeAndDateRange 删除失败: {}", e.getMessage(), e);
+            throw new RuntimeException("ClickHouse 删除失败: " + e.getMessage(), e);
+        }
+
+        // 等待 mutation 完成后再返回（避免新写入的数据被 mutation 吃掉）
+        waitForMutations();
+
+        return countBefore;
+    }
+
+    /**
+     * 等待 ClickHouse 所有 mutations 完成
+     * 通过轮询 system.mutations 表，直到没有活跃的 mutation
+     */
+    private void waitForMutations() {
+        try {
+            int maxWait = 60; // 最多等60秒
+            int waited = 0;
+            while (waited < maxWait) {
+                String checkSql = "SELECT count() FROM system.mutations WHERE is_done = 0 AND table = 'factor_value' AND database = 'stock'";
+                try (Connection conn = getConnection();
+                     PreparedStatement stmt = conn.prepareStatement(checkSql);
+                     ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next() && rs.getLong(1) == 0) {
+                        log.info("[ClickHouse] mutations 已全部完成");
+                        return;
+                    }
+                }
+                Thread.sleep(1000);
+                waited++;
+            }
+            log.warn("[ClickHouse] 等待 mutations 超时（{}秒），继续执行", maxWait);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (Exception e) {
+            log.warn("[ClickHouse] 检查 mutations 状态失败: {}", e.getMessage());
+        }
+    }
+
+    // ==================== 归一化（SQL 窗口函数一次性计算） ====================
+
+    /**
+     * 批量归一化：利用 CH 窗口函数一次性计算所有日期的 z_score 和 rank_value，
+     * 然后 INSERT 覆盖（ReplacingMergeTree 按最新 update_time 去重）。
+     *
+     * 优化：将原来 178万次 UPDATE（逐日逐行）替换为 2次SQL（算+写），提速 10x+
+     *
+     * @return 处理的行数
+     */
+    public long batchNormalize(String factorCode, java.util.List<java.time.LocalDate> dates) {
+        if (!clickHouseConfig.isEnabled() || dates == null || dates.isEmpty()) {
+            return 0L;
+        }
+
+        if (dates.size() == 1) {
+            // 单日期走内存计算路径（避免小数据量也走复杂SQL）
+            return normalizeSingleDate(factorCode, dates.getFirst());
+        }
+
+        String startDate = dates.getFirst().toString();
+        String endDate = dates.get(dates.size() - 1).toString();
+
+        log.info("[ClickHouse] batchNormalize: {} | {} ~ {} ({} dates)", factorCode, startDate, endDate, dates.size());
+
+        // Step 1: 用窗口函数一次性计算所有日期的 z_score 和 rank_value
+        // 所有聚合函数必须带 OVER (PARTITION BY calc_date)，否则 CH 报 NOT_AN_AGGREGATE
+        String sql = """
+                SELECT factor_code, symbol, calc_date, factor_val,
+                       if(stddevPop(factor_val) OVER (PARTITION BY calc_date) = 0, 0,
+                           (factor_val - avg(factor_val) OVER (PARTITION BY calc_date))
+                           / stddevPop(factor_val) OVER (PARTITION BY calc_date)) AS z_score,
+                       if(count(*) OVER (PARTITION BY calc_date) <= 1, 0.5,
+                           (rank() OVER (PARTITION BY calc_date ORDER BY factor_val) - 1) * 1.0
+                           / (count(*) OVER (PARTITION BY calc_date) - 1)) AS rank_value
+                FROM stock.factor_value FINAL
+                WHERE factor_code = ? AND calc_date >= ? AND calc_date <= ?
+                ORDER BY calc_date, symbol
+                """;
+
+        java.util.List<Object[]> rows = new ArrayList<>();
+        try (Connection conn = getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            stmt.setString(1, factorCode);
+            stmt.setString(2, startDate);
+            stmt.setString(3, endDate);
+
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    rows.add(new Object[]{
+                            rs.getString("factor_code"),
+                            rs.getString("symbol"),
+                            rs.getString("calc_date"),
+                            rs.getDouble("factor_val"),
+                            rs.getDouble("z_score"),
+                            rs.getDouble("rank_value")
+                    });
+                }
+            }
+        } catch (Exception e) {
+            log.error("[ClickHouse] batchNormalize 查询失败: {}", e.getMessage(), e);
+            throw new RuntimeException("ClickHouse 归一化查询失败: " + e.getMessage(), e);
+        }
+
+        if (rows.isEmpty()) {
+            log.info("[ClickHouse] batchNormalize: 无数据，跳过");
+            return 0L;
+        }
+
+        // Step 2: 批量 INSERT 覆盖（ReplacingMergeTree 自动去重，保留最新 update_time 行）
+        String insertSql = """
+                INSERT INTO stock.factor_value
+                (factor_code, symbol, calc_date, factor_val, z_score, rank_value, created_at, update_time)
+                VALUES (?, ?, ?, ?, ?, ?, now(), now())
+                """;
+        final int BATCH_SIZE = 10000;
+
+        try (Connection conn = getConnection();
+             PreparedStatement stmt = conn.prepareStatement(insertSql)) {
+
+            for (int i = 0; i < rows.size(); i++) {
+                Object[] row = rows.get(i);
+                stmt.setString(1, (String) row[0]); // factor_code
+                stmt.setString(2, (String) row[1]); // symbol
+                stmt.setString(3, (String) row[2]); // calc_date
+                stmt.setDouble(4, (Double) row[3]); // factor_val
+                stmt.setDouble(5, (Double) row[4]); // z_score
+                stmt.setDouble(6, (Double) row[5]); // rank_value
+                stmt.addBatch();
+
+                if ((i + 1) % BATCH_SIZE == 0) {
+                    stmt.executeBatch();
+                    log.info("[ClickHouse] batchNormalize: 已写入 {}/{}", i + 1, rows.size());
+                }
+            }
+            stmt.executeBatch();
+        } catch (Exception e) {
+            log.error("[ClickHouse] batchNormalize 写入失败: {}", e.getMessage(), e);
+            throw new RuntimeException("ClickHouse 归一化写入失败: " + e.getMessage(), e);
+        }
+
+        log.info("[ClickHouse] batchNormalize 完成: {} 行", rows.size());
+        return rows.size();
+    }
+
+    /**
+     * 单日期内存归一化（小数据量场景）
+     */
+    private long normalizeSingleDate(String factorCode, java.time.LocalDate date) {
+        String sql = """
+                SELECT factor_code, symbol, calc_date, factor_val,
+                       if(stddevPop(factor_val) OVER () = 0, 0,
+                           (factor_val - avg(factor_val) OVER ())
+                           / stddevPop(factor_val) OVER ()) AS z_score,
+                       if(count(*) OVER () <= 1, 0.5,
+                           (rank() OVER (ORDER BY factor_val) - 1) * 1.0
+                           / (count(*) OVER () - 1)) AS rank_value
+                FROM stock.factor_value FINAL
+                WHERE factor_code = ? AND calc_date = ?
+                ORDER BY symbol
+                """;
+
+        java.util.List<Object[]> rows = new ArrayList<>();
+        try (Connection conn = getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+
+            stmt.setString(1, factorCode);
+            stmt.setString(2, date.toString());
+
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    rows.add(new Object[]{
+                            rs.getString("factor_code"),
+                            rs.getString("symbol"),
+                            rs.getString("calc_date"),
+                            rs.getDouble("factor_val"),
+                            rs.getDouble("z_score"),
+                            rs.getDouble("rank_value")
+                    });
+                }
+            }
+        } catch (Exception e) {
+            log.error("[ClickHouse] normalizeSingleDate 失败: {}", e.getMessage(), e);
+            throw new RuntimeException("ClickHouse 单日归一化失败: " + e.getMessage(), e);
+        }
+
+        if (rows.isEmpty()) return 0L;
+
+        String insertSql = """
+                INSERT INTO stock.factor_value
+                (factor_code, symbol, calc_date, factor_val, z_score, rank_value, created_at, update_time)
+                VALUES (?, ?, ?, ?, ?, ?, now(), now())
+                """;
+
+        try (Connection conn = getConnection();
+             PreparedStatement stmt = conn.prepareStatement(insertSql)) {
+            for (Object[] row : rows) {
+                stmt.setString(1, (String) row[0]);
+                stmt.setString(2, (String) row[1]);
+                stmt.setString(3, (String) row[2]);
+                stmt.setDouble(4, (Double) row[3]);
+                stmt.setDouble(5, (Double) row[4]);
+                stmt.setDouble(6, (Double) row[5]);
+                stmt.addBatch();
+            }
+            stmt.executeBatch();
+        } catch (Exception e) {
+            log.error("[ClickHouse] normalizeSingleDate 写入失败: {}", e.getMessage(), e);
+            throw new RuntimeException("ClickHouse 单日归一化写入失败: " + e.getMessage(), e);
+        }
+
+        return rows.size();
     }
 
     // ==================== 辅助方法 ====================

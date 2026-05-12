@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import {
   Card, Row, Col, Table, Tag, Button, Modal, Select, InputNumber, Space,
-  Typography, Statistic, Spin, Tooltip, Alert, message,
+  Typography, Statistic, Spin, Tooltip, Alert, message, Popconfirm,
 } from 'antd';
 import {
   ThunderboltOutlined, PlayCircleOutlined, PauseCircleOutlined,
   CheckCircleOutlined, CloseCircleOutlined, SendOutlined, LeftOutlined,
-  InfoCircleOutlined,
+  InfoCircleOutlined, DeleteOutlined,
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import { paperTradingApi, strategyApi } from '../../api';
@@ -25,6 +25,16 @@ function PaperList({ onSelect }) {
   const load = () => {
     setLoading(true);
     paperTradingApi.list().then(d => setList(d || [])).catch(() => setList([])).finally(() => setLoading(false));
+  };
+
+  const handleDelete = async (id) => {
+    try {
+      await paperTradingApi.delete(id);
+      message.success('模拟盘已删除');
+      load();
+    } catch (e) {
+      // 错误信息由 axios 拦截器统一展示
+    }
   };
 
   useEffect(() => { load(); }, []);
@@ -51,7 +61,7 @@ function PaperList({ onSelect }) {
       },
     },
     {
-      title: '操作', width: 120,
+      title: '操作', width: 150,
       render: (_, r) => (
         <Space size={4}>
           <Button size="small" type="link" onClick={() => onSelect(r.id)}>详情</Button>
@@ -65,6 +75,9 @@ function PaperList({ onSelect }) {
               恢复
             </Button>
           )}
+          <Popconfirm title="确认删除此模拟盘？所有持仓、信号、净值数据将一并删除。" onConfirm={() => handleDelete(r.id)} okText="删除" cancelText="取消" okButtonProps={{ danger: true }}>
+            <Button size="small" type="link" danger>删除</Button>
+          </Popconfirm>
         </Space>
       ),
     },
@@ -93,7 +106,7 @@ function PaperList({ onSelect }) {
               </div>
             }
             placement="right"
-            overlayStyle={{ maxWidth: 520 }}
+            styles={{ root: { maxWidth: 520 } }}
           >
             <InfoCircleOutlined style={{ marginLeft: 8, color: '#bbb', fontSize: 16, cursor: 'pointer' }} />
           </Tooltip>
@@ -249,9 +262,9 @@ function PaperDetail({ paperId, onBack }) {
   const navOption = navHistory.length > 0 ? {
     backgroundColor: 'transparent',
     tooltip: { trigger: 'axis' },
-    grid: { left: 60, right: 20, top: 20, bottom: 30 },
+    grid: { left: 70, right: 20, top: 20, bottom: 40 },
     xAxis: { type: 'category', data: navHistory.map(n => n.navDate), axisLabel: { fontSize: 10, rotate: 45 } },
-    yAxis: { type: 'value', name: '累计收益率%', axisLabel: { fontSize: 10 } },
+    yAxis: { type: 'value', name: '累计收益率(%)', nameLocation: 'middle', nameGap: 45, nameTextStyle: { fontSize: 11 }, axisLabel: { fontSize: 10 } },
     series: [{
       type: 'line', smooth: true, symbol: 'none',
       data: navHistory.map(n => n.cumulativeReturn != null ? +(n.cumulativeReturn * 100).toFixed(2) : 0),
@@ -316,15 +329,13 @@ function PaperDetail({ paperId, onBack }) {
         <Col span={4}><Card size="small"><Statistic title="累计收益" value={cumulativeReturn * 100} suffix="%" precision={2} valueStyle={{ color: chgColor(cumulativeReturn) }} /></Card></Col>
         <Col span={4}><Card size="small"><Statistic title="持仓数" value={paper.positionCount} /></Card></Col>
         <Col span={4}><Card size="small"><Statistic title="可用资金" value={paper.currentCapital} prefix="¥" /></Card></Col>
-        <Col span={4} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <Col span={4} style={{ display: 'flex', flexDirection: 'column', gap: 8, justifyContent: 'center' }}>
           <Button type="primary" icon={<SendOutlined />} onClick={handleGenerate} loading={genLoading}>
             生成信号
           </Button>
           <Button onClick={handleBatchExecute} loading={batchExecLoading}>
             一键执行
           </Button>
-        </Col>
-        <Col span={4} style={{ display: 'flex', alignItems: 'center' }}>
           <Button onClick={handleProcessDividends} loading={dividendLoading}>
             处理分红
           </Button>

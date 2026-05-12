@@ -1006,6 +1006,16 @@ public class ClickHouseStockService {
         return DriverManager.getConnection(clickHouseConfig.getJdbcUrl());
     }
 
+    /**
+     * 执行 DDL/DML 语句（如 ALTER TABLE DELETE）
+     */
+    public void executeDdl(String sql) throws SQLException {
+        try (Connection conn = getConnection();
+             Statement stmt = conn.createStatement()) {
+            stmt.execute(sql);
+        }
+    }
+
     // ==================== 写入方法 ====================
 
     /**

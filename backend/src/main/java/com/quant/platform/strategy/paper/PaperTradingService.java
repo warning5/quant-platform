@@ -143,8 +143,16 @@ public class PaperTradingService {
             throw new IllegalArgumentException("因子配置解析失败: " + e.getMessage());
         }
 
-        // 获取最新交易日期
-        String latestDate = getLatestTradeDate();
+        // 收集策略中实际使用的因子code
+        Set<String> usedFactorCodes = new LinkedHashSet<>();
+        for (Map<String, Object> fc : factorConfigs) {
+            String code = (String) fc.getOrDefault("code", fc.get("factorCode"));
+            if (code != null && !code.isBlank()) usedFactorCodes.add(code);
+        }
+
+        // 获取最新交易日期：取策略中每个因子各自最新日期的最小值，确保所有因子都有数据
+        String latestDate = getLatestTradeDate(usedFactorCodes);
+        log.info("generateSignals: paperId={}, latestDate={}, factorConfigs={}", paperId, latestDate, factorConfigs.size());
 
         // 对每个因子查最新截面 rank_value，加权求和
         Map<String, Double> stockScores = new HashMap<>();
@@ -177,6 +185,7 @@ public class PaperTradingService {
                         stockScores.merge(sym, adjustedRank * weight, Double::sum);
                         stockWeights.merge(sym, weight, Double::sum);
                     });
+                    log.info("generateSignals: factor={}, date={}, rows={}", factorCode, latestDate, stockScores.size());
                 } catch (Exception e) {
                     log.debug("因子 {} 截面查询失败: {}", factorCode, e.getMessage());
                 }
@@ -195,6 +204,8 @@ public class PaperTradingService {
             .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
             .limit(20)
             .toList();
+        log.info("generateSignals: scored stocks={}, top20 first={}, last={}", finalScores.size(),
+            sorted.isEmpty() ? "N/A" : sorted.getFirst().getKey(), sorted.isEmpty() ? "N/A" : sorted.getLast().getKey());
 
         // 获取当前持仓
         List<PaperPosition> currentPositions = paperPositionMapper.selectList(
@@ -531,12 +542,56 @@ public class PaperTradingService {
         }
     }
 
-    private String getLatestTradeDate() {
+    /**
+     * 获取最新交易日期
+     * 策略：取每个因子各自最新 calc_date 的最小值，确保所有因子在该日期都有数据
+     * 回退链：逐因子MAX最小值 → 全局MAX(排除CHAN/FIN) → stock_daily MAX → 今天
+     */
+    private String getLatestTradeDate(Set<String> factorCodes) {
         if (clickHouseJdbcTemplate == null) return LocalDate.now().toString();
+
+        if (factorCodes != null && !factorCodes.isEmpty()) {
+            // 对每个因子取各自最新日期，返回最小值（所有因子都有的日期）
+            LocalDate minDate = null;
+            for (String code : factorCodes) {
+                try {
+                    List<String> dates = clickHouseJdbcTemplate.query(
+                        String.format(
+                            "SELECT MAX(calc_date) FROM stock.factor_value FINAL WHERE factor_code = '%s'",
+                            code),
+                        (rs, rowNum) -> rs.getString(1));
+                    if (!dates.isEmpty() && dates.getFirst() != null) {
+                        LocalDate d = LocalDate.parse(dates.getFirst());
+                        if (minDate == null || d.isBefore(minDate)) {
+                            minDate = d;
+                        }
+                    }
+                } catch (Exception e) {
+                    log.debug("查询因子 {} 最新日期失败: {}", code, e.getMessage());
+                }
+            }
+            if (minDate != null) {
+                log.info("getLatestTradeDate: 逐因子取MIN={}, factors={}", minDate, factorCodes);
+                return minDate.toString();
+            }
+        }
+
+        // 回退：全局 MAX 排除缠论和财务因子
         List<String> dates = clickHouseJdbcTemplate.query(
-            "SELECT MAX(trade_date) FROM stock.stock_daily FINAL",
+            "SELECT MAX(calc_date) FROM stock.factor_value FINAL " +
+            "WHERE factor_code NOT LIKE 'CHAN_%' AND factor_code NOT LIKE 'FIN_%'",
             (rs, rowNum) -> rs.getString(1));
-        return dates.isEmpty() ? LocalDate.now().toString() : dates.getFirst();
+        if (dates.isEmpty() || dates.getFirst() == null) {
+            dates = clickHouseJdbcTemplate.query(
+                "SELECT MAX(calc_date) FROM stock.factor_value FINAL",
+                (rs, rowNum) -> rs.getString(1));
+        }
+        if (dates.isEmpty() || dates.getFirst() == null) {
+            dates = clickHouseJdbcTemplate.query(
+                "SELECT MAX(trade_date) FROM stock.stock_daily FINAL",
+                (rs, rowNum) -> rs.getString(1));
+        }
+        return dates.isEmpty() || dates.getFirst() == null ? LocalDate.now().toString() : dates.getFirst();
     }
 
     private BigDecimal getLatestPrice(String code, String date) {
@@ -562,6 +617,24 @@ public class PaperTradingService {
         } catch (Exception e) {
             return code;
         }
+    }
+
+    /**
+     * 删除模拟盘（及关联的持仓、信号、净值）
+     */
+    @Transactional
+    public void deletePaperTrading(Long paperId) {
+        PaperTrading pt = paperTradingMapper.selectById(paperId);
+        if (pt == null) throw new IllegalArgumentException("模拟盘不存在");
+        // 按依赖顺序删除：信号 → 持仓 → 净值 → 主表
+        paperSignalMapper.delete(
+            new LambdaQueryWrapper<PaperSignal>().eq(PaperSignal::getPaperId, paperId));
+        paperPositionMapper.delete(
+            new LambdaQueryWrapper<PaperPosition>().eq(PaperPosition::getPaperId, paperId));
+        paperNavMapper.delete(
+            new LambdaQueryWrapper<PaperNav>().eq(PaperNav::getPaperId, paperId));
+        paperTradingMapper.deleteById(paperId);
+        log.info("模拟盘已删除: id={}, strategyCode={}", paperId, pt.getStrategyCode());
     }
 
     private String getStrategyFactorConfig(Long strategyId) {
