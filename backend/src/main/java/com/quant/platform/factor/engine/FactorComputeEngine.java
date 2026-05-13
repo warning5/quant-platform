@@ -217,6 +217,15 @@ public class FactorComputeEngine {
     }
 
     /**
+     * 判断是否为财务因子：按 FIN_ 前缀或已注册的财务计算器
+     * 优先用前缀判断，确保新增 FIN_ 因子无需修改代码也能正确识别
+     */
+    private boolean isFinancialFactor(String code) {
+        if (code != null && code.startsWith("FIN_")) return true;
+        return isFinancialFactor(code);
+    }
+
+    /**
      * 计算因子值（时间区间 × 股票池）
      */
     @Async("backtestTaskExecutor")
@@ -234,7 +243,7 @@ public class FactorComputeEngine {
         String code = factor.getFactorCode();
         runningFactors.add(code);
         try {
-            if (financialCalculators.containsKey(code)) {
+            if (isFinancialFactor(code)) {
                 computeFinancialFactorSync(code, startDate, endDate, symbols);
                 sendProgress(code, "DONE", 100, "财务因子计算完成");
                 return;
@@ -254,7 +263,7 @@ public class FactorComputeEngine {
     public void computeFactorSync(FactorDefinition factor, LocalDate startDate, LocalDate endDate, List<String> symbols) {
         runningFactors.add(factor.getFactorCode());
         try {
-            if (financialCalculators.containsKey(factor.getFactorCode())) {
+            if (isFinancialFactor(factor.getFactorCode())) {
                 computeFinancialFactorSync(factor.getFactorCode(), startDate, endDate, symbols);
                 return;
             }
@@ -280,7 +289,7 @@ public class FactorComputeEngine {
     public void doComputeFactorSync(FactorDefinition factor, LocalDate startDate, LocalDate endDate,
                                      List<String> symbols, Map<String, List<MarketDailyBar>> allBarsData) {
         try {
-            if (financialCalculators.containsKey(factor.getFactorCode())) {
+            if (isFinancialFactor(factor.getFactorCode())) {
                 computeFinancialFactorSync(factor.getFactorCode(), startDate, endDate, symbols);
                 return;
             }
@@ -421,7 +430,7 @@ public class FactorComputeEngine {
 
         try {
             // 财务因子走专门的增量计算逻辑（基于财报报告期，而非交易日）
-            if (financialCalculators.containsKey(code)) {
+            if (isFinancialFactor(code)) {
                 computeFinancialFactorIncremental(code, startDate, endDate, symbols);
                 return;
             }
@@ -464,7 +473,7 @@ public class FactorComputeEngine {
 
         try {
             // 财务因子不走预加载路径，回退到自行处理
-            if (financialCalculators.containsKey(code)) {
+            if (isFinancialFactor(code)) {
                 computeFinancialFactorIncremental(code, startDate, endDate, symbols);
                 return;
             }
@@ -913,7 +922,7 @@ public class FactorComputeEngine {
         String factorCode = factor.getFactorCode();
 
         // 财务因子走单独的计算路径（基于财务报表数据，非行情K线）
-        if (financialCalculators.containsKey(factorCode)) {
+        if (isFinancialFactor(factorCode)) {
             return computeOneDateFinancial(factorCode, date, symbols);
         }
 
@@ -948,7 +957,7 @@ public class FactorComputeEngine {
                                                        Map<String, List<MarketDailyBar>> allBarsData) {
         String factorCode = factor.getFactorCode();
 
-        if (financialCalculators.containsKey(factorCode)) {
+        if (isFinancialFactor(factorCode)) {
             // 财务因子仍走DB查询（每个日期取最新财报）
             return computeOneDateFinancial(factorCode, date, symbols);
         }

@@ -736,9 +736,13 @@ public class FactorService {
         Set<String> existingCodes = new java.util.HashSet<>(
                 clickHouseFactorValueService.findFactorsWithDates(date.toString()));
 
-        // 3. 找出缺失因子
+        // 3. 找出缺失因子（排除财务因子，财务因子非日频更新）
         return allFactors.stream()
                 .filter(f -> !existingCodes.contains(f.getFactorCode()))
+                .filter(f -> {
+                    String code = f.getFactorCode();
+                    return code != null && !code.startsWith("FIN_");
+                })
                 .map(f -> {
                     Map<String, Object> m = new java.util.LinkedHashMap<>();
                     m.put("id", f.getId());

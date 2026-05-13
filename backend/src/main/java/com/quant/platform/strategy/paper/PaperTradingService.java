@@ -116,6 +116,15 @@ public class PaperTradingService {
         if (pt == null) throw new IllegalArgumentException("模拟盘不存在");
         if (!"RUNNING".equals(pt.getStatus())) throw new IllegalArgumentException("模拟盘未运行");
 
+        // 生成前先删除该模拟盘所有 PENDING 信号，避免重复生成
+        int cleared = paperSignalMapper.delete(
+                new LambdaQueryWrapper<PaperSignal>()
+                        .eq(PaperSignal::getPaperId, paperId)
+                        .eq(PaperSignal::getStatus, "PENDING"));
+        if (cleared > 0) {
+            log.info("generateSignals: 清除旧 PENDING 信号 {} 条", cleared);
+        }
+
         // 获取策略因子配置
         String factorConfigJson = getStrategyFactorConfig(pt.getStrategyId());
         if (factorConfigJson == null || factorConfigJson.isEmpty()) {
@@ -150,11 +159,13 @@ public class PaperTradingService {
             if (code != null && !code.isBlank()) usedFactorCodes.add(code);
         }
 
-        // 获取最新交易日期：取策略中每个因子各自最新日期的最小值，确保所有因子都有数据
-        String latestDate = getLatestTradeDate(usedFactorCodes);
-        log.info("generateSignals: paperId={}, latestDate={}, factorConfigs={}", paperId, latestDate, factorConfigs.size());
+        // 获取信号日期：用日频因子的最新日期（排除 FIN_/CHAN_）
+        // 这样信号日期最接近当前交易日
+        String signalDate = getLatestTradeDate(usedFactorCodes);
+        log.info("generateSignals: paperId={}, signalDate={}, factorConfigs={}", paperId, signalDate, factorConfigs.size());
 
-        // 对每个因子查最新截面 rank_value，加权求和
+        // 改造：每个因子用自己的最新日期，分别归一化后加权合并
+        // 不再统一用 latestDate，避免财务因子拖拽整体日期
         Map<String, Double> stockScores = new HashMap<>();
         Map<String, Double> stockWeights = new HashMap<>();
 
@@ -169,13 +180,20 @@ public class PaperTradingService {
                 continue;
             }
 
-            // 从 CH 获取因子值
+            // 从 CH 获取因子值：每个因子用自己的最新日期
             if (clickHouseJdbcTemplate != null) {
                 try {
+                    // 查该因子自己的最新日期
+                    String factorDate = getFactorLatestDate(factorCode);
+                    if (factorDate == null) {
+                        log.warn("generateSignals: 因子 {} 无数据，跳过", factorCode);
+                        continue;
+                    }
                     String sql = String.format("""
-                        SELECT symbol, rank_value FROM stock.factor_value FINAL                         WHERE factor_code = '%s' AND calc_date = '%s'
+                        SELECT symbol, rank_value FROM stock.factor_value FINAL
+                        WHERE factor_code = '%s' AND calc_date = '%s'
                           AND rank_value IS NOT NULL
-                        """, factorCode, latestDate);
+                        """, factorCode, factorDate);
                     clickHouseJdbcTemplate.query(sql, (rs) -> {
                         String sym = rs.getString("symbol");
                         if (sym != null && sym.contains(".")) sym = sym.split("\\.")[0];
@@ -185,7 +203,7 @@ public class PaperTradingService {
                         stockScores.merge(sym, adjustedRank * weight, Double::sum);
                         stockWeights.merge(sym, weight, Double::sum);
                     });
-                    log.info("generateSignals: factor={}, date={}, rows={}", factorCode, latestDate, stockScores.size());
+                    log.info("generateSignals: factor={}, date={}, rows={}", factorCode, factorDate, stockScores.size());
                 } catch (Exception e) {
                     log.debug("因子 {} 截面查询失败: {}", factorCode, e.getMessage());
                 }
@@ -213,6 +231,16 @@ public class PaperTradingService {
         Set<String> heldCodes = currentPositions.stream()
             .map(PaperPosition::getCode).collect(Collectors.toSet());
 
+        // 获取当天已 SKIPPED 的股票，避免资金不足等原因反复生成重复信号
+        Set<String> skippedCodes = paperSignalMapper.selectList(
+                new LambdaQueryWrapper<PaperSignal>()
+                        .eq(PaperSignal::getPaperId, paperId)
+                        .eq(PaperSignal::getStatus, "SKIPPED")
+                        .eq(PaperSignal::getDirection, "BUY"))
+                .stream()
+                .map(PaperSignal::getCode)
+                .collect(Collectors.toSet());
+
         // 得分低于 0.3 的持仓 → 卖出信号
         List<PaperSignal> signals = new ArrayList<>();
         for (PaperPosition pos : currentPositions) {
@@ -220,7 +248,7 @@ public class PaperTradingService {
             if (score == null || score < 0.3) {
                 PaperSignal sellSignal = PaperSignal.builder()
                     .paperId(paperId)
-                    .signalDate(LocalDate.parse(latestDate))
+                    .signalDate(LocalDate.parse(signalDate))
                     .code(pos.getCode())
                     .name(pos.getName())
                     .direction("SELL")
@@ -234,16 +262,21 @@ public class PaperTradingService {
             }
         }
 
-        // 新股买入信号（不在持仓中的高分股）
-        int buySlots = 10 - heldCodes.size() + signals.size(); // 目标10只持仓
+        // 新股买入信号（不在持仓中、非当天已SKIPPED的高分股）
+        // buySlots 只看当前持仓，不预支 SELL 释放的仓位（SELL 执行后再生成新 BUY 信号）
+        int buySlots = 10 - heldCodes.size();
+        if (buySlots <= 0) {
+            log.info("generateSignals: 持仓已满({}只)，跳过买入信号生成", heldCodes.size());
+        }
         for (Map.Entry<String, Double> e : sorted) {
             if (buySlots <= 0) break;
             if (heldCodes.contains(e.getKey())) continue;
+            if (skippedCodes.contains(e.getKey())) continue;
 
-            BigDecimal price = getLatestPrice(e.getKey(), latestDate);
+            BigDecimal price = getLatestPrice(e.getKey(), signalDate);
             PaperSignal buySignal = PaperSignal.builder()
                 .paperId(paperId)
-                .signalDate(LocalDate.parse(latestDate))
+                .signalDate(LocalDate.parse(signalDate))
                 .code(e.getKey())
                 .name(getStockName(e.getKey()))
                 .direction("BUY")
@@ -257,7 +290,18 @@ public class PaperTradingService {
             buySlots--;
         }
 
-        return signals;
+        return signals.stream()
+            .sorted((a, b) -> {
+                // BUY 信号按 factorScore 降序排前面，SELL 信号排后面
+                if (!"BUY".equals(a.getDirection()) && "BUY".equals(b.getDirection())) return 1;
+                if ("BUY".equals(a.getDirection()) && !"BUY".equals(b.getDirection())) return -1;
+                // 同方向按得分降序
+                if (a.getFactorScore() != null && b.getFactorScore() != null) {
+                    return b.getFactorScore().compareTo(a.getFactorScore());
+                }
+                return 0;
+            })
+            .toList();
     }
 
     /**
@@ -281,8 +325,9 @@ public class PaperTradingService {
                 return null;
             }
 
-            BigDecimal perStock = pt.getCurrentCapital()
-                .divide(BigDecimal.valueOf(Math.max(1, pt.getPositionCount() + 1)), 2, RoundingMode.HALF_UP);
+            // 固定金额分配：初始资金/目标持仓数（10只），不受持仓数变化影响
+            BigDecimal perStock = pt.getInitialCapital()
+                .divide(BigDecimal.valueOf(10), 2, RoundingMode.HALF_UP);
             int shares = perStock.divide(price, 0, RoundingMode.DOWN).divide(BigDecimal.valueOf(100), 0, RoundingMode.DOWN).intValue() * 100;
             if (shares <= 0) shares = 100; // 最少1手
 
@@ -362,12 +407,28 @@ public class PaperTradingService {
      * 获取信号列表
      */
     public List<PaperSignal> getSignals(Long paperId) {
-        return paperSignalMapper.selectList(
+        List<PaperSignal> signals = paperSignalMapper.selectList(
             new LambdaQueryWrapper<PaperSignal>()
                 .eq(PaperSignal::getPaperId, paperId)
                 .orderByDesc(PaperSignal::getSignalDate)
                 .orderByDesc(PaperSignal::getId)
                 .last("LIMIT 50"));
+        // 同日期内：BUY 按 factorScore 降序，SELL 排后面
+        signals.sort((a, b) -> {
+            int dateCmp = b.getSignalDate().compareTo(a.getSignalDate());
+            if (dateCmp != 0) return dateCmp;
+            // 同日期：BUY 在前，SELL 在后
+            boolean aBuy = "BUY".equals(a.getDirection());
+            boolean bBuy = "BUY".equals(b.getDirection());
+            if (aBuy && !bBuy) return -1;
+            if (!aBuy && bBuy) return 1;
+            // 同方向：按得分降序
+            if (a.getFactorScore() != null && b.getFactorScore() != null) {
+                return b.getFactorScore().compareTo(a.getFactorScore());
+            }
+            return 0;
+        });
+        return signals;
     }
 
     /**
@@ -592,6 +653,23 @@ public class PaperTradingService {
                 (rs, rowNum) -> rs.getString(1));
         }
         return dates.isEmpty() || dates.getFirst() == null ? LocalDate.now().toString() : dates.getFirst();
+    }
+
+    /**
+     * 获取单个因子的最新日期
+     * 财务因子和日频因子分别更新，每个因子用自己的最新日期
+     */
+    private String getFactorLatestDate(String factorCode) {
+        if (clickHouseJdbcTemplate == null) return LocalDate.now().toString();
+        try {
+            List<String> dates = clickHouseJdbcTemplate.query(
+                String.format("SELECT MAX(calc_date) FROM stock.factor_value FINAL WHERE factor_code = '%s'", factorCode),
+                (rs, rowNum) -> rs.getString(1));
+            return dates.isEmpty() || dates.getFirst() == null ? null : dates.getFirst();
+        } catch (Exception e) {
+            log.debug("查询因子 {} 最新日期失败: {}", factorCode, e.getMessage());
+            return null;
+        }
     }
 
     private BigDecimal getLatestPrice(String code, String date) {
