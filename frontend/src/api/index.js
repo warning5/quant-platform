@@ -133,6 +133,8 @@ export const factorApi = {
       params: { startDate, endDate, forwardDays },
       timeout: 120000,
     }),
+  // 按日期筛选缺失因子值的因子
+  missingByDate: (date) => api.get('/factors/missing-by-date', { params: { date } }),
 };
 
 // ===== 策略 API =====

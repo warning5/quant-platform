@@ -96,7 +96,7 @@ function FactorMonitor() {
     const time = ts || dayjs().format('HH:mm:ss');
     setComputeLogs(prev => [
       ...prev.slice(-199),
-      { id: Date.now() + Math.random(), time, text, type },
+      { id: Date.now() + '-' + Math.random().toString(36).slice(2), time, text, type },
     ]);
   }, []);
 
@@ -127,7 +127,8 @@ function FactorMonitor() {
       if (nullIdx === -1) break;
       const frameStr = remaining.substring(0, nullIdx);
       remaining = remaining.substring(nullIdx + 1);
-      const lines = frameStr.split('\n');
+      // 处理 \r\n 换行（某些代理可能引入 \r）
+      const lines = frameStr.split('\n').map(l => l.endsWith('\r') ? l.slice(0, -1) : l);
       const command = lines[0];
       const headers = {};
       let bodyStart = 1;
@@ -162,6 +163,11 @@ function FactorMonitor() {
       const lastNullIdx = buffer.lastIndexOf('\x00');
       buffer = lastNullIdx >= 0 ? buffer.substring(lastNullIdx + 1) : buffer;
 
+      // 调试：打印解析到的帧数
+      if (frames.length > 0) {
+        console.log('[WS] parsed frames:', frames.length, 'commands:', frames.map(f => f.command));
+      }
+
       frames.forEach(frame => {
         if (frame.command === 'CONNECTED') {
           setWsConnected(true);
@@ -181,6 +187,10 @@ function FactorMonitor() {
           }).catch(() => {});
         } else if (frame.command === 'MESSAGE') {
           try {
+            if (!frame.body || frame.body.trim() === '') {
+              console.warn('[WS] 收到空消息体');
+              return;
+            }
             const data = JSON.parse(frame.body);
             const ts = data.timestamp
               ? new Date(data.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })

@@ -154,7 +154,7 @@ class ChanTheoryCalculatorTest {
 
     @Test
     void testShanghaiCompositeFullHistory() throws Exception {
-        List<MarketDailyBar> bars = fetchFromClickHouse("sh.000001", 500);
+        List<MarketDailyBar> bars = fetchFromClickHouse("000001", 500);
         if (bars.size() < 50) {
             log.warn("ClickHouse 数据不足，跳过真实数据测试 ({}条)", bars.size());
             return;
@@ -262,15 +262,39 @@ class ChanTheoryCalculatorTest {
     // 辅助方法
     // ═══════════════════════════════════════════════════════════
 
-    private List<MarketDailyBar> fetchFromClickHouse(String code, int limit) throws Exception {
+    // 指数代码集合（数据在 index_daily 表，不在 stock_daily）
+    private static final java.util.Set<String> INDEX_CODES = java.util.Set.of(
+            "000001", "000016", "000022", "000300", "000688",
+            "000852", "000905", "399001", "399006", "399303"
+    );
+
+    /**
+     * 去掉 sh./sz. 前缀，返回纯数字代码
+     */
+    private String normalizeCode(String code) {
+        if (code == null) return code;
+        return code.replaceAll("^[a-z]+\\.", "");
+    }
+
+    /**
+     * 根据代码判断查哪张表
+     */
+    private String resolveTable(String code) {
+        String normalized = normalizeCode(code);
+        return INDEX_CODES.contains(normalized) ? "index_daily" : "stock_daily";
+    }
+
+    private List<MarketDailyBar> fetchFromClickHouse(String code, int limit) {
+        String table = "stock." + resolveTable(code);
         String sql = String.format(
                 "SELECT trade_date, open_price, high_price, low_price, close_price, volume " +
-                        "FROM stock.stock_daily WHERE code='%s' AND open_price IS NOT NULL " +
-                        "ORDER BY trade_date DESC LIMIT %d FORMAT CSVWithNames", code, limit);
+                        "FROM %s WHERE code='%s' AND open_price IS NOT NULL " +
+                        "ORDER BY trade_date DESC LIMIT %d FORMAT CSVWithNames", table, normalizeCode(code), limit);
 
-        // 尝试两个地址
-        String[] urls = {CH_URL, "http://127.0.0.1:8123"};
+        // localhost 可能解析为 IPv6(::1) 或 IPv4(127.0.0.1)，CH 只监听其一就会连不上
+        String[] urls = {CH_URL, "http://127.0.0.1:8123", "http://[::1]:8123"};
         HttpURLConnection conn = null;
+        Exception lastEx = null;
 
         for (String baseUrl : urls) {
             try {
@@ -281,54 +305,60 @@ class ChanTheoryCalculatorTest {
                 conn.getOutputStream().write(sql.getBytes());
                 conn.setConnectTimeout(5000);
                 conn.setReadTimeout(30000);
+                conn.connect();
 
-                if (conn.getResponseCode() == 200) break; // 成功
-            } catch (Exception e) {
-                log.debug("尝试 {} 失败: {}", baseUrl, e.getMessage());
-                if (conn != null) try {
-                    conn.disconnect();
-                } catch (Exception ignored) {
+                if (conn.getResponseCode() == 200) {
+                    lastEx = null;
+                    break;
                 }
-                continue;
+            } catch (Exception e) {
+                lastEx = e;
+                log.debug("尝试 {} 失败: {}", baseUrl, e.getMessage());
+                if (conn != null) try { conn.disconnect(); } catch (Exception ignored) {}
+                conn = null;
             }
         }
 
-        if (conn == null || conn.getResponseCode() != 200) {
-            log.warn("ClickHouse 无法连接，跳过真实数据测试");
+        if (conn == null) {
+            log.warn("ClickHouse 无法连接 ({}), 跳过真实数据测试", lastEx != null ? lastEx.getMessage() : "unknown");
             return new ArrayList<>();
         }
 
-        BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+        BufferedReader reader = null;
         List<MarketDailyBar> bars = new ArrayList<>();
-        String line;
-        boolean header = true;
-        DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+        try {
+            reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+            String line;
+            boolean header = true;
+            DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd");
 
-        while ((line = reader.readLine()) != null) {
-            if (header) {
-                header = false;
-                continue;
-            } // skip header
-            String[] parts = line.replace("\"", "").split(",");
-            if (parts.length < 6) continue;
+            while ((line = reader.readLine()) != null) {
+                if (header) { header = false; continue; }
+                String[] parts = line.replace("\"", "").split(",");
+                if (parts.length < 6) continue;
 
-            try {
-                MarketDailyBar bar = MarketDailyBar.builder()
-                        .symbol(code)
-                        .tradeDate(LocalDate.parse(parts[0], fmt))
-                        .open(new BigDecimal(parts[1]))
-                        .high(new BigDecimal(parts[2]))
-                        .low(new BigDecimal(parts[3]))
-                        .close(new BigDecimal(parts[4]))
-                        .vol(new BigDecimal(parts[5]))
-                        .build();
-                bars.add(bar);
-            } catch (Exception e) {
-                // skip malformed lines
+                try {
+                    MarketDailyBar bar = MarketDailyBar.builder()
+                                .symbol(code)
+                                .tradeDate(LocalDate.parse(parts[0], fmt))
+                                .open(new BigDecimal(parts[1]))
+                                .high(new BigDecimal(parts[2]))
+                                .low(new BigDecimal(parts[3]))
+                                .close(new BigDecimal(parts[4]))
+                                .vol(new BigDecimal(parts[5]))
+                                .build();
+                    bars.add(bar);
+                } catch (Exception e) {
+                    // skip malformed lines
+                }
             }
+        } catch (Exception e) {
+            log.warn("读取 ClickHouse 响应失败: {}", e.getMessage());
+            return new ArrayList<>();
+        } finally {
+            if (reader != null) try { reader.close(); } catch (Exception ignored) {}
+            if (conn != null) try { conn.disconnect(); } catch (Exception ignored) {}
         }
-        reader.close();
-        conn.disconnect();
 
         // ClickHouse DESC排序，需要反转为正序
         java.util.Collections.reverse(bars);

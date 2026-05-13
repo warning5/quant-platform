@@ -691,6 +691,39 @@ public class FactorService {
     }
 
     /**
+     * 查询指定日期缺少因子值的因子列表
+     * 对比所有激活因子 vs 有该日期数据的因子，返回缺失的因子
+     */
+    public List<Map<String, Object>> findMissingFactorsByDate(LocalDate date) {
+        // 1. 查询所有激活因子
+        List<FactorDefinition> allFactors = factorMapper.selectList(
+                new LambdaQueryWrapper<FactorDefinition>()
+                        .eq(FactorDefinition::getStatus, FactorDefinition.FactorStatus.ACTIVE)
+                        .orderByAsc(FactorDefinition::getFactorCode));
+        if (allFactors.isEmpty()) {
+            return List.of();
+        }
+
+        // 2. 从 ClickHouse 查询该日期有数据的因子
+        Set<String> existingCodes = new java.util.HashSet<>(
+                clickHouseFactorValueService.findFactorsWithDates(date.toString()));
+
+        // 3. 找出缺失因子
+        return allFactors.stream()
+                .filter(f -> !existingCodes.contains(f.getFactorCode()))
+                .map(f -> {
+                    Map<String, Object> m = new java.util.LinkedHashMap<>();
+                    m.put("id", f.getId());
+                    m.put("factorCode", f.getFactorCode());
+                    m.put("factorName", f.getFactorName());
+                    m.put("category", f.getCategory().name());
+                    m.put("factorType", f.getFactorType().name());
+                    return m;
+                })
+                .toList();
+    }
+
+    /**
      * 因子计算监控数据：各因子统计 + 全局总数
      * 使用 stale-while-revalidate 策略：缓存过期时立即返回旧数据，后台异步刷新
      * 避免慢查询阻塞请求导致超时

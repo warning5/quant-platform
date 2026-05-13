@@ -92,14 +92,22 @@ public class ClickHouseStockService {
      * 批量查询多只股票的历史数据（优先 ClickHouse）
      */
     public List<StockDaily> getStockDailyBatch(List<String> codes, LocalDate startDate, LocalDate endDate) {
+        return getStockDailyBatch(codes, startDate, endDate, false);
+    }
+
+    /**
+     * 批量查询多只股票日线
+     * @param useFinal 是否使用 FINAL（预加载场景设 false 可大幅提速）
+     */
+    public List<StockDaily> getStockDailyBatch(List<String> codes, LocalDate startDate, LocalDate endDate, boolean useFinal) {
         if (!clickHouseConfig.isEnabled() || codes.isEmpty()) {
             return getBatchFromMySQL(codes, startDate, endDate);
         }
 
         try {
-            List<StockDaily> result = queryBatchFromClickHouse(codes, startDate, endDate);
+            List<StockDaily> result = queryBatchFromClickHouse(codes, startDate, endDate, useFinal);
             if (!result.isEmpty()) {
-                log.debug("[ClickHouse] 批量命中: {}只股票 {}~{}", codes.size(), startDate, endDate);
+                log.debug("[ClickHouse] 批量命中: {}只股票 {}~{} (final={})", codes.size(), startDate, endDate, useFinal);
                 return result;
             }
         } catch (Exception e) {
@@ -422,19 +430,24 @@ public class ClickHouseStockService {
     }
 
     private List<StockDaily> queryBatchFromClickHouse(List<String> codes, LocalDate startDate, LocalDate endDate) {
+        return queryBatchFromClickHouse(codes, startDate, endDate, true);
+    }
+
+    private List<StockDaily> queryBatchFromClickHouse(List<String> codes, LocalDate startDate, LocalDate endDate, boolean useFinal) {
         if (codes.size() == 1) {
             return queryFromClickHouse(codes.get(0), startDate, endDate);
         }
 
         String placeholders = String.join(",", codes.stream().map(c -> "'" + c + "'").toList());
+        String finalClause = useFinal ? " FINAL" : "";
         String sql = String.format("""
                 SELECT code, trade_date, name, open_price, close_price, high_price, low_price,
                        pre_close, volume, amount, change_percent, change_amount,
                        turnover_rate, pe_ttm, pb
-                FROM stock_daily FINAL
+                FROM stock_daily%s
                 WHERE code IN (%s) AND trade_date >= ? AND trade_date <= ?
                 ORDER BY code, trade_date
-                """, placeholders);
+                """, finalClause, placeholders);
 
         return executeQuery(sql, startDate, endDate);
     }

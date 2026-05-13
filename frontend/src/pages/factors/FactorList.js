@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Table, Tag, Button, Space, Input, Select, Card, Typography, Popconfirm, message, Tooltip, Badge } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined, PlayCircleOutlined, ClearOutlined } from '@ant-design/icons';
+import { Table, Tag, Button, Space, Input, Select, Card, Typography, Popconfirm, message, Tooltip, Badge, DatePicker, Alert } from 'antd';
+import { PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined, PlayCircleOutlined, ClearOutlined, SearchOutlined, CalculatorOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { factorApi } from '../../api';
 import { CATEGORY_OPTIONS, CATEGORY_LABELS } from './constants';
@@ -28,6 +28,13 @@ export default function FactorList() {
   const [params, setParams] = useState({ page: 0, size: 15, keyword: '', category: undefined, status: undefined });
   const [factorStatus, setFactorStatus] = useState({});
 
+  // 缺失因子查询状态
+  const [missingDate, setMissingDate] = useState(null);
+  const [missingFactors, setMissingFactors] = useState([]);
+  const [missingLoading, setMissingLoading] = useState(false);
+  const [showMissing, setShowMissing] = useState(false);
+  const [computing, setComputing] = useState(false);
+
   const fetchData = useCallback((p) => {
     setLoading(true);
     factorApi.list(p).then(res => {
@@ -44,6 +51,42 @@ export default function FactorList() {
 
   // 初始化加载（使用 params 初始值）
   useEffect(() => { fetchData(params); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** 查询指定日期缺失因子值的因子 */
+  const handleSearchMissing = useCallback(() => {
+    if (!missingDate) {
+      message.warning('请先选择日期');
+      return;
+    }
+    setMissingLoading(true);
+    setShowMissing(true);
+    factorApi.missingByDate(missingDate.format('YYYY-MM-DD'))
+      .then(res => {
+        setMissingFactors(res || []);
+        if (res && res.length > 0) {
+          message.info(`共 ${res.length} 个因子在 ${missingDate.format('YYYY-MM-DD')} 缺失数据`);
+        } else {
+          message.success('该日期所有因子均有数据');
+        }
+      })
+      .catch(() => message.error('查询失败'))
+      .finally(() => setMissingLoading(false));
+  }, [missingDate]);
+
+  /** 一键补算缺失因子 */
+  const handleComputeMissing = useCallback(() => {
+    if (!missingDate || missingFactors.length === 0) return;
+    const codes = missingFactors.map(f => f.factorCode);
+    setComputing(true);
+    factorApi.batchCompute(codes, missingDate.format('YYYY-MM-DD'), missingDate.format('YYYY-MM-DD'), false, true)
+      .then(res => {
+        const submitted = res?.submitted?.length ?? 0;
+        const skipped = res?.skipped?.length ?? 0;
+        message.success(`已提交 ${submitted} 个因子计算，跳过 ${skipped} 个`);
+      })
+      .catch(() => message.error('提交计算失败'))
+      .finally(() => setComputing(false));
+  }, [missingDate, missingFactors]);
 
   const handleDelete = (id) => {
     factorApi.delete(id).then(() => { message.success('删除成功'); fetchData(params); });
@@ -209,7 +252,68 @@ export default function FactorList() {
             onChange={v => { const p = { ...params, status: v, page: 0 }; setParams(p); fetchData(p); }}>
             {Object.entries(STATUS_LABELS).map(([k, v]) => <Option key={k} value={k}>{v}</Option>)}
           </Select>
+          <span style={{ color: '#999', marginLeft: 8 }}>|</span>
+          <DatePicker
+            placeholder="选择日期筛选缺失因子"
+            value={missingDate}
+            onChange={d => setMissingDate(d)}
+            allowClear
+            disabledDate={current => current && current > new Date()}
+          />
+          <Button
+            icon={<SearchOutlined />}
+            loading={missingLoading}
+            onClick={handleSearchMissing}
+          >
+            筛选缺失
+          </Button>
         </Space>
+
+        {showMissing && (
+          <div style={{ marginTop: 12 }}>
+            {missingFactors.length > 0 ? (
+              <>
+                <Alert
+                  type="warning"
+                  showIcon
+                  message={
+                    <Space>
+                      <span>{missingDate.format('YYYY-MM-DD')} 共 {missingFactors.length} 个因子缺失数据</span>
+                      <Button
+                        type="primary"
+                        size="small"
+                        icon={<CalculatorOutlined />}
+                        loading={computing}
+                        onClick={handleComputeMissing}
+                      >
+                        一键补算
+                      </Button>
+                      <Button size="small" onClick={() => setShowMissing(false)}>收起</Button>
+                    </Space>
+                  }
+                  style={{ marginBottom: 8 }}
+                />
+                <div style={{ maxHeight: 200, overflow: 'auto', border: '1px solid #f0f0f0', borderRadius: 4, padding: 4 }}>
+                  <Space wrap size={4}>
+                    {missingFactors.map(f => (
+                      <Tag key={f.factorCode} color="orange" style={{ margin: 0 }}>
+                        {f.factorCode} - {f.factorName}
+                      </Tag>
+                    ))}
+                  </Space>
+                </div>
+              </>
+            ) : (
+              <Alert
+                type="success"
+                showIcon
+                message={`${missingDate?.format('YYYY-MM-DD')} 所有激活因子均有数据`}
+                closable
+                onClose={() => setShowMissing(false)}
+              />
+            )}
+          </div>
+        )}
       </Card>
 
       <Card style={{ border: '1px solid #d9d9d9' }}>

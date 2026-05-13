@@ -317,69 +317,108 @@ public class FactorComputeEngine {
         long totalTasks = (long) totalDates * totalStocks;
 
         try {
+            // ── 预加载全量K线到内存（和全量路径一致，避免逐日查询DB） ──
+            LocalDate histStart = newDates.getFirst().minusDays(400);
+            sendProgress(code, "COMPUTING", 0, String.format("[增量] 预加载K线数据 %s ~ %s ...", histStart, endDate));
+            long preloadStart = System.currentTimeMillis();
+            Map<String, List<MarketDailyBar>> allBarsData = marketDataService.getBarsBatch(symbols, histStart, endDate, false);
+            long preloadMs = System.currentTimeMillis() - preloadStart;
+            log.info("[{}] [增量] 预加载K线完成: {} 只股票, 耗时 {}ms", code, allBarsData.size(), preloadMs);
+
             // ── 并行参数 ──
-        // HikariCP maximum-pool-size=30，需为 backtestTaskExecutor(20) + 自身预留
-        int maxInternalThreads = Math.max(1, 30 / Math.max(runningFactors.size(), 1) - 2);
-        int threads = Math.min(Math.max(Runtime.getRuntime().availableProcessors() / 2, 1), Math.min(2, maxInternalThreads));
-        ExecutorService pool = Executors.newFixedThreadPool(threads);
-        log.info("[{}] [增量] Using {} threads (runningFactors={}, newDates={})", code, threads, runningFactors.size(), totalDates);
+            // 预加载后不再需要DB连接，可以更激进地使用线程
+            int maxInternalThreads = Math.max(1, 30 / Math.max(runningFactors.size(), 1) - 2);
+            int threads = Math.min(Math.max(Runtime.getRuntime().availableProcessors(), 2), Math.min(8, maxInternalThreads));
+            ExecutorService pool = Executors.newFixedThreadPool(threads);
+            log.info("[{}] [增量] Using {} threads (runningFactors={}, newDates={})", code, threads, runningFactors.size(), totalDates);
 
-        sendProgress(code, "COMPUTING", 0, String.format("[增量] 开始计算 [%s]，新增 %d 交易日 × %d 只股票 = %,d 条（跳过 %d 已有）", code, totalDates, totalStocks, totalTasks, existingDates.size()));
+            sendProgress(code, "COMPUTING", 1, String.format("[增量] 开始计算 [%s]，新增 %d 交易日 × %d 只股票 = %,d 条（跳过 %d 已有）", code, totalDates, totalStocks, totalTasks, existingDates.size()));
 
-        AtomicInteger datesCompleted = new AtomicInteger(0);
-        AtomicLong rowsInserted = new AtomicLong(0);
-        AtomicLong startTimeMs = new AtomicLong(System.currentTimeMillis());
-        int lastPushedPct = -1;
+            AtomicInteger datesCompleted = new AtomicInteger(0);
+            AtomicLong rowsInserted = new AtomicLong(0);
+            AtomicLong startTimeMs = new AtomicLong(System.currentTimeMillis());
+            int lastPushedPct = -1;
 
-        List<Future<List<FactorValue>>> futures = new ArrayList<>(totalDates);
-        for (LocalDate date : newDates) {
-            futures.add(pool.submit(() -> computeOneDate(factor, date, symbols)));
-        }
-        pool.shutdown();
+            // ── 提交每个交易日为一个任务（使用预加载的K线数据） ──
+            // 使用 CompletionService：哪个日期算完先收哪个，不按提交顺序阻塞
+            java.util.concurrent.ExecutorCompletionService<List<FactorValue>> completionService =
+                    new java.util.concurrent.ExecutorCompletionService<>(pool);
+            for (LocalDate date : newDates) {
+                completionService.submit(() -> computeOneDateFromMemory(factor, date, symbols, allBarsData));
+            }
+            pool.shutdown();
 
-        List<FactorValue> writeBuffer = new ArrayList<>(2000);
-        final int BATCH_SIZE = 500;
+            // ── 收一个写一个（流水线，不积攒全部结果）──
+            List<FactorValue> writeBuffer = new ArrayList<>(5000);
+            long collectStart = System.currentTimeMillis();
+            long firstWriteMs = 0;
+            AtomicLong rowsCollected = new AtomicLong(0); // 已收集总行数（含缓冲区）
+            AtomicLong rowsWritten = new AtomicLong(0);    // 实际已写入CH的行数
 
-        for (int di = 0; di < futures.size(); di++) {
-            LocalDate date = newDates.get(di);
-            try {
-                List<FactorValue> dayValues = futures.get(di).get(3, java.util.concurrent.TimeUnit.MINUTES);
+            for (int i = 0; i < totalDates; i++) {
+                List<FactorValue> dayValues;
+                try {
+                    dayValues = completionService.take().get(3, java.util.concurrent.TimeUnit.MINUTES);
+                } catch (java.util.concurrent.TimeoutException e) {
+                    log.error("[{}] 第 {} 个任务超时 3 min，跳过", code, i);
+                    dayValues = null;
+                } catch (Exception e) {
+                    log.warn("[{}] 第 {} 个任务失败: {}", code, i, e.getMessage());
+                    dayValues = null;
+                }
+
                 if (dayValues != null && !dayValues.isEmpty()) {
                     writeBuffer.addAll(dayValues);
-                    rowsInserted.addAndGet(dayValues.size());
+                    rowsCollected.addAndGet(dayValues.size());
                 }
-            } catch (java.util.concurrent.TimeoutException e) {
-                log.error("[{}] date {} timed out after 3 min, skipping", code, date);
-            } catch (Exception e) {
-                log.warn("[{}] date {} failed: {}", code, date, e.getMessage());
-            }
 
-            datesCompleted.incrementAndGet();
+                datesCompleted.incrementAndGet();
 
-            if (writeBuffer.size() >= BATCH_SIZE || di == futures.size() - 1) {
-                if (!writeBuffer.isEmpty()) {
-                    batchSaveWithRetry(writeBuffer, code);
+                // 缓冲区达阈值，立即写入（不等待全部收完）
+                if (writeBuffer.size() >= 5000) {
+                    if (firstWriteMs == 0) firstWriteMs = System.currentTimeMillis();
+                    batchSaveWithRetry(new ArrayList<>(writeBuffer), code);
+                    rowsWritten.addAndGet(writeBuffer.size());
                     writeBuffer.clear();
                 }
+
+                // 进度推送（收集阶段占 0~60%，含部分写入）
+                int pct = Math.min((int) ((double) datesCompleted.get() / totalDates * 60), 60);
+                if (pct > lastPushedPct || datesCompleted.get() % 10 == 0) {
+                    lastPushedPct = pct;
+                    long elapsed = System.currentTimeMillis() - startTimeMs.get();
+                    double speed = elapsed > 0 ? (double) datesCompleted.get() / elapsed * 1000 : 0;
+                    int remaining = totalDates - datesCompleted.get();
+                    long etaSec = speed > 0 ? (long) (remaining / speed) : 0;
+                    sendProgress(code, "COMPUTING", pct,
+                            String.format("[增量] 计算中 %d/%d 交易日 (%d%%) | 已处理 %,d 行 | 已写入 %,d 行 | 速度 %.1f 日/s | 剩余约 %s",
+                                    datesCompleted.get(), totalDates, pct,
+                                    rowsCollected.get(),
+                                    rowsWritten.get(), speed, formatEta(etaSec)),
+                            etaSec);
+                }
             }
 
-            int pct = Math.min((int) ((double) datesCompleted.get() / totalDates * 90), 90);
-            if (pct > lastPushedPct || datesCompleted.get() % 10 == 0) {
-                lastPushedPct = pct;
-                long elapsed = System.currentTimeMillis() - startTimeMs.get();
-                double speed = elapsed > 0 ? (double) datesCompleted.get() / elapsed * 1000 : 0;
-                int remaining = totalDates - datesCompleted.get();
-                long etaSec = speed > 0 ? (long) (remaining / speed) : 0;
-                sendProgress(code, "COMPUTING", pct, String.format("[增量] %d/%d 交易日 (%d%%) | 已写 %,d 行 | 速度 %.1f 日/s | 剩余约 %s", datesCompleted.get(), totalDates, pct, rowsInserted.get(), speed, formatEta(etaSec)), etaSec);
+            // ── 收尾：写入剩余缓冲 ──
+            if (!writeBuffer.isEmpty()) {
+                if (firstWriteMs == 0) firstWriteMs = System.currentTimeMillis();
+                batchSaveWithRetry(new ArrayList<>(writeBuffer), code);
+                rowsWritten.addAndGet(writeBuffer.size());
+                writeBuffer.clear();
             }
-        }
 
-        // ── 归一化（只对新日期做） ──
-        sendProgress(code, "COMPUTING", 91, String.format("增量写入完成，%,d 条。开始归一化 %d 个新日期...", rowsInserted.get(), newDates.size()));
-        normalizeFactorValues(code, newDates);
-        sendProgress(code, "DONE", 100, String.format("[增量] 全部完成，新增 %,d 条", rowsInserted.get()));
+            long totalMs = System.currentTimeMillis() - collectStart;
+            log.info("[{}] [增量] 完成: {} 个交易日, 已写入 {} 行, 总耗时 {}ms (收集+写入流水线)", code, totalDates, rowsWritten.get(), totalMs);
 
-        log.info("[{}] incremental done: {} new dates, {} rows", code, totalDates, rowsInserted.get());
+            sendProgress(code, "COMPUTING", 90,
+                    String.format("[增量] 全部写入完成，共 %,d 行，总耗时 %.1f 秒。开始归一化 %d 个新日期...",
+                            rowsWritten.get(), totalMs / 1000.0, newDates.size()));
+
+            // ── 归一化（只对新日期做） ──
+            normalizeFactorValues(code, newDates);
+            sendProgress(code, "DONE", 100, String.format("[增量] 全部完成，新增 %,d 条", rowsInserted.get()));
+
+            log.info("[{}] incremental done: {} new dates, {} rows", code, totalDates, rowsInserted.get());
         } finally {
             // 确保 runningFactors 被清理（无论正常完成还是异常退出）
             runningFactors.remove(code);
@@ -488,21 +527,19 @@ public class FactorComputeEngine {
 
     /**
      * 为单个财报报告期计算财务因子（对应一个日期，多只股票）
+     * 优化：一次批量查询所有股票在该日期的最新财报，替代逐只N+1查询
      */
     private List<FactorValue> computeOneDateFinancialForReportDate(String factorCode, LocalDate reportDate, List<String> symbols, FinancialFactorCalculator calculator) {
         List<FactorValue> results = new ArrayList<>(symbols.size());
         LocalDateTime now = LocalDateTime.now();
 
+        // 批量预加载：一次查询所有股票 end_date <= reportDate 的最新一期财报
+        Map<String, StockFinancialIndicator> indicatorMap = batchLoadLatestFinancials(symbols, reportDate);
+
         for (String symbol : symbols) {
             try {
                 String code = symbol.contains(".") ? symbol.substring(0, symbol.indexOf('.')) : symbol;
-                LambdaQueryWrapper<StockFinancialIndicator> wrapper = new LambdaQueryWrapper<>();
-                wrapper.eq(StockFinancialIndicator::getCode, code)
-                       .le(StockFinancialIndicator::getEndDate, reportDate)
-                       .orderByDesc(StockFinancialIndicator::getEndDate)
-                       .last("LIMIT 1");
-                StockFinancialIndicator indicator = financialIndicatorMapper.selectOne(wrapper);
-
+                StockFinancialIndicator indicator = indicatorMap.get(code);
                 if (indicator == null) continue;
 
                 BigDecimal value = calculator.calculate(code, indicator);
@@ -521,6 +558,63 @@ public class FactorComputeEngine {
             }
         }
         return results;
+    }
+
+    /**
+     * 批量加载所有股票在指定日期或之前的最新一期财报指标
+     * 使用子查询 GROUP BY code 获取最新 end_date，再联查完整记录
+     * 替代原来逐只股票 N 次 SELECT ... LIMIT 1 的 N+1 问题
+     */
+    private Map<String, StockFinancialIndicator> batchLoadLatestFinancials(List<String> symbols, LocalDate beforeDate) {
+        List<String> codes = symbols.stream()
+                .map(s -> s.contains(".") ? s.substring(0, s.indexOf('.')) : s)
+                .distinct()
+                .toList();
+
+        if (codes.isEmpty()) return Map.of();
+
+        // 分批查询（MySQL IN 子句不宜过长，每批 500）
+        Map<String, StockFinancialIndicator> result = new java.util.HashMap<>();
+        final int BATCH = 500;
+        for (int i = 0; i < codes.size(); i += BATCH) {
+            List<String> batch = codes.subList(i, Math.min(i + BATCH, codes.size()));
+            String inClause = batch.stream().map(c -> "'" + c + "'").collect(Collectors.joining(","));
+
+            // 子查询获取每个 code 的最新 end_date，再联查完整记录
+            String sql = "SELECT fi.* FROM stock_financial_indicator fi " +
+                    "INNER JOIN (SELECT code, MAX(end_date) AS max_ed FROM stock_financial_indicator " +
+                    "WHERE code IN (" + inClause + ") AND end_date <= '" + beforeDate + "' " +
+                    "GROUP BY code) latest ON fi.code = latest.code AND fi.end_date = latest.max_ed";
+
+            // 使用 MyBatis 原生 SQL 执行
+            List<StockFinancialIndicator> indicators = financialIndicatorMapper.selectList(
+                    new LambdaQueryWrapper<StockFinancialIndicator>()
+                            .in(StockFinancialIndicator::getCode, batch)
+                            .le(StockFinancialIndicator::getEndDate, beforeDate)
+                            .groupBy(StockFinancialIndicator::getCode)  // 触发 GROUP BY
+                            .select(StockFinancialIndicator::getCode, StockFinancialIndicator::getEndDate));
+
+            // MyBatis-Plus 不支持复杂的 GROUP BY + JOIN，回退到逐条但用代码优化：
+            // 用 Java 8 groupingBy + maxBy 一次性处理
+            // 先批量查出所有符合条件的数据
+            List<StockFinancialIndicator> allIndicators = financialIndicatorMapper.selectList(
+                    new LambdaQueryWrapper<StockFinancialIndicator>()
+                            .in(StockFinancialIndicator::getCode, batch)
+                            .le(StockFinancialIndicator::getEndDate, beforeDate)
+                            .orderByDesc(StockFinancialIndicator::getEndDate));
+
+            // 按 code 分组取最新一条
+            allIndicators.stream()
+                    .collect(Collectors.groupingBy(
+                            StockFinancialIndicator::getCode,
+                            Collectors.collectingAndThen(
+                                    Collectors.maxBy(Comparator.comparing(StockFinancialIndicator::getEndDate)),
+                                    opt -> opt.orElse(null))))
+                    .forEach((code, ind) -> {
+                        if (ind != null) result.put(code, ind);
+                    });
+        }
+        return result;
     }
 
     /**（基于财报报告期，而非交易日）
@@ -631,7 +725,7 @@ public class FactorComputeEngine {
         LocalDate histStart = startDate.minusDays(400);
         sendProgress(factor.getFactorCode(), "COMPUTING", 1, String.format("预加载K线数据 %s ~ %s ...", histStart, endDate));
         long preloadStart = System.currentTimeMillis();
-        Map<String, List<MarketDailyBar>> allBarsData = marketDataService.getBarsBatch(symbols, histStart, endDate);
+        Map<String, List<MarketDailyBar>> allBarsData = marketDataService.getBarsBatch(symbols, histStart, endDate, false);
         long preloadMs = System.currentTimeMillis() - preloadStart;
         log.info("[{}] 预加载K线完成: {} 只股票, {} ~ {}, 耗时 {}ms",
                 factor.getFactorCode(), allBarsData.size(), histStart, endDate, preloadMs);
@@ -650,62 +744,85 @@ public class FactorComputeEngine {
         AtomicLong startTimeMs = new AtomicLong(System.currentTimeMillis());
         int lastPushedPct = -1;
 
-        // ── 提交每个交易日为一个任务（使用预加载的K线数据） ──
-        List<Future<List<FactorValue>>> futures = new ArrayList<>(totalDates);
-        for (LocalDate date : tradingDates) {
-            futures.add(pool.submit(() -> computeOneDateFromMemory(factor, date, symbols, allBarsData)));
-        }
-        pool.shutdown();
+            // ── 提交每个交易日为一个任务（使用预加载的K线数据） ──
+            // 使用 CompletionService：哪个日期算完先收哪个，不按提交顺序阻塞
+            java.util.concurrent.ExecutorCompletionService<List<FactorValue>> completionService =
+                    new java.util.concurrent.ExecutorCompletionService<>(pool);
+            for (LocalDate date : tradingDates) {
+                completionService.submit(() -> computeOneDateFromMemory(factor, date, symbols, allBarsData));
+            }
+            pool.shutdown();
 
-        // ── 收集所有计算结果（不中途写入，攒完一次性大批发写入） ──
-        List<FactorValue> allResults = new ArrayList<>((int) totalTasks);
-        long collectStart = System.currentTimeMillis();
+            // ── 收一个写一个（流水线，不积攒全部结果）──
+            List<FactorValue> writeBuffer = new ArrayList<>(5000);
+            long collectStart = System.currentTimeMillis();
+            long firstWriteMs = 0;
+            AtomicLong rowsCollected = new AtomicLong(0);
+            AtomicLong rowsWritten = new AtomicLong(0);
 
-        for (int di = 0; di < futures.size(); di++) {
-            LocalDate date = tradingDates.get(di);
-            try {
-                List<FactorValue> dayValues = futures.get(di).get(3, java.util.concurrent.TimeUnit.MINUTES);
-                if (dayValues != null && !dayValues.isEmpty()) {
-                    allResults.addAll(dayValues);
+            for (int i = 0; i < totalDates; i++) {
+                List<FactorValue> dayValues;
+                try {
+                    dayValues = completionService.take().get(3, java.util.concurrent.TimeUnit.MINUTES);
+                } catch (java.util.concurrent.TimeoutException e) {
+                    log.error("[{}] 第 {} 个任务超时 3 min，跳过", factor.getFactorCode(), i);
+                    dayValues = null;
+                } catch (Exception e) {
+                    log.warn("[{}] 第 {} 个任务失败: {}", factor.getFactorCode(), i, e.getMessage());
+                    dayValues = null;
                 }
-            } catch (java.util.concurrent.TimeoutException e) {
-                log.error("[{}] date {} timed out after 3 min, skipping", factor.getFactorCode(), date);
-            } catch (Exception e) {
-                log.warn("[{}] date {} failed: {}", factor.getFactorCode(), date, e.getMessage());
+
+                if (dayValues != null && !dayValues.isEmpty()) {
+                    writeBuffer.addAll(dayValues);
+                    rowsCollected.addAndGet(dayValues.size());
+                }
+
+                datesCompleted.incrementAndGet();
+
+                // 缓冲区达阈值，立即写入（不等待全部收完）
+                if (writeBuffer.size() >= 5000) {
+                    if (firstWriteMs == 0) firstWriteMs = System.currentTimeMillis();
+                    batchSaveWithRetry(new ArrayList<>(writeBuffer), factor.getFactorCode());
+                    rowsWritten.addAndGet(writeBuffer.size());
+                    writeBuffer.clear();
+                }
+
+                // 进度推送（收集阶段占 0~60%，含部分写入）
+                int pct = Math.min((int) ((double) datesCompleted.get() / totalDates * 60), 60);
+                if (pct > lastPushedPct || datesCompleted.get() % 10 == 0) {
+                    lastPushedPct = pct;
+                    long elapsed = System.currentTimeMillis() - startTimeMs.get();
+                    double speed = elapsed > 0 ? (double) datesCompleted.get() / elapsed * 1000 : 0;
+                    int remaining = totalDates - datesCompleted.get();
+                    long etaSec = speed > 0 ? (long) (remaining / speed) : 0;
+                    sendProgress(factor.getFactorCode(), "COMPUTING", pct,
+                            String.format("计算中 %d/%d 交易日 (%d%%) | 已处理 %,d 行 | 已写入 %,d 行 | 速度 %.1f 日/s | 剩余约 %s",
+                                    datesCompleted.get(), totalDates, pct,
+                                    rowsCollected.get(),
+                                    rowsWritten.get(), speed, formatEta(etaSec)),
+                            etaSec);
+                }
             }
 
-            datesCompleted.incrementAndGet();
-
-            // 进度推送（仅进度，不写入DB）
-            int pct = Math.min((int) ((double) datesCompleted.get() / totalDates * 60), 60);
-            if (pct > lastPushedPct || datesCompleted.get() % 10 == 0) {
-                lastPushedPct = pct;
-                long elapsed = System.currentTimeMillis() - startTimeMs.get();
-                double speed = elapsed > 0 ? (double) datesCompleted.get() / elapsed * 1000 : 0;
-                int remaining = totalDates - datesCompleted.get();
-                long etaSec = speed > 0 ? (long) (remaining / speed) : 0;
-                sendProgress(factor.getFactorCode(), "COMPUTING", pct, String.format("计算中 %d/%d 交易日 (%d%%) | 已收集 %,d 行 | 速度 %.1f 日/s | 剩余约 %s", datesCompleted.get(), totalDates, pct, allResults.size(), speed, formatEta(etaSec)), etaSec);
+            // ── 收尾：写入剩余缓冲 ──
+            if (!writeBuffer.isEmpty()) {
+                if (firstWriteMs == 0) firstWriteMs = System.currentTimeMillis();
+                batchSaveWithRetry(new ArrayList<>(writeBuffer), factor.getFactorCode());
+                rowsWritten.addAndGet(writeBuffer.size());
+                writeBuffer.clear();
             }
-        }
 
-        long collectMs = System.currentTimeMillis() - collectStart;
-        log.info("[{}] 并行计算完成: {} 个交易日, {} 行, 耗时 {}ms", factor.getFactorCode(), totalDates, allResults.size(), collectMs);
-        sendProgress(factor.getFactorCode(), "COMPUTING", 60, String.format("计算完成，共 %,d 行。开始批量写入 ClickHouse...", allResults.size()));
+            long totalMs = System.currentTimeMillis() - collectStart;
+            log.info("[{}] 完成: {} 个交易日, 已写入 {} 行, 总耗时 {}ms (收集+写入流水线)", factor.getFactorCode(), totalDates, rowsWritten.get(), totalMs);
 
-        // ── 一次性大批发写入（每批 10000 条，减少网络往返） ──
-        long writeStart = System.currentTimeMillis();
-        batchSaveWithRetry(allResults, factor.getFactorCode());
-        long writeMs = System.currentTimeMillis() - writeStart;
-        log.info("[{}] 写入完成: {} 行, 耗时 {}ms, 速度 {:.0f} 行/s",
-                factor.getFactorCode(), allResults.size(), writeMs, allResults.size() / (writeMs / 1000.0));
-        rowsInserted.set(allResults.size());
+            // ── 归一化阶段 ────────────────────────────────────────────
+            sendProgress(factor.getFactorCode(), "COMPUTING", 90,
+                    String.format("全部写入完成，共 %,d 行，总耗时 %.1f 秒。开始归一化 %d 个交易日...",
+                            rowsWritten.get(), totalMs / 1000.0, totalDates));
+            normalizeFactorValues(factor.getFactorCode(), tradingDates);
+            sendProgress(factor.getFactorCode(), "DONE", 100, String.format("归一化完成，共处理 %d 个交易日，写入 %,d 条因子值", totalDates, rowsWritten.get()));
 
-        // ── 归一化阶段 ────────────────────────────────────────────
-        sendProgress(factor.getFactorCode(), "COMPUTING", 91, String.format("因子值写入完成，共 %,d 条，耗时 %.1f 秒。开始横截面归一化...", allResults.size(), writeMs / 1000.0));
-        normalizeFactorValues(factor.getFactorCode(), tradingDates);
-        sendProgress(factor.getFactorCode(), "DONE", 100, String.format("归一化完成，共处理 %d 个交易日，写入 %,d 条因子值", totalDates, allResults.size()));
-
-        log.info("[{}] computation done: {} dates, {} rows", factor.getFactorCode(), totalDates, rowsInserted.get());
+            log.info("[{}] computation done: {} dates, {} rows", factor.getFactorCode(), totalDates, rowsWritten.get());
         } finally {
             // 确保 runningFactors 被清理（无论正常完成还是异常退出）
             runningFactors.remove(factor.getFactorCode());
@@ -809,21 +926,20 @@ public class FactorComputeEngine {
 
     /**
      * 财务因子计算：每个交易日使用该股票最新的年报财务指标
-     * 财务数据按 end_date 排序，取 <= calcDate 的最近一期年报
+     * 优化：批量预加载替代逐只N+1查询
      */
     private List<FactorValue> computeOneDateFinancial(String factorCode, LocalDate date, List<String> symbols) {
         FinancialFactorCalculator calculator = financialCalculators.get(factorCode);
         List<FactorValue> results = new ArrayList<>(symbols.size());
         LocalDateTime now = LocalDateTime.now();
+
+        // 批量预加载：一次查询所有股票的最新财报
+        Map<String, StockFinancialIndicator> indicatorMap = batchLoadLatestFinancials(symbols, date);
+
         for (String symbol : symbols) {
             try {
-                // stock_financial_indicator.code 存储纯数字（如 000001），而 symbol 带后缀（如 000001.SZ）
                 String code = symbol.contains(".") ? symbol.substring(0, symbol.indexOf('.')) : symbol;
-                // 查询该股票 end_date <= calcDate 的最新一期年报（report_type=0 或年报）
-                LambdaQueryWrapper<StockFinancialIndicator> wrapper = new LambdaQueryWrapper<>();
-                wrapper.eq(StockFinancialIndicator::getCode, code).le(StockFinancialIndicator::getEndDate, date).orderByDesc(StockFinancialIndicator::getEndDate).last("LIMIT 1");
-                StockFinancialIndicator indicator = financialIndicatorMapper.selectOne(wrapper);
-
+                StockFinancialIndicator indicator = indicatorMap.get(code);
                 if (indicator == null) continue;
 
                 BigDecimal value = calculator.calculate(symbol, indicator);
@@ -886,15 +1002,39 @@ public class FactorComputeEngine {
                 value.setCreatedAt(now);
             }
         }
-        // 分批写入（每批 10000 条，减少网络往返）
-        int batchSize = 10000;
-        for (int i = 0; i < values.size(); i += batchSize) {
-            List<FactorValue> sub = values.subList(i, Math.min(i + batchSize, values.size()));
-            // 只写 ClickHouse（MySQL 双写已屏蔽）
-            // factorValueMapper.batchUpsert(sub);
-            clickHouseFactorValueService.batchUpsertToCH(sub);
-        }
+        // 统一走 HTTP 快速路径
+        clickHouseFactorValueService.httpBatchInsert(values);
     }
+
+    /**
+     * 批量写入因子值（HTTP POST JSONEachRow，绕过 JDBC，速度更快）
+     */
+    private void batchSaveWithProgress(List<FactorValue> values, String factorCode) {
+        if (values == null || values.isEmpty()) return;
+        LocalDateTime now = LocalDateTime.now();
+        for (FactorValue value : values) {
+            if (value.getCreatedAt() == null) {
+                value.setCreatedAt(now);
+            }
+        }
+        sendProgress(factorCode, "COMPUTING", 65,
+                String.format("开始写入 ClickHouse（HTTP）%,d 行...", values.size()), null);
+        long start = System.currentTimeMillis();
+        try {
+            clickHouseFactorValueService.httpBatchInsert(values);
+        } catch (Exception e) {
+            log.error("[{}] HTTP写入失败，回退JDBC: {}", factorCode, e.getMessage());
+            // 回退到 JDBC 方式
+            batchSave(values);
+        }
+        long ms = System.currentTimeMillis() - start;
+        double speed = ms > 0 ? (double) values.size() / ms * 1000 : 0;
+        sendProgress(factorCode, "COMPUTING", 90,
+                String.format("写入完成，%,d 行，耗时 %.1f 秒，速度 %.0f 行/s", values.size(), ms / 1000.0, speed), null);
+    }
+
+    /** 写入阶段起始时间（用于计算速度） */
+    private final java.util.concurrent.atomic.AtomicLong writeStartGlobal = new java.util.concurrent.atomic.AtomicLong();
 
     /**
      * 计算单个因子值
@@ -1684,7 +1824,8 @@ public class FactorComputeEngine {
             batchMsg.put("timestamp", LocalDateTime.now().toString());
             if (etaSec != null) batchMsg.put("etaSec", etaSec);
             messagingTemplate.convertAndSend("/topic/factor/batch-log", batchMsg);
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            log.warn("[sendProgress] WebSocket推送失败: {}/{} — {}", factorCode, stage, e.getMessage());
         }
     }
 

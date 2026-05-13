@@ -185,6 +185,14 @@ public class MarketDataService {
      * @return Map<symbol, List<MarketDailyBar>> 按 symbol（带市场后缀）分组的行情数据
      */
     public Map<String, List<MarketDailyBar>> getBarsBatch(List<String> symbols, LocalDate startDate, LocalDate endDate) {
+        return getBarsBatch(symbols, startDate, endDate, true);
+    }
+
+    /**
+     * 批量获取多只股票K线
+     * @param useFinal 是否使用 FINAL（预加载因子计算场景设 false 可大幅提速）
+     */
+    public Map<String, List<MarketDailyBar>> getBarsBatch(List<String> symbols, LocalDate startDate, LocalDate endDate, boolean useFinal) {
         // 1. 解析 symbols -> codes（去重）
         List<String> codes = symbols.stream()
                 .map(this::parseCode)
@@ -192,7 +200,7 @@ public class MarketDataService {
                 .collect(Collectors.toList());
 
         // 2. 一次批量查询（代替 N 次单只查询）
-        List<StockDaily> allRows = clickHouseStockService.getStockDailyBatch(codes, startDate, endDate);
+        List<StockDaily> allRows = clickHouseStockService.getStockDailyBatch(codes, startDate, endDate, useFinal);
 
         // 3. 按 code 分组（内存）
         Map<String, List<StockDaily>> byCode = allRows.stream()

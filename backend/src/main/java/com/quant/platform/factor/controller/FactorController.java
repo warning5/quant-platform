@@ -115,7 +115,7 @@ public class FactorController {
     }
 
     @PostMapping("/batch-compute")
-    @Operation(summary = "批量并行计算多个因子（每个因子在独立线程中执行，最多8个）")
+    @Operation(summary = "批量并行计算多个因子（日期范围≤7天时无因子数量限制，否则最多8个）")
     public ApiResponse<Map<String, Object>> batchCompute(
             @RequestParam String factorCodes,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
@@ -123,8 +123,9 @@ public class FactorController {
             @RequestParam(defaultValue = "true") boolean incremental,
             @RequestParam(defaultValue = "false") boolean force) {
         List<String> codeList = Arrays.asList(factorCodes.split(","));
-        if (codeList.size() > 8) {
-            return ApiResponse.error("最多同时计算 8 个因子，当前提交了 " + codeList.size() + " 个");
+        long daysBetween = java.time.temporal.ChronoUnit.DAYS.between(startDate, endDate) + 1;
+        if (daysBetween > 7 && codeList.size() > 8) {
+            return ApiResponse.error("日期范围超过7天时最多同时计算 8 个因子（当前 " + codeList.size() + " 个，范围 " + daysBetween + " 天）");
         }
         Map<String, Object> result = factorService.triggerBatchCompute(codeList, startDate, endDate, incremental, force);
         return ApiResponse.success("批量计算任务已提交", result);
@@ -237,6 +238,13 @@ public class FactorController {
     @Operation(summary = "当前正在计算的因子代码列表")
     public ApiResponse<Set<String>> running() {
         return ApiResponse.success(computeEngine.getRunningFactorCodes());
+    }
+
+    @GetMapping("/missing-by-date")
+    @Operation(summary = "查询指定日期缺少因子值的因子列表")
+    public ApiResponse<List<Map<String, Object>>> missingByDate(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        return ApiResponse.success(factorService.findMissingFactorsByDate(date));
     }
 
     @GetMapping("/ws-test")
