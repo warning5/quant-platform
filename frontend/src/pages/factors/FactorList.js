@@ -1,9 +1,10 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { Table, Tag, Button, Space, Input, Select, Card, Typography, Popconfirm, message, Tooltip, Badge, DatePicker, Alert } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined, PlayCircleOutlined, ClearOutlined, SearchOutlined, CalculatorOutlined } from '@ant-design/icons';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import { Table, Tag, Button, Space, Input, Select, Card, Typography, Popconfirm, message, Tooltip, Badge, DatePicker, Alert, Modal, Radio } from 'antd';
+import { PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined, PlayCircleOutlined, ClearOutlined, SearchOutlined, CalculatorOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { factorApi } from '../../api';
 import { CATEGORY_OPTIONS, CATEGORY_LABELS } from './constants';
+import dayjs from 'dayjs';
 
 const { Title } = Typography;
 const { Option } = Select;
@@ -34,6 +35,17 @@ export default function FactorList() {
   const [missingLoading, setMissingLoading] = useState(false);
   const [showMissing, setShowMissing] = useState(false);
   const [computing, setComputing] = useState(false);
+
+  // 批量计算 Modal 状态
+  const [selectedRowKeys, setSelectedRowKeys] = useState([]);
+  const [computeModalVisible, setComputeModalVisible] = useState(false);
+  const [computeDateRange, setComputeDateRange] = useState([null, null]);
+  const [computeMode, setComputeMode] = useState('incremental');
+  const [batchComputing, setBatchComputing] = useState(false);
+
+  const selectedFactors = useMemo(() => {
+    return (data.records || []).filter(r => selectedRowKeys.includes(r.id));
+  }, [data.records, selectedRowKeys]);
 
   const fetchData = useCallback((p) => {
     setLoading(true);
@@ -87,6 +99,49 @@ export default function FactorList() {
       .catch(() => message.error('提交计算失败'))
       .finally(() => setComputing(false));
   }, [missingDate, missingFactors]);
+
+  /** 打开批量计算弹窗 */
+  const handleOpenBatchCompute = useCallback(() => {
+    if (selectedRowKeys.length === 0) {
+      message.warning('请先选择因子');
+      return;
+    }
+    // 默认范围：2025-01-01 到今天（后端增量计算会自动跳过已有数据的日期）
+    const defaultStart = dayjs('2025-01-01');
+    const defaultEnd = dayjs();
+    setComputeDateRange([defaultStart, defaultEnd]);
+    setComputeModalVisible(true);
+  }, [selectedRowKeys.length]);
+
+  /** 提交批量计算 —— 先跳转再异步提交，避免预加载K线耗时导致超时 */
+  const handleBatchCompute = useCallback(() => {
+    if (!computeDateRange[0] || !computeDateRange[1]) {
+      message.warning('请选择计算日期范围');
+      return;
+    }
+    const codes = selectedFactors.map(f => f.factorCode);
+    const startDate = computeDateRange[0].format('YYYY-MM-DD');
+    const endDate = computeDateRange[1].format('YYYY-MM-DD');
+    const isIncremental = computeMode === 'incremental';
+
+    // 立即关闭弹窗、清空选择、跳转监控页（不等待API）
+    setComputeModalVisible(false);
+    setSelectedRowKeys([]);
+    navigate('/factor-monitor');
+
+    // 后台异步提交，预加载K线耗时久不阻塞UI
+    setBatchComputing(true);
+    factorApi.batchCompute(codes, startDate, endDate, isIncremental, !isIncremental)
+      .then(res => {
+        const submitted = res?.submitted?.length ?? 0;
+        const skipped = res?.skipped?.length ?? 0;
+        message.success(`已提交 ${submitted} 个因子${isIncremental ? '增量' : '强制'}计算（${startDate} ~ ${endDate}），跳过 ${skipped} 个`);
+      })
+      .catch(err => {
+        message.error('提交计算失败: ' + (err?.message || '未知错误'));
+      })
+      .finally(() => setBatchComputing(false));
+  }, [computeDateRange, computeMode, selectedFactors, navigate]);
 
   const handleDelete = (id) => {
     factorApi.delete(id).then(() => { message.success('删除成功'); fetchData(params); });
@@ -317,12 +372,47 @@ export default function FactorList() {
       </Card>
 
       <Card style={{ border: '1px solid #d9d9d9' }}>
+        {selectedRowKeys.length > 0 && (
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message={
+              <Space>
+                <span>已选择 {selectedRowKeys.length} 个因子</span>
+                <Button
+                  type="primary"
+                  size="small"
+                  icon={<ThunderboltOutlined />}
+                  onClick={handleOpenBatchCompute}
+                >
+                  批量计算
+                </Button>
+                <Button
+                  size="small"
+                  onClick={() => setSelectedRowKeys([])}
+                >
+                  取消选择
+                </Button>
+              </Space>
+            }
+          />
+        )}
         <Table
           dataSource={data.records}
           columns={columns}
           rowKey="id"
           loading={loading}
           scroll={{ x: 1100 }}
+          rowSelection={{
+            selectedRowKeys,
+            onChange: setSelectedRowKeys,
+            selections: [
+              Table.SELECTION_ALL,
+              Table.SELECTION_INVERT,
+              Table.SELECTION_NONE,
+            ],
+          }}
           pagination={{
             total: data.total,
             pageSize: params.size,
@@ -338,6 +428,62 @@ export default function FactorList() {
           }}
         />
       </Card>
+
+      {/* 批量计算弹窗 */}
+      <Modal
+        title={
+          <Space>
+            <ThunderboltOutlined />
+            <span>批量计算因子</span>
+          </Space>
+        }
+        open={computeModalVisible}
+        onOk={handleBatchCompute}
+        onCancel={() => setComputeModalVisible(false)}
+        confirmLoading={batchComputing}
+        okText="开始计算"
+        cancelText="取消"
+        width={480}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ marginBottom: 8, color: '#666' }}>
+            已选因子（{selectedFactors.length} 个）：
+          </div>
+          <div style={{ maxHeight: 120, overflow: 'auto', border: '1px solid #f0f0f0', borderRadius: 4, padding: 8 }}>
+            <Space wrap size={4}>
+              {selectedFactors.map(f => (
+                <Tag key={f.factorCode} color="blue">{f.factorCode}</Tag>
+              ))}
+            </Space>
+          </div>
+        </div>
+        <div>
+          <div style={{ marginBottom: 8, color: '#666' }}>计算模式：</div>
+          <Radio.Group value={computeMode} onChange={e => setComputeMode(e.target.value)} style={{ marginBottom: 12 }}>
+            <Radio value="incremental">增量计算</Radio>
+            <Radio value="force">强制计算</Radio>
+          </Radio.Group>
+          <div style={{ marginBottom: 8, color: '#666' }}>计算日期范围：</div>
+          <DatePicker.RangePicker
+            style={{ width: '100%' }}
+            value={computeDateRange}
+            onChange={dates => setComputeDateRange(dates)}
+            allowClear
+            disabledDate={current => current && current > dayjs()}
+            presets={[
+              { label: '最近1天', value: [dayjs().subtract(1, 'day'), dayjs().subtract(1, 'day')] },
+              { label: '最近3天', value: [dayjs().subtract(3, 'day'), dayjs().subtract(1, 'day')] },
+              { label: '最近7天', value: [dayjs().subtract(7, 'day'), dayjs().subtract(1, 'day')] },
+              { label: '最近30天', value: [dayjs().subtract(30, 'day'), dayjs().subtract(1, 'day')] },
+            ]}
+          />
+          <div style={{ marginTop: 8, fontSize: 12, color: '#999' }}>
+            {computeMode === 'incremental'
+              ? '增量模式：仅计算选中日期范围内尚未有因子值的日期。日期超过7天时最多同时计算8个因子。'
+              : '强制模式：清空已有数据并重新计算选中日期范围内所有日期。耗时较长，请谨慎使用。'}
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

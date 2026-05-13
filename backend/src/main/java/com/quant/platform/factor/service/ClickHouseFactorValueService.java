@@ -844,6 +844,7 @@ public class ClickHouseFactorValueService {
     public void httpBatchInsert(List<com.quant.platform.factor.domain.FactorValue> values) {
         if (!clickHouseConfig.isEnabled() || values == null || values.isEmpty()) return;
         java.time.LocalDateTime now = java.time.LocalDateTime.now();
+        java.time.format.DateTimeFormatter chDtFmt = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
         // 分块：每块 50 万行，避免 HTTP body 过大
         int chunkSize = 500_000;
         for (int i = 0; i < values.size(); i += chunkSize) {
@@ -860,14 +861,27 @@ public class ClickHouseFactorValueService {
                     .append("\"factor_val\":").append(toJsonVal(fv.getFactorVal())).append(",")
                     .append("\"rank_value\":").append(toJsonVal(fv.getRankValue())).append(",")
                     .append("\"z_score\":").append(toJsonVal(fv.getZScore())).append(",")
-                    .append("\"created_at\":\"").append(created).append("\",")
-                    .append("\"update_time\":\"").append(now).append("\"")
+                    .append("\"created_at\":\"").append(created.format(chDtFmt)).append("\",")
+                    .append("\"update_time\":\"").append(now.format(chDtFmt)).append("\"")
                     .append('}');
             }
             httpPost("INSERT INTO stock.factor_value FORMAT JSONEachRow", body.toString());
             log.debug("[ClickHouse] HTTP批量写入 {} 条（{}/{}）", end - i, end, values.size());
         }
         log.info("[ClickHouse] HTTP批量写入完成，共 {} 条", values.size());
+    }
+
+    /**
+     * 对 factor_value 表执行 OPTIMIZE TABLE FINAL，合并 ReplacingMergeTree 重复行。
+     * 归一化写入新行后调用，确保查询能立即读到 z_score/rank_value 而非旧行 NULL。
+     */
+    public void optimizeFactorValue() {
+        // 用 HTTP POST body 方式发送 DDL，绕过 readonly=2 的 URL 参数限制
+        try {
+            httpPost("OPTIMIZE TABLE stock.factor_value FINAL", "");
+        } catch (Exception e) {
+            throw new RuntimeException("OPTIMIZE factor_value 失败: " + e.getMessage(), e);
+        }
     }
 
     /** HTTP POST 到 ClickHouse */

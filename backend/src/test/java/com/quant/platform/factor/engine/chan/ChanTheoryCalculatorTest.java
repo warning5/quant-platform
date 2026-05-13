@@ -320,7 +320,7 @@ class ChanTheoryCalculatorTest {
         }
 
         if (conn == null) {
-            log.warn("ClickHouse 无法连接 ({}), 跳过真实数据测试", lastEx != null ? lastEx.getMessage() : "unknown");
+            log.warn("ClickHouse 无法连接 ({}), 跳过真实数据测试", lastEx.getMessage());
             return new ArrayList<>();
         }
 

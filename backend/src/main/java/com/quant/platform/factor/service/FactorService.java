@@ -14,6 +14,7 @@ import com.quant.platform.factor.engine.ScriptedFactorEngine;
 import com.quant.platform.factor.mapper.FactorDefinitionMapper;
 import com.quant.platform.factor.mapper.FactorTestReportMapper;
 import com.quant.platform.factor.mapper.FactorValueMapper;
+import com.quant.platform.market.domain.MarketDailyBar;
 import com.quant.platform.market.service.MarketDataService;
 import com.quant.platform.stock.entity.StockInfo;
 import com.quant.platform.stock.mapper.StockInfoMapper;
@@ -385,6 +386,25 @@ public class FactorService {
                 "timestamp", java.time.LocalDateTime.now().toString()
         ));
 
+        // ── 统一预加载K线数据（所有因子共享，避免 N×11 次 CH 查询）──
+        Map<String, List<MarketDailyBar>> preloadedBars = null;
+        LocalDate histStart = startDate.minusDays(400);
+        log.info("[批量计算] 统一预加载K线: {} 只股票, {} ~ {}", symbols.size(), histStart, endDate);
+        long preloadStart = System.currentTimeMillis();
+        try {
+            preloadedBars = marketDataService.getBarsBatch(symbols, histStart, endDate, false);
+            long preloadMs = System.currentTimeMillis() - preloadStart;
+            long totalBars = preloadedBars.values().stream().mapToLong(List::size).sum();
+            log.info("[批量计算] 预加载完成: {} 只股票, {} 行K线, 耗时 {}ms", preloadedBars.size(), totalBars, preloadMs);
+            if (totalBars == 0) {
+                log.warn("[批量计算] 预加载K线为空！请检查数据源");
+            }
+        } catch (Exception e) {
+            log.error("[批量计算] 预加载K线失败，将回退到各因子自行预加载: {}", e.getMessage());
+            preloadedBars = null;
+        }
+        final Map<String, List<MarketDailyBar>> sharedBars = preloadedBars;
+
         for (String code : factorCodes) {
             FactorDefinition factor = factorMapper.selectOne(
                     new LambdaQueryWrapper<FactorDefinition>()
@@ -403,7 +423,11 @@ public class FactorService {
                 }
                 log.info("[{}] incremental: existing data up to {}, computing from {}", code, latestDate, startDate);
                 try {
-                    computeEngine.computeFactorIncremental(factor, startDate, endDate, symbols);
+                    if (sharedBars != null) {
+                        computeEngine.computeFactorIncrementalWithBars(factor, startDate, endDate, symbols, sharedBars);
+                    } else {
+                        computeEngine.computeFactorIncremental(factor, startDate, endDate, symbols);
+                    }
                 } catch (Exception e) {
                     skipped.add(code + "(提交失败:" + e.getMessage().split("\\n")[0] + ")");
                     log.warn("[{}] 提交增量计算失败: {}", code, e.getMessage());
@@ -411,7 +435,11 @@ public class FactorService {
                 }
             } else {
                 try {
-                    computeEngine.computeFactor(factor, startDate, endDate, symbols);
+                    if (sharedBars != null) {
+                        computeEngine.computeFactorWithBars(factor, startDate, endDate, symbols, sharedBars);
+                    } else {
+                        computeEngine.computeFactor(factor, startDate, endDate, symbols);
+                    }
                 } catch (Exception e) {
                     skipped.add(code + "(提交失败:" + e.getMessage().split("\\n")[0] + ")");
                     log.warn("[{}] 提交全量计算失败: {}", code, e.getMessage());
@@ -592,7 +620,7 @@ public class FactorService {
                 .collect(java.util.stream.Collectors.toMap(
                         s -> s.getCode() + "." + (s.getMarket() != null ? s.getMarket() : ""),
                         StockInfo::getName,
-                        (a, _) -> a));
+                        (a, existing) -> a));
 
         return factorSymbols.stream()
                 .filter(nameMap::containsKey)
@@ -638,7 +666,7 @@ public class FactorService {
                     .collect(java.util.stream.Collectors.toMap(
                             StockInfo::getCode,
                             s -> s.getName() != null ? s.getName() : "",
-                            (a, _) -> a));
+                            (a, existing) -> a));
             // 构建 symbol -> name 映射
             for (String sym : allSymbols) {
                 String code = sym.contains(".") ? sym.substring(0, sym.indexOf('.')) : sym;

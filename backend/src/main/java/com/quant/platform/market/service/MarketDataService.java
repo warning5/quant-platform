@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -199,12 +200,29 @@ public class MarketDataService {
                 .distinct()
                 .collect(Collectors.toList());
 
-        // 2. 一次批量查询（代替 N 次单只查询）
-        List<StockDaily> allRows = clickHouseStockService.getStockDailyBatch(codes, startDate, endDate, useFinal);
+        // 2. 分批查询（每批最多 500 只），避免单次查询数据量过大导致 CH socket_timeout
+        final int BATCH_SIZE = 500;
+        List<StockDaily> allRows = new ArrayList<>();
+        if (codes.size() <= BATCH_SIZE) {
+            allRows = clickHouseStockService.getStockDailyBatch(codes, startDate, endDate, useFinal);
+        } else {
+            int totalBatches = (codes.size() + BATCH_SIZE - 1) / BATCH_SIZE;
+            log.info("[getBarsBatch] 分批查询: {} 只股票, 分 {} 批, 每批最多 {} 只", codes.size(), totalBatches, BATCH_SIZE);
+            long batchStart = System.currentTimeMillis();
+            for (int i = 0; i < codes.size(); i += BATCH_SIZE) {
+                List<String> batch = codes.subList(i, Math.min(i + BATCH_SIZE, codes.size()));
+                List<StockDaily> batchRows = clickHouseStockService.getStockDailyBatch(batch, startDate, endDate, useFinal);
+                allRows.addAll(batchRows);
+                log.debug("[getBarsBatch] 批次 {}/{}: 查询 {} 只, 返回 {} 行", (i / BATCH_SIZE + 1), totalBatches, batch.size(), batchRows.size());
+            }
+            long batchMs = System.currentTimeMillis() - batchStart;
+            log.info("[getBarsBatch] 分批查询完成: {} 只股票, 总计 {} 行, 耗时 {}ms", codes.size(), allRows.size(), batchMs);
+        }
 
         // 3. 按 code 分组（内存）
         Map<String, List<StockDaily>> byCode = allRows.stream()
                 .collect(Collectors.groupingBy(StockDaily::getCode, Collectors.toList()));
+        log.info("[getBarsBatch诊断] byCode分组: {} distinct codes have data", byCode.size());
 
         // 4. 转换为 Map<symbol, List<MarketDailyBar>>
         Map<String, List<MarketDailyBar>> result = new LinkedHashMap<>();

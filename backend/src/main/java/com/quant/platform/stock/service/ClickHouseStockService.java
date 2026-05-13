@@ -110,6 +110,7 @@ public class ClickHouseStockService {
                 log.debug("[ClickHouse] 批量命中: {}只股票 {}~{} (final={})", codes.size(), startDate, endDate, useFinal);
                 return result;
             }
+            log.warn("[ClickHouse] 批量查询返回 0 行: {} 只股票 {}~{}, 回退 MySQL", codes.size(), startDate, endDate);
         } catch (Exception e) {
             log.warn("[ClickHouse] 批量查询失败，回退到 MySQL: {}", e.getMessage());
         }

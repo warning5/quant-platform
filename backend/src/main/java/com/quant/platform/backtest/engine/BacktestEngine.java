@@ -714,7 +714,7 @@ public class BacktestEngine {
                 .limit(topN)
                 .collect(Collectors.toMap(
                         Map.Entry::getKey,
-                        _ -> 1.0 / Math.min(topN, scores.size())
+                        entry -> 1.0 / Math.min(topN, scores.size())
                 ));
     }
 

@@ -215,7 +215,7 @@ export function ManualPaperTrading() {
             <li><Text strong>初次使用</Text>：手动模式（生成信号 → 逐个/批量执行），熟悉流程后再开启自动</li>
             <li><Text strong>自动运行</Text>：将状态设为 RUNNING，每个交易日 15:30 自动运行，无需人工干预</li>
             <li><Text strong>分红处理</Text>：A 股分红季（5~7月）建议手动点击「处理分红」，确保收益准确</li>
-            <li><Text strong>策略评估</Text>：运行 1 个月后观察净值曲线，累计收益 > 基准 + 无大额回撤，才考虑实盘</li>
+            <li><Text strong>策略评估</Text>：运行 1 个月后观察净值曲线，累计收益 {'>'} 基准 + 无大额回撤，才考虑实盘</li>
             <li><Text strong>风险控制</Text>：模拟盘止损逻辑尚未内置，建议定期查看持仓，手动 STOP 表现差的模拟盘</li>
           </ul>
         }

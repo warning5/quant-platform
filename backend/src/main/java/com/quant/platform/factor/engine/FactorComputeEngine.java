@@ -226,6 +226,165 @@ public class FactorComputeEngine {
     }
 
     /**
+     * 计算因子值（使用预加载的K线数据，批量计算时共享）
+     */
+    @Async("backtestTaskExecutor")
+    public void computeFactorWithBars(FactorDefinition factor, LocalDate startDate, LocalDate endDate,
+                                       List<String> symbols, Map<String, List<MarketDailyBar>> preloadedBars) {
+        String code = factor.getFactorCode();
+        runningFactors.add(code);
+        try {
+            if (financialCalculators.containsKey(code)) {
+                computeFinancialFactorSync(code, startDate, endDate, symbols);
+                sendProgress(code, "DONE", 100, "财务因子计算完成");
+                return;
+            }
+            self.doComputeFactorSync(factor, startDate, endDate, symbols, preloadedBars);
+            sendProgress(code, "DONE", 100, "因子计算完成");
+        } finally {
+            runningFactors.remove(code);
+        }
+    }
+
+    /**
+     * 同步计算因子值（供 runFactorTest 内部调用）
+     * 优化：多线程并行（按日期分片）+ 批量写入（每批500条）
+     */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    public void computeFactorSync(FactorDefinition factor, LocalDate startDate, LocalDate endDate, List<String> symbols) {
+        runningFactors.add(factor.getFactorCode());
+        try {
+            if (financialCalculators.containsKey(factor.getFactorCode())) {
+                computeFinancialFactorSync(factor.getFactorCode(), startDate, endDate, symbols);
+                return;
+            }
+            // 自行预加载
+            LocalDate histStart = startDate.minusDays(400);
+            sendProgress(factor.getFactorCode(), "COMPUTING", 0, String.format("预加载K线数据 %s ~ %s ...", histStart, endDate));
+            long preloadStart = System.currentTimeMillis();
+            Map<String, List<MarketDailyBar>> allBarsData = marketDataService.getBarsBatch(symbols, histStart, endDate, false);
+            long preloadMs = System.currentTimeMillis() - preloadStart;
+            log.info("[{}] 预加载K线完成: {} 只股票, {} ~ {}, 耗时 {}ms",
+                    factor.getFactorCode(), allBarsData.size(), histStart, endDate, preloadMs);
+
+            doComputeFactorSync(factor, startDate, endDate, symbols, allBarsData);
+        } finally {
+            runningFactors.remove(factor.getFactorCode());
+        }
+    }
+
+    /**
+     * 全量计算核心逻辑（从 computeFactorSync 抽取）
+     */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    public void doComputeFactorSync(FactorDefinition factor, LocalDate startDate, LocalDate endDate,
+                                     List<String> symbols, Map<String, List<MarketDailyBar>> allBarsData) {
+        try {
+            if (financialCalculators.containsKey(factor.getFactorCode())) {
+                computeFinancialFactorSync(factor.getFactorCode(), startDate, endDate, symbols);
+                return;
+            }
+
+            log.info("[全量] 跳过删除，直接覆盖写入: factor={}, {}~{}", factor.getFactorCode(), startDate, endDate);
+
+            List<LocalDate> tradingDates = marketDataService.getTradingDates(startDate, endDate);
+            int totalDates = tradingDates.size();
+            int totalStocks = symbols.size();
+            long totalTasks = (long) totalDates * totalStocks;
+
+            sendProgress(factor.getFactorCode(), "COMPUTING", 0, String.format("开始计算 [%s]，共 %d 交易日 × %d 只股票 = %,d 条", factor.getFactorCode(), totalDates, totalStocks, totalTasks));
+
+            // ── 并行参数 ──
+            int maxInternalThreads = Math.max(1, 30 / Math.max(runningFactors.size(), 1) - 2);
+            int threads = Math.min(Math.max(Runtime.getRuntime().availableProcessors(), 2), Math.min(8, maxInternalThreads));
+            ExecutorService pool = Executors.newFixedThreadPool(threads);
+            log.info("[{}] [sync] Using {} threads (runningFactors={})", factor.getFactorCode(), threads, runningFactors.size());
+
+            AtomicInteger datesCompleted = new AtomicInteger(0);
+            AtomicLong rowsInserted = new AtomicLong(0);
+            AtomicLong startTimeMs = new AtomicLong(System.currentTimeMillis());
+            int lastPushedPct = -1;
+
+            java.util.concurrent.ExecutorCompletionService<List<FactorValue>> completionService =
+                    new java.util.concurrent.ExecutorCompletionService<>(pool);
+            for (LocalDate date : tradingDates) {
+                completionService.submit(() -> computeOneDateFromMemory(factor, date, symbols, allBarsData));
+            }
+            pool.shutdown();
+
+            List<FactorValue> writeBuffer = new ArrayList<>(5000);
+            long collectStart = System.currentTimeMillis();
+            long firstWriteMs = 0;
+            AtomicLong rowsCollected = new AtomicLong(0);
+            AtomicLong rowsWritten = new AtomicLong(0);
+
+            for (int i = 0; i < totalDates; i++) {
+                List<FactorValue> dayValues;
+                try {
+                    dayValues = completionService.take().get(3, java.util.concurrent.TimeUnit.MINUTES);
+                } catch (java.util.concurrent.TimeoutException e) {
+                    log.error("[{}] 第 {} 个任务超时 3 min，跳过", factor.getFactorCode(), i);
+                    dayValues = null;
+                } catch (Exception e) {
+                    log.warn("[{}] 第 {} 个任务失败: {}", factor.getFactorCode(), i, e.getMessage());
+                    dayValues = null;
+                }
+
+                if (dayValues != null && !dayValues.isEmpty()) {
+                    writeBuffer.addAll(dayValues);
+                    rowsCollected.addAndGet(dayValues.size());
+                }
+
+                datesCompleted.incrementAndGet();
+
+                if (writeBuffer.size() >= 5000) {
+                    if (firstWriteMs == 0) firstWriteMs = System.currentTimeMillis();
+                    batchSaveWithRetry(new ArrayList<>(writeBuffer), factor.getFactorCode());
+                    rowsWritten.addAndGet(writeBuffer.size());
+                    writeBuffer.clear();
+                }
+
+                int pct = Math.min((int) ((double) datesCompleted.get() / totalDates * 60), 60);
+                if (pct > lastPushedPct || datesCompleted.get() % 10 == 0) {
+                    lastPushedPct = pct;
+                    long elapsed = System.currentTimeMillis() - startTimeMs.get();
+                    double speed = elapsed > 0 ? (double) datesCompleted.get() / elapsed * 1000 : 0;
+                    int remaining = totalDates - datesCompleted.get();
+                    long etaSec = speed > 0 ? (long) (remaining / speed) : 0;
+                    sendProgress(factor.getFactorCode(), "COMPUTING", pct,
+                            String.format("计算中 %d/%d 交易日 (%d%%) | 已处理 %,d 行 | 已写入 %,d 行 | 速度 %.1f 日/s | 剩余约 %s",
+                                    datesCompleted.get(), totalDates, pct,
+                                    rowsCollected.get(),
+                                    rowsWritten.get(), speed, formatEta(etaSec)),
+                            etaSec);
+                }
+            }
+
+            if (!writeBuffer.isEmpty()) {
+                if (firstWriteMs == 0) firstWriteMs = System.currentTimeMillis();
+                batchSaveWithRetry(new ArrayList<>(writeBuffer), factor.getFactorCode());
+                rowsWritten.addAndGet(writeBuffer.size());
+                writeBuffer.clear();
+            }
+
+            long totalMs = System.currentTimeMillis() - collectStart;
+            log.info("[{}] 完成: {} 个交易日, 已写入 {} 行, 总耗时 {}ms (收集+写入流水线)", factor.getFactorCode(), totalDates, rowsWritten.get(), totalMs);
+
+            sendProgress(factor.getFactorCode(), "COMPUTING", 90,
+                    String.format("全部写入完成，共 %,d 行，总耗时 %.1f 秒。开始归一化 %d 个交易日...",
+                            rowsWritten.get(), totalMs / 1000.0, totalDates));
+            normalizeFactorValues(factor.getFactorCode(), tradingDates);
+            sendProgress(factor.getFactorCode(), "DONE", 100, String.format("归一化完成，共处理 %d 个交易日，写入 %,d 条因子值", totalDates, rowsWritten.get()));
+
+            log.info("[{}] computation done: {} dates, {} rows", factor.getFactorCode(), totalDates, rowsWritten.get());
+        } catch (Exception e) {
+            log.error("[{}] 全量计算异常: {}", factor.getFactorCode(), e.getMessage(), e);
+            sendProgress(factor.getFactorCode(), "ERROR", -1, "全量计算异常: " + e.getMessage());
+            throw e;
+        }
+    }
+
+    /**
      * 查询指定因子已有数据的最新日期（用于增量续算）
      * 优先从 ClickHouse 读取
      *
@@ -253,77 +412,133 @@ public class FactorComputeEngine {
 
     /**
      * 增量计算因子值（不清除旧数据，跳过已有日期，只算新日期）
+     * 各自预加载K线（单因子调用路径）
      */
     @Async("backtestTaskExecutor")
     public void computeFactorIncremental(FactorDefinition factor, LocalDate startDate, LocalDate endDate, List<String> symbols) {
         String code = factor.getFactorCode();
-
-        // 先加入 runningFactors，确保在所有退出路径都能被清理
         runningFactors.add(code);
 
-        // 财务因子走专门的增量计算逻辑（基于财报报告期，而非交易日）
-        if (financialCalculators.containsKey(code)) {
-            try {
-                computeFinancialFactorIncremental(code, startDate, endDate, symbols);
-            } finally {
-                runningFactors.remove(code);
-            }
-            return;
-        }
-
-        // === 以下是技术因子的增量计算逻辑 ===
-
-        // 获取所有需要计算的交易日
-        List<LocalDate> tradingDates = marketDataService.getTradingDates(startDate, endDate);
-
-        // 过滤掉已有数据的日期（通过查 factor_value 中已存在的 calc_date）
-        final Set<LocalDate> existingDates;
-        Set<LocalDate> dates;
-        if (!tradingDates.isEmpty()) {
-            // 优先从 ClickHouse 读取
-            if (clickHouseConfig.isEnabled()) {
-                try {
-                    List<FactorValue> values = clickHouseFactorValueService.findByFactorCodeAndDateRange(code, tradingDates.getFirst(), tradingDates.getLast());
-                    dates = values.stream().map(FactorValue::getCalcDate).collect(java.util.stream.Collectors.toSet());
-                } catch (Exception e) {
-                    log.warn("[ClickHouse] 增量计算已有日期查询失败，回退 MySQL: {}", e.getMessage());
-                    LambdaQueryWrapper<FactorValue> wrapper = new LambdaQueryWrapper<>();
-                    wrapper.eq(FactorValue::getFactorCode, code).ge(FactorValue::getCalcDate, tradingDates.getFirst()).le(FactorValue::getCalcDate, tradingDates.getLast()).select(FactorValue::getCalcDate).groupBy(FactorValue::getCalcDate);
-                    dates = new HashSet<>(factorValueMapper.selectList(wrapper).stream().map(FactorValue::getCalcDate).toList());
-                }
-            } else {
-                LambdaQueryWrapper<FactorValue> wrapper = new LambdaQueryWrapper<>();
-                wrapper.eq(FactorValue::getFactorCode, code).ge(FactorValue::getCalcDate, tradingDates.getFirst()).le(FactorValue::getCalcDate, tradingDates.getLast()).select(FactorValue::getCalcDate).groupBy(FactorValue::getCalcDate);
-                dates = new HashSet<>(factorValueMapper.selectList(wrapper).stream().map(FactorValue::getCalcDate).toList());
-            }
-        } else {
-            dates = Collections.emptySet();
-        }
-
-        existingDates = dates;
-        List<LocalDate> newDates = tradingDates.stream().filter(d -> !existingDates.contains(d)).toList();
-
-        if (newDates.isEmpty()) {
-            sendProgress(code, "DONE", 100, "增量计算：无新日期需要计算（已有数据到 " + (existingDates.isEmpty() ? "无" : Collections.max(existingDates)) + "）");
-            // 统一由 finally 块清理 runningFactors
-            runningFactors.remove(code);
-            return;
-        }
-
-        log.info("[{}] incremental: total {} dates, {} new (skipping {} existing)", code, tradingDates.size(), newDates.size(), existingDates.size());
-
-        int totalDates = newDates.size();
-        int totalStocks = symbols.size();
-        long totalTasks = (long) totalDates * totalStocks;
-
         try {
-            // ── 预加载全量K线到内存（和全量路径一致，避免逐日查询DB） ──
+            // 财务因子走专门的增量计算逻辑（基于财报报告期，而非交易日）
+            if (financialCalculators.containsKey(code)) {
+                computeFinancialFactorIncremental(code, startDate, endDate, symbols);
+                return;
+            }
+
+            // 查已有日期，过滤出新日期
+            List<LocalDate> tradingDates = marketDataService.getTradingDates(startDate, endDate);
+            Set<LocalDate> existingDates = queryExistingDates(code, tradingDates);
+            List<LocalDate> newDates = tradingDates.stream().filter(d -> !existingDates.contains(d)).toList();
+
+            if (newDates.isEmpty()) {
+                sendProgress(code, "DONE", 100, "增量计算：无新日期需要计算（已有数据到 " + (existingDates.isEmpty() ? "无" : Collections.max(existingDates)) + "）");
+                return;
+            }
+
+            log.info("[{}] incremental: total {} dates, {} new (skipping {} existing)", code, tradingDates.size(), newDates.size(), existingDates.size());
+
+            // 自行预加载K线
             LocalDate histStart = newDates.getFirst().minusDays(400);
             sendProgress(code, "COMPUTING", 0, String.format("[增量] 预加载K线数据 %s ~ %s ...", histStart, endDate));
             long preloadStart = System.currentTimeMillis();
             Map<String, List<MarketDailyBar>> allBarsData = marketDataService.getBarsBatch(symbols, histStart, endDate, false);
             long preloadMs = System.currentTimeMillis() - preloadStart;
             log.info("[{}] [增量] 预加载K线完成: {} 只股票, 耗时 {}ms", code, allBarsData.size(), preloadMs);
+
+            doComputeIncremental(factor, newDates, existingDates, symbols, allBarsData);
+        } finally {
+            runningFactors.remove(code);
+        }
+    }
+
+    /**
+     * 增量计算因子值（使用预加载的K线数据，批量计算时共享）
+     * 由 FactorService.triggerBatchCompute 调用，避免每个因子各自预加载
+     */
+    @Async("backtestTaskExecutor")
+    public void computeFactorIncrementalWithBars(FactorDefinition factor, LocalDate startDate, LocalDate endDate,
+                                                  List<String> symbols, Map<String, List<MarketDailyBar>> preloadedBars) {
+        String code = factor.getFactorCode();
+        runningFactors.add(code);
+
+        try {
+            // 财务因子不走预加载路径，回退到自行处理
+            if (financialCalculators.containsKey(code)) {
+                computeFinancialFactorIncremental(code, startDate, endDate, symbols);
+                return;
+            }
+
+            // 查已有日期，过滤出新日期
+            List<LocalDate> tradingDates = marketDataService.getTradingDates(startDate, endDate);
+            Set<LocalDate> existingDates = queryExistingDates(code, tradingDates);
+            List<LocalDate> newDates = tradingDates.stream().filter(d -> !existingDates.contains(d)).toList();
+
+            if (newDates.isEmpty()) {
+                sendProgress(code, "DONE", 100, "增量计算：无新日期需要计算（已有数据到 " + (existingDates.isEmpty() ? "无" : Collections.max(existingDates)) + "）");
+                return;
+            }
+
+            log.info("[{}] incremental[共享预加载]: total {} dates, {} new (skipping {} existing)", code, tradingDates.size(), newDates.size(), existingDates.size());
+            sendProgress(code, "COMPUTING", 0, "[增量] 使用共享K线数据，跳过预加载");
+
+            doComputeIncremental(factor, newDates, existingDates, symbols, preloadedBars);
+        } finally {
+            runningFactors.remove(code);
+        }
+    }
+
+    /**
+     * 查询指定因子在给定交易日范围内已存在的日期集合
+     */
+    private Set<LocalDate> queryExistingDates(String factorCode, List<LocalDate> tradingDates) {
+        if (tradingDates.isEmpty()) {
+            return Collections.emptySet();
+        }
+        Set<LocalDate> dates;
+        if (clickHouseConfig.isEnabled()) {
+            try {
+                List<FactorValue> values = clickHouseFactorValueService.findByFactorCodeAndDateRange(factorCode, tradingDates.getFirst(), tradingDates.getLast());
+                dates = values.stream().map(FactorValue::getCalcDate).collect(Collectors.toSet());
+            } catch (Exception e) {
+                log.warn("[ClickHouse] 增量计算已有日期查询失败，回退 MySQL: {}", e.getMessage());
+                dates = queryExistingDatesFromMySQL(factorCode, tradingDates);
+            }
+        } else {
+            dates = queryExistingDatesFromMySQL(factorCode, tradingDates);
+        }
+        return dates;
+    }
+
+    private Set<LocalDate> queryExistingDatesFromMySQL(String factorCode, List<LocalDate> tradingDates) {
+        LambdaQueryWrapper<FactorValue> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(FactorValue::getFactorCode, factorCode)
+               .ge(FactorValue::getCalcDate, tradingDates.getFirst())
+               .le(FactorValue::getCalcDate, tradingDates.getLast())
+               .select(FactorValue::getCalcDate)
+               .groupBy(FactorValue::getCalcDate);
+        return new HashSet<>(factorValueMapper.selectList(wrapper).stream().map(FactorValue::getCalcDate).toList());
+    }
+
+    /**
+     * 增量计算核心逻辑（从 computeFactorIncremental 抽取）
+     * 负责并行计算每个交易日的因子值 + 流水线写入 + 归一化
+     */
+    private void doComputeIncremental(FactorDefinition factor, List<LocalDate> newDates, Set<LocalDate> existingDates,
+                                       List<String> symbols, Map<String, List<MarketDailyBar>> allBarsData) {
+        String code = factor.getFactorCode();
+        int totalDates = newDates.size();
+        int totalStocks = symbols.size();
+        long totalTasks = (long) totalDates * totalStocks;
+
+        try {
+            // 诊断：检查 allBarsData 是否为空
+            long totalBars = allBarsData.values().stream().mapToLong(List::size).sum();
+            long nonEmptySymbols = allBarsData.values().stream().filter(v -> !v.isEmpty()).count();
+            log.info("[{}] [诊断] symbols={}, allBarsData entries={}, nonEmpty={}, totalBars={}", code, symbols.size(), allBarsData.size(), nonEmptySymbols, totalBars);
+            if (allBarsData.isEmpty() || totalBars == 0) {
+                log.warn("[{}] allBarsData 为空！symbols前5={}", code, symbols.subList(0, Math.min(5, symbols.size())));
+            }
 
             // ── 并行参数 ──
             // 预加载后不再需要DB连接，可以更激进地使用线程
@@ -335,7 +550,6 @@ public class FactorComputeEngine {
             sendProgress(code, "COMPUTING", 1, String.format("[增量] 开始计算 [%s]，新增 %d 交易日 × %d 只股票 = %,d 条（跳过 %d 已有）", code, totalDates, totalStocks, totalTasks, existingDates.size()));
 
             AtomicInteger datesCompleted = new AtomicInteger(0);
-            AtomicLong rowsInserted = new AtomicLong(0);
             AtomicLong startTimeMs = new AtomicLong(System.currentTimeMillis());
             int lastPushedPct = -1;
 
@@ -416,12 +630,13 @@ public class FactorComputeEngine {
 
             // ── 归一化（只对新日期做） ──
             normalizeFactorValues(code, newDates);
-            sendProgress(code, "DONE", 100, String.format("[增量] 全部完成，新增 %,d 条", rowsInserted.get()));
+            sendProgress(code, "DONE", 100, String.format("[增量] 全部完成，新增 %,d 条", rowsWritten.get()));
 
-            log.info("[{}] incremental done: {} new dates, {} rows", code, totalDates, rowsInserted.get());
-        } finally {
-            // 确保 runningFactors 被清理（无论正常完成还是异常退出）
-            runningFactors.remove(code);
+            log.info("[{}] incremental done: {} new dates, {} rows", code, totalDates, rowsWritten.get());
+        } catch (Exception e) {
+            log.error("[{}] 增量计算异常: {}", code, e.getMessage(), e);
+            sendProgress(code, "ERROR", -1, "增量计算异常: " + e.getMessage());
+            throw e;
         }
     }
 
@@ -649,8 +864,8 @@ public class FactorComputeEngine {
         int totalStocks = symbols.size();
         long totalTasks = (long) totalDates * totalStocks;
 
-        log.info("Clearing existing factor values for [{}] between {} and {}", factorCode, startDate, endDate);
-        self.deleteExistingValues(factorCode, startDate, endDate);
+        // 不再 ALTER TABLE DELETE，直接 INSERT 覆盖（ReplacingMergeTree 按 update_time 去重）。
+        log.info("[财务全量] 跳过删除，直接覆盖写入: factor={}, {}~{}", factorCode, startDate, endDate);
 
         sendProgress(factorCode, "COMPUTING", 0, String.format("[财务全量] 开始计算 [%s]，共 %d 个报告期 × %d 只股票 = %,d 条", factorCode, totalDates, totalStocks, totalTasks));
 
@@ -689,144 +904,6 @@ public class FactorComputeEngine {
         normalizeFactorValues(factorCode, reportDates);
         sendProgress(factorCode, "DONE", 100, String.format("[财务全量] 全部完成，共 %,d 条", rowsInserted.get()));
         log.info("[{}] financial sync done: {} dates, {} rows", factorCode, totalDates, rowsInserted.get());
-    }
-
-    /**
-     * 同步计算因子值（供 runFactorTest 内部调用）
-     * 优化：多线程并行（按日期分片）+ 批量写入（每批500条）
-     */
-    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
-    public void computeFactorSync(FactorDefinition factor, LocalDate startDate, LocalDate endDate, List<String> symbols) {
-
-        // 显式加入 runningFactors，确保在所有退出路径都能被清理
-        runningFactors.add(factor.getFactorCode());
-
-        try {
-            // 财务因子走专门的计算逻辑（基于财报报告期，而非交易日）
-            if (financialCalculators.containsKey(factor.getFactorCode())) {
-                computeFinancialFactorSync(factor.getFactorCode(), startDate, endDate, symbols);
-                return;
-            }
-
-            // === 以下是技术因子的全量计算逻辑 ===
-
-            // 先清除该时间段的旧数据
-        log.info("Clearing existing factor values for [{}] between {} and {}", factor.getFactorCode(), startDate, endDate);
-        self.deleteExistingValues(factor.getFactorCode(), startDate, endDate);
-
-        List<LocalDate> tradingDates = marketDataService.getTradingDates(startDate, endDate);
-        int totalDates = tradingDates.size();
-        int totalStocks = symbols.size();
-        long totalTasks = (long) totalDates * totalStocks;
-
-        sendProgress(factor.getFactorCode(), "COMPUTING", 0, String.format("开始计算 [%s]，共 %d 交易日 × %d 只股票 = %,d 条", factor.getFactorCode(), totalDates, totalStocks, totalTasks));
-
-        // ── 预加载全量K线到内存（优化：避免每个交易日线程重复查DB） ──
-        LocalDate histStart = startDate.minusDays(400);
-        sendProgress(factor.getFactorCode(), "COMPUTING", 1, String.format("预加载K线数据 %s ~ %s ...", histStart, endDate));
-        long preloadStart = System.currentTimeMillis();
-        Map<String, List<MarketDailyBar>> allBarsData = marketDataService.getBarsBatch(symbols, histStart, endDate, false);
-        long preloadMs = System.currentTimeMillis() - preloadStart;
-        log.info("[{}] 预加载K线完成: {} 只股票, {} ~ {}, 耗时 {}ms",
-                factor.getFactorCode(), allBarsData.size(), histStart, endDate, preloadMs);
-
-        // ── 并行参数 ──────────────────────────────────────────────
-        // 动态限线程：感知当前并行因子数，避免耗尽 HikariCP（max=30）
-        // 预加载后不再需要DB连接，可以更激进地使用线程
-        int maxInternalThreads = Math.max(1, 30 / Math.max(runningFactors.size(), 1) - 2);
-        int threads = Math.min(Math.max(Runtime.getRuntime().availableProcessors(), 2), Math.min(8, maxInternalThreads));
-        ExecutorService pool = Executors.newFixedThreadPool(threads);
-        log.info("[{}] [sync] Using {} threads (runningFactors={})", factor.getFactorCode(), threads, runningFactors.size());
-
-        // ── 进度计数器 ────────────────────────────────────────────
-        AtomicInteger datesCompleted = new AtomicInteger(0);
-        AtomicLong rowsInserted = new AtomicLong(0);
-        AtomicLong startTimeMs = new AtomicLong(System.currentTimeMillis());
-        int lastPushedPct = -1;
-
-            // ── 提交每个交易日为一个任务（使用预加载的K线数据） ──
-            // 使用 CompletionService：哪个日期算完先收哪个，不按提交顺序阻塞
-            java.util.concurrent.ExecutorCompletionService<List<FactorValue>> completionService =
-                    new java.util.concurrent.ExecutorCompletionService<>(pool);
-            for (LocalDate date : tradingDates) {
-                completionService.submit(() -> computeOneDateFromMemory(factor, date, symbols, allBarsData));
-            }
-            pool.shutdown();
-
-            // ── 收一个写一个（流水线，不积攒全部结果）──
-            List<FactorValue> writeBuffer = new ArrayList<>(5000);
-            long collectStart = System.currentTimeMillis();
-            long firstWriteMs = 0;
-            AtomicLong rowsCollected = new AtomicLong(0);
-            AtomicLong rowsWritten = new AtomicLong(0);
-
-            for (int i = 0; i < totalDates; i++) {
-                List<FactorValue> dayValues;
-                try {
-                    dayValues = completionService.take().get(3, java.util.concurrent.TimeUnit.MINUTES);
-                } catch (java.util.concurrent.TimeoutException e) {
-                    log.error("[{}] 第 {} 个任务超时 3 min，跳过", factor.getFactorCode(), i);
-                    dayValues = null;
-                } catch (Exception e) {
-                    log.warn("[{}] 第 {} 个任务失败: {}", factor.getFactorCode(), i, e.getMessage());
-                    dayValues = null;
-                }
-
-                if (dayValues != null && !dayValues.isEmpty()) {
-                    writeBuffer.addAll(dayValues);
-                    rowsCollected.addAndGet(dayValues.size());
-                }
-
-                datesCompleted.incrementAndGet();
-
-                // 缓冲区达阈值，立即写入（不等待全部收完）
-                if (writeBuffer.size() >= 5000) {
-                    if (firstWriteMs == 0) firstWriteMs = System.currentTimeMillis();
-                    batchSaveWithRetry(new ArrayList<>(writeBuffer), factor.getFactorCode());
-                    rowsWritten.addAndGet(writeBuffer.size());
-                    writeBuffer.clear();
-                }
-
-                // 进度推送（收集阶段占 0~60%，含部分写入）
-                int pct = Math.min((int) ((double) datesCompleted.get() / totalDates * 60), 60);
-                if (pct > lastPushedPct || datesCompleted.get() % 10 == 0) {
-                    lastPushedPct = pct;
-                    long elapsed = System.currentTimeMillis() - startTimeMs.get();
-                    double speed = elapsed > 0 ? (double) datesCompleted.get() / elapsed * 1000 : 0;
-                    int remaining = totalDates - datesCompleted.get();
-                    long etaSec = speed > 0 ? (long) (remaining / speed) : 0;
-                    sendProgress(factor.getFactorCode(), "COMPUTING", pct,
-                            String.format("计算中 %d/%d 交易日 (%d%%) | 已处理 %,d 行 | 已写入 %,d 行 | 速度 %.1f 日/s | 剩余约 %s",
-                                    datesCompleted.get(), totalDates, pct,
-                                    rowsCollected.get(),
-                                    rowsWritten.get(), speed, formatEta(etaSec)),
-                            etaSec);
-                }
-            }
-
-            // ── 收尾：写入剩余缓冲 ──
-            if (!writeBuffer.isEmpty()) {
-                if (firstWriteMs == 0) firstWriteMs = System.currentTimeMillis();
-                batchSaveWithRetry(new ArrayList<>(writeBuffer), factor.getFactorCode());
-                rowsWritten.addAndGet(writeBuffer.size());
-                writeBuffer.clear();
-            }
-
-            long totalMs = System.currentTimeMillis() - collectStart;
-            log.info("[{}] 完成: {} 个交易日, 已写入 {} 行, 总耗时 {}ms (收集+写入流水线)", factor.getFactorCode(), totalDates, rowsWritten.get(), totalMs);
-
-            // ── 归一化阶段 ────────────────────────────────────────────
-            sendProgress(factor.getFactorCode(), "COMPUTING", 90,
-                    String.format("全部写入完成，共 %,d 行，总耗时 %.1f 秒。开始归一化 %d 个交易日...",
-                            rowsWritten.get(), totalMs / 1000.0, totalDates));
-            normalizeFactorValues(factor.getFactorCode(), tradingDates);
-            sendProgress(factor.getFactorCode(), "DONE", 100, String.format("归一化完成，共处理 %d 个交易日，写入 %,d 条因子值", totalDates, rowsWritten.get()));
-
-            log.info("[{}] computation done: {} dates, {} rows", factor.getFactorCode(), totalDates, rowsWritten.get());
-        } finally {
-            // 确保 runningFactors 被清理（无论正常完成还是异常退出）
-            runningFactors.remove(factor.getFactorCode());
-        }
     }
 
     /**
@@ -879,10 +956,12 @@ public class FactorComputeEngine {
         LocalDateTime now = LocalDateTime.now();
         List<FactorValue> results = new ArrayList<>(symbols.size());
 
+        // 诊断：记录有多少 symbol 的 bars 非空
+        int emptyCount = 0;
         for (String symbol : symbols) {
             try {
                 List<MarketDailyBar> allBars = allBarsData.getOrDefault(symbol, List.of());
-                if (allBars.isEmpty()) continue;
+                if (allBars.isEmpty()) { emptyCount++; continue; }
 
                 // 二分查找：找到 tradeDate > date 的第一个位置（不创建新列表）
                 int lo = 0, hi = allBars.size();
@@ -912,6 +991,11 @@ public class FactorComputeEngine {
                 }
             } catch (Exception e) {
             }
+        }
+        if (results.isEmpty() && emptyCount == symbols.size()) {
+            log.warn("[{}] [诊断] computeOneDateFromMemory: date={}, 所有{}只bars为空, allBarsData keys前5={}",
+                    factorCode, date, emptyCount,
+                    allBarsData.keySet().stream().limit(5).collect(java.util.stream.Collectors.joining(",")));
         }
         return results;
     }
@@ -1063,8 +1147,21 @@ public class FactorComputeEngine {
                 long rowCount = clickHouseFactorValueService.batchNormalize(factorCode, dates);
                 long elapsed = System.currentTimeMillis() - normStart;
                 double speed = elapsed > 0 ? (double) dates.size() / elapsed * 1000 : 0;
-                log.info("[{}] 归一化完成(CH): {} 日期, {} 行, 耗时 {}ms, 速度 {:.1f} 日/s",
+                log.info("[{}] 归一化完成(CH): {} 日期, {} 行, 耗时 {}ms, 速度 {} 日/s",
                         factorCode, dates.size(), rowCount, elapsed, speed);
+
+                // 归一化写入后触发 OPTIMIZE，合并旧行（z_score/rank_value=NULL），避免查询读到脏数据
+                if (rowCount > 0) {
+                    try {
+                        long optStart = System.currentTimeMillis();
+                        clickHouseFactorValueService.optimizeFactorValue();
+                        long optMs = System.currentTimeMillis() - optStart;
+                        log.info("[{}] OPTIMIZE factor_value 完成, 耗时 {}ms", factorCode, optMs);
+                    } catch (Exception optEx) {
+                        log.warn("[{}] OPTIMIZE 失败（不影响结果，下次查询带FINAL仍正确）: {}", factorCode, optEx.getMessage());
+                    }
+                }
+
                 sendProgress(factorCode, "COMPUTING", 99, String.format(
                         "归一化完成 | %d 日期 × 均值 %d 只/日 ≈ %,d 行 | 耗时 %.1f 秒",
                         dates.size(), rowCount > 0 && dates.size() > 0 ? rowCount / dates.size() : 0,

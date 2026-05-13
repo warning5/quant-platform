@@ -768,7 +768,7 @@ function FactorMonitor() {
             <div
               ref={logContainerRef}
               style={{
-                height: 220,
+                height: 300,
                 overflow: 'auto',
                 background: '#1a1a2e',
                 borderRadius: 6,
