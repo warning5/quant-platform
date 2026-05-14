@@ -25,14 +25,7 @@ from datetime import datetime
 import akshare as ak
 import pymysql
 
-DB_CONFIG = {
-    'host': 'localhost',
-    'port': 3306,
-    'user': 'root',
-    'password': '123456',
-    'database': 'stock',
-    'charset': 'utf8mb4',
-}
+from db_config import MYSQL_CONFIG
 
 
 # ─────────────────────────────────────────────
@@ -40,7 +33,7 @@ DB_CONFIG = {
 # ─────────────────────────────────────────────
 
 def get_conn():
-    return pymysql.connect(**DB_CONFIG)
+    return pymysql.connect(**MYSQL_CONFIG)
 
 def parse_number(val):
     """将各种格式的数值字符串转为 float 或 None"""

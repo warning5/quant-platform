@@ -23,15 +23,7 @@ import pandas as pd
 import pymysql
 import requests
 from dbutils.pooled_db import PooledDB
-
-DB_CONFIG = dict(
-    host='localhost',
-    port=3306,
-    user='root',
-    password='123456',
-    database='stock',
-    charset='utf8mb4',
-)
+from db_config import MYSQL_CONFIG
 FAIL_LOG = os.path.join(os.path.dirname(__file__), '_sina_failed_codes.txt')
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -52,7 +44,7 @@ def get_db_pool():
             creator=pymysql,
             maxconnections=25,
             blocking=True,
-            **DB_CONFIG,
+            **MYSQL_CONFIG,
         )
     return _db_pool
 

@@ -45,24 +45,7 @@ import pymysql
 import clickhouse_connect
 
 # ─── 数据库配置 ──────────────────────────────────────────────
-DB_CONFIG = dict(
-    host="localhost",
-    port=3306,
-    db="stock",
-    user="root",
-    password="123456",
-    charset="utf8mb4",
-    cursorclass=pymysql.cursors.DictCursor,
-)
-
-# ClickHouse 配置
-CH_CONFIG = dict(
-    host="localhost",
-    port=8123,
-    username="default",
-    password="123456",
-    database="stock",
-)
+from db_config import MYSQL_CONFIG as DB_CONFIG, CLICKHOUSE_CONFIG as CH_CONFIG
 
 # 腾讯财经接口
 QQ_URL = "https://qt.gtimg.cn/q={codes}"

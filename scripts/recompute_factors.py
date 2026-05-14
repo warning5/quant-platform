@@ -44,22 +44,7 @@ from datetime import date
 import pymysql
 import clickhouse_connect
 
-CH_CONFIG = {
-    "host": "localhost",
-    "port": 8123,
-    "username": "default",
-    "password": "123456",
-    "database": "stock",
-}
-
-MYSQL_CONFIG = {
-    "host": "localhost",
-    "port": 3306,
-    "user": "root",
-    "password": "123456",
-    "database": "stock",
-    "charset": "utf8mb4",
-}
+from db_config import CLICKHOUSE_CONFIG, MYSQL_CONFIG
 
 # ---- 因子分组 ----
 TECH_FACTORS = ["MOM20", "MOM60", "VOL20", "TURN20", "SIZE", "RSI5", "BOLL_POS", "VPCORR20"]
@@ -113,7 +98,7 @@ FIN_FACTORS = [
 def load_stock_daily():
     """加载全部 stock_daily，按 code 分组，按 trade_date 排序"""
     print("[1/5] 加载 stock_daily 数据...")
-    ch_client = clickhouse_connect.get_client(**CH_CONFIG)
+    ch_client = clickhouse_connect.get_client(**CLICKHOUSE_CONFIG)
     mysql_conn = pymysql.connect(**MYSQL_CONFIG)
 
     try:
@@ -604,7 +589,7 @@ def normalize_and_write(factor_data, code_market_map, batch_size=5000):
     写入 ClickHouse factor_value 表
     """
     print("[4/5] 横截面归一化并写入数据库...")
-    ch_client = clickhouse_connect.get_client(**CH_CONFIG)
+    ch_client = clickhouse_connect.get_client(**CLICKHOUSE_CONFIG)
 
     try:
         for fc, values in factor_data.items():
@@ -659,7 +644,7 @@ def _insert_batch(ch_client, batch):
 def clear_old_factors(factor_codes):
     """清空指定因子的旧 CH 数据"""
     print("[4/5] 清空旧 factor_value 数据...")
-    ch_client = clickhouse_connect.get_client(**CH_CONFIG)
+    ch_client = clickhouse_connect.get_client(**CLICKHOUSE_CONFIG)
     try:
         for fc in factor_codes:
             result = ch_client.query(f"SELECT count() FROM factor_value FINAL WHERE factor_code = '{fc}'")
@@ -679,7 +664,7 @@ def get_last_computed_dates(factor_codes):
     """
     if not factor_codes:
         return {}
-    ch_client = clickhouse_connect.get_client(**CH_CONFIG)
+    ch_client = clickhouse_connect.get_client(**CLICKHOUSE_CONFIG)
     try:
         codes_str = "', '".join(factor_codes)
         result = ch_client.query(f"""

@@ -39,19 +39,11 @@
 import sys
 import pymysql
 
-DB_CONFIG = {
-    'host': 'localhost',
-    'port': 3306,
-    'user': 'root',
-    'password': '123456',
-    'database': 'stock',
-    'charset': 'utf8mb4',
-    'cursorclass': pymysql.cursors.Cursor,
-}
+from db_config import MYSQL_CONFIG
 
 
 def get_conn():
-    return pymysql.connect(**DB_CONFIG)
+    return pymysql.connect(**MYSQL_CONFIG)
 
 
 def annual_factor(report_date):
