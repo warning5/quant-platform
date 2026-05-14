@@ -7,7 +7,6 @@ import com.quant.platform.stock.service.ClickHouseStockService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.jdbc.core.BeanPropertyRowMapper;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -19,7 +18,6 @@ import java.util.List;
 /**
  * 分析模块 ClickHouse 查询 Mapper
  * 仅当 quant.clickhouse.enabled=true 时加载
- *
  * 日线数据查询已统一委托给 ClickHouseStockService（不再直接 SQL 查 stock_daily）。
  * 本类只保留 factor_value / moneyflow 等分析专用表的查询。
  */
@@ -68,7 +66,6 @@ public class AnalysisChMapper {
      * 返回每个因子各自最新交易日的缠论信号
      * 使用 argMax(factor_val, calc_date) 获取每个因子最新日期的值
      * CH 列名: factor_code/symbol/calc_date/factor_val
-     * 
      * symbol 格式兼容：旧数据带后缀(600619.SH)，新数据无后缀(600619)
      */
     public TechSignal selectLatestTechSignal(String code) {
@@ -104,11 +101,11 @@ public class AnalysisChMapper {
                 }
                 // CH 返回 Float64 → 转 String（CHAN_PEN_DIR/CHAN_TREND 等）
                 Object pd = rs.getObject("pen_dir");
-                t.setPenDir(pd != null ? String.valueOf((long) Math.round(((Number) pd).doubleValue())) : null);
+                t.setPenDir(pd != null ? String.valueOf(Math.round(((Number) pd).doubleValue())) : null);
                 Object tr = rs.getObject("trend");
-                t.setTrend(tr != null ? String.valueOf((long) Math.round(((Number) tr).doubleValue())) : null);
+                t.setTrend(tr != null ? String.valueOf(Math.round(((Number) tr).doubleValue())) : null);
                 Object cs = rs.getObject("chan_signal");
-                t.setChanSignal(cs != null ? String.valueOf((long) Math.round(((Number) cs).doubleValue())) : null);
+                t.setChanSignal(cs != null ? String.valueOf(Math.round(((Number) cs).doubleValue())) : null);
                 Object hp = rs.getObject("hub_pos");
                 t.setHubPos(hp != null ? String.valueOf(((Number) hp).doubleValue()) : null);
                 Object pc = rs.getObject("pen_count");
@@ -116,7 +113,7 @@ public class AnalysisChMapper {
                 return t;
             }, withSuffix, noSuffix);
             if (!results.isEmpty()) {
-                return results.get(0);
+                return results.getFirst();
             }
         } catch (Exception e) {
             log.error("查询缠论因子失败: code={}, error={}", code, e.getMessage());
@@ -136,7 +133,7 @@ public class AnalysisChMapper {
             List<StockDaily> dailies = stockService.getStockDaily(noSuffix, start, end);
             if (dailies != null && !dailies.isEmpty()) {
                 // getStockDaily 返回按 trade_date ASC 排序，取最后一条即最新交易日
-                StockDaily latest = dailies.get(dailies.size() - 1);
+                StockDaily latest = dailies.getLast();
                 java.util.Map<String, Object> map = new java.util.HashMap<>();
                 map.put("close_price", latest.getClosePrice());
                 map.put("change_percent", latest.getChangePercent());
@@ -177,7 +174,7 @@ public class AnalysisChMapper {
                 row.setHighPrice(sd.getHighPrice());
                 row.setLowPrice(sd.getLowPrice());
                 row.setPreClose(sd.getPreClose());
-                row.setVolume(sd.getVolume() != null ? sd.getVolume().longValue() : null);
+                row.setVolume(sd.getVolume() != null ? sd.getVolume() : null);
                 row.setAmount(sd.getAmount());
                 row.setChangePercent(sd.getChangePercent());
                 row.setTurnoverRate(sd.getTurnoverRate());
@@ -243,6 +240,36 @@ public class AnalysisChMapper {
     }
 
     /**
+     * 查询历史资金流向数据（从 stock_sentiment_moneyflow 表）
+     * 返回近 N 天的 net_main/net_main_pct/net_huge/net_big/volume_ratio/turnover_rate
+     */
+    public List<java.util.Map<String, Object>> selectMoneyFlowHistory(String code, int days) {
+        String sql = """
+            SELECT trade_date, net_main, net_main_pct, net_huge, net_big
+            FROM stock.stock_sentiment_moneyflow FINAL
+            WHERE code = ?
+            ORDER BY trade_date DESC
+            LIMIT ?
+            """;
+        try {
+            String normalized = normalizeCodeForDaily(code);
+            return clickHouseJdbcTemplate.query(sql,
+                    (rs, rowNum) -> {
+                        java.util.Map<String, Object> map = new java.util.HashMap<>();
+                        map.put("tradeDate", rs.getString("trade_date"));
+                        map.put("netMain", rs.getBigDecimal("net_main"));
+                        map.put("netMainPct", rs.getBigDecimal("net_main_pct"));
+                        map.put("netHuge", rs.getBigDecimal("net_huge"));
+                        map.put("netBig", rs.getBigDecimal("net_big"));
+                        return map;
+                    }, normalized, days);
+        } catch (Exception e) {
+            log.warn("查询历史资金流向失败: code={}, error={}", code, e.getMessage());
+            return new ArrayList<>();
+        }
+    }
+
+    /**
      * 计算20日涨跌幅（用于判断强势股）
      * 委托 ClickHouseStockService 获取数据后内存计算
      */
@@ -255,7 +282,7 @@ public class AnalysisChMapper {
             List<StockDaily> dailies = stockService.getStockDaily(noSuffix, start, end);
             if (dailies == null || dailies.isEmpty()) return null;
             // 取最新一条
-            BigDecimal latestClose = dailies.get(0).getClosePrice();
+            BigDecimal latestClose = dailies.getFirst().getClosePrice();
             if (latestClose == null) return null;
             // 找第21条（约20个交易日前的收盘价）
             if (dailies.size() > 20) {

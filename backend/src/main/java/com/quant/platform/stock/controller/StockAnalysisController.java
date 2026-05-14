@@ -3,6 +3,7 @@ package com.quant.platform.stock.controller;
 import com.quant.platform.stock.analysis.domain.AnalysisOverview;
 import com.quant.platform.stock.analysis.engine.TradingSignalEngine;
 import com.quant.platform.stock.analysis.service.AnalysisService;
+import com.quant.platform.stock.analysis.service.MarketThermometerService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -51,6 +52,9 @@ public class StockAnalysisController {
     
     @Autowired(required = false)
     private TradingSignalEngine tradingSignalEngine;
+
+    @Autowired(required = false)
+    private MarketThermometerService marketThermometerService;
     
     /**
      * 获取个股分析总览（含四维度评分）
@@ -296,6 +300,92 @@ public class StockAnalysisController {
         } catch (Exception e) {
             log.error("大宗交易分析失败: code={}, error={}", code, e.getMessage(), e);
             return ResponseEntity.internalServerError().body(errorBody("大宗交易分析失败：" + e.getMessage()));
+        }
+    }
+
+    /**
+     * 大盘温度计
+     * GET /api/analysis/market-thermometer
+     * 返回：恐慌贪婪指数 + 各维度指标（PE分位/PB分位/均线温度/股债收益比/融资余额）
+     */
+    @GetMapping("/market-thermometer")
+    public ResponseEntity<?> getMarketThermometer() {
+        if (marketThermometerService == null) {
+            return ResponseEntity.status(503).body(errorBody("大盘温度计服务不可用"));
+        }
+        try {
+            Map<String, Object> data = marketThermometerService.getThermometer();
+            return ResponseEntity.ok(new ApiResponse<>(data));
+        } catch (Exception e) {
+            log.error("大盘温度计查询失败: error={}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(errorBody("大盘温度计查询失败：" + e.getMessage()));
+        }
+    }
+
+    /**
+     * 缠论K线图数据
+     * GET /api/analysis/chan-chart?code=600519
+     * 返回：K线数据 + 笔 + 中枢 + 买卖点
+     */
+    @GetMapping("/chan-chart")
+    public ResponseEntity<?> getChanChart(@RequestParam String code) {
+        if (analysisService == null) {
+            return ResponseEntity.status(503).body(errorBody("分析服务不可用，ClickHouse未启用"));
+        }
+        if (code == null || code.trim().isEmpty()) {
+            return ResponseEntity.badRequest().body(errorBody("股票代码不能为空"));
+        }
+        try {
+            Map<String, Object> data = analysisService.getChanChart(code.trim());
+            return ResponseEntity.ok(new ApiResponse<>(data));
+        } catch (Exception e) {
+            log.error("缠论K线图查询失败: code={}, error={}", code, e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(errorBody("缠论K线图查询失败：" + e.getMessage()));
+        }
+    }
+
+    /**
+     * 资金流向历史趋势
+     * GET /api/analysis/money-flow-history?code=600519&days=120
+     * 返回：逐日资金流向 + 评分
+     */
+    @GetMapping("/money-flow-history")
+    public ResponseEntity<?> getMoneyFlowHistory(@RequestParam String code,
+                                                   @RequestParam(defaultValue = "120") int days) {
+        if (analysisService == null) {
+            return ResponseEntity.status(503).body(errorBody("分析服务不可用，ClickHouse未启用"));
+        }
+        if (code == null || code.trim().isEmpty()) {
+            return ResponseEntity.badRequest().body(errorBody("股票代码不能为空"));
+        }
+        try {
+            Map<String, Object> data = analysisService.getMoneyFlowHistory(code.trim(), days);
+            return ResponseEntity.ok(new ApiResponse<>(data));
+        } catch (Exception e) {
+            log.error("资金流向历史查询失败: code={}, error={}", code, e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(errorBody("资金流向历史查询失败：" + e.getMessage()));
+        }
+    }
+
+    /**
+     * 相对强弱分析（个股 vs 行业）
+     * GET /api/analysis/relative-strength?code=600519
+     * 返回：累计收益对比 + RS Ratio
+     */
+    @GetMapping("/relative-strength")
+    public ResponseEntity<?> getRelativeStrength(@RequestParam String code) {
+        if (analysisService == null) {
+            return ResponseEntity.status(503).body(errorBody("分析服务不可用，ClickHouse未启用"));
+        }
+        if (code == null || code.trim().isEmpty()) {
+            return ResponseEntity.badRequest().body(errorBody("股票代码不能为空"));
+        }
+        try {
+            Map<String, Object> data = analysisService.getRelativeStrength(code.trim());
+            return ResponseEntity.ok(new ApiResponse<>(data));
+        } catch (Exception e) {
+            log.error("相对强弱分析失败: code={}, error={}", code, e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(errorBody("相对强弱分析失败：" + e.getMessage()));
         }
     }
 

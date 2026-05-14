@@ -48,7 +48,7 @@ springdoc:
 
 # ClickHouse 配置
 clickhouse:
-  host: localhost
+  host: 172.19.72.140
   port: 8123
   database: stock
   username: default

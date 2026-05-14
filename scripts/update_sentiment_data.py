@@ -39,7 +39,7 @@ from db_helper import ch_dedup_filter
 
 # ─── 配置 ──────────────────────────────────────────────────────
 CH_CONFIG = dict(
-    host="localhost", port=8123,
+    host="172.19.72.140", port=8123,
     username="default", password="123456", database="stock",
 )
 MYSQL_CONFIG = dict(
@@ -616,38 +616,56 @@ def fetch_moneyflow_rank() -> list:
     return rows
 
 
-def fetch_moneyflow_hist_single(code: str, market: str) -> list:
-    """获取单只股票近 120 天资金流向历史数据
+def fetch_moneyflow_hist_single(code: str, market: str, max_retries: int = 5) -> list:
+    """获取单只股票近 120 天资金流向历史数据（带重试+退避）
     返回 [ts_code, trade_date, code, name, close, pct_change,
            net_main, net_main_pct, net_huge, net_big, net_medium, net_small,
            update_time]"""
     import akshare as ak
+    import random
     rows = []
-    try:
-        df = ak.stock_individual_fund_flow(stock=code, market=market)
-        if df is None or df.empty:
-            return rows
-        for _, r in df.iterrows():
-            td = to_date(r.get("日期"))
-            if td is None:
-                continue
-            rows.append([
-                code,                              # ts_code
-                td,                                # trade_date
-                code,                              # code
-                "",                                # name (历史数据不一定有)
-                to_float(r.get("收盘价")),          # close
-                to_float(r.get("涨跌幅")),          # pct_change
-                to_float(r.get("主力净流入-净额")),  # net_main
-                to_float(r.get("主力净流入-净占比")), # net_main_pct
-                to_float(r.get("超大单净流入-净额")), # net_huge
-                to_float(r.get("大单净流入-净额")),   # net_big
-                to_float(r.get("中单净流入-净额")),   # net_medium
-                to_float(r.get("小单净流入-净额")),   # net_small
-                datetime.datetime.now(),            # update_time
+    for attempt in range(max_retries):
+        try:
+            # 每个请求用独立 session，避免被东财识别并发特征
+            import requests
+            session = requests.Session()
+            ua = random.choice([
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/121.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
             ])
-    except Exception as e:
-        pass  # 个别股票失败不打印，避免刷屏
+            session.headers.update({'User-Agent': ua})
+            ak.session = session
+
+            df = ak.stock_individual_fund_flow(stock=code, market=market)
+            if df is None or df.empty:
+                return rows
+            for _, r in df.iterrows():
+                td = to_date(r.get("日期"))
+                if td is None:
+                    continue
+                rows.append([
+                    code,                              # ts_code
+                    td,                                # trade_date
+                    code,                              # code
+                    "",                                # name (历史数据不一定有)
+                    to_float(r.get("收盘价")),          # close
+                    to_float(r.get("涨跌幅")),          # pct_change
+                    to_float(r.get("主力净流入-净额")),  # net_main
+                    to_float(r.get("主力净流入-净占比")), # net_main_pct
+                    to_float(r.get("超大单净流入-净额")), # net_huge
+                    to_float(r.get("大单净流入-净额")),   # net_big
+                    to_float(r.get("中单净流入-净额")),   # net_medium
+                    to_float(r.get("小单净流入-净额")),   # net_small
+                    datetime.datetime.now(),            # update_time
+                ])
+            return rows
+        except Exception:
+            if attempt < max_retries - 1:
+                wait = min(2 ** attempt * 3.0, 30.0)
+                time.sleep(wait)
+            else:
+                pass  # 最后一次失败静默
     return rows
 
 
@@ -1024,13 +1042,11 @@ def _get_market_prefix(code: str) -> str:
 
 
 def run_moneyflow_hist(args):
-    """历史资金流向补全：并发拉取全市场股票近120天资金流数据
+    """历史资金流向补全：单线程慢速拉取全市场股票近120天资金流数据
     用法：
       python update_sentiment_data.py --moneyflow-hist                     # 全市场
       python update_sentiment_data.py --moneyflow-hist --moneyflow-codes 600519,000001  # 指定股票
     """
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-
     # 获取股票列表（排除北交所 920 开头）
     if args.moneyflow_codes:
         codes = [c.strip().zfill(6) for c in args.moneyflow_codes.split(",")]
@@ -1043,6 +1059,7 @@ def run_moneyflow_hist(args):
         cur.close()
         conn.close()
         print(f"=== 历史资金流向补全: 全市场 {len(codes)} 只股票（排除北交所 920）===")
+        print(f"  注意: 东财接口限制较严，每只间隔2秒，预计需要 {len(codes)*2/60:.0f} 分钟")
 
     moneyflow_columns = ["ts_code","trade_date","code","name","close",
                           "pct_change","net_main","net_main_pct",
@@ -1050,20 +1067,11 @@ def run_moneyflow_hist(args):
                           "update_time"]
     moneyflow_unique = ["code", "trade_date"]
 
-    MAX_WORKERS = 8  # 并发数
-
-    def _fetch_one(code):
-        market = _get_market_prefix(code)
-        try:
-            return fetch_moneyflow_hist_single(code, market)
-        except Exception:
-            return None
-
     grand_start = datetime.datetime.now()
     total_written = 0
     total_failed = 0
     batch_rows = []
-    BATCH_FLUSH = 6000  # 约50只×120天
+    BATCH_FLUSH = 6000
 
     def flush_batch():
         nonlocal batch_rows, total_written
@@ -1077,35 +1085,32 @@ def run_moneyflow_hist(args):
         total_written += len(batch_rows)
         batch_rows = []
 
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = {executor.submit(_fetch_one, code): code for code in codes}
-        done = 0
+    done = 0
+    for code in codes:
+        done += 1
+        market = _get_market_prefix(code)
 
-        for future in as_completed(futures):
-            done += 1
-            code = futures[future]
-            if done % 100 == 0 or done == len(codes):
-                elapsed = (datetime.datetime.now() - grand_start).total_seconds()
-                speed = done / elapsed if elapsed > 0 else 0
-                eta = (len(codes) - done) / speed if speed > 0 else 0
-                print(f"  进度: {done}/{len(codes)}  "
-                      f"已写入={total_written}  失败={total_failed}  "
-                      f"速度={speed:.1f}只/s  预计剩余={eta/60:.1f}min")
+        # 单线程 + 每只2秒延迟，避免东财限流
+        rows = fetch_moneyflow_hist_single(code, market, max_retries=3)
+        if rows:
+            batch_rows.extend(rows)
+            if len(batch_rows) >= BATCH_FLUSH:
+                flush_batch()
+        else:
+            total_failed += 1
 
-            try:
-                rows = future.result()
-                if rows:
-                    batch_rows.extend(rows)
-                    if len(batch_rows) >= BATCH_FLUSH:
-                        flush_batch()
-                else:
-                    total_failed += 1
-            except Exception:
-                total_failed += 1
+        # 进度打印
+        if done % 10 == 0 or done == len(codes):
+            elapsed = (datetime.datetime.now() - grand_start).total_seconds()
+            speed = done / elapsed if elapsed > 0 else 0
+            eta = (len(codes) - done) / speed if speed > 0 else 0
+            print(f"  进度: {done}/{len(codes)}  "
+                  f"已写入={total_written}  失败={total_failed}  "
+                  f"速度={speed:.1f}只/s  预计剩余={eta/60:.1f}min")
 
-            # 限速
-            if done % MAX_WORKERS == 0:
-                time.sleep(0.3)
+        # 每只间隔2秒，避免东财封IP
+        if done < len(codes):
+            time.sleep(2.0)
 
     flush_batch()
 

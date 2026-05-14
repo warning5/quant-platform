@@ -7,8 +7,10 @@ import {
   QuestionCircleOutlined, SearchOutlined,
   ArrowUpOutlined, ArrowDownOutlined,
 } from '@ant-design/icons';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, Link } from 'react-router-dom';
 import { stockAnalysisApi, silentConfig } from '../../api';
+import { useMarketThermometer } from '../../hooks/useMarketThermometer';
+import ReactECharts from 'echarts-for-react';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -50,12 +52,16 @@ export default function StockAnalysis() {
   const [industryCorrData, setIndustryCorrData] = useState(null);
   const [limitUpData, setLimitUpData] = useState(null);
   const [blockTradeData, setBlockTradeData] = useState(null);
+  const [chanChartData, setChanChartData] = useState(null);
+  const [moneyFlowHistoryData, setMoneyFlowHistoryData] = useState(null);
+  const [relativeStrengthData, setRelativeStrengthData] = useState(null);
   const [error, setError] = useState(null);
   const [rulesVisible, setRulesVisible] = useState(false);
   const [rules, setRules] = useState(null);
   const [suggestions, setSuggestions] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const searchTimerRef = useRef(null);
+  const { data: thData, status: thStatus } = useMarketThermometer();
 
   // 从 URL 读取初始股票代码
   const urlCode = searchParams.get('code') || '';
@@ -177,6 +183,30 @@ export default function StockAnalysis() {
       .catch(() => setBlockTradeData(null));
   }, [overview?.code]);
 
+  // 加载缠论K线图数据
+  useEffect(() => {
+    if (!overview?.code) { setChanChartData(null); return; }
+    stockAnalysisApi.getChanChart(overview.code, silentConfig)
+      .then(data => setChanChartData(data))
+      .catch(() => setChanChartData(null));
+  }, [overview?.code]);
+
+  // 加载资金流向历史
+  useEffect(() => {
+    if (!overview?.code) { setMoneyFlowHistoryData(null); return; }
+    stockAnalysisApi.getMoneyFlowHistory(overview.code, 120, silentConfig)
+      .then(data => setMoneyFlowHistoryData(data))
+      .catch(() => setMoneyFlowHistoryData(null));
+  }, [overview?.code]);
+
+  // 加载相对强弱数据
+  useEffect(() => {
+    if (!overview?.code) { setRelativeStrengthData(null); return; }
+    stockAnalysisApi.getRelativeStrength(overview.code, silentConfig)
+      .then(data => setRelativeStrengthData(data))
+      .catch(() => setRelativeStrengthData(null));
+  }, [overview?.code]);
+
   // 加载评分规则
   const showRules = useCallback(() => {
     if (rules) {
@@ -260,6 +290,21 @@ export default function StockAnalysis() {
       label: tabLabel('大宗交易', '展示大宗交易历史、折价率、买卖营业部统计。大宗交易折价率高可能暗示大股东减持意愿，买方营业部集中说明机构承接。'),
       children: <BlockTradeTab data={blockTradeData} code={overview.code} />,
     },
+    {
+      key: 'chan-chart',
+      label: tabLabel('缠论图谱', '基于缠论理论实时计算K线合并、笔、中枢、买卖点，可视化展示股票的技术结构。红色标记买点，绿色标记卖点。'),
+      children: <ChanChartTab data={chanChartData} code={overview.code} />,
+    },
+    {
+      key: 'money-flow-history',
+      label: tabLabel('资金趋势', '展示近120日主力资金净流入/净流出趋势及每日资金面评分（满分25），追踪大资金动向变化。'),
+      children: <MoneyFlowHistoryTab data={moneyFlowHistoryData} code={overview.code} />,
+    },
+    {
+      key: 'relative-strength',
+      label: tabLabel('相对强弱', '对比个股与同行业等权组合的累计收益，计算RS Ratio。RS>1表示跑赢行业，<1表示跑输。'),
+      children: <RelativeStrengthTab data={relativeStrengthData} code={overview.code} />,
+    },
   ] : [];
 
   const changePct = overview ? parseChangePct(overview.changePercent) : 0;
@@ -292,6 +337,13 @@ export default function StockAnalysis() {
             </Button>
           </Col>
           <Col flex="auto" style={{ textAlign: 'right' }}>
+            {thData && thStatus && (
+              <Tooltip title={`大盘${thStatus.label}（${thData.fearGreedIndex?.toFixed(0)}°），${thStatus.action}`}>
+                <Tag color={thStatus.label === '极度贪婪' ? 'red' : thStatus.label === '极度恐慌' ? 'green' : 'blue'} style={{ marginRight: 12 }}>
+                  <Link to="/market-thermometer" style={{ color: 'inherit' }}>{thStatus.label} {thData.fearGreedIndex?.toFixed(0)}°</Link>
+                </Tag>
+              </Tooltip>
+            )}
             <Tooltip title="查看评分规则" className="tip-light">
               <QuestionCircleOutlined
                 style={{ fontSize: 16, cursor: 'pointer' }}
@@ -1294,6 +1346,348 @@ function BlockTradeTab({ data, code }) {
           <Empty description="该股无大宗交易记录" />
         )}
       </Card>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
+// P0 新增 Tab 组件
+// ══════════════════════════════════════════════════════════════
+
+/**
+ * 缠论K线图 Tab — K线 + 笔 + 中枢 + 买卖点
+ */
+function ChanChartTab({ data, code }) {
+  if (!data) return <Spin style={{ display: 'block', margin: '40px auto' }} />;
+  if (data.error) return <Alert type="warning" message={data.error} />;
+
+  const { dates, klineData, pens, hubs, buySellPoints, barCount, penCount, hubCount, bsPointCount } = data;
+
+  // 构建中枢矩形标记（markArea）
+  const markAreas = (hubs || []).map(h => {
+    if (!h.startDate || !h.endDate) return null;
+    const startIdx = dates.indexOf(h.startDate);
+    const endIdx = dates.indexOf(h.endDate);
+    if (startIdx < 0 || endIdx < 0) return null;
+    return [
+      { coord: [startIdx, h.high], itemStyle: { color: 'rgba(255, 200, 50, 0.12)' } },
+      { coord: [endIdx, h.low] },
+    ];
+  }).filter(Boolean);
+
+  // 笔折线数据（逐点生成，null 间断）
+  const penLineData = [];
+  if (pens) {
+    // 收集所有端点 index→price
+    const pointMap = {};
+    pens.forEach(p => {
+      pointMap[p.startIndex] = p.startPrice;
+      pointMap[p.endIndex] = p.endPrice;
+    });
+    for (let i = 0; i < dates.length; i++) {
+      penLineData.push(pointMap[i] !== undefined ? pointMap[i] : null);
+    }
+  }
+
+  // 买卖点散点
+  const buyPoints = (buySellPoints || []).filter(p => p.isBuy);
+  const sellPoints = (buySellPoints || []).filter(p => !p.isBuy);
+
+  const typeLabel = (type) => {
+    const map = {
+      'FIRST_BUY': '一买', 'SECOND_BUY': '二买', 'THIRD_BUY': '三买',
+      'FIRST_SELL': '一卖', 'SECOND_SELL': '二卖', 'THIRD_SELL': '三卖',
+    };
+    return map[type] || type;
+  };
+
+  const option = {
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'cross' },
+      formatter: (params) => {
+        const idx = params[0]?.dataIndex;
+        if (idx == null) return '';
+        const date = dates[idx];
+        const kline = klineData[idx];
+        if (!kline) return date;
+        return [
+          `<b>${date}</b>`,
+          `开: ${kline[0].toFixed(2)}  收: ${kline[1].toFixed(2)}`,
+          `低: ${kline[2].toFixed(2)}  高: ${kline[3].toFixed(2)}`,
+          `量: ${(kline[4] / 10000).toFixed(0)}万`,
+        ].join('<br/>');
+      },
+    },
+    legend: {
+      data: ['K线', '笔', '一买', '二买', '三买', '一卖', '二卖', '三卖'],
+      bottom: 0,
+      textStyle: { fontSize: 11 },
+    },
+    grid: [
+      { left: 60, right: 30, top: 30, height: '58%' },
+      { left: 60, right: 30, top: '72%', height: '16%' },
+    ],
+    xAxis: [
+      { type: 'category', data: dates, gridIndex: 0, axisLabel: { show: false }, axisTick: { show: false }, splitLine: { show: false } },
+      { type: 'category', data: dates, gridIndex: 1, axisLabel: { fontSize: 10, rotate: 30 } },
+    ],
+    yAxis: [
+      { type: 'value', gridIndex: 0, scale: true, splitArea: { show: true } },
+      { type: 'value', gridIndex: 1, scale: true, splitNumber: 2 },
+    ],
+    series: [
+      {
+        name: 'K线',
+        type: 'candlestick',
+        xAxisIndex: 0,
+        yAxisIndex: 0,
+        data: klineData,
+        itemStyle: { color: '#ef5350', color0: '#26a69a', borderColor: '#ef5350', borderColor0: '#26a69a' },
+      },
+      {
+        name: '笔',
+        type: 'line',
+        xAxisIndex: 0,
+        yAxisIndex: 0,
+        data: penLineData,
+        connectNulls: false,
+        lineStyle: { color: '#1890ff', width: 1.5 },
+        symbol: 'circle',
+        symbolSize: 4,
+        showSymbol: true,
+        z: 10,
+        markArea: { silent: true, data: markAreas },
+      },
+      // 买点
+      ...['FIRST_BUY', 'SECOND_BUY', 'THIRD_BUY'].map((type, i) => ({
+        name: typeLabel(type),
+        type: 'scatter',
+        xAxisIndex: 0,
+        yAxisIndex: 0,
+        data: buyPoints.filter(p => p.type === type).map(p => [p.index, p.price]),
+        symbol: 'triangle',
+        symbolSize: 14 + i * 2,
+        itemStyle: { color: i === 0 ? '#ff0000' : i === 1 ? '#ff6600' : '#ff9900' },
+        label: { show: true, formatter: typeLabel(type), position: 'bottom', fontSize: 10, color: '#ff0000' },
+        z: 20,
+      })),
+      // 卖点
+      ...['FIRST_SELL', 'SECOND_SELL', 'THIRD_SELL'].map((type, i) => ({
+        name: typeLabel(type),
+        type: 'scatter',
+        xAxisIndex: 0,
+        yAxisIndex: 0,
+        data: sellPoints.filter(p => p.type === type).map(p => [p.index, p.price]),
+        symbol: 'triangle',
+        symbolRotate: 180,
+        symbolSize: 14 + i * 2,
+        itemStyle: { color: i === 0 ? '#00cc00' : i === 1 ? '#009933' : '#006633' },
+        label: { show: true, formatter: typeLabel(type), position: 'top', fontSize: 10, color: '#00cc00' },
+        z: 20,
+      })),
+      // 成交量
+      {
+        type: 'bar',
+        xAxisIndex: 1,
+        yAxisIndex: 1,
+        data: klineData.map(k => ({
+          value: k[4],
+          itemStyle: { color: k[1] >= k[0] ? '#ef535080' : '#26a69a80' },
+        })),
+      },
+    ],
+    dataZoom: [
+      { type: 'inside', xAxisIndex: [0, 1], start: Math.max(0, 100 - Math.min(120, barCount) / barCount * 100), end: 100 },
+      { type: 'slider', xAxisIndex: [0, 1], bottom: 30, height: 15 },
+    ],
+  };
+
+  return (
+    <div>
+      <Row gutter={8} style={{ marginBottom: 12 }}>
+        <Col span={6}><Statistic title="K线天数" value={barCount || 0} valueStyle={{ fontSize: 16 }} /></Col>
+        <Col span={6}><Statistic title="笔数" value={penCount || 0} valueStyle={{ fontSize: 16 }} /></Col>
+        <Col span={6}><Statistic title="中枢数" value={hubCount || 0} valueStyle={{ fontSize: 16 }} /></Col>
+        <Col span={6}><Statistic title="买卖点" value={bsPointCount || 0} valueStyle={{ fontSize: 16 }} /></Col>
+      </Row>
+      <ReactECharts option={option} style={{ height: 600 }} notMerge lazyUpdate />
+    </div>
+  );
+}
+
+/**
+ * 资金流向历史趋势 Tab
+ */
+function MoneyFlowHistoryTab({ data, code }) {
+  if (!data) return <Spin style={{ display: 'block', margin: '40px auto' }} />;
+  if (data.error) return <Alert type="warning" message={data.error} />;
+
+  const { history, days, avgNetMain, avgNetMainPct, avgMoneyScore, inflowDays, inflowRatio } = data;
+  const dates = (history || []).map(h => h.tradeDate?.substring(5));
+  const netMainArr = (history || []).map(h => h.netMain ? h.netMain / 1e8 : 0);
+  const scoreArr = (history || []).map(h => h.moneyScore || 0);
+
+  const option = {
+    tooltip: { trigger: 'axis' },
+    legend: { data: ['主力净流入(亿)', '资金面评分', '净流入占比(%)'], bottom: 0, textStyle: { fontSize: 11 } },
+    grid: [
+      { left: 70, right: 70, top: 30, height: '52%' },
+      { left: 70, right: 70, top: '70%', height: '20%' },
+    ],
+    xAxis: [
+      { type: 'category', data: dates, gridIndex: 0, axisLabel: { show: false }, axisTick: { show: false } },
+      { type: 'category', data: dates, gridIndex: 1, axisLabel: { fontSize: 10, rotate: 45 } },
+    ],
+    yAxis: [
+      { type: 'value', gridIndex: 0, name: '净流入(亿)', axisLabel: { formatter: v => v.toFixed(1) } },
+      { type: 'value', gridIndex: 1, min: 0, max: 25, name: '评分', splitNumber: 3 },
+    ],
+    series: [
+      {
+        name: '主力净流入(亿)',
+        type: 'bar',
+        xAxisIndex: 0,
+        yAxisIndex: 0,
+        data: netMainArr.map(v => ({
+          value: Math.round(v * 100) / 100,
+          itemStyle: { color: v >= 0 ? '#ef5350' : '#26a69a' },
+        })),
+        barMaxWidth: 5,
+      },
+      {
+        name: '资金面评分',
+        type: 'line',
+        xAxisIndex: 0,
+        yAxisIndex: 0,
+        data: scoreArr,
+        lineStyle: { color: '#ff9800', width: 2 },
+        itemStyle: { color: '#ff9800' },
+        symbol: 'none',
+        z: 10,
+      },
+      {
+        name: '净流入占比(%)',
+        type: 'bar',
+        xAxisIndex: 1,
+        yAxisIndex: 1,
+        data: (history || []).map(h => ({
+          value: h.netMainPct ? Math.abs(h.netMainPct) : 0,
+          itemStyle: { color: (h.netMainPct || 0) >= 0 ? '#ef535080' : '#26a69a80' },
+        })),
+        barMaxWidth: 4,
+      },
+    ],
+    dataZoom: [
+      { type: 'inside', xAxisIndex: [0, 1] },
+      { type: 'slider', xAxisIndex: [0, 1], bottom: 28, height: 12 },
+    ],
+  };
+
+  return (
+    <div>
+      <Row gutter={8} style={{ marginBottom: 12 }}>
+        <Col span={4}><Statistic title="天数" value={days || 0} valueStyle={{ fontSize: 15 }} /></Col>
+        <Col span={5}><Statistic title="日均净流入" value={avgNetMain || 0} suffix="亿" precision={2} valueStyle={{ fontSize: 15 }} /></Col>
+        <Col span={5}><Statistic title="日均占比" value={avgNetMainPct || 0} suffix="%" precision={2} valueStyle={{ fontSize: 15 }} /></Col>
+        <Col span={5}><Statistic title="平均评分" value={avgMoneyScore || 0} suffix="/25" precision={1} valueStyle={{ fontSize: 15 }} /></Col>
+        <Col span={5}><Statistic title="流入占比" value={inflowRatio || 0} suffix="%" precision={1} valueStyle={{ fontSize: 15 }} /></Col>
+      </Row>
+      <ReactECharts option={option} style={{ height: 500 }} notMerge lazyUpdate />
+    </div>
+  );
+}
+
+/**
+ * 相对强弱 Tab — 个股 vs 行业累计收益 + RS Ratio
+ */
+function RelativeStrengthTab({ data, code }) {
+  if (!data) return <Spin style={{ display: 'block', margin: '40px auto' }} />;
+  if (data.error) return <Alert type="warning" message={data.error} />;
+
+  const { dates, stockCumRet, indCumRet, rsRatio, totalDays, latestStockCumRet,
+          latestIndCumRet, latestExcessRet, latestRsRatio, exceedDays, exceedRatio, rsDesc, industry } = data;
+
+  const shortDates = (dates || []).map(d => d?.substring(5));
+
+  const option = {
+    tooltip: { trigger: 'axis' },
+    legend: { data: [code || '个股', `${industry || '行业'}等权`, 'RS Ratio'], bottom: 0, textStyle: { fontSize: 11 } },
+    grid: [
+      { left: 70, right: 70, top: 30, height: '52%' },
+      { left: 70, right: 70, top: '70%', height: '20%' },
+    ],
+    xAxis: [
+      { type: 'category', data: shortDates, gridIndex: 0, axisLabel: { show: false }, axisTick: { show: false } },
+      { type: 'category', data: shortDates, gridIndex: 1, axisLabel: { fontSize: 10, rotate: 45 } },
+    ],
+    yAxis: [
+      { type: 'value', gridIndex: 0, name: '累计收益(%)', axisLabel: { formatter: v => v.toFixed(1) + '%' } },
+      { type: 'value', gridIndex: 1, name: 'RS Ratio', splitNumber: 3 },
+    ],
+    series: [
+      {
+        name: code || '个股',
+        type: 'line',
+        xAxisIndex: 0,
+        yAxisIndex: 0,
+        data: stockCumRet,
+        lineStyle: { color: '#ef5350', width: 2 },
+        itemStyle: { color: '#ef5350' },
+        symbol: 'none',
+      },
+      {
+        name: `${industry || '行业'}等权`,
+        type: 'line',
+        xAxisIndex: 0,
+        yAxisIndex: 0,
+        data: indCumRet,
+        lineStyle: { color: '#1890ff', width: 2 },
+        itemStyle: { color: '#1890ff' },
+        symbol: 'none',
+      },
+      {
+        name: 'RS Ratio',
+        type: 'line',
+        xAxisIndex: 1,
+        yAxisIndex: 1,
+        data: rsRatio,
+        lineStyle: { color: '#ff9800', width: 1.5 },
+        itemStyle: { color: '#ff9800' },
+        symbol: 'none',
+        markLine: {
+          silent: true,
+          data: [{ yAxis: 1, lineStyle: { color: '#999', type: 'dashed' }, label: { formatter: 'RS=1' } }],
+        },
+      },
+    ],
+    dataZoom: [
+      { type: 'inside', xAxisIndex: [0, 1] },
+      { type: 'slider', xAxisIndex: [0, 1], bottom: 28, height: 12 },
+    ],
+  };
+
+  return (
+    <div>
+      <Row gutter={8} style={{ marginBottom: 12 }}>
+        <Col span={4}><Statistic title="行业" value={industry || '-'} valueStyle={{ fontSize: 14 }} /></Col>
+        <Col span={5}><Statistic title="个股累计" value={latestStockCumRet || 0} suffix="%" precision={2}
+          valueStyle={{ fontSize: 15, color: (latestStockCumRet || 0) >= 0 ? '#ef5350' : '#26a69a' }} /></Col>
+        <Col span={5}><Statistic title="行业累计" value={latestIndCumRet || 0} suffix="%" precision={2}
+          valueStyle={{ fontSize: 15, color: (latestIndCumRet || 0) >= 0 ? '#ef5350' : '#26a69a' }} /></Col>
+        <Col span={5}><Statistic title="超额收益" value={latestExcessRet || 0} suffix="%" precision={2}
+          valueStyle={{ fontSize: 15, color: (latestExcessRet || 0) >= 0 ? '#ef5350' : '#26a69a' }} /></Col>
+        <Col span={5}><Statistic title="RS Ratio" value={latestRsRatio || 0} precision={2}
+          valueStyle={{ fontSize: 15, color: (latestRsRatio || 0) >= 1 ? '#ef5350' : '#26a69a' }} /></Col>
+      </Row>
+      <Alert
+        type={latestExcessRet > 0 ? 'success' : 'warning'}
+        message={rsDesc || '-'}
+        showIcon
+        style={{ marginBottom: 12 }}
+        description={`RS Ratio ${latestRsRatio || 0}，超额收益 ${latestExcessRet || 0}%，跑赢行业 ${exceedRatio || 0}% 的交易日`}
+      />
+      <ReactECharts option={option} style={{ height: 500 }} notMerge lazyUpdate />
     </div>
   );
 }

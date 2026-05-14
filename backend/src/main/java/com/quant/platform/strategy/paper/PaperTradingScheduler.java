@@ -22,6 +22,7 @@ public class PaperTradingScheduler {
 
     private final PaperTradingService paperTradingService;
     private final PaperTradingMapper paperTradingMapper;
+    private final PositionAlertService positionAlertService;
 
     /**
      * 每个交易日 15:30 执行（周一至周五）
@@ -72,6 +73,14 @@ public class PaperTradingScheduler {
                     log.info("模拟盘 [{}] 执行 {} 笔交易", paper.getId(), executed.size());
                 } catch (Exception e) {
                     log.warn("模拟盘 [{}] 信号执行异常: {}", paper.getId(), e.getMessage());
+                }
+
+                // Step 4: 持仓预警扫描
+                try {
+                    int alertCount = positionAlertService.scanAlerts(paper.getId());
+                    log.info("模拟盘 [{}] 预警扫描完成，生成 {} 条预警", paper.getId(), alertCount);
+                } catch (Exception e) {
+                    log.warn("模拟盘 [{}] 预警扫描异常: {}", paper.getId(), e.getMessage());
                 }
 
                 log.info("模拟盘 [{}] 处理完成", paper.getId());

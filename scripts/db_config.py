@@ -37,9 +37,9 @@ MYSQL_CONFIG = dict(
 )
 
 
-# ─── ClickHouse 配置 ──────────────────────────────────────────
+# ─── ClickHouse 配置（WSL2 IPv4 代理：172.19.72.140 → localhost:8123）───
 CLICKHOUSE_CONFIG = dict(
-    host="localhost",
+    host="172.19.72.140",
     port=8123,
     username="default",
     password="123456",

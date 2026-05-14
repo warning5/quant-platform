@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   Card, Row, Col, Table, Tag, Button, Modal, Select, InputNumber, Space,
   Typography, Statistic, Spin, Tooltip, Alert, message, Popconfirm,
@@ -6,10 +7,11 @@ import {
 import {
   ThunderboltOutlined, PlayCircleOutlined, PauseCircleOutlined,
   CheckCircleOutlined, CloseCircleOutlined, SendOutlined, LeftOutlined,
-  InfoCircleOutlined, DeleteOutlined,
+  InfoCircleOutlined, DeleteOutlined, AlertOutlined, BellOutlined, EyeOutlined,
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import { paperTradingApi, strategyApi } from '../../api';
+import { useMarketThermometer } from '../../hooks/useMarketThermometer';
 
 const { Text, Title } = Typography;
 const fmt = v => v != null ? (+v).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '-';
@@ -182,6 +184,18 @@ function PaperDetail({ paperId, onBack }) {
   const [execLoading, setExecLoading] = useState(null);
   const [batchExecLoading, setBatchExecLoading] = useState(false);
   const [dividendLoading, setDividendLoading] = useState(false);
+  const [alerts, setAlerts] = useState([]);
+  const [alertLoading, setAlertLoading] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [scanLoading, setScanLoading] = useState(false);
+
+  /* ── 大盘温度计 ─────────────────────── */
+  const { data: thData2, status: thStatus2 } = useMarketThermometer();
+
+  const loadAlerts = () => {
+    paperTradingApi.getAlerts(paperId).then(d => setAlerts(d || [])).catch(() => setAlerts([]));
+    paperTradingApi.getUnreadCount(paperId).then(d => setUnreadCount(d || 0)).catch(() => setUnreadCount(0));
+  };
 
   const load = () => {
     setLoading(true);
@@ -192,6 +206,7 @@ function PaperDetail({ paperId, onBack }) {
     paperTradingApi.getSignals(paperId)
       .then(d => setSignals(d || []))
       .catch(() => setSignals([]));
+    loadAlerts();
   };
 
   useEffect(() => { load(); }, [paperId]);
@@ -249,6 +264,55 @@ function PaperDetail({ paperId, onBack }) {
     } finally {
       setDividendLoading(false);
     }
+  };
+
+  // 手动扫描预警
+  const handleScanAlerts = async () => {
+    setScanLoading(true);
+    try {
+      const count = await paperTradingApi.scanAlerts(paperId);
+      message.success(`扫描完成，生成 ${count} 条预警`);
+      loadAlerts();
+    } catch (e) {
+      // axios 拦截器统一展示
+    } finally {
+      setScanLoading(false);
+    }
+  };
+
+  // 全部标记已读
+  const handleMarkAllRead = async () => {
+    try {
+      const count = await paperTradingApi.markAllRead(paperId);
+      message.success(`已标记 ${count} 条预警为已读`);
+      loadAlerts();
+    } catch (e) {}
+  };
+
+  // 单条标记已读
+  const handleMarkRead = async (alertId) => {
+    try {
+      await paperTradingApi.markRead(alertId);
+      loadAlerts();
+    } catch (e) {}
+  };
+
+  // 删除单条预警
+  const handleDeleteAlert = async (alertId) => {
+    try {
+      await paperTradingApi.deleteAlert(alertId);
+      message.success('已删除');
+      loadAlerts();
+    } catch (e) {}
+  };
+
+  // 清空所有预警
+  const handleClearAlerts = async () => {
+    try {
+      const count = await paperTradingApi.clearAlerts(paperId);
+      message.success(`已清空 ${count} 条预警`);
+      loadAlerts();
+    } catch (e) {}
   };
 
   if (loading) return <Spin tip="加载中..." style={{ display: 'block', margin: '80px auto' }} />;
@@ -319,8 +383,15 @@ function PaperDetail({ paperId, onBack }) {
 
   return (
     <div>
-      <div style={{ marginBottom: 12 }}>
+      <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 12 }}>
         <a onClick={onBack}><LeftOutlined /> 返回列表</a>
+        {thData2 && thStatus2 && (
+          <Tooltip title={`大盘${thStatus2.label}（${thData2.fearGreedIndex?.toFixed(0)}°），${thStatus2.action}`}>
+            <Tag color={thStatus2.label === '极度贪婪' ? 'red' : thStatus2.label === '极度恐慌' ? 'green' : 'blue'}>
+              <Link to="/market-thermometer" style={{ color: 'inherit' }}>{thStatus2.label} {thData2.fearGreedIndex?.toFixed(0)}°</Link>
+            </Tag>
+          </Tooltip>
+        )}
       </div>
 
       <Row gutter={16} style={{ marginBottom: 16 }}>
@@ -353,6 +424,78 @@ function PaperDetail({ paperId, onBack }) {
         {positions.length === 0 && <Text type="secondary">暂无持仓</Text>}
       </Card>
 
+      <Card title={
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span><AlertOutlined style={{ marginRight: 6, color: unreadCount > 0 ? '#ff4d4f' : '#999' }} />
+            持仓预警 {unreadCount > 0 && <Tag color="red" style={{ marginLeft: 8 }}>{unreadCount} 条未读</Tag>}
+          </span>
+          <Space>
+            <Button size="small" icon={<SendOutlined />} onClick={handleScanAlerts} loading={scanLoading}>手动扫描</Button>
+            {unreadCount > 0 && <Button size="small" icon={<EyeOutlined />} onClick={handleMarkAllRead}>全部已读</Button>}
+            {alerts.length > 0 && (
+              <Popconfirm title="确认清空所有预警？" onConfirm={handleClearAlerts} okText="清空" cancelText="取消">
+                <Button size="small" danger icon={<DeleteOutlined />}>清空</Button>
+              </Popconfirm>
+            )}
+          </Space>
+        </div>
+      } size="small" style={{ marginBottom: 16 }}>
+        {alerts.length === 0 ? (
+          <Text type="secondary">暂无预警信息</Text>
+        ) : (
+          <Table
+            dataSource={alerts}
+            rowKey="id"
+            size="small"
+            pagination={{ pageSize: 10 }}
+            rowClassName={r => !r.isRead ? 'alert-unread-row' : ''}
+            columns={[
+              {
+                title: '日期', dataIndex: 'alertDate', width: 100,
+                render: v => !v ? '-' : v,
+              },
+              {
+                title: '级别', dataIndex: 'alertLevel', width: 70,
+                render: v => {
+                  const cfg = { CRITICAL: { color: 'red', text: '严重' }, WARNING: { color: 'orange', text: '警告' }, INFO: { color: 'blue', text: '提示' } };
+                  const c = cfg[v] || { color: 'default', text: v };
+                  return <Tag color={c.color}>{c.text}</Tag>;
+                },
+              },
+              {
+                title: '类型', dataIndex: 'alertType', width: 80,
+                render: v => {
+                  const cfg = { MA_BREAK: '均线破位', DROP: '大跌', NOTICE: '公告', REPORT: '研报' };
+                  return cfg[v] || v;
+                },
+              },
+              {
+                title: '预警内容', dataIndex: 'title', ellipsis: true,
+                render: (v, r) => (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    {!r.isRead && <BellOutlined style={{ color: '#ff4d4f', fontSize: 12, flexShrink: 0 }} />}
+                    <Tooltip title={r.detail}><span>{v}</span></Tooltip>
+                  </div>
+                ),
+              },
+              {
+                title: '操作', width: 90,
+                render: (_, r) => (
+                  <Space size={0}>
+                    {!r.isRead && (
+                      <Button size="small" type="link" onClick={() => handleMarkRead(r.id)}>已读</Button>
+                    )}
+                    <Popconfirm title="确认删除此预警？" onConfirm={() => handleDeleteAlert(r.id)} okText="删除" cancelText="取消">
+                      <Button size="small" type="link" danger>删除</Button>
+                    </Popconfirm>
+                  </Space>
+                ),
+              },
+            ]}
+          />
+        )}
+      </Card>
+
       <Card title="交易信号" size="small">
         <Table dataSource={signals} columns={sigColumns} rowKey="id" size="small" pagination={{ pageSize: 10 }} />
       </Card>
@@ -360,13 +503,35 @@ function PaperDetail({ paperId, onBack }) {
   );
 }
 
+// ─── 未读预警行高亮样式注入 ─────────────────────────────────────────────────────
+const alertStyle = document.createElement('style');
+alertStyle.textContent = `.alert-unread-row { background-color: #fff2f0; }`;
+if (!document.querySelector('style[data-alert-style]')) {
+  alertStyle.setAttribute('data-alert-style', '1');
+  document.head.appendChild(alertStyle);
+}
+
 // ─── 主页面 ───────────────────────────────────────────────────────────────────
 
 export default function PaperTradingPage() {
-  const [selectedId, setSelectedId] = useState(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [selectedId, setSelectedId] = useState(() => {
+    const id = searchParams.get('id');
+    return id ? Number(id) : null;
+  });
+
+  const handleSelect = (id) => {
+    setSelectedId(id);
+    setSearchParams({ id });
+  };
+
+  const handleBack = () => {
+    setSelectedId(null);
+    setSearchParams({});
+  };
 
   if (selectedId) {
-    return <PaperDetail paperId={selectedId} onBack={() => setSelectedId(null)} />;
+    return <PaperDetail paperId={selectedId} onBack={handleBack} />;
   }
-  return <PaperList onSelect={setSelectedId} />;
+  return <PaperList onSelect={handleSelect} />;
 }

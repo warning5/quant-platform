@@ -7,6 +7,7 @@ import {
   MenuFoldOutlined, MenuUnfoldOutlined, FilterOutlined, BookOutlined,
   PartitionOutlined, AccountBookOutlined,
   SearchOutlined, HistoryOutlined,
+  AppstoreOutlined, ControlOutlined,
 } from '@ant-design/icons';
 
 import Dashboard from './pages/Dashboard';
@@ -42,6 +43,7 @@ import FinancialData from './pages/financial/FinancialData';
 import ResearchData from './pages/datadetail/ResearchData';
 import DataUpdate from './pages/dataupdate/DataUpdate';
 import StockAnalysis from './pages/analysis/StockAnalysis';
+import MarketThermometer from './pages/analysis/MarketThermometer';
 import SectorRanking from './pages/market/SectorRanking';
 
 const { Header, Sider, Content } = Layout;
@@ -54,6 +56,7 @@ function AppLayout() {
   const menuItems = [
     { key: '/', icon: <DashboardOutlined />, label: <Link to="/">总览</Link> },
     { key: '/market', icon: <FundViewOutlined />, label: <Link to="/market">行情数据</Link> },
+    { key: '/market-thermometer', icon: <ControlOutlined />, label: <Link to="/market-thermometer">大盘温度计</Link> },
     { key: '/stock-analysis', icon: <SearchOutlined />, label: <Link to="/stock-analysis">个股分析</Link> },
     {
       key: 'factors',
@@ -63,9 +66,7 @@ function AppLayout() {
         { key: '/factors', label: <Link to="/factors">因子列表</Link> },
         { key: '/factor-monitor', label: <Link to="/factor-monitor">因子计算</Link> },
         { key: '/factor-correlation', label: <Link to="/factor-correlation">因子相关性</Link> },
-        { key: '/factor-ic-ir', label: <Link to="/factor-ic-ir">IC/IR 分析</Link> },
         { key: '/factor-weight-optimize', label: <Link to="/factor-weight-optimize">权重优化</Link> },
-        { key: '/screen', label: <Link to="/screen">因子策略</Link> },
       ],
     },
     {
@@ -74,6 +75,7 @@ function AppLayout() {
       label: '策略管理',
       children: [
         { key: '/strategies', label: <Link to="/strategies">策略列表</Link> },
+        { key: '/backtests/param-optimize', label: <Link to="/backtests/param-optimize">参数优化</Link> },
         { key: '/paper-trading', label: <Link to="/paper-trading">模拟盘</Link> },
       ],
     },
@@ -84,7 +86,15 @@ function AppLayout() {
       children: [
         { key: '/backtests', label: <Link to="/backtests">回测列表</Link> },
         { key: '/backtests/compare', label: <Link to="/backtests/compare">策略对比</Link> },
-        { key: '/backtests/param-optimize', label: <Link to="/backtests/param-optimize">参数优化</Link> },
+        { key: '/factor-ic-ir', label: <Link to="/factor-ic-ir">IC/IR 分析</Link> },
+      ],
+    },
+    {
+      key: 'screen',
+      icon: <AppstoreOutlined />,
+      label: '选股工具',
+      children: [
+        { key: '/screen', label: <Link to="/screen">因子选股</Link> },
       ],
     },
     {
@@ -118,9 +128,10 @@ function AppLayout() {
   const selectedKeys = [location.pathname];
   const [openKeys, setOpenKeys] = useState(() => {
     const path = window.location.pathname;
-    if (path.startsWith('/factor') || path === '/screen' || path === '/factor-weight-optimize' || path === '/factor-ic-ir') return ['factors'];
-    if (path.startsWith('/strateg') || path === '/paper-trading') return ['strategies'];
+    if (path.startsWith('/factor') || path === '/factor-weight-optimize') return ['factors'];
+    if (path.startsWith('/strateg') || path === '/paper-trading' || path === '/backtests/param-optimize') return ['strategies'];
     if (path.startsWith('/backtest')) return ['backtests'];
+    if (path === '/screen') return ['screen'];
     if (path.startsWith('/data-detail')) return ['data-info'];
     if (path === '/data-update' || path === '/sector-ranking') return ['data-info'];
     if (path.startsWith('/manual/')) return ['manual'];
@@ -252,6 +263,7 @@ function AppLayout() {
             <Route path="/manual/backtest" element={<ManualBacktestPage />} />
             <Route path="/manual/others" element={<ManualOthersPage />} />
             <Route path="/stock-analysis" element={<StockAnalysis />} />
+            <Route path="/market-thermometer" element={<MarketThermometer />} />
             <Route path="/sector-ranking" element={<SectorRanking />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

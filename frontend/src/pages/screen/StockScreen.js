@@ -14,6 +14,8 @@ import {
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import api, { factorApi } from '../../api';
+import { Link } from 'react-router-dom';
+import { useMarketThermometer } from '../../hooks/useMarketThermometer';
 
 const { Title, Text, Paragraph } = Typography;
 const { Option } = Select;
@@ -739,6 +741,9 @@ export default function StockScreen() {
   const builtinPresets = presets.filter(p => p.isBuiltin === 1);
   const customPresets = presets.filter(p => p.isBuiltin !== 1);
 
+  /* ── 大盘温度计提示 ──────────────────────── */
+  const { data: thData, status: thStatus } = useMarketThermometer();
+
   /* ══════════════════════════════════════════════════════════════ */
   return (
     <div style={{ width: '100%' }}>
@@ -750,6 +755,13 @@ export default function StockScreen() {
             color={totalWeight > 0 ? (Math.abs(totalWeight - 1) < 0.01 ? 'green' : 'orange') : 'red'}
             text={`权重合计: ${totalWeight.toFixed(2)}`}
           />
+          {thData && thStatus && (
+            <Tooltip title={`大盘${thStatus.label}（${thData.fearGreedIndex?.toFixed(0)}°），${thStatus.action}`}>
+              <Tag color={thStatus.label === '极度贪婪' ? 'red' : thStatus.label === '极度恐慌' ? 'green' : 'blue'}>
+                <Link to="/market-thermometer" style={{ color: 'inherit' }}>{thStatus.label} {thData.fearGreedIndex?.toFixed(0)}°</Link>
+              </Tag>
+            </Tooltip>
+          )}
           <Button
             type="primary"
             icon={<PlayCircleOutlined />}

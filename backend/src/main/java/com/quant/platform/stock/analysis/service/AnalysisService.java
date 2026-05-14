@@ -1,14 +1,19 @@
 package com.quant.platform.stock.analysis.service;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.quant.platform.factor.engine.chan.ChanTheoryCalculator;
+import com.quant.platform.factor.engine.chan.ChanTheoryResult;
+import com.quant.platform.market.domain.MarketDailyBar;
 import com.quant.platform.stock.analysis.domain.*;
 import com.quant.platform.stock.analysis.engine.TradingSignalEngine;
 import com.quant.platform.stock.analysis.mapper.AnalysisChMapper;
 import com.quant.platform.stock.analysis.mapper.StockAnalysisMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
@@ -16,8 +21,6 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.*;
 import java.util.stream.Collectors;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
  * 个股分析服务
@@ -798,8 +801,8 @@ public class AnalysisService {
                 if (pb != null) pbHistory.add(pb);
             }
 
-            if (!peHistory.isEmpty()) currentPe = peHistory.get(peHistory.size() - 1);
-            if (!pbHistory.isEmpty()) currentPb = pbHistory.get(pbHistory.size() - 1);
+            if (!peHistory.isEmpty()) currentPe = peHistory.getLast();
+            if (!pbHistory.isEmpty()) currentPb = pbHistory.getLast();
 
             // 计算百分位：低于当前值的占比
             double pePct = calcPercentile(peHistory, currentPe);
@@ -1681,7 +1684,7 @@ public class AnalysisService {
         List<String> dates = clickHouseJdbcTemplate.query(
             "SELECT MAX(trade_date) FROM stock.stock_daily FINAL",
             (rs, rowNum) -> rs.getString(1));
-        return dates.isEmpty() ? "2026-01-01" : dates.get(0);
+        return dates.isEmpty() ? "2026-01-01" : dates.getFirst();
     }
 
     private double median(List<Double> values) {
@@ -1691,5 +1694,370 @@ public class AnalysisService {
         int n = sorted.size();
         if (n % 2 == 1) return sorted.get(n / 2);
         return (sorted.get(n / 2 - 1) + sorted.get(n / 2)) / 2.0;
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // P0 新增：缠论K线可视化、资金流向趋势、相对强弱
+    // ══════════════════════════════════════════════════════════════
+
+    /**
+     * 缠论K线图数据（实时计算）
+     * 获取近250个交易日K线 → ChanTheoryCalculator 计算 → 返回可视化数据
+     */
+    public Map<String, Object> getChanChart(String code) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("code", code);
+
+        try {
+            // 1. 获取 K 线数据（需要足够长，缠论至少100根才有效）
+            List<DailyBarRow> bars = analysisChMapper.selectRecentDailyBars(code, 260);
+            if (bars == null || bars.size() < 50) {
+                result.put("error", "K线数据不足（需至少50个交易日）");
+                return result;
+            }
+
+            // 2. 转换为 MarketDailyBar（ChanTheoryCalculator 入参）
+            List<MarketDailyBar> marketBars = new ArrayList<>();
+            for (DailyBarRow bar : bars) {
+                if (bar.getOpenPrice() == null || bar.getClosePrice() == null
+                        || bar.getHighPrice() == null || bar.getLowPrice() == null) continue;
+                marketBars.add(MarketDailyBar.builder()
+                        .symbol(normalizeCodeForDailyCH(code))
+                        .tradeDate(bar.getTradeDate())
+                        .open(bar.getOpenPrice())
+                        .high(bar.getHighPrice())
+                        .low(bar.getLowPrice())
+                        .close(bar.getClosePrice())
+                        .vol(bar.getVolume() != null ? BigDecimal.valueOf(bar.getVolume()) : null)
+                        .amount(bar.getAmount())
+                        .turnoverRate(bar.getTurnoverRate())
+                        .build());
+            }
+
+            // 3. 缠论计算
+            ChanTheoryResult chanResult = ChanTheoryCalculator.calculate(marketBars);
+            if (chanResult == null) {
+                result.put("error", "缠论计算失败");
+                return result;
+            }
+
+            // 4. 构建 K 线数据（前端 ECharts 格式）
+            List<Object> klineData = new ArrayList<>(); // [open, close, low, high, volume]
+            List<String> dates = new ArrayList<>();
+            for (MarketDailyBar bar : marketBars) {
+                klineData.add(List.of(
+                        bar.getOpen().doubleValue(),
+                        bar.getClose().doubleValue(),
+                        bar.getLow().doubleValue(),
+                        bar.getHigh().doubleValue(),
+                        bar.getVol() != null ? bar.getVol().doubleValue() : 0
+                ));
+                dates.add(bar.getTradeDate().toString());
+            }
+
+            // 5. 笔数据（折线图标记）
+            List<Object> penLines = new ArrayList<>();
+            if (chanResult.getPens() != null) {
+                for (var pen : chanResult.getPens()) {
+                    // 笔连接两个分型端点，方向为 UP/DOWN
+                    Map<String, Object> p = new LinkedHashMap<>();
+                    p.put("startIndex", pen.getStartIndex());
+                    p.put("endIndex", pen.getEndIndex());
+                    p.put("startPrice", pen.getStartPrice());
+                    p.put("endPrice", pen.getEndPrice());
+                    p.put("startDate", pen.getStartDate() != null ? pen.getStartDate().toString() : null);
+                    p.put("endDate", pen.getEndDate() != null ? pen.getEndDate().toString() : null);
+                    p.put("direction", pen.getDirection() != null ? pen.getDirection().name() : "UNKNOWN");
+                    penLines.add(p);
+                }
+            }
+
+            // 6. 中枢数据（矩形区域）
+            List<Object> hubZones = new ArrayList<>();
+            if (chanResult.getHubs() != null) {
+                for (var hub : chanResult.getHubs()) {
+                    Map<String, Object> h = new LinkedHashMap<>();
+                    h.put("high", hub.getHigh());
+                    h.put("low", hub.getLow());
+                    h.put("zz", hub.getZz());
+                    h.put("startDate", hub.getStartDate() != null ? hub.getStartDate().toString() : null);
+                    h.put("endDate", hub.getEndDate() != null ? hub.getEndDate().toString() : null);
+                    h.put("oscillationCount", hub.getOscillationCount());
+                    hubZones.add(h);
+                }
+            }
+
+            // 7. 买卖点标记
+            List<Object> buySellMarks = new ArrayList<>();
+            if (chanResult.getBuySellPoints() != null) {
+                for (var bsp : chanResult.getBuySellPoints()) {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("index", bsp.getIndex());
+                    m.put("type", bsp.getBuySellType() != null ? bsp.getBuySellType().name() : "UNKNOWN");
+                    m.put("value", bsp.getBuySellType() != null ? bsp.getBuySellType().getValue() : 0);
+                    m.put("isBuy", bsp.getBuySellType() != null && bsp.getBuySellType().isBuy());
+                    m.put("date", bsp.getDate() != null ? bsp.getDate().toString() : null);
+                    m.put("price", bsp.getPrice());
+                    buySellMarks.add(m);
+                }
+            }
+
+            result.put("dates", dates);
+            result.put("klineData", klineData);
+            result.put("pens", penLines);
+            result.put("hubs", hubZones);
+            result.put("buySellPoints", buySellMarks);
+            result.put("penCount", chanResult.getPens() != null ? chanResult.getPens().size() : 0);
+            result.put("hubCount", chanResult.getHubs() != null ? chanResult.getHubs().size() : 0);
+            result.put("bsPointCount", chanResult.getBuySellPoints() != null ? chanResult.getBuySellPoints().size() : 0);
+            result.put("barCount", marketBars.size());
+
+        } catch (Exception e) {
+            log.error("缠论K线图计算失败: code={}, error={}", code, e.getMessage(), e);
+            result.put("error", "计算失败: " + e.getMessage());
+        }
+
+        return result;
+    }
+
+    /**
+     * 资金流向历史趋势（逐日评分）
+     * 复用 TradingSignalEngine 评分规则对每日资金流向打分
+     */
+    public Map<String, Object> getMoneyFlowHistory(String code, int days) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("code", code);
+
+        try {
+            // 1. 获取历史资金流向
+            List<Map<String, Object>> mfHistory = analysisChMapper.selectMoneyFlowHistory(code, days);
+            if (mfHistory == null || mfHistory.isEmpty()) {
+                result.put("error", "无资金流向数据");
+                return result;
+            }
+
+            // 2. 反转（DESC→ASC）并逐日计算评分
+            Collections.reverse(mfHistory);
+            List<Map<String, Object>> scoredList = new ArrayList<>();
+            for (Map<String, Object> row : mfHistory) {
+                Map<String, Object> scored = new LinkedHashMap<>(row);
+                scored.put("moneyScore", calcDailyMoneyScore(row));
+                scoredList.add(scored);
+            }
+
+            result.put("history", scoredList);
+            result.put("days", scoredList.size());
+
+            // 3. 统计汇总
+            double avgNetMain = 0, avgPct = 0, totalScore = 0;
+            int inflowDays = 0;
+            for (Map<String, Object> row : scoredList) {
+                Object nm = row.get("netMain");
+                if (nm instanceof BigDecimal) {
+                    double v = ((BigDecimal) nm).doubleValue();
+                    avgNetMain += v;
+                    if (v > 0) inflowDays++;
+                }
+                Object pct = row.get("netMainPct");
+                if (pct instanceof BigDecimal) avgPct += ((BigDecimal) pct).doubleValue();
+                Object sc = row.get("moneyScore");
+                if (sc instanceof Number) totalScore += ((Number) sc).doubleValue();
+            }
+            int n = scoredList.size();
+            result.put("avgNetMain", BigDecimal.valueOf(avgNetMain / n).setScale(2, RoundingMode.HALF_UP));
+            result.put("avgNetMainPct", BigDecimal.valueOf(avgPct / n).setScale(2, RoundingMode.HALF_UP));
+            result.put("avgMoneyScore", BigDecimal.valueOf(totalScore / n).setScale(1, RoundingMode.HALF_UP));
+            result.put("inflowDays", inflowDays);
+            result.put("inflowRatio", Math.round((double) inflowDays / n * 10000) / 100.0);
+
+        } catch (Exception e) {
+            log.error("资金流向历史查询失败: code={}, error={}", code, e.getMessage(), e);
+            result.put("error", "查询失败: " + e.getMessage());
+        }
+
+        return result;
+    }
+
+    /**
+     * 单日资金面评分（复用 TradingSignalEngine 权重规则）
+     * 满分25分：主力净流入(10) + 占比(8) + 量比(4) + 换手率偏离(3)
+     * 注意：历史数据无量比/换手率，只按主力净流入(10)+占比(8)+净流入分级(7)=25分简化
+     */
+    private int calcDailyMoneyScore(Map<String, Object> row) {
+        int score = 0;
+
+        // 主力净流入（10分）
+        Object nm = row.get("netMain");
+        if (nm instanceof BigDecimal) {
+            double v = ((BigDecimal) nm).doubleValue();
+            if (v >= 5e8) score += 10;
+            else if (v >= 1e8) score += 7;
+            else if (v > 0) score += 5;
+            else if (v > -1e8) score += 2;
+            else if (v > -3e8) score += 1;
+        }
+
+        // 主力净流入占比（8分）
+        Object pct = row.get("netMainPct");
+        if (pct instanceof BigDecimal) {
+            double v = ((BigDecimal) pct).doubleValue();
+            if (v >= 10.0) score += 8;
+            else if (v >= 5.0) score += 6;
+            else if (v > 0) score += 4;
+            else if (v > -5.0) score += 2;
+            else if (v > -10.0) score += 1;
+        }
+
+        // 巨单净流入加分（7分 — 补充量比+换手率缺失的部分）
+        Object huge = row.get("netHuge");
+        if (huge instanceof BigDecimal) {
+            double v = ((BigDecimal) huge).doubleValue();
+            if (v >= 1e8) score += 5;
+            else if (v >= 3e7) score += 3;
+            else if (v > 0) score += 1;
+            else if (v < -1e8) score -= 3;
+            else if (v < -3e7) score -= 1;
+        }
+
+        return Math.max(0, Math.min(25, score));
+    }
+
+    /**
+     * 相对强弱分析：个股 vs 行业等权组合的累计收益对比
+     * 计算近60日的 RS Ratio（个股累计收益 / 行业累计收益）
+     */
+    public Map<String, Object> getRelativeStrength(String code) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("code", code);
+
+        try {
+            // 1. 获取该股票行业
+            Map<String, Object> myInfo = stockAnalysisMapper.selectStockInfo(code);
+            String industry = myInfo != null ? (String) myInfo.get("industry") : null;
+            if (industry == null || industry.isBlank()) {
+                result.put("error", "未找到行业信息");
+                return result;
+            }
+            result.put("industry", industry);
+
+            // 2. 获取个股近80日日线（多取确保对齐）
+            List<DailyBarRow> bars = analysisChMapper.selectRecentDailyBars(code, 85);
+            if (bars == null || bars.size() < 30) {
+                result.put("error", "个股数据不足（需至少30个交易日）");
+                return result;
+            }
+
+            // 3. 获取行业等权日收益率序列
+            String normalized = normalizeCodeForDailyCH(code);
+            String indReturnSql = """
+                SELECT sd.trade_date, AVG(sd.change_percent) / 100 as avg_ret
+                FROM stock.stock_daily sd FINAL
+                INNER JOIN stock_info si ON si.code = sd.code
+                WHERE si.industry = ?
+                  AND si.market NOT IN ('BJ','北交所')
+                  AND sd.trade_date >= subtractDays(today(), 90)
+                GROUP BY sd.trade_date
+                ORDER BY sd.trade_date
+                """;
+            List<Map<String, Object>> indRows = clickHouseJdbcTemplate.query(indReturnSql,
+                (rs, rowNum) -> {
+                    Map<String, Object> m = new java.util.HashMap<>();
+                    m.put("tradeDate", rs.getString("trade_date"));
+                    m.put("avgRet", rs.getBigDecimal("avg_ret"));
+                    return m;
+                }, industry);
+
+            // 构建行业收益 map
+            Map<String, Double> indRetMap = new LinkedHashMap<>();
+            for (Map<String, Object> r : indRows) {
+                String td = (String) r.get("tradeDate");
+                BigDecimal avgRet = (BigDecimal) r.get("avgRet");
+                if (avgRet != null) indRetMap.put(td, avgRet.doubleValue());
+            }
+
+            // 4. 对齐日期并计算累计收益 + RS Ratio
+            double stockCumRet = 0;
+            double indCumRet = 0;
+            List<Map<String, Object>> series = new ArrayList<>();
+            List<String> dates = new ArrayList<>();
+            List<Double> stockCumList = new ArrayList<>();
+            List<Double> indCumList = new ArrayList<>();
+            List<Double> rsRatioList = new ArrayList<>();
+
+            for (int i = 1; i < bars.size(); i++) {
+                DailyBarRow prev = bars.get(i - 1);
+                DailyBarRow curr = bars.get(i);
+                if (prev.getClosePrice() == null || curr.getClosePrice() == null
+                        || prev.getClosePrice().doubleValue() == 0) continue;
+                if (curr.getTradeDate() == null) continue;
+
+                double stockRet = (curr.getClosePrice().doubleValue() - prev.getClosePrice().doubleValue())
+                        / prev.getClosePrice().doubleValue();
+                String td = curr.getTradeDate().toString();
+                Double indRet = indRetMap.get(td);
+                if (indRet == null) continue;
+
+                stockCumRet += stockRet;
+                indCumRet += indRet;
+
+                // RS Ratio: 个股累计收益 / 行业累计收益（行业为0时取0）
+                double rsRatio = Math.abs(indCumRet) > 0.0001 ? stockCumRet / indCumRet : (stockCumRet > 0 ? 1.0 : (stockCumRet < 0 ? -1.0 : 0));
+
+                Map<String, Object> day = new LinkedHashMap<>();
+                day.put("tradeDate", td);
+                day.put("stockRet", Math.round(stockRet * 10000.0) / 100.0);
+                day.put("indRet", Math.round(indRet * 10000.0) / 100.0);
+                day.put("excessRet", Math.round((stockRet - indRet) * 10000.0) / 100.0);
+                day.put("stockCumRet", Math.round(stockCumRet * 10000.0) / 100.0);
+                day.put("indCumRet", Math.round(indCumRet * 10000.0) / 100.0);
+                day.put("rsRatio", Math.round(rsRatio * 100.0) / 100.0);
+                series.add(day);
+
+                dates.add(td);
+                stockCumList.add(Math.round(stockCumRet * 10000.0) / 100.0);
+                indCumList.add(Math.round(indCumRet * 10000.0) / 100.0);
+                rsRatioList.add(Math.round(rsRatio * 100.0) / 100.0);
+            }
+
+            result.put("series", series);
+            result.put("dates", dates);
+            result.put("stockCumRet", stockCumList);
+            result.put("indCumRet", indCumList);
+            result.put("rsRatio", rsRatioList);
+            result.put("totalDays", series.size());
+
+            // 5. 统计汇总
+            if (!series.isEmpty()) {
+                double latestStockCum = stockCumList.getLast();
+                double latestIndCum = indCumList.getLast();
+                double latestRs = rsRatioList.getLast();
+                result.put("latestStockCumRet", latestStockCum);
+                result.put("latestIndCumRet", latestIndCum);
+                result.put("latestExcessRet", Math.round((latestStockCum - latestIndCum) * 100.0) / 100.0);
+                result.put("latestRsRatio", latestRs);
+
+                // 超额收益为正的天数占比
+                long exceedDays = series.stream()
+                        .filter(d -> ((Number) d.get("excessRet")).doubleValue() > 0)
+                        .count();
+                result.put("exceedDays", exceedDays);
+                result.put("exceedRatio", Math.round((double) exceedDays / series.size() * 10000) / 100.0);
+
+                // RS Ratio 描述
+                String rsDesc;
+                if (latestRs > 1.5) rsDesc = "显著强于行业（RS>1.5）";
+                else if (latestRs > 1.1) rsDesc = "明显强于行业（RS>1.1）";
+                else if (latestRs > 0.9) rsDesc = "与行业同步（RS 0.9~1.1）";
+                else if (latestRs > 0.5) rsDesc = "弱于行业（RS 0.5~0.9）";
+                else rsDesc = "显著弱于行业（RS<0.5）";
+                result.put("rsDesc", rsDesc);
+            }
+
+        } catch (Exception e) {
+            log.error("相对强弱分析失败: code={}, error={}", code, e.getMessage(), e);
+            result.put("error", "计算失败: " + e.getMessage());
+        }
+
+        return result;
     }
 }

@@ -163,6 +163,14 @@ export const paperTradingApi = {
   processDividends: (paperId) => api.post(`/paper-trading/${paperId}/process-dividends`),
   // 删除模拟盘
   delete: (paperId) => api.delete(`/paper-trading/${paperId}`),
+  // 持仓预警
+  getAlerts: (paperId, limit = 50) => api.get(`/paper-trading/${paperId}/alerts`, { params: { limit } }),
+  getUnreadCount: (paperId) => api.get(`/paper-trading/${paperId}/alerts/unread-count`),
+  markAllRead: (paperId) => api.post(`/paper-trading/${paperId}/alerts/read-all`),
+  markRead: (alertId) => api.post(`/paper-trading/alerts/${alertId}/read`),
+  deleteAlert: (alertId) => api.delete(`/paper-trading/alerts/${alertId}`),
+  clearAlerts: (paperId) => api.delete(`/paper-trading/${paperId}/alerts`),
+  scanAlerts: (paperId) => api.post(`/paper-trading/${paperId}/scan-alerts`),
 };
 
 // ===== 回测 API =====
@@ -276,6 +284,12 @@ export const stockAnalysisApi = {
   // 热门行业专题
   getHotSectors: () => api.get('/analysis/hot-sectors'),
   getHotSectorDetail: (conceptName) => api.get('/analysis/hot-sectors/detail', { params: { conceptName } }),
+  // 大盘温度计
+  getMarketThermometer: () => api.get('/analysis/market-thermometer'),
+  // P0 新增
+  getChanChart: (code) => api.get('/analysis/chan-chart', { params: { code } }),
+  getMoneyFlowHistory: (code, days = 120) => api.get('/analysis/money-flow-history', { params: { code, days } }),
+  getRelativeStrength: (code) => api.get('/analysis/relative-strength', { params: { code } }),
 };
 
 export default api;
