@@ -26,6 +26,9 @@ public class PaperSignal {
     @TableField("signal_date")
     private LocalDate signalDate;
 
+    @TableField("factor_date")
+    private LocalDate factorDate;
+
     private String code;
     private String name;
     private String direction; // BUY/SELL

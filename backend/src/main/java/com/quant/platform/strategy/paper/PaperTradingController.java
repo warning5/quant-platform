@@ -140,4 +140,31 @@ public class PaperTradingController {
         int count = positionAlertService.scanAlerts(paperId);
         return ApiResponse.success("扫描完成", count);
     }
+
+    // ─── 风控配置 ────────────────────────────────────────────────────
+
+    @GetMapping("/{paperId}/risk-config")
+    @Operation(summary = "获取风控配置")
+    public ApiResponse<PaperRiskConfig> getRiskConfig(@PathVariable Long paperId) {
+        return ApiResponse.success(paperTradingService.getRiskConfig(paperId));
+    }
+
+    @PutMapping("/{paperId}/risk-config")
+    @Operation(summary = "更新风控配置")
+    public ApiResponse<PaperRiskConfig> updateRiskConfig(
+            @PathVariable Long paperId,
+            @RequestParam(required = false) BigDecimal stopLossPct,
+            @RequestParam(required = false) BigDecimal takeProfitPct,
+            @RequestParam(required = false) BigDecimal trailingAtr,
+            @RequestParam(required = false) BigDecimal maxPositionPct,
+            @RequestParam(required = false) BigDecimal maxIndustryPct,
+            @RequestParam(required = false) BigDecimal maxDrawdownPct,
+            @RequestParam(required = false) Integer timingEnabled,
+            @RequestParam(required = false) String benchmarkCode,
+            @RequestParam(required = false) String allocationMode) {
+        return ApiResponse.success("风控配置已更新",
+            paperTradingService.updateRiskConfig(paperId, stopLossPct, takeProfitPct,
+                trailingAtr, maxPositionPct, maxIndustryPct, maxDrawdownPct,
+                timingEnabled, benchmarkCode, allocationMode));
+    }
 }

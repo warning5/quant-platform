@@ -64,3 +64,21 @@ CREATE TABLE IF NOT EXISTS paper_nav (
     INDEX idx_paper_date (paper_id, nav_date),
     UNIQUE KEY uk_paper_date (paper_id, nav_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='模拟盘净值';
+
+-- 模拟盘风控配置表
+CREATE TABLE IF NOT EXISTS paper_risk_config (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    paper_id BIGINT NOT NULL COMMENT '模拟盘ID',
+    stop_loss_pct DECIMAL(5,2) DEFAULT 8.0 COMMENT '止损%，默认8%',
+    take_profit_pct DECIMAL(5,2) DEFAULT 30.0 COMMENT '止盈%，默认30%',
+    trailing_atr DECIMAL(3,1) DEFAULT 0 COMMENT 'ATR移动止损倍数，0=禁用',
+    max_position_pct DECIMAL(5,2) DEFAULT 20.0 COMMENT '单股仓位上限%，默认20%',
+    max_industry_pct DECIMAL(5,2) DEFAULT 35.0 COMMENT '单一行业上限%，默认35%',
+    max_drawdown_pct DECIMAL(5,2) DEFAULT 20.0 COMMENT '最大回撤%，默认20%',
+    timing_enabled TINYINT DEFAULT 0 COMMENT '是否启用择时：0=禁用，1=启用',
+    benchmark_code VARCHAR(10) DEFAULT '000300' COMMENT '基准指数：000300/000905/000852',
+    allocation_mode VARCHAR(20) DEFAULT 'equal' COMMENT '分配模式：equal/dynamic/kelly',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_paper (paper_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='模拟盘风控配置';

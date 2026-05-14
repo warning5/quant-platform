@@ -3,11 +3,13 @@ import { Link, useSearchParams } from 'react-router-dom';
 import {
   Card, Row, Col, Table, Tag, Button, Modal, Select, InputNumber, Space,
   Typography, Statistic, Spin, Tooltip, Alert, message, Popconfirm,
+  Form, Switch, Divider, Collapse,
 } from 'antd';
 import {
   ThunderboltOutlined, PlayCircleOutlined, PauseCircleOutlined,
   CheckCircleOutlined, CloseCircleOutlined, SendOutlined, LeftOutlined,
   InfoCircleOutlined, DeleteOutlined, AlertOutlined, BellOutlined, EyeOutlined,
+  SettingOutlined,
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import { paperTradingApi, strategyApi } from '../../api';
@@ -17,6 +19,16 @@ const { Text, Title } = Typography;
 const fmt = v => v != null ? (+v).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '-';
 const fmtPct = v => v != null ? `${(+v * 100).toFixed(2)}%` : '-';
 const chgColor = v => v > 0 ? '#ef5350' : v < 0 ? '#26a69a' : '#999';
+
+// 带问号的标签
+const LabelWithTip = ({ text, tip }) => (
+  <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+    {text}
+    <Tooltip title={tip} placement="top">
+      <span style={{ color: '#999', cursor: 'help', fontSize: 12 }}>？</span>
+    </Tooltip>
+  </span>
+);
 
 // ─── 模拟盘列表 ───────────────────────────────────────────────────────────────
 function PaperList({ onSelect }) {
@@ -175,6 +187,13 @@ function CreateModal({ visible, onClose, onCreated }) {
   );
 }
 
+// ─── 预警类型映射 ─────────────────────────────────────────────────────────────
+const ALERT_TYPE_MAP = {
+  MA_BREAK: '均线破位', DROP: '大跌', NOTICE: '公告', REPORT: '研报',
+  RISK_CONCENTRATION: '集中度风险', RISK_INDUSTRY: '行业暴露', RISK_DRAWDOWN: '回撤超限',
+};
+const EVENT_TYPE_MAP = { EVENT_INCREASE: '定增', EVENT_UNLOCK: '解禁', EVENT_INCENTIVE: '股权激励', EVENT_FORECAST: '业绩预告', EVENT快报: '业绩快报' };
+
 // ─── 模拟盘详情 ───────────────────────────────────────────────────────────────
 function PaperDetail({ paperId, onBack }) {
   const [loading, setLoading] = useState(true);
@@ -188,6 +207,11 @@ function PaperDetail({ paperId, onBack }) {
   const [alertLoading, setAlertLoading] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [scanLoading, setScanLoading] = useState(false);
+  // 风控配置
+  const [riskConfig, setRiskConfig] = useState(null);
+  const [riskForm] = Form.useForm();
+  const [riskSaving, setRiskSaving] = useState(false);
+  const [riskModalOpen, setRiskModalOpen] = useState(false);
 
   /* ── 大盘温度计 ─────────────────────── */
   const { data: thData2, status: thStatus2 } = useMarketThermometer();
@@ -195,6 +219,49 @@ function PaperDetail({ paperId, onBack }) {
   const loadAlerts = () => {
     paperTradingApi.getAlerts(paperId).then(d => setAlerts(d || [])).catch(() => setAlerts([]));
     paperTradingApi.getUnreadCount(paperId).then(d => setUnreadCount(d || 0)).catch(() => setUnreadCount(0));
+  };
+
+  const loadRiskConfig = () => {
+    paperTradingApi.getRiskConfig(paperId).then(cfg => {
+      setRiskConfig(cfg);
+      riskForm.setFieldsValue({
+        stopLossPct: cfg?.stopLossPct ?? 0.08,
+        takeProfitPct: cfg?.takeProfitPct ?? 0.30,
+        trailingAtrPct: cfg?.trailingAtrPct ?? 0,
+        maxPositionPct: cfg?.maxPositionPct ?? 0.20,
+        maxIndustryPct: cfg?.maxIndustryPct ?? 0.30,
+        maxDrawdownPct: cfg?.maxDrawdownPct ?? 0.15,
+        timingEnabled: cfg?.timingEnabled === 1,
+        benchmarkCode: cfg?.benchmarkCode ?? '000300',
+        allocationMode: cfg?.allocationMode ?? 'equal',
+      });
+    }).catch(() => {});
+  };
+
+  const handleSaveRiskConfig = async () => {
+    const vals = riskForm.getFieldsValue();
+    setRiskSaving(true);
+    try {
+      const params = {
+        stopLossPct: vals.stopLossPct,
+        takeProfitPct: vals.takeProfitPct,
+        trailingAtrPct: vals.trailingAtrPct ?? 0,
+        maxPositionPct: vals.maxPositionPct,
+        maxIndustryPct: vals.maxIndustryPct,
+        maxDrawdownPct: vals.maxDrawdownPct,
+        timingEnabled: vals.timingEnabled ? 1 : 0,
+        benchmarkCode: vals.benchmarkCode ?? '000300',
+        allocationMode: vals.allocationMode ?? 'equal',
+      };
+      await paperTradingApi.updateRiskConfig(paperId, params);
+      message.success('风控配置已保存');
+      setRiskModalOpen(false);
+      loadRiskConfig();
+    } catch (e) {
+      // axios 统一处理
+    } finally {
+      setRiskSaving(false);
+    }
   };
 
   const load = () => {
@@ -207,6 +274,7 @@ function PaperDetail({ paperId, onBack }) {
       .then(d => setSignals(d || []))
       .catch(() => setSignals([]));
     loadAlerts();
+    loadRiskConfig();
   };
 
   useEffect(() => { load(); }, [paperId]);
@@ -318,24 +386,47 @@ function PaperDetail({ paperId, onBack }) {
   if (loading) return <Spin tip="加载中..." style={{ display: 'block', margin: '80px auto' }} />;
   if (!data) return <Card><Text type="danger">加载失败</Text></Card>;
 
-  const { paper, positions = [], navHistory = [] } = data;
+  const { paper, positions = [], navHistory = [], benchmarkNav = [], benchmarkCode = '000300' } = data;
   const cumulativeReturn = paper.initialCapital > 0
     ? (paper.totalAssets - paper.initialCapital) / paper.initialCapital : 0;
 
-  // 净值曲线
-  const navOption = navHistory.length > 0 ? {
-    backgroundColor: 'transparent',
-    tooltip: { trigger: 'axis' },
-    grid: { left: 70, right: 20, top: 20, bottom: 40 },
-    xAxis: { type: 'category', data: navHistory.map(n => n.navDate), axisLabel: { fontSize: 10, rotate: 45 } },
-    yAxis: { type: 'value', name: '累计收益率(%)', nameLocation: 'middle', nameGap: 45, nameTextStyle: { fontSize: 11 }, axisLabel: { fontSize: 10 } },
-    series: [{
-      type: 'line', smooth: true, symbol: 'none',
-      data: navHistory.map(n => n.cumulativeReturn != null ? +(n.cumulativeReturn * 100).toFixed(2) : 0),
-      lineStyle: { color: '#1890ff', width: 2 },
-      areaStyle: { color: 'rgba(24,144,255,0.1)' },
-    }],
-  } : null;
+  // 净值曲线（指数增强监控）
+  const navOption = navHistory.length > 0 ? (() => {
+    const dates = navHistory.map(n => n.navDate);
+    const paperNav = navHistory.map(n => n.cumulativeReturn != null ? +(n.cumulativeReturn * 100).toFixed(2) : 0);
+
+    // 基准指数归一化（起点=0%）
+    const benchmarkDates = benchmarkNav.map(b => b.date);
+    const benchmarkPct = benchmarkNav.map(b => b.nav != null ? +((b.nav - 1) * 100).toFixed(2) : 0);
+
+    // 超额收益 = 模拟盘净值 - 基准净值（同日期对齐）
+    const excessData = dates.map((d, i) => {
+      const bi = benchmarkDates.indexOf(d);
+      return bi >= 0 ? +(paperNav[i] - benchmarkPct[bi]).toFixed(2) : null;
+    });
+
+    return {
+      backgroundColor: 'transparent',
+      tooltip: { trigger: 'axis' },
+      legend: { top: 0, right: 0, data: ['模拟盘', benchmarkCode === '000300' ? '沪深300' : '中证500', '超额收益'] },
+      grid: { left: 60, right: 60, top: 30, bottom: 40 },
+      xAxis: { type: 'category', data: dates, axisLabel: { fontSize: 10, rotate: 45 } },
+      yAxis: [
+        { type: 'value', name: '累计收益率(%)', nameLocation: 'middle', nameGap: 45, nameTextStyle: { fontSize: 11 }, axisLabel: { fontSize: 10 }, splitLine: { lineStyle: { type: 'dashed' } } },
+        { type: 'value', name: '超额(%)', nameLocation: 'middle', nameGap: 45, nameTextStyle: { fontSize: 11 }, axisLabel: { fontSize: 10 }, splitLine: { show: false } },
+      ],
+      series: [
+        { type: 'line', smooth: true, symbol: 'none', name: '模拟盘', xAxisIndex: 0, yAxisIndex: 0,
+          data: paperNav, lineStyle: { color: '#1890ff', width: 2 }, areaStyle: { color: 'rgba(24,144,255,0.1)' } },
+        { type: 'line', smooth: true, symbol: 'none', name: benchmarkCode === '000300' ? '沪深300' : '中证500', xAxisIndex: 0, yAxisIndex: 0,
+          data: benchmarkDates.length ? dates.map(d => { const i = benchmarkDates.indexOf(d); return i >= 0 ? benchmarkPct[i] : null; }) : [],
+          lineStyle: { color: '#fa8c16', width: 1.5, type: 'dashed' } },
+        { type: 'bar', name: '超额收益', xAxisIndex: 0, yAxisIndex: 1, symbol: 'none',
+          data: excessData.map(v => v == null ? '-' : v),
+          itemStyle: { color: v => v > 0 ? 'rgba(82,196,26,0.6)' : v < 0 ? 'rgba(245,34,45,0.6)' : 'rgba(153,153,153,0.3)' } },
+      ],
+    };
+  })() : null;
 
   // 持仓表格
   const posColumns = [
@@ -353,7 +444,16 @@ function PaperDetail({ paperId, onBack }) {
 
   // 信号表格
   const sigColumns = [
-    { title: '日期', dataIndex: 'signalDate', width: 100 },
+    {
+      title: '日期',
+      dataIndex: 'signalDate',
+      width: 100,
+      render: (v, r) => (
+        <Tooltip title={`因子截面日期: ${r.factorDate || v}`}>
+          <span>{v}</span>
+        </Tooltip>
+      ),
+    },
     { title: '代码', dataIndex: 'code', width: 80 },
     { title: '名称', dataIndex: 'name', width: 90 },
     {
@@ -394,13 +494,16 @@ function PaperDetail({ paperId, onBack }) {
         )}
       </div>
 
-      <Row gutter={16} style={{ marginBottom: 16 }}>
+      <Row gutter={12} style={{ marginBottom: 12 }}>
         <Col span={4}><Card size="small"><Statistic title="初始资金" value={paper.initialCapital} prefix="¥" /></Card></Col>
         <Col span={4}><Card size="small"><Statistic title="当前资产" value={paper.totalAssets} prefix="¥" valueStyle={{ color: chgColor(cumulativeReturn) }} /></Card></Col>
         <Col span={4}><Card size="small"><Statistic title="累计收益" value={cumulativeReturn * 100} suffix="%" precision={2} valueStyle={{ color: chgColor(cumulativeReturn) }} /></Card></Col>
         <Col span={4}><Card size="small"><Statistic title="持仓数" value={paper.positionCount} /></Card></Col>
-        <Col span={4}><Card size="small"><Statistic title="可用资金" value={paper.currentCapital} prefix="¥" /></Card></Col>
-        <Col span={4} style={{ display: 'flex', flexDirection: 'column', gap: 8, justifyContent: 'center' }}>
+        <Col span={8}><Card size="small"><Statistic title="可用资金" value={paper.currentCapital} prefix="¥" /></Card></Col>
+      </Row>
+
+      <Row gutter={12} style={{ marginBottom: 16 }}>
+        <Col span={24} style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <Button type="primary" icon={<SendOutlined />} onClick={handleGenerate} loading={genLoading}>
             生成信号
           </Button>
@@ -410,6 +513,9 @@ function PaperDetail({ paperId, onBack }) {
           <Button onClick={handleProcessDividends} loading={dividendLoading}>
             处理分红
           </Button>
+          <Button icon={<SettingOutlined />} onClick={() => setRiskModalOpen(true)}>
+            风控配置
+          </Button>
         </Col>
       </Row>
 
@@ -418,6 +524,85 @@ function PaperDetail({ paperId, onBack }) {
           <ReactECharts option={navOption} style={{ height: 240 }} notMerge={true} />
         </Card>
       )}
+
+      {/* ── 风控配置弹框 ── */}
+      <Modal
+        title={<><SettingOutlined style={{ marginRight: 8 }} />风控配置</>}
+        open={riskModalOpen}
+        onCancel={() => setRiskModalOpen(false)}
+        footer={[
+          <Button key="default" onClick={() => riskForm.setFieldsValue({
+            stopLossPct: 0.08, takeProfitPct: 0.30, trailingAtrPct: 0,
+            maxPositionPct: 0.20, maxIndustryPct: 0.30, maxDrawdownPct: 0.15,
+            timingEnabled: false, benchmarkCode: '000300', allocationMode: 'equal',
+          })}>恢复默认</Button>,
+          <Button key="cancel" onClick={() => setRiskModalOpen(false)}>取消</Button>,
+          <Button key="save" type="primary" loading={riskSaving} onClick={handleSaveRiskConfig}>保存</Button>,
+        ]}
+        width={680}
+        destroyOnClose
+      >
+        <Form form={riskForm} layout="vertical" size="small" style={{ marginTop: 16 }}>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item label={<LabelWithTip text="止损阈值" tip="单笔持仓亏损达到此比例，触发止损卖出信号。范围：0~100%，例：0.08 表示亏损 8% 时止损" />} name="stopLossPct">
+                <InputNumber min={0} max={1} step={0.01} style={{ width: '100%' }} placeholder="0.08" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label={<LabelWithTip text="止盈阈值" tip="单笔持仓盈利达到此比例，触发止盈卖出信号。范围：0~1000%，例：0.30 表示盈利 30% 时止盈" />} name="takeProfitPct">
+                <InputNumber min={0} max={10} step={0.01} style={{ width: '100%' }} placeholder="0.30" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label={<LabelWithTip text="最大单股集中度" tip="单一股票市值占总资产的比例上限。范围：1%~100%，超过后生成集中度预警。例：0.20 表示单股不超过 20%" />} name="maxPositionPct">
+                <InputNumber min={0.01} max={1} step={0.01} style={{ width: '100%' }} placeholder="0.20" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label={<LabelWithTip text="最大行业暴露" tip="同一申万行业市值占总资产的比例上限。范围：1%~35%，超过后生成行业暴露预警。例：0.30 表示单一行业不超过 30%" />} name="maxIndustryPct">
+                <InputNumber min={0.01} max={0.35} step={0.01} style={{ width: '100%' }} placeholder="0.30" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label={<LabelWithTip text="最大回撤限制" tip="从历史峰值最大回撤比例。范围：1%~100%，超过后生成回撤预警，提示策略需调整。例：0.15 表示回撤不超过 15%" />} name="maxDrawdownPct">
+                <InputNumber min={0.01} max={1} step={0.01} style={{ width: '100%' }} placeholder="0.15" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label={<LabelWithTip text="大盘择时" tip="开启后，当大盘温度计发出空头信号时，自动暂停新开仓买操作（已持仓不强制卖出）。" />} name="timingEnabled" valuePropName="checked">
+                <Switch checkedChildren="开" unCheckedChildren="关" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label={<LabelWithTip text="基准指数" tip="用于计算超额收益（模拟盘收益 - 基准收益）。净值曲线图中叠加显示基准指数走势。" />} name="benchmarkCode">
+                <Select options={[
+                  { label: '沪深300 (000300)', value: '000300' },
+                  { label: '中证500 (000905)', value: '000905' },
+                  { label: '中证1000 (000852)', value: '000852' },
+                  { label: '创业板指 (399006)', value: '399006' },
+                  { label: '万得全A (881001)', value: '881001' },
+                ]} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label={<LabelWithTip text="资金分配模式" tip={
+                <div>
+                  等权：初始资金÷10，每只标的平均分配
+                  动态权重：按因子得分比例分配（min=初始/20，max=初始/5）
+                  凯利公式：基于历史胜率计算最优仓位（需≥5笔，限制5%~25%）
+                </div>
+              } />} name="allocationMode">
+                <Select options={[
+                  { label: '等权分配 (equal)', value: 'equal' },
+                  { label: '动态权重 (dynamic)', value: 'dynamic' },
+                  { label: '凯利公式 (kelly)', value: 'kelly' },
+                ]} />
+              </Form.Item>
+            </Col>
+          </Row>
+        </Form>
+      </Modal>
 
       <Card title="当前持仓" size="small" style={{ marginBottom: 16 }}>
         <Table dataSource={positions} columns={posColumns} rowKey="id" size="small" pagination={false} />
@@ -463,10 +648,16 @@ function PaperDetail({ paperId, onBack }) {
                 },
               },
               {
-                title: '类型', dataIndex: 'alertType', width: 80,
+                title: '类型', dataIndex: 'alertType', width: 90,
                 render: v => {
-                  const cfg = { MA_BREAK: '均线破位', DROP: '大跌', NOTICE: '公告', REPORT: '研报' };
-                  return cfg[v] || v;
+                  // 新增风控预警 + 事件驱动类型
+                  const map = {
+                    MA_BREAK: '均线破位', DROP: '大跌', NOTICE: '公告', REPORT: '研报',
+                    RISK_CONCENTRATION: '集中度', RISK_INDUSTRY: '行业暴露', RISK_DRAWDOWN: '回撤',
+                    EVENT_INCREASE: '定增', EVENT_UNLOCK: '解禁', EVENT_INCENTIVE: '股权激励',
+                    EVENT_FORECAST: '业绩预告', EVENT_EXPRESS: '业绩快报',
+                  };
+                  return map[v] || (v?.startsWith('EVENT_') ? '事件驱动' : v);
                 },
               },
               {

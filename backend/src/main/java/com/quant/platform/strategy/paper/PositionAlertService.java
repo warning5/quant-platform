@@ -24,6 +24,7 @@ import java.util.Map;
 public class PositionAlertService {
 
     private final PositionAlertMapper positionAlertMapper;
+    private final PaperRiskConfigMapper paperRiskConfigMapper;
     private final JdbcTemplate jdbcTemplate;
 
     @Autowired(required = false)
@@ -64,6 +65,14 @@ public class PositionAlertService {
             // 4. 研报变化检测
             alertCount += checkResearchReports(paperId, pos, today);
         }
+
+        // 5. 集中度/行业/回撤风控检测（每模拟盘一次）
+        alertCount += checkRiskConcentration(paperId, positions, today);
+        alertCount += checkRiskIndustry(paperId, positions, today);
+        alertCount += checkRiskDrawdown(paperId, today);
+
+        // 6. 事件驱动预警（定增/解禁/股权激励/业绩预告）
+        alertCount += checkEventDrivenAlerts(paperId, positions, today);
 
         log.info("模拟盘 {} 预警扫描完成，生成 {} 条预警", paperId, alertCount);
         return alertCount;
@@ -385,6 +394,241 @@ public class PositionAlertService {
             log.debug("研报检测失败: code={}, error={}", pos.getCode(), e.getMessage());
         }
         return count;
+    }
+
+    // ─── 风控检测 ───────────────────────────────────────────────────
+
+    /**
+     * 单股集中度检测
+     * 单股市值 / 总资产 > maxPositionPct → WARNING
+     */
+    private int checkRiskConcentration(Long paperId, List<PaperPosition> positions, LocalDate today) {
+        PaperRiskConfig cfg = getRiskConfig(paperId);
+        if (cfg == null || cfg.getMaxPositionPct() == null) return 0;
+
+        double maxPct = cfg.getMaxPositionPct().doubleValue(); // 0.20 表示 20%
+        BigDecimal totalAssets = getTotalAssets(paperId);
+        if (totalAssets == null || totalAssets.compareTo(BigDecimal.ZERO) <= 0) return 0;
+
+        int count = 0;
+        for (PaperPosition pos : positions) {
+            if (pos.getMarketValue() == null) continue;
+            double ratio = pos.getMarketValue().divide(totalAssets, 4, java.math.RoundingMode.HALF_UP)
+                .multiply(new BigDecimal("100")).doubleValue(); // 转为百分比，如 15.5 表示 15.5%
+            if (ratio > maxPct * 100) { // maxPct=0.20 → 比较 15.5 > 20
+                saveAlert(PositionAlert.builder()
+                    .paperId(paperId).code(pos.getCode()).name(pos.getName())
+                    .alertType("RISK_CONCENTRATION").alertLevel("WARNING")
+                    .title(String.format("持仓集中度预警：%s %s 占比 %.1f%% > %.1f%%",
+                        pos.getCode(), pos.getName(), ratio, maxPct * 100))
+                    .detail(String.format("单股持仓 %.2f 元 / 总资产 %.2f 元 = %.1f%%（上限 %.1f%%）",
+                        pos.getMarketValue(), totalAssets, ratio, maxPct * 100))
+                    .alertDate(today).isRead(false).build());
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /**
+     * 行业暴露度检测
+     * 单一行业市值 / 总资产 > maxIndustryPct → WARNING
+     */
+    private int checkRiskIndustry(Long paperId, List<PaperPosition> positions, LocalDate today) {
+        PaperRiskConfig cfg = getRiskConfig(paperId);
+        if (cfg == null || cfg.getMaxIndustryPct() == null) return 0;
+
+        BigDecimal maxPct = cfg.getMaxIndustryPct();
+        BigDecimal totalAssets = getTotalAssets(paperId);
+        if (totalAssets == null || totalAssets.compareTo(BigDecimal.ZERO) <= 0) return 0;
+
+        // 按行业聚合市值
+        Map<String, BigDecimal> industryValue = new HashMap<>();
+        for (PaperPosition pos : positions) {
+            if (pos.getMarketValue() == null) continue;
+            String industry = getStockIndustry(pos.getCode());
+            if (industry == null) industry = "未知";
+            industryValue.merge(industry, pos.getMarketValue(), BigDecimal::add);
+        }
+
+        log.info("[行业暴露检测] paperId={}, totalAssets={}, maxPct={}, 行业数量={}", 
+            paperId, totalAssets, maxPct, industryValue.size());
+        for (Map.Entry<String, BigDecimal> e : industryValue.entrySet()) {
+            double ratio = e.getValue().divide(totalAssets, 4, java.math.RoundingMode.HALF_UP)
+                .multiply(new BigDecimal("100")).doubleValue();
+            log.info("  行业: {}, 市值: {}, 占比: {}%, 阈值: {}%, 触发: {}", 
+                e.getKey(), e.getValue(), String.format("%.2f", ratio), 
+                maxPct.doubleValue() * 100, ratio > maxPct.doubleValue() * 100);
+        }
+        
+        int count = 0;
+        for (Map.Entry<String, BigDecimal> e : industryValue.entrySet()) {
+            double ratio = e.getValue().divide(totalAssets, 4, java.math.RoundingMode.HALF_UP)
+                .multiply(new BigDecimal("100")).doubleValue();
+            if (ratio > maxPct.doubleValue() * 100) {
+                log.info("[行业暴露预警] 触发: {} 占比 {}%", e.getKey(), String.format("%.2f", ratio));
+                saveAlert(PositionAlert.builder()
+                    .paperId(paperId).code(null).name(e.getKey())
+                    .alertType("RISK_INDUSTRY").alertLevel("WARNING")
+                    .title(String.format("行业暴露预警：%s 占比 %.1f%% > %.1f%%",
+                        e.getKey(), ratio, maxPct.doubleValue() * 100))
+                    .detail(String.format("行业 %s 持仓 %.2f 元 / 总资产 %.2f 元 = %.1f%%（上限 %.1f%%）",
+                        e.getKey(), e.getValue(), totalAssets, ratio, maxPct.doubleValue() * 100))
+                    .alertDate(today).isRead(false).build());
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /**
+     * 最大回撤检测
+     * 从峰值回撤 > maxDrawdownPct → CRITICAL
+     */
+    private int checkRiskDrawdown(Long paperId, LocalDate today) {
+        PaperRiskConfig cfg = getRiskConfig(paperId);
+        if (cfg == null || cfg.getMaxDrawdownPct() == null) return 0;
+
+        double maxDd = cfg.getMaxDrawdownPct().doubleValue(); // 0.15 表示 15%
+
+        // 从 paper_nav 取历史净值峰值
+        try {
+            List<Map<String, Object>> navs = jdbcTemplate.query(
+                "SELECT nav_date, total_assets FROM paper_nav WHERE paper_id = ? ORDER BY nav_date ASC",
+                (rs, rowNum) -> {
+                    Map<String, Object> m = new HashMap<>();
+                    m.put("date", rs.getDate("nav_date").toLocalDate());
+                    m.put("assets", rs.getBigDecimal("total_assets"));
+                    return m;
+                }, paperId);
+
+            if (navs.isEmpty()) return 0;
+
+            BigDecimal peak = navs.stream()
+                .map(m -> (BigDecimal) m.get("assets"))
+                .reduce(BigDecimal.ZERO, (a, b) -> a.compareTo(b) > 0 ? a : b);
+
+            BigDecimal current = navs.getLast() != null
+                ? (BigDecimal) navs.get(navs.size() - 1).get("assets") : null;
+            if (current == null || peak.compareTo(BigDecimal.ZERO) <= 0) return 0;
+
+            double drawdownPct = peak.subtract(current)
+                .divide(peak, 4, java.math.RoundingMode.HALF_UP)
+                .multiply(new BigDecimal("100")).doubleValue();
+
+            if (drawdownPct > maxDd * 100) {
+                saveAlert(PositionAlert.builder()
+                    .paperId(paperId).code(null).name("组合")
+                    .alertType("RISK_DRAWDOWN").alertLevel("CRITICAL")
+                    .title(String.format("最大回撤预警：%.1f%% > %.1f%%", drawdownPct, maxDd * 100))
+                    .detail(String.format("当前资产 %.2f，峰值 %.2f，回撤 %.1f%%（阈值 %.1f%%）",
+                        current, peak, drawdownPct, maxDd * 100))
+                    .alertDate(today).isRead(false).build());
+                return 1;
+            }
+        } catch (Exception e) {
+            log.debug("回撤检测失败: paperId={}, error={}", paperId, e.getMessage());
+        }
+        return 0;
+    }
+
+    /**
+     * 事件驱动预警
+     * 定增 / 解禁 / 股权激励 / 业绩预告（近7天）
+     */
+    private int checkEventDrivenAlerts(Long paperId, List<PaperPosition> positions, LocalDate today) {
+        if (clickHouseJdbcTemplate == null) return 0;
+        int count = 0;
+
+        for (PaperPosition pos : positions) {
+            try {
+                String sql = String.format("""
+                    SELECT notice_type, notice_date, title
+                    FROM stock.stock_sentiment_notice FINAL
+                    WHERE code = '%s'
+                      AND notice_date >= '%s'
+                      AND notice_type IN ('定增', '解禁', '股权激励', '业绩预告', '业绩快报')
+                    ORDER BY notice_date DESC
+                    LIMIT 3
+                    """, pos.getCode(), today.minusDays(7));
+
+                List<Map<String, Object>> rows = clickHouseJdbcTemplate.query(sql, (rs, rowNum) -> {
+                    Map<String, Object> m = new HashMap<>();
+                    m.put("type", rs.getString("notice_type"));
+                    m.put("date", rs.getString("notice_date"));
+                    m.put("title", rs.getString("title"));
+                    return m;
+                });
+
+                for (Map<String, Object> row : rows) {
+                    String type = (String) row.get("type");
+                    String title = (String) row.get("title");
+                    LocalDate noticeDate = LocalDate.parse(row.get("date").toString());
+
+                    String alertType;
+                    switch (type) {
+                        case "定增": alertType = "EVENT_INCREASE"; break;
+                        case "解禁": alertType = "EVENT_UNLOCK"; break;
+                        case "股权激励": alertType = "EVENT_INCENTIVE"; break;
+                        case "业绩预告": alertType = "EVENT_FORECAST"; break;
+                        case "业绩快报": alertType = "EVENT_EXPRESS"; break;
+                        default: alertType = "EVENT_" + type;
+                    }
+                    String level = ("股权激励".equals(type) || "业绩预告".equals(type) || "业绩快报".equals(type)) ? "INFO" : "WARNING";
+
+                    saveAlert(PositionAlert.builder()
+                        .paperId(paperId)
+                        .code(pos.getCode())
+                        .name(pos.getName())
+                        .alertType(alertType)
+                        .alertLevel(level)
+                        .title(String.format("%s %s: %s", noticeDate, type,
+                            title != null ? title.substring(0, Math.min(title.length(), 30)) : ""))
+                        .detail(String.format("事件类型: %s，日期: %s", type, noticeDate))
+                        .alertDate(noticeDate)
+                        .isRead(false)
+                        .build());
+                    count++;
+                }
+            } catch (Exception e) {
+                log.debug("事件驱动检测失败: code={}, error={}", pos.getCode(), e.getMessage());
+            }
+        }
+        return count;
+    }
+
+    // ─── 辅助方法 ───────────────────────────────────────────────────
+
+    private PaperRiskConfig getRiskConfig(Long paperId) {
+        PaperRiskConfig cfg = paperRiskConfigMapper.selectOne(
+            new LambdaQueryWrapper<PaperRiskConfig>()
+                .eq(PaperRiskConfig::getPaperId, paperId));
+        if (cfg != null) return cfg;
+        // 未配置时返回默认值，确保风控预警能正常触发
+        return PaperRiskConfig.defaults(paperId);
+    }
+
+    private BigDecimal getTotalAssets(Long paperId) {
+        try {
+            List<BigDecimal> r = jdbcTemplate.query(
+                "SELECT total_assets FROM paper_trading WHERE id = ?",
+                (rs, rowNum) -> rs.getBigDecimal("total_assets"), paperId);
+            return r.isEmpty() ? null : r.getFirst();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private String getStockIndustry(String code) {
+        if (code == null) return null;
+        try {
+            List<String> r = jdbcTemplate.query(
+                "SELECT industry FROM stock_info WHERE code = ? LIMIT 1",
+                (rs, rowNum) -> rs.getString("industry"), code);
+            return r.isEmpty() ? null : r.getFirst();
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private void saveAlert(PositionAlert alert) {

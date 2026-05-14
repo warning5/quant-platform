@@ -171,6 +171,9 @@ export const paperTradingApi = {
   deleteAlert: (alertId) => api.delete(`/paper-trading/alerts/${alertId}`),
   clearAlerts: (paperId) => api.delete(`/paper-trading/${paperId}/alerts`),
   scanAlerts: (paperId) => api.post(`/paper-trading/${paperId}/scan-alerts`),
+  // 风控配置
+  getRiskConfig: (paperId) => api.get(`/paper-trading/${paperId}/risk-config`),
+  updateRiskConfig: (paperId, params) => api.put(`/paper-trading/${paperId}/risk-config`, null, { params }),
 };
 
 // ===== 回测 API =====
