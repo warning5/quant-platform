@@ -36,17 +36,7 @@ import pandas as pd
 import clickhouse_connect
 import pymysql
 from db_helper import ch_dedup_filter
-
-# ─── 配置 ──────────────────────────────────────────────────────
-CH_CONFIG = dict(
-    host="172.19.72.140", port=8123,
-    username="default", password="123456", database="stock",
-)
-MYSQL_CONFIG = dict(
-    host="localhost", port=3306,
-    user="root", password="123456", database="stock",
-    charset="utf8mb4",
-)
+from db_config import CLICKHOUSE_CONFIG, MYSQL_CONFIG
 
 # ─── 工具函数 ────────────────────────────────────────────────────
 
@@ -94,7 +84,7 @@ def _ch_batch_insert(table: str, rows: list, column_names: list, dry_run: bool =
         print(f"[DRY-RUN] {table}: CH 模拟写入 {len(rows)} 条")
         return len(rows)
     try:
-        client = clickhouse_connect.get_client(**CH_CONFIG)
+        client = clickhouse_connect.get_client(**CLICKHOUSE_CONFIG)
         client.insert(table, rows, column_names=column_names)
         client.close()
         print(f"[CH] {table}: 写入 {len(rows)} 条")

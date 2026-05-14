@@ -29,6 +29,9 @@ from datetime import date, datetime, timedelta
 
 from db_config import DB_BACKEND, MYSQL_CONFIG, CLICKHOUSE_CONFIG, get_backend_label
 
+# ─── ClickHouse HTTP 接口地址（用于 requests 调用）───
+CH_HTTP_URL = f"http://{CLICKHOUSE_CONFIG['host']}:{CLICKHOUSE_CONFIG['port']}/"
+
 
 # ─── 公共工具函数（日线脚本共享）─────────────────────────────
 def to_float(value):
@@ -957,7 +960,7 @@ class StockDailyDB:
         while True:
             try:
                 r = requests.post(
-                    "http://localhost:8123/",
+                    CH_HTTP_URL,
                     params={
                         "user": CLICKHOUSE_CONFIG["username"],
                         "password": CLICKHOUSE_CONFIG["password"],
@@ -994,7 +997,7 @@ class StockDailyDB:
         """
         import requests
         r = requests.post(
-            "http://localhost:8123/",
+            CH_HTTP_URL,
             params={
                 "max_query_size": "10485760",
                 "max_ast_elements": "1048576",

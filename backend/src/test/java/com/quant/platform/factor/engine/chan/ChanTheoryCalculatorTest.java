@@ -24,7 +24,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @Slf4j
 class ChanTheoryCalculatorTest {
 
-    private static final String CH_URL = "http://localhost:8123";
+    private static final String CH_URL = "http://172.19.72.140:8123";
     private static final String CH_USER = "default";
     private static final String CH_PASS = "123456";
 
