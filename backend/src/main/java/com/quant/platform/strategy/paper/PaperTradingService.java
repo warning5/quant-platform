@@ -98,10 +98,17 @@ public class PaperTradingService {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("paper", pt);
 
-        // 持仓
+        // 持仓（刷新现价和盈亏）
         List<PaperPosition> positions = paperPositionMapper.selectList(
             new LambdaQueryWrapper<PaperPosition>().eq(PaperPosition::getPaperId, paperId));
+        refreshPositionPrices(positions);
         result.put("positions", positions);
+
+        // 用刷新后的持仓市值重新计算总资产
+        BigDecimal posValue = positions.stream()
+            .map(p -> p.getMarketValue() != null ? p.getMarketValue() : BigDecimal.ZERO)
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+        pt.setTotalAssets(pt.getCurrentCapital().add(posValue));
 
         // 最新净值
         List<PaperNav> navs = paperNavMapper.selectList(
@@ -120,8 +127,10 @@ public class PaperTradingService {
 
         if (clickHouseJdbcTemplate != null && !navs.isEmpty()) {
             try {
-                LocalDate startDate = navs.getFirst().getNavDate();
-                LocalDate endDate = navs.getLast().getNavDate();
+                LocalDate navStartDate = navs.getFirst().getNavDate();
+                // 基准往前多查30天，让基准曲线有参考意义（即使模拟盘只运行1天也能看到指数走势）
+                LocalDate startDate = navStartDate.minusDays(30);
+                LocalDate endDate = LocalDate.now();
 
                 // 归一化基准指数净值（起点=1.0）
                 String benchmarkSql = String.format("""
@@ -139,30 +148,149 @@ public class PaperTradingService {
                         return m;
                     });
 
-                if (!indexRows.isEmpty()) {
-                    BigDecimal basePrice = (BigDecimal) indexRows.getFirst().get("close");
-                    List<Map<String, Object>> benchmarkNav = new ArrayList<>();
-                    for (Map<String, Object> row : indexRows) {
-                        Map<String, Object> b = new LinkedHashMap<>();
-                        b.put("date", row.get("date"));
-                        if (basePrice != null && basePrice.compareTo(BigDecimal.ZERO) > 0) {
-                            double normalized = ((BigDecimal) row.get("close"))
-                                .divide(basePrice, 6, RoundingMode.HALF_UP).doubleValue();
-                            b.put("nav", Math.round(normalized * 1000.0) / 1000.0);
-                        } else {
-                            b.put("nav", 1.0);
+                // 找到 navStartDate 前一个交易日的收盘价作为归一化基准
+                // 这样 navStartDate 当天显示的是当日涨跌幅，不是强制的0%
+                BigDecimal basePrice = null;
+                for (int i = 0; i < indexRows.size(); i++) {
+                    if (navStartDate.toString().equals(indexRows.get(i).get("date"))) {
+                        if (i > 0) {
+                            basePrice = (BigDecimal) indexRows.get(i - 1).get("close");
                         }
-                        benchmarkNav.add(b);
+                        break;
                     }
-                    result.put("benchmarkNav", benchmarkNav);
-                    result.put("benchmarkCode", benchmarkCode);
                 }
+                // 如果找不到前一个交易日，回退到 navStartDate 当天
+                if (basePrice == null) {
+                    for (Map<String, Object> row : indexRows) {
+                        if (navStartDate.toString().equals(row.get("date"))) {
+                            basePrice = (BigDecimal) row.get("close");
+                            break;
+                        }
+                    }
+                }
+                // 如果还是找不到，取第一条
+                if (basePrice == null && !indexRows.isEmpty()) {
+                    basePrice = (BigDecimal) indexRows.getFirst().get("close");
+                }
+
+                // 只输出 navHistory 日期范围内的基准数据（不展示模拟盘创建前的基准历史）
+                Set<String> navDateSet = navs.stream()
+                    .map(n -> n.getNavDate().toString()).collect(Collectors.toSet());
+
+                List<Map<String, Object>> benchmarkNav = new ArrayList<>();
+                for (Map<String, Object> row : indexRows) {
+                    String date = (String) row.get("date");
+                    if (!navDateSet.contains(date)) continue;
+                    Map<String, Object> b = new LinkedHashMap<>();
+                    b.put("date", date);
+                    if (basePrice != null && basePrice.compareTo(BigDecimal.ZERO) > 0) {
+                        double normalized = ((BigDecimal) row.get("close"))
+                            .divide(basePrice, 6, RoundingMode.HALF_UP).doubleValue();
+                        b.put("nav", Math.round(normalized * 1000.0) / 1000.0);
+                    } else {
+                        b.put("nav", 1.0);
+                    }
+                    benchmarkNav.add(b);
+                }
+                result.put("benchmarkNav", benchmarkNav);
+                result.put("benchmarkCode", benchmarkCode);
             } catch (Exception e) {
                 log.debug("基准指数净值查询失败: paperId={}, error={}", paperId, e.getMessage());
             }
         }
 
+        // 刷新/追加快照当日净值（非交易时段也能看到最新净值）
+        refreshTodayNav(pt);
+
         return result;
+    }
+
+    /**
+     * 刷新/追加当日净值快照，确保 getDetail 返回时 navHistory 包含今日最新数据
+     */
+    private void refreshTodayNav(PaperTrading pt) {
+        if (clickHouseJdbcTemplate == null) return;
+        try {
+            // 获取最新交易日
+            List<String> dates = clickHouseJdbcTemplate.query(
+                "SELECT max(trade_date) as d FROM stock.stock_daily FINAL",
+                (rs, rowNum) -> rs.getString("d"));
+            if (dates.isEmpty() || dates.getFirst() == null) return;
+            LocalDate today = LocalDate.parse(dates.getFirst());
+
+            BigDecimal dailyReturn = BigDecimal.ZERO;
+            BigDecimal cumulativeReturn = BigDecimal.ZERO;
+            if (pt.getInitialCapital().compareTo(BigDecimal.ZERO) > 0) {
+                cumulativeReturn = pt.getTotalAssets()
+                    .subtract(pt.getInitialCapital())
+                    .divide(pt.getInitialCapital(), 6, RoundingMode.HALF_UP);
+            }
+
+            PaperNav todayNav = paperNavMapper.selectOne(
+                new LambdaQueryWrapper<PaperNav>()
+                    .eq(PaperNav::getPaperId, pt.getId())
+                    .eq(PaperNav::getNavDate, today));
+
+            if (todayNav != null) {
+                todayNav.setTotalAssets(pt.getTotalAssets());
+                todayNav.setDailyReturn(dailyReturn);
+                todayNav.setCumulativeReturn(cumulativeReturn);
+                paperNavMapper.updateById(todayNav);
+            } else {
+                PaperNav nav = PaperNav.builder()
+                    .paperId(pt.getId())
+                    .navDate(today)
+                    .totalAssets(pt.getTotalAssets())
+                    .dailyReturn(dailyReturn)
+                    .cumulativeReturn(cumulativeReturn)
+                    .build();
+                paperNavMapper.insert(nav);
+            }
+        } catch (Exception e) {
+            log.warn("刷新当日净值快照失败: paperId={}, error={}", pt.getId(), e.getMessage());
+        }
+    }
+
+    /**
+     * 刷新持仓现价、市值、盈亏
+     */
+    private void refreshPositionPrices(List<PaperPosition> positions) {
+        if (positions == null || positions.isEmpty() || clickHouseJdbcTemplate == null) return;
+
+        // 获取最新交易日
+        String latestDate;
+        try {
+            List<String> dates = clickHouseJdbcTemplate.query(
+                "SELECT max(trade_date) as d FROM stock.stock_daily FINAL",
+                (rs, rowNum) -> rs.getString("d"));
+            latestDate = dates.isEmpty() || dates.getFirst() == null ? null : dates.getFirst();
+        } catch (Exception e) {
+            log.warn("获取最新交易日失败: {}", e.getMessage());
+            return;
+        }
+        if (latestDate == null) return;
+
+        for (PaperPosition pos : positions) {
+            try {
+                BigDecimal latestPrice = getLatestPrice(pos.getCode(), latestDate);
+                if (latestPrice == null || latestPrice.compareTo(BigDecimal.ZERO) <= 0) continue;
+
+                pos.setCurrentPrice(latestPrice);
+                BigDecimal marketValue = latestPrice.multiply(BigDecimal.valueOf(pos.getShares()));
+                pos.setMarketValue(marketValue);
+
+                BigDecimal cost = pos.getCostPrice().multiply(BigDecimal.valueOf(pos.getShares()));
+                BigDecimal profitLoss = marketValue.subtract(cost);
+                pos.setProfitLoss(profitLoss);
+
+                if (cost.compareTo(BigDecimal.ZERO) > 0) {
+                    BigDecimal profitPct = profitLoss.divide(cost, 6, RoundingMode.HALF_UP);
+                    pos.setProfitLossPct(profitPct);
+                }
+            } catch (Exception e) {
+                log.warn("刷新持仓价格失败: code={}, error={}", pos.getCode(), e.getMessage());
+            }
+        }
     }
 
     /**

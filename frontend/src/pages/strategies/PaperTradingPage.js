@@ -390,43 +390,43 @@ function PaperDetail({ paperId, onBack }) {
   const cumulativeReturn = paper.initialCapital > 0
     ? (paper.totalAssets - paper.initialCapital) / paper.initialCapital : 0;
 
-  // 净值曲线（指数增强监控）
-  const navOption = navHistory.length > 0 ? (() => {
-    const dates = navHistory.map(n => n.navDate);
-    const paperNav = navHistory.map(n => n.cumulativeReturn != null ? +(n.cumulativeReturn * 100).toFixed(2) : 0);
+    // 净值曲线（指数增强监控）
+    const navOption = navHistory.length > 0 ? (() => {
+      const dates = navHistory.map(n => n.navDate);
+      const paperNav = navHistory.map(n => n.cumulativeReturn != null ? +(n.cumulativeReturn * 100).toFixed(2) : 0);
 
-    // 基准指数归一化（起点=0%）
-    const benchmarkDates = benchmarkNav.map(b => b.date);
-    const benchmarkPct = benchmarkNav.map(b => b.nav != null ? +((b.nav - 1) * 100).toFixed(2) : 0);
+      // 基准指数归一化（起点=0%）
+      const benchmarkDates = benchmarkNav.map(b => b.date);
+      const benchmarkPct = benchmarkNav.map(b => b.nav != null ? +((b.nav - 1) * 100).toFixed(2) : 0);
 
-    // 超额收益 = 模拟盘净值 - 基准净值（同日期对齐）
-    const excessData = dates.map((d, i) => {
-      const bi = benchmarkDates.indexOf(d);
-      return bi >= 0 ? +(paperNav[i] - benchmarkPct[bi]).toFixed(2) : null;
-    });
+      // 超额收益 = 模拟盘净值 - 基准净值（同日期对齐）
+      const excessData = dates.map((d, i) => {
+        const bi = benchmarkDates.indexOf(d);
+        return bi >= 0 ? +(paperNav[i] - benchmarkPct[bi]).toFixed(2) : null;
+      });
 
-    return {
-      backgroundColor: 'transparent',
-      tooltip: { trigger: 'axis' },
-      legend: { top: 0, right: 0, data: ['模拟盘', benchmarkCode === '000300' ? '沪深300' : '中证500', '超额收益'] },
-      grid: { left: 60, right: 60, top: 30, bottom: 40 },
-      xAxis: { type: 'category', data: dates, axisLabel: { fontSize: 10, rotate: 45 } },
-      yAxis: [
-        { type: 'value', name: '累计收益率(%)', nameLocation: 'middle', nameGap: 45, nameTextStyle: { fontSize: 11 }, axisLabel: { fontSize: 10 }, splitLine: { lineStyle: { type: 'dashed' } } },
-        { type: 'value', name: '超额(%)', nameLocation: 'middle', nameGap: 45, nameTextStyle: { fontSize: 11 }, axisLabel: { fontSize: 10 }, splitLine: { show: false } },
-      ],
-      series: [
-        { type: 'line', smooth: true, symbol: 'none', name: '模拟盘', xAxisIndex: 0, yAxisIndex: 0,
-          data: paperNav, lineStyle: { color: '#1890ff', width: 2 }, areaStyle: { color: 'rgba(24,144,255,0.1)' } },
-        { type: 'line', smooth: true, symbol: 'none', name: benchmarkCode === '000300' ? '沪深300' : '中证500', xAxisIndex: 0, yAxisIndex: 0,
-          data: benchmarkDates.length ? dates.map(d => { const i = benchmarkDates.indexOf(d); return i >= 0 ? benchmarkPct[i] : null; }) : [],
-          lineStyle: { color: '#fa8c16', width: 1.5, type: 'dashed' } },
-        { type: 'bar', name: '超额收益', xAxisIndex: 0, yAxisIndex: 1, symbol: 'none',
-          data: excessData.map(v => v == null ? '-' : v),
-          itemStyle: { color: v => v > 0 ? 'rgba(82,196,26,0.6)' : v < 0 ? 'rgba(245,34,45,0.6)' : 'rgba(153,153,153,0.3)' } },
-      ],
-    };
-  })() : null;
+      return {
+        backgroundColor: 'transparent',
+        tooltip: { trigger: 'axis' },
+        legend: { top: 0, right: 0, data: ['模拟盘', benchmarkCode === '000300' ? '沪深300' : '中证500', '超额收益'] },
+        grid: { left: 60, right: 60, top: 30, bottom: 40 },
+        xAxis: { type: 'category', data: dates, axisLabel: { fontSize: 10, rotate: 45 } },
+        yAxis: [
+          { type: 'value', name: '累计收益率(%)', nameLocation: 'middle', nameGap: 45, nameTextStyle: { fontSize: 11 }, axisLabel: { fontSize: 10 }, splitLine: { lineStyle: { type: 'dashed' } } },
+          { type: 'value', name: '超额(%)', nameLocation: 'middle', nameGap: 45, nameTextStyle: { fontSize: 11 }, axisLabel: { fontSize: 10 }, splitLine: { show: false } },
+        ],
+        series: [
+          { type: 'line', smooth: true, symbol: 'none', name: '模拟盘', xAxisIndex: 0, yAxisIndex: 0,
+            data: paperNav, lineStyle: { color: '#1890ff', width: 2 }, areaStyle: { color: 'rgba(24,144,255,0.1)' } },
+          { type: 'line', smooth: true, symbol: 'none', name: benchmarkCode === '000300' ? '沪深300' : '中证500', xAxisIndex: 0, yAxisIndex: 0,
+            data: benchmarkDates.length ? dates.map(d => { const i = benchmarkDates.indexOf(d); return i >= 0 ? benchmarkPct[i] : null; }) : [],
+            lineStyle: { color: '#fa8c16', width: 1.5, type: 'dashed' } },
+          { type: 'bar', name: '超额收益', xAxisIndex: 0, yAxisIndex: 1, symbol: 'none',
+            data: excessData.map(v => v == null ? '-' : v),
+            itemStyle: { color: v => v > 0 ? 'rgba(82,196,26,0.6)' : v < 0 ? 'rgba(245,34,45,0.6)' : 'rgba(153,153,153,0.3)' } },
+        ],
+      };
+    })() : null;
 
   // 持仓表格
   const posColumns = [
