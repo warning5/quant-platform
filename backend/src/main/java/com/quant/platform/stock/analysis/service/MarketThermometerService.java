@@ -6,6 +6,8 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -23,7 +25,12 @@ public class MarketThermometerService {
 
     private static final long BOND_CACHE_TTL_MS = 24 * 3600 * 1000L;
     private static final long THERM_CACHE_TTL_MS = 5 * 60 * 1000L;
-    private static final int THERM_CACHE_VERSION = 2; // 缓存版本号，代码变更后递增强制刷新
+    private static final int THERM_CACHE_VERSION = 3; // v3: 增加 QVIX 第5维度
+
+    /** QVIX 历史统计参数（akshare 1538 天实测，2026-05-15） */
+    private static final double QVIX_MEAN = 19.73;
+    private static final double QVIX_P5   = 14.66;
+    private static final double QVIX_P95  = 28.03;
     /**
      * 10年国债收益率缓存，盘中不变，缓存24小时
      */
@@ -76,16 +83,26 @@ public class MarketThermometerService {
         result.put("marginTrend", margin.get("trend"));          // 扩张/收缩/平稳
         result.put("marginHistory", margin.get("history"));
 
-        // 5. 综合恐慌贪婪指数（0-100）
-        double pePct = ((Number) result.get("pePercentile")).doubleValue();
-        double pbPct = ((Number) result.get("pbPercentile")).doubleValue();
+        // 5. QVIX 波动率指数（akshare 中金所沪深300ETF期权隐含波动率）
+        Map<String, Object> qvix = calcQvixScore();
+        result.put("qvix", qvix.getOrDefault("qvix", null));         // 原始 QVIX 值
+        result.put("qvixScore", qvix.getOrDefault("score", 50.0));  // 归一化 0-100
+        result.put("qvixMean", QVIX_MEAN);
+
+        // 6. 综合恐慌贪婪指数（5维，v3）
+        double pePct   = ((Number) result.get("pePercentile")).doubleValue();
+        double pbPct   = ((Number) result.get("pbPercentile")).doubleValue();
         double maScore = ((Number) result.get("maTemperature")).doubleValue();
         double bondScore = calcBondScore((Double) result.get("stockBondRatio"));
-        double fearGreed = pePct * 0.30 + pbPct * 0.20 + maScore * 0.30 + bondScore * 0.20;
+        double qvixScore = ((Number) result.getOrDefault("qvixScore", 50.0)).doubleValue();
+        // PE×25% + PB×15% + 均线×25% + 股债×20% + QVIX×15%
+        double fearGreed = pePct * 0.25 + pbPct * 0.15 + maScore * 0.25
+                         + bondScore * 0.20 + qvixScore * 0.15;
         result.put("fearGreedIndex", Math.round(fearGreed * 10) / 10.0);
         result.put("fearGreedLabel", getFearGreedLabel(fearGreed));
+        result.put("bondScore", Math.round(bondScore * 10) / 10.0);
 
-        // 6. 实际数据日期（取 stock_daily 最新交易日，非日历今天）
+        // 7. 实际数据日期（取 stock_daily 最新交易日，非日历今天）
         result.put("tradeDate", pePb.getOrDefault("actualTradeDate", today.toString()).toString());
         result.put("updateTime", java.time.LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
 
@@ -216,11 +233,12 @@ public class MarketThermometerService {
 
         try {
             // 沪深300 指数 code = 000300（存储在 index_daily）
+            // 注意：数据按 ASC 存储（早期在前），PRECEDING 取前N行 = 近N日均线
             String sql = String.format("""
                     WITH ma AS (
                         SELECT trade_date, close_price,
-                               avg(close_price) OVER (ORDER BY trade_date ROWS BETWEEN CURRENT ROW AND 19 FOLLOWING) as ma20,
-                               avg(close_price) OVER (ORDER BY trade_date ROWS BETWEEN CURRENT ROW AND 59 FOLLOWING) as ma60
+                               avg(close_price) OVER (ORDER BY trade_date ROWS BETWEEN 19 PRECEDING AND CURRENT ROW) as ma20,
+                               avg(close_price) OVER (ORDER BY trade_date ROWS BETWEEN 59 PRECEDING AND CURRENT ROW) as ma60
                         FROM stock.index_daily FINAL
                         WHERE code = '000300' AND trade_date <= '%s'
                         QUALIFY row_number() OVER (ORDER BY trade_date DESC) <= 65
@@ -454,6 +472,88 @@ public class MarketThermometerService {
             result.put("history", List.of());
         }
         return result;
+    }
+
+    // ─── QVIX 波动率指数计算 ─────────────────────────────────────────
+
+    /**
+     * 通过 akshare 获取中金所沪深300ETF QVIX 并归一化到 0-100
+     * QVIX 越高 = 市场预期波动越大 = 越恐慌
+     * 归一化：(qvix - P5) / (P95 - P5) × 100%
+     */
+    private Map<String, Object> calcQvixScore() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("qvix", null);
+        result.put("score", 50.0);
+
+        String pythonScript = """
+import akshare as ak
+import warnings, json
+warnings.filterwarnings('ignore')
+try:
+    df = ak.index_option_300etf_qvix()
+    df = df.dropna(subset=['close'])
+    if len(df) == 0:
+        print('NULL')
+        exit()
+    hist = df['close']
+    latest = df.iloc[-1]
+    qvix = float(latest['close'])
+    p5 = float(hist.quantile(0.05))
+    p95 = float(hist.quantile(0.95))
+    score = max(0.0, min(100.0, (qvix - p5) / (p95 - p5) * 100))
+    print(json.dumps({'qvix': round(qvix, 2), 'score': round(score, 1)}))
+except Exception as e:
+    print('NULL')
+""";
+
+        try {
+            ProcessBuilder pb = new ProcessBuilder("python", "-c", pythonScript);
+            pb.redirectErrorStream(true);
+            pb.environment().put("PYTHONIOENCODING", "utf-8");
+            Process proc = pb.start();
+            BufferedReader reader = new BufferedReader(new InputStreamReader(proc.getInputStream(), "UTF-8"));
+            String output = reader.readLine();
+            int exitCode = proc.waitFor();
+
+            if (output == null || "NULL".equals(output) || exitCode != 0) {
+                log.warn("QVIX 获取失败，output={}, exitCode={}", output, exitCode);
+                return result;
+            }
+
+            // 解析 JSON（手写解析，支持 number 和 string 两种值格式）
+            if (output.startsWith("{")) {
+                output = output.trim();
+                String qvixStr = extractJsonValue(output, "qvix");
+                String scoreStr = extractJsonValue(output, "score");
+                if (qvixStr != null && scoreStr != null) {
+                    result.put("qvix", Double.parseDouble(qvixStr));
+                    result.put("score", Double.parseDouble(scoreStr));
+                    log.info("QVIX 获取成功: qvix={}, score={}", qvixStr, scoreStr);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("QVIX Python 子进程调用失败: {}", e.getMessage());
+        }
+        return result;
+    }
+
+    /** 手动解析 JSON: {"key": value}，value 可能是数字或字符串 */
+    private String extractJsonValue(String json, String key) {
+        String token = '"' + key + '"';
+        int idx = json.indexOf(token);
+        if (idx < 0) return null;
+        int colon = json.indexOf(':', idx);
+        if (colon < 0) return null;
+        int next = json.indexOf(',', colon + 1);
+        int brace = json.indexOf('}', colon + 1);
+        int end = Math.min(next > 0 ? next : Integer.MAX_VALUE, brace > 0 ? brace : Integer.MAX_VALUE);
+        String raw = json.substring(colon + 1, end).trim();
+        // 去掉首尾引号（如果有）
+        if (raw.startsWith("\"") && raw.endsWith("\"")) {
+            raw = raw.substring(1, raw.length() - 1);
+        }
+        return raw.isEmpty() ? null : raw;
     }
 
     // ─── 辅助方法 ───────────────────────────────────────────────────

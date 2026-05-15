@@ -1043,7 +1043,8 @@ public class DataUpdateService {
             result.put("warning", "ClickHouse 查询失败，数据可能不完整: " + (chError != null ? chError : "未知错误"));
         }
 
-        log.info("[DataCoverage] 数据概览查询完成");
+        log.info("[DataCoverage] 数据概览: {}只股票, {}条日线记录, 最新 {}, 最早 {}, 市场数 {}",
+                totalStocks, totalDailyRecords, latestTradeDate, earliestTradeDate, marketCoverage.size());
         return result;
     }
 

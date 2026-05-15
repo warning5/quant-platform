@@ -386,7 +386,9 @@ function PaperDetail({ paperId, onBack }) {
   if (loading) return <Spin tip="加载中..." style={{ display: 'block', margin: '80px auto' }} />;
   if (!data) return <Card><Text type="danger">加载失败</Text></Card>;
 
-  const { paper, positions = [], navHistory = [], benchmarkNav = [], benchmarkCode = '000300' } = data;
+  const { paper, positions = [], navHistory = [], benchmarkNav = [], benchmarkCode = '000300',
+    informationRatio, informationRatioAnnualized, informationRatioAvg, informationRatioAvgAnnualized,
+    irWindowDays, irExcessReturns = [] } = data;
   const cumulativeReturn = paper.initialCapital > 0
     ? (paper.totalAssets - paper.initialCapital) / paper.initialCapital : 0;
 
@@ -520,7 +522,40 @@ function PaperDetail({ paperId, onBack }) {
       </Row>
 
       {navOption && (
-        <Card title="净值曲线" size="small" style={{ marginBottom: 16 }}>
+        <Card
+          title={
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span>净值曲线</span>
+              {informationRatio != null && (
+                <Space size={16}>
+                  <Tooltip title={`滚动${irWindowDays || 20}日信息比率 = 超额收益均值 / 超额收益标准差`}>
+                    <span style={{ fontSize: 13, color: '#666' }}>
+                      IR: <Text strong style={{ color: informationRatio > 0 ? '#52c41a' : informationRatio < 0 ? '#f5222d' : '#999' }}>
+                        {informationRatio.toFixed(3)}
+                      </Text>
+                      {informationRatioAnnualized != null && (
+                        <span style={{ fontSize: 12, color: '#999', marginLeft: 4 }}>
+                          (年化 {informationRatioAnnualized.toFixed(3)})
+                        </span>
+                      )}
+                    </span>
+                  </Tooltip>
+                  {informationRatioAvg != null && (
+                    <Tooltip title="历史平均IR（全周期）">
+                      <span style={{ fontSize: 13, color: '#666' }}>
+                        均值IR: <Text strong style={{ color: informationRatioAvg > 0 ? '#52c41a' : informationRatioAvg < 0 ? '#f5222d' : '#999' }}>
+                          {informationRatioAvg.toFixed(3)}
+                        </Text>
+                      </span>
+                    </Tooltip>
+                  )}
+                </Space>
+              )}
+            </div>
+          }
+          size="small"
+          style={{ marginBottom: 16 }}
+        >
           <ReactECharts option={navOption} style={{ height: 240 }} notMerge={true} />
         </Card>
       )}

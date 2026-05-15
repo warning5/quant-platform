@@ -441,8 +441,9 @@ public class DataUpdateController {
 
     /**
      * 调用 find_delisted_stocks.py 脚本获取退市股票列表
+     * @param inactiveDays 停牌天数阈值（默认30）
      */
-    private String runFindDelistedScript() throws Exception {
+    private String runFindDelistedScript(int inactiveDays) throws Exception {
         if (resolvedScriptDir == null) {
             throw new IllegalStateException("脚本目录未配置，请在 application.yml 中设置 quant.data-update.script-dir");
         }
@@ -451,7 +452,7 @@ public class DataUpdateController {
             throw new java.io.FileNotFoundException("脚本不存在: " + script.getAbsolutePath());
         }
 
-        ProcessBuilder pb = new ProcessBuilder(pythonPath, script.getAbsolutePath());
+        ProcessBuilder pb = new ProcessBuilder(pythonPath, script.getAbsolutePath(), String.valueOf(inactiveDays));
         pb.directory(new java.io.File(resolvedScriptDir));
         pb.redirectErrorStream(false);
         // 强制 Python 使用 UTF-8 输出，避免 Windows 默认 GBK 导致中文乱码
@@ -488,11 +489,11 @@ public class DataUpdateController {
     }
 
     @GetMapping("/delisted/list")
-    @Operation(summary = "查询退市股票列表（通过 Baostock 差分，缓存 1 小时）")
+    @Operation(summary = "查询退市股票列表（ClickHouse 检测最近无交易数据，缓存 1 小时）")
     public ApiResponse<List<Map<String, Object>>> listDelistedStocks(
             @RequestParam(defaultValue = "30") int inactiveDays) {
         try {
-            // 缓存命中
+            // 缓存命中（注意：不同 inactiveDays 参数应分别缓存，简单处理：参数变化时清空缓存）
             long now = System.currentTimeMillis();
             if (delistedCache != null && (now - delistedCacheTime) < DELISTED_CACHE_TTL_MS) {
                 log.debug("[退市查询] 命中缓存，剩余 {} 分钟",
@@ -500,7 +501,7 @@ public class DataUpdateController {
                 return ApiResponse.success(delistedCache);
             }
             // 缓存过期，调用 Python 脚本
-            String json = runFindDelistedScript();
+            String json = runFindDelistedScript(inactiveDays);
             com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
             List<Map<String, Object>> stocks = mapper.readValue(json,
                     mapper.getTypeFactory().constructCollectionType(List.class, Map.class));

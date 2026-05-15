@@ -96,6 +96,7 @@ public class PaperTradingService {
         if (pt == null) throw new IllegalArgumentException("模拟盘不存在");
 
         Map<String, Object> result = new LinkedHashMap<>();
+        result.put("paperId", paperId);
         result.put("paper", pt);
 
         // 持仓（刷新现价和盈亏）
@@ -194,6 +195,10 @@ public class PaperTradingService {
                 }
                 result.put("benchmarkNav", benchmarkNav);
                 result.put("benchmarkCode", benchmarkCode);
+
+                // ── 信息比率（IR）= 滚动N日超额收益均值 / 超额收益标准差 ──
+                // 传入 indexRows（全量基准数据）和 basePrice，用于逐日超额收益计算
+                calculateInformationRatio(result, navs, indexRows, basePrice);
             } catch (Exception e) {
                 log.debug("基准指数净值查询失败: paperId={}, error={}", paperId, e.getMessage());
             }
@@ -505,10 +510,15 @@ public class PaperTradingService {
                 && marketThermometerService != null) {
             try {
                 Map<String, Object> thermometer = marketThermometerService.getThermometer();
-                Object signal = thermometer != null ? thermometer.get("bullBearSignal") : null;
-                marketBearish = "BEARISH".equals(signal) || "空头".equals(signal);
-                log.info("generateSignals: 择时={}, bullBearSignal={}",
-                    riskConfig.getTimingEnabled(), signal);
+                // maTrend: 多头/震荡/空头
+                String maTrend = thermometer != null ? (String) thermometer.get("maTrend") : null;
+                // fearGreedLabel: 极度恐慌/恐慌/偏恐慌/中性/偏贪婪/贪婪/极度贪婪
+                String fearGreedLabel = thermometer != null ? (String) thermometer.get("fearGreedLabel") : null;
+                // 空头条件：均线温度=空头，或综合指数=极度恐慌/恐慌
+                marketBearish = "空头".equals(maTrend)
+                    || "极度恐慌".equals(fearGreedLabel) || "恐慌".equals(fearGreedLabel);
+                log.info("generateSignals: 择时={}, maTrend={}, fearGreedLabel={}, marketBearish={}",
+                    riskConfig.getTimingEnabled(), maTrend, fearGreedLabel, marketBearish);
             } catch (Exception e) {
                 log.debug("大盘择时查询失败: {}", e.getMessage());
             }
@@ -1102,6 +1112,99 @@ public class PaperTradingService {
         } catch (Exception e) {
             log.debug("凯利参数计算失败: paperId={}, error={}", paperId, e.getMessage());
             return null;
+        }
+    }
+
+    /**
+     * 计算信息比率（Information Ratio）
+     * IR = 超额收益均值 / 超额收益标准差，滚动N日窗口
+     * 超额收益 = 模拟盘累计收益率 - 基准累计收益率（归一化：基准净值/基准起点净值 - 1）
+     *
+     * @param result    放入 IR 计算结果的 Map
+     * @param navs      模拟盘净值历史
+     * @param indexRows 全量基准指数数据（含 close_price）
+     * @param basePrice 基准归一化起点价格（navStartDate前一日收盘价）
+     */
+    @SuppressWarnings("unchecked")
+    private void calculateInformationRatio(
+            Map<String, Object> result,
+            List<PaperNav> navs,
+            List<Map<String, Object>> indexRows,
+            BigDecimal basePrice) {
+
+        if (navs == null || navs.isEmpty()
+                || indexRows == null || indexRows.isEmpty()
+                || basePrice == null || basePrice.compareTo(BigDecimal.ZERO) <= 0) {
+            return;
+        }
+
+        // 构建日期 -> 归一化基准净值的映射（全量 indexRows）
+        Map<String, Double> benchNormMap = new java.util.HashMap<>();
+        for (Map<String, Object> row : indexRows) {
+            String date = String.valueOf(row.get("date"));
+            BigDecimal close = (BigDecimal) row.get("close");
+            if (date != null && close != null) {
+                double nav = close.divide(basePrice, 6, RoundingMode.HALF_UP).doubleValue();
+                benchNormMap.put(date, nav);
+            }
+        }
+
+        // 计算每日超额收益 = 模拟盘累计收益 - (基准净值 - 1)
+        List<Double> excessList = new java.util.ArrayList<>();
+        List<Map<String, Object>> excessDailyList = new java.util.ArrayList<>();
+        for (PaperNav nav : navs) {
+            String date = nav.getNavDate().toString();
+            if (!benchNormMap.containsKey(date)) continue;
+            double benchReturn = benchNormMap.get(date) - 1.0;
+            double paperReturn = nav.getCumulativeReturn() != null
+                ? nav.getCumulativeReturn().doubleValue() : 0.0;
+            double excess = paperReturn - benchReturn;
+            excessList.add(excess);
+
+            Map<String, Object> entry = new java.util.LinkedHashMap<>();
+            entry.put("date", date);
+            entry.put("excessReturn", Math.round(excess * 10000.0) / 10000.0);
+            excessDailyList.add(entry);
+        }
+
+        if (excessList.size() < 3) {
+            log.info("[信息比率] 数据点不足({}<3)，跳过计算", excessList.size());
+            return;
+        }
+
+        // 滚动窗口 IR（窗口 = min(20, 数据长度)）
+        int windowDays = Math.min(20, excessList.size());
+        List<Double> irList = new java.util.ArrayList<>();
+        for (int i = windowDays - 1; i < excessList.size(); i++) {
+            int start = i - windowDays + 1;
+            double mean = 0;
+            for (int j = start; j <= i; j++) mean += excessList.get(j);
+            mean /= windowDays;
+            double variance = 0;
+            for (int j = start; j <= i; j++) {
+                double d = excessList.get(j) - mean;
+                variance += d * d;
+            }
+            variance /= windowDays;
+            double std = Math.sqrt(Math.max(0, variance));
+            if (std > 1e-10) {
+                irList.add(mean / std);
+            }
+        }
+
+        if (!irList.isEmpty()) {
+            double latestIR = irList.get(irList.size() - 1);
+            double avgIR = irList.stream().mapToDouble(Double::doubleValue).sum() / irList.size();
+            result.put("informationRatio", Math.round(latestIR * 10000.0) / 10000.0);
+            result.put("informationRatioAnnualized", Math.round(latestIR * Math.sqrt(252) * 10000.0) / 10000.0);
+            result.put("informationRatioAvg", Math.round(avgIR * 10000.0) / 10000.0);
+            result.put("informationRatioAvgAnnualized", Math.round(avgIR * Math.sqrt(252) * 10000.0) / 10000.0);
+            result.put("irWindowDays", windowDays);
+            result.put("irExcessReturns", excessDailyList);
+            log.info("[信息比率] 最新{}-日IR={}, 年化={}, 均值IR={}, 数据点={}",
+                windowDays, latestIR, latestIR * Math.sqrt(252), avgIR, excessList.size());
+        } else {
+            log.info("[信息比率] 滚动IR全为NaN（标准差≈0），数据点={}", excessList.size());
         }
     }
 }

@@ -3,6 +3,7 @@ import { Row, Col, Card, Statistic, Typography, Spin, Tooltip, Badge, Divider, S
 import {
   ControlOutlined, SwapOutlined,
   DollarOutlined, FundOutlined, BankOutlined, InsuranceOutlined,
+  ThunderboltOutlined,
   QuestionCircleOutlined,
 } from '@ant-design/icons';
 import ReactEcharts from 'echarts-for-react';
@@ -98,11 +99,14 @@ export default function MarketThermometer() {
                 <div>• <strong>因子选股</strong>：大盘低估值时优先执行价值/质量因子信号</div>
                 <div>• <strong>模拟盘</strong>：大盘温度&gt;70时自动暂停买入信号执行</div>
                 <div>• <strong>个股分析</strong>：个股估值与大盘分位对比，判断相对高低估</div>
-                <div style={{ marginTop: 8, color: '#aaa' }}>仅供参考，不构成投资建议。</div>
+                <div style={{ marginTop: 8 }}><strong>综合指数计算公式（5维，v3）：</strong></div>
+                <div>PE分位×25% + PB分位×15% + 均线温度×25% + 股债得分×20% + 波动率指数×15%</div>
+                <div style={{ marginTop: 4, color: '#888' }}>波动率指数（QVIX）：akshare index_option_300etf_qvix()，归一化分位得分</div>
+                <div style={{ marginTop: 8, color: '#aaa' }}>仅供参考，不构成投资建议。历史业绩不代表未来表现。</div>
               </div>
             }
             placement="bottomLeft"
-            overlayStyle={{ maxWidth: 400 }}
+            overlayStyle={{ maxWidth: 480 }}
           >
             <QuestionCircleOutlined style={{ color: '#999', cursor: 'pointer', fontSize: 16 }} />
           </Tooltip>
@@ -147,78 +151,243 @@ export default function MarketThermometer() {
         <Row gutter={24} align="middle">
           <Col xs={24} md={8} style={{ textAlign: 'center' }}>
             <div style={{ fontSize: 72, fontWeight: 700, color: FEAR_GREED_COLOR(fg), lineHeight: 1 }}>
-              {fg.toFixed(0)}
+              {fg.toFixed(1)}
             </div>
             <div style={{ fontSize: 20, color: FEAR_GREED_COLOR(fg), marginTop: 8 }}>
               {data?.fearGreedLabel}
             </div>
-            <Text style={{ color: '#666', fontSize: 12 }}>
-              恐慌贪婪指数（0极度恐慌 ~ 100极度贪婪）
-            </Text>
+            <Space size={4}>
+              <Text style={{ color: '#666', fontSize: 12 }}>
+                恐慌贪婪指数（0极度恐慌 ~ 100极度贪婪）
+              </Text>
+              <Tooltip
+                title={
+                  (() => {
+                    const pe = data?.pePercentile ?? 0;
+                    const pb = data?.pbPercentile ?? 0;
+                    const ma = data?.maTemperature ?? 0;
+                    const ratio = data?.stockBondRatio ?? 0;
+                    const bondScore = 0; // 股债比 < 1.5，该项贡献为0
+                    const qvix = data?.qvixScore ?? 50;
+                    const peW = pe * 0.25;
+                    const pbW = pb * 0.15;
+                    const maW = ma * 0.25;
+                    const bondW = bondScore * 0.20;
+                    const qvixW = qvix * 0.15;
+                    return (
+                      <div style={{ fontSize: 12, lineHeight: 1.8, minWidth: 320 }}>
+                        <div style={{ fontWeight: 600, marginBottom: 8 }}>📐 综合指数计算过程</div>
+                        <div><strong>各维度得分（满分100）：</strong></div>
+                        <div>• PE分位数：{pe.toFixed(1)} × 25% = {peW.toFixed(1)}</div>
+                        <div>• PB分位数：{pb.toFixed(1)} × 15% = {pbW.toFixed(1)}</div>
+                        <div>• 均线温度：{ma.toFixed(1)} × 25% = {maW.toFixed(1)}</div>
+                        <div>• 股债收益比得分：{bondScore.toFixed(1)} × 20% = {bondW.toFixed(1)}</div>
+                        <div style={{ paddingLeft: 12, color: '#fa8c16', fontSize: 11 }}>（⚠️ 股债比当前为 {ratio.toFixed(2)}，低于阈值1.5，该项得分为0）</div>
+                        <div>• 波动率指数得分：{qvix.toFixed(1)} × 15% = {qvixW.toFixed(1)}</div>
+                        <div style={{ marginTop: 8, padding: '6px 10px', background: '#f5f5f5', borderRadius: 4 }}>
+                          <strong>综合指数 = </strong>
+                          {peW.toFixed(1)} + {pbW.toFixed(1)} + {maW.toFixed(1)} + {bondW.toFixed(1)} + {qvixW.toFixed(1)}
+                          <strong> = {fg.toFixed(1)}</strong>
+                        </div>
+                      </div>
+                    );
+                  })()
+                }
+                overlayStyle={{ maxWidth: 420 }}
+              >
+                <QuestionCircleOutlined style={{ color: '#999', cursor: 'pointer', fontSize: 13 }} />
+              </Tooltip>
+            </Space>
           </Col>
           <Col xs={24} md={16}>
+            {/* 第一行：PE + PB + 均线温度 */}
             <Row gutter={[12, 12]}>
-              <Col span={12}>
-                <Tooltip title="全市场PE历史分位（近3年）">
-                  <Card size="small" style={{ background: 'rgba(255,255,255,0.9)' }}>
-                    <Statistic
-                      title="PE分位数"
-                      value={data?.pePercentile ?? 0}
-                      suffix="%"
-                      precision={1}
-                      prefix={<FundOutlined />}
-                      valueStyle={{ color: '#1677ff', fontSize: 24 }}
-                    />
-                    <Text type="secondary" style={{ fontSize: 11 }}>近3年历史分位</Text>
-                  </Card>
-                </Tooltip>
+              <Col span={8}>
+                <Card size="small" style={{ background: 'rgba(255,255,255,0.9)' }}>
+                  <Statistic
+                    title={
+                      <Space size={4}>
+                        <span>PE分位数</span>
+                        <Tooltip
+                          title={
+                            <div style={{ fontSize: 12, lineHeight: 1.8, maxWidth: 360 }}>
+                              <div style={{ fontWeight: 600, marginBottom: 6 }}>📊 PE分位数 — 计算逻辑</div>
+                              <div><strong>数据源：</strong>全市场A股（剔除 PE≤0 或 PE≥500 的异常值）</div>
+                              <div><strong>当前值：</strong>当日全市场 PE 等权均值</div>
+                              <div><strong>分位计算：</strong>过去 3 年每日 PE 均值组成的序列中，当前值排在第几位</div>
+                              <div><strong>解读：</strong>0% = 历史最低估值，100% = 历史最高估值</div>
+                              <div style={{ marginTop: 6, padding: '4px 8px', background: '#f5f5f5', borderRadius: 4 }}>
+                                <strong>公式：</strong>PE分位 = count(历史PE均值 ≤ 当前PE均值) / 总天数 × 100%
+                              </div>
+                              <div style={{ marginTop: 6, color: '#aaa', fontSize: 11 }}>数据来源：stock_daily（ClickHouse）</div>
+                            </div>
+                          }
+                          overlayStyle={{ maxWidth: 400 }}
+                        >
+                          <QuestionCircleOutlined style={{ color: '#999', cursor: 'pointer', fontSize: 13 }} />
+                        </Tooltip>
+                      </Space>
+                    }
+                    value={data?.pePercentile ?? 0}
+                    suffix="%"
+                    precision={1}
+                    prefix={<FundOutlined />}
+                    valueStyle={{ color: '#1677ff', fontSize: 24 }}
+                  />
+                  <Text type="secondary" style={{ fontSize: 11 }}>近3年历史分位</Text>
+                </Card>
               </Col>
-              <Col span={12}>
-                <Tooltip title="全市场PB历史分位（近3年）">
-                  <Card size="small" style={{ background: 'rgba(255,255,255,0.9)' }}>
-                    <Statistic
-                      title="PB分位数"
-                      value={data?.pbPercentile ?? 0}
-                      suffix="%"
-                      precision={1}
-                      prefix={<InsuranceOutlined />}
-                      valueStyle={{ color: '#722ed1', fontSize: 24 }}
-                    />
-                    <Text type="secondary" style={{ fontSize: 11 }}>近3年历史分位</Text>
-                  </Card>
-                </Tooltip>
+              <Col span={8}>
+                <Card size="small" style={{ background: 'rgba(255,255,255,0.9)' }}>
+                  <Statistic
+                    title={
+                      <Space size={4}>
+                        <span>PB分位数</span>
+                        <Tooltip
+                          title={
+                            <div style={{ fontSize: 12, lineHeight: 1.8, maxWidth: 360 }}>
+                              <div style={{ fontWeight: 600, marginBottom: 6 }}>📊 PB分位数 — 计算逻辑</div>
+                              <div><strong>数据源：</strong>全市场A股（剔除 PB≤0 或 PB≥50 的异常值）</div>
+                              <div><strong>当前值：</strong>当日全市场 PB 等权均值</div>
+                              <div><strong>分位计算：</strong>过去 3 年每日 PB 均值组成的序列中，当前值排在第几位</div>
+                              <div><strong>解读：</strong>0% = 历史最低估值，100% = 历史最高估值</div>
+                              <div style={{ marginTop: 6, padding: '4px 8px', background: '#f5f5f5', borderRadius: 4 }}>
+                                <strong>公式：</strong>PB分位 = count(历史PB均值 ≤ 当前PB均值) / 总天数 × 100%
+                              </div>
+                              <div style={{ marginTop: 6, color: '#aaa', fontSize: 11 }}>数据来源：stock_daily（ClickHouse）</div>
+                            </div>
+                          }
+                          overlayStyle={{ maxWidth: 400 }}
+                        >
+                          <QuestionCircleOutlined style={{ color: '#999', cursor: 'pointer', fontSize: 13 }} />
+                        </Tooltip>
+                      </Space>
+                    }
+                    value={data?.pbPercentile ?? 0}
+                    suffix="%"
+                    precision={1}
+                    prefix={<InsuranceOutlined />}
+                    valueStyle={{ color: '#722ed1', fontSize: 24 }}
+                  />
+                  <Text type="secondary" style={{ fontSize: 11 }}>近3年历史分位</Text>
+                </Card>
               </Col>
-              <Col span={12}>
-                <Tooltip title="沪深300均线多空排列（20日 > 60日 = 多头）">
-                  <Card size="small" style={{ background: 'rgba(255,255,255,0.9)' }}>
-                    <Statistic
-                      title="均线温度"
-                      value={data?.maTemperature ?? 50}
-                      suffix="%"
-                      precision={1}
-                      prefix={<SwapOutlined />}
-                      valueStyle={{ color: fgColor, fontSize: 24 }}
-                    />
-                    <Badge
-                      status={data?.maTrend === '多头' ? 'success' : data?.maTrend === '空头' ? 'error' : 'warning'}
-                      text={<Text type="secondary" style={{ fontSize: 11 }}>{data?.maTrend || '震荡'}</Text>}
-                    />
-                  </Card>
-                </Tooltip>
+              <Col span={8}>
+                <Card size="small" style={{ background: 'rgba(255,255,255,0.9)' }}>
+                  <Statistic
+                    title={
+                      <Space size={4}>
+                        <span>均线温度</span>
+                        <Tooltip
+                          title={
+                            <div style={{ fontSize: 12, lineHeight: 1.8, maxWidth: 360 }}>
+                              <div style={{ fontWeight: 600, marginBottom: 6 }}>🌡️ 均线温度 — 计算逻辑</div>
+                              <div><strong>数据源：</strong>沪深300指数日收盘价</div>
+                              <div><strong>比较基准：</strong>MA20（20日均线） vs MA60（60日均线）</div>
+                              <div><strong>温度计算：</strong>收盘价偏离 MA60 的幅度，归一化到 0-100</div>
+                              <div><strong>趋势判定：</strong></div>
+                              <div>&nbsp;&nbsp;• MA20 &gt; MA60 → 多头（温度 &gt; 50）</div>
+                              <div>&nbsp;&nbsp;• MA20 &lt; MA60 → 空头（温度 &lt; 50）</div>
+                              <div style={{ marginTop: 6, padding: '4px 8px', background: '#f5f5f5', borderRadius: 4 }}>
+                                <strong>公式：</strong>均线温度 = (收盘价 - MA60) / MA60 × 50 + 50（归一化）<br/>
+                                <strong>趋势：</strong>MA20 &gt; MA60 = 多头 | MA20 &lt; MA60 = 空头
+                              </div>
+                            </div>
+                          }
+                          overlayStyle={{ maxWidth: 400 }}
+                        >
+                          <QuestionCircleOutlined style={{ color: '#999', cursor: 'pointer', fontSize: 13 }} />
+                        </Tooltip>
+                      </Space>
+                    }
+                    value={data?.maTemperature ?? 50}
+                    suffix="%"
+                    precision={1}
+                    prefix={<SwapOutlined />}
+                    valueStyle={{ color: fgColor, fontSize: 24 }}
+                  />
+                  <Badge
+                    status={data?.maTrend === '多头' ? 'success' : data?.maTrend === '空头' ? 'error' : 'warning'}
+                    text={<Text type="secondary" style={{ fontSize: 11 }}>{data?.maTrend || '震荡'}</Text>}
+                  />
+                </Card>
               </Col>
-              <Col span={12}>
-                <Tooltip title="沪深300盈利收益率 / 10年国债收益率（>3偏低估，<1.5偏高估）">
-                  <Card size="small" style={{ background: 'rgba(255,255,255,0.9)' }}>
-                    <Statistic
-                      title="股债收益比"
-                      value={data?.stockBondRatio ?? 0}
-                      precision={2}
-                      prefix={<DollarOutlined />}
-                      valueStyle={{ color: '#fa8c16', fontSize: 24 }}
-                    />
-                    <Text type="secondary" style={{ fontSize: 11 }}>10Y国债 {data?.bondYield10Y?.toFixed(2)}%</Text>
-                  </Card>
-                </Tooltip>
+            </Row>
+            {/* 第二行：股债收益比 + QVIX 波动率指数 */}
+            <Row gutter={[12, 12]} style={{ marginTop: 16 }}>
+              <Col span={8}>
+                <Card size="small" style={{ background: 'rgba(255,255,255,0.9)' }}>
+                  <Statistic
+                    title={
+                      <Space size={4}>
+                        <span>股债收益比</span>
+                        <Tooltip
+                          title={
+                            <div style={{ fontSize: 12, lineHeight: 1.8, maxWidth: 360 }}>
+                              <div style={{ fontWeight: 600, marginBottom: 6 }}>📊 股债收益比 — 计算逻辑</div>
+                              <div><strong>分子（股票）：</strong>沪深300盈利收益率 = 1 / PE_TTM（等权平均）</div>
+                              <div><strong>分母（债券）：</strong>10年国债到期收益率（中债登发布）</div>
+                              <div><strong>阈值信号：</strong></div>
+                              <div>&nbsp;&nbsp;• 比值 &gt; 3.0 → 股票显著低估（贪婪信号，得分 90+）</div>
+                              <div>&nbsp;&nbsp;• 比值 &lt; 1.5 → 股票显著高估（恐慌信号，得分 10）</div>
+                              <div style={{ marginTop: 6, padding: '4px 8px', background: '#f5f5f5', borderRadius: 4 }}>
+                                <strong>公式：</strong>股债收益比 = 沪深300盈利收益率 / 10年国债收益率<br/>
+                                <strong>股债得分：</strong>10 + (比值 - 1.5) / 1.5 × 80（映射到 0-100）
+                              </div>
+                              <div style={{ marginTop: 6, color: '#aaa', fontSize: 11 }}>数据来源：沪深300指数 PE + 中债估值</div>
+                            </div>
+                          }
+                          overlayStyle={{ maxWidth: 400 }}
+                        >
+                          <QuestionCircleOutlined style={{ color: '#999', cursor: 'pointer', fontSize: 13 }} />
+                        </Tooltip>
+                      </Space>
+                    }
+                    value={data?.stockBondRatio ?? 0}
+                    precision={2}
+                    prefix={<DollarOutlined />}
+                    valueStyle={{ color: '#fa8c16', fontSize: 22 }}
+                  />
+                  <Text type="secondary" style={{ fontSize: 11 }}>10Y国债 {data?.bondYield10Y?.toFixed(2)}%</Text>
+                </Card>
+              </Col>
+              <Col span={8}>
+                <Card size="small" style={{ background: 'rgba(255,255,255,0.9)' }}>
+                  <Statistic
+                    title={
+                      <Space size={4}>
+                        <span>波动率指数</span>
+                        <Tooltip
+                          title={
+                            <div style={{ fontSize: 12, lineHeight: 1.8, maxWidth: 360 }}>
+                              <div style={{ fontWeight: 600, marginBottom: 6 }}>📊 波动率指数（QVIX）— 计算逻辑</div>
+                              <div><strong>数据源：</strong>中金所沪深300ETF期权（MO系列）隐含波动率</div>
+                              <div><strong>获取方式：</strong>akshare index_option_300etf_qvix()</div>
+                              <div><strong>当前值：</strong>今日 QVIX = {data?.qvix != null ? data.qvix.toFixed(2) : '-'}</div>
+                              <div><strong>历史均值：</strong>{data?.qvixMean?.toFixed(2) ?? '19.73'}（中性分位）</div>
+                              <div><strong>解读：</strong>QVIX &gt; 均值 → 市场预期未来波动加大（恐慌）</div>
+                              <div style={{ marginTop: 6, padding: '4px 8px', background: '#f5f5f5', borderRadius: 4 }}>
+                                <strong>公式：</strong>波动率得分 = (QVIX - 5%分位) / (95%分位 - 5%分位) × 100%<br/>
+                                <strong>信号：</strong>QVIX &lt; 15 = 极度贪婪，QVIX &gt; 28 = 极度恐慌
+                              </div>
+                              <div style={{ marginTop: 6, color: '#aaa', fontSize: 11 }}>数据来源：中金所（akshare）</div>
+                            </div>
+                          }
+                          overlayStyle={{ maxWidth: 400 }}
+                        >
+                          <QuestionCircleOutlined style={{ color: '#999', cursor: 'pointer', fontSize: 13 }} />
+                        </Tooltip>
+                      </Space>
+                    }
+                    value={data?.qvixScore ?? 50}
+                    precision={1}
+                    prefix={<ThunderboltOutlined />}
+                    valueStyle={{ color: '#f5222d', fontSize: 22 }}
+                  />
+                  <Text type="secondary" style={{ fontSize: 11 }}>
+                    QVIX {data?.qvix != null ? data.qvix.toFixed(2) : '-'} | 均值 {data?.qvixMean?.toFixed(2) ?? '19.73'}
+                  </Text>
+                </Card>
               </Col>
             </Row>
           </Col>
@@ -265,13 +434,16 @@ export default function MarketThermometer() {
                       text={<span style={{ fontSize: 13 }}>{data?.marginTrend || '平稳'}</span>}
                     />
                     <div style={{ marginTop: 8, fontSize: 12, color: '#999' }}>
-                      近5日 &nbsp;
-                      <span style={{ color: diff > 0 ? '#52c41a' : diff < 0 ? '#ff4d4f' : '#999' }}>
-                        {diffSign}{diff.toFixed(2)}亿
+                      vs 前5日 &nbsp;
+                      <span style={{ color: '#aaa' }}>
+                        {(prev >= 0 ? '+' : '') + prev.toFixed(2)}亿
                       </span>
-                      &nbsp;vs 前5日
-                      <span style={{ marginLeft: 4, color: '#aaa' }}>
-                        ({(prev >= 0 ? '+' : '') + prev.toFixed(2)}亿)
+                      &nbsp;
+                      <span style={{ color: diff > 0 ? '#52c41a' : diff < 0 ? '#ff4d4f' : '#999' }}>
+                        →&nbsp;{diffSign}{diff.toFixed(2)}亿
+                      </span>
+                      <span style={{ marginLeft: 4, fontStyle: 'italic', color: '#bbb' }}>
+                        {diff > 0 ? '流出收窄' : diff < 0 ? '流出扩大' : ''}
                       </span>
                       {incomplete && (
                         <Tooltip title="数据来源不完整（东财接口近期受限），实际金额可能偏小，仅供参考">
@@ -350,10 +522,6 @@ export default function MarketThermometer() {
             </Row>
             <Divider />
             <Paragraph type="secondary" style={{ fontSize: 12 }}>
-              <strong>综合指数计算公式：</strong> PE分位×30% + PB分位×20% + 均线温度×30% + 股债得分×20%
-              <br />
-              主力资金数据来源：东财 stock_sentiment_moneyflow
-              <br />
               仅供参考，不构成投资建议。历史业绩不代表未来表现。
             </Paragraph>
           </Card>
