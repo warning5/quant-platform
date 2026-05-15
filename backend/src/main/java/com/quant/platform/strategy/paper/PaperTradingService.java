@@ -81,11 +81,26 @@ public class PaperTradingService {
     }
 
     /**
-     * 获取所有模拟盘列表
+     * 获取所有模拟盘列表（刷新持仓价格和总资产）
      */
     public List<PaperTrading> listAll() {
-        return paperTradingMapper.selectList(
+        List<PaperTrading> list = paperTradingMapper.selectList(
             new LambdaQueryWrapper<PaperTrading>().orderByDesc(PaperTrading::getCreatedAt));
+        for (PaperTrading pt : list) {
+            try {
+                List<PaperPosition> positions = paperPositionMapper.selectList(
+                        new LambdaQueryWrapper<PaperPosition>().eq(PaperPosition::getPaperId, pt.getId()));
+                refreshPositionPrices(positions);
+                BigDecimal posValue = positions.stream()
+                        .map(p -> p.getMarketValue() != null ? p.getMarketValue() : BigDecimal.ZERO)
+                        .reduce(BigDecimal.ZERO, BigDecimal::add);
+                pt.setTotalAssets(pt.getCurrentCapital().add(posValue));
+                pt.setPositionCount(positions.size());
+            } catch (Exception e) {
+                log.warn("刷新模拟盘列表价格失败: paperId={}, error={}", pt.getId(), e.getMessage());
+            }
+        }
+        return list;
     }
 
     /**

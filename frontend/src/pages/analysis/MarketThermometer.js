@@ -120,24 +120,32 @@ export default function MarketThermometer() {
 
       {error && <Card><Text type="danger">加载失败：{error}</Text></Card>}
 
-      {/* 资金流向数据来源警告 */}
-      <Card
-        style={{
-          marginBottom: 16,
-          background: '#fffbe6',
-          border: '1px solid #ffe58f',
-        }}
-        styles={{ body: { padding: '12px 16px' } }}
-      >
-        <Space>
-          <span style={{ fontSize: 16 }}>⚠️</span>
-          <Text style={{ fontSize: 13, color: '#ad6800' }}>
-            <strong>资金流向数据说明：</strong>
-            数据基于东财接口获取，2026-05-13 起全市场日度更新已暂停（接口级 IP 封锁，持续超过 60 分钟）。
-            当前显示数据为封锁前已入库的历史数据，实际金额可能偏小，仅供参考。
-          </Text>
-        </Space>
-      </Card>
+      {/* 资金流向数据来源警告（数据日期 <= 前天时显示） */}
+      {(() => {
+        const mfDate = data?.moneyflowMaxDate;
+        if (!mfDate) return null;
+        const today = new Date();
+        const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+        const mf = new Date(mfDate + 'T00:00:00');
+        // 显示警告条件：数据日期 < 昨天
+        const showWarn = mf < yesterday;
+        if (!showWarn) return null;
+        return (
+          <Card
+            style={{ marginBottom: 16, background: '#fffbe6', border: '1px solid #ffe58f' }}
+            styles={{ body: { padding: '12px 16px' } }}
+          >
+            <Space>
+              <span style={{ fontSize: 16 }}>⚠️</span>
+              <Text style={{ fontSize: 13, color: '#ad6800' }}>
+                <strong>资金流向数据说明：</strong>
+                数据基于东财接口获取，最新数据日期为 {mfDate}，此后全市场日度更新已暂停（接口级 IP 封锁）。
+                当前显示数据为封锁前已入库的历史数据，实际金额可能偏小，仅供参考。
+              </Text>
+            </Space>
+          </Card>
+        );
+      })()}
 
       {/* 综合恐慌贪婪指数 - 大卡片 */}
       <Card

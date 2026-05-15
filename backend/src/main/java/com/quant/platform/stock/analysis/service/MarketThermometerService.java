@@ -452,6 +452,8 @@ public class MarketThermometerService {
             result.put("change", last5NetMainYi);
             result.put("prevChange", prev5NetMainYi);
             result.put("trend", trend);
+            // 返回资金流向最新日期，供前端动态判断数据时效
+            result.put("moneyflowMaxDate", rows.get(0).get("trade_date").toString());
 
             // 历史
             List<Map<String, Object>> history = new ArrayList<>();
@@ -470,6 +472,7 @@ public class MarketThermometerService {
             result.put("prevChange", 0.0);
             result.put("trend", "平稳");
             result.put("history", List.of());
+            result.put("moneyflowMaxDate", null);
         }
         return result;
     }
