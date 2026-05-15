@@ -748,21 +748,34 @@ class StockDailyDB:
 
                 ct = row.get("create_time")
                 if ct is None:
-                    vals.append(now_dt)
+                    vals.append(datetime.combine(td_val, datetime.min.time().replace(hour=12)))
                 elif isinstance(ct, str):
-                    vals.append(datetime.fromisoformat(ct))
+                    try:
+                        vals.append(datetime.fromisoformat(ct))
+                    except ValueError:
+                        vals.append(datetime.combine(td_val, datetime.min.time().replace(hour=12)))
                 elif isinstance(ct, date) and not isinstance(ct, datetime):
-                    vals.append(datetime.combine(ct, datetime.min.time()))
+                    vals.append(datetime.combine(ct, datetime.min.time().replace(hour=12)))
                 else:
                     vals.append(ct)
 
                 ut = row.get("update_time")
                 if ut is None:
-                    vals.append(now_dt)
+                    # 用 trade_date + 12:00:00 作为统一版本号，保证同一天多次运行幂等
+                    # ReplacingMergeTree 按 update_time 去重：相同 (code, trade_date, update_time)
+                    # 的记录会合并，避免 now_dt 秒级差异导致重复
+                    vals.append(datetime.combine(td_val, datetime.min.time().replace(hour=12)))
                 elif isinstance(ut, str):
-                    vals.append(datetime.fromisoformat(ct) if ut == ct else datetime.now())
+                    if ut == ct and ct is not None:
+                        vals.append(datetime.fromisoformat(ct))
+                    else:
+                        # 字符串格式的 update_time，尝试解析
+                        try:
+                            vals.append(datetime.fromisoformat(ut))
+                        except ValueError:
+                            vals.append(datetime.combine(td_val, datetime.min.time().replace(hour=12)))
                 elif isinstance(ut, date) and not isinstance(ut, datetime):
-                    vals.append(datetime.combine(ut, datetime.min.time()))
+                    vals.append(datetime.combine(ut, datetime.min.time().replace(hour=12)))
                 else:
                     vals.append(ut)
                 insert_rows.append(vals)
