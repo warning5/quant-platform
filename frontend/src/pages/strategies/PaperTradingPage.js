@@ -9,7 +9,7 @@ import {
   ThunderboltOutlined, PlayCircleOutlined, PauseCircleOutlined,
   CheckCircleOutlined, CloseCircleOutlined, SendOutlined, LeftOutlined,
   InfoCircleOutlined, DeleteOutlined, AlertOutlined, BellOutlined, EyeOutlined,
-  SettingOutlined, FundOutlined, SafetyCertificateOutlined,
+  FundOutlined, SafetyCertificateOutlined,
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import { paperTradingApi, strategyApi } from '../../api';
@@ -508,7 +508,7 @@ function PaperDetail({ paperId, onBack }) {
         activeKey={activeTab}
         onChange={setActiveTab}
         style={{ marginBottom: 16 }}
-        tabBarStyle={{ marginBottom: 0 }}
+        tabBarStyle={{ marginBottom: 16 }}
         items={[
           {
             key: 'overview',
@@ -520,7 +520,6 @@ function PaperDetail({ paperId, onBack }) {
                     <Button type="primary" icon={<SendOutlined />} onClick={handleGenerate} loading={genLoading}>生成信号</Button>
                     <Button onClick={handleBatchExecute} loading={batchExecLoading}>一键执行</Button>
                     <Button onClick={handleProcessDividends} loading={dividendLoading}>处理分红</Button>
-                    <Button icon={<SettingOutlined />} onClick={() => setActiveTab('risk')}>风控配置</Button>
                   </Col>
                 </Row>
                 {navOption && (
@@ -574,8 +573,6 @@ function PaperDetail({ paperId, onBack }) {
                 <Row gutter={12} style={{ marginBottom: 16 }}>
                   <Col span={24} style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                     <Button type="primary" icon={<SendOutlined />} onClick={handleGenerate} loading={genLoading}>生成信号</Button>
-                    <Button onClick={handleBatchExecute} loading={batchExecLoading}>一键执行</Button>
-                    <Button onClick={handleProcessDividends} loading={dividendLoading}>处理分红</Button>
                   </Col>
                 </Row>
                 <Alert
