@@ -1,6 +1,10 @@
 import React from 'react';
-import { Card, Typography, Row, Col, Tag, Alert, Steps, Button, Space, Descriptions } from 'antd';
-import { ThunderboltOutlined, PlayCircleOutlined, CheckCircleOutlined, ClockCircleOutlined, GiftOutlined, FundOutlined } from '@ant-design/icons';
+import { Card, Typography, Row, Col, Tag, Alert, Steps, Space, Descriptions, Table } from 'antd';
+import {
+  ThunderboltOutlined, FundOutlined, SafetyCertificateOutlined,
+  AlertOutlined, BellOutlined, WarningOutlined,
+  SendOutlined, PlayCircleOutlined, ClockCircleOutlined, GiftOutlined,
+} from '@ant-design/icons';
 
 const { Title, Paragraph, Text } = Typography;
 
@@ -21,7 +25,7 @@ export function ManualPaperTrading() {
       {/* 使用流程 */}
       <Title level={4}>使用流程（5 步）</Title>
       <Steps
-        current={5}
+        current={4}
         items={[
           { title: '创建策略', description: '在策略列表中创建策略，配置因子+权重' },
           { title: '新建模拟盘', description: '选择策略，设置初始资金，创建模拟盘' },
@@ -31,159 +35,326 @@ export function ManualPaperTrading() {
         ]}
       />
 
-      {/* 模拟盘详情页功能 */}
-      <Title level={4} style={{ marginTop: 20 }}>详情页功能说明</Title>
-      <Row gutter={[12, 12]}>
-        <Col xs={24} md={8}>
-          <Card size="small" type="inner" style={{ borderLeft: '4px solid #1677ff' }} title="📊 净值统计卡片">
-            <Paragraph style={{ fontSize: 12, margin: 0 }}>
-              <Text strong>初始资金</Text>：模拟盘启动资金<br/>
-              <Text strong>当前资产</Text>：现金 + 持仓市值<br/>
-              <Text strong>累计收益</Text>：绝对收益和收益率<br/>
-              <Text strong>持仓数</Text>：当前持仓股票数量<br/>
-              <Text strong>可用资金</Text>：可用于买入的现金
-            </Paragraph>
-          </Card>
-        </Col>
-        <Col xs={24} md={8}>
-          <Card size="small" type="inner" style={{ borderLeft: '4px solid #52c41a' }} title="📈 净值曲线">
-            <Paragraph style={{ fontSize: 12, margin: 0 }}>
-              展示累计收益率随时间的变化曲线。<br/>
-              <Text type="secondary">每次交易后自动追加 NAV 记录，无需手动刷新。</Text><br/>
-              曲线平滑上升说明策略稳健；大幅波动说明风险较高。
-            </Paragraph>
-          </Card>
-        </Col>
-        <Col xs={24} md={8}>
-          <Card size="small" type="inner" style={{ borderLeft: '4px solid #fa8c16' }} title="📋 持仓与信号">
-            <Paragraph style={{ fontSize: 12, margin: 0 }}>
-              <Text strong>当前持仓</Text>：成本价、现价、盈亏百分比<br/>
-              <Text strong>交易信号</Text>：待执行/已执行/已跳过状态<br/>
-              点击「执行」手动单笔执行，或「一键执行」批量处理。
-            </Paragraph>
-          </Card>
-        </Col>
-      </Row>
+      {/* ──────────────────────────────────────────────────────────
+          详情页功能区（与 UI 的 4 个 Tab 对应）
+      ────────────────────────────────────────────────────────── */}
+      <Title level={4} style={{ marginTop: 24 }}>详情页功能区说明</Title>
+      <Paragraph type="secondary" style={{ fontSize: 13 }}>
+        模拟盘详情页分为 4 个功能区 Tab，涵盖从信号生成到风控的全流程操作。
+      </Paragraph>
 
-      {/* 新增功能详解 */}
-      <Title level={4} style={{ marginTop: 20 }}>🆕 新增功能详解（Phase 1 补全）</Title>
-
-      {/* 功能 1：批量执行 */}
-      <Card size="small" style={{ marginBottom: 12 }}>
-        <Title level={5}><PlayCircleOutlined /> 一键执行所有信号</Title>
+      {/* Tab 1：基础使用 */}
+      <Card
+        size="small"
+        style={{ marginBottom: 12, borderLeft: '4px solid #1677ff' }}
+        title={
+          <span><FundOutlined style={{ marginRight: 6 }} />Tab 1 · 基础使用</span>
+        }
+      >
         <Paragraph style={{ fontSize: 13 }}>
-          原来需要逐个点击「执行」按钮处理每个信号，操作繁琐。
-          新增「一键执行」按钮，自动按顺序执行所有 <Tag color="blue">PENDING</Tag> 状态的信号。
+          基础操作区，包含顶部统计卡片、净值曲线和持仓列表。操作按钮组：
         </Paragraph>
-        <Descriptions size="small" column={1} bordered style={{ marginBottom: 8 }}>
-          <Descriptions.Item label="入口">模拟盘详情页 → 「一键执行」按钮</Descriptions.Item>
-          <Descriptions.Item label="执行顺序">按信号日期升序、ID 升序依次执行</Descriptions.Item>
-          <Descriptions.Item label="异常处理">单笔失败不中断，继续处理下一笔，最终返回成功列表</Descriptions.Item>
-          <Descriptions.Item label="API">POST /api/paper-trading/{`{paperId}`}/execute-all-signals</Descriptions.Item>
-        </Descriptions>
-      </Card>
+        <Row gutter={[8, 8]} style={{ marginBottom: 12 }}>
+          {[
+            { icon: <SendOutlined />, label: '生成信号', desc: '按因子得分生成买卖信号（待执行状态）', color: 'blue' },
+            { icon: <PlayCircleOutlined />, label: '一键执行', desc: '批量执行所有待处理信号，无需逐个点击', color: 'green' },
+            { icon: <GiftOutlined />, label: '处理分红', desc: '结算持仓股票的分红送股，更新现金和持仓', color: 'orange' },
+            { icon: <SafetyCertificateOutlined />, label: '风控配置', desc: '切换到风控配置 Tab，设置止损止盈等参数', color: 'red' },
+          ].map(b => (
+            <Col xs={24} md={12} key={b.label}>
+              <Card size="small" type="inner">
+                <Tag color={b.color} style={{ marginBottom: 4 }}>{b.icon} {b.label}</Tag>
+                <Text type="secondary" style={{ fontSize: 12 }}>{b.desc}</Text>
+              </Card>
+            </Col>
+          ))}
+        </Row>
 
-      {/* 功能 2：定时自动运行 */}
-      <Card size="small" style={{ marginBottom: 12 }}>
-        <Title level={5}><ClockCircleOutlined /> 定时自动运行（调度器）</Title>
-        <Paragraph style={{ fontSize: 13 }}>
-          新增 <Text code>PaperTradingScheduler</Text> 定时调度器，
-          每个交易日 <Text strong>15:30</Text>（收盘后）自动运行所有 <Tag color="green">RUNNING</Tag> 状态的模拟盘。
-        </Paragraph>
         <Row gutter={12}>
           <Col xs={24} md={12}>
-            <Card size="small" type="inner" title="自动执行流程">
+            <Card size="small" type="inner" title="📊 净值统计卡片（顶部）">
               <Paragraph style={{ fontSize: 12, margin: 0 }}>
-                1. <Text strong>处理分红送股</Text>：结算当日除权股票的现金红利和送转股<br/>
-                2. <Text strong>生成交易信号</Text>：根据策略因子配置计算截面得分，生成买卖信号<br/>
-                3. <Text strong>批量执行信号</Text>：自动执行所有待处理信号，更新持仓和资金
+                <Text strong>初始资金</Text>：模拟盘启动资金，用户自定义<br/>
+                <Text strong>当前资产</Text>：现金 + 所有持仓市值之和<br/>
+                <Text strong>累计收益</Text>：绝对收益额 + 收益率（红色=盈利，绿色=亏损）<br/>
+                <Text strong>持仓数</Text>：当前持仓股票数量<br/>
+                <Text strong>可用资金</Text>：可用于买入的现金（不含持仓占用）
               </Paragraph>
             </Card>
           </Col>
           <Col xs={24} md={12}>
-            <Card size="small" type="inner" title="调度配置">
+            <Card size="small" type="inner" title="📈 净值曲线">
               <Paragraph style={{ fontSize: 12, margin: 0 }}>
-                <Text strong>Cron 表达式</Text>：<Text code>0 30 15 * * MON-FRI</Text><br/>
-                <Text strong>时区</Text>：Asia/Shanghai（北京时间）<br/>
-                <Text strong>生效条件</Text>：模拟盘状态为 RUNNING<br/>
-                <Text strong>依赖</Text>：需 @EnableScheduling（已启用）
+                展示累计收益率随时间的变化。<Text type="secondary">每次交易后自动追加 NAV 记录，无需手动操作。</Text><br/>
+                <Text strong>蓝线</Text>：模拟盘累计收益率 &nbsp;
+                <Text strong>橙线</Text>：基准指数（沪深300/中证500等）&nbsp;
+                <Text strong>柱状图</Text>：超额收益（日超额 = 模拟盘 - 基准）<br/>
+                IR（信息比率）= 超额收益均值 / 超额收益标准差，值越大说明跑赢基准越稳定
               </Paragraph>
             </Card>
           </Col>
         </Row>
-        <Alert type="warning" showIcon style={{ marginTop: 8 }}
-          message="注意事项"
-          description="定时任务依赖 ClickHouse 中有当日收盘数据。若数据未更新，信号生成可能使用过期数据。建议配合数据更新调度一起使用。"
+
+        <Card size="small" type="inner" title="💼 当前持仓" style={{ marginTop: 12 }}>
+          <Paragraph style={{ fontSize: 12, margin: 0 }}>
+            展示所有持仓股票的成本价、现价、市值和盈亏百分比。
+            盈亏按 <Text code>profit_loss_pct</Text> 字段颜色区分（红色=盈利，绿色=亏损）。
+            点击「执行」可手动卖出单只持仓。
+          </Paragraph>
+        </Card>
+      </Card>
+
+      {/* Tab 2：择时信号 */}
+      <Card
+        size="small"
+        style={{ marginBottom: 12, borderLeft: '4px solid #52c41a' }}
+        title={
+          <span><ThunderboltOutlined style={{ marginRight: 6 }} />Tab 2 · 择时信号</span>
+        }
+      >
+        <Alert
+          message="择时信号机制"
+          description={
+            <ul style={{ margin: 0, paddingLeft: 16, fontSize: 13 }}>
+              <li><Text strong>信号生成</Text>：每个交易日收盘后，系统根据策略配置的因子+权重计算截面得分，按分数排序生成 TOP N 买入/卖出信号</li>
+              <li><Text strong>执行时机</Text>：信号生成后为 PENDING 状态，用户手动点击「执行」或「一键执行」进行成交</li>
+              <li><Text strong>大盘择时</Text>：在「风控配置」Tab 中开启「大盘择时」开关后，当大盘温度计为空头信号时，自动暂停新开仓（不影响已有持仓）</li>
+            </ul>
+          }
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
         />
-      </Card>
 
-      {/* 功能 3：分红送股结算 */}
-      <Card size="small" style={{ marginBottom: 12 }}>
-        <Title level={5}><GiftOutlined /> 分红送股结算</Title>
-        <Paragraph style={{ fontSize: 13 }}>
-          实盘中分红送股会直接影响持仓成本和资金余额，模拟盘现已支持真实结算。
-          数据来源：<Text code>stock_dividend</Text> 表（除权除息日驱动）。
-        </Paragraph>
+        <Card size="small" type="inner" title="信号字段说明" style={{ marginBottom: 12 }}>
+          <Table
+            size="small"
+            pagination={false}
+            columns={[
+              { title: '字段', dataIndex: 'field', width: 100 },
+              { title: '含义', dataIndex: 'desc' },
+            ]}
+            dataSource={[
+              { field: 'signal_date', desc: '信号生成日期（因子截面日期）' },
+              { field: 'direction', desc: 'BUY=买入信号，SELL=卖出信号' },
+              { field: 'signal_price', desc: '生成信号时的参考价格（收盘价）' },
+              { field: 'factor_score', desc: '综合因子得分，数值越高排名越靠前' },
+              { field: 'reason', desc: '生成原因，如"因子得分 TOP 5%"、"因子得分下降 20%"' },
+              { field: 'status', desc: 'PENDING=待执行，EXECUTED=已执行，SKIPPED=已跳过，EXPIRED=已过期' },
+            ]}
+          />
+        </Card>
+
         <Row gutter={12}>
           <Col xs={24} md={8}>
-            <Card size="small" type="inner" title="💰 现金分红（每股派息）">
+            <Card size="small" type="inner" title="🟢 买入信号触发条件">
               <Paragraph style={{ fontSize: 12, margin: 0 }}>
-                <Text strong>计算</Text>：cash_dividend × 持仓股数<br/>
-                <Text strong>效果</Text>：增加模拟盘可用资金（current_capital）<br/>
-                <Text strong>示例</Text>：持仓 1000 股，每股派息 0.5 元 → 获得 500 元
+                • 因子综合得分排名靠前（TOP N）<br/>
+                • 当前无持仓或持仓不足<br/>
+                • 可用资金充足<br/>
+                • 大盘择时未触发（开启时）
               </Paragraph>
             </Card>
           </Col>
           <Col xs={24} md={8}>
-            <Card size="small" type="inner" title="📈 送股（每股送股）">
+            <Card size="small" type="inner" title="🔴 卖出信号触发条件">
               <Paragraph style={{ fontSize: 12, margin: 0 }}>
-                <Text strong>计算</Text>：stock_dividend × 持仓股数<br/>
-                <Text strong>效果</Text>：增加持仓数量，成本价自动摊薄<br/>
-                <Text strong>示例</Text>：持仓 1000 股，每 10 股送 2 股 → 变为 1200 股
+                • 因子综合得分下降（排名滑出）<br/>
+                • 单笔止盈达到阈值<br/>
+                • 单笔止损达到阈值<br/>
+                • 大盘择时触发（空头信号）
               </Paragraph>
             </Card>
           </Col>
           <Col xs={24} md={8}>
-            <Card size="small" type="inner" title="🔄 转增（每股转增）">
+            <Card size="small" type="inner" title="⏰ 执行价规则">
               <Paragraph style={{ fontSize: 12, margin: 0 }}>
-                <Text strong>计算</Text>：convert_dividend × 持仓股数<br/>
-                <Text strong>效果</Text>：与送股相同，增加持仓数量<br/>
-                <Text strong>区别</Text>：送股来自未分配利润，转增来自资本公积
+                • 交易日执行：按收盘价成交<br/>
+                • 非交易日执行：拦截（不允许）<br/>
+                • 信号日期宽松判断（最近3天内有数据即可），执行时严格判断（必须是当天）
               </Paragraph>
             </Card>
           </Col>
         </Row>
-        <Descriptions size="small" column={1} bordered style={{ marginTop: 8 }}>
-          <Descriptions.Item label="触发时机">手动点击「处理分红」按钮，或定时调度自动触发</Descriptions.Item>
-          <Descriptions.Item label="结算日期">按除权除息日（ex_dividend_date）匹配，非派息日</Descriptions.Item>
-          <Descriptions.Item label="API">POST /api/paper-trading/{`{paperId}`}/process-dividends</Descriptions.Item>
-        </Descriptions>
       </Card>
 
-      {/* 功能 4：NAV 自动追加 */}
-      <Card size="small" style={{ marginBottom: 12 }}>
-        <Title level={5}><FundOutlined /> NAV 曲线自动追加</Title>
-        <Paragraph style={{ fontSize: 13 }}>
-          原来模拟盘只有初始 NAV 记录，交易后净值曲线不会更新。
-          现在每次交易执行后自动计算并追加 NAV 记录，净值曲线实时反映策略表现。
-        </Paragraph>
-        <Row gutter={12}>
+      {/* Tab 3：持仓预警 */}
+      <Card
+        size="small"
+        style={{ marginBottom: 12, borderLeft: '4px solid #fa8c16' }}
+        title={
+          <span>
+            <AlertOutlined style={{ marginRight: 6 }} />Tab 3 · 持仓预警
+            <Tag color="orange" style={{ marginLeft: 8 }}>10 种预警类型</Tag>
+          </span>
+        }
+      >
+        <Alert
+          message="预警扫描说明"
+          description={
+            <Space direction="vertical" size={4}>
+              <Text type="secondary">• 手动扫描：点击「手动扫描预警」按钮，系统检测持仓股票的所有预警条件</Text>
+              <Text type="secondary">• 自动触发：执行交易信号后自动扫描（买/卖成交时）</Text>
+              <Text type="secondary">• 未读标记：新预警红色高亮显示，已读/删除后恢复普通样式</Text>
+            </Space>
+          }
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+        />
+
+        <Title level={5} style={{ marginTop: 8 }}>10 种预警类型</Title>
+        <Row gutter={[8, 8]} style={{ marginBottom: 12 }}>
+          {/* 技术面 */}
           <Col xs={24} md={12}>
-            <Card size="small" type="inner" title="自动触发时机">
+            <Card size="small" type="inner" title="🔧 技术面预警" style={{ borderLeft: '3px solid #1890ff' }}>
+              <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12 }}>
+                <li><Text strong>MA_BREAK（均线破位）</Text>：股价跌破 5 日或 20 日均线，发出警示</li>
+                <li><Text strong>DROP（大跌）</Text>：单日跌幅超过阈值（默认 -5%），提示关注</li>
+              </ul>
+            </Card>
+          </Col>
+          {/* 消息面 */}
+          <Col xs={24} md={12}>
+            <Card size="small" type="inner" title="📰 消息面预警" style={{ borderLeft: '3px solid #722ed1' }}>
+              <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12 }}>
+                <li><Text strong>NOTICE（公告）</Text>：检测到近期重要公告，可能影响股价</li>
+                <li><Text strong>REPORT（研报）</Text>：机构发布新研报，关注评级变化</li>
+              </ul>
+            </Card>
+          </Col>
+          {/* 风控预警 */}
+          <Col xs={24} md={12}>
+            <Card size="small" type="inner" title="🛡️ 风控预警" style={{ borderLeft: '3px solid #f5222d' }}>
+              <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12 }}>
+                <li><Text strong>RISK_CONCENTRATION（集中度）</Text>：单只股票市值超过最大集中度阈值</li>
+                <li><Text strong>RISK_INDUSTRY（行业暴露）</Text>：单一行业市值超过最大行业暴露阈值（建议 ≤35%）</li>
+                <li><Text strong>RISK_DRAWDOWN（回撤）</Text>：当前净值从历史峰值回撤超过最大回撤限制</li>
+              </ul>
+            </Card>
+          </Col>
+          {/* 事件驱动 */}
+          <Col xs={24} md={12}>
+            <Card size="small" type="inner" title="📅 事件驱动预警" style={{ borderLeft: '3px solid #fa8c16' }}>
+              <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12 }}>
+                <li><Text strong>EVENT_INCREASE（定增）</Text>：近 7 天内有定向增发公告，WARNING 级</li>
+                <li><Text strong>EVENT_UNLOCK（解禁）</Text>：近 7 天内有股份解禁公告，WARNING 级</li>
+                <li><Text strong>EVENT_INCENTIVE（股权激励）</Text>：近 7 天内有股权激励公告，INFO 级</li>
+                <li><Text strong>EVENT_FORECAST（业绩预告）</Text>：近 7 天内有业绩预告，INFO 级</li>
+              </ul>
+            </Card>
+          </Col>
+        </Row>
+
+        <Card size="small" type="inner" title="预警级别说明" style={{ marginBottom: 0 }}>
+          <Row gutter={12}>
+            {[
+              { level: 'CRITICAL', color: 'red', text: '严重', desc: '需立即关注，可能造成较大损失' },
+              { level: 'WARNING', color: 'orange', text: '警告', desc: '需要关注，建议查看详情并考虑操作' },
+              { level: 'INFO', color: 'blue', text: '提示', desc: '信息通知，常规事件，不一定需要操作' },
+            ].map(l => (
+              <Col xs={24} md={8} key={l.level}>
+                <Tag color={l.color}>{l.level} · {l.text}</Tag>
+                <Text type="secondary" style={{ fontSize: 12 }}>{l.desc}</Text>
+              </Col>
+            ))}
+          </Row>
+        </Card>
+      </Card>
+
+      {/* Tab 4：风控配置 */}
+      <Card
+        size="small"
+        style={{ marginBottom: 12, borderLeft: '4px solid #f5222d' }}
+        title={
+          <span><SafetyCertificateOutlined style={{ marginRight: 6 }} />Tab 4 · 风控配置</span>
+        }
+      >
+        <Alert
+          message="风控配置说明"
+          description={
+            <Text type="secondary">
+              风控参数在「风控配置」Tab 中设置，点击「保存配置」后立即生效。止损/止盈达到阈值后自动生成卖出信号（需手动执行）。
+            </Text>
+          }
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+        />
+
+        <Title level={5}>8 个风控参数详解</Title>
+        <Row gutter={[8, 8]} style={{ marginBottom: 12 }}>
+          <Col xs={24} md={12}>
+            <Card size="small" type="inner" title="⚡ 止损阈值（stopLossPct）">
               <Paragraph style={{ fontSize: 12, margin: 0 }}>
-                • 买入成交后自动追加<br/>
-                • 卖出成交后自动追加<br/>
-                • 分红送股结算后自动追加<br/>
-                <Text type="secondary">同一天多次交易，只更新当日 NAV 记录，不重复插入</Text>
+                <Text strong>含义</Text>：单笔持仓亏损达到此比例，触发止损卖出信号<br/>
+                <Text strong>建议值</Text>：8%（亏损 8% 时止损）<br/>
+                <Text strong>计算</Text>：(当前价 - 成本价) / 成本价 ≤ -stopLossPct<br/>
+                <Text type="secondary">注意：触发后生成 SELL 信号，需手动执行</Text>
               </Paragraph>
             </Card>
           </Col>
           <Col xs={24} md={12}>
-            <Card size="small" type="inner" title="计算字段说明">
+            <Card size="small" type="inner" title="🏆 止盈阈值（takeProfitPct）">
               <Paragraph style={{ fontSize: 12, margin: 0 }}>
-                <Text strong>total_assets</Text>：current_capital + ∑(持仓市值)<br/>
-                <Text strong>daily_return</Text>：(今日资产 - 昨日资产) / 昨日资产<br/>
-                <Text strong>cumulative_return</Text>：(今日资产 - 初始资金) / 初始资金
+                <Text strong>含义</Text>：单笔持仓盈利达到此比例，触发止盈卖出信号<br/>
+                <Text strong>建议值</Text>：30%（盈利 30% 时止盈）<br/>
+                <Text strong>计算</Text>：(当前价 - 成本价) / 成本价 ≥ takeProfitPct<br/>
+                <Text type="secondary">建议 ≤ 2（A股波动大，过高止盈难以触发）</Text>
+              </Paragraph>
+            </Card>
+          </Col>
+          <Col xs={24} md={12}>
+            <Card size="small" type="inner" title="📊 最大单股集中度（maxPositionPct）">
+              <Paragraph style={{ fontSize: 12, margin: 0 }}>
+                <Text strong>含义</Text>：单一股票市值占总资产的比例上限<br/>
+                <Text strong>建议值</Text>：20%（单只股票不超过资产的 20%）<br/>
+                <Text strong>触发</Text>：超过阈值后生成 RISK_CONCENTRATION 预警
+              </Paragraph>
+            </Card>
+          </Col>
+          <Col xs={24} md={12}>
+            <Card size="small" type="inner" title="🏭 最大行业暴露（maxIndustryPct）">
+              <Paragraph style={{ fontSize: 12, margin: 0 }}>
+                <Text strong>含义</Text>：同一申万行业市值占总资产的比例上限<br/>
+                <Text strong>建议值</Text>：30%（单一行业不超过资产的 30%）<br/>
+                <Text strong>触发</Text>：超过阈值后生成 RISK_INDUSTRY 预警
+              </Paragraph>
+            </Card>
+          </Col>
+          <Col xs={24} md={12}>
+            <Card size="small" type="inner" title="📉 最大回撤限制（maxDrawdownPct）">
+              <Paragraph style={{ fontSize: 12, margin: 0 }}>
+                <Text strong>含义</Text>：从历史净值峰值最大回撤比例<br/>
+                <Text strong>建议值</Text>：15%（回撤不超过 15%）<br/>
+                <Text strong>触发</Text>：超过阈值后生成 RISK_DRAWDOWN 预警，提示策略需调整
+              </Paragraph>
+            </Card>
+          </Col>
+          <Col xs={24} md={12}>
+            <Card size="small" type="inner" title="🌡️ 大盘择时（timingEnabled）">
+              <Paragraph style={{ fontSize: 12, margin: 0 }}>
+                <Text strong>含义</Text>：开启后，大盘温度计为空头信号时自动暂停新开仓<br/>
+                <Text strong>开关</Text>：OFF=不启用，ON=开启大盘择时<br/>
+                <Text strong>效果</Text>：仅影响新开仓买操作，已持仓不强制卖出
+              </Paragraph>
+            </Card>
+          </Col>
+          <Col xs={24} md={12}>
+            <Card size="small" type="inner" title="📋 基准指数（benchmarkCode）">
+              <Paragraph style={{ fontSize: 12, margin: 0 }}>
+                <Text strong>含义</Text>：用于计算超额收益（模拟盘 - 基准）的基准<br/>
+                <Text strong>选项</Text>：沪深300 / 中证500 / 中证1000 / 创业板指 / 万得全A<br/>
+                <Text strong>效果</Text>：净值曲线图叠加显示基准指数走势
+              </Paragraph>
+            </Card>
+          </Col>
+          <Col xs={24} md={12}>
+            <Card size="small" type="inner" title="💰 资金分配模式（allocationMode）">
+              <Paragraph style={{ fontSize: 12, margin: 0 }}>
+                <Text strong>等权（equal）</Text>：初始资金 ÷ N，每只标的平均分配（N=标的数量）<br/>
+                <Text strong>动态权重（dynamic）</Text>：按因子得分比例分配，min=初始/20，max=初始/5<br/>
+                <Text strong>凯利公式（kelly）</Text>：基于历史胜率计算最优仓位，需≥5笔历史，限制 5%~25%
               </Paragraph>
             </Card>
           </Col>
@@ -191,11 +362,11 @@ export function ManualPaperTrading() {
       </Card>
 
       {/* 状态说明 */}
-      <Title level={4} style={{ marginTop: 20 }}>模拟盘状态说明</Title>
+      <Title level={4} style={{ marginTop: 16 }}>模拟盘状态说明</Title>
       <Row gutter={[12, 12]}>
         {[
-          { status: 'RUNNING', color: 'green', text: '运行中', desc: '定时调度会处理此模拟盘；可手动生成信号和执行交易' },
-          { status: 'PAUSED', color: 'orange', text: '已暂停', desc: '定时调度跳过；可查看历史数据，但不能生成新信号' },
+          { status: 'RUNNING', color: 'green', text: '运行中', desc: '定时调度会处理此模拟盘；可手动生成信号和执行交易；可一键执行批量处理' },
+          { status: 'PAUSED', color: 'orange', text: '已暂停', desc: '定时调度跳过；可查看历史数据，但不能生成新信号；可手动操作持仓' },
           { status: 'STOPPED', color: 'red', text: '已停止', desc: '定时调度跳过；模拟盘归档，不再接受任何操作' },
         ].map(s => (
           <Col xs={24} md={8} key={s.status}>
@@ -212,11 +383,11 @@ export function ManualPaperTrading() {
         message="操作建议"
         description={
           <ul style={{ margin: 0, paddingLeft: 16, fontSize: 13 }}>
-            <li><Text strong>初次使用</Text>：手动模式（生成信号 → 逐个/批量执行），熟悉流程后再开启自动</li>
-            <li><Text strong>自动运行</Text>：将状态设为 RUNNING，每个交易日 15:30 自动运行，无需人工干预</li>
-            <li><Text strong>分红处理</Text>：A 股分红季（5~7月）建议手动点击「处理分红」，确保收益准确</li>
-            <li><Text strong>策略评估</Text>：运行 1 个月后观察净值曲线，累计收益 {'>'} 基准 + 无大额回撤，才考虑实盘</li>
-            <li><Text strong>风险控制</Text>：模拟盘止损逻辑尚未内置，建议定期查看持仓，手动 STOP 表现差的模拟盘</li>
+            <li><Text strong>初次使用</Text>：手动模式（生成信号 → 逐个/批量执行），熟悉流程后再开启定时自动</li>
+            <li><Text strong>定时自动运行</Text>：将状态设为 RUNNING，每个交易日 15:30 自动生成+执行信号，无需人工干预</li>
+            <li><Text strong>分红处理</Text>：A 股分红季（5~7 月）建议手动点击「处理分红」，确保收益计算准确</li>
+            <li><Text strong>风控配置</Text>：建仓前先在「风控配置」Tab 中设置止损/止盈/集中度/行业暴露参数</li>
+            <li><Text strong>策略评估</Text>：运行 1 个月后观察净值曲线，累计收益跑赢基准且回撤可控，才考虑实盘</li>
           </ul>
         }
       />

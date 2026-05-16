@@ -3,13 +3,13 @@ import { Link, useSearchParams } from 'react-router-dom';
 import {
   Card, Row, Col, Table, Tag, Button, Modal, Select, InputNumber, Space,
   Typography, Statistic, Spin, Tooltip, Alert, message, Popconfirm,
-  Form, Switch, Divider, Collapse,
+  Form, Switch, Divider, Collapse, Tabs, Badge,
 } from 'antd';
 import {
   ThunderboltOutlined, PlayCircleOutlined, PauseCircleOutlined,
   CheckCircleOutlined, CloseCircleOutlined, SendOutlined, LeftOutlined,
   InfoCircleOutlined, DeleteOutlined, AlertOutlined, BellOutlined, EyeOutlined,
-  SettingOutlined,
+  SettingOutlined, FundOutlined, SafetyCertificateOutlined,
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import { paperTradingApi, strategyApi } from '../../api';
@@ -211,7 +211,8 @@ function PaperDetail({ paperId, onBack }) {
   const [riskConfig, setRiskConfig] = useState(null);
   const [riskForm] = Form.useForm();
   const [riskSaving, setRiskSaving] = useState(false);
-  const [riskModalOpen, setRiskModalOpen] = useState(false);
+  // 功能区 Tab
+  const [activeTab, setActiveTab] = useState('overview');
 
   /* ── 大盘温度计 ─────────────────────── */
   const { data: thData2, status: thStatus2 } = useMarketThermometer();
@@ -255,7 +256,6 @@ function PaperDetail({ paperId, onBack }) {
       };
       await paperTradingApi.updateRiskConfig(paperId, params);
       message.success('风控配置已保存');
-      setRiskModalOpen(false);
       loadRiskConfig();
     } catch (e) {
       // axios 统一处理
@@ -504,237 +504,296 @@ function PaperDetail({ paperId, onBack }) {
         <Col span={8}><Card size="small"><Statistic title="可用资金" value={paper.currentCapital} prefix="¥" /></Card></Col>
       </Row>
 
-      <Row gutter={12} style={{ marginBottom: 16 }}>
-        <Col span={24} style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <Button type="primary" icon={<SendOutlined />} onClick={handleGenerate} loading={genLoading}>
-            生成信号
-          </Button>
-          <Button onClick={handleBatchExecute} loading={batchExecLoading}>
-            一键执行
-          </Button>
-          <Button onClick={handleProcessDividends} loading={dividendLoading}>
-            处理分红
-          </Button>
-          <Button icon={<SettingOutlined />} onClick={() => setRiskModalOpen(true)}>
-            风控配置
-          </Button>
-        </Col>
-      </Row>
-
-      {navOption && (
-        <Card
-          title={
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span>净值曲线</span>
-              {informationRatio != null && (
-                <Space size={16}>
-                  <Tooltip title={`滚动${irWindowDays || 20}日信息比率 = 超额收益均值 / 超额收益标准差`}>
-                    <span style={{ fontSize: 13, color: '#666' }}>
-                      IR: <Text strong style={{ color: informationRatio > 0 ? '#52c41a' : informationRatio < 0 ? '#f5222d' : '#999' }}>
-                        {informationRatio.toFixed(3)}
-                      </Text>
-                      {informationRatioAnnualized != null && (
-                        <span style={{ fontSize: 12, color: '#999', marginLeft: 4 }}>
-                          (年化 {informationRatioAnnualized.toFixed(3)})
-                        </span>
-                      )}
-                    </span>
-                  </Tooltip>
-                  {informationRatioAvg != null && (
-                    <Tooltip title="历史平均IR（全周期）">
-                      <span style={{ fontSize: 13, color: '#666' }}>
-                        均值IR: <Text strong style={{ color: informationRatioAvg > 0 ? '#52c41a' : informationRatioAvg < 0 ? '#f5222d' : '#999' }}>
-                          {informationRatioAvg.toFixed(3)}
-                        </Text>
-                      </span>
-                    </Tooltip>
-                  )}
-                </Space>
-              )}
-            </div>
-          }
-          size="small"
-          style={{ marginBottom: 16 }}
-        >
-          <ReactECharts option={navOption} style={{ height: 240 }} notMerge={true} />
-        </Card>
-      )}
-
-      {/* ── 风控配置弹框 ── */}
-      <Modal
-        title={<><SettingOutlined style={{ marginRight: 8 }} />风控配置</>}
-        open={riskModalOpen}
-        onCancel={() => setRiskModalOpen(false)}
-        footer={[
-          <Button key="default" onClick={() => riskForm.setFieldsValue({
-            stopLossPct: 0.08, takeProfitPct: 0.30, trailingAtrPct: 0,
-            maxPositionPct: 0.20, maxIndustryPct: 0.30, maxDrawdownPct: 0.15,
-            timingEnabled: false, benchmarkCode: '000300', allocationMode: 'equal',
-          })}>恢复默认</Button>,
-          <Button key="cancel" onClick={() => setRiskModalOpen(false)}>取消</Button>,
-          <Button key="save" type="primary" loading={riskSaving} onClick={handleSaveRiskConfig}>保存</Button>,
-        ]}
-        width={680}
-        destroyOnClose
-      >
-        <Form form={riskForm} layout="vertical" size="small" style={{ marginTop: 16 }}>
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item label={<LabelWithTip text="止损阈值" tip="单笔持仓亏损达到此比例，触发止损卖出信号。范围：0~100%，例：0.08 表示亏损 8% 时止损" />} name="stopLossPct">
-                <InputNumber min={0} max={1} step={0.01} style={{ width: '100%' }} placeholder="0.08" />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item label={<LabelWithTip text="止盈阈值" tip="单笔持仓盈利达到此比例，触发止盈卖出信号。范围：0~1000%，例：0.30 表示盈利 30% 时止盈" />} name="takeProfitPct">
-                <InputNumber min={0} max={10} step={0.01} style={{ width: '100%' }} placeholder="0.30" />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item label={<LabelWithTip text="最大单股集中度" tip="单一股票市值占总资产的比例上限。范围：1%~100%，超过后生成集中度预警。例：0.20 表示单股不超过 20%" />} name="maxPositionPct">
-                <InputNumber min={0.01} max={1} step={0.01} style={{ width: '100%' }} placeholder="0.20" />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item label={<LabelWithTip text="最大行业暴露" tip="同一申万行业市值占总资产的比例上限。范围：1%~35%，超过后生成行业暴露预警。例：0.30 表示单一行业不超过 30%" />} name="maxIndustryPct">
-                <InputNumber min={0.01} max={0.35} step={0.01} style={{ width: '100%' }} placeholder="0.30" />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item label={<LabelWithTip text="最大回撤限制" tip="从历史峰值最大回撤比例。范围：1%~100%，超过后生成回撤预警，提示策略需调整。例：0.15 表示回撤不超过 15%" />} name="maxDrawdownPct">
-                <InputNumber min={0.01} max={1} step={0.01} style={{ width: '100%' }} placeholder="0.15" />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item label={<LabelWithTip text="大盘择时" tip="开启后，当大盘温度计发出空头信号时，自动暂停新开仓买操作（已持仓不强制卖出）。" />} name="timingEnabled" valuePropName="checked">
-                <Switch checkedChildren="开" unCheckedChildren="关" />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item label={<LabelWithTip text="基准指数" tip="用于计算超额收益（模拟盘收益 - 基准收益）。净值曲线图中叠加显示基准指数走势。" />} name="benchmarkCode">
-                <Select options={[
-                  { label: '沪深300 (000300)', value: '000300' },
-                  { label: '中证500 (000905)', value: '000905' },
-                  { label: '中证1000 (000852)', value: '000852' },
-                  { label: '创业板指 (399006)', value: '399006' },
-                  { label: '万得全A (881001)', value: '881001' },
-                ]} />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item label={<LabelWithTip text="资金分配模式" tip={
-                <div>
-                  等权：初始资金÷10，每只标的平均分配
-                  动态权重：按因子得分比例分配（min=初始/20，max=初始/5）
-                  凯利公式：基于历史胜率计算最优仓位（需≥5笔，限制5%~25%）
-                </div>
-              } />} name="allocationMode">
-                <Select options={[
-                  { label: '等权分配 (equal)', value: 'equal' },
-                  { label: '动态权重 (dynamic)', value: 'dynamic' },
-                  { label: '凯利公式 (kelly)', value: 'kelly' },
-                ]} />
-              </Form.Item>
-            </Col>
-          </Row>
-        </Form>
-      </Modal>
-
-      <Card title="当前持仓" size="small" style={{ marginBottom: 16 }}>
-        <Table dataSource={positions} columns={posColumns} rowKey="id" size="small" pagination={false} />
-        {positions.length === 0 && <Text type="secondary">暂无持仓</Text>}
-      </Card>
-
-      <Card title={
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span><AlertOutlined style={{ marginRight: 6, color: unreadCount > 0 ? '#ff4d4f' : '#999' }} />
-            持仓预警 {unreadCount > 0 && <Tag color="red" style={{ marginLeft: 8 }}>{unreadCount} 条未读</Tag>}
-          </span>
-          <Space>
-            <Button size="small" icon={<SendOutlined />} onClick={handleScanAlerts} loading={scanLoading}>手动扫描</Button>
-            {unreadCount > 0 && <Button size="small" icon={<EyeOutlined />} onClick={handleMarkAllRead}>全部已读</Button>}
-            {alerts.length > 0 && (
-              <Popconfirm title="确认清空所有预警？" onConfirm={handleClearAlerts} okText="清空" cancelText="取消">
-                <Button size="small" danger icon={<DeleteOutlined />}>清空</Button>
-              </Popconfirm>
-            )}
-          </Space>
-        </div>
-      } size="small" style={{ marginBottom: 16 }}>
-        {alerts.length === 0 ? (
-          <Text type="secondary">暂无预警信息</Text>
-        ) : (
-          <Table
-            dataSource={alerts}
-            rowKey="id"
-            size="small"
-            pagination={{ pageSize: 10 }}
-            rowClassName={r => !r.isRead ? 'alert-unread-row' : ''}
-            columns={[
-              {
-                title: '日期', dataIndex: 'alertDate', width: 100,
-                render: v => !v ? '-' : v,
-              },
-              {
-                title: '级别', dataIndex: 'alertLevel', width: 70,
-                render: v => {
-                  const cfg = { CRITICAL: { color: 'red', text: '严重' }, WARNING: { color: 'orange', text: '警告' }, INFO: { color: 'blue', text: '提示' } };
-                  const c = cfg[v] || { color: 'default', text: v };
-                  return <Tag color={c.color}>{c.text}</Tag>;
-                },
-              },
-              {
-                title: '类型', dataIndex: 'alertType', width: 90,
-                render: v => {
-                  // 新增风控预警 + 事件驱动类型
-                  const map = {
-                    MA_BREAK: '均线破位', DROP: '大跌', NOTICE: '公告', REPORT: '研报',
-                    RISK_CONCENTRATION: '集中度', RISK_INDUSTRY: '行业暴露', RISK_DRAWDOWN: '回撤',
-                    EVENT_INCREASE: '定增', EVENT_UNLOCK: '解禁', EVENT_INCENTIVE: '股权激励',
-                    EVENT_FORECAST: '业绩预告', EVENT_EXPRESS: '业绩快报',
-                  };
-                  return map[v] || (v?.startsWith('EVENT_') ? '事件驱动' : v);
-                },
-              },
-              {
-                title: '预警内容', dataIndex: 'title', ellipsis: true,
-                render: (v, r) => (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    {!r.isRead && <BellOutlined style={{ color: '#ff4d4f', fontSize: 12, flexShrink: 0 }} />}
-                    <Tooltip title={r.detail}><span>{v}</span></Tooltip>
-                  </div>
-                ),
-              },
-              {
-                title: '操作', width: 90,
-                render: (_, r) => (
-                  <Space size={0}>
-                    {!r.isRead && (
-                      <Button size="small" type="link" onClick={() => handleMarkRead(r.id)}>已读</Button>
+      <Tabs
+        activeKey={activeTab}
+        onChange={setActiveTab}
+        style={{ marginBottom: 16 }}
+        tabBarStyle={{ marginBottom: 0 }}
+        items={[
+          {
+            key: 'overview',
+            label: <span><FundOutlined /> 基础使用</span>,
+            children: (
+              <>
+                <Row gutter={12} style={{ marginBottom: 16 }}>
+                  <Col span={24} style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <Button type="primary" icon={<SendOutlined />} onClick={handleGenerate} loading={genLoading}>生成信号</Button>
+                    <Button onClick={handleBatchExecute} loading={batchExecLoading}>一键执行</Button>
+                    <Button onClick={handleProcessDividends} loading={dividendLoading}>处理分红</Button>
+                    <Button icon={<SettingOutlined />} onClick={() => setActiveTab('risk')}>风控配置</Button>
+                  </Col>
+                </Row>
+                {navOption && (
+                  <Card
+                    title={
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span>净值曲线</span>
+                        {informationRatio != null && (
+                          <Space size={16}>
+                            <Tooltip title={`滚动${irWindowDays || 20}日信息比率 = 超额收益均值 / 超额收益标准差`}>
+                              <span style={{ fontSize: 13, color: '#666' }}>
+                                IR: <Text strong style={{ color: informationRatio > 0 ? '#52c41a' : informationRatio < 0 ? '#f5222d' : '#999' }}>
+                                  {informationRatio.toFixed(3)}
+                                </Text>
+                                {informationRatioAnnualized != null && (
+                                  <span style={{ fontSize: 12, color: '#999', marginLeft: 4 }}>(年化 {informationRatioAnnualized.toFixed(3)})</span>
+                                )}
+                              </span>
+                            </Tooltip>
+                            {informationRatioAvg != null && (
+                              <Tooltip title="历史平均IR（全周期）">
+                                <span style={{ fontSize: 13, color: '#666' }}>
+                                  均值IR: <Text strong style={{ color: informationRatioAvg > 0 ? '#52c41a' : informationRatioAvg < 0 ? '#f5222d' : '#999' }}>
+                                    {informationRatioAvg.toFixed(3)}
+                                  </Text>
+                                </span>
+                              </Tooltip>
+                            )}
+                          </Space>
+                        )}
+                      </div>
+                    }
+                    size="small"
+                    style={{ marginBottom: 16 }}
+                  >
+                    <ReactECharts option={navOption} style={{ height: 240 }} notMerge={true} />
+                  </Card>
+                )}
+                <Card title="当前持仓" size="small">
+                  <Table dataSource={positions} columns={posColumns} rowKey="id" size="small" pagination={false} />
+                  {positions.length === 0 && <Text type="secondary">暂无持仓</Text>}
+                </Card>
+              </>
+            ),
+          },
+          {
+            key: 'signals',
+            label: <span><ThunderboltOutlined /> 择时信号</span>,
+            children: (
+              <>
+                <Row gutter={12} style={{ marginBottom: 16 }}>
+                  <Col span={24} style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <Button type="primary" icon={<SendOutlined />} onClick={handleGenerate} loading={genLoading}>生成信号</Button>
+                    <Button onClick={handleBatchExecute} loading={batchExecLoading}>一键执行</Button>
+                    <Button onClick={handleProcessDividends} loading={dividendLoading}>处理分红</Button>
+                  </Col>
+                </Row>
+                <Alert
+                  message="择时信号说明"
+                  description={
+                    <Space direction="vertical" size={4}>
+                      <Text type="secondary">• 信号按因子综合得分排序，买入TOP标的，卖出分数下降的持仓</Text>
+                      <Text type="secondary">• 开启大盘择时后，大盘温度计为空头信号时自动暂停新开仓（不影响已有持仓）</Text>
+                      <Text type="secondary">• 执行信号后，按止盈止损规则自动监控持仓盈亏</Text>
+                    </Space>
+                  }
+                  type="info"
+                  showIcon
+                  style={{ marginBottom: 16 }}
+                />
+                <Card title="交易信号" size="small">
+                  <Table dataSource={signals} columns={sigColumns} rowKey="id" size="small" pagination={{ pageSize: 10 }} />
+                  {signals.length === 0 && <Text type="secondary">暂无信号，请先生成信号</Text>}
+                </Card>
+              </>
+            ),
+          },
+          {
+            key: 'alerts',
+            label: (
+              <span>
+                <AlertOutlined /> 持仓预警
+                {unreadCount > 0 && <Badge count={unreadCount} size="small" style={{ marginLeft: 6 }} />}
+              </span>
+            ),
+            children: (
+              <>
+                <Row gutter={12} style={{ marginBottom: 16 }}>
+                  <Col span={24} style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <Button icon={<BellOutlined />} onClick={handleScanAlerts} loading={scanLoading}>手动扫描预警</Button>
+                    {unreadCount > 0 && <Button icon={<EyeOutlined />} onClick={handleMarkAllRead}>全部已读</Button>}
+                    {alerts.length > 0 && (
+                      <Popconfirm title="确认清空所有预警？" onConfirm={handleClearAlerts} okText="清空" cancelText="取消">
+                        <Button danger icon={<DeleteOutlined />}>清空</Button>
+                      </Popconfirm>
                     )}
-                    <Popconfirm title="确认删除此预警？" onConfirm={() => handleDeleteAlert(r.id)} okText="删除" cancelText="取消">
-                      <Button size="small" type="link" danger>删除</Button>
-                    </Popconfirm>
-                  </Space>
-                ),
-              },
-            ]}
-          />
-        )}
-      </Card>
+                  </Col>
+                </Row>
+                <Alert
+                  message="持仓预警说明"
+                  description={
+                    <Space direction="vertical" size={4}>
+                      <Text type="secondary">• 技术预警：均线破位（跌破5/20日均线）、大跌（单日跌幅超阈值）</Text>
+                      <Text type="secondary">• 事件预警：近7天内的定增/解禁/股权激励/业绩预告事件驱动</Text>
+                      <Text type="secondary">• 风控预警：集中度超限、行业暴露超限、最大回撤超限</Text>
+                      <Text type="secondary">• 建议定期扫描，关注 CRITICAL/WARNING 级别的红色/橙色预警</Text>
+                    </Space>
+                  }
+                  type="warning"
+                  showIcon
+                  style={{ marginBottom: 16 }}
+                />
+                <Card
+                  title={
+                    <span>
+                      <AlertOutlined /> 预警列表
+                      {unreadCount > 0 && <Tag color="red" style={{ marginLeft: 8 }}>{unreadCount} 条未读</Tag>}
+                    </span>
+                  }
+                  size="small"
+                >
+                  {alerts.length === 0 ? (
+                    <Text type="secondary">暂无预警信息</Text>
+                  ) : (
+                    <Table
+                      dataSource={alerts}
+                      rowKey="id"
+                      size="small"
+                      pagination={{ pageSize: 10 }}
+                      rowClassName={r => !r.isRead ? 'alert-unread-row' : ''}
+                      columns={[
+                        { title: '日期', dataIndex: 'alertDate', width: 100, render: v => !v ? '-' : v },
+                        {
+                          title: '级别', dataIndex: 'alertLevel', width: 70,
+                          render: v => {
+                            const cfg = { CRITICAL: { color: 'red', text: '严重' }, WARNING: { color: 'orange', text: '警告' }, INFO: { color: 'blue', text: '提示' } };
+                            const c = cfg[v] || { color: 'default', text: v };
+                            return <Tag color={c.color}>{c.text}</Tag>;
+                          },
+                        },
+                        {
+                          title: '类型', dataIndex: 'alertType', width: 90,
+                          render: v => {
+                            const map = {
+                              MA_BREAK: '均线破位', DROP: '大跌', NOTICE: '公告', REPORT: '研报',
+                              RISK_CONCENTRATION: '集中度', RISK_INDUSTRY: '行业暴露', RISK_DRAWDOWN: '回撤',
+                              EVENT_INCREASE: '定增', EVENT_UNLOCK: '解禁', EVENT_INCENTIVE: '股权激励',
+                              EVENT_FORECAST: '业绩预告', EVENT_EXPRESS: '业绩快报',
+                            };
+                            return map[v] || (v?.startsWith('EVENT_') ? '事件驱动' : v);
+                          },
+                        },
+                        {
+                          title: '预警内容', dataIndex: 'title', ellipsis: true,
+                          render: (v, r) => (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                              {!r.isRead && <BellOutlined style={{ color: '#ff4d4f', fontSize: 12, flexShrink: 0 }} />}
+                              <Tooltip title={r.detail}><span>{v}</span></Tooltip>
+                            </div>
+                          ),
+                        },
+                        {
+                          title: '操作', width: 90,
+                          render: (_, r) => (
+                            <Space size={0}>
+                              {!r.isRead && <Button size="small" type="link" onClick={() => handleMarkRead(r.id)}>已读</Button>}
+                              <Popconfirm title="确认删除此预警？" onConfirm={() => handleDeleteAlert(r.id)} okText="删除" cancelText="取消">
+                                <Button size="small" type="link" danger>删除</Button>
+                              </Popconfirm>
+                            </Space>
+                          ),
+                        },
+                      ]}
+                    />
+                  )}
+                </Card>
+              </>
+            ),
+          },
+          {
+            key: 'risk',
+            label: <span><SafetyCertificateOutlined /> 风控配置</span>,
+            children: (
+              <>
+                <Row gutter={12} style={{ marginBottom: 16 }}>
+                  <Col span={24} style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <Button type="primary" icon={<CheckCircleOutlined />} onClick={handleSaveRiskConfig} loading={riskSaving}>保存配置</Button>
+                  </Col>
+                </Row>
+                <Alert
+                  message="风控配置说明"
+                  description={
+                    <Space direction="vertical" size={4}>
+                      <Text type="secondary">• 止损/止盈：单笔持仓盈亏达到阈值时，自动生成卖出信号（需手动执行）</Text>
+                      <Text type="secondary">• 最大单股集中度/行业暴露：超过阈值后生成风控预警（建议≤20%/≤30%）</Text>
+                      <Text type="secondary">• 大盘择时：开启后大盘温度计为空头时自动暂停新开仓</Text>
+                      <Text type="secondary">• 资金分配：equal=等权，dynamic=因子得分权重，kelly=凯利公式（需≥5笔历史）</Text>
+                    </Space>
+                  }
+                  type="info"
+                  showIcon
+                  style={{ marginBottom: 16 }}
+                />
+                <Form form={riskForm} layout="vertical" size="small">
+                  <Row gutter={16}>
+                    <Col span={8}>
+                      <Form.Item label={<LabelWithTip text="止损阈值" tip="单笔持仓亏损达到此比例，触发止损卖出信号。例：0.08=亏损8%止损" />} name="stopLossPct">
+                        <InputNumber min={0} max={1} step={0.01} style={{ width: '100%' }} placeholder="0.08" />
+                      </Form.Item>
+                    </Col>
+                    <Col span={8}>
+                      <Form.Item label={<LabelWithTip text="止盈阈值" tip="单笔持仓盈利达到此比例，触发止盈卖出信号。例：0.30=盈利30%止盈" />} name="takeProfitPct">
+                        <InputNumber min={0} max={10} step={0.01} style={{ width: '100%' }} placeholder="0.30" />
+                      </Form.Item>
+                    </Col>
+                    <Col span={8}>
+                      <Form.Item label={<LabelWithTip text="最大单股集中度" tip="单一股票市值占总资产的比例上限。例：0.20=单股不超过20%" />} name="maxPositionPct">
+                        <InputNumber min={0.01} max={1} step={0.01} style={{ width: '100%' }} placeholder="0.20" />
+                      </Form.Item>
+                    </Col>
+                    <Col span={8}>
+                      <Form.Item label={<LabelWithTip text="最大行业暴露" tip="同一行业市值占总资产的比例上限。建议≤30%。例：0.30=单一行业不超过30%" />} name="maxIndustryPct">
+                        <InputNumber min={0.01} max={0.35} step={0.01} style={{ width: '100%' }} placeholder="0.30" />
+                      </Form.Item>
+                    </Col>
+                    <Col span={8}>
+                      <Form.Item label={<LabelWithTip text="最大回撤限制" tip="从历史峰值最大回撤比例。例：0.15=回撤不超过15%" />} name="maxDrawdownPct">
+                        <InputNumber min={0.01} max={1} step={0.01} style={{ width: '100%' }} placeholder="0.15" />
+                      </Form.Item>
+                    </Col>
+                    <Col span={8}>
+                      <Form.Item label={<LabelWithTip text="大盘择时" tip="开启后，大盘温度计为空头信号时自动暂停新开仓（不影响已有持仓）" />} name="timingEnabled" valuePropName="checked">
+                        <Switch checkedChildren="开" unCheckedChildren="关" />
+                      </Form.Item>
+                    </Col>
+                    <Col span={12}>
+                      <Form.Item label={<LabelWithTip text="基准指数" tip="用于计算超额收益。净值曲线图中叠加显示基准指数走势。" />} name="benchmarkCode">
+                        <Select options={[
+                          { label: '沪深300 (000300)', value: '000300' },
+                          { label: '中证500 (000905)', value: '000905' },
+                          { label: '中证1000 (000852)', value: '000852' },
+                          { label: '创业板指 (399006)', value: '399006' },
+                          { label: '万得全A (881001)', value: '881001' },
+                        ]} />
+                      </Form.Item>
+                    </Col>
+                    <Col span={12}>
+                      <Form.Item label={<LabelWithTip text="资金分配模式" tip={
+                        <div>
+                          等权：初始资金÷N，每只标的平均分配<br />
+                          动态权重：按因子得分比例分配（min=初始/20，max=初始/5）<br />
+                          凯利公式：基于历史胜率计算最优仓位（需≥5笔，5%~25%）
+                        </div>
+                      } />} name="allocationMode">
+                        <Select options={[
+                          { label: '等权分配 (equal)', value: 'equal' },
+                          { label: '动态权重 (dynamic)', value: 'dynamic' },
+                          { label: '凯利公式 (kelly)', value: 'kelly' },
+                        ]} />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+                </Form>
+              </>
+            ),
+          },
+        ]}
+      />
 
-      <Card title="交易信号" size="small">
-        <Table dataSource={signals} columns={sigColumns} rowKey="id" size="small" pagination={{ pageSize: 10 }} />
-      </Card>
+      {/* ── 未读预警行高亮样式注入 ── */}
+      <style>{`.alert-unread-row { background-color: #fff2f0; }`}</style>
     </div>
   );
-}
-
-// ─── 未读预警行高亮样式注入 ─────────────────────────────────────────────────────
-const alertStyle = document.createElement('style');
-alertStyle.textContent = `.alert-unread-row { background-color: #fff2f0; }`;
-if (!document.querySelector('style[data-alert-style]')) {
-  alertStyle.setAttribute('data-alert-style', '1');
-  document.head.appendChild(alertStyle);
 }
 
 // ─── 主页面 ───────────────────────────────────────────────────────────────────

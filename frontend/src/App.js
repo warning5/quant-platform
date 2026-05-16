@@ -31,14 +31,14 @@ import FactorWeightOptimize from './pages/factors/FactorWeightOptimize';
 import FactorIcIrAnalysis from './pages/factors/FactorIcIrAnalysis';
 import StockScreen from './pages/screen/StockScreen';
 import ManualOverviewPage from './pages/manual/ManualOverviewPage';
-import ManualDataUpdatePage from './pages/manual/ManualDataUpdatePage';
-import ManualDataDetailPage from './pages/manual/ManualDataDetailPage';
+import ManualDataInfoPage from './pages/manual/ManualDataInfoPage';
 import ManualStockAnalysisPage from './pages/manual/ManualStockAnalysisPage';
+import ManualMarketThermometerPage from './pages/manual/ManualMarketThermometerPage';
+import ManualPaperTradingFullPage from './pages/manual/ManualPaperTradingFullPage';
 import ManualFactorPage from './pages/manual/ManualFactorPage';
 import ManualFactorTestPage from './pages/manual/ManualFactorTestPage';
 import ManualStrategyPage from './pages/manual/ManualStrategyPage';
 import ManualBacktestPage from './pages/manual/ManualBacktestPage';
-import ManualOthersPage from './pages/manual/ManualOthersPage';
 import FinancialData from './pages/financial/FinancialData';
 import ResearchData from './pages/datadetail/ResearchData';
 import DataUpdate from './pages/dataupdate/DataUpdate';
@@ -114,13 +114,12 @@ function AppLayout() {
       label: '使用手册',
       children: [
         { key: '/manual/overview', label: <Link to="/manual/overview">平台概述</Link> },
-        { key: '/manual/data-update', label: <Link to="/manual/data-update">数据更新</Link> },
-        { key: '/manual/data-detail', label: <Link to="/manual/data-detail">数据详情</Link> },
+        { key: '/manual/data-info', label: <Link to="/manual/data-info">数据信息</Link> },
         { key: '/manual/stock-analysis', label: <Link to="/manual/stock-analysis">个股分析</Link> },
+        { key: '/manual/market-thermometer', label: <Link to="/manual/market-thermometer">大盘温度计</Link> },
         { key: '/manual/factors', label: <Link to="/manual/factors">因子管理</Link> },
         { key: '/manual/strategy', label: <Link to="/manual/strategy">策略管理</Link> },
         { key: '/manual/backtest', label: <Link to="/manual/backtest">回测管理</Link> },
-        { key: '/manual/others', label: <Link to="/manual/others">其它</Link> },
       ],
     },
   ];
@@ -255,13 +254,13 @@ function AppLayout() {
             <Route path="/factor-ic-ir" element={<FactorIcIrAnalysis />} />
             <Route path="/screen" element={<StockScreen />} />
             <Route path="/manual/overview" element={<ManualOverviewPage />} />
-            <Route path="/manual/data-update" element={<ManualDataUpdatePage />} />
-            <Route path="/manual/data-detail" element={<ManualDataDetailPage />} />
+            <Route path="/manual/data-info" element={<ManualDataInfoPage />} />
             <Route path="/manual/stock-analysis" element={<ManualStockAnalysisPage />} />
+            <Route path="/manual/market-thermometer" element={<ManualMarketThermometerPage />} />
+            <Route path="/manual/paper-trading" element={<ManualPaperTradingFullPage />} />
             <Route path="/manual/factors" element={<ManualFactorPage />} />
             <Route path="/manual/strategy" element={<ManualStrategyPage />} />
             <Route path="/manual/backtest" element={<ManualBacktestPage />} />
-            <Route path="/manual/others" element={<ManualOthersPage />} />
             <Route path="/stock-analysis" element={<StockAnalysis />} />
             <Route path="/market-thermometer" element={<MarketThermometer />} />
             <Route path="/sector-ranking" element={<SectorRanking />} />

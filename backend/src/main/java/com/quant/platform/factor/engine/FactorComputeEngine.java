@@ -221,8 +221,9 @@ public class FactorComputeEngine {
      * 优先用前缀判断，确保新增 FIN_ 因子无需修改代码也能正确识别
      */
     private boolean isFinancialFactor(String code) {
-        if (code != null && code.startsWith("FIN_")) return true;
-        return isFinancialFactor(code);
+        if (code == null) return false;
+        if (code.startsWith("FIN_")) return true;
+        return financialCalculators.containsKey(code);
     }
 
     /**

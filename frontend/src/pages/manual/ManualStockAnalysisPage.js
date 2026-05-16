@@ -12,8 +12,15 @@ const stockAnalysisNav = [
   { id: 'money-flow',   label: '资金面',     color: 'red'       },
   { id: 'event',        label: '事件面',     color: 'purple'    },
   { id: 'fundamental',  label: '基本面',     color: 'geekblue'  },
-  { id: 'research',     label: '研报舆情',   color: 'gold'      },
+  { id: 'research',     label: '研报分析',   color: 'gold'      },
   { id: 'peer',         label: '同业对比',   color: 'magenta'   },
+  { id: 'valuation',    label: '估值分位',   color: 'volcano'   },
+  { id: 'industry-corr',label: '行业关联',   color: 'geekblue'  },
+  { id: 'limit-up',     label: '涨跌停',     color: 'red'       },
+  { id: 'block-trade',  label: '大宗交易',   color: 'orange'    },
+  { id: 'chan-chart',   label: '缠论图谱',   color: 'purple'    },
+  { id: 'money-flow-history', label: '资金趋势', color: 'cyan'   },
+  { id: 'relative-strength', label: '相对强弱', color: 'blue'    },
 ];
 
 export default function ManualStockAnalysisPage() {
@@ -28,7 +35,7 @@ export default function ManualStockAnalysisPage() {
         <Title level={3} style={{ margin: 0, fontSize: 20 }}>
           ⚡ 使用手册 · 个股分析
         </Title>
-        <Text type="secondary" style={{ fontSize: 13 }}>四维度评分 · 研报舆情 · 同业对比</Text>
+        <Text type="secondary" style={{ fontSize: 13 }}>四维度评分 · 研报舆情 · 同业对比 · 缠论图谱</Text>
       </div>
 
       {/* 顶部锚点导航 */}
@@ -48,7 +55,7 @@ export default function ManualStockAnalysisPage() {
           <Title level={4} style={{ borderLeft: '4px solid #1677ff', paddingLeft: 12, marginBottom: 16 }}>功能概述</Title>
           <Paragraph>
             个股分析模块对单只股票进行<Text strong>四维度量化评分</Text>（技术面30 + 资金面25 + 事件面20 + 基本面25 = 满分100），
-            结合研报舆情、同业对比、估值分位等多维数据，提供综合性的投资参考。
+            结合研报舆情、同业对比、估值分位、缠论图谱等多维数据，提供综合性的投资参考。
           </Paragraph>
           <Alert type="success" showIcon message="核心价值"
             description="把缠论信号、均线趋势、资金流向、研报评级、财务健康度浓缩成一个百分制评分，1分钟完成一只股票的全方位体检。" />
@@ -165,7 +172,7 @@ export default function ManualStockAnalysisPage() {
         <section id="event" style={{ paddingBottom: 16 }}>
           <Title level={4} style={{ borderLeft: '4px solid #722ed1', paddingLeft: 12, marginBottom: 16 }}>事件面评分详情</Title>
           <Row gutter={[12, 8]}>
-            <Col xs={24} md={12}>
+            <Col xs={24} md={8}>
               <Card size="small" type="inner" style={{ borderLeft: '3px solid #722ed1' }}>
                 <Text strong>研报评级（权重12分）</Text>
                   <Paragraph style={{ fontSize: 11, margin: '4px 0 0' }}>
@@ -174,7 +181,7 @@ export default function ManualStockAnalysisPage() {
                   </Paragraph>
               </Card>
             </Col>
-            <Col xs={24} md={12}>
+            <Col xs={24} md={8}>
               <Card size="small" type="inner" style={{ borderLeft: '3px solid #722ed1' }}>
                 <Text strong>机构调研（权重5分）</Text>
                 <Paragraph style={{ fontSize: 11, margin: '4px 0 0' }}>
@@ -183,7 +190,7 @@ export default function ManualStockAnalysisPage() {
                 </Paragraph>
               </Card>
             </Col>
-            <Col xs={24} md={12}>
+            <Col xs={24} md={8}>
               <Card size="small" type="inner" style={{ borderLeft: '3px solid #722ed1' }}>
                 <Text strong>大宗交易（权重3分）</Text>
                 <Paragraph style={{ fontSize: 11, margin: '4px 0 0' }}>
@@ -222,8 +229,8 @@ export default function ManualStockAnalysisPage() {
         <section id="research" style={{ paddingBottom: 16 }}>
           <Title level={4} style={{ borderLeft: '4px solid #faad14', paddingLeft: 12, marginBottom: 16 }}>研报舆情分析</Title>
           <Paragraph>
-            展示该股票近90天的 <Text strong>研究报告</Text>（来源：`stock_research_report` 表，约2万条）
-            和 <Text strong>舆情调查</Text>（来源：`stock_sentiment_survey` 表，2329条）。
+            展示该股票近90天的 <Text strong>研究报告</Text>（来源：`stock_research_report` 表）
+            和 <Text strong>舆情调查</Text>（来源：`stock_sentiment_survey` 表）。
           </Paragraph>
           <Row gutter={[12, 8]}>
             <Col xs={24} md={12}>
@@ -254,10 +261,272 @@ export default function ManualStockAnalysisPage() {
             <Text strong>估值（PE/PB）和盈利能力（ROE/营收增速）</Text> 对比。
           </Paragraph>
           <Alert type="info" showIcon message="使用方法"
-            description="在个股分析页滚动至「同业对比」卡片，系统自动展示同业公司的估值分位和盈利对比柱状图，快速判断该股票在行业中的相对位置。" />
+            description="在个股分析页点击「同业对比」Tab，系统自动展示同业公司的估值分位和盈利对比，快速判断该股票在行业中的相对位置。" />
           <Alert type="warning" showIcon style={{ marginTop: 8 }}
             message="注意"
             description="同业对比仅在股票有行业分类数据时可展示；若显示「暂无同业数据」，请先执行行业分类更新。" />
+        </section>
+
+        {/* 估值分位 */}
+        <section id="valuation" style={{ paddingBottom: 16 }}>
+          <Title level={4} style={{ borderLeft: '4px solid #fa541c', paddingLeft: 12, marginBottom: 16 }}>估值分位</Title>
+          <Paragraph>基于近N年历史数据，计算当前 <Text strong>PE(TTM)</Text> 和 <Text strong>PB</Text> 在历史上的分位数（0~100%）：</Paragraph>
+          <Row gutter={[12, 8]}>
+            <Col xs={24} md={12}>
+              <Card size="small" type="inner" style={{ borderLeft: '4px solid #cf1322' }}>
+                <Text strong>PE(TTM) 分位</Text>
+                <Paragraph style={{ fontSize: 11, margin: '4px 0 0' }}>
+                  市盈率（滚动）＝ 股价 ÷ 近12个月每股收益。<br/>
+                  分位越低越便宜（&lt;20% 低估），分位越高越贵（&gt;80% 高估）。<br/>
+                  <Text type="secondary">适用：绝大多数行业</Text>
+                </Paragraph>
+              </Card>
+            </Col>
+            <Col xs={24} md={12}>
+              <Card size="small" type="inner" style={{ borderLeft: '4px solid #389e0d' }}>
+                <Text strong>PB 分位</Text>
+                <Paragraph style={{ fontSize: 11, margin: '4px 0 0' }}>
+                  市净率 ＝ 股价 ÷ 每股净资产。<br/>
+                  适合评估金融、重资产行业（银行/钢铁/煤炭等）。<br/>
+                  <Text type="secondary">破净或接近破净 = 安全边际高</Text>
+                </Paragraph>
+              </Card>
+            </Col>
+          </Row>
+          <Alert type="info" showIcon style={{ marginTop: 8 }}
+            message="分位解读"
+            description="＜20% 低估（安全边际高）；20%~50% 合理；50%~80% 偏贵；＞80% 高估（警惕回调）。建议结合基本面评分综合判断。" />
+        </section>
+
+        {/* 行业关联 */}
+        <section id="industry-corr" style={{ paddingBottom: 16 }}>
+          <Title level={4} style={{ borderLeft: '4px solid #2f54eb', paddingLeft: 12, marginBottom: 16 }}>行业关联</Title>
+          <Paragraph>分析个股与所属行业的 <Text strong>Beta 系数</Text> 和 <Text strong>相关系数</Text>，理解个股的行业风险敞口：</Paragraph>
+          <Row gutter={[12, 8]}>
+            <Col xs={24} md={8}>
+              <Card size="small" type="inner" style={{ borderLeft: '4px solid #f5222d' }}>
+                <Text strong>Beta ＞ 1.5</Text>
+                <Paragraph style={{ fontSize: 11, margin: '4px 0 0' }}>
+                  高弹性：行业涨跌1%，个股平均波动＞1.5%。<br/>
+                  适合激进投资者，但下跌时亏损也更大。
+                </Paragraph>
+              </Card>
+            </Col>
+            <Col xs={24} md={8}>
+              <Card size="small" type="inner" style={{ borderLeft: '4px solid #fa8c16' }}>
+                <Text strong>Beta 1.0~1.5</Text>
+                <Paragraph style={{ fontSize: 11, margin: '4px 0 0' }}>
+                  中等弹性：基本跟随行业波动。<br/>
+                  最常见的个股风险水平。
+                </Paragraph>
+              </Card>
+            </Col>
+            <Col xs={24} md={8}>
+              <Card size="small" type="inner" style={{ borderLeft: '4px solid #52c41a' }}>
+                <Text strong>Beta ＜ 0.5</Text>
+                <Paragraph style={{ fontSize: 11, margin: '4px 0 0' }}>
+                  防御性：波动小于行业，甚至逆势。<br/>
+                  适合避险或对冲行业风险。
+                </Paragraph>
+              </Card>
+            </Col>
+          </Row>
+          <Alert type="info" showIcon style={{ marginTop: 8 }}
+            message="近5日超额收益"
+            description="展示个股与行业等权组合的近5日累计收益对比。RS Ratio ＞ 1 表示跑赢行业，＜ 1 表示跑输。关注「大幅跑赢」信号作为买入参考。" />
+        </section>
+
+        {/* 涨跌停 */}
+        <section id="limit-up" style={{ paddingBottom: 16 }}>
+          <Title level={4} style={{ borderLeft: '4px solid #f5222d', paddingLeft: 12, marginBottom: 16 }}>涨跌停分析</Title>
+          <Paragraph>展示该股票的 <Text strong>涨停/跌停历史记录</Text>、涨停原因统计、炸板情况：</Paragraph>
+          <Row gutter={[12, 8]}>
+            <Col xs={24} md={8}>
+              <Card size="small" type="inner" style={{ borderLeft: '4px solid #f5222d' }}>
+                <Text strong>涨停次数</Text>
+                <Paragraph style={{ fontSize: 11, margin: '4px 0 0' }}>
+                  涨停 = 强势信号，但需区分<br/>
+                  首次涨停（启动）vs 连续涨停（高潮）
+                </Paragraph>
+              </Card>
+            </Col>
+            <Col xs={24} md={8}>
+              <Card size="small" type="inner" style={{ borderLeft: '4px solid #fa8c16' }}>
+                <Text strong>炸板率</Text>
+                <Paragraph style={{ fontSize: 11, margin: '4px 0 0' }}>
+                  涨停后打开 = 封板不稳<br/>
+                  高炸板率 = 诱多信号，需警惕
+                </Paragraph>
+              </Card>
+            </Col>
+            <Col xs={24} md={8}>
+              <Card size="small" type="inner" style={{ borderLeft: '4px solid #52c41a' }}>
+                <Text strong>跌停次数</Text>
+                <Paragraph style={{ fontSize: 11, margin: '4px 0 0' }}>
+                  跌停 = 强烈卖出信号<br/>
+                  连续跌停 = 流动性危机或重大利空
+                </Paragraph>
+              </Card>
+            </Col>
+          </Row>
+          <Alert type="warning" showIcon style={{ marginTop: 8 }}
+            message="使用建议"
+            description="涨停原因Top统计帮助判断涨停性质（政策利好/业绩预增/题材炒作）。首次涨停且原因明确，后续上涨概率更高。" />
+        </section>
+
+        {/* 大宗交易 */}
+        <section id="block-trade" style={{ paddingBottom: 16 }}>
+          <Title level={4} style={{ borderLeft: '4px solid #fa8c16', paddingLeft: 12, marginBottom: 16 }}>大宗交易分析</Title>
+          <Paragraph>展示该股票的 <Text strong>大宗交易历史</Text>、折价率、买卖营业部统计：</Paragraph>
+          <Row gutter={[12, 8]}>
+            <Col xs={24} md={12}>
+              <Card size="small" type="inner" style={{ borderLeft: '4px solid #fa8c16' }}>
+                <Text strong>折价率分析</Text>
+                <Paragraph style={{ fontSize: 11, margin: '4px 0 0' }}>
+                  折价率 ＜ -10% = 大幅折价，可能暗示大股东减持意愿<br/>
+                  溢价成交 = 机构看好，愿意以高于市价接盘
+                </Paragraph>
+              </Card>
+            </Col>
+            <Col xs={24} md={12}>
+              <Card size="small" type="inner" style={{ borderLeft: '4px solid #1677ff' }}>
+                <Text strong>营业部集中度</Text>
+                <Paragraph style={{ fontSize: 11, margin: '4px 0 0' }}>
+                  买方营业部集中 = 单一机构大举建仓（强势信号）<br/>
+                  卖方营业部集中 = 单一股东大举减持（警惕信号）
+                </Paragraph>
+              </Card>
+            </Col>
+          </Row>
+          <Alert type="info" showIcon style={{ marginTop: 8 }}
+            message="关键结论"
+            description="大宗交易折价率高且连续发生 = 机构出货信号（扣分）。溢价成交且买方营业部集中 = 机构看好（加分），是事件面评分的输入之一。" />
+        </section>
+
+        {/* 缠论图谱 */}
+        <section id="chan-chart" style={{ paddingBottom: 16 }}>
+          <Title level={4} style={{ borderLeft: '4px solid #722ed1', paddingLeft: 12, marginBottom: 16 }}>缠论图谱</Title>
+          <Paragraph>
+            基于缠论理论实时计算 K线合并、笔、中枢、买卖点，<Text strong>可视化展示</Text>股票的技术结构。
+            红色标记 <Text strong>买点</Text>，绿色标记 <Text strong>卖点</Text>。
+          </Paragraph>
+          <Row gutter={[12, 8]}>
+            <Col xs={24} md={6}>
+              <Card size="small" type="inner" style={{ borderLeft: '4px solid #f5222d' }}>
+                <Text strong>一买（底背弛）</Text>
+                <Paragraph style={{ fontSize: 11, margin: '4px 0 0' }}>
+                  趋势最低点，最安全买点<br/>
+                  但等待确认需要时间
+                </Paragraph>
+              </Card>
+            </Col>
+            <Col xs={24} md={6}>
+              <Card size="small" type="inner" style={{ borderLeft: '4px solid #fa541c' }}>
+                <Text strong>二买</Text>
+                <Paragraph style={{ fontSize: 11, margin: '4px 0 0' }}>
+                  一买后的第一次回调<br/>
+                  风险收益比最优的买点
+                </Paragraph>
+              </Card>
+            </Col>
+            <Col xs={24} md={6}>
+              <Card size="small" type="inner" style={{ borderLeft: '4px solid #faad14' }}>
+                <Text strong>三买（最强势）</Text>
+                <Paragraph style={{ fontSize: 11, margin: '4px 0 0' }}>
+                  中枢上方的买点<br/>
+                  趋势加速阶段，短线最强信号
+                </Paragraph>
+              </Card>
+            </Col>
+            <Col xs={24} md={6}>
+              <Card size="small" type="inner" style={{ borderLeft: '4px solid #52c41a' }}>
+                <Text strong>中枢（震荡区）</Text>
+                <Paragraph style={{ fontSize: 11, margin: '4px 0 0' }}>
+                  缠论核心价值：识别震荡区间<br/>
+                  中枢突破 = 趋势延续信号
+                </Paragraph>
+              </Card>
+            </Col>
+          </Row>
+          <Alert type="success" showIcon style={{ marginTop: 8 }}
+            message="实战建议"
+            description="三买出现 = 技术面额外+2分。中枢突破+三买组合 = 短线最强信号。图谱支持缩放查看近120天K线细节。" />
+        </section>
+
+        {/* 资金趋势 */}
+        <section id="money-flow-history" style={{ paddingBottom: 16 }}>
+          <Title level={4} style={{ borderLeft: '4px solid #13c2c2', paddingLeft: 12, marginBottom: 16 }}>资金趋势（近120日）</Title>
+          <Paragraph>展示 <Text strong>近120日主力资金净流入/净流出趋势</Text> 及每日资金面评分（满分25），追踪大资金动向变化：</Paragraph>
+          <Row gutter={[12, 8]}>
+            <Col xs={24} md={8}>
+              <Card size="small" type="inner" style={{ borderLeft: '4px solid #1677ff' }}>
+                <Text strong>主力净流入趋势</Text>
+                <Paragraph style={{ fontSize: 11, margin: '4px 0 0' }}>
+                  连续5日净流入 = 强势信号<br/>
+                  连续5日净流出 = 回避信号
+                </Paragraph>
+              </Card>
+            </Col>
+            <Col xs={24} md={8}>
+              <Card size="small" type="inner" style={{ borderLeft: '4px solid #fa8c16' }}>
+                <Text strong>资金面评分趋势</Text>
+                <Paragraph style={{ fontSize: 11, margin: '4px 0 0' }}>
+                  评分持续上升 = 资金面改善<br/>
+                  评分从高位回落 = 资金撤离信号
+                </Paragraph>
+              </Card>
+            </Col>
+            <Col xs={24} md={8}>
+              <Card size="small" type="inner" style={{ borderLeft: '4px solid #52c41a' }}>
+                <Text strong>净流入占比</Text>
+                <Paragraph style={{ fontSize: 11, margin: '4px 0 0' }}>
+                  占比持续为正 = 机构建仓<br/>
+                  占比持续为负 = 机构出货
+                </Paragraph>
+              </Card>
+            </Col>
+          </Row>
+          <Alert type="warning" showIcon style={{ marginTop: 8 }}
+            message="关键结论"
+            description="资金趋势比单日资金面评分更有参考价值。连续净流入 + 评分持续上升 = 最强买入信号组合。趋势反转（由正转负）是卖出预警信号。" />
+        </section>
+
+        {/* 相对强弱 */}
+        <section id="relative-strength" style={{ paddingBottom: 16 }}>
+          <Title level={4} style={{ borderLeft: '4px solid #1677ff', paddingLeft: 12, marginBottom: 16 }}>相对强弱（vs 行业）</Title>
+          <Paragraph>对比个股与 <Text strong>同行业等权组合</Text> 的累计收益，计算 RS Ratio：</Paragraph>
+          <Row gutter={[12, 8]}>
+            <Col xs={24} md={8}>
+              <Card size="small" type="inner" style={{ borderLeft: '4px solid #f5222d' }}>
+                <Text strong>RS Ratio ＞ 1.2</Text>
+                <Paragraph style={{ fontSize: 11, margin: '4px 0 0' }}>
+                  大幅跑赢行业<br/>
+                  个股有独立强势逻辑
+                </Paragraph>
+              </Card>
+            </Col>
+            <Col xs={24} md={8}>
+              <Card size="small" type="inner" style={{ borderLeft: '4px solid #fa8c16' }}>
+                <Text strong>RS Ratio 0.8~1.2</Text>
+                <Paragraph style={{ fontSize: 11, margin: '4px 0 0' }}>
+                  基本同步行业<br/>
+                  无明显的相对强弱优势
+                </Paragraph>
+              </Card>
+            </Col>
+            <Col xs={24} md={8}>
+              <Card size="small" type="inner" style={{ borderLeft: '4px solid #52c41a' }}>
+                <Text strong>RS Ratio ＜ 0.8</Text>
+                <Paragraph style={{ fontSize: 11, margin: '4px 0 0' }}>
+                  跑输行业<br/>
+                  即使行业上涨，个股也可能下跌
+                </Paragraph>
+              </Card>
+            </Col>
+          </Row>
+          <Alert type="info" showIcon style={{ marginTop: 8 }}
+            message="使用建议"
+            description="RS Ratio 持续上升 = 个股相对行业越来越强，是超额收益的来源。选择在 RS Ratio ＞ 1 且处于上升通道的个股，胜率更高。" />
         </section>
 
         {/* 使用详解 */}

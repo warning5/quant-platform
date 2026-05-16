@@ -231,20 +231,33 @@ public class PaperTradingService {
     private void refreshTodayNav(PaperTrading pt) {
         if (clickHouseJdbcTemplate == null) return;
         try {
-            // 获取最新交易日
+            // 获取最新交易日作为"今日"（非自然日）
             List<String> dates = clickHouseJdbcTemplate.query(
                 "SELECT max(trade_date) as d FROM stock.stock_daily FINAL",
                 (rs, rowNum) -> rs.getString("d"));
             if (dates.isEmpty() || dates.getFirst() == null) return;
             LocalDate today = LocalDate.parse(dates.getFirst());
 
-            BigDecimal dailyReturn = BigDecimal.ZERO;
-            BigDecimal cumulativeReturn = BigDecimal.ZERO;
-            if (pt.getInitialCapital().compareTo(BigDecimal.ZERO) > 0) {
-                cumulativeReturn = pt.getTotalAssets()
-                    .subtract(pt.getInitialCapital())
-                    .divide(pt.getInitialCapital(), 6, RoundingMode.HALF_UP);
-            }
+            // 前一交易日 NAV（用于计算 dailyReturn）
+            PaperNav prevNav = paperNavMapper.selectOne(
+                new LambdaQueryWrapper<PaperNav>()
+                    .eq(PaperNav::getPaperId, pt.getId())
+                    .ne(PaperNav::getNavDate, today)
+                    .orderByDesc(PaperNav::getNavDate)
+                    .last("LIMIT 1"));
+
+            BigDecimal prevTotalAssets = prevNav != null
+                ? prevNav.getTotalAssets() : pt.getInitialCapital();
+
+            BigDecimal dailyReturn = prevTotalAssets.compareTo(BigDecimal.ZERO) > 0
+                ? pt.getTotalAssets().subtract(prevTotalAssets)
+                    .divide(prevTotalAssets, 6, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO;
+
+            BigDecimal cumulativeReturn = pt.getInitialCapital().compareTo(BigDecimal.ZERO) > 0
+                ? pt.getTotalAssets().subtract(pt.getInitialCapital())
+                    .divide(pt.getInitialCapital(), 6, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO;
 
             PaperNav todayNav = paperNavMapper.selectOne(
                 new LambdaQueryWrapper<PaperNav>()
@@ -292,7 +305,7 @@ public class PaperTradingService {
 
         for (PaperPosition pos : positions) {
             try {
-                BigDecimal latestPrice = getLatestPrice(pos.getCode(), latestDate);
+                BigDecimal latestPrice = getOpenPrice(pos.getCode(), latestDate);
                 if (latestPrice == null || latestPrice.compareTo(BigDecimal.ZERO) <= 0) continue;
 
                 pos.setCurrentPrice(latestPrice);
@@ -307,6 +320,7 @@ public class PaperTradingService {
                     BigDecimal profitPct = profitLoss.divide(cost, 6, RoundingMode.HALF_UP);
                     pos.setProfitLossPct(profitPct);
                 }
+                paperPositionMapper.updateById(pos);
             } catch (Exception e) {
                 log.warn("刷新持仓价格失败: code={}, error={}", pos.getCode(), e.getMessage());
             }
@@ -322,6 +336,12 @@ public class PaperTradingService {
         PaperTrading pt = paperTradingMapper.selectById(paperId);
         if (pt == null) throw new IllegalArgumentException("模拟盘不存在");
         if (!"RUNNING".equals(pt.getStatus())) throw new IllegalArgumentException("模拟盘未运行");
+
+        // 交易日门控：若今天非交易日（周末/节假日），跳过信号生成
+        if (!isTradingDay()) {
+            log.info("generateSignals: 最近3日内无有效交易日数据（因子可能断档），跳过信号生成");
+            return List.of();
+        }
 
         // 生成前先删除该模拟盘所有 PENDING 信号，避免重复生成
         int cleared = paperSignalMapper.delete(
@@ -390,6 +410,17 @@ public class PaperTradingService {
                     maxDailyDate = ld;
                 }
             }
+        }
+        if (maxDailyDate == null) {
+            // 兜底：从 stock_daily 取最新交易日
+            try {
+                List<String> dates = clickHouseJdbcTemplate.query(
+                    "SELECT MAX(trade_date) FROM stock.stock_daily FINAL",
+                    (rs, rowNum) -> rs.getString(1));
+                if (!dates.isEmpty() && dates.getFirst() != null) {
+                    maxDailyDate = LocalDate.parse(dates.getFirst());
+                }
+            } catch (Exception ignored) {}
         }
         signalDate = maxDailyDate != null ? maxDailyDate.toString() : LocalDate.now().toString();
         log.info("generateSignals: paperId={}, signalDate={}（日频因子最新，排除FIN_/CHAN_）, factorConfigs={}",
@@ -554,7 +585,8 @@ public class PaperTradingService {
             if (heldCodes.contains(e.getKey())) continue;
             if (skippedCodes.contains(e.getKey())) continue;
 
-            BigDecimal price = getLatestPrice(e.getKey(), signalDate);
+            // 始终用 stock_daily 最新开盘价（而非收盘价），模拟开盘成交
+            BigDecimal price = getOpenPrice(e.getKey(), null);
             PaperSignal buySignal = PaperSignal.builder()
                 .paperId(paperId)
                 .signalDate(LocalDate.parse(signalDate))
@@ -595,6 +627,11 @@ public class PaperTradingService {
         if (signal == null) throw new IllegalArgumentException("信号不存在");
         if (!"PENDING".equals(signal.getStatus())) throw new IllegalArgumentException("信号已处理");
 
+        // 非交易日禁止手动执行，避免价格不匹配
+        if (!canExecuteSignal()) {
+            throw new IllegalStateException("非交易日，不允许执行信号，请于下一交易日开盘后再执行");
+        }
+
         PaperTrading pt = paperTradingMapper.selectById(signal.getPaperId());
 
         if ("BUY".equals(signal.getDirection())) {
@@ -604,8 +641,9 @@ public class PaperTradingService {
             if (riskConfig == null) riskConfig = PaperRiskConfig.defaults(signal.getPaperId());
             String allocationMode = riskConfig.getAllocationMode() != null ? riskConfig.getAllocationMode() : "equal";
 
-            BigDecimal price = signal.getSignalPrice();
-            if (price == null || price.doubleValue() <= 0) {
+            // 手动执行时按规则确定成交价：交易日收盘价 / 非交易日下个交易日开盘价
+            BigDecimal price = getExecutionPrice(signal.getCode());
+            if (price == null || price.compareTo(BigDecimal.ZERO) <= 0) {
                 signal.setStatus("SKIPPED");
                 signal.setReason("价格无效");
                 paperSignalMapper.updateById(signal);
@@ -695,7 +733,8 @@ public class PaperTradingService {
                 return null;
             }
 
-            BigDecimal sellAmount = pos.getCurrentPrice().multiply(BigDecimal.valueOf(pos.getShares()));
+            BigDecimal price = getExecutionPrice(signal.getCode());
+            BigDecimal sellAmount = price.multiply(BigDecimal.valueOf(pos.getShares()));
             pt.setCurrentCapital(pt.getCurrentCapital().add(sellAmount));
             pt.setPositionCount(Math.max(0, pt.getPositionCount() - 1));
             paperTradingMapper.updateById(pt);
@@ -703,7 +742,7 @@ public class PaperTradingService {
             paperPositionMapper.deleteById(pos.getId());
 
             signal.setStatus("EXECUTED");
-            signal.setExecutedPrice(pos.getCurrentPrice());
+            signal.setExecutedPrice(price);
             signal.setExecutedAt(LocalDateTime.now());
             paperSignalMapper.updateById(signal);
 
@@ -984,17 +1023,140 @@ public class PaperTradingService {
         }
     }
 
+    /**
+     * 判断是否可以生成信号（有可用的最新因子数据）
+     * 严格模式：最新交易日必须是今天或未来（不允许周末生成信号）
+     */
+    /**
+     * 判断是否可以生成信号（允许最近3天内有交易日数据，覆盖周末/节假日补跑）
+     */
+    private boolean isTradingDay() {
+        if (clickHouseJdbcTemplate == null) {
+            log.warn("isTradingDay: clickHouseJdbcTemplate 为 null，拦截");
+            return false;
+        }
+        try {
+            List<String> dates = clickHouseJdbcTemplate.query(
+                "SELECT MAX(trade_date) FROM stock.stock_daily FINAL",
+                (rs, rowNum) -> rs.getString(1));
+            if (dates.isEmpty() || dates.getFirst() == null) {
+                log.warn("isTradingDay: 查询结果为空，拦截");
+                return false;
+            }
+            LocalDate latest = LocalDate.parse(dates.getFirst());
+            // 宽松模式：最近3天内有交易日数据即可（允许周末/节假日补跑生成）
+            boolean result = !latest.isBefore(LocalDate.now().minusDays(3));
+            if (!result) {
+                log.info("isTradingDay: 最新交易日={}，距今超过3天，拦截", latest);
+            }
+            return result;
+        } catch (Exception e) {
+            log.warn("isTradingDay 查询失败，拦截: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * 判断是否可以执行信号（严格：必须是今天或未来）
+     */
+    private boolean canExecuteSignal() {
+        if (clickHouseJdbcTemplate == null) {
+            log.warn("canExecuteSignal: clickHouseJdbcTemplate 为 null，拦截");
+            return false;
+        }
+        try {
+            List<String> dates = clickHouseJdbcTemplate.query(
+                "SELECT MAX(trade_date) FROM stock.stock_daily FINAL",
+                (rs, rowNum) -> rs.getString(1));
+            if (dates.isEmpty() || dates.getFirst() == null) {
+                log.warn("canExecuteSignal: 查询结果为空，拦截");
+                return false;
+            }
+            LocalDate latest = LocalDate.parse(dates.getFirst());
+            boolean result = !latest.isBefore(LocalDate.now());
+            if (!result) {
+                log.info("canExecuteSignal: 最新交易日={}，今天={}，拦截", latest, LocalDate.now());
+            }
+            return result;
+        } catch (Exception e) {
+            log.warn("canExecuteSignal 查询失败，拦截: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * 获取最新收盘价（原有逻辑，供其他场景使用）
+     */
     private BigDecimal getLatestPrice(String code, String date) {
         if (clickHouseJdbcTemplate == null) return BigDecimal.ZERO;
         try {
-            String sql = String.format(
-                "SELECT close_price FROM stock.stock_daily FINAL WHERE code = '%s' AND trade_date = '%s'",
-                code, date);
+            // date 为 null 时自动取 stock_daily 最新交易日的价格
+            String sql;
+            if (date == null || date.isBlank()) {
+                sql = String.format(
+                    "SELECT close_price FROM stock.stock_daily FINAL WHERE code = '%s' ORDER BY trade_date DESC LIMIT 1",
+                    code);
+            } else {
+                sql = String.format(
+                    "SELECT close_price FROM stock.stock_daily FINAL WHERE code = '%s' AND trade_date = '%s'",
+                    code, date);
+            }
             List<BigDecimal> prices = clickHouseJdbcTemplate.query(sql,
                 (rs, rowNum) -> rs.getBigDecimal("close_price"));
             return prices.isEmpty() ? BigDecimal.ZERO : prices.getFirst();
         } catch (Exception e) {
             return BigDecimal.ZERO;
+        }
+    }
+
+    /**
+     * 获取指定日期的开盘价（用于模拟盘成交执行）
+     * date 为 null 时取最新交易日的开盘价
+     */
+    private BigDecimal getOpenPrice(String code, String date) {
+        if (clickHouseJdbcTemplate == null) return BigDecimal.ZERO;
+        try {
+            String sql;
+            if (date == null || date.isBlank()) {
+                sql = String.format(
+                    "SELECT open_price FROM stock.stock_daily FINAL WHERE code = '%s' ORDER BY trade_date DESC LIMIT 1",
+                    code);
+            } else {
+                sql = String.format(
+                    "SELECT open_price FROM stock.stock_daily FINAL WHERE code = '%s' AND trade_date = '%s'",
+                    code, date);
+            }
+            List<BigDecimal> prices = clickHouseJdbcTemplate.query(sql,
+                (rs, rowNum) -> rs.getBigDecimal("open_price"));
+            if (prices.isEmpty() || prices.getFirst() == null || prices.getFirst().compareTo(BigDecimal.ZERO) <= 0) {
+                // 开盘价为空时降级为收盘价
+                log.warn("getOpenPrice: {} {} 开盘价为空，降级为收盘价", code, date);
+                return getLatestPrice(code, date);
+            }
+            return prices.getFirst();
+        } catch (Exception e) {
+            log.warn("getOpenPrice 查询失败 code={}, date={}: {}", code, date, e.getMessage());
+            return BigDecimal.ZERO;
+        }
+    }
+
+    /**
+     * 手动执行信号时的成交价（调用前需先通过 isTradingDay() 拦截非交易日）
+     * - 今天是交易日 → 今天收盘价
+     */
+    private BigDecimal getExecutionPrice(String code) {
+        if (clickHouseJdbcTemplate == null) return BigDecimal.ZERO;
+        try {
+            LocalDate today = LocalDate.now();
+            BigDecimal closePrice = getLatestPrice(code, today.toString());
+            if (closePrice == null || closePrice.compareTo(BigDecimal.ZERO) <= 0) {
+                log.warn("getExecutionPrice: {} {} 收盘价无效，降级为开盘价", code, today);
+                return getOpenPrice(code, today.toString());
+            }
+            return closePrice;
+        } catch (Exception e) {
+            log.warn("getExecutionPrice 查询失败 code={}: {}", code, e.getMessage());
+            return getOpenPrice(code, null);
         }
     }
 
