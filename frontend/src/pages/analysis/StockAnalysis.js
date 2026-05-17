@@ -6,9 +6,11 @@ import {
 import {
   QuestionCircleOutlined, SearchOutlined,
   ArrowUpOutlined, ArrowDownOutlined,
+  FileTextOutlined, DownloadOutlined,
 } from '@ant-design/icons';
 import { useSearchParams, Link } from 'react-router-dom';
 import { stockAnalysisApi, silentConfig } from '../../api';
+import api from '../../api';
 import { useMarketThermometer } from '../../hooks/useMarketThermometer';
 import ReactECharts from 'echarts-for-react';
 
@@ -55,6 +57,8 @@ export default function StockAnalysis() {
   const [chanChartData, setChanChartData] = useState(null);
   const [moneyFlowHistoryData, setMoneyFlowHistoryData] = useState(null);
   const [relativeStrengthData, setRelativeStrengthData] = useState(null);
+  const [bullBearData, setBullBearData] = useState(null);
+  const [klineData, setKlineData] = useState(null);
   const [error, setError] = useState(null);
   const [rulesVisible, setRulesVisible] = useState(false);
   const [rules, setRules] = useState(null);
@@ -90,6 +94,11 @@ export default function StockAnalysis() {
         setOverview(null);
       })
       .finally(() => setLoading(false));
+
+    // 同时加载K线数据
+    stockAnalysisApi.getKLine(code, 60)
+      .then(data => setKlineData(data))
+      .catch(() => setKlineData(null));
   }, [inputCode, setSearchParams]);
 
   // 联想搜索（防抖 300ms）
@@ -207,6 +216,14 @@ export default function StockAnalysis() {
       .catch(() => setRelativeStrengthData(null));
   }, [overview?.code]);
 
+  // 加载多空辩论数据
+  useEffect(() => {
+    if (!overview?.code) { setBullBearData(null); return; }
+    api.get(`/analysis/bull-bear?code=${overview.code}`, { ...silentConfig })
+      .then(data => setBullBearData(data))
+      .catch(() => setBullBearData(null));
+  }, [overview?.code]);
+
   // 加载评分规则
   const showRules = useCallback(() => {
     if (rules) {
@@ -244,6 +261,13 @@ export default function StockAnalysis() {
       key: 'tech',
       label: tabLabel('技术面', '通过均线排列、MACD、RSI、缠论信号等技术指标，判断股票短期走势和买卖时机。适合把握趋势和择时。'),
       children: <ScoreDetailTab detail={overview.scoreDetails?.find(d => d.dimension === 'tech')} />,
+    },
+    {
+      key: 'kline',
+      label: tabLabel('价格走势', '近60交易日K线图，含均线（MA5/10/20/60）叠加，辅助判断价格趋势和均线支撑压力位。'),
+      children: klineData && klineData.length > 0 ? <KLineChart data={klineData} /> : (
+        <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>暂无K线数据</div>
+      ),
     },
     {
       key: 'money',
@@ -305,6 +329,49 @@ export default function StockAnalysis() {
       label: tabLabel('相对强弱', '对比个股与同行业等权组合的累计收益，计算RS Ratio。RS>1表示跑赢行业，<1表示跑输。'),
       children: <RelativeStrengthTab data={relativeStrengthData} code={overview.code} />,
     },
+    {
+      key: 'bull-bear',
+      label: tabLabel('多空辩论', '基于规则引擎生成多空双方论据，汇总看多和看空因素，辅助判断多空力量对比。'),
+      children: bullBearData ? (
+        <div>
+          {/* 多空力量对比雷达图（按维度） */}
+          {((bullBearData.bullArguments?.length > 0 || bullBearData.bearArguments?.length > 0) && (
+            <BullBearChart bull={bullBearData.bullArguments || []} bear={bullBearData.bearArguments || []} />
+          ))}
+          {/* 多空论据列表 */}
+          <Row gutter={24}>
+            <Col span={12}>
+              <Card title={"多方论据 (" + (bullBearData.bullArguments?.length || 0) + ")"} size="small">
+                {bullBearData.bullArguments?.length > 0 ? bullBearData.bullArguments.map((arg, i) => (
+                  <div key={i} style={{ marginBottom: 8 }}>
+                    <Text style={{ color: arg.strength >= 4 ? '#f5222d' : arg.strength >= 3 ? '#fa8c16' : '#999' }}>
+                      {'★'.repeat(arg.strength)}{'☆'.repeat(5 - arg.strength)}
+                    </Text>
+                    <Text strong style={{ marginLeft: 8 }}>{arg.rule}</Text>
+                    <div style={{ fontSize: 12, color: '#666', marginLeft: 24 }}>{arg.description}</div>
+                  </div>
+                )) : <Text type="secondary">暂无多方论据</Text>}
+              </Card>
+            </Col>
+            <Col span={12}>
+              <Card title={"空方论据 (" + (bullBearData.bearArguments?.length || 0) + ")"} size="small">
+                {bullBearData.bearArguments?.length > 0 ? bullBearData.bearArguments.map((arg, i) => (
+                  <div key={i} style={{ marginBottom: 8 }}>
+                    <Text style={{ color: arg.strength >= 4 ? '#f5222d' : arg.strength >= 3 ? '#fa8c16' : '#999' }}>
+                      {'★'.repeat(arg.strength)}{'☆'.repeat(5 - arg.strength)}
+                    </Text>
+                    <Text strong style={{ marginLeft: 8 }}>{arg.rule}</Text>
+                    <div style={{ fontSize: 12, color: '#666', marginLeft: 24 }}>{arg.description}</div>
+                  </div>
+                )) : <Text type="secondary">暂无空方论据</Text>}
+              </Card>
+            </Col>
+          </Row>
+        </div>
+      ) : (
+        <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+      ),
+    },
   ] : [];
 
   const changePct = overview ? parseChangePct(overview.changePercent) : 0;
@@ -350,6 +417,31 @@ export default function StockAnalysis() {
                 onClick={showRules}
               />
             </Tooltip>
+            {overview?.code && (
+              <>
+                <Button
+                  style={{ marginLeft: 8 }}
+                  icon={<FileTextOutlined />}
+                  onClick={() => window.open(`/api/analysis/html-report?code=${overview.code}&mode=preview`, '_blank')}
+                >
+                  预览报告
+                </Button>
+                <Button
+                  style={{ marginLeft: 4 }}
+                  icon={<DownloadOutlined />}
+                  onClick={() => {
+                    const link = document.createElement('a');
+                    link.href = `/api/analysis/html-report?code=${overview.code}&mode=download`;
+                    link.download = `${overview.code}_report.html`;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                  }}
+                >
+                  下载
+                </Button>
+              </>
+            )}
           </Col>
         </Row>
       </Card>
@@ -366,8 +458,8 @@ export default function StockAnalysis() {
       {overview && !loading && (
         <>
           <Card style={{ marginBottom: 16 }}>
-            {/* 第一行：股票信息 + 综合评分 */}
-            <Row gutter={24} align="middle" style={{ marginBottom: 16 }}>
+            {/* 第一行：股票信息 + 操作建议标签 */}
+            <Row gutter={24} align="middle" style={{ marginBottom: 12 }}>
               <Col>
                 <Title level={4} style={{ margin: 0 }}>
                   {overview.name} ({overview.code})
@@ -398,33 +490,74 @@ export default function StockAnalysis() {
               </Col>
             </Row>
 
-            {/* 第二行：综合评分 + 仓位 + 操作时机（紧凑行内样式，无大框） */}
+            {/* 决策卡片：当前价 / 目标价 / 止损价 / 仓位 */}
+            {(overview.targetPrice || overview.stopLossPrice) && (
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(4, 1fr)',
+                gap: 0,
+                border: '1px solid #f0f0f0',
+                borderRadius: 8,
+                overflow: 'hidden',
+                marginBottom: 16,
+                background: '#fafafa',
+              }}>
+                {[
+                  { label: '当前价', value: overview.price || '-', sub: '', color: changePct >= 0 ? '#f5222d' : '#52c41a' },
+                  { label: '目标价', value: overview.targetPrice || '-', sub: '阻力位×1.05', color: '#1890ff' },
+                  { label: '止损价', value: overview.stopLossPrice || '-', sub: overview.targetPrice ? `距${((1 - parseFloat(overview.stopLossPrice || 0) / parseFloat(overview.price || 1)) * 100).toFixed(1)}%` : 'ATR×1.5', color: '#f5222d' },
+                  { label: '建议仓位', value: overview.position != null ? overview.position + '%' : '-', sub: overview.confidenceLevel ? `信心:${overview.confidenceLevel}` : '', color: '#333' },
+                ].map((item, idx) => (
+                  <div key={idx} style={{
+                    textAlign: 'center',
+                    padding: '10px 8px',
+                    borderRight: idx < 3 ? '1px solid #f0f0f0' : 'none',
+                  }}>
+                    <div style={{ fontSize: 11, color: '#999', marginBottom: 2 }}>{item.label}</div>
+                    <div style={{ fontSize: 22, fontWeight: 600, color: item.color, lineHeight: 1 }}>{item.value}</div>
+                    {item.sub && <div style={{ fontSize: 10, color: '#bbb', marginTop: 2 }}>{item.sub}</div>}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* 第二行：综合评分（数字+雷达图） + 仓位/时机 */}
             <Row gutter={24} style={{ marginBottom: 16, textAlign: 'center' }}>
-              <Col span={8}>
+              {/* 左：综合评分数字 */}
+              <Col span={4} style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
                 <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>
                   综合评分
-                <Tooltip title="查看评分规则" className="tip-light">
+                  <Tooltip title="查看评分规则" className="tip-light">
                     <QuestionCircleOutlined
                       style={{ marginLeft: 4, cursor: 'pointer' }}
                       onClick={showRules}
                     />
                   </Tooltip>
                 </div>
-                <div style={{ fontSize: 32, fontWeight: 500, color: scoreColor(overview.totalScore, 100) }}>
-                  {overview.totalScore}<span style={{ fontSize: 16, color: '#999' }}> / 100</span>
+                <div style={{ fontSize: 36, fontWeight: 500, color: scoreColor(overview.totalScore, 100), lineHeight: 1 }}>
+                  {overview.totalScore}
                 </div>
+                <div style={{ fontSize: 12, color: '#999', marginTop: 2 }}>/ 100</div>
               </Col>
-              <Col span={8}>
+              {/* 中：雷达图 */}
+              <Col span={10}>
+                {overview.scoreDetails && overview.scoreDetails.length > 0 && (
+                  <ScoreRadarChart scoreDetails={overview.scoreDetails} />
+                )}
+              </Col>
+              {/* 右：仓位 + 时机 */}
+              <Col span={5} style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
                 <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>建议仓位</div>
-                <div style={{ fontSize: 32, fontWeight: 500, color: '#333' }}>
-                  {overview.position}<span style={{ fontSize: 16, color: '#999' }}>%</span>
+                <div style={{ fontSize: 36, fontWeight: 500, color: '#333', lineHeight: 1 }}>
+                  {overview.position}
                 </div>
+                <div style={{ fontSize: 12, color: '#999', marginTop: 2 }}>%</div>
               </Col>
-              <Col span={8}>
+              <Col span={5} style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
                 <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>操作时机</div>
                 <Tag
                   color={actionColor(overview.actionName)}
-                  style={{ fontSize: 16, padding: '4px 16px' }}
+                  style={{ fontSize: 16, padding: '4px 16px', marginTop: 4 }}
                 >
                   {overview.timing || '-'}
                 </Tag>
@@ -479,10 +612,19 @@ export default function StockAnalysis() {
             )}
           </Card>
 
-          {/* ── 分析结论 - 紧凑行内样式 ───────────────────────────────── */}
-          {overview.conclusion && (
+          {/* ── 分析结论 - 合并多空辩论结论 ───────────────────────────── */}
+          {(overview.conclusion || bullBearData?.conclusion) && (
             <div style={{ marginBottom: 16, padding: '10px 12px', background: '#e6f7ff', borderRadius: 4, fontSize: 13, color: '#096dd9' }}>
-              <span style={{ fontWeight: 500 }}>分析结论：</span>{overview.conclusion}
+              {overview.conclusion && (
+                <div style={{ marginBottom: bullBearData?.conclusion ? 8 : 0 }}>
+                  <span style={{ fontWeight: 500 }}>分析结论：</span>{overview.conclusion}
+                </div>
+              )}
+              {bullBearData?.conclusion && (
+                <div>
+                  <span style={{ fontWeight: 500 }}>多空辩论：</span>{bullBearData.conclusion}
+                </div>
+              )}
             </div>
           )}
 
@@ -517,6 +659,194 @@ export default function StockAnalysis() {
           ))}
         </Card>
       )}
+    </div>
+  );
+}
+
+// ── 四维度雷达图 ─────────────────────────────────────────────────────────────
+function ScoreRadarChart({ scoreDetails }) {
+  if (!scoreDetails || scoreDetails.length === 0) return null;
+
+  const indicator = scoreDetails.map(d => ({
+    name: d.dimensionName || d.dimension,
+    max: d.maxScore || 10,
+  }));
+
+  const serieData = [{
+    value: scoreDetails.map(d => d.score || 0),
+    name: '四维度评分',
+    lineStyle: { color: '#1890ff', width: 2 },
+    areaStyle: { color: 'rgba(24, 144, 255, 0.12)' },
+    itemStyle: { color: '#1890ff' },
+    label: {
+      show: true,
+      formatter: '{c}',
+      fontSize: 11,
+      color: '#333',
+      position: 'outside',
+      distance: 4,
+    },
+  }];
+
+  const option = {
+    backgroundColor: 'transparent',
+    tooltip: {
+      trigger: 'item',
+      formatter: (params) => {
+        const idx = params.dataIndex;
+        const dim = scoreDetails[idx];
+        if (!dim) return '';
+        const items = (dim.items || []).map(it => `${it.label}: ${it.value} (${it.score}/${it.maxScore})`).join('<br/>');
+        return `<b>${dim.dimensionName}</b>：${dim.score} / ${dim.maxScore}<br/>${items}`;
+      },
+    },
+    radar: {
+      indicator,
+      radius: '72%',
+      splitNumber: 4,
+      splitArea: {
+        areaStyle: { color: ['rgba(24,144,255,0.03)', 'rgba(24,144,255,0.07)', 'rgba(24,144,255,0.11)', 'rgba(24,144,255,0.15)'] },
+      },
+      axisLine: { lineStyle: { color: '#e8e8e8' } },
+      splitLine: { lineStyle: { color: '#e8e8e8' } },
+      name: { textStyle: { color: '#333', fontSize: 12, fontWeight: 500, padding: [0, 4] } },
+    },
+    series: [{ type: 'radar', data: serieData }],
+  };
+
+  return <ReactECharts option={option} style={{ height: 220 }} notMerge lazyUpdate />;
+}
+
+// ── K线图 ────────────────────────────────────────────────────────────────────
+function KLineChart({ data }) {
+  if (!data || data.length === 0) return null;
+
+  const dates = data.map(d => d.date);
+  const ohlc = data.map(d => [d.open, d.close, d.low, d.high]);
+  const volumes = data.map(d => d.volume || 0);
+  const closes = data.map(d => d.close);
+
+  // 计算均线
+  const calcMA = (period) => {
+    const result = [];
+    for (let i = 0; i < closes.length; i++) {
+      if (i < period - 1) { result.push('-'); continue; }
+      const sum = closes.slice(i - period + 1, i + 1).reduce((a, b) => a + b, 0);
+      result.push((sum / period).toFixed(2));
+    }
+    return result;
+  };
+
+  const ma5 = calcMA(5);
+  const ma10 = calcMA(10);
+  const ma20 = calcMA(20);
+  const ma60 = calcMA(60);
+
+  const option = {
+    backgroundColor: 'transparent',
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'cross' },
+      formatter: (params) => {
+        const bar = params.find(p => p.seriesType === 'candlestick');
+        if (!bar) return '';
+        const idx = bar.dataIndex;
+        const d = data[idx];
+        const vol = params.find(p => p.seriesName === '成交量');
+        return `<b>${d.date}</b><br/>
+          开：${d.open}<br/>高：${d.high}<br/>低：${d.low}<br/>收：${d.close}
+          ${d.changePercent != null ? `<br/>涨跌：${parseFloat(d.changePercent).toFixed(2)}%` : ''}
+          ${vol ? `<br/>成交量：${(d.volume / 10000).toFixed(0)}万` : ''}`;
+      },
+    },
+    legend: { data: ['K线', 'MA5', 'MA10', 'MA20', 'MA60'], bottom: 0, type: 'scroll' },
+    grid: [{ left: 60, right: 20, top: 20, height: '55%' }, { left: 60, right: 20, top: '75%', height: '15%' }],
+    xAxis: [
+      { type: 'category', data: dates, gridIndex: 0, boundaryGap: false, axisLine: { lineStyle: { color: '#e8e8e8' } }, axisLabel: { show: false } },
+      { type: 'category', data: dates, gridIndex: 1, boundaryGap: false, axisLine: { lineStyle: { color: '#e8e8e8' } }, axisLabel: { fontSize: 10 } },
+    ],
+    yAxis: [
+      { scale: true, gridIndex: 0, axisLine: { lineStyle: { color: '#e8e8e8' } }, axisLabel: { fontSize: 10 } },
+      { scale: true, gridIndex: 1, axisLine: { lineStyle: { color: '#e8e8e8' } }, axisLabel: { fontSize: 10, formatter: v => (v / 10000).toFixed(0) + '万' } },
+    ],
+    dataZoom: [{ type: 'inside', xAxisIndex: [0, 1], start: 50, end: 100 }, { type: 'slider', xAxisIndex: [0, 1], start: 50, end: 100 }],
+    series: [
+      {
+        type: 'candlestick',
+        name: 'K线',
+        data: ohlc,
+        itemStyle: { color: '#ef5350', color0: '#26a69a', borderColor: '#ef5350', borderColor0: '#26a69a' },
+        xAxisIndex: 0, yAxisIndex: 0,
+      },
+      { type: 'line', name: 'MA5', data: ma5, smooth: true, lineStyle: { width: 1, color: '#f5d76e' }, symbol: 'none', xAxisIndex: 0, yAxisIndex: 0 },
+      { type: 'line', name: 'MA10', data: ma10, smooth: true, lineStyle: { width: 1, color: '#42a5f5' }, symbol: 'none', xAxisIndex: 0, yAxisIndex: 0 },
+      { type: 'line', name: 'MA20', data: ma20, smooth: true, lineStyle: { width: 1, color: '#ab47bc' }, symbol: 'none', xAxisIndex: 0, yAxisIndex: 0 },
+      { type: 'line', name: 'MA60', data: ma60, smooth: true, lineStyle: { width: 1, color: '#ff7043' }, symbol: 'none', xAxisIndex: 0, yAxisIndex: 0 },
+      {
+        type: 'bar', name: '成交量', data: volumes,
+        xAxisIndex: 1, yAxisIndex: 1,
+        itemStyle: { color: params => ohlc[params.dataIndex][1] >= ohlc[params.dataIndex][0] ? '#ef535080' : '#26a69a80' },
+      },
+    ],
+  };
+
+  return <ReactECharts option={option} style={{ height: 420 }} notMerge lazyUpdate />;
+}
+
+// ── 多空论点对比图 ──────────────────────────────────────────────────────────
+function BullBearChart({ bull, bear }) {
+  // 按维度聚合强度
+  const dimMap = {};
+  const bullIdx = new Set(bull.map((_, i) => i));
+  [...bull, ...bear].forEach((arg, idx) => {
+    const dim = arg.dimension || '其他';
+    if (!dimMap[dim]) dimMap[dim] = { bullScore: 0, bearScore: 0 };
+    if (idx < bull.length) dimMap[dim].bullScore += arg.strength;
+    else dimMap[dim].bearScore += arg.strength;
+  });
+
+  const dims = Object.keys(dimMap);
+  if (dims.length === 0) return null;
+
+  const bullScores = dims.map(d => dimMap[d].bullScore);
+  const bearScores = dims.map(d => -dimMap[d].bearScore);
+
+  const maxAbs = Math.max(...bullScores.map(Math.abs), ...bearScores.map(Math.abs)) + 2;
+
+  const option = {
+    backgroundColor: 'transparent',
+    tooltip: {
+      trigger: 'axis',
+      formatter: (params) => {
+        const dim = params[0].axisValue;
+        const bull = params.find(p => p.seriesName === '多头');
+        const bear = params.find(p => p.seriesName === '空头');
+        return `<b>${dim}</b><br/>多头：+${bull?.value || 0}分<br/>空头：${bear?.value || 0}分`;
+      },
+    },
+    grid: { left: 60, right: 40, top: 20, bottom: 40 },
+    xAxis: { type: 'category', data: dims, axisLine: { lineStyle: { color: '#e8e8e8' } }, axisLabel: { fontSize: 12 } },
+    yAxis: { type: 'value', min: -maxAbs, max: maxAbs, axisLine: { lineStyle: { color: '#e8e8e8' } }, axisLabel: { fontSize: 10 } },
+    series: [
+      {
+        type: 'bar', name: '多头', data: bullScores,
+        itemStyle: { color: '#ef5350' },
+        barMaxWidth: 30,
+        label: { show: true, position: 'top', fontSize: 10, color: '#ef5350', formatter: v => v.value > 0 ? '+' + v.value : '' },
+      },
+      {
+        type: 'bar', name: '空头', data: bearScores,
+        itemStyle: { color: '#26a69a' },
+        barMaxWidth: 30,
+        label: { show: true, position: 'bottom', fontSize: 10, color: '#26a69a', formatter: v => v.value < 0 ? v.value : '' },
+      },
+    ],
+  };
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <Text strong style={{ fontSize: 13 }}>多空力量对比（按维度）</Text>
+      <ReactECharts option={option} style={{ height: 200 }} notMerge lazyUpdate />
     </div>
   );
 }

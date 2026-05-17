@@ -19,6 +19,11 @@ spring:
       idle-timeout: 300000
       max-lifetime: 600000
   # JPA配置已移除，所有数据操作使用MyBatis-Plus
+  freemarker:
+    charset: UTF-8
+    content-type: text/html
+    suffix: .ftl
+    template-loader-path: classpath:/templates/
   jackson:
     time-zone: Asia/Shanghai
     date-format: yyyy-MM-dd HH:mm:ss
@@ -73,6 +78,15 @@ quant:
     thread-pool-size: 4
     max-concurrent-tasks: 10
   factor:
+    # LLM 配置（用于研报摘要生成 + 综合结论输出）
+    llm:
+      enabled: false                        # 设为 true 启用 LLM
+      base-url: http://localhost:11434/v1   # Ollama / DeepSeek / Qwen 等
+      api-key: ""                           # Ollama 无需 key；API key 留空
+      model: qwen2.5:14b                    # 模型名（确保已启动）
+      temperature: 0.3                       # 摘要用低温保持准确性
+      max-tokens: 1024                       # 最大输出 token 数
+      timeout: 30                            # 请求超时（秒）
     script-timeout-seconds: 30
     cache-size: 1000
   aktools:

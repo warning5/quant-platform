@@ -285,9 +285,17 @@ public class PaperTradingService {
     }
 
     /**
-     * 刷新持仓现价、市值、盈亏
+     * 获取模拟盘持仓列表（供 Scheduler 调用）
      */
-    private void refreshPositionPrices(List<PaperPosition> positions) {
+    public List<PaperPosition> getPositionsForPaper(Long paperId) {
+        return paperPositionMapper.selectList(
+            new LambdaQueryWrapper<PaperPosition>().eq(PaperPosition::getPaperId, paperId));
+    }
+
+    /**
+     * 刷新持仓现价、市值、盈亏（公开方法，供 Scheduler 在收盘后统一刷新）
+     */
+    public void refreshPositionPrices(List<PaperPosition> positions) {
         if (positions == null || positions.isEmpty() || clickHouseJdbcTemplate == null) return;
 
         // 获取最新交易日
@@ -716,7 +724,7 @@ public class PaperTradingService {
             paperSignalMapper.updateById(signal);
 
             updateTotalAssets(pt);
-            appendNavRecord(pt.getId());
+            // 注意：不在此处调用 appendNavRecord，日收益需在收盘后统一按收盘价计算
             return pos;
 
         } else if ("SELL".equals(signal.getDirection())) {
@@ -747,7 +755,7 @@ public class PaperTradingService {
             paperSignalMapper.updateById(signal);
 
             updateTotalAssets(pt);
-            appendNavRecord(pt.getId());
+            // 注意：不在此处调用 appendNavRecord，日收益需在收盘后统一按收盘价计算
             return pos;
         }
 
@@ -887,7 +895,7 @@ public class PaperTradingService {
 
         paperTradingMapper.updateById(pt);
         updateTotalAssets(pt);
-        appendNavRecord(pt.getId());
+        // 注意：不在此处调用 appendNavRecord，日收益需在收盘后统一按收盘价计算
     }
 
     // ─── 内部方法 ──────────────────────────────────────────────────────
@@ -903,10 +911,10 @@ public class PaperTradingService {
     }
 
     /**
-     * 追加/更新当日 NAV 记录（每次交易后自动调用）
+     * 追加/更新当日 NAV 记录（收盘后统一调用，基于收盘价计算日收益）
      * 同一天多次交易时，更新当日已存在的记录，不重复插入
      */
-    private void appendNavRecord(Long paperId) {
+    public void appendNavRecord(Long paperId) {
         PaperTrading pt = paperTradingMapper.selectById(paperId);
         LocalDate today = LocalDate.now();
 

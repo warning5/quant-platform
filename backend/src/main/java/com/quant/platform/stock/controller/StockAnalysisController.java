@@ -4,15 +4,19 @@ import com.quant.platform.stock.analysis.domain.AnalysisOverview;
 import com.quant.platform.stock.analysis.engine.TradingSignalEngine;
 import com.quant.platform.stock.analysis.service.AnalysisService;
 import com.quant.platform.stock.analysis.service.MarketThermometerService;
+import com.quant.platform.stock.analysis.service.WorkflowReportService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -55,7 +59,10 @@ public class StockAnalysisController {
 
     @Autowired(required = false)
     private MarketThermometerService marketThermometerService;
-    
+
+    @Autowired(required = false)
+    private WorkflowReportService workflowReportService;
+
     /**
      * 获取个股分析总览（含四维度评分）
      * GET /api/analysis/overview?code=000001
@@ -427,10 +434,97 @@ public class StockAnalysisController {
         }
     }
 
+    /**
+     * 多空辩论论据
+     * GET /api/analysis/bull-bear?code=000001
+     */
+    @GetMapping("/bull-bear")
+    public ResponseEntity<?> getBullBear(@RequestParam String code) {
+        if (workflowReportService == null) {
+            return ResponseEntity.status(503).body(errorBody("报告服务不可用"));
+        }
+        if (code == null || code.trim().isEmpty()) {
+            return ResponseEntity.badRequest().body(errorBody("股票代码不能为空"));
+        }
+        try {
+            com.quant.platform.stock.analysis.domain.WorkflowReport report = workflowReportService.generateReport(code.trim());
+            Map<String, Object> data = new HashMap<>();
+            data.put("bullArguments", report.getBullArguments());
+            data.put("bearArguments", report.getBearArguments());
+            data.put("conclusion", report.getConclusion());
+            data.put("totalScore", report.getTotalScore());
+            data.put("bias", report.getBias());
+            return ResponseEntity.ok(new ApiResponse<>(data));
+        } catch (Exception e) {
+            log.error("多空辩论生成失败: code={}, error={}", code, e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(errorBody("多空辩论生成失败：" + e.getMessage()));
+        }
+    }
+
+    /**
+     * HTML 报告导出
+     * GET /api/analysis/html-report?code=000001&mode=preview
+     * mode=preview: 浏览器预览；mode=download: 下载HTML文件
+     */
+    @GetMapping("/html-report")
+    public ResponseEntity<?> getHtmlReport(@RequestParam String code,
+                                           @RequestParam(defaultValue = "preview") String mode) {
+        if (workflowReportService == null) {
+            return ResponseEntity.status(503).body(errorBody("报告服务不可用"));
+        }
+        if (code == null || code.trim().isEmpty()) {
+            return ResponseEntity.badRequest().body(errorBody("股票代码不能为空"));
+        }
+        try {
+            String html = workflowReportService.generateHtml(code.trim());
+            byte[] bytes = html.getBytes(StandardCharsets.UTF_8);
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.TEXT_HTML);
+            if ("download".equals(mode)) {
+                headers.set(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"" + code.trim() + "_report.html\"");
+            }
+            return ResponseEntity.ok().headers(headers).body(bytes);
+        } catch (Exception e) {
+            log.error("HTML报告生成失败: code={}, error={}", code, e.getMessage(), e);
+            String errorHtml = "<html><body><h1>报告生成失败</h1><p>" + escapeHtml(e.getMessage()) + "</p></body></html>";
+            return ResponseEntity.internalServerError()
+                    .contentType(MediaType.TEXT_HTML)
+                    .body(errorHtml.getBytes(StandardCharsets.UTF_8));
+        }
+    }
+
+    private String escapeHtml(String text) {
+        if (text == null) return "";
+        return text.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;");
+    }
+
     private Map<String, Object> errorBody(String message) {
         Map<String, Object> body = new HashMap<>();
         body.put("error", message);
         body.put("code", 500);
         return body;
+    }
+
+    /**
+     * K线数据（近N交易日）
+     * GET /api/analysis/kline?code=000001&days=60
+     */
+    @GetMapping("/kline")
+    public ResponseEntity<?> getKLine(@RequestParam String code,
+                                       @RequestParam(defaultValue = "60") int days) {
+        if (code == null || code.trim().isEmpty()) {
+            return ResponseEntity.badRequest().body(errorBody("股票代码不能为空"));
+        }
+        try {
+            List<Map<String, Object>> kline = analysisService.getKLine(code.trim(), days);
+            return ResponseEntity.ok(new ApiResponse<>(kline));
+        } catch (Exception e) {
+            log.error("K线数据获取失败: code={}, error={}", code, e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(errorBody("K线数据获取失败：" + e.getMessage()));
+        }
     }
 }

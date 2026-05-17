@@ -2030,4 +2030,579 @@ public class BuiltinFactors {
             return BigDecimal.valueOf(Math.log(ratio)).setScale(8, RoundingMode.HALF_UP);
         }
     }
+
+    // ===== DMI / ADX 系列 =====
+
+    /**
+     * Wilder 平滑 EMA
+     * alpha = 2 / (period + 1)，与 Wilder 平滑等价
+     */
+    private static double wilderEma(double prevSmoothed, double value, int period) {
+        double alpha = 2.0 / (period + 1);
+        return prevSmoothed * (1 - alpha) + value * alpha;
+    }
+
+    /**
+     * DMI/ADX 核心算法（供多个计算器复用）
+     * @return [trSmooth, dmPlusSmooth, dmMinusSmooth]，全为 double
+     */
+    private static double[] computeDmiSmoothed(List<MarketDailyBar> bars, int n) {
+        int len = bars.size();
+        double[] trArr = new double[len];
+        double[] dmPlus = new double[len];
+        double[] dmMinus = new double[len];
+
+        for (int i = 0; i < len; i++) {
+            MarketDailyBar curr = bars.get(i);
+            double h = curr.getHigh().doubleValue();
+            double l = curr.getLow().doubleValue();
+            double c = curr.getClose().doubleValue();
+
+            if (i == 0) {
+                trArr[i] = h - l;
+                dmPlus[i] = 0;
+                dmMinus[i] = 0;
+            } else {
+                MarketDailyBar prev = bars.get(i - 1);
+                double pc = prev.getClose().doubleValue();
+
+                trArr[i] = Math.max(h - l, Math.max(Math.abs(h - pc), Math.abs(l - pc)));
+
+                double upMove = h - prev.getHigh().doubleValue();
+                double downMove = prev.getLow().doubleValue() - l;
+
+                if (upMove > downMove && upMove > 0) {
+                    dmPlus[i] = upMove;
+                    dmMinus[i] = 0;
+                } else if (downMove > upMove && downMove > 0) {
+                    dmPlus[i] = 0;
+                    dmMinus[i] = downMove;
+                } else {
+                    dmPlus[i] = 0;
+                    dmMinus[i] = 0;
+                }
+            }
+        }
+
+        // Wilder 初始值 = 第一个周期的简单和
+        double trSmooth = 0, dmPSmooth = 0, dmMSmooth = 0;
+        for (int i = 0; i < n && i < len; i++) {
+            trSmooth += trArr[i];
+            dmPSmooth += dmPlus[i];
+            dmMSmooth += dmMinus[i];
+        }
+        if (trSmooth == 0) return new double[]{0, 0, 0};
+
+        // 后续用 Wilder EMA 递推
+        for (int i = n; i < len; i++) {
+            trSmooth = wilderEma(trSmooth, trArr[i], n);
+            dmPSmooth = wilderEma(dmPSmooth, dmPlus[i], n);
+            dmMSmooth = wilderEma(dmMSmooth, dmMinus[i], n);
+        }
+
+        return new double[]{trSmooth, dmPSmooth, dmMSmooth};
+    }
+
+    /**
+     * +DI14（上升方向指标）——衡量上涨趋势强度
+     */
+    public static class PlusDI14Calculator implements FactorCalculator {
+        @Override
+        public String getFactorCode() {
+            return "PLUS_DI14";
+        }
+
+        @Override
+        public BigDecimal calculate(String symbol, LocalDate calcDate,
+                                    List<MarketDailyBar> history, Map<String, Object> context) {
+            if (history.size() < 15) return null;
+            double[] smooth = computeDmiSmoothed(history, 14);
+            if (smooth[0] == 0) return null;
+            double di = 100.0 * smooth[1] / smooth[0];
+            return BigDecimal.valueOf(di).setScale(6, RoundingMode.HALF_UP);
+        }
+    }
+
+    /**
+     * -DI14（下降方向指标）——衡量下跌趋势强度
+     */
+    public static class MinusDI14Calculator implements FactorCalculator {
+        @Override
+        public String getFactorCode() {
+            return "MINUS_DI14";
+        }
+
+        @Override
+        public BigDecimal calculate(String symbol, LocalDate calcDate,
+                                    List<MarketDailyBar> history, Map<String, Object> context) {
+            if (history.size() < 15) return null;
+            double[] smooth = computeDmiSmoothed(history, 14);
+            if (smooth[0] == 0) return null;
+            double di = 100.0 * smooth[2] / smooth[0];
+            return BigDecimal.valueOf(di).setScale(6, RoundingMode.HALF_UP);
+        }
+    }
+
+    /**
+     * DX14（方向移动指数）——+DI 与 -DI 的相对差距
+     * DX = 100 * |+DI - (-DI)| / (+DI + -DI)
+     */
+    public static class Dx14Calculator implements FactorCalculator {
+        @Override
+        public String getFactorCode() {
+            return "DX14";
+        }
+
+        @Override
+        public BigDecimal calculate(String symbol, LocalDate calcDate,
+                                    List<MarketDailyBar> history, Map<String, Object> context) {
+            if (history.size() < 15) return null;
+            double[] smooth = computeDmiSmoothed(history, 14);
+            if (smooth[0] == 0) return null;
+            double diP = smooth[1] / smooth[0];
+            double diM = smooth[2] / smooth[0];
+            double sum = diP + diM;
+            if (sum == 0) return null;
+            double dx = 100.0 * Math.abs(diP - diM) / sum;
+            return BigDecimal.valueOf(dx).setScale(6, RoundingMode.HALF_UP);
+        }
+    }
+
+    /**
+     * ADX14（平均方向移动指数）——趋势强度的终极指标
+     * ADX = Wilder EMA(DX)，反映当前趋势的强弱（不管多空）
+     * ADX > 25 → 强趋势；ADX < 20 → 震荡/无趋势
+     */
+    public static class Adx14Calculator implements FactorCalculator {
+        @Override
+        public String getFactorCode() {
+            return "ADX14";
+        }
+
+        @Override
+        public BigDecimal calculate(String symbol, LocalDate calcDate,
+                                    List<MarketDailyBar> history, Map<String, Object> context) {
+            int n = 14;
+            if (history.size() < n * 2) return null;
+
+            // 逐根计算 DX
+            double[] dxArr = new double[history.size()];
+            for (int i = 1; i < history.size(); i++) {
+                int start = Math.max(0, i - n);
+                int end = i + 1;
+                List<MarketDailyBar> sub = history.subList(start, end);
+                double[] smooth = computeDmiSmoothed(sub, n);
+                if (smooth[0] == 0) {
+                    dxArr[i] = 0;
+                } else {
+                    double diP = smooth[1] / smooth[0];
+                    double diM = smooth[2] / smooth[0];
+                    double sum = diP + diM;
+                    dxArr[i] = (sum == 0) ? 0 : 100.0 * Math.abs(diP - diM) / sum;
+                }
+            }
+
+            // Wilder EMA of DX: alpha = 2/(n+1)
+            // 第一个 ADX = 最后一个 DX
+            double alpha = 2.0 / (n + 1);
+            double adx = dxArr[n]; // 第 n 个 DX 作为初始值
+            for (int i = n + 1; i < history.size(); i++) {
+                adx = adx * (1 - alpha) + dxArr[i] * alpha;
+            }
+            return BigDecimal.valueOf(adx).setScale(6, RoundingMode.HALF_UP);
+        }
+    }
+
+    /**
+     * ADX20（长周期 ADX）——更长趋势判断
+     */
+    public static class Adx20Calculator implements FactorCalculator {
+        @Override
+        public String getFactorCode() {
+            return "ADX20";
+        }
+
+        @Override
+        public BigDecimal calculate(String symbol, LocalDate calcDate,
+                                    List<MarketDailyBar> history, Map<String, Object> context) {
+            int n = 20;
+            if (history.size() < n * 2) return null;
+
+            double[] dxArr = new double[history.size()];
+            for (int i = 1; i < history.size(); i++) {
+                int start = Math.max(0, i - n);
+                int end = i + 1;
+                List<MarketDailyBar> sub = history.subList(start, end);
+                double[] smooth = computeDmiSmoothed(sub, n);
+                if (smooth[0] == 0) {
+                    dxArr[i] = 0;
+                } else {
+                    double diP = smooth[1] / smooth[0];
+                    double diM = smooth[2] / smooth[0];
+                    double sum = diP + diM;
+                    dxArr[i] = (sum == 0) ? 0 : 100.0 * Math.abs(diP - diM) / sum;
+                }
+            }
+
+            double alpha = 2.0 / (n + 1);
+            double adx = dxArr[n];
+            for (int i = n + 1; i < history.size(); i++) {
+                adx = adx * (1 - alpha) + dxArr[i] * alpha;
+            }
+            return BigDecimal.valueOf(adx).setScale(6, RoundingMode.HALF_UP);
+        }
+    }
+
+    // ===== SAR / KDJ扩展 / BOLL扩展 / 均线排列 / 支撑阻力 (2026-05-17) =====
+
+    /**
+     * SAR（抛物转向指标）- 返回当前SAR值
+     * AF初始0.02，每创新高/低加0.02，上限0.2
+     * SAR > 价格 → 看跌；SAR < 价格 → 看涨
+     */
+    public static class SarCalculator implements FactorCalculator {
+        @Override
+        public String getFactorCode() {
+            return "SAR";
+        }
+
+        @Override
+        public BigDecimal calculate(String symbol, LocalDate calcDate,
+                                    List<MarketDailyBar> history, Map<String, Object> context) {
+            if (history.size() < 3) return null;
+
+            double af = 0.02, maxAf = 0.2;
+            boolean uptrend = history.get(1).getClose().doubleValue() > history.get(0).getClose().doubleValue();
+            double ep, sar;
+
+            if (uptrend) {
+                // 初始SAR = 近n日最低价
+                double lowest = Double.MAX_VALUE;
+                for (int i = 0; i < history.size() - 1; i++) {
+                    lowest = Math.min(lowest, history.get(i).getLow().doubleValue());
+                }
+                sar = lowest;
+                ep = Double.MIN_VALUE;
+                for (int i = 0; i < history.size() - 1; i++) {
+                    ep = Math.max(ep, history.get(i).getHigh().doubleValue());
+                }
+            } else {
+                double highest = Double.MIN_VALUE;
+                for (int i = 0; i < history.size() - 1; i++) {
+                    highest = Math.max(highest, history.get(i).getHigh().doubleValue());
+                }
+                sar = highest;
+                ep = Double.MAX_VALUE;
+                for (int i = 0; i < history.size() - 1; i++) {
+                    ep = Math.min(ep, history.get(i).getLow().doubleValue());
+                }
+            }
+
+            // 从第二根K线开始递推（history.size()-1 根已确认趋势的K线）
+            for (int i = history.size() - 1; i > 0; i--) {
+                MarketDailyBar curr = history.get(i);
+                double currHigh = curr.getHigh().doubleValue();
+                double currLow = curr.getLow().doubleValue();
+                double currClose = curr.getClose().doubleValue();
+                MarketDailyBar prev = history.get(i - 1);
+
+                if (uptrend) {
+                    // 上涨趋势
+                    if (currHigh > ep) {
+                        ep = currHigh;
+                        af = Math.min(af + 0.02, maxAf);
+                    }
+                    double newSar = sar + af * (ep - sar);
+                    // SAR 不能高于近两日最低价
+                    double minLow = Math.min(prev.getLow().doubleValue(), currLow);
+                    if (newSar > minLow) newSar = minLow;
+                    if (newSar > currLow) {
+                        // 趋势反转
+                        uptrend = false;
+                        sar = ep;
+                        ep = currLow;
+                        af = 0.02;
+                    } else {
+                        sar = newSar;
+                    }
+                } else {
+                    // 下跌趋势
+                    if (currLow < ep) {
+                        ep = currLow;
+                        af = Math.min(af + 0.02, maxAf);
+                    }
+                    double newSar = sar - af * (sar - ep);
+                    // SAR 不能低于近两日最高价
+                    double maxHigh = Math.max(prev.getHigh().doubleValue(), currHigh);
+                    if (newSar < maxHigh) newSar = maxHigh;
+                    if (newSar < currHigh) {
+                        // 趋势反转
+                        uptrend = true;
+                        sar = ep;
+                        ep = currHigh;
+                        af = 0.02;
+                    } else {
+                        sar = newSar;
+                    }
+                }
+            }
+
+            return BigDecimal.valueOf(sar).setScale(6, RoundingMode.HALF_UP);
+        }
+    }
+
+    /**
+     * KDJ_D - KDJ指标D线（J=3K-2D）
+     * 9日RSV平滑，K/D初值50
+     */
+    public static class KdjDCalculator implements FactorCalculator {
+        @Override
+        public String getFactorCode() {
+            return "KDJ_D";
+        }
+
+        @Override
+        public BigDecimal calculate(String symbol, LocalDate calcDate,
+                                    List<MarketDailyBar> history, Map<String, Object> context) {
+            if (history.size() < 10) return null;
+            double k = 50, d = 50;
+            for (int i = 0; i < history.size(); i++) {
+                int start = Math.max(0, i - 8);
+                double highest = Double.MIN_VALUE, lowest = Double.MAX_VALUE;
+                for (int j = start; j <= i; j++) {
+                    highest = Math.max(highest, history.get(j).getHigh().doubleValue());
+                    lowest = Math.min(lowest, history.get(j).getLow().doubleValue());
+                }
+                double close = history.get(i).getClose().doubleValue();
+                double rsv = (highest == lowest) ? 50 : (close - lowest) / (highest - lowest) * 100;
+                k = (2.0 / 3.0) * k + (1.0 / 3.0) * rsv;
+                d = (2.0 / 3.0) * d + (1.0 / 3.0) * k;
+            }
+            return BigDecimal.valueOf(d).setScale(8, RoundingMode.HALF_UP);
+        }
+    }
+
+    /**
+     * KDJ_J - KDJ指标J线（J = 3K - 2D）
+     * J > 100 超买，J < 0 超卖
+     */
+    public static class KdjJCalculator implements FactorCalculator {
+        @Override
+        public String getFactorCode() {
+            return "KDJ_J";
+        }
+
+        @Override
+        public BigDecimal calculate(String symbol, LocalDate calcDate,
+                                    List<MarketDailyBar> history, Map<String, Object> context) {
+            if (history.size() < 10) return null;
+            double k = 50, d = 50;
+            for (int i = 0; i < history.size(); i++) {
+                int start = Math.max(0, i - 8);
+                double highest = Double.MIN_VALUE, lowest = Double.MAX_VALUE;
+                for (int j = start; j <= i; j++) {
+                    highest = Math.max(highest, history.get(j).getHigh().doubleValue());
+                    lowest = Math.min(lowest, history.get(j).getLow().doubleValue());
+                }
+                double close = history.get(i).getClose().doubleValue();
+                double rsv = (highest == lowest) ? 50 : (close - lowest) / (highest - lowest) * 100;
+                k = (2.0 / 3.0) * k + (1.0 / 3.0) * rsv;
+                d = (2.0 / 3.0) * d + (1.0 / 3.0) * k;
+            }
+            double j = 3 * k - 2 * d;
+            return BigDecimal.valueOf(j).setScale(8, RoundingMode.HALF_UP);
+        }
+    }
+
+    /**
+     * BOLL_UPPER - 布林带上轨（MA20 + 2*STD）
+     * 返回价格值（绝对值），非分位
+     */
+    public static class BollUpperCalculator implements FactorCalculator {
+        @Override
+        public String getFactorCode() {
+            return "BOLL_UPPER";
+        }
+
+        @Override
+        public BigDecimal calculate(String symbol, LocalDate calcDate,
+                                    List<MarketDailyBar> history, Map<String, Object> context) {
+            if (history.size() < 20) return null;
+            List<MarketDailyBar> window = history.subList(history.size() - 20, history.size());
+            double[] closes = window.stream().mapToDouble(b -> b.getClose().doubleValue()).toArray();
+            double mean = 0;
+            for (double c : closes) mean += c;
+            mean /= closes.length;
+            double std = 0;
+            for (double c : closes) std += (c - mean) * (c - mean);
+            std = Math.sqrt(std / closes.length);
+            return BigDecimal.valueOf(mean + 2 * std).setScale(4, RoundingMode.HALF_UP);
+        }
+    }
+
+    /**
+     * BOLL_LOWER - 布林带下轨（MA20 - 2*STD）
+     */
+    public static class BollLowerCalculator implements FactorCalculator {
+        @Override
+        public String getFactorCode() {
+            return "BOLL_LOWER";
+        }
+
+        @Override
+        public BigDecimal calculate(String symbol, LocalDate calcDate,
+                                    List<MarketDailyBar> history, Map<String, Object> context) {
+            if (history.size() < 20) return null;
+            List<MarketDailyBar> window = history.subList(history.size() - 20, history.size());
+            double[] closes = window.stream().mapToDouble(b -> b.getClose().doubleValue()).toArray();
+            double mean = 0;
+            for (double c : closes) mean += c;
+            mean /= closes.length;
+            double std = 0;
+            for (double c : closes) std += (c - mean) * (c - mean);
+            std = Math.sqrt(std / closes.length);
+            return BigDecimal.valueOf(mean - 2 * std).setScale(4, RoundingMode.HALF_UP);
+        }
+    }
+
+    /**
+     * BOLL_WIDTH - 布林带宽度（通道宽度 / 中轨）
+     * 衡量波动率，宽度扩大 = 趋势可能反转或加速
+     */
+    public static class BollWidthCalculator implements FactorCalculator {
+        @Override
+        public String getFactorCode() {
+            return "BOLL_WIDTH";
+        }
+
+        @Override
+        public BigDecimal calculate(String symbol, LocalDate calcDate,
+                                    List<MarketDailyBar> history, Map<String, Object> context) {
+            if (history.size() < 20) return null;
+            List<MarketDailyBar> window = history.subList(history.size() - 20, history.size());
+            double[] closes = window.stream().mapToDouble(b -> b.getClose().doubleValue()).toArray();
+            double mean = 0;
+            for (double c : closes) mean += c;
+            mean /= closes.length;
+            double std = 0;
+            for (double c : closes) std += (c - mean) * (c - mean);
+            std = Math.sqrt(std / closes.length);
+            if (mean == 0) return null;
+            return BigDecimal.valueOf(2 * std / mean).setScale(8, RoundingMode.HALF_UP);
+        }
+    }
+
+    /**
+     * MA_ALIGNMENT - 均线多头排列程度
+     * 返回 0~5：5条均线（MA5/10/20/30/60）升序排列的数量
+     * 5 = 完全多头排列（最强），0 = 完全空头排列（最弱）
+     */
+    public static class MaAlignmentCalculator implements FactorCalculator {
+        @Override
+        public String getFactorCode() {
+            return "MA_ALIGNMENT";
+        }
+
+        @Override
+        public BigDecimal calculate(String symbol, LocalDate calcDate,
+                                    List<MarketDailyBar> history, Map<String, Object> context) {
+            if (history.size() < 61) return null;
+            double ma5 = avgClose(history, 5);
+            double ma10 = avgClose(history, 10);
+            double ma20 = avgClose(history, 20);
+            double ma30 = avgClose(history, 30);
+            double ma60 = avgClose(history, 60);
+            int count = 0;
+            if (ma5 > ma10) count++;
+            if (ma10 > ma20) count++;
+            if (ma20 > ma30) count++;
+            if (ma30 > ma60) count++;
+            return BigDecimal.valueOf(count).setScale(0, RoundingMode.HALF_UP);
+        }
+
+        private double avgClose(List<MarketDailyBar> h, int n) {
+            return h.subList(h.size() - n, h.size())
+                    .stream().mapToDouble(b -> b.getClose().doubleValue()).sum() / n;
+        }
+    }
+
+    /**
+     * NEAR_RESISTANCE - 距离最近阻力位的幅度（%）
+     * 阻力位 = 近60日内的局部高点（排除最近5日）
+     * 返回 (close - resistance) / close * 100，负值越大代表越接近阻力
+     */
+    public static class NearResistanceCalculator implements FactorCalculator {
+        @Override
+        public String getFactorCode() {
+            return "NEAR_RESISTANCE";
+        }
+
+        @Override
+        public BigDecimal calculate(String symbol, LocalDate calcDate,
+                                    List<MarketDailyBar> history, Map<String, Object> context) {
+            if (history.size() < 20) return null;
+            // 取近60日（排除最近5日），找局部高点
+            int lookback = Math.min(60, history.size() - 5);
+            double close = history.getLast().getClose().doubleValue();
+            double maxHigh = Double.MIN_VALUE;
+            for (int i = history.size() - lookback; i < history.size() - 5; i++) {
+                maxHigh = Math.max(maxHigh, history.get(i).getHigh().doubleValue());
+            }
+            if (maxHigh == Double.MIN_VALUE || close == 0) return null;
+            return BigDecimal.valueOf((close - maxHigh) / close * 100).setScale(4, RoundingMode.HALF_UP);
+        }
+    }
+
+    /**
+     * NEAR_SUPPORT - 距离最近支撑位的幅度（%）
+     * 支撑位 = 近60日内的局部低点（排除最近5日）
+     * 返回 (support - close) / close * 100
+     */
+    public static class NearSupportCalculator implements FactorCalculator {
+        @Override
+        public String getFactorCode() {
+            return "NEAR_SUPPORT";
+        }
+
+        @Override
+        public BigDecimal calculate(String symbol, LocalDate calcDate,
+                                    List<MarketDailyBar> history, Map<String, Object> context) {
+            if (history.size() < 20) return null;
+            int lookback = Math.min(60, history.size() - 5);
+            double close = history.getLast().getClose().doubleValue();
+            double minLow = Double.MAX_VALUE;
+            for (int i = history.size() - lookback; i < history.size() - 5; i++) {
+                minLow = Math.min(minLow, history.get(i).getLow().doubleValue());
+            }
+            if (minLow == Double.MAX_VALUE || close == 0) return null;
+            return BigDecimal.valueOf((minLow - close) / close * 100).setScale(4, RoundingMode.HALF_UP);
+        }
+    }
+
+    /**
+     * 量比 (VOLUME_RATIO) - 近5日均量 / 近20日均量
+     * > 1.5 = 放量，> 2 = 显著放量
+     */
+    public static class VolumeRatioCalculator2 implements FactorCalculator {
+        @Override
+        public String getFactorCode() {
+            return "VOLUME_RATIO";
+        }
+
+        @Override
+        public BigDecimal calculate(String symbol, LocalDate calcDate,
+                                    List<MarketDailyBar> history, Map<String, Object> context) {
+            if (history.size() < 21) return null;
+            double sum5 = 0, sum20 = 0;
+            for (int i = history.size() - 5; i < history.size(); i++) {
+                sum5 += history.get(i).getVol().doubleValue();
+            }
+            for (int i = history.size() - 20; i < history.size(); i++) {
+                sum20 += history.get(i).getVol().doubleValue();
+            }
+            if (sum20 == 0) return null;
+            return BigDecimal.valueOf((sum5 / 5) / (sum20 / 20)).setScale(6, RoundingMode.HALF_UP);
+        }
+    }
 }
+

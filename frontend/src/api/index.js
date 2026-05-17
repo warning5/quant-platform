@@ -293,6 +293,7 @@ export const stockAnalysisApi = {
   getChanChart: (code) => api.get('/analysis/chan-chart', { params: { code } }),
   getMoneyFlowHistory: (code, days = 120) => api.get('/analysis/money-flow-history', { params: { code, days } }),
   getRelativeStrength: (code) => api.get('/analysis/relative-strength', { params: { code } }),
+  getKLine: (code, days = 60) => api.get('/analysis/kline', { params: { code, days } }),
 };
 
 export default api;

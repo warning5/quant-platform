@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Card, Row, Col, Statistic, Button, Input, Select, DatePicker, Form,
-  Checkbox, Tag, Typography, Space, Alert, Table, Tooltip, Progress, Badge, message, Divider, Tabs, Spin, Modal, Popconfirm
+  Checkbox, Tag, Typography, Space, Alert, Table, Tooltip, Progress, Badge, message, Divider, Tabs, Spin, Modal, Popconfirm, Radio
 } from 'antd';
 import {
   PlayCircleOutlined, StopOutlined, ReloadOutlined,
@@ -128,6 +128,10 @@ const renderTaskConfig = (task, updateType) => {
     if (task.configFetchZtPool !== false) tags.push(<Tag key="ztpool" color="red">涨跌停池</Tag>);
     if (task.configFetchMoneyflow !== false) tags.push(<Tag key="moneyflow" color="magenta">资金流向</Tag>);
     if (task.configFetchNotice !== false) tags.push(<Tag key="notice" color="volcano">公告</Tag>);
+    if (task.configFetchFundHolder !== false) tags.push(<Tag key="fund" color="gold">基金持仓</Tag>);
+    if (task.configFetchShareholder !== false) tags.push(<Tag key="shareholder" color="lime">股东人数</Tag>);
+    if (task.configFetchNews !== false) tags.push(<Tag key="news" color="cyan">新闻</Tag>);
+    if (task.configForce) tags.push(<Tag key="force" color="red">全量重刷</Tag>);
   } else if (updateType === 'RESEARCH') {
     if (task.configForce) tags.push(<Tag key="force" color="red">强制重新采集</Tag>);
     if (task.configSingleCode) tags.push(<Tag key="single" color="geekblue">单只: {task.configSingleCode}</Tag>);
@@ -225,6 +229,7 @@ function DataUpdate() {
   const sentimentCoverageFetchedRef = useRef(false);
   const [sentimentValidateResult, setSentimentValidateResult] = useState(null);
   const [sentimentValidateLoading, setSentimentValidateLoading] = useState(false);
+  const [sentimentMoneyflowSource, setSentimentMoneyflowSource] = useState('AKSHARE');
 
   // 研报数据
   const [researchTask, setResearchTask] = useState(null);
@@ -555,7 +560,12 @@ function DataUpdate() {
               if (msg.fetchZtPool !== undefined) t.configFetchZtPool = msg.fetchZtPool;
               if (msg.fetchMoneyflow !== undefined) t.configFetchMoneyflow = msg.fetchMoneyflow;
               if (msg.fetchNotice !== undefined) t.configFetchNotice = msg.fetchNotice;
+              if (msg.fetchFundHolder !== undefined) t.configFetchFundHolder = msg.fetchFundHolder;
+              if (msg.fetchShareholder !== undefined) t.configFetchShareholder = msg.fetchShareholder;
+              if (msg.fetchNews !== undefined) t.configFetchNews = msg.fetchNews;
+              if (msg.moneyflowSource !== undefined) t.configMoneyflowSource = msg.moneyflowSource;
               if (msg.singleCode !== undefined) t.configSingleCode = msg.singleCode;
+              if (msg.force !== undefined) t.configForce = msg.force;
               return t;
             });
           } else if (msg.type === 'DATA_UPDATE_LOG') {
@@ -871,14 +881,33 @@ function DataUpdate() {
         force: values.force || false,
         // 情绪数据专属字段
         ...(updateType === 'SENTIMENT' ? {
-          fetchLhb: values.fetchLhb !== false,
-          fetchMargin: values.fetchMargin !== false,
-          fetchSurvey: values.fetchSurvey !== false,
-          fetchBlockTrade: values.fetchBlockTrade !== false,
-          fetchActivity: values.fetchActivity !== false,
-          fetchZtPool: values.fetchZtPool !== false,
-          fetchMoneyflow: values.fetchMoneyflow !== false,
-          fetchNotice: values.fetchNotice !== false,
+          ...(values.moneyflowSource !== 'NEODATA' ? {
+            fetchLhb: values.fetchLhb !== false,
+            fetchMargin: values.fetchMargin !== false,
+            fetchSurvey: values.fetchSurvey !== false,
+            fetchBlockTrade: values.fetchBlockTrade !== false,
+            fetchActivity: values.fetchActivity !== false,
+            fetchZtPool: values.fetchZtPool !== false,
+            fetchMoneyflow: values.fetchMoneyflow !== false,
+            fetchNotice: values.fetchNotice !== false,
+            fetchFundHolder: values.fetchFundHolder !== false,
+            fetchShareholder: values.fetchShareholder !== false,
+            fetchNews: values.fetchNews !== false,
+          } : {
+            // NeoData 模式：显式关闭其他模块，防止 Java 默认值 true 导致误执行
+            fetchLhb: false,
+            fetchMargin: false,
+            fetchSurvey: false,
+            fetchBlockTrade: false,
+            fetchActivity: false,
+            fetchZtPool: false,
+            fetchMoneyflow: true,
+            fetchNotice: false,
+            fetchFundHolder: false,
+            fetchShareholder: false,
+            fetchNews: false,
+          }),
+          moneyflowSource: values.moneyflowSource || 'AKSHARE',
         } : {}),
       };
 
@@ -1651,10 +1680,11 @@ function DataUpdate() {
                           条 · {
                             table.minDate && table.maxDate
                               ? (() => {
-                                  const minStr = table.minDate.slice(5);
-                                  const maxStr = table.maxDate.slice(5);
-                                  const crossYear = table.minDate.slice(0, 4) !== table.maxDate.slice(0, 4);
-                                  return crossYear ? `${table.minDate}~${table.maxDate}` : `${minStr}~${maxStr}`;
+                                  // 统一取前10位（日期部分），避免 datetime 含时间导致显示异常
+                                  const minD = String(table.minDate).slice(0, 10);
+                                  const maxD = String(table.maxDate).slice(0, 10);
+                                  const crossYear = minD.slice(0, 4) !== maxD.slice(0, 4);
+                                  return crossYear ? `${minD}~${maxD}` : `${minD.slice(5)}~${maxD.slice(5)}`;
                                 })()
                               : ''
                           }
@@ -1681,53 +1711,122 @@ function DataUpdate() {
             fetchZtPool: true,
             fetchMoneyflow: true,
             fetchNotice: true,
+            fetchFundHolder: true,
+            fetchShareholder: true,
+            fetchNews: true,
+            force: false,
+            moneyflowSource: 'AKSHARE',
           }}>
-            <Row gutter={[16, 12]} style={{ width: '100%' }}>
+            <Row gutter={[16, 12]} style={{ width: '100%' }} align="middle">
               <Col>
                 <Form.Item name="dateRange" label="日期范围" tooltip="不选则默认最近7天">
                   <RangePicker placeholder={['开始日期', '结束日期']} />
                 </Form.Item>
               </Col>
               <Col>
-                <span style={{ lineHeight: '32px', color: '#8c8c8c', fontSize: 13 }}>
-                  <ThunderboltOutlined style={{ marginRight: 4 }} />
-                  采集市场情绪相关衍生数据
-                </span>
+                <Form.Item name="moneyflowSource" noStyle>
+                  <Radio.Group onChange={e => {
+                    const val = e.target.value;
+                    setSentimentMoneyflowSource(val);
+                    // 显式同步 form 字段，防止 Form.Item 绑定失效
+                    sentimentForm.setFieldsValue({ moneyflowSource: val });
+                    if (val === 'NEODATA') {
+                      // NeoData 模式：只保留资金流向勾选，其他全部取消
+                      sentimentForm.setFieldsValue({
+                        fetchLhb: false,
+                        fetchMargin: false,
+                        fetchSurvey: false,
+                        fetchBlockTrade: false,
+                        fetchActivity: false,
+                        fetchZtPool: false,
+                        fetchMoneyflow: true,
+                        fetchNotice: false,
+                        fetchFundHolder: false,
+                        fetchShareholder: false,
+                        fetchNews: false,
+                        force: false,
+                      });
+                    } else {
+                      // AKSHARE 模式：全部恢复默认勾选
+                      sentimentForm.setFieldsValue({
+                        fetchLhb: true,
+                        fetchMargin: true,
+                        fetchSurvey: true,
+                        fetchBlockTrade: true,
+                        fetchActivity: true,
+                        fetchZtPool: true,
+                        fetchMoneyflow: true,
+                        fetchNotice: true,
+                        fetchFundHolder: true,
+                        fetchShareholder: true,
+                        fetchNews: true,
+                        force: false,
+                      });
+                    }
+                  }}>
+                    <Radio.Button value="AKSHARE">
+                      <CloudSyncOutlined /> akshare（默认）
+                    </Radio.Button>
+                    <Radio.Button value="NEODATA" style={{ marginLeft: 8 }}>
+                      <ThunderboltOutlined /> NeoData（更快，推荐）
+                    </Radio.Button>
+                  </Radio.Group>
+                  {sentimentMoneyflowSource === 'NEODATA' && (
+                    <Tag color="purple" icon={<ThunderboltOutlined />} style={{ marginLeft: 12 }}>
+                      NeoData 模式：仅采集资金流向
+                    </Tag>
+                  )}
+                </Form.Item>
               </Col>
             </Row>
             <Row gutter={[16, 12]} style={{ width: '100%', marginBottom: 12 }}>
               <Col>
-                <Space size={16}>
-                  <Form.Item name="fetchLhb" valuePropName="checked" style={{ marginBottom: 0 }}>
-                    <Checkbox>龙虎榜</Checkbox>
-                  </Form.Item>
-                  <Form.Item name="fetchMargin" valuePropName="checked" style={{ marginBottom: 0 }}>
-                    <Checkbox>融资融券</Checkbox>
-                  </Form.Item>
-                  <Form.Item name="fetchSurvey" valuePropName="checked" style={{ marginBottom: 0 }}>
-                    <Checkbox>机构调研</Checkbox>
-                  </Form.Item>
-                  <Form.Item name="fetchBlockTrade" valuePropName="checked" style={{ marginBottom: 0 }}>
-                    <Checkbox>大宗交易</Checkbox>
-                  </Form.Item>
-                  <Form.Item name="fetchActivity" valuePropName="checked" style={{ marginBottom: 0 }}>
-                    <Checkbox>市场活跃度</Checkbox>
-                  </Form.Item>
-                  <Form.Item name="fetchZtPool" valuePropName="checked" style={{ marginBottom: 0 }}>
-                    <Checkbox>涨跌停池</Checkbox>
-                  </Form.Item>
-                  <Form.Item name="fetchMoneyflow" valuePropName="checked" style={{ marginBottom: 0 }}>
-                    <Checkbox>资金流向</Checkbox>
-                  </Form.Item>
-                  <Form.Item name="fetchNotice" valuePropName="checked" style={{ marginBottom: 0 }}>
-                    <Checkbox>公告</Checkbox>
-                  </Form.Item>
-                </Space>
+                <div style={{
+                  opacity: sentimentMoneyflowSource === 'NEODATA' ? 0.5 : 1,
+                  pointerEvents: sentimentMoneyflowSource === 'NEODATA' ? 'none' : 'auto',
+                  transition: 'opacity 0.2s',
+                }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '8px 16px' }}>
+                    <Form.Item name="fetchLhb" valuePropName="checked" style={{ marginBottom: 0 }}>
+                      <Checkbox>龙虎榜</Checkbox>
+                    </Form.Item>
+                    <Form.Item name="fetchMargin" valuePropName="checked" style={{ marginBottom: 0 }}>
+                      <Checkbox>融资融券</Checkbox>
+                    </Form.Item>
+                    <Form.Item name="fetchSurvey" valuePropName="checked" style={{ marginBottom: 0 }}>
+                      <Checkbox>机构调研</Checkbox>
+                    </Form.Item>
+                    <Form.Item name="fetchBlockTrade" valuePropName="checked" style={{ marginBottom: 0 }}>
+                      <Checkbox>大宗交易</Checkbox>
+                    </Form.Item>
+                    <Form.Item name="fetchActivity" valuePropName="checked" style={{ marginBottom: 0 }}>
+                      <Checkbox>市场活跃度</Checkbox>
+                    </Form.Item>
+                    <Form.Item name="fetchZtPool" valuePropName="checked" style={{ marginBottom: 0 }}>
+                      <Checkbox>涨跌停池</Checkbox>
+                    </Form.Item>
+                    <Form.Item name="fetchMoneyflow" valuePropName="checked" style={{ marginBottom: 0 }}>
+                      <Checkbox>资金流向</Checkbox>
+                    </Form.Item>
+                    <Form.Item name="fetchNotice" valuePropName="checked" style={{ marginBottom: 0 }}>
+                      <Checkbox>公告</Checkbox>
+                    </Form.Item>
+                    <Form.Item name="fetchFundHolder" valuePropName="checked" style={{ marginBottom: 0 }}>
+                      <Checkbox>基金持仓</Checkbox>
+                    </Form.Item>
+                    <Form.Item name="fetchShareholder" valuePropName="checked" style={{ marginBottom: 0 }}>
+                      <Checkbox>股东人数</Checkbox>
+                    </Form.Item>
+                    <Form.Item name="fetchNews" valuePropName="checked" style={{ marginBottom: 0 }}>
+                      <Checkbox>新闻</Checkbox>
+                    </Form.Item>
+                  </div>
+                </div>
               </Col>
             </Row>
             <Row style={{ width: '100%' }}>
               <Col>
-                <Space size={12}>
+                <Space size={12} wrap>
                   <Button type="primary" icon={isRunning ? <LockOutlined /> : <PlayCircleOutlined />}
                     onClick={() => handleSubmit('SENTIMENT')} disabled={isRunning}>
                     开始采集
@@ -1736,6 +1835,9 @@ function DataUpdate() {
                     onClick={() => handleCancel('SENTIMENT')} disabled={!isRunning}>
                     取消任务
                   </Button>
+                  <Form.Item name="force" valuePropName="checked" style={{ marginBottom: 0 }}>
+                    <Checkbox>全量重刷（覆盖已有数据）</Checkbox>
+                  </Form.Item>
                   <Button icon={<SearchOutlined />}
                     onClick={handleSentimentValidate} loading={sentimentValidateLoading}>
                     数据校验
@@ -1751,6 +1853,44 @@ function DataUpdate() {
 
         {/* 进度条 */}
         {renderProgressBar(sentimentTask)}
+
+        {/* 任务配置摘要 */}
+        {sentimentTask && (sentimentTask.configStartDate || sentimentTask.configMoneyflowSource) && (
+          <Card size="small" style={{ marginBottom: 8, background: '#f6ffed', borderColor: '#b7eb8f' }}>
+            <Space wrap size={16}>
+              <Text style={{ fontSize: 12 }}>
+                <CalendarOutlined /> 日期：
+                <Tag size="small" color="blue">{sentimentTask.configStartDate || '默认'}</Tag>
+                {' ~ '}
+                <Tag size="small" color="blue">{sentimentTask.configEndDate || '默认'}</Tag>
+              </Text>
+              <Text style={{ fontSize: 12 }}>
+                <ThunderboltOutlined /> 模式：
+                {sentimentTask.configMoneyflowSource === 'NEODATA' ? (
+                  <Tag size="small" color="purple">NeoData（仅资金流向）</Tag>
+                ) : (
+                  <Tag size="small">akshare</Tag>
+                )}
+              </Text>
+              {sentimentTask.configMoneyflowSource !== 'NEODATA' && (
+                <Text style={{ fontSize: 12 }}>
+                  模块：
+                  {sentimentTask.configFetchLhb && <Tag size="small">龙虎榜</Tag>}
+                  {sentimentTask.configFetchMargin && <Tag size="small">融资融券</Tag>}
+                  {sentimentTask.configFetchSurvey && <Tag size="small">机构调研</Tag>}
+                  {sentimentTask.configFetchBlockTrade && <Tag size="small">大宗交易</Tag>}
+                  {sentimentTask.configFetchActivity && <Tag size="small">市场活跃度</Tag>}
+                  {sentimentTask.configFetchZtPool && <Tag size="small">涨跌停池</Tag>}
+                  {sentimentTask.configFetchMoneyflow && <Tag size="small">资金流向</Tag>}
+                  {sentimentTask.configFetchNotice && <Tag size="small">公告</Tag>}
+                  {sentimentTask.configFetchFundHolder && <Tag size="small">基金持仓</Tag>}
+                  {sentimentTask.configFetchShareholder && <Tag size="small">股东人数</Tag>}
+                  {sentimentTask.configFetchNews && <Tag size="small">新闻</Tag>}
+                </Text>
+              )}
+            </Space>
+          </Card>
+        )}
 
         {/* 日志 */}
         <Card title={<span>采集日志 <Text type="secondary" style={{ fontSize: 12 }}>({sentimentLogs.length} 条)</Text></span>}

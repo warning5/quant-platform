@@ -79,8 +79,8 @@ public class DataUpdateController {
     @PostMapping("/start")
     @Operation(summary = "启动数据更新任务")
     public ApiResponse<Map<String, Object>> startTask(@RequestBody DataUpdateRequest request) {
-        log.info("启动数据更新任务: source={}, market={}, startDate={}, endDate={}",
-                request.getSource(), request.getMarket(), request.getStartDate(), request.getEndDate());
+        log.info("启动数据更新任务: source={}, market={}, startDate={}, endDate={}, moneyflowSource={}",
+                request.getSource(), request.getMarket(), request.getStartDate(), request.getEndDate(), request.getMoneyflowSource());
 
         DataUpdateTask task = dataUpdateService.submitTask(request);
         return ApiResponse.success("任务已启动", Map.of(

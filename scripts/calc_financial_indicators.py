@@ -99,7 +99,8 @@ def main():
     # 加载 income 数据: key=(code,report_date)
     print("加载 income 数据...")
     cur.execute("SELECT code, report_date, total_revenue, operating_profit, operating_cost, "
-                "net_profit_incl_minority, net_profit, total_profit, finance_expense, income_tax, eps_basic FROM stock_income")
+                "net_profit_incl_minority, net_profit, total_profit, finance_expense, income_tax, eps_basic, "
+                "deducted_np_parent_company FROM stock_income")
     income_data = {}
     for r in cur.fetchall():
         income_data[(r[0], r[1])] = {
@@ -112,6 +113,7 @@ def main():
             'finance_expense': to_float(r[8]),
             'income_tax': to_float(r[9]),
             'eps_basic': to_float(r[10]),
+            'deducted_np_parent_company': to_float(r[11]),
         }
 
     # 加载 balance 数据
@@ -303,6 +305,14 @@ def main():
         else:
             ar_turnover_days = None
 
+        # 23. ar_to_np_ratio = 应收账款 / 净利润（含少数）* 100（年化）
+        #    > 1000% 表明应收账款远大于盈利质量，危险信号
+        #    参考报告：海立股份 5653% = 57.39亿应收 / 0.72亿净利 * 100
+        if accounts_receivable and net_profit and net_profit != 0:
+            ar_to_np_ratio = accounts_receivable / abs(net_profit) * 100 * af
+        else:
+            ar_to_np_ratio = None
+
         # 四舍五入
         def r4(v):
             return round(v, 4) if v is not None else None
@@ -330,6 +340,7 @@ def main():
             'net_profit_margin': r4(net_profit_margin),
             'inventory_turnover': r4(inventory_turnover),
             'ar_turnover_days': r4(ar_turnover_days),
+            'ar_to_np_ratio': r4(ar_to_np_ratio),
             'net_operate_cf': cf.get('net_operate_cf'),
             'free_cash_flow': cf.get('free_cash_flow'),
         }

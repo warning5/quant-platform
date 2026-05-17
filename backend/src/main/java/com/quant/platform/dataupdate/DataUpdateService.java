@@ -609,6 +609,30 @@ public class DataUpdateService {
 
         // 情绪数据
         if ("SENTIMENT".equals(updateType)) {
+            // NEODATA 模式：只用 NeoData 跑资金流向，跳过其他所有子模块
+            if ("NEODATA".equalsIgnoreCase(request.getMoneyflowSource())) {
+                cmd.add("update_sentiment_data.py");
+                cmd.add("--moneyflow-neodata");
+                String startDate = request.getStartDate();
+                String endDate = request.getEndDate();
+                if ((startDate == null || startDate.isEmpty()) && (endDate == null || endDate.isEmpty())) {
+                    java.time.LocalDate today = java.time.LocalDate.now();
+                    java.time.LocalDate from = today.minusDays(3);
+                    startDate = from.toString();
+                    endDate = today.toString();
+                }
+                if (startDate != null && !startDate.isEmpty()) {
+                    cmd.add("--start-date");
+                    cmd.add(startDate);
+                }
+                if (endDate != null && !endDate.isEmpty()) {
+                    cmd.add("--end-date");
+                    cmd.add(endDate);
+                }
+                log.info("[DataUpdate] NEODATA 模式：仅更新资金流向，日期 {} ~ {}", startDate, endDate);
+                return cmd;
+            }
+            // AKSHARE 模式（默认）：原有逻辑
             cmd.add("update_sentiment_data.py");
             String startDate = request.getStartDate();
             String endDate = request.getEndDate();
@@ -635,6 +659,10 @@ public class DataUpdateService {
             if (!request.isFetchZtPool()) cmd.add("--skip-zt");
             if (!request.isFetchMoneyflow()) cmd.add("--skip-moneyflow");
             if (!request.isFetchNotice()) cmd.add("--skip-notice");
+            if (request.isFetchFundHolder()) cmd.add("--fund-holder");
+            if (request.isFetchShareholder()) cmd.add("--shareholder");
+            if (request.isFetchNews()) cmd.add("--news");
+            if (request.isForce()) cmd.add("--force");
             return cmd;
         }
 
@@ -908,6 +936,10 @@ public class DataUpdateService {
                 msg.put("fetchZtPool", req.isFetchZtPool());
                 msg.put("fetchMoneyflow", req.isFetchMoneyflow());
                 msg.put("fetchNotice", req.isFetchNotice());
+                msg.put("fetchFundHolder", req.isFetchFundHolder());
+                msg.put("fetchShareholder", req.isFetchShareholder());
+                msg.put("fetchNews", req.isFetchNews());
+                msg.put("moneyflowSource", req.getMoneyflowSource());
             }
             messagingTemplate.convertAndSend("/topic/data-update/status", msg);
         } catch (Exception e) {

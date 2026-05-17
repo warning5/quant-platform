@@ -140,6 +140,12 @@
             <version>4.0.18</version>
         </dependency>
 
+        <!-- FreeMarker (Workflow A 报告模板) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-freemarker</artifactId>
+        </dependency>
+
         <!-- Spring Cache + Caffeine (数据概览缓存) -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

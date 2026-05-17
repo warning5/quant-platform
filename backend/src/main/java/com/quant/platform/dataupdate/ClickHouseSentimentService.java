@@ -3,6 +3,7 @@ package com.quant.platform.dataupdate;
 import com.quant.platform.config.ClickHouseConfig;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.sql.Connection;
@@ -22,6 +23,7 @@ public class ClickHouseSentimentService {
 
     private final ClickHouseConfig clickHouseConfig;
     private final SentimentService sentimentService;  // MySQL fallback
+    private final JdbcTemplate jdbcTemplate;  // 用于查询MySQL-only的表（基金持仓/股东人数/新闻）
 
     // 情绪数据表列表（与 SentimentService 一致）
     // 保留：zt(涨跌停池) + moneyflow(资金情绪代理) + notice(公告)
@@ -145,6 +147,45 @@ public class ClickHouseSentimentService {
                 Map<String, Object> tableStat = new LinkedHashMap<>();
                 tableStat.put("table", table);
                 tableStat.put("name", TABLE_NAMES.getOrDefault(table, table));
+                tableStat.put("recordCount", 0);
+                tableStat.put("minDate", null);
+                tableStat.put("maxDate", null);
+                tableStats.add(tableStat);
+            }
+        }
+
+        // 追加：基金持仓、股东人数、新闻（MySQL-only 表，但同属数据采集管线）
+        for (String[] extra : new String[][]{
+                {"stock_fund_holder", "基金持仓", "report_date"},
+                {"stock_shareholder", "股东人数", "report_date"},
+                {"stock_news", "新闻", "publish_date"}
+        }) {
+            String table = extra[0];
+            String name = extra[1];
+            String dateCol = extra[2];
+            try {
+                Integer count = jdbcTemplate.queryForObject("SELECT COUNT(*) as cnt FROM " + table, Integer.class);
+                if (count == null) count = 0;
+                totalRecords += count;
+
+                // 新闻表 publish_date 含时间，只取 DATE 部分
+                String dateSql = "news".equals(extra[0])
+                        ? "SELECT MIN(DATE(" + dateCol + ")) as min_date, MAX(DATE(" + dateCol + ")) as max_date FROM " + table
+                        : "SELECT MIN(" + dateCol + ") as min_date, MAX(" + dateCol + ") as max_date FROM " + table;
+                Map<String, Object> dateRange = jdbcTemplate.queryForMap(dateSql);
+
+                Map<String, Object> tableStat = new LinkedHashMap<>();
+                tableStat.put("table", table);
+                tableStat.put("name", name);
+                tableStat.put("recordCount", count);
+                tableStat.put("minDate", dateRange.get("min_date"));
+                tableStat.put("maxDate", dateRange.get("max_date"));
+                tableStats.add(tableStat);
+            } catch (Exception e) {
+                log.warn("查询MySQL表 {} 失败: {}", table, e.getMessage());
+                Map<String, Object> tableStat = new LinkedHashMap<>();
+                tableStat.put("table", table);
+                tableStat.put("name", name);
                 tableStat.put("recordCount", 0);
                 tableStat.put("minDate", null);
                 tableStat.put("maxDate", null);

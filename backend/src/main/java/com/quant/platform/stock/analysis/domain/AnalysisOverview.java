@@ -104,4 +104,19 @@ public class AnalysisOverview {
      * 是否大盘蓝筹（总市值 ≥ 1000亿）
      */
     private boolean blueChip;
+
+    /**
+     * 目标价
+     */
+    private String targetPrice;
+
+    /**
+     * 止损价
+     */
+    private String stopLossPrice;
+
+    /**
+     * 信心水平（低/中/高）
+     */
+    private String confidenceLevel;
 }

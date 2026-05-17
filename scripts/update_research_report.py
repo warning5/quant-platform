@@ -23,7 +23,8 @@ import json
 import pymysql
 import warnings
 import akshare as ak
-from datetime import datetime
+from datetime import datetime, date, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 warnings.filterwarnings('ignore')
 
@@ -41,14 +42,13 @@ def get_mysql_conn():
 def upsert_reports_batch(mysql_conn, rows):
     """
     批量写入研报数据到 MySQL。
-    rows: list of dict, key 与 stock_research_report 字段对应
-    逻辑：先尝试 INSERT IGNORE，失败（或需要更新）则逐条 REPLACE
+    使用 REPLACE INTO：已存在则覆盖（按主键/唯一键判断），不存在则插入。
     """
     if not rows:
         return 0
 
     sql = """
-    INSERT IGNORE INTO stock_research_report
+    REPLACE INTO stock_research_report
         (code, name, report_title, rating, institution,
          eps_forecast, industry, report_date, pdf_url)
     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -65,19 +65,21 @@ def upsert_reports_batch(mysql_conn, rows):
     cursor = mysql_conn.cursor()
     try:
         cursor.executemany(sql, params)
-        inserted = cursor.rowcount
-    except Exception:
-        # 部分重复主键 → 逐条 INSERT IGNORE
-        inserted = 0
+        affected = cursor.rowcount
+        mysql_conn.commit()
+    except Exception as e:
+        # 如果 REPLACE 失败，逐条重试（排查单条坏数据）
+        print(f"  [WARN] 批量写入失败: {e}，逐条重试...")
+        affected = 0
         for p in params:
             try:
                 cursor.execute(sql, p)
-                inserted += max(0, cursor.rowcount)
+                affected += max(0, cursor.rowcount)
             except Exception:
                 pass
-
+        mysql_conn.commit()
     cursor.close()
-    return inserted
+    return affected
 
 
 def parse_float(val):
@@ -156,19 +158,52 @@ def fetch_stock_reports(code):
     return results, None
 
 
-def get_stock_list(mysql_conn, force_all=False):
-    """获取需要更新的股票列表"""
+def get_stock_list(mysql_conn, force_all=False, skip_recent_days=0):
+    """
+    获取需要更新的股票列表
+    - force_all=True: 返回全部股票
+    - skip_recent_days>0: 只返回最近 N 天没有研报记录的股票（增量模式）
+                        分两步查，避免 stock_info.code 和 stock_research_report.code
+                        的 collation 不同导致 Illegal mix of collations 错误
+    """
     cursor = mysql_conn.cursor()
     if force_all:
         cursor.execute("SELECT code, name FROM stock_info ORDER BY code")
-    else:
-        # 优先更新有财务数据的股票
+        rows = cursor.fetchall()
+        cursor.close()
+        return rows
+
+    if skip_recent_days > 0:
+        # 增量模式：两步查，避开 SQL collation 冲突
+        cutoff = (date.today() - timedelta(days=skip_recent_days)).isoformat()
+
+        # 第1步：有财务数据的全部股票
         cursor.execute("""
-            SELECT DISTINCT s.code, s.name
+            SELECT s.code, s.name
             FROM stock_info s
             WHERE EXISTS (SELECT 1 FROM stock_financial_indicator f WHERE f.code = s.code)
             ORDER BY s.code
         """)
+        all_stocks = cursor.fetchall()
+
+        # 第2步：最近 N 天有研报的 code 集合（单独查，不做跨表比较）
+        cursor.execute(
+            "SELECT DISTINCT code FROM stock_research_report WHERE report_date >= %s",
+            (cutoff,)
+        )
+        recent_codes = {r[0] for r in cursor.fetchall()}
+        cursor.close()
+
+        # 第3步：Python 层过滤
+        return [s for s in all_stocks if s[0] not in recent_codes]
+
+    # 全量模式（有财务数据的股票）
+    cursor.execute("""
+        SELECT DISTINCT s.code, s.name
+        FROM stock_info s
+        WHERE EXISTS (SELECT 1 FROM stock_financial_indicator f WHERE f.code = s.code)
+        ORDER BY s.code
+    """)
     rows = cursor.fetchall()
     cursor.close()
     return rows
@@ -186,6 +221,12 @@ def print_overview(mysql_conn):
 
     cursor.execute("SELECT MIN(report_date), MAX(report_date) FROM stock_research_report")
     dr = cursor.fetchone()
+
+    cursor.execute("""
+        SELECT COUNT(*) FROM stock_research_report
+        WHERE eps_forecast IS NULL OR eps_forecast = '' OR eps_forecast = '{}'
+    """)
+    null_eps = cursor.fetchone()[0]
 
     cursor.execute("""
         SELECT institution, COUNT(*) AS cnt
@@ -210,6 +251,8 @@ def print_overview(mysql_conn):
     print(f"{'='*52}")
     print(f"  总记录数    : {total:,}")
     print(f"  覆盖股票数  : {stocks:,}")
+    if null_eps > 0:
+        print(f"  ⚠ 缺EPS/PE  : {null_eps:,} 条（可用 --fix-null-eps 补采）")
     if dr and dr[0]:
         print(f"  日期范围    : {dr[0]} ~ {dr[1]}")
     print()
@@ -223,9 +266,28 @@ def print_overview(mysql_conn):
     print(f"{'='*52}\n")
 
 
+def get_stocks_with_null_eps(mysql_conn):
+    """获取 eps_forecast 为空的股票列表（用于补采）"""
+    cursor = mysql_conn.cursor()
+    cursor.execute("""
+        SELECT DISTINCT r.code, s.name
+        FROM stock_research_report r
+        LEFT JOIN stock_info s ON r.code = s.code
+        WHERE r.eps_forecast IS NULL OR r.eps_forecast = '' OR r.eps_forecast = '{}'
+    """)
+    rows = cursor.fetchall()
+    cursor.close()
+    return rows
+
+
 def run_update(mysql_conn, stocks, batch_size=20, sleep_sec=1.0,
-              start_date=None, end_date=None, force_all=False):
-    """主更新循环"""
+              start_date=None, end_date=None, force_all=False,
+              max_workers=10, skip_recent_days=7):
+    """
+    主更新循环（多线程版）
+    - max_workers: 并发线程数（默认10，避免被封）
+    - skip_recent_days: 增量跳过天数（默认7天，与 get_stock_list 配合使用）
+    """
     total_new = 0
     total_err = 0
     start_time = datetime.now()
@@ -258,43 +320,71 @@ def run_update(mysql_conn, stocks, batch_size=20, sleep_sec=1.0,
         cur.execute(f"DELETE FROM stock_research_report {where}", params)
         deleted = cur.rowcount
         cur.close()
+        mysql_conn.commit()
         print(f"[FORCE] 已删除日期范围内已有记录: {deleted} 条")
 
     date_label = ""
     if dt_start or dt_end:
         date_label = f"（日期范围: {dt_start or '不限'} ~ {dt_end or '不限'}）"
+
     print(f"开始时间 : {start_time.strftime('%H:%M:%S')}")
     print(f"目标股票 : {len(stocks)} 只 {date_label}")
+    print(f"并发线程 : {max_workers}")
     print(f"{'='*52}")
 
-    for i, (code, name) in enumerate(stocks, 1):
-        prefix = f"[{i}/{len(stocks)}] {code} {name or ''}"
+    # Worker 函数：处理单只股票
+    def worker(item):
+        code, name = item
+        try:
+            results, err = fetch_stock_reports(code)
+            if err:
+                return (code, name, 0, err[:60])
+            if not results:
+                return (code, name, 0, "无研报")
 
-        results, err = fetch_stock_reports(code)
-
-        if err:
-            total_err += 1
-            print(f"  {prefix}  ✗  {err[:60]}")
-        elif not results:
-            print(f"  {prefix}  .  无研报")
-        else:
             # 按日期范围过滤
             if dt_start or dt_end:
-                filtered = [r for r in results if r["report_date"] is not None
-                            and (not dt_start or r["report_date"] >= dt_start)
-                            and (not dt_end or r["report_date"] <= dt_end)]
+                filtered = [
+                    r for r in results
+                    if r["report_date"] is not None
+                    and (not dt_start or r["report_date"] >= dt_start)
+                    and (not dt_end or r["report_date"] <= dt_end)
+                ]
                 skipped = len(results) - len(filtered)
                 results = filtered
                 if skipped > 0:
-                    print(f"  {prefix}  ~  日期过滤跳过 {skipped} 条")
-            n = upsert_reports_batch(mysql_conn, results)
-            total_new += n
-            print(f"  {prefix}  ✓  +{n}/{len(results)} 条")
+                    pass  # 日期过滤跳过不打印，避免刷屏
 
-        # 每批休眠
-        if i % batch_size == 0 and i < len(stocks):
-            if sleep_sec > 0:
-                time.sleep(sleep_sec)
+            if not results:
+                return (code, name, 0, "无匹配日期")
+
+            # 每个线程独立连接写入
+            conn = get_mysql_conn()
+            n = upsert_reports_batch(conn, results)
+            conn.close()
+            return (code, name, n, None)
+        except Exception as e:
+            return (code, name, 0, str(e)[:60])
+
+    # 并发执行
+    completed = 0
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(worker, item): item for item in stocks}
+        for future in as_completed(futures):
+            code, name, n, err = future.result()
+            completed += 1
+
+            prefix = f"[{completed}/{len(stocks)}] {code} {name or ''}"
+            if err:
+                if "无研报" in err or "无匹配日期" in err:
+                    pass  # 静默跳过
+                else:
+                    total_err += 1
+                    print(f"  {prefix}  ✗  {err}")
+            else:
+                total_new += n
+                if completed % 50 == 0 or completed == len(stocks):
+                    print(f"  {prefix}  ✓  +{n} 条  (累计 {total_new})")
 
     end_time = datetime.now()
     duration = (end_time - start_time).total_seconds()
@@ -307,26 +397,21 @@ def run_update(mysql_conn, stocks, batch_size=20, sleep_sec=1.0,
 
 
 def main():
-    args = sys.argv[1:]
+    import argparse
+    parser = argparse.ArgumentParser(description="研报数据更新（多线程优化版）")
+    parser.add_argument("code", nargs="?", default=None, help="单只股票代码（如 000001）")
+    parser.add_argument("--check", "-c", action="store_true", help="仅打印数据概览")
+    parser.add_argument("--all", "-a", action="store_true", help="强制重刷全部股票（删除旧数据后重写）")
+    parser.add_argument("--start-date", default=None, help="开始日期 YYYY-MM-DD（仅用于过滤研报日期）")
+    parser.add_argument("--end-date", default=None, help="结束日期 YYYY-MM-DD")
+    parser.add_argument("--max-workers", type=int, default=10, help="并发线程数（默认10）")
+    parser.add_argument("--skip-recent-days", type=int, default=7, help="跳过最近N天已更新的股票（默认7天，0=不跳过）")
+    parser.add_argument("--fix-null-eps", action="store_true", help="仅补采 eps_forecast 为空的股票（修复老数据）")
+    args = parser.parse_args()
 
-    check_only = any(a in ("--check", "-c") for a in args)
-    force_all = any(a in ("--all", "-a") for a in args)
-
-    # 解析 --start-date / --end-date，同时收集这些值以便排除 single_code
-    start_date = None
-    end_date = None
-    date_values = set()
-    for i, a in enumerate(args):
-        if a == "--start-date" and i + 1 < len(args):
-            start_date = args[i + 1]
-            date_values.add(start_date)
-        if a == "--end-date" and i + 1 < len(args):
-            end_date = args[i + 1]
-            date_values.add(end_date)
-
-    # single_code：不含 "-" 前缀，且不是日期参数值
-    single_code = next((a for a in args
-                        if not a.startswith("-") and a not in date_values), None)
+    check_only = args.check
+    force_all = args.all
+    fix_null_eps = args.fix_null_eps
 
     mysql_conn = get_mysql_conn()
 
@@ -336,27 +421,41 @@ def main():
         return
 
     # 获取股票列表
-    if single_code:
+    skip_days = args.skip_recent_days if not force_all else 0
+    if args.code:
         cursor = mysql_conn.cursor()
-        cursor.execute("SELECT code, name FROM stock_info WHERE code=%s", (single_code,))
+        cursor.execute("SELECT code, name FROM stock_info WHERE code=%s", (args.code,))
         stocks = cursor.fetchall()
         cursor.close()
         if not stocks:
-            print(f"未找到股票: {single_code}")
+            print(f"未找到股票: {args.code}")
             mysql_conn.close()
             return
-        print(f"模式: 单只股票 {single_code}")
+        print(f"模式: 单只股票 {args.code}")
+    elif fix_null_eps:
+        stocks = get_stocks_with_null_eps(mysql_conn)
+        print(f"模式: 补采 eps_forecast 为空的股票，共 {len(stocks)} 只")
+        if not stocks:
+            print("没有 eps_forecast 为空的记录，退出。")
+            mysql_conn.close()
+            return
     else:
-        stocks = get_stock_list(mysql_conn, force_all=force_all)
-        print(f"模式: {'全部股票' if force_all else '有财务数据的股票'}，共 {len(stocks)} 只")
+        stocks = get_stock_list(mysql_conn, force_all=force_all, skip_recent_days=skip_days)
+        mode_label = '全部股票' if force_all else f'有财务数据的股票（跳过{skip_days}天内已更新）'
+        print(f"模式: {mode_label}，共 {len(stocks)} 只")
         if not stocks:
             print("无符合条件的股票，退出。")
             mysql_conn.close()
             return
 
     try:
-        run_update(mysql_conn, stocks, start_date=start_date, end_date=end_date,
-                   force_all=force_all)
+        run_update(
+            mysql_conn, stocks,
+            start_date=args.start_date, end_date=args.end_date,
+            force_all=force_all,
+            max_workers=args.max_workers,
+            skip_recent_days=skip_days,
+        )
     except KeyboardInterrupt:
         print("\n用户中断")
     finally:

@@ -131,6 +131,28 @@ public class DataUpdateRequest {
     private boolean fetchNotice = true;
 
     /**
+     * 情绪数据：采集基金持仓（默认 true）
+     */
+    private boolean fetchFundHolder = true;
+
+    /**
+     * 情绪数据：采集股东人数（默认 true）
+     */
+    private boolean fetchShareholder = true;
+
+    /**
+     * 情绪数据：采集个股新闻+事件标签+情感（默认 true）
+     */
+    private boolean fetchNews = true;
+
+    /**
+     * 情绪数据：资金流向数据源
+     * AKSHARE = akshare（默认，与原行为一致）
+     * NEODATA = NeoData（更快，推荐）
+     */
+    private String moneyflowSource = "AKSHARE";
+
+    /**
      * 研报数据：单只股票代码（为空则更新全部）
      */
     private String singleCode;

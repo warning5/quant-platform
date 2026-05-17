@@ -149,6 +149,25 @@ public class FactorComputeEngine {
         registerBuiltin(new BuiltinFactors.TurnoverAnomalyCalculator());
         registerBuiltin(new BuiltinFactors.VolumeSurpriseCalculator());
 
+        // 注册 DMI/ADX 趋势因子 (2026-05-17)
+        registerBuiltin(new BuiltinFactors.PlusDI14Calculator());
+        registerBuiltin(new BuiltinFactors.MinusDI14Calculator());
+        registerBuiltin(new BuiltinFactors.Dx14Calculator());
+        registerBuiltin(new BuiltinFactors.Adx14Calculator());
+        registerBuiltin(new BuiltinFactors.Adx20Calculator());
+
+        // 注册 SAR/KDJ扩展/BOLL扩展/均线排列/支撑阻力/量比 (2026-05-17)
+        registerBuiltin(new BuiltinFactors.SarCalculator());
+        registerBuiltin(new BuiltinFactors.KdjDCalculator());
+        registerBuiltin(new BuiltinFactors.KdjJCalculator());
+        registerBuiltin(new BuiltinFactors.BollUpperCalculator());
+        registerBuiltin(new BuiltinFactors.BollLowerCalculator());
+        registerBuiltin(new BuiltinFactors.BollWidthCalculator());
+        registerBuiltin(new BuiltinFactors.MaAlignmentCalculator());
+        registerBuiltin(new BuiltinFactors.NearResistanceCalculator());
+        registerBuiltin(new BuiltinFactors.NearSupportCalculator());
+        registerBuiltin(new BuiltinFactors.VolumeRatioCalculator2());
+
         // 注册缠论因子 (2026-04-29)
         registerBuiltin(new ChanTheoryFactors.PenDirectionCalculator());
         registerBuiltin(new ChanTheoryFactors.TrendTypeCalculator());

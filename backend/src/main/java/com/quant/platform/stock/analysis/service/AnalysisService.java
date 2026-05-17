@@ -110,6 +110,46 @@ public class AnalysisService {
                 }
             }
         }
+
+        // 计算ATR（14日平均真实波幅）
+        BigDecimal atr = null;
+        if (techBars != null && techBars.size() >= 14) {
+            List<DailyBarRow> atrBars = techBars.subList(techBars.size() - 14, techBars.size());
+            double sum = 0;
+            for (int i = 1; i < atrBars.size(); i++) {
+                DailyBarRow cur = atrBars.get(i);
+                DailyBarRow pre = atrBars.get(i - 1);
+                double tr1 = cur.getHighPrice().subtract(cur.getLowPrice()).doubleValue();
+                double tr2 = Math.abs(cur.getHighPrice().subtract(pre.getClosePrice()).doubleValue());
+                double tr3 = Math.abs(cur.getLowPrice().subtract(pre.getClosePrice()).doubleValue());
+                sum += Math.max(tr1, Math.max(tr2, tr3));
+            }
+            atr = BigDecimal.valueOf(sum / 13.0);
+        }
+
+        // 计算目标价/止损价（依赖 chPrice 中的当前价）
+        BigDecimal currentPrice = null;
+        if (chPrice != null && chPrice.get("close_price") != null) {
+            currentPrice = (BigDecimal) chPrice.get("close_price");
+        }
+        String targetPriceStr = null;
+        String stopLossPriceStr = null;
+        if (currentPrice != null) {
+            // 目标价：阻力位上方5%，若无则当前价×1.10
+            BigDecimal target = resistancePrice != null
+                    ? resistancePrice.multiply(new BigDecimal("1.05"))
+                    : currentPrice.multiply(new BigDecimal("1.10"));
+            targetPriceStr = target.setScale(2, RoundingMode.HALF_UP).toString();
+
+            // 止损价：缠论支撑位 与 ATR止损 两者取较近的
+            BigDecimal atrStop = atr != null
+                    ? currentPrice.subtract(atr.multiply(new BigDecimal("1.5")))
+                    : currentPrice.multiply(new BigDecimal("0.90"));
+            BigDecimal stopLoss = (supportPrice != null && supportPrice.compareTo(atrStop) > 0)
+                    ? atrStop  // ATR止损更近（更保守）
+                    : supportPrice;  // 缠论支撑更近
+            stopLossPriceStr = stopLoss.setScale(2, RoundingMode.HALF_UP).toString();
+        }
         
         // 3. 资金面信号（从CH计算量比/换手率）
         MoneyFlowSignal moneySignal = calcMoneyFlowSignal(code);
@@ -209,6 +249,11 @@ public class AnalysisService {
 
         // 7.2 标记是否大盘蓝筹（供前端切换展示）
         overview.setBlueChip(isBlueChip);
+
+        // 7.3 决策卡片：目标价 / 止损价 / 信心水平
+        overview.setTargetPrice(targetPriceStr);
+        overview.setStopLossPrice(stopLossPriceStr);
+        overview.setConfidenceLevel(calcConfidenceLevel(fundamentalSignal, researchSignal));
 
         log.info("个股分析完成: code={}, totalScore={}, action={}",
                 code, overview.getTotalScore(), overview.getAction());
@@ -2059,5 +2104,46 @@ public class AnalysisService {
         }
 
         return result;
+    }
+
+    /**
+     * K线数据（近N交易日，供前端图表使用）
+     */
+    public List<Map<String, Object>> getKLine(String code, int days) {
+        List<DailyBarRow> bars = analysisChMapper.selectRecentDailyBars(code, days);
+        if (bars == null || bars.isEmpty()) return Collections.emptyList();
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (DailyBarRow bar : bars) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("date", bar.getTradeDate() != null ? bar.getTradeDate().toString() : "");
+            item.put("open", bar.getOpenPrice());
+            item.put("high", bar.getHighPrice());
+            item.put("low", bar.getLowPrice());
+            item.put("close", bar.getClosePrice());
+            item.put("volume", bar.getVolume());
+            item.put("changePercent", bar.getChangePercent());
+            item.put("turnoverRate", bar.getTurnoverRate());
+            result.add(item);
+        }
+        return result;
+    }
+
+    /**
+     * 信心水平：基于数据完整性评分（低/中/高）
+     * 研报覆盖 + 基本面数据完整度 + 缠论信号
+     */
+    private String calcConfidenceLevel(FundamentalSignal fundamental, ResearchSignal research) {
+        int score = 0;
+        // 有研报覆盖（reportCount是int原始类型，无法判空）
+        if (research != null && research.getReportCount() > 0) score += 3;
+        // PE/PB/ROE 数据完整
+        if (fundamental != null) {
+            if (fundamental.getPeTtm() != null && fundamental.getPeTtm().doubleValue() > 0) score += 2;
+            if (fundamental.getRoe() != null && fundamental.getRoe().doubleValue() > 0) score += 2;
+            if (fundamental.getRevenueYoy() != null) score += 1;
+        }
+        if (score >= 6) return "高";
+        if (score >= 3) return "中";
+        return "低";
     }
 }

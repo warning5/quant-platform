@@ -75,12 +75,28 @@ public class PaperTradingScheduler {
                     log.warn("模拟盘 [{}] 信号执行异常: {}", paper.getId(), e.getMessage());
                 }
 
-                // Step 4: 持仓预警扫描
+                // Step 4: 收盘后刷新持仓价格为当日收盘价
+                try {
+                    List<PaperPosition> positions = paperTradingService.getPositionsForPaper(paper.getId());
+                    paperTradingService.refreshPositionPrices(positions);
+                } catch (Exception e) {
+                    log.warn("模拟盘 [{}] 持仓价格刷新异常: {}", paper.getId(), e.getMessage());
+                }
+
+                // Step 5: 持仓预警扫描
                 try {
                     int alertCount = positionAlertService.scanAlerts(paper.getId());
                     log.info("模拟盘 [{}] 预警扫描完成，生成 {} 条预警", paper.getId(), alertCount);
                 } catch (Exception e) {
                     log.warn("模拟盘 [{}] 预警扫描异常: {}", paper.getId(), e.getMessage());
+                }
+
+                // Step 6: 收盘后统一计算并记录当日 NAV（日收益基于收盘价）
+                try {
+                    paperTradingService.appendNavRecord(paper.getId());
+                    log.info("模拟盘 [{}] 当日 NAV 记录完成", paper.getId());
+                } catch (Exception e) {
+                    log.warn("模拟盘 [{}] NAV 记录异常: {}", paper.getId(), e.getMessage());
                 }
 
                 log.info("模拟盘 [{}] 处理完成", paper.getId());
