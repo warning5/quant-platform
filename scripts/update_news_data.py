@@ -188,12 +188,19 @@ BATCH_SIZE = 200
 
 
 def get_batch_stocks(conn, force_all=False):
-    """获取股票列表，默认 stock_daily，全量时从 stock_info 取"""
+    """获取股票列表，默认从 stock_info 取（MySQL stock_daily 为空，数据在 ClickHouse）"""
     cur = conn.cursor()
     if force_all:
         cur.execute("SELECT code FROM stock_info ORDER BY code")
     else:
-        cur.execute("SELECT DISTINCT code FROM stock_daily ORDER BY code LIMIT 2000")
+        # 增量：取 stock_news 中没有记录的股票
+        cur.execute("""
+            SELECT si.code
+            FROM stock_info si
+            LEFT JOIN stock_news sn ON sn.code = si.code COLLATE utf8mb4_unicode_ci
+            WHERE sn.code IS NULL
+            ORDER BY si.code
+        """)
     stocks = [r[0] for r in cur.fetchall()]
     cur.close()
     return stocks

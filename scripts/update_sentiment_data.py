@@ -40,6 +40,61 @@ import clickhouse_connect
 import pymysql
 from db_helper import ch_dedup_filter
 from db_config import CLICKHOUSE_CONFIG, MYSQL_CONFIG
+import subprocess
+import os as _os
+
+# ─── NeoData Token 自动刷新 ───────────────────────────────────────
+
+_REFRESH_SCRIPT = str(__file__).replace("\\", "/").rsplit("/", 1)[0] + "/refresh_neodata_token.py"
+
+def _check_neodata_token(verbose=True):
+    """检查 NeoData token 状态，快过期则警告，已过期则退出并提示刷新
+
+    已过期时脚本以退出码 42 退出 → AI 检测到后会调用 connect_cloud_service 刷新
+    """
+    try:
+        r = subprocess.run(
+            [sys.executable, _REFRESH_SCRIPT],
+            capture_output=True, timeout=15,
+            cwd=str(__file__).replace("\\", "/").rsplit("/", 1)[0] or ".",
+        )
+    except Exception as e:
+        if verbose:
+            print(f"[NeoData token] 检查失败: {e}，跳过（NeoData 功能可能不可用）")
+        return  # 不阻断，允许继续
+
+    code = r.returncode
+    if code == 0:
+        # 正常，打印一行即可
+        if verbose:
+            out = r.stdout.decode("utf-8", errors="ignore").strip()
+            if out:
+                print(f"[NeoData token] {out}")
+        return
+
+    stderr = r.stderr.decode("utf-8", errors="ignore") if r.stderr else ""
+
+    if code == 43:
+        # 快过期警告，不阻断
+        warn_line = [l for l in stderr.splitlines() if l.strip()]
+        if warn_line:
+            print(f"[NeoData token] ⚠️  {warn_line[0].strip()}", file=sys.stderr)
+        return
+
+    if code == 42:
+        # 已过期 → 打印提示后退出（AI 检测到 exit 42 会自动刷新）
+        expired_lines = [l for l in stderr.splitlines() if l.strip()]
+        for line in expired_lines[-4:]:
+            print(f"[NeoData token] {line.strip()}", file=sys.stderr)
+        # AI 会检测到这个 exit code 并自动刷新，无需手动提示
+        sys.exit(42)
+
+
+# 脚本启动时自动检查 token（首次 NeoData 调用前）
+_check_neodata_token(verbose=True)
+
+
+# ─── 工具函数 ────────────────────────────────────────────────────
 
 # ─── 工具函数 ────────────────────────────────────────────────────
 

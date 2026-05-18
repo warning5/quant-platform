@@ -25,18 +25,77 @@
           AND trade_date >= DATE_SUB(CURDATE(), INTERVAL #{days} DAY)
     </select>
     
-    <!-- 查询基本面数据：pe_ttm/pb 从 CH stock_daily 取（MySQL stock_daily 为空），其余从 stock_financial_indicator 取 -->
+    <!-- 查询基本面数据（增强版）：pe_ttm/pb 从 CH 取，其余从 MySQL 取 -->
     <select id="selectFundamentalSignal" resultType="com.quant.platform.stock.analysis.domain.FundamentalSignal">
         SELECT
             fi.roe as roe,
             fi.revenue_yoy as revenueYoy,
             fi.net_profit_yoy as netProfitYoy,
             fi.gross_profit_margin as grossMargin,
-            fi.debt_to_asset_ratio as debtRatio
+            fi.net_profit_margin as netProfitMargin,
+            fi.debt_to_asset_ratio as debtRatio,
+            -- 偿债能力
+            fi.current_ratio as currentRatio,
+            fi.quick_ratio as quickRatio,
+            -- 营运能力
+            fi.ar_turnover_days as arTurnoverDays,
+            -- 现金流
+            fi.operating_cf_to_np as operatingCfToNp,
+            fi.operating_cf_to_debt as operatingCfToDebt,
+            -- 利润表展示字段（最新一期绝对值）
+            inc.total_revenue as totalRevenue,
+            inc.np_parent_company_owners as netProfitAbs,
+            inc.deducted_np_parent_company as deductedNetProfit,
+            -- 资产负债表展示字段
+            sb.cash_and_equivalents as monetaryCapital,
+            sb.inventory as inventory,
+            sb.goodwill as goodwill,
+            -- 现金流量表展示字段
+            scf.free_cash_flow as freeCashFlow,
+            -- 报告期
+            DATE_FORMAT(fi.end_date, '%Y-%m-%d') as endDate
         FROM stock_financial_indicator fi
+        LEFT JOIN stock_income inc
+            ON inc.code = fi.code
+           AND inc.end_date = fi.end_date
+        LEFT JOIN stock_balance sb
+            ON sb.code = fi.code
+           AND sb.end_date = fi.end_date
+        LEFT JOIN stock_cashflow scf
+            ON scf.code = fi.code
+           AND scf.end_date = fi.end_date
         WHERE fi.code = #{code}
           AND fi.end_date = (SELECT MAX(end_date) FROM stock_financial_indicator WHERE code = #{code})
         LIMIT 1
+    </select>
+
+    <!-- 查询扣非净利润同比增速：最新一期 vs 去年同期（跨年） -->
+    <!-- 使用归母净利润的去年同期来计算扣非增速的同期比 -->
+    <select id="selectDeductedNpYoY" resultType="java.math.BigDecimal">
+        SELECT
+            ROUND(
+                (CUR_YOY.deducted - PREV_YOY.deducted) / NULLIF(ABS(PREV_YOY.deducted), 0) * 100,
+                2
+            ) as yoy
+        FROM (
+            SELECT si.deducted_np_parent_company as deducted
+            FROM stock_income si
+            WHERE si.code = #{code}
+              AND si.deducted_np_parent_company IS NOT NULL
+              AND si.end_date = (SELECT MAX(end_date) FROM stock_income WHERE code = #{code})
+            LIMIT 1
+        ) CUR_YOY,
+        (
+            SELECT si2.deducted_np_parent_company as deducted
+            FROM stock_income si2
+            WHERE si2.code = #{code}
+              AND si2.deducted_np_parent_company IS NOT NULL
+              AND si2.end_date = DATE_SUB(
+                  (SELECT MAX(end_date) FROM stock_income WHERE code = #{code}),
+                  INTERVAL 1 YEAR
+              )
+            LIMIT 1
+        ) PREV_YOY
     </select>
     
     <!-- 查询事件面数据 -->

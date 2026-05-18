@@ -118,6 +118,7 @@ const renderTaskConfig = (task, updateType) => {
     if (task.configResume) tags.push(<Tag key="resume" color="orange">跳过已有</Tag>);
   } else if (updateType === 'FINANCIAL') {
     if (task.configYearStart) tags.push(<Tag key="year" color="blue">{task.configYearStart}~{task.configYearEnd || ''}</Tag>);
+    if (task.configSingleCode) tags.push(<Tag key="single" color="geekblue">单只: {task.configSingleCode}</Tag>);
     if (task.configForce) tags.push(<Tag key="force" color="red">强制重新采集</Tag>);
   } else if (updateType === 'SENTIMENT') {
     if (task.configFetchLhb !== false) tags.push(<Tag key="lhb" color="blue">龙虎榜</Tag>);
@@ -878,6 +879,7 @@ function DataUpdate() {
         delay: values.delay || null,
         yearStart: values.yearStart || null,
         yearEnd: values.yearEnd || null,
+        singleCode: (values.singleCode || '').trim() || null,
         force: values.force || false,
         // 情绪数据专属字段
         ...(updateType === 'SENTIMENT' ? {
@@ -1318,6 +1320,11 @@ function DataUpdate() {
                       <Select.Option key={y} value={y}>{y} 年</Select.Option>
                     ))}
                   </Select>
+                </Form.Item>
+              </Col>
+              <Col>
+                <Form.Item name="singleCode" label="单只股票" style={{ marginBottom: 0 }}>
+                  <Input placeholder="留空则更新全部，如 000001" style={{ width: 180 }} allowClear />
                 </Form.Item>
               </Col>
               <Col>

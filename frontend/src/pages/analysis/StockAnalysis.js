@@ -263,11 +263,12 @@ export default function StockAnalysis() {
       children: <ScoreDetailTab detail={overview.scoreDetails?.find(d => d.dimension === 'tech')} />,
     },
     {
-      key: 'kline',
-      label: tabLabel('价格走势', '近60交易日K线图，含均线（MA5/10/20/60）叠加，辅助判断价格趋势和均线支撑压力位。'),
-      children: klineData && klineData.length > 0 ? <KLineChart data={klineData} /> : (
-        <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>暂无K线数据</div>
-      ),
+      key: 'fundamental',
+      label: tabLabel('基本面', '通过PE、PB、ROE、营收/净利增速等财务指标，评估公司内在价值和成长性。适合中长期投资参考。'),
+      children: <ScoreDetailTab
+        detail={overview.scoreDetails?.find(d => d.dimension === 'fundamental')}
+        reportPeriod={overview.fundamentalSignal?.endDate}
+      />,
     },
     {
       key: 'money',
@@ -280,9 +281,11 @@ export default function StockAnalysis() {
       children: <ScoreDetailTab detail={overview.scoreDetails?.find(d => d.dimension === 'sentiment')} />,
     },
     {
-      key: 'fundamental',
-      label: tabLabel('基本面', '通过PE、PB、ROE、营收/净利增速等财务指标，评估公司内在价值和成长性。适合中长期投资参考。'),
-      children: <ScoreDetailTab detail={overview.scoreDetails?.find(d => d.dimension === 'fundamental')} />,
+      key: 'kline',
+      label: tabLabel('价格走势', '近60交易日K线图，含均线（MA5/10/20/60）叠加，辅助判断价格趋势和均线支撑压力位。'),
+      children: klineData && klineData.length > 0 ? <KLineChart data={klineData} /> : (
+        <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>暂无K线数据</div>
+      ),
     },
     {
       key: 'research',
@@ -545,15 +548,8 @@ export default function StockAnalysis() {
                   <ScoreRadarChart scoreDetails={overview.scoreDetails} />
                 )}
               </Col>
-              {/* 右：仓位 + 时机 */}
-              <Col span={5} style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
-                <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>建议仓位</div>
-                <div style={{ fontSize: 36, fontWeight: 500, color: '#333', lineHeight: 1 }}>
-                  {overview.position}
-                </div>
-                <div style={{ fontSize: 12, color: '#999', marginTop: 2 }}>%</div>
-              </Col>
-              <Col span={5} style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
+              {/* 右：操作时机 */}
+              <Col span={10} style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
                 <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>操作时机</div>
                 <Tag
                   color={actionColor(overview.actionName)}
@@ -571,8 +567,12 @@ export default function StockAnalysis() {
                   <Col span={6} key={detail.dimension || idx}>
                     <Tooltip title={
                       <div style={{ fontSize: 12 }}>
-                        {detail.items?.map((item, i) => (
-                          <div key={i}>{item.label}: {item.value} ({item.score}/{item.maxScore})</div>
+                        <div style={{ marginBottom: 3, color: '#fa8c16' }}>核心打分指标：</div>
+                        {detail.items?.filter(it => it.maxScore > 0).map((item, i) => (
+                          <div key={i} style={{ marginBottom: 2 }}>
+                            <span>{item.label}: {item.value} ({item.score}/{item.maxScore})</span>
+                            {item.desc && <div style={{ color: '#aaa', fontSize: 10, marginLeft: 8 }}>{item.desc}</div>}
+                          </div>
                         ))}
                         {detail.dataRange && (
                           <div style={{ marginTop: 4, borderTop: '1px solid #555', paddingTop: 4 }}>
@@ -642,22 +642,37 @@ export default function StockAnalysis() {
         </Card>
       )}
 
-      {/* ── 评分规则 Panel ────────────────────────────────────────────── */}
+      {/* ── 评分规则悬浮说明（鼠标移开自动关闭）──────────────────────────────── */}
       {rulesVisible && (
-        <Card
-          title="评分规则说明"
-          extra={<Button type="text" onClick={() => setRulesVisible(false)}>关闭</Button>}
-          style={{ position: 'fixed', top: 100, right: 50, width: 500, zIndex: 1000, boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}
+        <div
+          onMouseLeave={() => setRulesVisible(false)}
+          style={{
+            position: 'fixed', top: 100, right: 50,
+            width: 680, zIndex: 1000,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+            background: '#fff',
+            borderRadius: 6,
+            border: '1px solid #f0f0f0',
+            padding: '12px 16px',
+            maxHeight: 'calc(100vh - 140px)',
+            overflowY: 'auto',
+          }}
         >
+          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 10, color: '#333' }}>评分规则说明</div>
           {rules?.map((rule, idx) => (
-            <div key={idx} style={{ marginBottom: 12 }}>
+            <div key={idx} style={{ marginBottom: 10 }}>
               <Text strong>{rule.dimension}（满分{rule.maxScore}）：</Text>
-              <div style={{ fontSize: 13, whiteSpace: 'pre-wrap', marginLeft: 8 }}>
-                {rule.rule}
+              <div style={{ fontSize: 13, whiteSpace: 'pre-wrap', marginLeft: 8, color: '#444', lineHeight: 1.7 }}>
+                {rule.rule.split('\n').map((line, li) => (
+                  <div key={li} style={{ display: 'flex' }}>
+                    <span style={{ marginRight: 6, flexShrink: 0, color: '#1890ff' }}>•</span>
+                    <span>{line}</span>
+                  </div>
+                ))}
               </div>
             </div>
           ))}
-        </Card>
+        </div>
       )}
     </div>
   );
@@ -667,54 +682,132 @@ export default function StockAnalysis() {
 function ScoreRadarChart({ scoreDetails }) {
   if (!scoreDetails || scoreDetails.length === 0) return null;
 
-  const indicator = scoreDetails.map(d => ({
-    name: d.dimensionName || d.dimension,
-    max: d.maxScore || 10,
-  }));
+  const [hoveredIdx, setHoveredIdx] = useState(null);
+  const [tooltipLocked, setTooltipLocked] = useState(false);
+  // 用 ref 持久保存当前 hover 的数据，避免 onMouseLeave 后数据丢失导致 tooltip 消失
+  const hoverRef = useRef(null);
 
-  const serieData = [{
-    value: scoreDetails.map(d => d.score || 0),
-    name: '四维度评分',
-    lineStyle: { color: '#1890ff', width: 2 },
-    areaStyle: { color: 'rgba(24, 144, 255, 0.12)' },
-    itemStyle: { color: '#1890ff' },
-    label: {
-      show: true,
-      formatter: '{c}',
-      fontSize: 11,
-      color: '#333',
-      position: 'outside',
-      distance: 4,
-    },
-  }];
-
-  const option = {
-    backgroundColor: 'transparent',
-    tooltip: {
-      trigger: 'item',
-      formatter: (params) => {
-        const idx = params.dataIndex;
-        const dim = scoreDetails[idx];
-        if (!dim) return '';
-        const items = (dim.items || []).map(it => `${it.label}: ${it.value} (${it.score}/${it.maxScore})`).join('<br/>');
-        return `<b>${dim.dimensionName}</b>：${dim.score} / ${dim.maxScore}<br/>${items}`;
-      },
-    },
-    radar: {
-      indicator,
-      radius: '72%',
-      splitNumber: 4,
-      splitArea: {
-        areaStyle: { color: ['rgba(24,144,255,0.03)', 'rgba(24,144,255,0.07)', 'rgba(24,144,255,0.11)', 'rgba(24,144,255,0.15)'] },
-      },
-      axisLine: { lineStyle: { color: '#e8e8e8' } },
-      splitLine: { lineStyle: { color: '#e8e8e8' } },
-      name: { textStyle: { color: '#333', fontSize: 12, fontWeight: 500, padding: [0, 4] } },
-    },
-    series: [{ type: 'radar', data: serieData }],
+  const cx = 155, cy = 118, R = 82;
+  const n = scoreDetails.length;
+  const toXY = (i, r) => {
+    const a = (Math.PI * 2 * i / n) - Math.PI / 2;
+    return { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) };
   };
 
-  return <ReactECharts option={option} style={{ height: 220 }} notMerge lazyUpdate />;
+  // 雷达图指标数据
+  const dims = scoreDetails.map((d, i) => {
+    const max = d.maxScore || 10;
+    const score = d.score || 0;
+    const r = (score / max) * R;
+    const endpoint = toXY(i, r);
+    const labelPos = toXY(i, R + 16);
+    const angle = (Math.PI * 2 * i / n) - Math.PI / 2;
+    // 文本对齐方向
+    const tx = Math.cos(angle) > 0.1 ? 'start' : Math.cos(angle) < -0.1 ? 'end' : 'middle';
+    return { d, i, r, endpoint, labelPos, angle, tx, score, max };
+  });
+
+  // 填充多边形路径
+  const fillPath = dims.map(({ r }, i) => {
+    const p = toXY(i, r);
+    return `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`;
+  }).join(' ') + 'Z';
+
+  // 网格圈
+  const gridPolygons = [0.25, 0.5, 0.75, 1].map(f => {
+    const pts = dims.map((_, i) => { const p = toXY(i, R * f); return `${p.x},${p.y}`; }).join(' ');
+    return <polygon key={f} points={pts} fill="none" stroke="#e8e8e8" strokeWidth={1} />;
+  });
+
+  // 轴线
+  const axisLines = dims.map(({ i }) => {
+    const p = toXY(i, R);
+    return <line key={i} x1={cx} y1={cy} x2={p.x} y2={p.y} stroke="#e8e8e8" strokeWidth={1} />;
+  });
+
+  const hoverData = hoverRef.current;
+  const showTooltip = hoverData && (hoveredIdx !== null || tooltipLocked);
+
+  return (
+    <div style={{ position: 'relative', height: 245 }}>
+      <svg width={310} height={240} style={{ display: 'block', margin: '0 auto' }}>
+        <rect x={cx - R - 40} y={cy - R - 28} width={R * 2 + 80} height={R * 2 + 56} fill="transparent" />
+        {gridPolygons}
+        {axisLines}
+        <path d={fillPath} fill="rgba(24,144,255,0.12)" />
+        <path d={fillPath} fill="none" stroke="#1890ff" strokeWidth={2} />
+        {dims.map(({ i, endpoint, angle, d }) => {
+          const tipR = 5; // 固定小圆点标记
+          const dx = Math.cos(angle) * 12;
+          const dy = Math.sin(angle) * 12;
+          return (
+            <g key={i}>
+              {/* 大的透明感应区：覆盖圆点和文字，防止闪烁 */}
+              <circle
+                cx={endpoint.x} cy={endpoint.y} r={22}
+                fill="transparent"
+                style={{ cursor: 'pointer' }}
+                onMouseEnter={() => {
+                  setHoveredIdx(i);
+                  setTooltipLocked(false);
+                  hoverRef.current = d;
+                }}
+                onMouseLeave={() => {
+                  if (!tooltipLocked) {
+                    setHoveredIdx(null);
+                  }
+                }}
+              />
+              <circle
+                cx={endpoint.x} cy={endpoint.y} r={tipR}
+                fill="#1890ff" fillOpacity={hoveredIdx === i ? 0.85 : 0.5}
+                style={{ pointerEvents: 'none', transition: 'fill-opacity 0.15s' }}
+              />
+              <text x={endpoint.x + dx} y={endpoint.y + dy}
+                textAnchor="middle" dominantBaseline="middle"
+                fontSize={11} fill="#1890ff" fontWeight={600}
+                style={{ pointerEvents: 'none', userSelect: 'none' }}>
+                {dims[i].score}
+              </text>
+            </g>
+          );
+        })}
+        {dims.map(({ i, labelPos, tx, d }) => (
+          <text key={i} x={labelPos.x} y={labelPos.y}
+            textAnchor={tx} dominantBaseline="middle"
+            fontSize={12} fill="#333" fontWeight={500}
+            style={{ pointerEvents: 'none', userSelect: 'none' }}>
+            {d.dimensionName || d.dimension}
+          </text>
+        ))}
+      </svg>
+      {showTooltip && (
+        <div
+          style={{
+            position: 'absolute', top: 8, left: 0,
+            background: '#fff',
+            border: '1px solid #d9d9d9', borderRadius: 8,
+            padding: '8px 12px', fontSize: 12, color: '#333',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.12)', zIndex: 100, minWidth: 160,
+          }}
+          onMouseEnter={() => setTooltipLocked(true)}
+          onMouseLeave={() => {
+            setTooltipLocked(false);
+            setHoveredIdx(null);
+            hoverRef.current = null;
+          }}
+        >
+          <div style={{ fontWeight: 600, marginBottom: 4, color: '#1890ff' }}>{hoverData.dimensionName}</div>
+          <div style={{ marginBottom: 6 }}>得分：<b>{hoverData.score}</b> / {hoverData.maxScore}</div>
+          {(hoverData.items || []).filter(it => it.maxScore > 0).map((it, idx) => (
+            <div key={idx} style={{ fontSize: 11, marginTop: 3 }}>
+              {it.label}：{it.value} <span style={{ color: '#1890ff' }}>({it.score}/{it.maxScore})</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ── K线图 ────────────────────────────────────────────────────────────────────
@@ -853,20 +946,853 @@ function BullBearChart({ bull, bear }) {
 
 // ── 通用：指标列表行 ──────────────────────────────────────────────────────
 // 每行：指标名 | 值(Tag) | 评分 | 说明
+/**
+ * 根据指标标签、当前值、得分，生成动态解读文案
+ * 说明：不是解释指标"是什么"，而是解读"当前这个值意味着什么"
+ */
+function getValueInterpretation(label, value, score, maxScore) {
+  // ── 空值兜底 ──
+  if (value == null || value === '-' || value === '暂无数据' || value === '暂无') {
+    return '数据缺失，无法评估。建议等待财报更新或确认数据源。';
+  }
+
+  // ═══════════════════════════════════════
+  //  技术面
+  // ═══════════════════════════════════════
+
+  if (label === '缠论信号') {
+    if (value.includes('买入')) return '缠论出现买入信号，中枢完成离开段，短期存在结构买点，但需量能配合确认（放量上涨才有效）。';
+    if (value.includes('卖出')) return '缠论出现卖出信号，注意中枢完成返回段带来的回调或趋势转折风险，可适当减仓。';
+    return '缠论未给出明确买卖信号，当前处于中枢震荡区间，方向未明，宜观望等待。';
+  }
+
+  if (label === '趋势状态') {
+    if (value === '上涨') return '股价处于明确上涨趋势中（短/中/长期高点依次抬高），顺势做多胜率更高，不要逆势猜顶。';
+    if (value === '下跌') return '股价处于下跌趋势中（短/中/长期低点依次降低），抄底风险大，应等待底部结构出现或趋势反转信号。';
+    return '股价在一定区间内上下波动（高低点未明显抬高或降低），方向不明，可区间操作或等待突破确认。';
+  }
+
+  if (label === '均线多头') {
+    if (value === '是') return 'MA5 > MA10 > MA20 > MA60 多头排列完好，短期成本 > 中期成本 > 长期成本，上升趋势健康，支撑有效。';
+    return '均线尚未形成多头排列，价格运行杂乱，趋势方向未统一，震荡概率大，不宜重仓追进。';
+  }
+
+  if (label === 'MACD金叉') {
+    if (value === '是') return 'DIF 从下穿上 DEA（零轴下方为弱势反弹，零轴上方为强势信号），需结合 RSI 判断是否超买区——若 RSI>70 则冲顶嫌疑大，可信度打折。';
+    return 'DIF 与 DEA 尚未形成金叉，多头动能尚在积蓄或已转弱，当前不构成 MACD 维度的买入依据。';
+  }
+
+  if (label === 'RSI14') {
+    const v = parseFloat(value);
+    if (!isNaN(v)) {
+      if (v < 20) return `RSI=${v}，极端超卖（14日指标极低），市场情绪恐慌尾声，往往是中期底部的信号，可开始关注分批建仓机会。`;
+      if (v < 30) return `RSI=${v}，处于超卖区，买方力量开始积累但尚未确认，存在反弹可能，建议观察是否出现底部结构。`;
+      if (v > 80) return `RSI=${v}，极端超买，市场情绪极度亢奋，随时可能快速回调，追高风险极大。`;
+      if (v > 70) return `RSI=${v}，处于超买区，多方力量接近枯竭，注意回落风险，若 MACD 同时出现顶背离则信号更可靠。`;
+      if (v > 55) return `RSI=${v}，处于偏强区间，多头占优，趋势有望延续，但已不属低位布局区间。`;
+      if (v >= 45) return `RSI=${v}，处于正常偏多区间（45~55），多空力量相对均衡，趋势方向等待放量确认。`;
+      if (v >= 35) return `RSI=${v}，处于偏弱区间（35~45），空方占优但未超卖，若有缩量止跌迹象可少量试探。`;
+      return `RSI=${v}，处于弱市区（30~35），空方主导，未达超卖区域，趋势逆转信号尚不充分。`;
+    }
+  }
+
+  if (label === 'BOLL轨道') {
+    if (value.includes('突破上轨')) {
+      if (score === 2) return '股价突破布林带上轨，但RSI>70处于超买区，这可能是冲顶诱多信号——表面强势但风险积累，得分从6分降权为2分，不宜追高。';
+      return '股价突破布林带上轨且RSI未超买，强势延续信号可信，短期动能强劲。布林带开口扩大+价格沿上轨运行，是典型的强趋势延续形态，但连续突破后仍需关注量能是否跟进。';
+    }
+    if (value.includes('上轨附近')) {
+      if (score === 2) return '股价接近布林上轨，但RSI>70超买区，上行空间有限，随时可能遇阻回落，得分从4分降权为2分。';
+      return '股价接近布林上轨，偏强势运行，方向未变，但上方空间逐渐受限。上轨是动态阻力位——价格触及上轨时若放量则有望突破，若缩量则大概率遇阻回落。';
+    }
+    if (value.includes('中上')) return '股价处于布林带中上区域（0.5~0.8），走势偏强，位于中轨上方运行，多方略占优，但尚未触及上轨压力位，还有一定上行空间。';
+    if (value.includes('中下')) return '股价处于布林带中下区域（0.2~0.5），偏弱运行，位于中轨下方，空方略占优，若持续贴近下轨则有破位风险，关注下轨支撑是否有效。';
+    if (value.includes('下轨')) {
+      if (score === 2) return '股价接近布林下轨且RSI<30超卖区，双重低位信号共振——价格处于布林带下边界且动量指标也超卖，反弹概率积累，是潜在布局机会。';
+      return '股价跌破或接近布林下轨，极端弱势，可能是加速赶底阶段。下轨是动态支撑位，价格触及下轨时若缩量企稳则可能反弹，若放量跌破下轨则打开下行空间。';
+    }
+    return '股价处于布林带中轨附近（0.2~0.8 区间），多空均衡。布林带中轨是多空分水岭——价格在中轨上方偏强，下方偏弱，当前方向未明，等待放量选择突破方向。';
+  }
+
+  if (label === 'MACD动能') {
+    if (value.includes('红柱扩张')) return '红柱持续放大，多头动能加速释放，上涨趋势正在进行中，顺势持有信号。';
+    if (value.includes('红柱微缩')) return '红柱开始收窄，上涨动能有所衰减，虽仍处多头但力度减弱，注意观察是否转为死叉。';
+    if (value.includes('红柱衰竭')) return '红柱大幅收缩，上涨动能接近枯竭，警惕趋势转折，若继续收缩可能转为绿柱。';
+    if (value.includes('绿柱收窄')) return '绿柱开始收窄，空头力量减弱，可能正在筑底或酝酿反弹，需等待金叉确认。';
+    if (value.includes('刚转红柱')) return 'MACD 刚从绿转红，多空转换初期，可信度待验证，需等红柱稳定放大再确认。';
+    if (value.includes('绿柱扩张')) return '绿柱持续放大，空头动能加速释放，下跌趋势正在进行，逆势抄底风险大。';
+    return 'MACD 动能信号无法解读，请结合柱状图方向和绝对值判断多空力度。';
+  }
+
+  if (label === 'MACD位置') {
+    if (value.includes('死叉(零轴上)')) return 'MACD 在零轴上方死叉，属于强势回调信号——上涨趋势中的短暂修正，不改变中期多头格局，但短期需谨慎。';
+    if (value.includes('死叉(零轴下)')) return 'MACD 在零轴下方死叉，空头主导格局明确，下跌趋势延续信号，减仓/止损为主。';
+    if (value.includes('零轴上方')) return 'MACD 柱状图位于零轴以上，多头力量主导，红柱可靠性高，上涨趋势健康。';
+    if (value.includes('零轴下方')) return 'MACD 柱状图位于零轴以下，空头力量主导，绿柱为主，下跌趋势中减少逆势操作。';
+    return 'MACD 零轴位置信号不明确，结合 DIF/DEA 方向和柱状图综合判断。';
+  }
+
+  if (label === '量价背离') {
+    if (value == null || value === '-' || value === '暂无数据' || value === '暂无') {
+      return '数据缺失，无法评估。建议等待财报更新或确认数据源。';
+    }
+
+    // 已触发背离
+    if (value.includes('高位背离')) return '价格上涨处于高位，但近5日主力资金净流出，是主力高位派发筹码的典型信号，上涨不可持续，应减仓或观望。';
+    if (value.includes('低位背离')) return '价格下跌处于低位，但近5日主力资金净流入，主力可能在悄悄吸筹，下跌可能即将见底，可关注是否出现放量阳线确认。';
+
+    // 未触发：value 格式为 "条件未达 | ret5=+x.xx%/main=+xxxx万(元)"
+    const ret5Match = value.match(/ret5=([^\s]+)/);
+    const mainMatch = value.match(/main=([^\s]+)/);
+    if (ret5Match && mainMatch) {
+      const ret5 = ret5Match[1];
+      const main = mainMatch[1];
+      const ret5Num = parseFloat(ret5);
+      // main 格式可能是 "+x.x亿(元)" 或 "+xxxx万(元)"
+      const mainYuan = main.includes('亿')
+        ? parseFloat(main) * 1_0000_0000
+        : parseFloat(main.replace('万(元)', '')) * 10000;
+
+      const reasons = [];
+      if (!isNaN(ret5Num)) {
+        if (ret5Num >= 3) {
+          reasons.push('✓ 涨幅 ' + ret5 + ' ≥ +3%（满足）');
+        } else {
+          reasons.push('✗ 涨幅 ' + ret5 + '（需 ≥ +3%，差 ' + (3 - ret5Num).toFixed(2) + '% 才满足）');
+        }
+      } else {
+        reasons.push('涨幅数据缺失');
+      }
+
+      if (!isNaN(mainYuan)) {
+        if (ret5Num >= 0 && mainYuan <= -50_000_000) {
+          reasons.push('✓ 主力净流出 ' + main + '（满足高位背离）');
+        } else if (ret5Num >= 0) {
+          reasons.push('✗ 主力净 ' + main + '（需 ≤ -5000万 才触发高位背离）');
+        } else if (ret5Num <= 0 && mainYuan >= 50_000_000) {
+          reasons.push('✓ 主力净流入 ' + main + '（满足低位背离）');
+        } else if (ret5Num <= 0) {
+          reasons.push('✗ 主力净 ' + main + '（需 ≥ +5000万 才触发低位背离）');
+        } else {
+          reasons.push('主力净 ' + main + '（需根据涨跌方向判断）');
+        }
+      } else {
+        reasons.push('主力资金数据缺失');
+      }
+
+      return '当前无量价背离信号。\n\n' + reasons.join('\n') + '。\n\n提示：主力资金以"万元"为单位，近5日累计净流入/流出超过5000万才构成背离条件。';
+    }
+
+    if (value.includes('背离')) return '检测到量价背离信号，价格与资金流向出现分歧，建议结合其他指标综合判断方向。';
+    return '当前无量价背离信号，量价关系正常。';
+  }
+
+  if (label === '趋势判断') {
+    if (value.includes('反弹')) return '5日涨幅明显高于20日涨幅，属于短期急涨——可能是超跌反弹而非趋势反转，与"趋势状态"配合判断，若趋势仍为空头则此反弹可信度低。';
+    if (value.includes('短强')) return '短期涨幅领先中期，走势节奏健康，上涨有根基，不是孤立急拉，趋势延续性较好。';
+    if (value.includes('回撤')) return '短期下跌但中期仍在上行，属于正常回调——不改变中期趋势方向，回调企稳后可考虑加仓。';
+    if (value.includes('5日')) return '短期与中期涨幅节奏相近，方向一致，暂无明显背离，趋势平稳运行。';
+  }
+
+  if (label === '均线空头') {
+    if (value === '是') return 'MA5 < MA10 < MA20 < MA60 空头排列，空方主导，下降趋势明确，顺势做空或观望为主。';
+    return '均线未形成空头排列，未触发空头排列惩罚。';
+  }
+
+  if (label === 'KDJ(9,3,3)') {
+    // 解析 K/D/J 具体数值
+    const kMatch = value.match(/K(\d+\.?\d*)/);
+    const dMatch = value.match(/D(\d+\.?\d*)/);
+    const jMatch = value.match(/J(\d+\.?\d*)/);
+    const k = kMatch ? parseFloat(kMatch[1]) : null;
+    const d = dMatch ? parseFloat(dMatch[1]) : null;
+    const j = jMatch ? parseFloat(jMatch[1]) : null;
+
+    if (k != null && d != null && j != null) {
+      // 金叉/死叉判断（K/D交叉关系）
+      if (value.includes('金叉')) return `K=${k} 上穿 D=${d}，短线动能转多。J=${j}，若 J>100 则属于极端超买钝化（追高风险大）；若 J<0 则极端超卖钝化（是难得的中期底部信号）。当前金叉建议配合 MACD 方向确认，不单独作为买入依据。`;
+      if (value.includes('死叉')) return `K=${k} 下穿 D=${d}，短线动能转空。若 K>80 区域死叉，可信度更高（高位派发信号）；若 K<20 区域死叉，属于空头动能继续释放，不宜抄底。`;
+
+      // 超买/超卖判断
+      if (k >= 80 || j >= 90) return `K=${k}/D=${d}/J=${j}，KDJ 处于超买区（K≥80 或 J≥90），动量极强但随时钝化——尤其 J 值超过 100 时属于极端超买，是典型的高位派发阶段，不应追高。`;
+      if (k <= 20 || j <= 10) return `K=${k}/D=${d}/J=${j}，KDJ 处于超卖区（K≤20 或 J≤10），反弹概率积累——尤其 J<0 属于极端超卖，是难得的中期底部信号，可开始关注分批建仓。`;
+
+      // 正常区间但 K/D/J 相对关系
+      if (k > d && d > j) return `K=${k}>D=${d}>J=${j}，多头排列但力度一般（非极端超买），短线偏多但空间已有限，不宜重仓追进。`;
+      if (k < d && d < j) return `K=${k}<D=${d}<J=${j}，空头排列但非极端超卖，短线偏空，若出现放量阳线或底背离可关注。`;
+      if (k > d) return `K=${k}>D=${d}（J=${j}），K 上穿 D 形成金叉状态，短线偏多；但当前处于正常区间（非超买/超卖），信号强度中等，需确认量能配合。`;
+      if (k < d) return `K=${k}<D=${d}（J=${j}），K 下穿 D 形成死叉状态，短线偏空；但当前处于正常区间（非超买/超卖），信号强度中等。`;
+      return `K=${k}/D=${d}/J=${j}，KDJ 三值均处于正常区间（20~80），无明显超买超卖，方向不明确，等待 K/D 交叉信号出现。`;
+    }
+
+    // 兜底模式匹配（旧格式兼容）
+    if (value.includes('金叉')) return 'K 线从下上穿 D 线，短线动量转多，但 J 线易超买钝化，建议配合 MACD 方向确认，不单独作为买入依据。';
+    if (value.includes('死叉')) return 'K 线从上穿过 D 线，短线动量转空，若处于高档区（K>80）死叉可信度更高。';
+    if (value.includes('超买')) return 'J>90 或 K>80，KDJ 进入超买区，动量极强但随时可能钝化，见此信号不应追高。';
+    if (value.includes('超卖')) return 'J<10 或 K<20，KDJ 进入超卖区，反弹概率逐渐积累，但需等 K/D 拐头向上才确认。';
+  }
+
+  if (label === 'DMI(14)') {
+    // 解析 +DI/-DI 数值
+    const pdiMatch = value.match(/\+DI(\d+\.?\d*)/);
+    const ndiMatch = value.match(/-DI(\d+\.?\d*)/);
+    const adxMatch = value.match(/ADX([\d.]+)/);
+    const pdi = pdiMatch ? parseFloat(pdiMatch[1]) : null;
+    const ndi = ndiMatch ? parseFloat(ndiMatch[1]) : null;
+    const adx = adxMatch ? parseFloat(adxMatch[1]) : null;
+
+    const spread = (pdi != null && ndi != null) ? Math.abs(pdi - ndi) : null;
+
+    if (value.includes('多头')) {
+      if (adx != null) {
+        if (adx > 35) return `+DI=${pdi}>-DI=${ndi}，两者差值${spread?.toFixed(1) || ''}，ADX=${adx}——趋势方向极为明确且强度高，属于强势上涨趋势，是 DMI 维度最健康的买入信号，顺势持有。`;
+        if (adx > 25) return `+DI=${pdi}>-DI=${ndi}，差值${spread?.toFixed(1) || ''}，ADX=${adx}——趋势明确但非极端强势，上涨有根基但力度中等，适合持有。`;
+        if (adx >= 20) return `+DI=${pdi}>-DI=${ndi}，差值${spread?.toFixed(1) || ''}，ADX=${adx}——趋势方向向上但力度一般（刚好越过 20 阈值），可能震荡上行，信号可信度一般，需配合均线确认。`;
+        if (adx >= 15) return `+DI=${pdi}>-DI=${ndi}，差值${spread?.toFixed(1) || ''}，ADX=${adx}——趋势方向正确但强度偏弱（低于 20 的弱趋势区），上涨可能不持续，仅适合轻仓试探。`;
+        return `+DI=${pdi}>-DI=${ndi}，差值${spread?.toFixed(1) || ''}，ADX=${adx}——虽然 +DI 领先但 ADX 极低（<15），说明多空力量差距很小，属于震荡行情中的微弱优势，趋势策略应减少操作。`;
+      }
+      if (spread != null) {
+        if (spread >= 10) return `+DI=${pdi}>-DI=${ndi}，差值${spread.toFixed(1)} 较大，多头优势较为明显。但缺乏 ADX 数据无法判断趋势强度，建议结合 MACD 位置确认。`;
+        return `+DI=${pdi}>-DI=${ndi}，差值${spread.toFixed(1)} 较小，多头优势微弱，趋势信号不明确。`;
+      }
+      return '+DI>-DI，多头方向占优，但 ADX 数据缺失无法判断趋势强度，信号可信度打折。';
+    }
+
+    if (value.includes('空头')) {
+      if (adx != null) {
+        if (adx > 35) return `-DI=${ndi}>+DI=${pdi}，差值${spread?.toFixed(1) || ''}，ADX=${adx}——下跌趋势极为明确且力度强，是 DMI 维度的强烈看空信号，应减仓或止损，不逆势抄底。`;
+        if (adx > 25) return `-DI=${ndi}>+DI=${pdi}，差值${spread?.toFixed(1) || ''}，ADX=${adx}——下跌趋势明确，空方力度强，顺势看空为主。`;
+        if (adx >= 20) return `-DI=${ndi}>+DI=${pdi}，差值${spread?.toFixed(1) || ''}，ADX=${adx}——趋势方向向下但力度中等，下跌有根基，短期偏空。`;
+        if (adx >= 15) return `-DI=${ndi}>+DI=${pdi}，差值${spread?.toFixed(1) || ''}，ADX=${adx}——空头方向占优但强度偏弱，下跌可能不持续，注意是否有企稳迹象。`;
+        return `-DI=${ndi}>+DI=${pdi}，差值${spread?.toFixed(1) || ''}，ADX=${adx}——虽然 -DI 领先但 ADX 极低（<15），多空力量接近，属于震荡中的微弱空头优势，不宜过度看空。`;
+      }
+      if (spread != null) {
+        if (spread >= 10) return `-DI=${ndi}>+DI=${pdi}，差值${spread.toFixed(1)} 较大，空头优势明显。但缺乏 ADX 数据无法判断趋势强度。`;
+        return `-DI=${ndi}>+DI=${pdi}，差值${spread.toFixed(1)} 较小，空头优势微弱。`;
+      }
+      return '-DI>+DI，空头方向占优，但 ADX 数据缺失无法判断趋势强度。';
+    }
+  }
+
+  if (label === 'SAR') {
+    // 解析 SAR 具体数值
+    const sarMatch = value.match(/SAR=(\d+\.?\d*)/);
+    const sar = sarMatch ? parseFloat(sarMatch[1]) : null;
+    const hasAbove = value.includes('>') && !value.includes('<');
+    const hasBelow = value.includes('<') && !value.includes('>');
+    const isBull = value.includes('多头') || hasBelow;
+    const isBear = value.includes('空头') || hasAbove;
+
+    if (value.includes('翻多')) return 'SAR 从上往下穿越价格，重要反转信号——空头趋势终结，多头启动，是右侧买入确认点。';
+    if (value.includes('翻空')) return 'SAR 从下往上穿越价格，重要反转信号——多头趋势终结，空头启动，应减仓或止损。';
+
+    if (isBull && sar != null) {
+      return `SAR=${sar}元，在价格下方运行——这是多头持仓保护点，当前处于多头持仓区。SAR 上移代表动态止损跟随价格上涨而上移（趋势越强，SAR 上移越快），应顺势持有。`;
+    }
+    if (isBear && sar != null) {
+      return `SAR=${sar}元，在价格上方运行——这是空头持仓保护点，当前处于空头持仓区。SAR 下移代表动态止损跟随价格下跌而下移，趋势未逆转前不宜抄底。若 SAR 持续下移但股价缩量横盘，可能预示止跌。`;
+    }
+
+    // 兜底
+    if (value.includes('多头')) return 'SAR 在价格下方运行，多头持仓保护点，持续持有信号；SAR 上移代表动态止损点跟随价格上涨而上移。';
+    if (value.includes('空头')) return 'SAR 在价格上方运行，空头持仓保护点；SAR 下移代表动态止损点跟随价格下跌而下移。';
+  }
+
+  // ── 惩罚项解读 ──
+  if (label === '均线空头') {
+    return 'MA5<MA10<MA20<MA60 空头排列，短中长期成本依次向下，下跌趋势明确，技术面扣分3分。空头排列中任何反弹都可能是减仓机会，不宜逆势做多。';
+  }
+  if (label === 'KDJ死叉') {
+    return 'KDJ 死叉：K值从上穿D值转为下穿D值，短期动量由多转空，是短线卖出信号，技术面扣分2分。若死叉发生在K>80超买区，可信度更高（高位派发）。';
+  }
+  if (label === 'DMI空头') {
+    return 'DMI 空头信号：-DI > +DI，下跌力度强于上涨力度，趋势方向偏空，技术面扣分1分。若同时ADX>30，则下跌趋势明确且力度强。';
+  }
+  if (label === 'SAR翻空') {
+    return 'SAR 翻空：抛物线转向从价格下方翻至上方，趋势由多转空的重要反转信号，技术面扣分2分。这是右侧卖出确认点，应果断减仓或止损。';
+  }
+
+  if (label === '近高/低(60日)') {
+    const scoreDesc = score > 0 ? `技术面加分${score}分。` : score < 0 ? `技术面扣分${Math.abs(score)}分。` : '';
+    // 同时解析高低两个值（格式：近高=xx(-x.x%) / 近低=xx(+x.x%)）
+    const highMatch = value.match(/近高[=\s]*([\d.]+)\s*\((\-?[\d.]+)%\)/);
+    const lowMatch = value.match(/近低[=\s]*([\d.]+)\s*\((\-?[\d.]+)%\)/);
+    const highPrice = highMatch ? parseFloat(highMatch[1]) : null;
+    const highPct = highMatch ? Math.abs(parseFloat(highMatch[2])) : null; // 距高点还差多少%
+    const lowPrice = lowMatch ? parseFloat(lowMatch[1]) : null;
+    const lowPct = lowMatch ? Math.abs(parseFloat(lowMatch[2])) : null; // 距低点涨了多少%
+
+    if (highPct != null && lowPct != null && highPrice != null && lowPrice != null) {
+      const range = highPrice - lowPrice;
+      const currentPos = lowPct / (highPct + lowPct) * 100; // 当前在高低区间内的位置
+
+      if (highPct < 3) {
+        if (lowPct > 20) return `${scoreDesc}距60日高点仅${highPct.toFixed(1)}%（高点${highPrice}元），已从前低${lowPrice}元反弹${lowPct.toFixed(1)}%，处于区间上沿（${currentPos.toFixed(0)}%处）。即将挑战前高阻力位——若放量突破则打开上涨空间，若量能不足则大概率冲高回落，短期追高风险极大。`;
+        if (lowPct > 10) return `${scoreDesc}距60日高点仅${highPct.toFixed(1)}%（高点${highPrice}元），已从前低${lowPrice}元反弹${lowPct.toFixed(1)}%，处于区间上部（${currentPos.toFixed(0)}%处）。接近阻力位但距前低不远，属于波段反弹中段，关注量能是否持续。`;
+        return `${scoreDesc}距60日高点仅${highPct.toFixed(1)}%（高点${highPrice}元），距前低${lowPrice}元仅反弹${lowPct.toFixed(1)}%，处于区间上部但反弹力度有限。前高压力在即，若不能放量突破则可能重回震荡。`;
+      }
+      if (highPct < 10) {
+        if (lowPct > 20) return `${scoreDesc}距60日高点${highPct.toFixed(1)}%（高点${highPrice}元），已从前低${lowPrice}元反弹${lowPct.toFixed(1)}%，处于区间上沿偏下（${currentPos.toFixed(0)}%处）。有一定上行空间但并非关键阻力区域，若能持续放量则有望挑战前高。`;
+        if (lowPct > 10) return `${scoreDesc}距60日高点${highPct.toFixed(1)}%（高点${highPrice}元），距前低${lowPrice}元反弹${lowPct.toFixed(1)}%，处于区间中部（${currentPos.toFixed(0)}%处）。上下均有空间，方向取决于量能和突破方向。`;
+        return `${scoreDesc}距60日高点${highPct.toFixed(1)}%（高点${highPrice}元），距前低${lowPrice}元仅反弹${lowPct.toFixed(1)}%，处于区间下部但反弹力度弱。关注是否能放量突破区间中轨，否则可能下探前低。`;
+      }
+      if (lowPct < 5) {
+        return `${scoreDesc}距前低${lowPrice}元仅${lowPct.toFixed(1)}%（高点${highPrice}元），距高点${highPct.toFixed(1)}%，处于区间底部（${currentPos.toFixed(0)}%处）。接近强支撑区域，若缩量企稳则可能蓄力反弹；若放量跌破前低则打开下行空间，止损需设在${lowPrice}元下方。`;
+      }
+      if (lowPct < 10) {
+        return `${scoreDesc}距前低${lowPrice}元${lowPct.toFixed(1)}%（高点${highPrice}元），距高点${highPct.toFixed(1)}%，处于区间下部（${currentPos.toFixed(0)}%处）。已接近支撑区域但尚未确认底部，下跌动能已部分释放，赔率逐渐改善。`;
+      }
+      // 中间位置
+      if (currentPos > 60) return `${scoreDesc}距高点${highPct.toFixed(1)}%、距低点${lowPct.toFixed(1)}%，当前处于区间上部（${currentPos.toFixed(0)}%处），偏多但上方空间有限，关注前高${highPrice}元能否突破。`;
+      if (currentPos > 40) return `${scoreDesc}距高点${highPct.toFixed(1)}%、距低点${lowPct.toFixed(1)}%，当前处于区间中部（${currentPos.toFixed(0)}%处），方向不明确，等待放量选择方向——向上放量看多，向下放量看空。`;
+      return `${scoreDesc}距高点${highPct.toFixed(1)}%、距低点${lowPct.toFixed(1)}%，当前处于区间下部（${currentPos.toFixed(0)}%处），偏空但下跌空间有限，关注前低${lowPrice}元支撑是否有效。`;
+    }
+
+    // 单值解析（向后兼容）
+    if (value.includes('(-') && value.match(/\(\-[\d.]+%\)/)) {
+      const pct = parseFloat(value.match(/\(\-([\d.]+)%\)/)?.[1] || '0');
+      if (pct < 3) return `${scoreDesc}距60日高点仅${pct}%，即将挑战前高，若放量突破则打开上涨空间，若量能不足则容易冲高回落。`;
+      if (pct < 10) return `${scoreDesc}距60日高点${pct}%，有一定空间但并非关键阻力，若能持续放量则压力不大。`;
+      return `${scoreDesc}距60日高点${pct}%，前高位置较远，短期上涨空间充足，暂无明显技术阻力。`;
+    }
+    if (value.includes('(+')) {
+      const pct = parseFloat(value.match(/\(\+([\d.]+)%\)/)?.[1] || '0');
+      if (pct < 3) return `${scoreDesc}距60日低点仅${pct}%，接近支撑区域，若缩量企稳则可能蓄力反弹，若放量跌破则打开下行空间。`;
+      if (pct < 10) return `${scoreDesc}距60日低点${pct}%，处于低位区域，下跌动能已有释放，但趋势逆转需等待放量阳线确认。`;
+      return `${scoreDesc}距60日低点${pct}%，处于相对低位，前期下跌动能已有消化，赔率逐渐改善。`;
+    }
+    return '近高/低数据无法完整解读，请结合括号内百分比判断当前位置是接近阻力还是支撑。';
+  }
+
+  if (label === '量比(5日/20日)') {
+    const v = parseFloat(value);
+    if (!isNaN(v)) {
+      const scoreDesc = score > 0 ? `技术面加分${score}分。` : score < 0 ? `技术面扣分${Math.abs(score)}分。` : '';
+      if (v >= 3) return `量比=${v}，极度放量（3倍以上），${scoreDesc}是异常信号——可能是重大消息刺激、主力对倒出货或机构大进大出。需高度警惕：仅当放量上涨（股价大涨+量比>3）才可信，若放量下跌则是主力甩货，风险极大。`;
+      if (v >= 2) return `量比=${v}，显著放量，${scoreDesc}资金活跃度大幅提升——说明有主力资金在积极参与。关键看方向：放量上涨=真金白银做多，可靠性高；放量下跌=主力出货，是危险信号。`;
+      if (v >= 1.5) return `量比=${v}，温和放量，${scoreDesc}是最健康的量价配合状态——有资金持续流入支撑上涨，趋势有望延续，是当前最好的做多窗口。`;
+      if (v > 1.2) return `量比=${v}，轻微放量，${scoreDesc}量能略高于正常水平，说明有增量资金在试探性介入，但力度有限，需观察是否继续放大至1.5以上。`;
+      if (v > 1.0) return `量比=${v}，刚好略高于基准线（1.0），${scoreDesc}量能处于正常偏强状态——有微弱增量，但不足以确认趋势加速，趋势大概率延续现有方向但力度未增强。`;
+      if (v === 1.0) return `量比=1.0，恰好等于基准线——近5日均量与近20日均量完全相等，多空力量处于短期均衡，方向选择在即，需等待放量打破平衡。`;
+      if (v >= 0.85) return `量比=${v}，轻微缩量，量能略低于正常水平——多空观望情绪渐浓，趋势可能进入整理阶段，现有趋势力度在衰减。`;
+      if (v >= 0.7) return `量比=${v}，轻度缩量，动能明显减弱——若股价仍在上涨，则是无量上涨（虚涨），随时可能回调；若股价下跌，则是无量阴跌（延续）。`;
+      if (v >= 0.5) return `量比=${v}，明显缩量，交投清淡——多空双方都在等待，要么是横盘蓄势（变盘前兆），要么是无人问津（冷门股）。关键看后续是否放量选择方向。`;
+      return `量比=${v}，极度缩量，${scoreDesc}成交极为清淡——往往是变盘的前兆（地量见地价或地量后加速下跌），但也可能仅仅是市场关注度极低的冷门股。`;
+    }
+  }
+
+  if (label === 'SMA5均线') {
+    const v = parseFloat(value);
+    if (!isNaN(v)) {
+      return `SMA5=${v}元，5日平均持仓成本。SMA5 需结合 MA10/MA20/MA60 综合判断多头排列状态，单独参考意义有限。`;
+    }
+  }
+
+  if (label === '笔方向') {
+    if (value === '向上') return '当前缠论笔方向向上，多方主导，走势以上涨笔为主，短线偏多。';
+    if (value === '向下') return '当前缠论笔方向向下，空方主导，走势以下跌笔为主，短线偏空。';
+    return '笔方向未确定，走势尚未形成有效笔结构，参考价值有限。';
+  }
+
+  if (label === '笔数') {
+    const v = parseInt(value, 10);
+    if (!isNaN(v)) {
+      if (v <= 3) return `近期笔数=${v}，笔数较少，走势简洁有力，趋势方向清晰，信号可靠度较高。`;
+      if (v <= 6) return `近期笔数=${v}，笔数适中，走势有一定复杂性，趋势仍在但需注意震荡。`;
+      return `近期笔数=${v}，笔数较多，走势震荡频繁，多空反复拉锯，信号杂音大，应降低权重。`;
+    }
+  }
+
+  // ═══════════════════════════════════════
+  //  资金面
+  // ═══════════════════════════════════════
+
+  if (label === '主力净流入') {
+    if (value.includes('亿')) {
+      const numMatch = value.replace(/[^0-9.\-]/g, '');
+      const v = parseFloat(numMatch);
+      if (v >= 3) return `主力净流入${value}，大资金强力做多，控盘度高，股价短期上涨概率大，是积极信号。`;
+      if (v >= 1) return `主力净流入${value}，主力积极入场，态度明确，短期偏多。`;
+      if (v > 0) return `主力净流入${value}，主力小幅流入，态度偏多但力度有限。`;
+      if (v >= -1) return `主力净流出${value}，主力小幅撤退，但力度不大，暂不影响整体格局。`;
+      if (v >= -3) return `主力净流出${value}，主力明显流出，短期承压，若持续流出需警惕。`;
+      return `主力净流出${value}，主力大举撤离，是强烈的减仓信号，往往伴随股价下跌。`;
+    }
+    if (value.includes('万')) return `主力净流入${value}，金额较小，反映当日主力参与度不高，方向参考意义有限。`;
+  }
+
+  if (label === '主力净流入占比') {
+    const v = parseFloat(value);
+    if (!isNaN(v)) {
+      if (v >= 15) return `净流入占比${v}%，主力高度控盘，强势特征极为明显，短期内多头格局大概率延续。`;
+      if (v >= 10) return `净流入占比${v}%，主力控盘度高，强势信号。`;
+      if (v >= 5) return `净流入占比${v}%，主力参与积极，态度偏多。`;
+      if (v >= 0) return `净流入占比${v}%，主力小幅流入，态度偏多但力度有限。`;
+      if (v >= -5) return `净流出占比${v}%，主力温和流出，暂未改变整体趋势，可继续观察。`;
+      if (v >= -10) return `净流出占比${v}%，主力明显撤离，短期内多头承压，若持续流出则需减仓。`;
+      return `净流出占比${v}%，主力大举出逃，是强烈的卖出预警，往往伴随加速下跌。`;
+    }
+  }
+
+  if (label === '换手率偏离') {
+    const v = parseFloat(value);
+    if (!isNaN(v)) {
+      if (v > 5) return `换手率偏离${v}%，远超正常水平，筹码换手极为频繁，可能是主力对倒或机构大进大出，高换手后往往伴随剧烈波动。`;
+      if (v > 0) return `换手率偏离${v}%，略高于正常水平，活跃度提升但不过度，多空博弈积极。`;
+      if (v >= -2) return `换手率偏离${v}%，接近正常水平，筹码相对稳定，无明显异动。`;
+      return `换手率偏离${v}%，明显低于正常水平，筹码锁定良好（控盘型），但也可能是无人问津。`;
+    }
+  }
+
+  if (label === '超大单净流入') {
+    const v = parseFloat(value.replace(/[^0-9.\-]/g, ''));
+    if (!isNaN(v) && v > 0) return `超大单净流入${value}，超级资金（单笔>100万）大举买入，往往是机构级别操作，中期信号意义强。`;
+    if (!isNaN(v) && v < 0) return `超大单净流出${value}，超级资金大举撤退，是重要的机构减仓信号，需高度重视。`;
+    return '超大单净流入数据无法解读，请查看具体数值。';
+  }
+
+  if (label === '大单净流入') {
+    const v = parseFloat(value.replace(/[^0-9.\-]/g, ''));
+    if (!isNaN(v) && v > 0) return `大单净流入${value}，大户资金（单笔20~100万）积极入场，反映中大户投资者做多意愿较强。`;
+    if (!isNaN(v) && v < 0) return `大单净流出${value}，大户资金撤离，反映中大户投资者在减仓，对短期走势有一定压力。`;
+    return '大单净流入数据无法解读，请查看具体数值。';
+  }
+
+  if (label === '主力资金状态') {
+    if (value === '主力流入') return '综合判断当日主力资金方向为流入，大资金整体做多，短期偏乐观。';
+    if (value === '主力流出') return '综合判断当日主力资金方向为流出，大资金整体撤退，短期偏谨慎。';
+    return '主力资金状态暂无数据。';
+  }
+
+  if (label === '当日换手率') {
+    const v = parseFloat(value);
+    if (!isNaN(v)) {
+      if (v >= 20) return `换手率${v}%，极高换手，筹码极度活跃，多空博弈激烈，高位高换手风险大。`;
+      if (v >= 10) return `换手率${v}%，高换手，筹码换手积极，活跃度高；需结合股价位置判断高位还是低位。`;
+      if (v >= 3) return `换手率${v}%，正常换手，筹码交换适度，趋势运行健康。`;
+      if (v >= 1) return `换手率${v}%，偏低换手，筹码锁定较好，多空分歧小，走势可能延续现有趋势。`;
+      return `换手率${v}%，极低换手，交投清淡，通常出现在横盘或趋势末端（高位低换手=主力控盘，低位低换手=无人问津）。`;
+    }
+  }
+
+  if (label === '量能状态') {
+    if (value === '放量') return '综合量能判断为放量，成交量明显放大，资金积极参与，方向与量能配合时信号可靠。';
+    if (value === '温和放量') return '综合量能判断为温和放量，量能逐步放大，量价配合健康，是较为理想的做多状态。';
+    if (value === '缩量') return '综合量能判断为缩量，成交量明显萎缩，多空观望情绪浓厚，可能横盘或酝酿变盘。';
+    return '量能状态数据不明确。';
+  }
+
+  // ═══════════════════════════════════════
+  //  事件面
+  // ═══════════════════════════════════════
+
+  if (label === '连续涨停') {
+    const v = parseInt(value, 10);
+    if (!isNaN(v) && v >= 3) return `近10日涨停${v}天，强势连板，市场情绪极度亢奋，是龙头股特征，但高位炸板风险极高，不建议追高。`;
+    if (!isNaN(v) && v >= 2) return `近10日涨停${v}天，连续强势涨停，市场关注度高，是强势股特征，注意连板后的分歧风险。`;
+    if (!isNaN(v) && v === 1) return `近10日涨停1天，偶发性涨停，市场关注度有所提升，注意观察次日开盘情绪是否持续。`;
+    return '近10日无涨停记录，市场情绪相对平稳，个股无明显异动，属于正常交易状态。';
+  }
+
+  if (label === '炸板率') {
+    const v = parseFloat(value);
+    if (!isNaN(v)) {
+      if (v < 5) return `炸板率${v}%，几乎零炸板，封板极为坚决，多方力量极强，是极为强势的做多信号。`;
+      if (v < 15) return `炸板率${v}%，炸板极少，封板坚定，多方占优，当日做多胜率高。`;
+      if (v < 30) return `炸板率${v}%，存在一定炸板，封板力度一般，多空有分歧，次日走势存在不确定性。`;
+      if (v < 50) return `炸板率${v}%，炸板较多，封板脆弱，抛压较大，当日追板风险极高，次日低开概率大。`;
+      return `炸板率${v}%，炸板率极高，封板几乎失败，空方主导，次日大概率低开，应避免参与。`;
+    }
+  }
+
+  if (label === '强势股') {
+    if (value === '是') return '近20日涨幅超过30%，属于强势股，动能强劲，但波动也会加大——适合趋势跟踪，不适合逆势操作。';
+    return '近20日涨幅未超30%，走势相对温和，不是当前市场热门标的，适合稳健型操作。';
+  }
+
+  if (label === '融资余额变化') {
+    const v = parseFloat(value);
+    if (!isNaN(v)) {
+      if (v > 10) return `融资余额增长${v}%，杠杆资金大幅加码，情绪极度乐观，是强烈的做多信号，但也要警惕融资盘踩踏风险。`;
+      if (v > 5) return `融资余额增长${v}%，杠杆资金积极做多，情绪乐观，上涨趋势有杠杆资金支撑。`;
+      if (v > 0) return `融资余额增长${v}%，杠杆资金小幅加仓，态度偏多但力度有限。`;
+      if (v >= -3) return `融资余额下降${v}%，杠杆资金小幅撤退，态度略偏空但影响不大。`;
+      if (v >= -10) return `融资余额下降${v}%，杠杆资金明显减仓，情绪转弱，若持续下降则需谨慎。`;
+      return `融资余额大幅下降${v}%，杠杆资金大举撤离，是强烈的看空信号，融资踩踏往往加速下跌。`;
+    }
+  }
+
+  if (label === '龙虎榜') {
+    if (value.includes('净买入')) return '龙虎榜机构席位净买入，专业机构参与，看多信号强；机构席位净买入次日继续上涨概率较大。';
+    if (value.includes('净卖出')) return '龙虎榜机构席位净卖出，专业机构减仓，是机构看空的警示信号，需注意后续走势。';
+    if (value === '未上榜') return '该股未登上龙虎榜，说明当日成交金额或涨跌幅未达到上榜标准，不是热点股。';
+    return '龙虎榜数据无法解读。';
+  }
+
+  if (label === '龙虎榜机构净买入') {
+    const v = parseFloat(value.replace(/[^0-9.\-]/g, ''));
+    if (!isNaN(v) && v > 0) return `机构席位龙虎榜净买入${value}，专业机构真金白银参与，是中期看好信号，可信度高。`;
+    if (!isNaN(v) && v < 0) return `机构席位龙虎榜净卖出${value}，专业机构减仓离场，是中期看淡警示，需结合基本面判断。`;
+    return '龙虎榜机构净买入数据无法解读。';
+  }
+
+  if (label === '龙虎榜上榜') {
+    if (value.includes('净买入')) return '近期多次登上龙虎榜且机构席位净买入，专业机构持续关注，是中长期看好信号。';
+    if (value.includes('净卖出')) return '近期登上龙虎榜但机构席位净卖出，专业机构减仓，需注意机构是否在出货。';
+    if (value === '未上榜') return '近期未登上龙虎榜，非市场热点或大资金参与度不高。';
+    return '龙虎榜上榜数据无法解读。';
+  }
+
+  if (label === '机构调研热度') {
+    const v = parseInt(value, 10);
+    if (!isNaN(v)) {
+      if (v >= 15) return `近90天${v}次机构调研，机构高度关注，是市场热门调研标的，往往对应重大业务变化或业绩拐点。`;
+      if (v >= 10) return `近90天${v}次机构调研，机构关注度很高，说明公司有一定关注度和话题性。`;
+      if (v >= 5) return `近90天${v}次机构调研，关注度尚可，有一定市场认可，但不算热点。`;
+      if (v >= 2) return `近90天${v}次机构调研，关注度偏低，覆盖机构有限。`;
+      return `近90天${v}次机构调研，几乎无机构关注，可能是冷门股或问题较多未被机构覆盖。`;
+    }
+  }
+
+  if (label === '公告事件') {
+    if (value.match(/正面(\d+)\/负面(\d+)/)) {
+      const pos = parseInt(value.match(/正面(\d+)/)?.[1] || '0');
+      const neg = parseInt(value.match(/负面(\d+)/)?.[1] || '0');
+      const net = pos - neg;
+      if (net >= 5) return `公告正面${pos}项/负面${neg}项，净正面${net}项，正面事件密集，公司近期有较多利好催化，可重点关注。`;
+      if (net >= 2) return `公告正面${pos}项/负面${neg}项，净正面${net}项，正面事件占优，基本面有正向催化。`;
+      if (net >= 0) return `公告正面${pos}项/负面${neg}项，正负事件基本平衡，暂无明显偏向。`;
+      if (net >= -2) return `公告正面${pos}项/负面${neg}项，净负面${Math.abs(net)}项，负面事件偏多，需留意潜在风险。`;
+      return `公告正面${pos}项/负面${neg}项，净负面${Math.abs(net)}项，负面事件较多，是较强的风险警示信号。`;
+    }
+  }
+
+  // ═══════════════════════════════════════
+  //  基本面
+  // ═══════════════════════════════════════
+
+  if (label === 'ROE') {
+    const v = parseFloat(value);
+    if (!isNaN(v)) {
+      if (v >= 20) return `ROE=${v}%，股东回报极为优秀，是巴菲特最看重的指标，这类公司往往具备强大的竞争优势（护城河）。`;
+      if (v >= 15) return `ROE=${v}%，股东回报优秀，属于高质量公司，盈利能力强于大多数上市公司。`;
+      if (v >= 10) return `ROE=${v}%，盈利质量良好，ROE>10%是白马股的门槛，公司盈利能力稳定。`;
+      if (v >= 5) return `ROE=${v}%，盈利能力中等，行业可能处于成熟期或竞争加剧，ROE 能否提升是关键观察点。`;
+      return `ROE=${v}%，盈利能力偏弱，公司可能处于亏损边缘或行业衰退期，需确认是否具有反转逻辑再介入。`;
+    }
+  }
+
+  if (label === 'PE估值') {
+    if (typeof value === 'string' && value.includes('分位')) {
+      const match = value.match(/分位([\d.]+)%/);
+      const pctVal = match ? parseFloat(match[1]) : null;
+      if (pctVal != null) {
+        if (pctVal <= 10) return `PE历史分位${pctVal}%，处于极低历史区间，是深度价值区间，安全边际极高（前提是基本面无恶化）。`;
+        if (pctVal <= 20) return `PE历史分位${pctVal}%，处于历史低估区间，与过去相比估值偏低，安全边际较高。`;
+        if (pctVal <= 30) return `PE历史分位${pctVal}%，估值偏低但不是极端低估，仍有下行空间但已不大。`;
+        if (pctVal <= 50) return `PE历史分位${pctVal}%，估值处于历史中位附近，合理估值，等待更好的布局时机。`;
+        if (pctVal <= 70) return `PE历史分位${pctVal}%，估值偏高，高于历史中位数，当前价格包含较多乐观预期。`;
+        return `PE历史分位${pctVal}%，处于历史高估区间，估值压力较大，除非业绩持续高增长否则性价比低。`;
+      }
+    }
+    const v = parseFloat(value);
+    if (!isNaN(v)) {
+      if (v < 10) return `PE=${v}倍，绝对估值极低，可能是深度价值股（银行/地产/周期）或基本面有问题，需区分对待。`;
+      if (v < 15) return `PE=${v}倍，绝对估值偏低，具备安全边际，适合价值投资者布局。`;
+      if (v < 25) return `PE=${v}倍，绝对估值合理，符合市场一般水平，是A股大多数公司的正常估值区间。`;
+      if (v < 40) return `PE=${v}倍，估值偏高，需高增速来消化，当前估值已包含较高增长预期。`;
+      if (v < 60) return `PE=${v}倍，绝对估值很高，需要业绩持续高速增长才能支撑，高估值高风险。`;
+      return `PE=${v}倍，估值极高（超过60倍），PEG>2 概率大，是典型的成长股或题材股特征，波动极大。`;
+    }
+  }
+
+  if (label === '营收增速') {
+    const v = parseFloat(value);
+    if (!isNaN(v)) {
+      if (v >= 50) return `营收增速${v}%，收入爆发式增长，往往对应新产品放量、市场份额提升或行业高景气，是成长股的标志。`;
+      if (v >= 30) return `营收增速${v}%，收入高速增长，成长性突出，公司处于快速扩张期。`;
+      if (v >= 20) return `营收增速${v}%，增长稳健，处于成长期中期，是较为理想的内生增长水平。`;
+      if (v >= 10) return `营收增速${v}%，增长有所放缓但仍为正，需观察增速是否持续下滑。`;
+      if (v >= 0) return `营收增速${v}%，收入增速很低，接近停滞，需判断是行业天花板还是公司竞争力下滑。`;
+      return `营收增速${v}%，收入负增长，公司业务面临收缩，是较强的负面信号，需排查原因。`;
+    }
+  }
+
+  if (label === '净利增速') {
+    const v = parseFloat(value);
+    if (!isNaN(v)) {
+      if (v >= 100) return `净利增速${v}%，利润爆发式增长，往往是基数效应或主业进入收获期，注意剔除一次性因素。`;
+      if (v >= 50) return `净利增速${v}%，利润高速增长，成色足（需与营收增速对比，差距大可能有非经常损益）。`;
+      if (v >= 20) return `净利增速${v}%，盈利增长强劲，基本面向好，是较为理想的增速水平。`;
+      if (v >= 0) return `净利增速${v}%，利润增速放缓但仍为正，若持续下滑则需警惕。`;
+      return `净利增速${v}%，利润下滑，需排查是成本上升、收入下降还是一次性因素导致。`;
+    }
+  }
+
+  if (label === '扣非增速') {
+    const v = parseFloat(value);
+    if (!isNaN(v)) {
+      if (v >= 30) return `扣非增速${v}%，核心业务盈利能力强且增长扎实，剔除水分后利润质量高。`;
+      if (v >= 20) return `扣非增速${v}%，主业增长稳健，盈利有实在根基，增速含金量高。`;
+      if (v >= 10) return `扣非增速${v}%，主业盈利增长尚可，但速度一般，需观察是否能持续。`;
+      if (v >= 0) return `扣非增速${v}%，主业盈利增长缓慢，竞争力或行业景气度需关注。`;
+      return `扣非增速${v}%，主业亏损或大幅下滑，公司利润主要靠非经常性损益（政府补贴/资产出售等），风险较大。`;
+    }
+  }
+
+  if (label === 'PB估值') {
+    if (typeof value === 'string' && value.includes('分位')) {
+      const match = value.match(/分位([\d.]+)%/);
+      const pctVal = match ? parseFloat(match[1]) : null;
+      if (pctVal != null) {
+        if (pctVal <= 20) return `PB历史分位${pctVal}%，资产估值处于历史低位，市净率便宜，适合价值投资布局。`;
+        if (pctVal <= 40) return `PB历史分位${pctVal}%，资产估值偏低，相较历史有折价。`;
+        if (pctVal <= 60) return `PB历史分位${pctVal}%，资产估值中性，合理水平。`;
+        if (pctVal <= 80) return `PB历史分位${pctVal}%，资产估值偏高，市场对公司资产给予了溢价。`;
+        return `PB历史分位${pctVal}%，资产估值处于历史高位，市场对公司资产极为乐观，溢价高。`;
+      }
+    }
+    const v = parseFloat(value);
+    if (!isNaN(v)) {
+      if (v < 1) return `PB=${v}倍，股价低于净资产，属于破净股，往往出现在银行/钢铁/煤炭等重资产行业，需区分是价值陷阱还是真的便宜。`;
+      if (v < 2) return `PB=${v}倍，资产估值低，下行空间有限，适合保守型价值投资者。`;
+      if (v < 3) return `PB=${v}倍，资产估值合理，符合大多数工业/消费类公司水平。`;
+      if (v < 5) return `PB=${v}倍，资产估值偏高，市场对公司资产或轻资产属性给予了溢价。`;
+      return `PB=${v}倍，资产估值极高，通常对应高成长预期、轻资产模式（科技/消费）或市场高亢情绪。`;
+    }
+  }
+
+  if (label === '毛利率') {
+    const v = parseFloat(value);
+    if (!isNaN(v)) {
+      if (v >= 60) return `毛利率${v}%，定价权极强，是顶级消费品（白酒/奢侈品/创新药）的典型特征，护城河极深。`;
+      if (v >= 40) return `毛利率${v}%，定价权强，竞争优势明显，盈利能力有保障，是好行业/好公司的特征。`;
+      if (v >= 25) return `毛利率${v}%，盈利空间较大，可能处于品牌消费或有一定差异化的制造业。`;
+      if (v >= 15) return `毛利率${v}%，盈利空间一般，处于竞争较激烈的行业（普通制造业/商贸等）。`;
+      return `毛利率${v}%，利润空间极薄，成本控制能力是关键，这类公司依赖规模效应或周转率取胜。`;
+    }
+  }
+
+  if (label === '现金流质量') {
+    const v = parseFloat(value);
+    if (!isNaN(v)) {
+      if (v >= 1.5) return `经营现金流/净利润=${v}倍，盈利质量极为优秀，利润全部有真实现金支撑，是最健康的财务状态。`;
+      if (v >= 1.0) return `经营现金流/净利润=${v}倍，盈利质量好，利润基本有现金覆盖，财务造假风险低。`;
+      if (v >= 0.8) return `经营现金流/净利润=${v}倍，盈利质量较好，约八成利润有现金支撑，较为健康。`;
+      if (v >= 0.5) return `经营现金流/净利润=${v}倍，盈利质量一般，部分利润为账面数字，可能对应应收增加或存货堆积。`;
+      if (v > 0) return `经营现金流/净利润=${v}倍，现金回流明显弱于账面利润，可能存在大量应收账款，警惕坏账风险。`;
+      return `经营现金流为负，公司现金净流出，处于投入期（扩张）或烧钱阶段，需结合行业特性和融资能力判断风险。`;
+    }
+  }
+
+  if (label === '偿债能力') {
+    const crMatch = value.match(/流动=([\d.]+)/);
+    const qrMatch = value.match(/速动=([\d.]+)/);
+    const cr = crMatch ? parseFloat(crMatch[1]) : null;
+    const qr = qrMatch ? parseFloat(qrMatch[1]) : null;
+    if (cr != null && qr != null) {
+      if (cr >= 2 && qr >= 1.5) return `流动比率${cr}、速动比率${qr}，偿债能力极强，财务风险极低，公司资金充裕，抗风险能力强。`;
+      if (cr >= 1.5 && qr >= 1) return `流动比率${cr}、速动比率${qr}，偿债能力优秀，短期债务偿还无忧，资金状况健康。`;
+      if (cr >= 1.2 && qr >= 0.8) return `流动比率${cr}、速动比率${qr}，偿债能力基本达标，短期流动性尚可，注意持续监控。`;
+      if (cr >= 1.0) return `流动比率${cr}、速动比率${qr}，偿债能力勉强及格，若市场恶化或应收账款回收不力可能面临流动性风险。`;
+      return `流动比率${cr}、速动比率${qr}，偿债压力较大，短期资金链紧张，是较强的财务风险信号，需高度警惕。`;
+    }
+  }
+
+  if (label === '回款质量') {
+    const v = parseFloat(value);
+    if (!isNaN(v)) {
+      if (v <= 30) return `应收账款周转${v}天，回款极快，资金使用效率高，议价能力强，是优质企业的标志。`;
+      if (v <= 60) return `应收账款周转${v}天，回款较快，资金占用少，整体健康。`;
+      if (v <= 90) return `应收账款周转${v}天，回款周期正常，处于行业合理水平。`;
+      if (v <= 120) return `应收账款周转${v}天，回款周期偏长，资金被下游客户占用较多，需关注大客户回款节奏。`;
+      if (v <= 180) return `应收账款周转${v}天，回款明显偏慢，资金被大量占用，警惕坏账风险和现金流恶化。`;
+      return `应收账款周转${v}天，回款极慢（超过半年），资金被严重占用，可能是客户信用恶化或行业话语权极弱，风险极高。`;
+    }
+  }
+
+  if (label === '研报评级') {
+    if (value.includes('买入')) return '机构最新评级为买入，专业机构综合基本面、估值、成长性后给出的最高推荐等级，可作为正向参考。';
+    if (value.includes('增持')) return '机构评级为增持，态度积极但低于买入，适合中长期关注。';
+    if (value.includes('中性')) return '机构评级为中性，认为当前价格已反映基本面，缺乏明显上行空间，观望为主。';
+    if (value.includes('减持') || value.includes('卖出')) return '机构看空，是较强的卖出警示，需结合自身判断是否需要减仓。';
+    return '暂无最新研报评级，机构关注度低，可能未被主流机构覆盖，股价走势更多依赖市场情绪和资金面。';
+  }
+
+  if (label === '研报覆盖热度') {
+    const v = parseInt(value, 10);
+    if (!isNaN(v)) {
+      if (v >= 20) return `近90天${v}篇研报，机构高度密集覆盖，是市场公认的核心标的，研究最充分，信息最透明。`;
+      if (v >= 10) return `近90天${v}篇研报，机构关注度很高，市场共识强，信息较充分。`;
+      if (v >= 5) return `近90天${v}篇研报，机构关注度尚可，有一定市场认可。`;
+      if (v >= 2) return `近90天${v}篇研报，覆盖度偏低，可能存在认知差——要么被低估值得挖掘，要么有问题未被机构发现。`;
+      return `近90天无研报覆盖，机构几乎不关注，需自行深入研究，定价效率可能较低（机会或风险并存）。`;
+    }
+  }
+
+  // ── 新增基本面指标解读 ──────────────────────────────
+
+  if (label === '净利率') {
+    const v = parseFloat(value);
+    if (!isNaN(v)) {
+      if (v >= 30) return `净利率${v}%，盈利能力极强，是顶级商业模式（白酒/医药/软件SaaS）的特征，每一元收入都能转化为高额利润，护城河极深。`;
+      if (v >= 20) return `净利率${v}%，盈利能力很强，公司具备明显的竞争优势或定价权，利润转化效率高于大多数公司。`;
+      if (v >= 10) return `净利率${v}%，盈利能力良好，处于A股中上游水平，经营效率较高，属于优质公司区间。`;
+      if (v >= 5) return `净利率${v}%，盈利能力中等，属传统制造业/零售业的正常水平，依赖规模效应或高周转取胜。`;
+      if (v > 0) return `净利率${v}%，盈利能力偏弱，每元收入转化利润很少，需关注成本结构是否有改善空间。`;
+      return `净利率${v}%，主营业务已亏损，每一元收入都在消耗利润，需高度警惕经营风险。`;
+    }
+  }
+
+  if (label === '资产负债率') {
+    const v = parseFloat(value);
+    if (!isNaN(v)) {
+      if (v <= 20) return `资产负债率${v}%，负债极低，财务极为稳健，是轻资产/现金牛公司的典型特征（如白酒/互联网平台）。`;
+      if (v <= 40) return `资产负债率${v}%，负债水平健康，财务结构稳健，未来仍有加杠杆扩张的空间。`;
+      if (v <= 60) return `资产负债率${v}%，负债水平可接受，处于大多数A股公司的正常区间，需关注有息负债占比而非总负债。`;
+      if (v <= 80) return `资产负债率${v}%，负债偏高，财务杠杆较大，利息支出可能侵蚀利润，需关注短债置换能力。`;
+      return `资产负债率${v}%，负债极高，存在较大财务风险，可能是房地产/银行等高杠杆行业，也可能是财务困境公司，需重点排查。`;
+    }
+  }
+
+  if (label === '商誉') {
+    if (value.includes('倍)')) {
+      const match = value.match(/占净利([\d.]+)倍/);
+      if (match) {
+        const ratio = parseFloat(match[1]);
+        if (ratio > 50) return `商誉占净利润${ratio}倍，商誉减值风险极大！一旦被收购标的业绩不达预期，大额减值将重创当年利润，需高度警惕并查阅最新减值测试公告。`;
+        if (ratio > 10) return `商誉占净利润${ratio}倍，商誉减值风险较大，每年末需重点关注减值测试，确认并购标的业绩承诺是否还在履行期。`;
+        if (ratio > 3) return `商誉占净利润${ratio}倍，有一定减值风险，建议了解被收购标的经营情况，判断业绩承诺可达性。`;
+        return `商誉占净利润${ratio}倍，减值风险可控，商誉规模相对利润而言不显著，对财务报表影响有限。`;
+      }
+    }
+    const vMatch = value.match(/([\d.]+)亿/);
+    if (vMatch) {
+      const v = parseFloat(vMatch[1]);
+      if (v > 50) return `商誉${v}亿元，金额较大，需关注被收购标的业绩表现，防范减值风险。`;
+      return `商誉${v}亿元，金额较小，对财务报表影响有限。`;
+    }
+  }
+
+  if (label === '自由现金流') {
+    if (value.includes('亿') || value.includes('万')) {
+      const isNegative = value.trim().startsWith('-');
+      if (!isNegative) return `自由现金流${value}，为正说明公司在维持现有运营和必要投资后还能产生多余现金，是高品质公司的标志，可用于分红/回购/再投资。`;
+      return `自由现金流${value}，为负说明公司需要不断投入资本开支才能维持或扩张，属于重资产或高成长投入期特征，需关注投入能否转化为未来现金流。`;
+    }
+  }
+
+  if (label === '营收/净利(绝对值)') {
+    if (value.includes('营收') && value.includes('净利')) {
+      return `最新一期财报的营业收入和归母净利润绝对值。营收规模反映公司市场地位，净利规模反映最终盈利体量。结合净利率可以判断公司的盈利效率。`;
+    }
+  }
+
+  if (label === '存货') {
+    const vMatch = value.match(/([\d.]+)亿/);
+    if (vMatch) {
+      const v = parseFloat(vMatch[1]);
+      if (v > 100) return `存货${value}，金额极大，需结合行业特点判断——地产/制造业存货高可能是风险（滞销/跌价），零售/超市存货高可能是正常备货。`;
+      return `存货${value}，需结合营业成本判断存货周转天数，周转慢且存货增长快可能是滞销信号。`;
+    }
+  }
+
+  if (label === '货币资金') {
+    const vMatch = value.match(/([\d.]+)亿/);
+    if (vMatch) {
+      return `货币资金${value}，是公司短期偿付能力和抗风险能力的核心保障。充裕的货币资金意味着公司有能力应对突发情况、进行研发投入或实施分红回购。`;
+    }
+  }
+
+  if (label === 'WR(14)') {
+    const wrMatch = value.match(/([-\d.]+)/);
+    const wrVal = wrMatch ? parseFloat(wrMatch[1]) : null;
+    if (wrVal != null) {
+      if (wrVal < -80) return `WR=${wrVal}，深度超卖区（<-80），价格处于近期极低位置，反弹概率高，但需等待KDJ金叉或放量确认才入场。`;
+      if (wrVal < -50) return `WR=${wrVal}，超卖区（-80~-50），价格相对近期高低点偏低，存在反弹机会，但力度可能弱于深度超卖区。`;
+      if (wrVal > -20) return `WR=${wrVal}，超买区（>-20），价格处于近期极高位置，回落风险大，不宜追高，可考虑减仓。`;
+      return `WR=${wrVal}，正常区间（-50~-20），无明显超买超卖信号，需结合趋势方向判断。`;
+    }
+  }
+
+  if (label === 'BOLL带宽') {
+    const bwMatch = value.match(/([\d.]+)/);
+    const bw = bwMatch ? parseFloat(bwMatch[1]) : null;
+    if (bw != null) {
+      if (bw < 5) return `带宽=${bw}%，极度收敛（<5%），布林带收口到极致，市场犹豫期即将结束，一旦放量突破方向确立，趋势力度往往很强，重点关注。`;
+      if (bw < 10) return `带宽=${bw}%，收敛状态（5%~10%），波动收窄，变盘概率积累中，可密切关注突破方向。`;
+      return `带宽=${bw}%，正常/发散状态（>10%），波动充分，趋势已运行一段时间，按现有趋势操作即可。`;
+    }
+  }
+
+  // ═══════════════════════════════════════
+  //  通用兜底（所有指标均需覆盖才生效）
+  // ═══════════════════════════════════════
+  const s = score != null ? score : 0;
+  const m = maxScore != null ? maxScore : 0;
+  const pct = m > 0 ? Math.round((s / m) * 100) : 0;
+  if (pct >= 80) return `${label}当前值得分率${pct}%，处于领先水平，该指标表现优秀。`;
+  if (pct >= 60) return `${label}当前值得分率${pct}%，处于良好水平。`;
+  if (pct >= 40) return `${label}当前值得分率${pct}%，处于中等水平，无明显优势。`;
+  if (pct >= 20) return `${label}当前值得分率${pct}%，处于偏弱水平，建议关注是否有改善信号。`;
+  if (label === 'MA发散/收敛') {
+    if (value && value.includes('发散')) {
+      if (value.includes('→')) {
+        const match = value.match(/([-.\d]+)%%→([-.\d]+)%%/);
+        if (match) {
+          const [prev, curr] = [parseFloat(match[1]), parseFloat(match[2])];
+          const delta = curr - prev;
+          if (delta > 2) return `MA间距从${prev.toFixed(2)}%→${curr.toFixed(2)}%（扩大>2%），均线大幅发散，趋势加速信号强，行情大概率延续。`;
+          if (curr > 0) return `MA间距从${prev.toFixed(2)}%→${curr.toFixed(2)}%，均线正向发散（MA5在MA20上方并扩大差距），上升趋势正在加速。`;
+          return `MA间距从${prev.toFixed(2)}%→${curr.toFixed(2)}%（扩大），均线负向发散（空头排列加速），下跌趋势正在加速——做空动能强。`;
+        }
+      }
+      return `均线发散，MA5远离MA20，趋势加速中，行情大概率延续。`;
+    }
+    if (value && value.includes('收敛')) {
+      if (value.includes('→')) {
+        const match = value.match(/([-.\d]+)%%→([-.\d]+)%%/);
+        if (match) {
+          const [prev, curr] = [parseFloat(match[1]), parseFloat(match[2])];
+          const delta = Math.abs(curr - prev);
+          if (delta > 2) return `MA间距从${prev.toFixed(2)}%→${curr.toFixed(2)}%（收窄>2%），均线大幅收敛，趋势快速衰竭，变盘概率大增。`;
+          return `MA间距从${prev.toFixed(2)}%→${curr.toFixed(2)}%，均线收敛（MA5向MA20靠拢），动能衰减，趋势大概率衰竭或进入横盘整理。`;
+        }
+      }
+      return `均线收敛，MA5向MA20靠拢，动能衰减，趋势大概率衰竭。`;
+    }
+    if (value && value.includes('稳定')) return `MA间距稳定，多空力量相对均衡，短期方向不明，建议等待信号明确后再操作。`;
+    return `均线间距无明显变化，趋势处于稳定期。`;
+  }
+  return `${label}当前值得分率${pct}%，处于落后水平，是当前主要风险点之一。`;
+}
+
 function IndicatorRow({ label, value, score, maxScore, desc, color }) {
+  const interp = getValueInterpretation(label, value, score, maxScore);
   return (
     <div style={{
       display: 'flex', alignItems: 'center', padding: '6px 0',
       borderBottom: '1px solid #f0f0f0', gap: 12,
     }}>
-      <span style={{ width: 100, flexShrink: 0, color: '#333', fontWeight: 500 }}>{label}</span>
-      <span style={{ width: 80, flexShrink: 0, textAlign: 'center' }}>
-        <Tag color={color || 'default'} style={{ margin: 0, fontSize: 14, padding: '2px 10px' }}>
+      <span style={{ width: 90, flexShrink: 0, color: '#333', fontWeight: 500 }}>{label}</span>
+      <span style={{ width: 130, flexShrink: 0, textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+        <Tag color={color || 'default'} style={{
+          margin: 0, fontSize: 13, padding: '2px 8px',
+          whiteSpace: 'normal', lineHeight: 1.4, maxWidth: '100%',
+        }}>
           {value ?? '-'}
         </Tag>
+        <Tooltip
+          title={<span style={{ fontSize: 12, lineHeight: '18px' }}>{interp}</span>}
+          placement="top"
+          overlayStyle={{ maxWidth: 320 }}
+        >
+          <QuestionCircleOutlined style={{ fontSize: 12, color: '#bfbfbf', cursor: 'pointer' }} />
+        </Tooltip>
       </span>
-      <span style={{ width: 60, flexShrink: 0, textAlign: 'center', fontSize: 13, color: '#666' }}>
-        {score !== undefined && maxScore > 0 ? `${score}/${maxScore}` : ''}
+      <span style={{ width: 50, flexShrink: 0, textAlign: 'center', fontSize: 13, color: '#666' }}>
+        {score !== undefined && maxScore > 0 ? `${score}/${maxScore}` :
+         score !== undefined && score < 0 ? `${score}` : ''}
       </span>
       <span style={{ flex: 1, fontSize: 12, color: '#999' }}>{desc || ''}</span>
     </div>
@@ -874,32 +1800,81 @@ function IndicatorRow({ label, value, score, maxScore, desc, color }) {
 }
 
 // ── 通用评分明细 Tab（消费 overview.scoreDetails[维度].items） ─────────
-function ScoreDetailTab({ detail }) {
+function ScoreDetailTab({ detail, reportPeriod }) {
   if (!detail || !detail.items || detail.items.length === 0) {
     return <Empty description="暂无数据" />;
   }
 
   return (
     <div>
+      {/* 报告期标注 */}
+      {reportPeriod && (
+        <div style={{
+          marginBottom: 8,
+          padding: '6px 12px',
+          background: '#f0f5ff',
+          borderRadius: 4,
+          fontSize: 12,
+          color: '#1890ff',
+          display: 'inline-block',
+        }}>
+          📅 财务数据报告期：{reportPeriod}
+        </div>
+      )}
+
       {/* 表头 */}
       <div style={{
         display: 'flex', padding: '4px 0', gap: 12,
         borderBottom: '2px solid #e8e8e8', fontWeight: 600, fontSize: 12, color: '#999',
       }}>
-        <span style={{ width: 100, flexShrink: 0 }}>指标</span>
-        <span style={{ width: 80, flexShrink: 0, textAlign: 'center' }}>当前值</span>
-        <span style={{ width: 60, flexShrink: 0, textAlign: 'center' }}>评分</span>
+        <span style={{ width: 90, flexShrink: 0 }}>指标</span>
+        <span style={{ width: 130, flexShrink: 0, textAlign: 'center' }}>当前值</span>
+        <span style={{ width: 50, flexShrink: 0, textAlign: 'center' }}>评分</span>
         <span style={{ flex: 1 }}>说明</span>
       </div>
 
-      {/* 所有指标（后端决定顺序和infoOnly标记） */}
-      {detail.items.map((it, i) => (
+      {/* 核心打分指标（含0分项，让用户看到完整计分明细） */}
+      {detail.items.filter(it => it.maxScore > 0).map((it, i) => (
         <IndicatorRow
-          key={i}
+          key={'s' + i}
           label={it.label}
           value={it.value}
           score={it.score}
           maxScore={it.maxScore}
+          desc={it.desc}
+          color={it.color || 'default'}
+        />
+      ))}
+      {/* 分隔：扣分项 */}
+      {detail.items.filter(it => it.score < 0 && it.maxScore === 0).length > 0 && (
+        <div style={{ marginTop: 8, padding: '4px 0', borderTop: '1px dashed #ff4d4f', fontSize: 11, color: '#ff4d4f' }}>
+          — 扣分项 —
+        </div>
+      )}
+      {detail.items.filter(it => it.score < 0 && it.maxScore === 0).map((it, i) => (
+        <IndicatorRow
+          key={'p' + i}
+          label={it.label}
+          value={it.value}
+          score={it.score}
+          maxScore={0}
+          desc={it.desc}
+          color={it.color || 'default'}
+        />
+      ))}
+      {/* 分隔：参考指标 */}
+      {detail.items.filter(it => it.score === 0 && it.maxScore === 0).length > 0 && (
+        <div style={{ marginTop: 8, padding: '4px 0', borderTop: '1px dashed #d9d9d9', fontSize: 11, color: '#999' }}>
+          — 参考指标 —
+        </div>
+      )}
+      {detail.items.filter(it => it.score === 0 && it.maxScore === 0).map((it, i) => (
+        <IndicatorRow
+          key={'r' + i}
+          label={it.label}
+          value={it.value}
+          score={undefined}
+          maxScore={0}
           desc={it.desc}
           color={it.color || 'default'}
         />

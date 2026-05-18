@@ -33,9 +33,17 @@ public interface StockAnalysisMapper {
     
     /**
      * 查询基本面数据（从 stock_financial_indicator 等表）
-     * 返回：pe_ttm, pb, roe, revenue_yoy, net_profit_yoy, gross_margin, debt_ratio
+     * 返回：roe, revenue_yoy, net_profit_yoy, gross_margin, debt_ratio,
+     *       current_ratio, quick_ratio, ar_turnover_days, operating_cf_to_np, operating_cf_to_debt,
+     *       deducted_net_profit
      */
     FundamentalSignal selectFundamentalSignal(@Param("code") String code);
+
+    /**
+     * 查询扣非净利润同比增速（%）
+     * 最新一期 vs 去年同期（跨年比较）
+     */
+    BigDecimal selectDeductedNpYoY(@Param("code") String code);
     
     /**
      * 查询事件面数据

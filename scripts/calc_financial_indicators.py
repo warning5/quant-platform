@@ -92,7 +92,7 @@ def main():
             "SELECT code, report_date FROM stock_financial_indicator WHERE code = %s",
             (code_filter,))
     else:
-        cur.execute("SELECT code, report_date FROM stock_financial_indicator")
+        cur.execute("SELECT code, report_date FROM stock_financial_indicator WHERE LEFT(report_date,4) >= '2010'")
     indicator_keys = cur.fetchall()
     print(f"共 {len(indicator_keys)} 条 indicator 记录待计算")
 
@@ -100,7 +100,7 @@ def main():
     print("加载 income 数据...")
     cur.execute("SELECT code, report_date, total_revenue, operating_profit, operating_cost, "
                 "net_profit_incl_minority, net_profit, total_profit, finance_expense, income_tax, eps_basic, "
-                "deducted_np_parent_company FROM stock_income")
+                "deducted_np_parent_company, np_parent_company_owners FROM stock_income")
     income_data = {}
     for r in cur.fetchall():
         income_data[(r[0], r[1])] = {
@@ -114,6 +114,7 @@ def main():
             'income_tax': to_float(r[9]),
             'eps_basic': to_float(r[10]),
             'deducted_np_parent_company': to_float(r[11]),
+            'np_parent_company_owners': to_float(r[12]),
         }
 
     # 加载 balance 数据
@@ -252,9 +253,11 @@ def main():
         else:
             total_assets_turnover = None
 
-        # 10. operating_cf_to_np = 经营现金流 / |净利润| * 100
-        if net_operate_cf is not None and net_profit and net_profit != 0:
-            operating_cf_to_np = net_operate_cf / abs(net_profit) * 100
+        # 10. operating_cf_to_np = 经营现金流 / |归母净利润| * 100
+        # 用 np_parent_company_owners（新浪三大表来源）作为分母，与归母净利润口径一致
+        np_attr = inc.get('np_parent_company_owners') or net_profit_attr  # 优先用归母净利润
+        if net_operate_cf is not None and np_attr and np_attr != 0:
+            operating_cf_to_np = net_operate_cf / abs(np_attr) * 100
         else:
             operating_cf_to_np = None
 

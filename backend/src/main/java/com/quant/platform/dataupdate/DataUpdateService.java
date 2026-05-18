@@ -240,14 +240,50 @@ public class DataUpdateService {
                 }
             } else if ("FINANCIAL".equals(updateType)) {
                 // 财务数据：执行 update_financial_data.py
-                task.setTotalStocks(5500); // 约5500只股票
+                task.setTotalStocks(1);
                 task.setCurrentStep("财务数据");
                 broadcastStatus(task);
-                boolean finOk = runSingleScript(taskId, task, cmd, "财务数据");
-                if (!"CANCELLED".equals(task.getStatus())) {
-                    task.setStatus(finOk ? "SUCCESS" : "FAILED");
-                    task.setProgress(100);
-                    task.setCurrentStep(finOk ? "采集完成" : "采集失败");
+                String singleCode = request.getSingleCode();
+                if (singleCode != null && !singleCode.isEmpty()) {
+                    // 单只股票：先 ths，再 sina
+                    List<String> thsCmd = new ArrayList<>();
+                    thsCmd.add(pythonPath);
+                    thsCmd.add("-u");
+                    thsCmd.add("update_financial_data.py");
+                    thsCmd.add("--step");
+                    thsCmd.add("ths");
+                    thsCmd.add("--code");
+                    thsCmd.add(singleCode);
+                    if (request.isForce()) thsCmd.add("--force");
+                    task.setCurrentStep("财务数据 · 同花顺摘要");
+                    broadcastStatus(task);
+                    boolean thsOk = runSingleScript(taskId, task, thsCmd, "财务-同花顺");
+
+                    List<String> sinaCmd = new ArrayList<>();
+                    sinaCmd.add(pythonPath);
+                    sinaCmd.add("-u");
+                    sinaCmd.add("update_financial_data.py");
+                    sinaCmd.add("--step");
+                    sinaCmd.add("sina");
+                    sinaCmd.add("--code");
+                    sinaCmd.add(singleCode);
+                    if (request.isForce()) sinaCmd.add("--force");
+                    task.setCurrentStep("财务数据 · 新浪三大表");
+                    broadcastStatus(task);
+                    boolean sinaOk = runSingleScript(taskId, task, sinaCmd, "财务-新浪");
+
+                    if (!"CANCELLED".equals(task.getStatus())) {
+                        task.setStatus(thsOk && sinaOk ? "SUCCESS" : "FAILED");
+                        task.setProgress(100);
+                        task.setCurrentStep(thsOk && sinaOk ? "采集完成" : "部分失败");
+                    }
+                } else {
+                    boolean finOk = runSingleScript(taskId, task, cmd, "财务数据");
+                    if (!"CANCELLED".equals(task.getStatus())) {
+                        task.setStatus(finOk ? "SUCCESS" : "FAILED");
+                        task.setProgress(100);
+                        task.setCurrentStep(finOk ? "采集完成" : "采集失败");
+                    }
                 }
             } else if ("SENTIMENT".equals(updateType)) {
                 // 情绪数据：执行 update_sentiment_data.py
@@ -593,13 +629,23 @@ public class DataUpdateService {
         // 财务数据
         if ("FINANCIAL".equals(updateType)) {
             cmd.add("update_financial_data.py");
-            if (request.getYearStart() != null) {
-                cmd.add("--year-start");
-                cmd.add(request.getYearStart().toString());
-            }
-            if (request.getYearEnd() != null) {
-                cmd.add("--year-end");
-                cmd.add(request.getYearEnd().toString());
+            // 单只股票模式：只跑 ths + sina 两个步骤（跳过 yjbb 批量步骤）
+            String singleCode = request.getSingleCode();
+            if (singleCode != null && !singleCode.isEmpty()) {
+                // 不在这里返回，继续构建命令，由 executeTask 分两阶段执行
+                cmd.add("--step");
+                cmd.add("ths");
+                cmd.add("--code");
+                cmd.add(singleCode);
+            } else {
+                if (request.getYearStart() != null) {
+                    cmd.add("--year-start");
+                    cmd.add(request.getYearStart().toString());
+                }
+                if (request.getYearEnd() != null) {
+                    cmd.add("--year-end");
+                    cmd.add(request.getYearEnd().toString());
+                }
             }
             if (request.isForce()) {
                 cmd.add("--force");

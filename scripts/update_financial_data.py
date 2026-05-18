@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3 -u
 # -*- coding: utf-8 -*-
 """
 财务数据采集脚本
@@ -280,7 +280,8 @@ def save_ths_to_tables(df, code, conn, force=False):
 
         # ─── 写入 stock_income（补充关键指标）───
         if income_vals:
-            income_cols = ['net_profit', 'net_profit_incl_minority', 'total_revenue', 'deducted_np_parent_company', 'eps_basic']
+            # 动态包含所有已映射的 income 字段（而非写死列表）
+            income_cols = [col for col in income_vals.keys()]
             set_parts = []
             insert_cols = []
             insert_vals = []
@@ -353,7 +354,7 @@ INCOME_MAP = {
     '利润总额': 'total_profit',
     '所得税费用': 'income_tax',
     '净利润': 'net_profit_incl_minority',          # 合并报表净利润（含少数股东）
-    '归属于母公司所有者的净利润': 'net_profit',      # 归属母公司净利润
+    '归属于母公司所有者的净利润': 'np_parent_company_owners',  # 归母净利润
     '少数股东损益': 'np_minority',
     '基本每股收益': 'eps_basic',
     '稀释每股收益': 'eps_diluted',
@@ -700,11 +701,11 @@ def validate_financial_data(conn, years):
     print("\n【2】stock_financial_indicator 年份覆盖")
     print("-" * 50)
     cursor.execute("""
-        SELECT report_year,
+        SELECT LEFT(report_date, 4) as report_year,
                COUNT(*) as record_cnt,
                COUNT(DISTINCT code) as stock_cnt
         FROM stock_financial_indicator
-        GROUP BY report_year
+        GROUP BY LEFT(report_date, 4)
         ORDER BY report_year DESC
         LIMIT 20
     """)
@@ -722,12 +723,12 @@ def validate_financial_data(conn, years):
     print("\n【3】关键字段空值率（stock_financial_indicator）")
     print("-" * 50)
     key_fields = [
-        'revenue',        # 营业收入
-        'net_profit',     # 净利润
-        'total_assets',   # 总资产
-        'total_liabilities',  # 总负债
-        'gross_margin',   # 毛利率
-        'net_margin',     # 净利率
+        'revenue_yoy',        # 营收增速
+        'net_profit_yoy',     # 净利增速
+        'gross_profit_margin', # 毛利率
+        'net_profit_margin',  # 净利率
+        'roe',                # ROE
+        'debt_to_asset_ratio', # 资产负债率
     ]
     cursor.execute("SELECT COUNT(*) as total FROM stock_financial_indicator")
     total = cursor.fetchone()['total'] or 1
@@ -747,41 +748,29 @@ def validate_financial_data(conn, years):
     print("\n【4】净利润同比异常检测（变化 > 10倍 或 扭亏/转亏）")
     print("-" * 50)
     cursor.execute("""
-        SELECT a.code, a.report_year, a.report_type,
-               a.net_profit as cur_profit,
-               b.net_profit as prev_profit,
-               ROUND(a.net_profit / NULLIF(b.net_profit, 0), 2) as yoy_ratio
+        SELECT a.code, LEFT(a.report_date,4) as report_year, a.report_type,
+               a.roe as cur_roe,
+               b.roe as prev_roe
         FROM stock_financial_indicator a
         LEFT JOIN stock_financial_indicator b
           ON a.code = b.code
-         AND b.report_year = a.report_year - 1
+         AND LEFT(b.report_date,4) = LEFT(a.report_date,4) - 1
          AND b.report_type = a.report_type
-        WHERE a.report_year >= YEAR(CURDATE()) - 3
+        WHERE LEFT(a.report_date,4) >= YEAR(CURDATE()) - 3
           AND a.report_type IN (1, 2, 4)
-          AND a.net_profit IS NOT NULL AND b.net_profit IS NOT NULL
-          AND (ABS(a.net_profit) > 1e8 OR ABS(b.net_profit) > 1e8)
-          AND (
-            ABS(a.net_profit / NULLIF(b.net_profit, 0)) > 10
-            OR (a.net_profit > 0 AND b.net_profit < 0)
-            OR (a.net_profit < 0 AND b.net_profit > 0)
-          )
-        ORDER BY ABS(COALESCE(yoy_ratio, 0)) DESC
+          AND a.roe IS NOT NULL AND b.roe IS NOT NULL
+          AND (ABS(a.roe) > 100 OR ABS(b.roe) > 100)
+          AND ABS(a.roe / NULLIF(b.roe, 0)) > 5
+        ORDER BY ABS(a.roe / NULLIF(b.roe, 0)) DESC
         LIMIT 15
     """)
     anomalies = cursor.fetchall()
     if anomalies:
-        print(f"  {'代码':<10} {'年份':<6} {'类型':<4} {'当年净利润':>14} {'上年净利润':>14} {'同比':>8}  原因")
+        print(f"  {'代码':<10} {'年份':<6} {'类型':<4} {'当年ROE':>10} {'上年ROE':>10}  备注")
         for r in anomalies:
-            if r['cur_profit'] > 0 and r['prev_profit'] < 0:
-                reason = "扭亏"
-            elif r['cur_profit'] < 0 and r['prev_profit'] > 0:
-                reason = "转亏"
-            else:
-                ratio = r['yoy_ratio'] or 0
-                reason = f"激增{ratio:.0f}x" if ratio > 0 else f"骤降{abs(ratio):.0f}x"
             print(f"  {r['code']:<10} {r['report_year']:<6} {r['report_type']:<4} "
-                  f"{r['cur_profit']:>14,.0f} {r['prev_profit']:>14,.0f} {reason:>10}")
-        print(f"\n  共发现 {len(anomalies)} 条异常（仅显示前15条），通常因资产重组/会计政策变更/季节性因素")
+                  f"{r['cur_roe']:>10.2f} {r['prev_roe']:>10.2f}  ROE异常波动")
+        print(f"\n  共发现 {len(anomalies)} 条ROE异常（仅显示前15条），通常因资产重组/会计政策变更/季节性因素")
     else:
         print("  未发现明显异常")
 
@@ -795,9 +784,9 @@ def validate_financial_data(conn, years):
         FROM stock_info si
         LEFT JOIN stock_financial_indicator sfi
           ON si.code = sfi.code
-         AND sfi.report_year >= {current_year - 2}
+         AND LEFT(sfi.report_date,4) >= {current_year - 2}
          AND sfi.report_type IN (1, 2, 4)
-        WHERE si.list_status = 'L'
+        WHERE si.code NOT LIKE '%.BJ'
         GROUP BY si.code, si.name, si.market
         HAVING record_cnt = 0
         LIMIT 20
@@ -807,8 +796,8 @@ def validate_financial_data(conn, years):
         print(f"  {'代码':<10} {'名称':<10} {'市场':<5}  备注")
         for r in missing:
             print(f"  {r['code']:<10} {r['name'][:8]:<10} {r['market']:<5}  近3年财报缺失")
-        cursor.execute(f"""
-            SELECT COUNT(*) as total FROM stock_info WHERE list_status = 'L'
+        cursor.execute("""
+            SELECT COUNT(*) as total FROM stock_info WHERE code NOT LIKE '%.BJ'
         """)
         total_stocks = cursor.fetchone()['total']
         print(f"\n  共 {len(missing)} 只股票近3年财报完全缺失（显示前20条，共 {total_stocks} 只有效股票）")
