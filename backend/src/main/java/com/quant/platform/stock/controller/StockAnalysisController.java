@@ -3,7 +3,10 @@ package com.quant.platform.stock.controller;
 import com.quant.platform.stock.analysis.domain.AnalysisOverview;
 import com.quant.platform.stock.analysis.engine.TradingSignalEngine;
 import com.quant.platform.stock.analysis.service.AnalysisService;
+import com.quant.platform.stock.analysis.service.BidAskService;
+import com.quant.platform.stock.analysis.service.InstitutionCoverageService;
 import com.quant.platform.stock.analysis.service.MarketThermometerService;
+import com.quant.platform.stock.analysis.service.NewsService;
 import com.quant.platform.stock.analysis.service.WorkflowReportService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -53,7 +56,16 @@ public class StockAnalysisController {
     
     @Autowired(required = false)
     private AnalysisService analysisService;
-    
+
+    @Autowired(required = false)
+    private NewsService newsService;
+
+    @Autowired(required = false)
+    private BidAskService bidAskService;
+
+    @Autowired(required = false)
+    private InstitutionCoverageService institutionCoverageService;
+
     @Autowired(required = false)
     private TradingSignalEngine tradingSignalEngine;
 
@@ -311,6 +323,119 @@ public class StockAnalysisController {
     }
 
     /**
+     * 新闻事件分析
+     * GET /api/analysis/news?code=600619
+     * 返回：利好/风险/中性新闻列表 + 情感偏向 + 事件标签统计 + 新闻评分
+     */
+    @GetMapping("/news")
+    public ResponseEntity<?> getNewsAnalysis(@RequestParam String code) {
+        if (newsService == null) {
+            return ResponseEntity.status(503).body(errorBody("新闻服务不可用"));
+        }
+        if (code == null || code.trim().isEmpty()) {
+            return ResponseEntity.badRequest().body(errorBody("股票代码不能为空"));
+        }
+        try {
+            Map<String, Object> data = newsService.getNewsAnalysis(code.trim());
+            return ResponseEntity.ok(new ApiResponse<>(data));
+        } catch (Exception e) {
+            log.error("新闻分析失败: code={}, error={}", code, e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(errorBody("新闻分析失败：" + e.getMessage()));
+        }
+    }
+
+    /**
+     * 按事件标签查询新闻
+     * GET /api/analysis/news/tag?code=600619&tag=PERFORMANCE
+     */
+    @GetMapping("/news/tag")
+    public ResponseEntity<?> getNewsByTag(@RequestParam String code,
+                                          @RequestParam String tag) {
+        if (newsService == null) {
+            return ResponseEntity.status(503).body(errorBody("新闻服务不可用"));
+        }
+        try {
+            List<Map<String, Object>> data = newsService.getNewsByTag(code.trim(), tag);
+            return ResponseEntity.ok(new ApiResponse<>(data));
+        } catch (Exception e) {
+            log.error("标签新闻查询失败: code={}, tag={}, error={}", code, tag, e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(errorBody("标签新闻查询失败：" + e.getMessage()));
+        }
+    }
+
+    /**
+     * 新闻事件信号（供评分引擎使用）
+     * GET /api/analysis/news-signal?code=600619
+     */
+    @GetMapping("/news-signal")
+    public ResponseEntity<?> getNewsSignal(@RequestParam String code) {
+        if (newsService == null) {
+            return ResponseEntity.status(503).body(errorBody("新闻服务不可用"));
+        }
+        try {
+            Map<String, Object> data = newsService.getNewsSignal(code.trim());
+            return ResponseEntity.ok(new ApiResponse<>(data));
+        } catch (Exception e) {
+            log.error("新闻信号获取失败: code={}, error={}", code, e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(errorBody("新闻信号获取失败：" + e.getMessage()));
+        }
+    }
+
+    /**
+     * 内外盘比分析
+     * GET /api/analysis/bid-ask
+     */
+    @GetMapping("/bid-ask")
+    public ResponseEntity<?> getBidAskAnalysis(@RequestParam String code) {
+        if (bidAskService == null) {
+            return ResponseEntity.status(503).body(errorBody("内外盘比服务不可用"));
+        }
+        try {
+            Map<String, Object> data = bidAskService.getBidAskAnalysis(code.trim());
+            return ResponseEntity.ok(new ApiResponse<>(data));
+        } catch (Exception e) {
+            log.error("内外盘比获取失败: code={}, error={}", code, e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(errorBody("内外盘比获取失败：" + e.getMessage()));
+        }
+    }
+
+    /**
+     * 内外盘比信号（供评分引擎使用）
+     * GET /api/analysis/bid-ask-signal
+     */
+    @GetMapping("/bid-ask-signal")
+    public ResponseEntity<?> getBidAskSignal(@RequestParam String code) {
+        if (bidAskService == null) {
+            return ResponseEntity.status(503).body(errorBody("内外盘比服务不可用"));
+        }
+        try {
+            Map<String, Object> data = bidAskService.getBidAskSignal(code.trim());
+            return ResponseEntity.ok(new ApiResponse<>(data));
+        } catch (Exception e) {
+            log.error("内外盘比信号获取失败: code={}, error={}", code, e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(errorBody("内外盘比信号获取失败：" + e.getMessage()));
+        }
+    }
+
+    /**
+     * 机构覆盖度综合指标（Tab④ 机构跟踪）
+     * GET /api/analysis/institution-coverage
+     */
+    @GetMapping("/institution-coverage")
+    public ResponseEntity<?> getInstitutionCoverage(@RequestParam String code) {
+        if (institutionCoverageService == null) {
+            return ResponseEntity.status(503).body(errorBody("机构覆盖度服务不可用"));
+        }
+        try {
+            Map<String, Object> data = institutionCoverageService.getInstitutionCoverage(code.trim());
+            return ResponseEntity.ok(new ApiResponse<>(data));
+        } catch (Exception e) {
+            log.error("机构覆盖度获取失败: code={}, error={}", code, e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(errorBody("机构覆盖度获取失败：" + e.getMessage()));
+        }
+    }
+
+    /**
      * 大盘温度计
      * GET /api/analysis/market-thermometer
      * 返回：恐慌贪婪指数 + 各维度指标（PE分位/PB分位/均线温度/股债收益比/融资余额）
@@ -393,6 +518,27 @@ public class StockAnalysisController {
         } catch (Exception e) {
             log.error("相对强弱分析失败: code={}, error={}", code, e.getMessage(), e);
             return ResponseEntity.internalServerError().body(errorBody("相对强弱分析失败：" + e.getMessage()));
+        }
+    }
+
+    /**
+     * P2新增：个股长周期表现分析（YTD、超额收益、RS Rating、行业内排名）
+     * GET /api/analysis/stock-performance
+     */
+    @GetMapping("/stock-performance")
+    public ResponseEntity<?> getStockPerformance(@RequestParam String code) {
+        if (analysisService == null) {
+            return ResponseEntity.status(503).body(errorBody("分析服务不可用，ClickHouse未启用"));
+        }
+        if (code == null || code.trim().isEmpty()) {
+            return ResponseEntity.badRequest().body(errorBody("股票代码不能为空"));
+        }
+        try {
+            Map<String, Object> data = analysisService.getStockPerformance(code.trim());
+            return ResponseEntity.ok(new ApiResponse<>(data));
+        } catch (Exception e) {
+            log.error("个股长周期表现分析失败: code={}, error={}", code, e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(errorBody("个股长周期表现分析失败：" + e.getMessage()));
         }
     }
 

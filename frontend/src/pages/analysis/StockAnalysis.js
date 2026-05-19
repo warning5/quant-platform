@@ -13,6 +13,10 @@ import { stockAnalysisApi, silentConfig } from '../../api';
 import api from '../../api';
 import { useMarketThermometer } from '../../hooks/useMarketThermometer';
 import ReactECharts from 'echarts-for-react';
+import { NewsEventTab } from './NewsEventTab';
+import { BidAskPanel } from './BidAskPanel';
+import { InstitutionCoverageTab } from './InstitutionCoverageTab';
+import { StockPerformanceTab } from './StockPerformanceTab';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -54,9 +58,13 @@ export default function StockAnalysis() {
   const [industryCorrData, setIndustryCorrData] = useState(null);
   const [limitUpData, setLimitUpData] = useState(null);
   const [blockTradeData, setBlockTradeData] = useState(null);
+  const [newsData, setNewsData] = useState(null);
   const [chanChartData, setChanChartData] = useState(null);
   const [moneyFlowHistoryData, setMoneyFlowHistoryData] = useState(null);
+  const [bidAskData, setBidAskData] = useState(null);
+  const [institutionCoverageData, setInstitutionCoverageData] = useState(null);
   const [relativeStrengthData, setRelativeStrengthData] = useState(null);
+  const [stockPerformanceData, setStockPerformanceData] = useState(null);
   const [bullBearData, setBullBearData] = useState(null);
   const [klineData, setKlineData] = useState(null);
   const [error, setError] = useState(null);
@@ -192,6 +200,14 @@ export default function StockAnalysis() {
       .catch(() => setBlockTradeData(null));
   }, [overview?.code]);
 
+  // 加载新闻事件数据
+  useEffect(() => {
+    if (!overview?.code) { setNewsData(null); return; }
+    stockAnalysisApi.getNewsAnalysis(overview.code, silentConfig)
+      .then(data => setNewsData(data))
+      .catch(() => setNewsData(null));
+  }, [overview?.code]);
+
   // 加载缠论K线图数据
   useEffect(() => {
     if (!overview?.code) { setChanChartData(null); return; }
@@ -208,12 +224,36 @@ export default function StockAnalysis() {
       .catch(() => setMoneyFlowHistoryData(null));
   }, [overview?.code]);
 
+  // 加载内外盘比数据
+  useEffect(() => {
+    if (!overview?.code) { setBidAskData(null); return; }
+    stockAnalysisApi.getBidAskAnalysis(overview.code, silentConfig)
+      .then(data => setBidAskData(data?.data || data || null))
+      .catch(() => setBidAskData(null));
+  }, [overview?.code]);
+
+  // 加载机构覆盖度数据（Tab④）
+  useEffect(() => {
+    if (!overview?.code) { setInstitutionCoverageData(null); return; }
+    stockAnalysisApi.getInstitutionCoverage(overview.code, silentConfig)
+      .then(data => setInstitutionCoverageData(data?.data || data || null))
+      .catch(() => setInstitutionCoverageData(null));
+  }, [overview?.code]);
+
   // 加载相对强弱数据
   useEffect(() => {
     if (!overview?.code) { setRelativeStrengthData(null); return; }
     stockAnalysisApi.getRelativeStrength(overview.code, silentConfig)
       .then(data => setRelativeStrengthData(data))
       .catch(() => setRelativeStrengthData(null));
+  }, [overview?.code]);
+
+  // 加载长周期表现数据（P2：YTD、超额收益、RS Rating、行业内排名）
+  useEffect(() => {
+    if (!overview?.code) { setStockPerformanceData(null); return; }
+    stockAnalysisApi.getStockPerformance(overview.code, silentConfig)
+      .then(data => setStockPerformanceData(data))
+      .catch(() => setStockPerformanceData(null));
   }, [overview?.code]);
 
   // 加载多空辩论数据
@@ -281,6 +321,16 @@ export default function StockAnalysis() {
       children: <ScoreDetailTab detail={overview.scoreDetails?.find(d => d.dimension === 'sentiment')} />,
     },
     {
+      key: 'news-event',
+      label: tabLabel('新闻事件', '基于东方财富个股新闻，提取利好/风险分类、事件标签（业绩/扩产/政策/解禁等）、情感评分，辅助捕捉基本面催化信息。'),
+      children: <NewsEventTab data={newsData} code={overview.code} />,
+    },
+    {
+      key: 'institution-coverage',
+      label: tabLabel('机构跟踪', '综合研报覆盖（近1年）、基金持仓（合计流通比例）、机构调研（近90天）三维评估机构关注度。综合得分0-10分，研报≥30篇/基金合计≥30%流通为高覆盖。'),
+      children: <InstitutionCoverageTab data={institutionCoverageData} code={overview.code} />,
+    },
+    {
       key: 'kline',
       label: tabLabel('价格走势', '近60交易日K线图，含均线（MA5/10/20/60）叠加，辅助判断价格趋势和均线支撑压力位。'),
       children: klineData && klineData.length > 0 ? <KLineChart data={klineData} /> : (
@@ -325,12 +375,17 @@ export default function StockAnalysis() {
     {
       key: 'money-flow-history',
       label: tabLabel('资金趋势', '展示近120日主力资金净流入/净流出趋势及每日资金面评分（满分25），追踪大资金动向变化。'),
-      children: <MoneyFlowHistoryTab data={moneyFlowHistoryData} code={overview.code} />,
+      children: <MoneyFlowHistoryTab data={moneyFlowHistoryData} bidAskData={bidAskData} code={overview.code} />,
     },
     {
       key: 'relative-strength',
       label: tabLabel('相对强弱', '对比个股与同行业等权组合的累计收益，计算RS Ratio。RS>1表示跑赢行业，<1表示跑输。'),
       children: <RelativeStrengthTab data={relativeStrengthData} code={overview.code} />,
+    },
+    {
+      key: 'stock-performance',
+      label: tabLabel('长周期', 'YTD涨幅、超额收益（vs沪深300）、RS Rating（250日全市场排名）、行业内排名。'),
+      children: <StockPerformanceTab data={stockPerformanceData} code={overview.code} />,
     },
     {
       key: 'bull-bear',
@@ -559,43 +614,6 @@ export default function StockAnalysis() {
                 </Tag>
               </Col>
             </Row>
-
-            {/* 第三行：维度评分条 */}
-            {overview.scoreDetails && overview.scoreDetails.length > 0 && (
-              <Row gutter={16}>
-                {overview.scoreDetails.map((detail, idx) => (
-                  <Col span={6} key={detail.dimension || idx}>
-                    <Tooltip title={
-                      <div style={{ fontSize: 12 }}>
-                        <div style={{ marginBottom: 3, color: '#fa8c16' }}>核心打分指标：</div>
-                        {detail.items?.filter(it => it.maxScore > 0).map((item, i) => (
-                          <div key={i} style={{ marginBottom: 2 }}>
-                            <span>{item.label}: {item.value} ({item.score}/{item.maxScore})</span>
-                            {item.desc && <div style={{ color: '#aaa', fontSize: 10, marginLeft: 8 }}>{item.desc}</div>}
-                          </div>
-                        ))}
-                        {detail.dataRange && (
-                          <div style={{ marginTop: 4, borderTop: '1px solid #555', paddingTop: 4 }}>
-                            数据范围：{detail.dataRange}
-                          </div>
-                        )}
-                      </div>
-                    } className="tip-light">
-                      <div>
-                        <Text style={{ fontSize: 12 }}>{detail.dimensionName}：{detail.score}/{detail.maxScore}</Text>
-                        <Progress
-                          percent={Math.round(detail.score / detail.maxScore * 100)}
-                          strokeColor={scoreColor(detail.score, detail.maxScore)}
-                          showInfo={false}
-                          size="small"
-                          style={{ marginBottom: 4 }}
-                        />
-                      </div>
-                    </Tooltip>
-                  </Col>
-                ))}
-              </Row>
-            )}
 
             {/* 风险提示 - 紧凑行内样式 */}
             {overview.risks && (
@@ -1467,6 +1485,42 @@ function getValueInterpretation(label, value, score, maxScore) {
     }
   }
 
+  if (label === '基金持仓集中度') {
+    const v = parseFloat(value);
+    if (!isNaN(v) && v > 0) {
+      if (v >= 20) return `基金持仓占流通股${v.toFixed(2)}%，机构高度重仓，大量筹码被锁定，抛压小，股价稳定性高。机构抱团程度显著，是中长期持有的重要支撑。`;
+      if (v >= 10) return `基金持仓占流通股${v.toFixed(2)}%，机构有较强配置，关注度高，股价稳定性较好。`;
+      if (v >= 5) return `基金持仓占流通股${v.toFixed(2)}%，有机构关注但配置比例一般，需结合其他指标综合判断。`;
+      return `基金持仓占流通股${v.toFixed(2)}%，有少量基金配置，机构关注度偏低。`;
+    }
+    return '暂无基金持仓数据，可能无机构覆盖，或为冷门股。';
+  }
+
+  if (label === '新闻事件') {
+    if (value && value.includes('利好')) {
+      const match = value.match(/(\d+)利好\/(\d+)风险/);
+      if (match) {
+        const pos = parseInt(match[1]);
+        const neg = parseInt(match[2]);
+        const biasMatch = value.match(/([+-]?\d+)%/);
+        const biasStr = biasMatch ? `情感偏向${biasMatch[1]}%` : '';
+        if (pos >= 5 && neg === 0) return `近30天利好${pos}条/风险${neg}条，舆论明显偏多${biasStr ? '，' + biasStr : ''}，新闻面评分高，基本面有持续催化剂。`;
+        if (pos > neg) return `近30天利好${pos}条/风险${neg}条，舆论偏正面${biasStr ? '，' + biasStr : ''}，新闻面中性偏多，作为辅助验证可参考。`;
+        if (pos === neg) return `近30天利好${pos}条/风险${neg}条，舆论基本平衡${biasStr ? '，' + biasStr : ''}，新闻面无明显偏向。`;
+        return `近30天利好${pos}条/风险${neg}条，舆论偏负面${biasStr ? '，' + biasStr : ''}，新闻面是辅助警示信号。`;
+      }
+    }
+    if (value && value.includes('风险')) {
+      const match = value.match(/(\d+)利好\/(\d+)风险/);
+      if (match) {
+        const pos = parseInt(match[1]);
+        const neg = parseInt(match[2]);
+        if (neg > pos) return `近30天利好${pos}条/风险${neg}条，舆论偏风险，是基本面潜在利空的警示信号，需结合其他指标综合判断。`;
+      }
+    }
+    return '暂无新闻数据，请先更新新闻数据。';
+  }
+
   // ═══════════════════════════════════════
   //  基本面
   // ═══════════════════════════════════════
@@ -1576,11 +1630,13 @@ function getValueInterpretation(label, value, score, maxScore) {
   if (label === '现金流质量') {
     const v = parseFloat(value);
     if (!isNaN(v)) {
-      if (v >= 1.5) return `经营现金流/净利润=${v}倍，盈利质量极为优秀，利润全部有真实现金支撑，是最健康的财务状态。`;
-      if (v >= 1.0) return `经营现金流/净利润=${v}倍，盈利质量好，利润基本有现金覆盖，财务造假风险低。`;
-      if (v >= 0.8) return `经营现金流/净利润=${v}倍，盈利质量较好，约八成利润有现金支撑，较为健康。`;
-      if (v >= 0.5) return `经营现金流/净利润=${v}倍，盈利质量一般，部分利润为账面数字，可能对应应收增加或存货堆积。`;
-      if (v > 0) return `经营现金流/净利润=${v}倍，现金回流明显弱于账面利润，可能存在大量应收账款，警惕坏账风险。`;
+      // 数据库存储为百分比（375.00 = 375% = 3.75倍），需除以100转为倍数
+      const vTimes = v / 100;
+      if (vTimes >= 1.5) return `经营现金流/净利润=${vTimes.toFixed(2)}倍，盈利质量极为优秀，利润全部有真实现金支撑，是最健康的财务状态。`;
+      if (vTimes >= 1.0) return `经营现金流/净利润=${vTimes.toFixed(2)}倍，盈利质量好，利润基本有现金覆盖，财务造假风险低。`;
+      if (vTimes >= 0.8) return `经营现金流/净利润=${vTimes.toFixed(2)}倍，盈利质量较好，约八成利润有现金支撑，较为健康。`;
+      if (vTimes >= 0.5) return `经营现金流/净利润=${vTimes.toFixed(2)}倍，盈利质量一般，部分利润为账面数字，可能对应应收增加或存货堆积。`;
+      if (vTimes > 0) return `经营现金流/净利润=${vTimes.toFixed(2)}倍，现金回流明显弱于账面利润，可能存在大量应收账款，警惕坏账风险。`;
       return `经营现金流为负，公司现金净流出，处于投入期（扩张）或烧钱阶段，需结合行业特性和融资能力判断风险。`;
     }
   }
@@ -1774,7 +1830,7 @@ function IndicatorRow({ label, value, score, maxScore, desc, color }) {
       display: 'flex', alignItems: 'center', padding: '6px 0',
       borderBottom: '1px solid #f0f0f0', gap: 12,
     }}>
-      <span style={{ width: 90, flexShrink: 0, color: '#333', fontWeight: 500 }}>{label}</span>
+      <span style={{ width: 120, flexShrink: 0, color: '#333', fontWeight: 500 }}>{label}</span>
       <span style={{ width: 130, flexShrink: 0, textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
         <Tag color={color || 'default'} style={{
           margin: 0, fontSize: 13, padding: '2px 8px',
@@ -1807,6 +1863,20 @@ function ScoreDetailTab({ detail, reportPeriod }) {
 
   return (
     <div>
+      {/* 数据日期标注 */}
+      {detail.dataRange && (
+        <div style={{
+          marginBottom: 8,
+          padding: '6px 12px',
+          background: '#f6ffed',
+          borderRadius: 4,
+          fontSize: 12,
+          color: '#52c41a',
+          display: 'inline-block',
+        }}>
+          📅 {detail.dataRange}
+        </div>
+      )}
       {/* 报告期标注 */}
       {reportPeriod && (
         <div style={{
@@ -1827,7 +1897,7 @@ function ScoreDetailTab({ detail, reportPeriod }) {
         display: 'flex', padding: '4px 0', gap: 12,
         borderBottom: '2px solid #e8e8e8', fontWeight: 600, fontSize: 12, color: '#999',
       }}>
-        <span style={{ width: 90, flexShrink: 0 }}>指标</span>
+        <span style={{ width: 120, flexShrink: 0 }}>指标</span>
         <span style={{ width: 130, flexShrink: 0, textAlign: 'center' }}>当前值</span>
         <span style={{ width: 50, flexShrink: 0, textAlign: 'center' }}>评分</span>
         <span style={{ flex: 1 }}>说明</span>
@@ -2824,11 +2894,11 @@ function ChanChartTab({ data, code }) {
 /**
  * 资金流向历史趋势 Tab
  */
-function MoneyFlowHistoryTab({ data, code }) {
+function MoneyFlowHistoryTab({ data, bidAskData, code }) {
   if (!data) return <Spin style={{ display: 'block', margin: '40px auto' }} />;
   if (data.error) return <Alert type="warning" message={data.error} />;
 
-  const { history, days, avgNetMain, avgNetMainPct, avgMoneyScore, inflowDays, inflowRatio } = data;
+  const { history, days, avgNetMain, avgNetMainPct, avgMoneyScore, inflowDays, inflowRatio, latestDate } = data;
   const dates = (history || []).map(h => h.tradeDate?.substring(5));
   const netMainArr = (history || []).map(h => h.netMain ? h.netMain / 1e8 : 0);
   const scoreArr = (history || []).map(h => h.moneyScore || 0);
@@ -2891,6 +2961,16 @@ function MoneyFlowHistoryTab({ data, code }) {
 
   return (
     <div>
+      {/* 数据日期提示 */}
+      {latestDate && (
+        <div style={{ marginBottom: 12, color: '#888', fontSize: 12 }}>
+          数据日期：{latestDate}
+        </div>
+      )}
+
+      {/* 内外盘比面板（独立展示） */}
+      <BidAskPanel data={bidAskData} />
+
       <Row gutter={8} style={{ marginBottom: 12 }}>
         <Col span={4}><Statistic title="天数" value={days || 0} valueStyle={{ fontSize: 15 }} /></Col>
         <Col span={5}><Statistic title="日均净流入" value={avgNetMain || 0} suffix="亿" precision={2} valueStyle={{ fontSize: 15 }} /></Col>

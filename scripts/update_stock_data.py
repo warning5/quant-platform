@@ -39,7 +39,22 @@ import os
 import time
 import argparse
 import subprocess
+import signal
 from datetime import datetime, timedelta
+
+# ─── SIGINT/SIGTERM 处理（支持 Java cancelTask 杀进程树） ─────────
+class CancelException(Exception):
+    pass
+
+def _sig_handler(signum, frame):
+    raise CancelException(f"收到信号 {signum}，正在退出...")
+
+# Windows 不支持 SIGTERM，转为 SIGINT
+for _sig in (signal.SIGINT, signal.SIGTERM):
+    try:
+        signal.signal(_sig, _sig_handler)
+    except (ValueError, OSError):
+        pass
 
 # ─── 基础路径（确保子脚本能被找到） ─────────────────────────
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -54,6 +69,7 @@ BJ_QQ_SCRIPT    = os.path.join(SCRIPT_DIR, "update_bj_stock_daily_qq.py")
 INFO_SCRIPT     = os.path.join(SCRIPT_DIR, "update_stock_info_daily.py")
 INDEX_SCRIPT    = os.path.join(SCRIPT_DIR, "update_index_daily_baostock.py")
 SENTIMENT_SCRIPT = os.path.join(SCRIPT_DIR, "update_sentiment_data.py")
+BIDASK_SCRIPT   = os.path.join(SCRIPT_DIR, "update_bid_ask.py")
 
 
 def resolve_date(date_str):
@@ -92,7 +108,8 @@ def resolve_date(date_str):
 
 
 def run_cmd(cmd, description):
-    """运行子进程，打印命令信息（自动传递 DB_BACKEND 环境变量）"""
+    """运行子进程，打印命令信息（自动传递 DB_BACKEND 环境变量）
+    支持 SIGINT/SIGTERM → 终止子进程并抛出 CancelException"""
     print(f"\n{'=' * 70}")
     print(f"  >> {description}")
     print(f"  >> 命令: {' '.join(cmd)}")
@@ -102,12 +119,27 @@ def run_cmd(cmd, description):
     # 传递 DB_BACKEND 环境变量给子进程
     env = os.environ.copy()
     env["DB_BACKEND"] = DB_BACKEND
-    result = subprocess.run(cmd, env=env)
-    elapsed = time.time() - start
-
-    status = "成功" if result.returncode == 0 else "失败"
-    print(f"\n  [完成] {description} - {status} (耗时 {elapsed:.1f}s)")
-    return result.returncode == 0
+    try:
+        proc = subprocess.Popen(cmd, env=env)
+        try:
+            result = proc.wait()
+        except CancelException:
+            print(f"\n[中断] {description} - 正在终止子进程...")
+            proc.terminate()
+            try:
+                proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            raise
+        elapsed = time.time() - start
+        status = "成功" if result == 0 else "失败"
+        print(f"\n  [完成] {description} - {status} (耗时 {elapsed:.1f}s)")
+        return result == 0
+    except CancelException:
+        raise
+    except Exception as e:
+        print(f"\n[ERROR] {description} - 运行异常: {e}")
+        return False
 
 
 def run_baostock(market, start_date, end_date, extra_args):
@@ -199,6 +231,26 @@ def run_sentiment(date_str=None):
         cmd += ["--date", date_str.replace("-", "")]
 
     return run_cmd(cmd, "市场情绪数据 (涨跌停/资金)")
+
+
+def run_bidask(date_str=None, code=None, limit=0, all_mode=False):
+    """调用内外盘数据采集脚本
+    :param all_mode: True 时清空全表重刷（慎用）
+    """
+    if not os.path.exists(BIDASK_SCRIPT):
+        print(f"[ERROR] 找不到脚本: {BIDASK_SCRIPT}")
+        return False
+    cmd = [sys.executable, "-u", BIDASK_SCRIPT]
+    if code:
+        cmd += ["--code", code]
+    elif all_mode:
+        cmd += ["--all"]  # 仅明确传 all_mode=True 时才清空重刷
+    # 不传 --all 时 update_bid_ask.py 默认增量更新所有活跃股票（不清空）
+    if date_str:
+        cmd += ["--date", date_str]
+    if limit > 0:
+        cmd += ["--limit", str(limit)]
+    return run_cmd(cmd, "内外盘数据 (腾讯证券)")
 
 
 def show_summary():
@@ -332,6 +384,10 @@ def main():
         "--sentiment-only", action="store_true",
         help="只采集市场情绪数据（涨跌停/资金情绪），不更新日线和info"
     )
+    parser.add_argument(
+        "--bidask-only", action="store_true",
+        help="只采集内外盘数据（腾讯证券），不更新日线和info"
+    )
 
     # ─── 市场选择 ───
     parser.add_argument(
@@ -416,6 +472,8 @@ def main():
         print(f"  更新模式:   仅指数日线")
     elif args.sentiment_only:
         print(f"  更新模式:   仅市场情绪数据（涨跌停/北向/资金情绪）")
+    elif args.bidask_only:
+        print(f"  更新模式:   仅内外盘数据")
     else:
         print(f"  更新模式:   个股日线 + 指数日线 + 信息 (全部)")
     print(f"{'#' * 70}")
@@ -432,9 +490,9 @@ def main():
     total_start = time.time()
     results = []
 
-    do_daily = not args.info_only and not args.index_only and not args.sentiment_only
-    do_info  = not args.daily_only and not args.index_only and not args.sentiment_only
-    do_index = (not args.info_only and not args.daily_only and not args.sentiment_only) or args.index_only
+    do_daily = not args.info_only and not args.index_only and not args.sentiment_only and not args.bidask_only
+    do_info  = not args.daily_only and not args.index_only and not args.sentiment_only and not args.bidask_only
+    do_index = (not args.info_only and not args.daily_only and not args.sentiment_only and not args.bidask_only) or args.index_only
 
     # ─── Part 1: 更新日线行情 ───
     if do_daily:
@@ -461,13 +519,18 @@ def main():
         results.append(("stock_info", ok))
 
     # ─── Part 2.5: 情绪数据 ───
-    if args.sentiment_only or (not args.info_only and not args.daily_only and not args.index_only):
+    if args.sentiment_only or (not args.info_only and not args.daily_only and not args.index_only and not args.bidask_only):
         # 全量模式：最后跑情绪数据
         ok = run_sentiment(end_date)
         results.append(("市场情绪", ok))
 
+    # ─── Part 2.6: 内外盘数据 ───
+    if args.bidask_only or (not args.info_only and not args.daily_only and not args.index_only and not args.sentiment_only):
+        ok = run_bidask(date_str=end_date, code=args.code, limit=args.limit)
+        results.append(("内外盘数据", ok))
+
     # ─── Part 3: 自动补全缺失字段 ───
-    do_fix = not args.info_only and not args.sentiment_only  # info-only / sentiment-only 模式不补全日线字段
+    do_fix = not args.info_only and not args.sentiment_only and not args.bidask_only  # info-only / sentiment-only 模式不补全日线字段
     if do_fix:
         try:
             from db_helper import StockDailyDB

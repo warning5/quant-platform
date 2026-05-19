@@ -318,200 +318,44 @@ public class TradingSignalEngine {
     
     /**
      * 计算资金面得分（满分25）
-     * 权重：主力净流入(10分) + 主力净流入占比(8分) + 量比(4分) + 换手率偏离(3分)
+     * 权重：主力净流入(6分) + 主力净流入占比(5分) + 融资余额变化(3分)
+     *   + 5日累计主力净流入(3分) + 股东人数变化(2分) + 量比(3分) + 换手率偏离(3分)
      */
     private int calcMoneyScore(MoneyFlowSignal money) {
         if (money == null) return 0;
-        
         int score = 0;
-        
-        // 主力净流入（10分）— 最核心指标，直接反映大资金动向
+
+        // 1. 主力净流入（6分）
         if (money.getNetMain() != null) {
             double nm = money.getNetMain().doubleValue();
             if (nm >= NET_MAIN_HIGH) {
-                score += 10; // 强力流入（>5亿）
+                score += 6;
             } else if (nm >= NET_MAIN_MED) {
-                score += 7;  // 明显流入（>1亿）
+                score += 4;
             } else if (nm > 0) {
-                score += 5;  // 小幅流入
+                score += 3;
             } else if (nm > NET_MAIN_LOW) {
-                score += 2;  // 小幅流出（>-1亿）
-            } else if (nm > NET_MAIN_VLOW) {
-                score += 1;  // 中度流出（>-3亿）
+                score += 1;
             }
-            // ≤-3亿严重流出 = 0分
         }
-        
-        // 主力净流入占比（8分）— 相对比例，消除市值大小偏差
+
+        // 2. 主力净流入占比（5分）
         if (money.getNetMainPct() != null) {
             double pct = money.getNetMainPct().doubleValue();
             if (pct >= NET_MAIN_PCT_HIGH) {
-                score += 8;  // 占比>10%，强力
-            } else if (pct >= NET_MAIN_PCT_MED) {
-                score += 6;  // 占比>5%，明显
-            } else if (pct > 0) {
-                score += 4;  // 占比>0%，小幅
-            } else if (pct > NET_MAIN_PCT_LOW) {
-                score += 2;  // 占比>-5%，温和流出
-            } else if (pct > NET_MAIN_PCT_VLOW) {
-                score += 1;  // 占比>-10%，中度流出
-            }
-            // ≤-10% = 0分
-        }
-        
-        // 量比（4分）— 成交活跃度
-        if (money.getVolumeRatio() != null) {
-            double vr = money.getVolumeRatio().doubleValue();
-            if (vr >= VOLUME_RATIO_HIGH) {
-                score += 4; // 放量
-            } else if (vr >= VOLUME_RATIO_MEDIUM) {
-                score += 3; // 温和放量
-            } else if (vr >= 1.0) {
-                score += 2; // 正常量能
-            }
-        }
-        
-        // 换手率偏离（3分）— 交投活跃度变化
-        if (money.getTurnoverDeviation() != null) {
-            double dev = money.getTurnoverDeviation().doubleValue();
-            if (dev > 0) {
-                score += 3; // 活跃度提升
-            } else if (dev > -2) {
-                score += 2; // 正常
-            } else {
-                score += 1; // 低迷
-            }
-        }
-        
-        return Math.max(0, Math.min(MONEY_WEIGHT, score));
-    }
-    
-    /**
-     * 计算事件面得分——大盘蓝筹模式（满分25）
-     * 指标：融资余额变化(6分) + 龙虎榜机构净买入(6分) + 机构调研热度(6分) + 龙虎榜上榜(4分) + 公告事件(3分)
-     */
-    private int calcSentimentScoreBlueChip(SentimentSignal sentiment) {
-        if (sentiment == null) return 0;
-        int score = 0;
-
-        // 融资余额变化（6分）— 杠杆资金态度
-        if (sentiment.getMarginChgPct() != null) {
-            double chg = sentiment.getMarginChgPct().doubleValue();
-            if (chg > 5.0) {
-                score += 6;
-            } else if (chg > 2.0) {
-                score += 4;
-            } else if (chg > 0) {
-                score += 2;
-            } else if (chg > -3.0) {
-                score += 1;
-            }
-        }
-
-        // 龙虎榜机构净买入（6分）
-        if (sentiment.getLhbInstitutionNet() != null) {
-            double lhb = sentiment.getLhbInstitutionNet().doubleValue();
-            if (lhb > 50e6) {
-                score += 6;
-            } else if (lhb > 10e6) {
-                score += 4;
-            } else if (lhb > 0) {
-                score += 2;
-            } else if (lhb > -10e6) {
-                score += 1;
-            }
-        }
-
-        // 机构调研热度（6分）
-        if (sentiment.getHolderChangePct() != null) {
-            double surveyCount = sentiment.getHolderChangePct().doubleValue();
-            if (surveyCount >= 10.0) {
-                score += 6;
-            } else if (surveyCount >= 5.0) {
-                score += 4;
-            } else if (surveyCount >= 2.0) {
-                score += 2;
-            } else if (surveyCount >= 1.0) {
-                score += 1;
-            }
-        }
-
-        // 龙虎榜上榜（4分）— 非机构数据，所有龙虎榜记录
-        if (sentiment.getLhbAppearCount() != null && sentiment.getLhbAppearCount() > 0) {
-            BigDecimal netAmt = sentiment.getLhbNetAmount();
-            if (netAmt != null && netAmt.doubleValue() > 0) {
-                score += 4;
-            } else {
-                score += 1;
-            }
-        }
-
-        // 公告事件（3分）
-        int posCount = sentiment.getNoticePositiveCount() != null ? sentiment.getNoticePositiveCount() : 0;
-        int negCount = sentiment.getNoticeNegativeCount() != null ? sentiment.getNoticeNegativeCount() : 0;
-        int eventNet = posCount - negCount;
-        if (eventNet >= 3) {
-            score += 3;
-        } else if (eventNet >= 1) {
-            score += 2;
-        } else if (eventNet < 0) {
-            // 负面公告多，扣分到0
-        }
-
-        return Math.max(0, Math.min(SENTIMENT_WEIGHT, score));
-    }
-
-    /**
-     * 计算事件面得分（满分25）
-     * 涨停5 + 炸板率5 + 强势股4 + 龙虎榜4 + 融资余额3 + 公告事件4 = 25
-     */
-    private int calcSentimentScore(SentimentSignal sentiment) {
-        if (sentiment == null) return 0;
-
-        int score = 0;
-
-        // 1. 连续涨停（5分）— 近10日涨停天数
-        if (sentiment.getLimitUpDays() != null) {
-            int days = sentiment.getLimitUpDays();
-            if (days >= 3) {
-                score += 5; // 连板3天以上
-            } else if (days >= 2) {
-                score += 4;
-            } else if (days > 0) {
-                score += 2;
-            }
-        }
-
-        // 2. 炸板率（5分）— 越低越好，低炸板率说明封板坚决
-        if (sentiment.getBrokenLimitUpRate() != null) {
-            double rate = sentiment.getBrokenLimitUpRate();
-            if (rate < 10.0) {
                 score += 5;
-            } else if (rate < 30.0) {
+            } else if (pct >= NET_MAIN_PCT_MED) {
+                score += 4;
+            } else if (pct > 0) {
                 score += 3;
-            } else if (rate < 50.0) {
+            } else if (pct > NET_MAIN_PCT_LOW) {
                 score += 1;
             }
         }
 
-        // 3. 强势股（4分）— 20日涨幅>30%
-        if (Boolean.TRUE.equals(sentiment.getIsStrongStock())) {
-            score += 4;
-        }
-
-        // 4. 龙虎榜信号（4分）— 上榜且净买入为正
-        if (sentiment.getLhbAppearCount() != null && sentiment.getLhbAppearCount() > 0) {
-            BigDecimal netAmt = sentiment.getLhbNetAmount();
-            if (netAmt != null && netAmt.doubleValue() > 0) {
-                score += 4; // 上榜+净买入
-            } else {
-                score += 1; // 上榜但净卖出
-            }
-        }
-
-        // 5. 融资余额变化（3分）— 资金加杠杆看多
-        if (sentiment.getMarginChgPct() != null) {
-            double pct = sentiment.getMarginChgPct().doubleValue();
+        // 3. 融资余额变化（3分）— 从事件面移入
+        if (money.getMarginChgPct() != null) {
+            double pct = money.getMarginChgPct().doubleValue();
             if (pct > 5.0) {
                 score += 3;
             } else if (pct > 2.0) {
@@ -521,19 +365,240 @@ public class TradingSignalEngine {
             }
         }
 
-        // 6. 公告事件（4分）— 正面-负面
+        // 4. 5日累计主力净流入（3分）
+        if (money.getNetMain5d() != null) {
+            double nm5 = money.getNetMain5d().doubleValue();
+            if (nm5 >= 3e8) {
+                score += 3;  // >3亿
+            } else if (nm5 >= 1e8) {
+                score += 2;  // >1亿
+            } else if (nm5 > 0) {
+                score += 1;  // >0
+            }
+        }
+
+        // 5. 股东人数变化（2分，负值=筹码集中=看多）
+        if (money.getShareholderChangePct() != null) {
+            double chg = money.getShareholderChangePct().doubleValue();
+            if (chg < -10.0) {
+                score += 2;  // 筹码高度集中
+            } else if (chg < -5.0) {
+                score += 1;  // 筹码集中
+            }
+        }
+
+        // 6. 量比（2分，调整为给新指标腾出空间）
+        if (money.getVolumeRatio() != null) {
+            double vr = money.getVolumeRatio().doubleValue();
+            if (vr >= VOLUME_RATIO_HIGH) {
+                score += 2;
+            } else if (vr >= VOLUME_RATIO_MEDIUM) {
+                score += 1;
+            }
+        }
+
+        // 7. 换手率偏离（3分）
+        if (money.getTurnoverDeviation() != null) {
+            double dev = money.getTurnoverDeviation().doubleValue();
+            if (dev > 0) {
+                score += 3;
+            } else if (dev > -2) {
+                score += 2;
+            } else {
+                score += 1;
+            }
+        }
+
+        // 8. 内外盘比（2分，外盘/内盘，>1买方强势，防造假参考）
+        if (money.getOuterInnerRatio() != null) {
+            double ratio = money.getOuterInnerRatio().doubleValue();
+            if (ratio > 1.2) {
+                score += 2;  // 强势买方
+            } else if (ratio > 1.0) {
+                score += 1;  // 买方略强
+            }
+        }
+
+        return Math.max(0, Math.min(MONEY_WEIGHT, score));
+    }
+    
+    /**
+     * 计算事件面得分——大盘蓝筹模式（满分25）
+     * 指标：龙虎榜机构净买入(4分) + 机构调研热度(6分) + 基金持仓(4分)
+     *   + 龙虎榜上榜(3分) + 公告事件(2分) + 融资余额已移至资金面
+     */
+    private int calcSentimentScoreBlueChip(SentimentSignal sentiment) {
+        if (sentiment == null) return 0;
+        int score = 0;
+
+        // 1. 龙虎榜机构净买入（4分）— 机构席位真金白银
+        if (sentiment.getLhbInstitutionNet() != null) {
+            double lhb = sentiment.getLhbInstitutionNet().doubleValue();
+            if (lhb > 50e6) {
+                score += 4;
+            } else if (lhb > 10e6) {
+                score += 3;
+            } else if (lhb > 0) {
+                score += 2;
+            } else if (lhb > -10e6) {
+                score += 1;
+            }
+        }
+
+        // 2. 机构调研热度（6分）— 近90天研报数量（替代旧 holderChangePct）
+        if (sentiment.getResearchReportCount90d() != null) {
+            int cnt = sentiment.getResearchReportCount90d();
+            if (cnt >= 10) {
+                score += 6;
+            } else if (cnt >= 5) {
+                score += 4;
+            } else if (cnt >= 2) {
+                score += 2;
+            } else if (cnt >= 1) {
+                score += 1;
+            }
+        }
+
+        // 3. 基金持仓集中度（4分）— float_ratio 合计占流通股比例
+        if (sentiment.getFundHolderRatio() != null) {
+            double ratio = sentiment.getFundHolderRatio().doubleValue();
+            if (ratio >= 20.0) {
+                score += 4;
+            } else if (ratio >= 10.0) {
+                score += 3;
+            } else if (ratio >= 5.0) {
+                score += 2;
+            } else if (ratio > 0) {
+                score += 1;
+            }
+        }
+
+        // 4. 龙虎榜上榜（3分）— 非机构数据，所有龙虎榜记录
+        if (sentiment.getLhbAppearCount() != null && sentiment.getLhbAppearCount() > 0) {
+            BigDecimal netAmt = sentiment.getLhbNetAmount();
+            if (netAmt != null && netAmt.doubleValue() > 0) {
+                score += 3;
+            } else {
+                score += 1;
+            }
+        }
+
+        // 5. 公告事件（2分）— 正面-负面（关键词已扩展）
         int posCount = sentiment.getNoticePositiveCount() != null ? sentiment.getNoticePositiveCount() : 0;
         int negCount = sentiment.getNoticeNegativeCount() != null ? sentiment.getNoticeNegativeCount() : 0;
         int eventNet = posCount - negCount;
         if (eventNet >= 3) {
-            score += 4;
-        } else if (eventNet >= 1) {
             score += 2;
-        } else if (eventNet < 0) {
-            score += 0; // 负面公告多，不加分
+        } else if (eventNet >= 1) {
+            score += 1;
         }
 
-        return Math.min(SENTIMENT_WEIGHT, score);
+        // 融资余额变化已移至资金面评分
+
+        return Math.max(0, Math.min(SENTIMENT_WEIGHT, score));
+    }
+
+    /**
+     * 计算事件面得分（满分25）
+     * 涨停4 + 炸板率3 + 强势股4 + 龙虎榜3 + 机构调研6 + 基金持仓4 + 公告事件2 = 26... → 调整
+     * 涨停4 + 炸板率3 + 强势股3 + 龙虎榜3 + 机构调研6 + 基金持仓4 + 公告事件2 = 25
+     */
+    private int calcSentimentScore(SentimentSignal sentiment) {
+        if (sentiment == null) return 0;
+
+        int score = 0;
+
+        // 1. 连续涨停（4分）— 近10日涨停天数
+        if (sentiment.getLimitUpDays() != null) {
+            int days = sentiment.getLimitUpDays();
+            if (days >= 3) {
+                score += 4;
+            } else if (days >= 2) {
+                score += 3;
+            } else if (days > 0) {
+                score += 2;
+            }
+        }
+
+        // 2. 炸板率（3分）— 越低越好
+        if (sentiment.getBrokenLimitUpRate() != null) {
+            double rate = sentiment.getBrokenLimitUpRate();
+            if (rate < 10.0) {
+                score += 3;
+            } else if (rate < 30.0) {
+                score += 2;
+            } else if (rate < 50.0) {
+                score += 1;
+            }
+        }
+
+        // 3. 强势股（3分）— 20日涨幅>30%
+        if (Boolean.TRUE.equals(sentiment.getIsStrongStock())) {
+            score += 3;
+        }
+
+        // 4. 龙虎榜信号（3分）— 上榜且净买入为正
+        if (sentiment.getLhbAppearCount() != null && sentiment.getLhbAppearCount() > 0) {
+            BigDecimal netAmt = sentiment.getLhbNetAmount();
+            if (netAmt != null && netAmt.doubleValue() > 0) {
+                score += 3;
+            } else {
+                score += 1;
+            }
+        }
+
+        // 5. 机构调研热度（6分）— 近90天研报数量（新增）
+        if (sentiment.getResearchReportCount90d() != null) {
+            int cnt = sentiment.getResearchReportCount90d();
+            if (cnt >= 10) {
+                score += 6;
+            } else if (cnt >= 5) {
+                score += 4;
+            } else if (cnt >= 2) {
+                score += 2;
+            } else if (cnt >= 1) {
+                score += 1;
+            }
+        }
+
+        // 6. 基金持仓集中度（4分）— float_ratio 合计占流通股比例（新增）
+        if (sentiment.getFundHolderRatio() != null) {
+            double ratio = sentiment.getFundHolderRatio().doubleValue();
+            if (ratio >= 20.0) {
+                score += 4;  // >20% = 机构重仓
+            } else if (ratio >= 10.0) {
+                score += 3;  // >10%
+            } else if (ratio >= 5.0) {
+                score += 2;  // >5%
+            } else if (ratio > 0) {
+                score += 1;  // 有基金持仓
+            }
+        }
+
+        // 7. 公告事件（2分）— 正面-负面（关键词已扩展为含投资/扩产）
+        int posCount = sentiment.getNoticePositiveCount() != null ? sentiment.getNoticePositiveCount() : 0;
+        int negCount = sentiment.getNoticeNegativeCount() != null ? sentiment.getNoticeNegativeCount() : 0;
+        int eventNet = posCount - negCount;
+        if (eventNet >= 3) {
+            score += 2;
+        } else if (eventNet >= 1) {
+            score += 1;
+        }
+
+        // 8. 新闻事件（2分）— 来自东方财富个股新闻（利好/风险/情感偏向）
+        Integer ns = sentiment.getNewsScore();
+        if (ns != null && ns > 0) {
+            if (ns >= 8) {
+                score += 2;  // 重大利好新闻
+            } else if (ns >= 5) {
+                score += 1;  // 中性偏多
+            }
+        } else if (ns != null && ns == 0) {
+            // 无利好新闻，且有风险信号，扣0.5分
+            // 不做扣分处理，保持评分非负
+        }
+
+        return Math.max(0, Math.min(SENTIMENT_WEIGHT, score));
     }
     
     /**
@@ -663,8 +728,9 @@ public class TradingSignalEngine {
         }
 
         // === 9. 现金流质量（2分） ===
+        // 数据库存储为百分比，需除以100转为倍数
         if (fundamental.getOperatingCfToNp() != null) {
-            double cfNp = fundamental.getOperatingCfToNp().doubleValue();
+            double cfNp = fundamental.getOperatingCfToNp().doubleValue() / 100.0;
             if (cfNp >= 1.0) {
                 score += 2;
             } else if (cfNp >= 0.5) {
@@ -1275,50 +1341,172 @@ public class TradingSignalEngine {
     private List<ScoreDetail.ScoreItem> buildMoneyItems(MoneyFlowSignal money) {
         List<ScoreDetail.ScoreItem> items = new ArrayList<>();
 
-        // 主力净流入（10分）
+        // 1. 主力净流入（6分）
         BigDecimal nm = money != null ? money.getNetMain() : null;
         double nmVal = nm != null ? nm.doubleValue() : 0;
         int nmScore = 0;
         if (nm != null) {
-            if (nmVal >= NET_MAIN_HIGH) nmScore = 10;
-            else if (nmVal >= NET_MAIN_MED) nmScore = 7;
-            else if (nmVal > 0) nmScore = 5;
-            else if (nmVal > NET_MAIN_LOW) nmScore = 2;
-            else if (nmVal > NET_MAIN_VLOW) nmScore = 1;
+            if (nmVal >= NET_MAIN_HIGH) nmScore = 6;
+            else if (nmVal >= NET_MAIN_MED) nmScore = 4;
+            else if (nmVal > 0) nmScore = 3;
+            else if (nmVal > NET_MAIN_LOW) nmScore = 1;
         }
         String nmColor = nmVal > 0 ? "red" : nmVal < 0 ? "green" : "default";
         items.add(buildItem("主力净流入", nm != null ? formatMoneyFlow(nm) : "暂无数据",
-                nmScore, 10, ">5亿=10分, >1亿=7分, >0=5分, >-1亿=2分, >-3亿=1分, ≤-3亿=0分", false, nmColor));
+                nmScore, 6,
+                "【指标定义】主力净流入 = 大单(20~100万) + 超大单(>100万)当日净流入额，反映大资金当日净买卖方向。" +
+                "正值 = 大资金净买入（做多）；负值 = 大资金净卖出（做空）。" +
+                "【为什么用它】主力净流入是判断大资金态度最直接的指标——它回答'今天谁在买、谁在卖'。" +
+                "散户交易呈现随机分布，而主力操作会集中体现在大单/超大单上。该指标源自东财真实逐笔成交数据，" +
+                "经席位分类统计得出，比传统技术指标更能反映真实资金流向。" +
+                "【评分逻辑】净流入≥5亿=6分（机构级别强力做多）；≥1亿=4分（大资金积极介入）；" +
+                ">0=3分（资金小幅流入）；>-1亿=1分（资金小幅流出，但抛压可控）；≤-1亿=0分（资金明显撤离）。" +
+                "【注意】单日报应结合5日累计看趋势，单日净流入可能受消息脉冲影响。",
+                false, nmColor));
 
-        // 主力净流入占比（8分）
+        // 2. 主力净流入占比（5分）
         BigDecimal nmPct = money != null ? money.getNetMainPct() : null;
         double nmPctVal = nmPct != null ? nmPct.doubleValue() : 0;
         int pctScore = 0;
         if (nmPct != null) {
-            if (nmPctVal >= NET_MAIN_PCT_HIGH) pctScore = 8;
-            else if (nmPctVal >= NET_MAIN_PCT_MED) pctScore = 6;
-            else if (nmPctVal > 0) pctScore = 4;
-            else if (nmPctVal > NET_MAIN_PCT_LOW) pctScore = 2;
-            else if (nmPctVal > NET_MAIN_PCT_VLOW) pctScore = 1;
+            if (nmPctVal >= NET_MAIN_PCT_HIGH) pctScore = 5;
+            else if (nmPctVal >= NET_MAIN_PCT_MED) pctScore = 4;
+            else if (nmPctVal > 0) pctScore = 3;
+            else if (nmPctVal > NET_MAIN_PCT_LOW) pctScore = 1;
         }
         String pctColor = nmPctVal > 0 ? "red" : nmPctVal < 0 ? "green" : "default";
         items.add(buildItem("主力净流入占比", nmPct != null ? nmPct.setScale(2, RoundingMode.HALF_UP) + "%" : "暂无数据",
-                pctScore, 8, ">10%=8分, >5%=6分, >0%=4分, >-5%=2分, >-10%=1分, ≤-10%=0分", false, pctColor));
+                pctScore, 5,
+                "【指标定义】主力净流入占比 = 主力净流入额 / 当日成交额 × 100%，衡量主力资金在当日总成交中的占比。" +
+                "它回答'今天的大资金动向，在整体交易中占多大分量'。" +
+                "【为什么用它】绝对金额对小盘股不公平——1亿净流入对100亿市值是巨量，对5000亿市值只是毛毛雨。" +
+                "占比消除了市值差异，实现跨股票可比。同时它能识别'伪流入'：某股成交额100亿、净流入5亿(占比5%)，" +
+                "另一股成交额1亿、净流入3000万(占比30%)，后者资金态度坚决得多。" +
+                "【评分逻辑】占比≥10%=5分（资金态度坚决，控盘度高）；≥5%=4分（资金积极介入）；" +
+                ">0%=3分（资金小幅流入）；>-5%=1分（资金微幅流出）；≤-5%=0分（资金明显撤离）。" +
+                "【注意】小盘股占比容易虚高（少量资金即可撬动），大盘股占比更真实反映机构态度。",
+                false, pctColor));
 
-        // 量比（4分）
+        // 3. 融资余额变化（3分）— 从事件面移入
+        BigDecimal marginChg = money != null ? money.getMarginChgPct() : null;
+        double mcVal = marginChg != null ? marginChg.doubleValue() : 0;
+        int mcScore = 0;
+        if (marginChg != null) {
+            if (mcVal > 5.0) mcScore = 3;
+            else if (mcVal > 2.0) mcScore = 2;
+            else if (mcVal > 0) mcScore = 1;
+        }
+        items.add(buildItem("融资余额变化", marginChg != null ? marginChg.setScale(2, RoundingMode.HALF_UP) + "%" : "-",
+                mcScore, 3,
+                "【指标定义】融资余额日环比变化率 = (最新融资余额 - 前一交易日融资余额) / 前一交易日融资余额 × 100%。" +
+                "融资余额 = 投资者向券商借钱买入股票后尚未偿还的余额，是杠杆资金的代理指标。" +
+                "【为什么用它】融资客是典型的趋势追随者——市场上涨时加杠杆追涨，下跌时被迫平仓杀跌。" +
+                "融资余额增加 = 杠杆资金看多情绪升温；减少 = 杠杆资金撤退或被动平仓。" +
+                "它是市场情绪的'放大器'：融资增加会助推上涨，融资减少会加速下跌。" +
+                "【评分逻辑】增长>5%=3分（杠杆资金大幅加码，情绪极度乐观）；>2%=2分（杠杆资金积极做多）；" +
+                ">0%=1分（杠杆资金小幅加仓）；≤0%=0分（杠杆资金撤退或观望）。" +
+                "【风险警示】融资余额过高时，一旦股价回调可能触发连环平仓（踩踏），是双刃剑。",
+                false, mcVal > 0 ? "red" : mcVal < 0 ? "green" : "default"));
+
+        // 4. 5日累计主力净流入（3分）— 新增
+        BigDecimal nm5d = money != null ? money.getNetMain5d() : null;
+        double nm5dVal = nm5d != null ? nm5d.doubleValue() : 0;
+        int nm5dScore = 0;
+        if (nm5d != null) {
+            if (nm5dVal >= 3e8) nm5dScore = 3;
+            else if (nm5dVal >= 1e8) nm5dScore = 2;
+            else if (nm5dVal > 0) nm5dScore = 1;
+        }
+        String nm5dColor = nm5dVal > 0 ? "red" : nm5dVal < 0 ? "green" : "default";
+        items.add(buildItem("5日累计净流入", nm5d != null ? formatMoneyFlow(nm5d) : "-",
+                nm5dScore, 3,
+                "【指标定义】近5个交易日主力净流入的累计值，反映大资金近一周的持续态度。" +
+                "【为什么用它】单日净流入易受消息脉冲影响（如突发利好导致一日游），5日累计能过滤单日噪音，" +
+                "识别主力真实的持续意图。连续5天净流入 = 主力在系统性建仓；连续5天净流出 = 主力在系统性出货。" +
+                "它回答'大资金是短期扰动还是持续布局'。" +
+                "【评分逻辑】累计≥3亿=3分（主力持续大力做多）；≥1亿=2分（主力持续流入）；>0=1分（主力小幅净流入）；" +
+                "≤0=0分（主力净流出或无明显动作）。" +
+                "【注意】结合当日净流入看：当日正+5日正 = 趋势确认；当日正+5日负 = 诱多反弹；" +
+                "当日负+5日正 = 短期洗盘；当日负+5日负 = 出货确认。",
+                false, nm5dColor));
+
+        // 5. 股东人数变化（2分，负值=筹码集中）— 新增
+        BigDecimal holderChg = money != null ? money.getShareholderChangePct() : null;
+        double hcVal = holderChg != null ? holderChg.doubleValue() : 0;
+        int hcScore = 0;
+        if (holderChg != null) {
+            if (hcVal < -10.0) hcScore = 2;
+            else if (hcVal < -5.0) hcScore = 1;
+        }
+        String hcDisplay = holderChg != null ? holderChg.setScale(2, RoundingMode.HALF_UP) + "%" : "-";
+        String hcColor = hcScore == 2 ? "red" : hcScore == 1 ? "volcano" : hcVal > 0 ? "green" : "default";
+        items.add(buildItem("股东人数变化", hcDisplay,
+                hcScore, 2,
+                "【指标定义】股东人数变化率 = (最新季度股东人数 - 上季度股东人数) / 上季度股东人数 × 100%。" +
+                "负值 = 股东人数减少（筹码从散户向大户/机构集中）；正值 = 股东人数增加（筹码分散）。" +
+                "【为什么用它】股东人数是A股特有的筹码分布代理指标——散户割肉离场、机构悄悄吸筹时，" +
+                "股东人数会持续下降（筹码集中），这是主力建仓期的典型特征。" +
+                "它直接回答'谁在持有这只股票'的问题：人少=主力控盘度高，人多=散户扎堆。" +
+                "【评分逻辑】减少>10%=2分（筹码高度集中，主力控盘）；减少>5%=1分（筹码趋于集中）；" +
+                "增加或微降=0分（筹码分散或无明显变化）。" +
+                "【注意】该指标季度更新，滞后性强，适合中长期判断而非短线交易。",
+                false, hcColor));
+
+        // 6. 量比（2分）
         BigDecimal vr = money != null ? money.getVolumeRatio() : null;
         double vrVal = vr != null ? vr.doubleValue() : 0;
         int vrScore = 0;
         if (vr != null) {
-            if (vrVal >= VOLUME_RATIO_HIGH) vrScore = 4;
-            else if (vrVal >= VOLUME_RATIO_MEDIUM) vrScore = 3;
-            else if (vrVal >= 1.0) vrScore = 2;
+            if (vrVal >= VOLUME_RATIO_HIGH) vrScore = 2;
+            else if (vrVal >= VOLUME_RATIO_MEDIUM) vrScore = 1;
         }
         String vrColor = vrVal >= 2.0 ? "red" : vrVal >= 1.5 ? "volcano" : vr != null ? "green" : "default";
         items.add(buildItem("量比", vr != null ? vr.setScale(2, RoundingMode.HALF_UP).toString() : "-",
-                vrScore, 4, "量比≥2.0=4分, ≥1.5=3分, ≥1.0=2分", false, vrColor));
+                vrScore, 2,
+                "【指标定义】量比 = 当日成交量 / 近5日平均成交量，衡量当日成交相对于近期平均水平的活跃程度。" +
+                "基准值1.0表示与近期平均水平持平；>1表示放量，<1表示缩量。" +
+                "【为什么用它】量比是识别资金异动最灵敏的指标——主力进场必然伴随成交量异常放大，" +
+                "而量比能在当日盘中就捕捉到这种变化（不同于换手率需要收盘后对比历史）。" +
+                "它过滤了个股流通盘大小的影响：大盘股1.5倍放量与小盘股1.5倍放量意义相同。" +
+                "【评分逻辑】量比≥2.0=2分（显著放量，资金积极介入）；≥1.5=1分（温和放量，有增量资金）；" +
+                "<1.5=0分（量能正常或缩量）。" +
+                "【实战要点】放量上涨=真金白银做多（可信）；放量下跌=主力出货（危险）；" +
+                "缩量上涨=虚涨无量（不可持续）；缩量下跌=阴跌延续或地量见底（需结合位置判断）。",
+                false, vrColor));
 
-        // 换手率偏离（3分）
+        // 7. 内外盘比（2分，参考指标，不做主要评分依据）
+        BigDecimal oir = money != null ? money.getOuterInnerRatio() : null;
+        double oirVal = oir != null ? oir.doubleValue() : 0;
+        int oirScore = 0;
+        String oirTrend = null;
+        if (oir != null) {
+            if (oirVal > 1.2) oirScore = 2;
+            else if (oirVal > 1.0) oirScore = 1;
+            if (oirVal > 1.2) oirTrend = "强势买方";
+            else if (oirVal > 1.0) oirTrend = "买方略强";
+            else if (oirVal >= 0.85) oirTrend = "多空均衡";
+            else if (oirVal >= 0.7) oirTrend = "卖方略强";
+            else if (oirVal > 0) oirTrend = "强势卖方";
+            else oirTrend = "无数据";
+        } else {
+            oirTrend = "无数据";
+        }
+        String oirColor = oirScore == 2 ? "red" : oirScore == 1 ? "volcano" : oirVal < 1.0 && oir != null ? "green" : "default";
+        items.add(buildItem("内外盘比", oir != null
+                ? oir.setScale(3, RoundingMode.HALF_UP).toString() + " " + oirTrend
+                : "无数据",
+                oirScore, 2,
+                "【指标定义】内外盘比 = 外盘成交量 / 内盘成交量。外盘 = 主动买入成交（以卖一价或更高价成交）；" +
+                "内盘 = 主动卖出成交（以买一价或更低价成交）。比值>1表示买方更积极，<1表示卖方更积极。" +
+                "【为什么用它替代委比】委比 = (委买手数 - 委卖手数) / (委买手数 + 委卖手数)，极易被主力在盘口挂大单后撤单操纵。" +
+                "而内外盘是真实成交数据，无法造假——买方真的掏钱买入、卖方真的割肉卖出才会计入。" +
+                "【评分逻辑】比值>1.2=2分（买方强势，主动买入明显多于卖出）；>1.0=1分（买方略强）；" +
+                "≤1.0=0分（卖方占优或均衡）。" +
+                "【注意】涨停板时外盘极小（没人卖），比值失真；跌停板时内盘极小（没人买），比值也失真。" +
+                "需结合股价位置判断：低位外盘大 = 吸筹；高位外盘大 = 诱多。",
+                false, oirColor));
+
+        // 8. 换手率偏离（3分）
         BigDecimal dev = money != null ? money.getTurnoverDeviation() : null;
         double devVal = dev != null ? dev.doubleValue() : 0;
         int devScore = 0;
@@ -1329,7 +1517,17 @@ public class TradingSignalEngine {
         }
         String devColor = devVal > 3.0 ? "red" : devVal > 0 ? "volcano" : dev != null ? "green" : "default";
         items.add(buildItem("换手率偏离", dev != null ? dev.setScale(2, RoundingMode.HALF_UP) + "%" : "-",
-                devScore, 3, "偏离>0%=3分, >-2%=2分, ≤-2%=1分", false, devColor));
+                devScore, 3,
+                "【指标定义】换手率偏离 = 当日换手率 - 近20日平均换手率，衡量当日筹码换手活跃程度相对于中期常态的偏离。" +
+                "正值 = 当日交投比近期更活跃（有资金异动）；负值 = 当日交投比近期更清淡（筹码锁定或无人问津）。" +
+                "【为什么用它而非绝对换手率】不同股票的常态换手率天差地别：银行股日常0.3%就算高换手，" +
+                "而科技股日常5%才算正常。直接用绝对换手率评分对大盘股不公平。偏离值消除了个股基差，" +
+                "只衡量'今天比平常活跃了多少'，实现跨市值可比。" +
+                "【评分逻辑】偏离>0%=3分（活跃度提升，资金异动）；>-2%=2分（接近正常，略有降温）；" +
+                "≤-2%=1分（明显缩量，筹码锁定或无人关注）。" +
+                "【实战要点】正偏离+股价上涨 = 资金进场确认；正偏离+股价下跌 = 主力出货；" +
+                "负偏离+股价上涨 = 无量上涨（虚涨）；负偏离+股价下跌 = 缩量阴跌（恐慌盘未出尽或地量见底）。",
+                false, devColor));
 
         // === 参考指标（不参与评分） ===
         BigDecimal netHuge = money != null ? money.getNetHuge() : null;
@@ -1384,35 +1582,44 @@ public class TradingSignalEngine {
     private List<ScoreDetail.ScoreItem> buildSentimentItems(SentimentSignal sentiment) {
         List<ScoreDetail.ScoreItem> items = new ArrayList<>();
 
-        // 1. 连续涨停（5分）
+        // 1. 连续涨停（4分）
         Integer days = sentiment != null ? sentiment.getLimitUpDays() : null;
         int daysScore = 0;
         if (days != null) {
-            if (days >= 3) daysScore = 5;
-            else if (days >= 2) daysScore = 4;
+            if (days >= 3) daysScore = 4;
+            else if (days >= 2) daysScore = 3;
             else if (days > 0) daysScore = 2;
         }
         String daysColor = days != null && days >= 3 ? "red" : days != null && days >= 2 ? "volcano" : days != null && days >= 1 ? "blue" : "default";
         items.add(buildItem("连续涨停", days != null ? days + "天" : "-",
-                daysScore, 5, "连板≥3天=5分, 2天=4分, 1天=2分", false, daysColor));
+                daysScore, 4,
+                "【选用原因】涨停是A股最强做多信号，连续涨停代表市场情绪极度亢奋，是龙头股的核心特征。" +
+                "【价值】连板天数直接反映短期爆发力和资金接力意愿；连板越高代表资金接力越强，但同时也意味着分歧风险越大——给分但不过度奖励。",
+                false, daysColor));
 
-        // 2. 炸板率（5分）
+        // 2. 炸板率（3分）
         Double rate = sentiment != null ? sentiment.getBrokenLimitUpRate() : null;
         int rateScore = 0;
         if (rate != null) {
-            if (rate < 10.0) rateScore = 5;
-            else if (rate < 30.0) rateScore = 3;
+            if (rate < 10.0) rateScore = 3;
+            else if (rate < 30.0) rateScore = 2;
             else if (rate < 50.0) rateScore = 1;
         }
         items.add(buildItem("炸板率", rate != null ? String.format("%.1f%%", rate) : "-",
-                rateScore, 5, "炸板率<10%=5分, <30%=3分, <50%=1分", false, "default"));
+                rateScore, 3,
+                "【选用原因】炸板率衡量涨停封板力度，炸板率高说明抛压重、封板不坚决，是\"假强势\"的识别器。" +
+                "【价值】配合连续涨停使用——涨停次数多+炸板率低=真强势；涨停多+炸板率高=资金博弈激烈，次日低开概率大。此指标有效过滤弱势涨停，避免被\"虚假繁荣\"误导。",
+                false, "default"));
 
-        // 3. 强势股（4分）
+        // 3. 强势股（3分）
         boolean isStrong = sentiment != null && Boolean.TRUE.equals(sentiment.getIsStrongStock());
         items.add(buildItem("强势股", isStrong ? "是" : "否",
-                isStrong ? 4 : 0, 4, "20日涨幅>30%=4分", false, isStrong ? "red" : "default"));
+                isStrong ? 3 : 0, 3,
+                "【选用原因】20日涨幅>30%是中期趋势跟踪的核心阈值，代表资金在中期维度持续做多。" +
+                "【价值】与连续涨停互补——涨停看短期爆发力，强势股看中期动能。趋势一旦形成延续概率大，但波动也会加大，适合趋势跟踪而非逆势抄底。",
+                false, isStrong ? "red" : "default"));
 
-        // 4. 龙虎榜信号（4分）
+        // 4. 龙虎榜信号（3分）
         Integer lhbCount = sentiment != null ? sentiment.getLhbAppearCount() : null;
         BigDecimal lhbNet = sentiment != null ? sentiment.getLhbNetAmount() : null;
         int lhbScore = 0;
@@ -1420,7 +1627,7 @@ public class TradingSignalEngine {
         String lhbColor = "default";
         if (lhbCount != null && lhbCount > 0) {
             if (lhbNet != null && lhbNet.doubleValue() > 0) {
-                lhbScore = 4;
+                lhbScore = 3;
                 lhbDisplay = "上榜" + lhbCount + "次,净买入" + formatMoneyFlow(lhbNet);
                 lhbColor = "red";
             } else {
@@ -1432,85 +1639,150 @@ public class TradingSignalEngine {
             lhbDisplay = "未上榜";
         }
         items.add(buildItem("龙虎榜", lhbDisplay,
-                lhbScore, 4, "上榜+净买入=4分, 上榜+净卖出=1分", false, lhbColor));
+                lhbScore, 3,
+                "【选用原因】龙虎榜是交易所公开的大资金交易席位数据，机构席位净买入代表专业机构的真实交易行为，是市场最透明的资金信号之一。" +
+                "【价值】机构席位净买入=专业资金真金白银看多，可信度高于散户资金；净卖出=机构减仓离场，是中期看淡警示。龙虎榜上榜次日继续上涨概率较大，但需区分机构席位vs游资席位。",
+                false, lhbColor));
 
-        // 5. 融资余额变化（3分）
-        BigDecimal mcp = sentiment != null ? sentiment.getMarginChgPct() : null;
-        double mcpVal = mcp != null ? mcp.doubleValue() : 0;
-        int mcpScore = 0;
-        if (mcp != null) {
-            if (mcpVal > 5.0) mcpScore = 3;
-            else if (mcpVal > 2.0) mcpScore = 2;
-            else if (mcpVal > 0) mcpScore = 1;
+        // 5. 机构调研热度（6分）— 近90天研报数量，新增
+        Integer rrCount = sentiment != null ? sentiment.getResearchReportCount90d() : null;
+        int rrScore = 0;
+        if (rrCount != null) {
+            if (rrCount >= 10) rrScore = 6;
+            else if (rrCount >= 5) rrScore = 4;
+            else if (rrCount >= 2) rrScore = 2;
+            else if (rrCount >= 1) rrScore = 1;
         }
-        items.add(buildItem("融资余额变化", mcp != null ? mcp.setScale(2, RoundingMode.HALF_UP) + "%" : "-",
-                mcpScore, 3, "变化>5%=3分, >2%=2分, >0%=1分", false, mcpVal > 0 ? "red" : mcpVal < -3 ? "green" : "default"));
+        String rrColor = rrScore >= 4 ? "red" : rrScore >= 1 ? "volcano" : "default";
+        items.add(buildItem("机构调研热度", rrCount != null ? rrCount + "篇/90天" : "-",
+                rrScore, 6,
+                "【选用原因】研报数量代表机构分析师的关注频次，是机构覆盖度的量化指标。机构密集调研往往对应业绩拐点或重大业务变化，是基本面研究的\"先行指标\"。" +
+                "【价值】事件面权重最高的单项（6分），≥10篇/90天给满分。研报覆盖=机构正式关注，与基金持仓互补——调研是\"正在研究\"，持仓是\"已经买入\"。无研报覆盖的股票往往是被市场忽略的冷门股。",
+                false, rrColor));
 
-        // 6. 公告事件（4分）
+        // 6. 基金持仓集中度（4分）— float_ratio合计，新增
+        BigDecimal fhr = sentiment != null ? sentiment.getFundHolderRatio() : null;
+        double fhrVal = fhr != null ? fhr.doubleValue() : 0;
+        int fhrScore = 0;
+        if (fhr != null) {
+            if (fhrVal >= 20.0) fhrScore = 4;
+            else if (fhrVal >= 10.0) fhrScore = 3;
+            else if (fhrVal >= 5.0) fhrScore = 2;
+            else if (fhrVal > 0) fhrScore = 1;
+        }
+        String fhrDisplay = fhr != null ? String.format("%.2f%%", fhrVal) : "-";
+        String fhrColor = fhrScore >= 3 ? "red" : fhrScore >= 1 ? "volcano" : fhrVal == 0 ? "default" : "default";
+        items.add(buildItem("基金持仓集中度", fhrDisplay,
+                fhrScore, 4,
+                "【选用原因】基金持仓占流通股比例反映机构资金的\"长期配置意愿\"，季报披露的基金持仓数据比实时资金流向更稳定、更具参考价值。" +
+                "【价值】≥20%=机构重仓（4分），>0%=有基金配置（1分）。与机构调研互补——调研是\"关注\"，持仓是\"真金白银买入\"。高基金持仓意味着大量筹码被机构锁定，抛压相对较小，股价稳定性更高。",
+                false, fhrColor));
+
+        // 7. 公告事件（2分）— 关键词已扩展为含投资/扩产
         int posCount = sentiment != null && sentiment.getNoticePositiveCount() != null ? sentiment.getNoticePositiveCount() : 0;
         int negCount = sentiment != null && sentiment.getNoticeNegativeCount() != null ? sentiment.getNoticeNegativeCount() : 0;
         int eventNet = posCount - negCount;
         int eventScore = 0;
         String eventDisplay = "正面" + posCount + "/负面" + negCount;
-        if (eventNet >= 3) eventScore = 4;
-        else if (eventNet >= 1) eventScore = 2;
+        if (eventNet >= 3) eventScore = 2;
+        else if (eventNet >= 1) eventScore = 1;
         items.add(buildItem("公告事件", eventDisplay,
-                eventScore, 4, "正面-负面≥3=4分, ≥1=2分", false, eventNet >= 1 ? "red" : eventNet < 0 ? "green" : "default"));
+                eventScore, 2,
+                "【选用原因】公告是上市公司最正式的信息披露形式，回购/增持/业绩预增等是直接利好信号；减持/定增/业绩预降等是直接风险信号。" +
+                "【价值】权重较低（2分）是因为公告信息往往已被市场提前反映。但净正面公告密集出现=基本面有持续催化，是中长期持有的加分项。含投资/扩产/产能扩张等关键词作为正面补充。",
+                false, eventNet >= 1 ? "red" : eventNet < 0 ? "green" : "default"));
+
+        // 8. 新闻事件（2分）— 东方财富个股新闻（利好/风险/情感偏向）
+        Integer ns = sentiment != null ? sentiment.getNewsScore() : null;
+        Integer nPos = sentiment != null ? sentiment.getNewsPositive30d() : null;
+        Integer nNeg = sentiment != null ? sentiment.getNewsNegative30d() : null;
+        Double nBias = sentiment != null ? sentiment.getNewsSentimentBias() : null;
+        int nsScore = 0;
+        String nsDisplay = "-";
+        String nsColor = "default";
+        if (ns != null) {
+            nsScore = ns >= 8 ? 2 : ns >= 5 ? 1 : 0;
+            int pos = nPos != null ? nPos : 0;
+            int neg = nNeg != null ? nNeg : 0;
+            String biasStr;
+            if (nBias != null) {
+                int biasPct = (int) Math.round(nBias * 100);
+                biasStr = (biasPct > 0 ? "+" : "") + biasPct + "%";
+            } else {
+                biasStr = "-";
+            }
+            nsDisplay = pos + "利好/" + neg + "风险 | " + biasStr;
+            nsColor = ns >= 8 ? "red" : ns >= 5 ? "volcano" : ns == 0 && neg > 0 ? "green" : "default";
+        }
+        items.add(buildItem("新闻事件", nsDisplay,
+                nsScore, 2,
+                "【选用原因】东方财富个股新闻覆盖市场舆论，可捕捉非公告信息的公开信息来源。利好/风险分类+情感偏向+事件标签（业绩/扩产/政策等）是对公告信息的补充验证。" +
+                "【价值】权重最低（2分）是因为新闻噪音大、易被操纵，更多作为辅助验证而非主要信号。新闻面评分≥8分代表近期利好舆论密集；情感偏向>+50%代表市场情绪明显偏向乐观。与\"新闻事件\"Tab互补，Tab展示详情，此处提供评分。",
+                false, nsColor));
 
         return items;
     }
 
     /**
      * 大盘蓝筹事件面评分明细
-     * 融资余额(6) + 机构净买入(6) + 机构调研(6) + 龙虎榜上榜(4) + 公告事件(3) = 25
+     * 机构净买入(4) + 机构调研(6) + 基金持仓(4) + 龙虎榜上榜(3) + 公告事件(2) + 融资余额已移至资金面
      */
     private List<ScoreDetail.ScoreItem> buildSentimentItemsBlueChip(SentimentSignal sentiment) {
         List<ScoreDetail.ScoreItem> items = new ArrayList<>();
 
-        // 融资余额变化（6分）
-        BigDecimal mcp = sentiment != null ? sentiment.getMarginChgPct() : null;
-        double mcpVal = mcp != null ? mcp.doubleValue() : 0;
-        int mcpScore = 0;
-        if (mcp != null) {
-            if (mcpVal > 5.0) mcpScore = 6;
-            else if (mcpVal > 2.0) mcpScore = 4;
-            else if (mcpVal > 0) mcpScore = 2;
-            else if (mcpVal > -3.0) mcpScore = 1;
-        }
-        items.add(buildItem("融资余额变化", mcp != null ? mcp.setScale(2, RoundingMode.HALF_UP) + "%" : "-",
-                mcpScore, 6, "变化>5%=6分, >2%=4分, >0%=2分, >-3%=1分", false,
-                mcpVal > 0 ? "red" : mcpVal < -3 ? "green" : "default"));
-
-        // 龙虎榜机构净买入（6分）
+        // 1. 龙虎榜机构净买入（4分）
         BigDecimal lhb = sentiment != null ? sentiment.getLhbInstitutionNet() : null;
         double lhbVal = lhb != null ? lhb.doubleValue() : 0;
         int lhbScore = 0;
         if (lhb != null) {
-            if (lhbVal > 50e6) lhbScore = 6;
-            else if (lhbVal > 10e6) lhbScore = 4;
+            if (lhbVal > 50e6) lhbScore = 4;
+            else if (lhbVal > 10e6) lhbScore = 3;
             else if (lhbVal > 0) lhbScore = 2;
             else if (lhbVal > -10e6) lhbScore = 1;
         }
         String lhbDisplay = lhb != null ? formatMoneyFlow(lhb) : "-";
         items.add(buildItem("龙虎榜机构净买入", lhbDisplay,
-                lhbScore, 6, "净买入>5000万=6分, >1000万=4分, >0=2分", false,
+                lhbScore, 4,
+                "【选用原因】机构席位龙虎榜净买入额是大资金真实交易的直接证据，比散户资金更可信。金额门槛（5000万/1000万/0）对应不同级别的机构认可度。" +
+                "【价值】4分给净买入>5000万，代表机构高度认可；净买入>0万给2分（哪怕是小额净买入）。大盘蓝筹盘子大，机构净买入金额本身就有说服力。",
+                false,
                 lhbVal > 0 ? "red" : lhbVal < 0 ? "green" : "default"));
 
-        // 机构调研热度（6分）
-        BigDecimal hc = sentiment != null ? sentiment.getHolderChangePct() : null;
-        double hcVal = hc != null ? hc.doubleValue() : 0;
-        int hcScore = 0;
-        if (hc != null) {
-            if (hcVal >= 10.0) hcScore = 6;
-            else if (hcVal >= 5.0) hcScore = 4;
-            else if (hcVal >= 2.0) hcScore = 2;
-            else if (hcVal >= 1.0) hcScore = 1;
+        // 2. 机构调研热度（6分）— 近90天研报数量（替代旧holderChangePct）
+        Integer rrCount = sentiment != null ? sentiment.getResearchReportCount90d() : null;
+        int rrScore = 0;
+        if (rrCount != null) {
+            if (rrCount >= 10) rrScore = 6;
+            else if (rrCount >= 5) rrScore = 4;
+            else if (rrCount >= 2) rrScore = 2;
+            else if (rrCount >= 1) rrScore = 1;
         }
-        items.add(buildItem("机构调研热度", hc != null ? hc.intValue() + "次" : "-",
-                hcScore, 6, "90天内≥10次=6分, ≥5次=4分, ≥2次=2分, ≥1次=1分", false,
-                hc != null && hcVal >= 5 ? "red" : hc != null && hcVal >= 1 ? "volcano" : "default"));
+        String rrColor = rrScore >= 4 ? "red" : rrScore >= 1 ? "volcano" : "default";
+        items.add(buildItem("机构调研热度", rrCount != null ? rrCount + "篇/90天" : "-",
+                rrScore, 6,
+                "【选用原因】研报数量代表机构分析师的关注频次，是机构覆盖度的量化指标。机构密集调研往往对应业绩拐点或重大业务变化，是基本面研究的\"先行指标\"。" +
+                "【价值】事件面权重最高的单项（6分），≥10篇/90天给满分。调研是\"正在研究\"，持仓是\"已经买入\"。大盘蓝筹有研报覆盖是标配，无覆盖反而说明机构关注度低于市场预期。",
+                false, rrColor));
 
-        // 龙虎榜上榜（4分）
+        // 3. 基金持仓集中度（4分）— float_ratio合计，新增
+        BigDecimal fhr = sentiment != null ? sentiment.getFundHolderRatio() : null;
+        double fhrVal = fhr != null ? fhr.doubleValue() : 0;
+        int fhrScore = 0;
+        if (fhr != null) {
+            if (fhrVal >= 20.0) fhrScore = 4;
+            else if (fhrVal >= 10.0) fhrScore = 3;
+            else if (fhrVal >= 5.0) fhrScore = 2;
+            else if (fhrVal > 0) fhrScore = 1;
+        }
+        String fhrDisplay = fhr != null ? String.format("%.2f%%", fhrVal) : "-";
+        String fhrColor = fhrScore >= 3 ? "red" : fhrScore >= 1 ? "volcano" : "default";
+        items.add(buildItem("基金持仓集中度", fhrDisplay,
+                fhrScore, 4,
+                "【选用原因】基金持仓占流通股比例反映机构资金的\"长期配置意愿\"，季报披露的基金持仓数据比实时资金流向更稳定。" +
+                "【价值】≥20%=机构重仓（4分），>0%=有基金配置（1分）。高基金持仓意味着大量筹码被机构锁定，抛压小，股价稳定性高。大盘蓝筹的基金持仓比例也是机构抱团程度的体现。",
+                false, fhrColor));
+
+        // 4. 龙虎榜上榜（3分）
         Integer lhbCount = sentiment != null ? sentiment.getLhbAppearCount() : null;
         BigDecimal lhbNet = sentiment != null ? sentiment.getLhbNetAmount() : null;
         int lhbAppearScore = 0;
@@ -1518,7 +1790,7 @@ public class TradingSignalEngine {
         String lhbAppearColor = "default";
         if (lhbCount != null && lhbCount > 0) {
             if (lhbNet != null && lhbNet.doubleValue() > 0) {
-                lhbAppearScore = 4;
+                lhbAppearScore = 3;
                 lhbAppearDisplay = "上榜" + lhbCount + "次,净买入";
                 lhbAppearColor = "red";
             } else {
@@ -1530,19 +1802,27 @@ public class TradingSignalEngine {
             lhbAppearDisplay = "未上榜";
         }
         items.add(buildItem("龙虎榜上榜", lhbAppearDisplay,
-                lhbAppearScore, 4, "上榜+净买入=4分, 上榜+净卖出=1分", false, lhbAppearColor));
+                lhbAppearScore, 3,
+                "【选用原因】龙虎榜是交易所公开的大资金交易席位数据，上榜次数代表个股被大资金关注的频率，净买入方向代表机构vs游资的博弈结果。" +
+                "【价值】与\"龙虎榜机构净买入\"指标互补——前者看绝对金额，此处看上榜频率和整体净买卖方向。多次上榜+净买入=大资金持续关注，是中长期看好信号。",
+                false, lhbAppearColor));
 
-        // 公告事件（3分）
+        // 5. 公告事件（2分）— 关键词已扩展
         int posCount = sentiment != null && sentiment.getNoticePositiveCount() != null ? sentiment.getNoticePositiveCount() : 0;
         int negCount = sentiment != null && sentiment.getNoticeNegativeCount() != null ? sentiment.getNoticeNegativeCount() : 0;
         int eventNet = posCount - negCount;
         int eventScore = 0;
         String eventDisplay = "正面" + posCount + "/负面" + negCount;
-        if (eventNet >= 3) eventScore = 3;
-        else if (eventNet >= 1) eventScore = 2;
+        if (eventNet >= 3) eventScore = 2;
+        else if (eventNet >= 1) eventScore = 1;
         items.add(buildItem("公告事件", eventDisplay,
-                eventScore, 3, "正面-负面≥3=3分, ≥1=2分", false,
+                eventScore, 2,
+                "【选用原因】公告是上市公司最正式的信息披露，回购/增持/业绩预增等是直接利好信号；减持/定增/业绩预降等是直接风险信号。" +
+                "【价值】权重较低（2分）是因为公告信息往往已被市场提前反映。净正面公告密集出现=基本面有持续催化。大盘蓝筹的公告往往涉及重大资产重组或股权激励，是中期重要催化剂。",
+                false,
                 eventNet >= 1 ? "red" : eventNet < 0 ? "green" : "default"));
+
+        // 融资余额变化已移至资金面评分，此处不再展示
 
         return items;
     }
@@ -1677,7 +1957,9 @@ public class TradingSignalEngine {
                 drVal <= 40 ? "green" : drVal <= 60 ? "default" : "red"));
 
         // === 9. 现金流质量（2分） ===
-        BigDecimal cfNp = fundamental != null ? fundamental.getOperatingCfToNp() : null;
+        // operatingCfToNp 在数据库中存为百分比（375.00 = 375% = 3.75倍），需除以100转为倍数
+        BigDecimal cfNpRaw = fundamental != null ? fundamental.getOperatingCfToNp() : null;
+        BigDecimal cfNp = cfNpRaw != null ? cfNpRaw.divide(BigDecimal.valueOf(100), 4, RoundingMode.HALF_UP) : null;
         double cfNpVal = cfNp != null ? cfNp.doubleValue() : 0;
         int cfScore = 0;
         if (cfNp != null && cfNpVal > 0) {

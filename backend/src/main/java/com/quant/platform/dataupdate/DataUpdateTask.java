@@ -80,6 +80,11 @@ public class DataUpdateTask {
     private Map<String, Integer> fieldChanges = new LinkedHashMap<>();
 
     /**
+     * 内外盘数据统计（市场维度），如 {"SH":{"total":2307,"success":2305,"failed":2,"rate":"99.9"},"SZ":{...}}
+     */
+    private Map<String, Map<String, Object>> bidAskStats = new LinkedHashMap<>();
+
+    /**
      * 创建时间
      */
     private LocalDateTime createTime = LocalDateTime.now();

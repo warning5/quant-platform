@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.quant.platform.stock.analysis.mapper.InstitutionCoverageMapper">
+
+    <!-- 近1年研报统计 -->
+    <select id="selectResearchReportStats" resultType="java.util.Map">
+        SELECT
+            COUNT(*) as report_count,
+            COUNT(DISTINCT institution) as institution_count,
+            MAX(report_date) as latest_report_date
+        FROM stock_research_report
+        WHERE code = #{code}
+          AND report_date >= DATE_SUB(CURDATE(), INTERVAL 365 DAY)
+    </select>
+
+    <!-- 近1年研报明细 -->
+    <select id="selectRecentResearchReports" resultType="java.util.Map">
+        SELECT
+            report_title,
+            rating,
+            institution,
+            DATE_FORMAT(report_date, '%Y-%m-%d') as report_date,
+            name as stock_name
+        FROM stock_research_report
+        WHERE code = #{code}
+        ORDER BY report_date DESC
+        LIMIT #{limit}
+    </select>
+
+    <!-- 最新季度基金持仓汇总 -->
+    <select id="selectFundHolderSummary" resultType="java.util.Map">
+        SELECT
+            COUNT(DISTINCT fund_code) as fund_count,
+            SUM(float_ratio) as total_float_ratio,
+            SUM(market_value) as total_market_value
+        FROM stock_fund_holder
+        WHERE stock_code = #{code}
+          AND report_date >= DATE_SUB(CURDATE(), INTERVAL 120 DAY)
+    </select>
+
+    <!-- 近N天机构调研记录 -->
+    <select id="selectRecentInstitutionResearch" resultType="java.util.Map">
+        SELECT
+            DATE_FORMAT(report_date, '%Y-%m-%d') as report_date,
+            org_name,
+            content_summary
+        FROM stock_institution_research
+        WHERE code = #{code}
+          AND report_date >= DATE_SUB(CURDATE(), INTERVAL #{days} DAY)
+        ORDER BY report_date DESC
+    </select>
+
+</mapper>

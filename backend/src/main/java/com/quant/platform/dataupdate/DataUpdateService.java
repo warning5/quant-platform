@@ -71,6 +71,8 @@ public class DataUpdateService {
     private int defaultStartDays;
     private Process currentProcess;
     private String resolvedScriptDir;
+    /** PID of the Python process (for process-group kill on cancel) */
+    private volatile long currentProcessPid = -1;
 
     /**
      * 初始化：将相对路径解析为绝对路径并验证
@@ -186,13 +188,23 @@ public class DataUpdateService {
         task.setCurrentStep("用户取消");
 
         if (currentProcess != null && currentProcess.isAlive()) {
-            currentProcess.destroy();
-            try {
-                currentProcess.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
-            } catch (InterruptedException ignored) {
+            long pid = currentProcessPid;
+            if (pid > 0) {
+                // 杀整个进程树：Windows 用 taskkill /T，Unix 用 kill -TERM
+                try {
+                    boolean isWindows = System.getProperty("os.name").toLowerCase().contains("win");
+                    if (isWindows) {
+                        new ProcessBuilder("taskkill", "/F", "/T", "/PID", String.valueOf(pid)).start();
+                    } else {
+                        Runtime.getRuntime().exec(new String[]{"kill", "-TERM", "-" + pid});
+                    }
+                } catch (IOException ignored) {
+                }
             }
-            if (currentProcess.isAlive()) {
-                currentProcess.destroyForcibly();
+            // 等待进程真正退出（最多 3 秒）
+            try {
+                currentProcess.waitFor(3, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (InterruptedException ignored) {
             }
         }
 
@@ -296,6 +308,24 @@ public class DataUpdateService {
                     task.setProgress(100);
                     task.setCurrentStep(senOk ? "采集完成" : "采集失败");
                 }
+            } else if ("BIDASK".equals(updateType)) {
+                // 内外盘数据：执行 update_stock_data.py --bidask-only
+                task.setTotalStocks(5248);
+                task.setCurrentStep("内外盘数据");
+                broadcastStatus(task);
+                boolean bidaskOk = runSingleScript(taskId, task, cmd, "内外盘数据");
+                if (!"CANCELLED".equals(task.getStatus())) {
+                    task.setStatus(bidaskOk ? "SUCCESS" : "FAILED");
+                    task.setProgress(100);
+                    task.setCurrentStep(bidaskOk ? "采集完成" : "采集失败");
+                    // 成功后从数据库查询市场维度统计
+                    if (bidaskOk) {
+                        LocalDate tradeDate = request.getEndDate() != null
+                            ? LocalDate.parse(request.getEndDate()) : LocalDate.now();
+                        task.setBidAskStats(loadBidAskStats(tradeDate));
+                        broadcastStatus(task);
+                    }
+                }
             } else if (cmd == null) {
                 // ALL → 依次执行 SH、SZ、BJ
                 executeAllMarkets(taskId, request);
@@ -360,6 +390,7 @@ public class DataUpdateService {
             // 从活跃任务中移除（避免阻止新任务启动）
             activeTasks.remove(taskId);
             currentProcess = null;
+        currentProcessPid = -1;
             broadcastStatus(task);
             log.info("[DataUpdate] 任务 {} 结束, 状态: {}", taskId, task.getStatus());
         }
@@ -486,6 +517,7 @@ public class DataUpdateService {
         pb.environment().put("DB_BACKEND", "clickhouse");
         Process process = pb.start();
         currentProcess = process;
+        currentProcessPid = process.pid();
         // 进程已启动，不再覆盖 currentStep，保留市场前缀直到 parseProgress 更新
         log.info("[DataUpdate] 进程已启动, PID={}, cmd={}", process.pid(), cmd);
 
@@ -501,6 +533,7 @@ public class DataUpdateService {
 
         int exitCode = process.waitFor();
         currentProcess = null;
+        currentProcessPid = -1;
         if ("CANCELLED".equals(task.getStatus())) return false;
         if (exitCode == 0) {
             broadcastLog(taskId, "[OK] 脚本执行成功");
@@ -622,6 +655,30 @@ public class DataUpdateService {
             if (request.getLimit() != null && request.getLimit() > 0) {
                 cmd.add("--limit");
                 cmd.add(request.getLimit().toString());
+            }
+            return cmd;
+        }
+
+        // 内外盘数据（调用 update_stock_data.py --bidask-only）
+        if ("BIDASK".equals(updateType)) {
+            cmd.add("update_stock_data.py");
+            cmd.add("--bidask-only");
+            // 单只股票
+            String singleCode = request.getSingleCode();
+            if (singleCode != null && !singleCode.isEmpty()) {
+                cmd.add("--code");
+                cmd.add(singleCode);
+            }
+            // 日期参数透传
+            String startDate = request.getStartDate();
+            String endDate = request.getEndDate();
+            if (startDate != null && !startDate.isEmpty()) {
+                cmd.add("--start-date");
+                cmd.add(startDate);
+            }
+            if (endDate != null && !endDate.isEmpty()) {
+                cmd.add("--end-date");
+                cmd.add(endDate);
             }
             return cmd;
         }
@@ -959,6 +1016,7 @@ public class DataUpdateService {
             msg.put("endTime", task.getEndTime() != null ? task.getEndTime().toString() : null);
             msg.put("error", task.getError());
             msg.put("fieldChanges", task.getFieldChanges());
+            msg.put("bidAskStats", task.getBidAskStats());
             if (task.getRequest() != null) {
                 DataUpdateRequest req = task.getRequest();
                 msg.put("updateType", req.getUpdateType());
@@ -1323,6 +1381,50 @@ public class DataUpdateService {
                 """.formatted(marketCondition, date);
 
         return jdbcTemplate.queryForList(sql);
+    }
+
+    /**
+     * 从数据库查询指定日期的内外盘数据统计（按市场拆分）
+     * @return Map: {"SH":{"total":N,"success":N,"failed":N,"rate":"xx.x%"}, ...}
+     */
+    public Map<String, Map<String, Object>> loadBidAskStats(LocalDate tradeDate) {
+        Map<String, Map<String, Object>> result = new LinkedHashMap<>();
+        String dateStr = tradeDate.toString();
+        String[] markets = {"SH", "SZ", "BJ"};
+        // 用 LEFT(b.code,1) 直接从 stock_bid_ask 判断市场，避免 JOIN collate 冲突
+        for (String mkt : markets) {
+            String mktCond;
+            if ("SH".equals(mkt)) {
+                mktCond = "LEFT(b.code,1) = '6'";
+            } else if ("SZ".equals(mkt)) {
+                mktCond = "LEFT(b.code,1) IN ('0','3')";
+            } else {
+                mktCond = "LEFT(b.code,1) IN ('4','8','9')";
+            }
+            String siCond = mktCond.replace("b.code", "si.code");
+            // 目标总数（stock_info 中排除 ST/退市）
+            String totalSql = String.format("""
+                SELECT COUNT(*) FROM stock_info si
+                WHERE LENGTH(si.code)=6 AND (%s)
+                AND (si.name NOT LIKE '%%%s%%' AND si.name NOT LIKE '%%%s%%')
+                """, siCond, "退", "ST");
+            int total = jdbcTemplate.queryForObject(totalSql, Integer.class);
+
+            // 成功数（直接查 stock_bid_ask，按 code 前缀判断市场）
+            String successSql = String.format("""
+                SELECT COUNT(*) FROM stock_bid_ask b
+                WHERE b.trade_date = '%s' AND (%s)
+                """, dateStr, mktCond);
+            int success = jdbcTemplate.queryForObject(successSql, Integer.class);
+
+            Map<String, Object> stats = new LinkedHashMap<>();
+            stats.put("total", total);
+            stats.put("success", success);
+            stats.put("failed", total - success);
+            stats.put("rate", total > 0 ? String.format("%.1f%%", 100.0 * success / total) : "N/A");
+            result.put(mkt, stats);
+        }
+        return result;
     }
 
     @PreDestroy

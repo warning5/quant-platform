@@ -8,6 +8,8 @@ import com.quant.platform.market.domain.MarketDailyBar;
 import com.quant.platform.stock.analysis.domain.*;
 import com.quant.platform.stock.analysis.engine.TradingSignalEngine;
 import com.quant.platform.stock.analysis.mapper.AnalysisChMapper;
+import com.quant.platform.stock.analysis.mapper.BidAskMapper;
+import com.quant.platform.stock.analysis.mapper.NewsMapper;
 import com.quant.platform.stock.analysis.mapper.StockAnalysisMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -19,6 +21,7 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -33,9 +36,13 @@ import java.util.stream.Collectors;
 public class AnalysisService {
     
     private final AnalysisChMapper analysisChMapper;
-    
+
     private final StockAnalysisMapper stockAnalysisMapper;
-    
+
+    private final NewsMapper newsMapper;
+
+    private final BidAskMapper bidAskMapper;
+
     private final TradingSignalEngine tradingSignalEngine;
     
     /**
@@ -168,23 +175,44 @@ public class AnalysisService {
             sentimentSignal.setIsStrongStock(ret20d.doubleValue() > 30);
         }
 
-        // 4.5 所有股票补充融资余额（margin_detail 4.1万条，覆盖面广）
-        try {
-            BigDecimal marginChg = stockAnalysisMapper.selectMarginChangePct(code);
-            if (marginChg != null) sentimentSignal.setMarginChgPct(marginChg);
-        } catch (Exception e) { log.debug("融资余额变化查询失败: {}", e.getMessage()); }
+        // 4.5 融资余额/股东人数已移至 calcMoneyFlowSignal()，此处不再重复查询
 
-        // 4.6 大盘蓝筹补充事件面数据（机构净买入+机构调研）
+        // 4.6 大盘蓝筹补充事件面数据（龙虎榜机构净买入）
         if (isBlueChip) {
             try {
                 BigDecimal lhbNet = stockAnalysisMapper.selectLhbInstitutionNet(code);
                 if (lhbNet != null) sentimentSignal.setLhbInstitutionNet(lhbNet);
             } catch (Exception e) { log.debug("龙虎榜机构净买入查询失败: {}", e.getMessage()); }
-            try {
-                BigDecimal holderChg = stockAnalysisMapper.selectHolderChangePct(code);
-                if (holderChg != null) sentimentSignal.setHolderChangePct(holderChg);
-            } catch (Exception e) { log.debug("股东户数变化查询失败: {}", e.getMessage()); }
         }
+
+        // 4.7 事件面补充：机构调研热度 + 基金持仓集中度（所有股票）
+        try {
+            Integer rrCount = stockAnalysisMapper.selectResearchReportCount90d(code);
+            if (rrCount != null) sentimentSignal.setResearchReportCount90d(rrCount);
+        } catch (Exception e) { log.debug("研报数量查询失败: {}", e.getMessage()); }
+        try {
+            BigDecimal fhr = stockAnalysisMapper.selectFundHolderRatio(code);
+            if (fhr != null) sentimentSignal.setFundHolderRatio(fhr);
+        } catch (Exception e) { log.debug("基金持仓集中度查询失败: {}", e.getMessage()); }
+
+        // 4.8 新闻事件信号（来自 stock_news 表）
+        try {
+            Map<String, Object> stats30d = newsMapper.selectNewsStats30d(code, 30);
+            if (stats30d != null && !stats30d.isEmpty()) {
+                int pos30d = ((Number) stats30d.getOrDefault("positive_30d", 0)).intValue();
+                int neg30d = ((Number) stats30d.getOrDefault("negative_30d", 0)).intValue();
+                int tagged30d = ((Number) stats30d.getOrDefault("tagged_30d", 0)).intValue();
+                int total30d = pos30d + neg30d;
+                double bias = total30d > 0 ? (double) (pos30d - neg30d) / total30d : 0.0;
+                // 新闻评分（满分10分）
+                int newsScore = calcNewsScore(pos30d, neg30d, tagged30d, bias);
+                sentimentSignal.setNewsPositive30d(pos30d);
+                sentimentSignal.setNewsNegative30d(neg30d);
+                sentimentSignal.setNewsTagged30d(tagged30d);
+                sentimentSignal.setNewsSentimentBias(bias);
+                sentimentSignal.setNewsScore(newsScore);
+            }
+        } catch (Exception e) { log.debug("新闻事件信号查询失败: {}", e.getMessage()); }
 
         // 5. 基本面信号（从MySQL查 roe/增速等，pe/pb 从CH补充）
         FundamentalSignal fundamentalSignal = stockAnalysisMapper.selectFundamentalSignal(code);
@@ -255,6 +283,21 @@ public class AnalysisService {
         overview.setRisks(signal.getRisks());
         overview.setReversalConditions(signal.getReversalConditions());
         overview.setScoreDetails(signal.getScoreDetails());
+        // 资金面数据日期更新到 money detail 的 dataRange
+        try {
+            java.util.Map<String, Object> mfForDate = analysisChMapper.selectLatestMoneyFlow(code);
+            if (mfForDate != null && mfForDate.get("tradeDate") != null) {
+                String mfDate = mfForDate.get("tradeDate").toString();
+                for (ScoreDetail detail : overview.getScoreDetails()) {
+                    if ("money".equals(detail.getDimension())) {
+                        detail.setDataRange("数据日期：" + mfDate);
+                        break;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.debug("获取资金流向日期失败: code={}", code);
+        }
         // 回写各维度分数到 Signal 对象
         for (ScoreDetail detail : signal.getScoreDetails()) {
             switch (detail.getDimension()) {
@@ -475,7 +518,44 @@ public class AnalysisService {
         } catch (Exception e) {
             log.debug("获取资金流向数据失败: code={}, error={}", code, e.getMessage());
         }
-        
+
+        // 融资余额变化（所有股票，不只是蓝筹）
+        try {
+            BigDecimal marginChg = stockAnalysisMapper.selectMarginChangePct(code);
+            if (marginChg != null) signal.setMarginChgPct(marginChg);
+        } catch (Exception e) { log.debug("融资余额变化查询失败: {}", e.getMessage()); }
+
+        // 股东人数变化（所有股票，最新一季度 change_pct）
+        try {
+            BigDecimal holderChg = stockAnalysisMapper.selectShareholderChangePct(code);
+            if (holderChg != null) signal.setShareholderChangePct(holderChg);
+        } catch (Exception e) { log.debug("股东人数变化查询失败: {}", e.getMessage()); }
+
+        // 内外盘比（stock_bid_ask 表，每日收盘快照）
+        try {
+            java.util.Map<String, Object> bidAskData = bidAskMapper.selectLatestBidAsk(code);
+            if (bidAskData != null && bidAskData.get("ratio") != null) {
+                BigDecimal ratio = new BigDecimal(bidAskData.get("ratio").toString());
+                signal.setOuterInnerRatio(ratio);
+                // 趋势由 BidAskService 计算，这里直接用 ratio 近似判断
+                signal.setBidAskTrend(ratio.doubleValue() > 1.2 ? "BUYER_STRONG"
+                        : ratio.doubleValue() > 1.0 ? "BUYER_SLIGHT"
+                        : ratio.doubleValue() >= 0.85 ? "BALANCED"
+                        : "SELLER_STRONG");
+            }
+        } catch (Exception e) { log.debug("内外盘比查询失败: {}", e.getMessage()); }
+
+        // 5日累计主力净流入
+        try {
+            java.util.Map<String, Object> mf5d = stockAnalysisMapper.selectNetMain5d(code);
+            if (mf5d != null) {
+                if (mf5d.get("netMain5d") != null)
+                    signal.setNetMain5d((BigDecimal) mf5d.get("netMain5d"));
+                if (mf5d.get("netMainPct5d") != null)
+                    signal.setNetMainPct5d((BigDecimal) mf5d.get("netMainPct5d"));
+            }
+        } catch (Exception e) { log.debug("5日累计资金流向查询失败: {}", e.getMessage()); }
+
         return signal;
     }
     
@@ -811,7 +891,8 @@ public class AnalysisService {
                 }
                 adx = smoothedDX;
                 // ADX 理论范围 [0, 100]，Wilder 平滑不会超限；防御性处理 NaN/Inf/异常值
-                if (Double.isNaN(adx) || Double.isInfinite(adx) || adx <= 0 || adx > 100) {
+                // 注意：ADX=0 是合法值（震荡市），只过滤负数或超限值
+                if (Double.isNaN(adx) || Double.isInfinite(adx) || adx < 0 || adx > 100) {
                     adx = 0; // 无效则置 0，前端不显示 ADX
                 }
             }
@@ -2305,6 +2386,11 @@ public class AnalysisService {
             result.put("days", scoredList.size());
 
             // 3. 统计汇总
+            // 提取最新数据日期（reverse 后最后一条是最新的）
+            Object latestDateObj = scoredList.get(scoredList.size() - 1).get("tradeDate");
+            if (latestDateObj != null) {
+                result.put("latestDate", latestDateObj.toString());
+            }
             double avgNetMain = 0, avgPct = 0, totalScore = 0;
             int inflowDays = 0;
             for (Map<String, Object> row : scoredList) {
@@ -2540,6 +2626,279 @@ public class AnalysisService {
     }
 
     /**
+     * P2 新增：个股长周期表现分析
+     * 返回：YTD涨幅、相对沪深300超额收益、RS Rating（250日收益排名百分位）、行业内排名
+     */
+    public Map<String, Object> getStockPerformance(String code) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("code", code);
+
+        try {
+            // 1. 获取该股票行业信息
+            Map<String, Object> myInfo = stockAnalysisMapper.selectStockInfo(code);
+            String industry = myInfo != null ? (String) myInfo.get("industry") : null;
+            result.put("industry", industry);
+
+            // 2. 确定当年首个交易日（CH index_daily）
+            String yearStartDate = getYearStartDate();
+            if (yearStartDate == null) {
+                result.put("error", "无法获取年度起始日期");
+                return result;
+            }
+            result.put("yearStartDate", yearStartDate);
+
+            // 3. 获取沪深300 YTD涨幅
+            double hs300Ytd = calcIndexYtd("000300", yearStartDate);
+            result.put("hs300Ytd", round2(hs300Ytd * 100));
+
+            // 4. 获取个股YTD涨幅（从stock_daily）
+            double stockYtd = calcStockYtd(code, yearStartDate);
+            if (stockYtd == Double.NaN || stockYtd == Double.MAX_VALUE) {
+                result.put("error", "个股数据不足");
+                return result;
+            }
+            result.put("stockYtd", round2(stockYtd * 100));
+            result.put("excessReturn", round2((stockYtd - hs300Ytd) * 100));
+
+            // 5. RS Rating：近250日收益排名百分位（全市场）
+            int rsRating = calcRsRating(code);
+            result.put("rsRating", rsRating);
+            result.put("rsRatingLabel", rsRatingToLabel(rsRating));
+
+            // 6. 行业内排名（按20日涨幅）
+            if (industry != null && !industry.isBlank()) {
+                int indRank = calcIndustryRank(code, industry);
+                int indTotal = calcIndustryTotal(industry);
+                result.put("industryRank", indRank);
+                result.put("industryTotal", indTotal);
+                result.put("industryRankLabel", indRank + "/" + indTotal);
+                result.put("industryRankPct", indTotal > 0 ? round2(indRank * 100.0 / indTotal) : null);
+            }
+
+            return result;
+        } catch (Exception e) {
+            log.error("个股长周期表现分析失败: code={}, error={}", code, e.getMessage(), e);
+            result.put("error", e.getMessage());
+            return result;
+        }
+    }
+
+    /**
+     * 获取当年首个交易日（以沪深300为准）
+     */
+    private String getYearStartDate() {
+        int currentYear = java.time.LocalDate.now().getYear();
+        try {
+            String sql = String.format(
+                "SELECT MIN(trade_date) FROM stock.index_daily WHERE code = '000300' AND trade_date >= '%d-01-01'",
+                currentYear);
+            Object rawDate = clickHouseJdbcTemplate.queryForObject(sql, Object.class);
+            if (rawDate == null) return null;
+            return rawDate instanceof LocalDate ? ((LocalDate) rawDate).toString() : rawDate.toString();
+        } catch (Exception e) {
+            log.warn("获取年度起始日期失败: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 计算指数YTD涨幅
+     */
+    private double calcIndexYtd(String indexCode, String yearStartDate) {
+        try {
+            String sql = String.format("""
+                SELECT
+                    (max(close_price) - min(close_price)) / min(close_price) as ytd
+                FROM stock.index_daily
+                WHERE code = '%s' AND trade_date >= '%s'
+                """, indexCode, yearStartDate);
+            Double ytd = clickHouseJdbcTemplate.queryForObject(sql, Double.class);
+            return ytd != null ? ytd : 0.0;
+        } catch (Exception e) {
+            log.warn("计算指数YTD失败: code={}, {}", indexCode, e.getMessage());
+            return 0.0;
+        }
+    }
+
+    /**
+     * 计算个股YTD涨幅（从stock_daily）
+     * 使用子查询获取首日/末日价格，避免 maxBy/minBy（ClickHouse 26.5 不支持）
+     */
+    private double calcStockYtd(String code, String yearStartDate) {
+        String normalized = normalizeCodeForDailyCH(code);
+        try {
+            // 先查首日、末日两个日期
+            String dateSql = String.format("""
+                SELECT MIN(trade_date) as start_date, MAX(trade_date) as end_date
+                FROM stock.stock_daily FINAL
+                WHERE code = '%s' AND trade_date >= '%s'
+                """, normalized, yearStartDate);
+            Map<String, Object> dateRow = clickHouseJdbcTemplate.queryForMap(dateSql);
+            // ClickHouse Date 类型返回 LocalDate，需要转 String
+            Object startObj = dateRow.get("start_date");
+            Object endObj = dateRow.get("end_date");
+            String startDate = startObj instanceof LocalDate ? ((LocalDate) startObj).toString() : startObj.toString();
+            String endDate = endObj instanceof LocalDate ? ((LocalDate) endObj).toString() : endObj.toString();
+            if (startDate == null || endDate == null) return Double.NaN;
+
+            // 查首日收盘价
+            BigDecimal startPrice = null;
+            String startSql = String.format(
+                "SELECT close_price FROM stock.stock_daily FINAL WHERE code = '%s' AND trade_date = '%s' LIMIT 1",
+                normalized, startDate);
+            List<Map<String, Object>> startRows = clickHouseJdbcTemplate.queryForList(startSql);
+            if (!startRows.isEmpty() && startRows.get(0).get("close_price") != null) {
+                startPrice = new BigDecimal(startRows.get(0).get("close_price").toString());
+            }
+            // 查末日收盘价
+            BigDecimal endPrice = null;
+            String endSql = String.format(
+                "SELECT close_price FROM stock.stock_daily FINAL WHERE code = '%s' AND trade_date = '%s' LIMIT 1",
+                normalized, endDate);
+            List<Map<String, Object>> endRows = clickHouseJdbcTemplate.queryForList(endSql);
+            if (!endRows.isEmpty() && endRows.get(0).get("close_price") != null) {
+                endPrice = new BigDecimal(endRows.get(0).get("close_price").toString());
+            }
+
+            if (startPrice == null || endPrice == null || startPrice.doubleValue() == 0) {
+                return Double.NaN;
+            }
+            return endPrice.subtract(startPrice).divide(startPrice, 6, RoundingMode.HALF_UP).doubleValue();
+        } catch (Exception e) {
+            log.warn("计算个股YTD失败: code={}, {}", code, e.getMessage());
+            return Double.NaN;
+        }
+    }
+    /**
+     * 计算RS Rating：近250日收益排名百分位（0~99）
+     * 样本：全市场有≥160日数据的沪深股票
+     */
+    private int calcRsRating(String code) {
+        String normalized = normalizeCodeForDailyCH(code);
+        try {
+            // 近250日个股收益率（用 argMax/argMin 取首日/末日价格，已验证有效）
+            String stockSql = String.format("""
+                SELECT (argMax(close_price, trade_date) - argMin(close_price, trade_date))
+                       / argMin(close_price, trade_date) as ret_250d
+                FROM stock.stock_daily FINAL
+                WHERE code = '%s' AND trade_date >= subtractDays(today(), 260)
+                """, normalized);
+            Double stockRet = clickHouseJdbcTemplate.queryForObject(stockSql, Double.class);
+            if (stockRet == null) return 0;
+
+            // 全市场近250日收益率分布（分位数）
+            String pctSql = String.format("""
+                WITH stock_ret AS (
+                    SELECT code,
+                           (argMax(close_price, trade_date) - argMin(close_price, trade_date))
+                           / argMin(close_price, trade_date) as ret
+                    FROM stock.stock_daily FINAL
+                    WHERE trade_date >= subtractDays(today(), 260)
+                    GROUP BY code
+                    HAVING min(close_price) > 0 AND count() >= 160
+                )
+                SELECT
+                    countIf(ret > %f) as above_count,
+                    count() as total_count
+                FROM stock_ret
+                """, stockRet);
+            Map<String, Object> pctRow = clickHouseJdbcTemplate.queryForMap(pctSql);
+            long above = ((Number) pctRow.get("above_count")).longValue();
+            long total = ((Number) pctRow.get("total_count")).longValue();
+
+            if (total == 0) return 0;
+            // 百分位：above/total = 比该股强的股票比例 → (1 - above/total) * 99 = 排名百分位
+            int rating = (int) Math.round((1.0 - (double) above / total) * 99);
+            return Math.max(0, Math.min(99, rating));
+        } catch (Exception e) {
+            log.warn("计算RS Rating失败: code={}, {}", code, e.getMessage());
+            return 0;
+        }
+    }
+
+    /**
+     * 计算该股在行业内的20日涨幅排名
+     */
+    private int calcIndustryRank(String code, String industry) {
+        String normalized = normalizeCodeForDailyCH(code);
+        try {
+            // 先获取该股20日收益率
+            String targetSql = String.format("""
+                SELECT (argMax(close_price, trade_date) - min(close_price)) / min(close_price) as ret_20d
+                FROM stock.stock_daily FINAL
+                WHERE code = '%s' AND trade_date >= subtractDays(today(), 25)
+                """, normalized);
+            Double targetRet = clickHouseJdbcTemplate.queryForObject(targetSql, Double.class);
+            if (targetRet == null) return 0;
+
+            // 统计行业内收益率高于该股的股票数量
+            String rankSql = """
+                WITH latest AS (
+                    SELECT code,
+                           argMax(close_price, trade_date) as latest_close,
+                           min(close_price) as min_close,
+                           count() as day_count
+                    FROM stock.stock_daily FINAL
+                    WHERE trade_date >= subtractDays(today(), 25)
+                    GROUP BY code
+                    HAVING min(close_price) > 0 AND day_count >= 10
+                ),
+                ret20 AS (
+                    SELECT l.code,
+                           (l.latest_close - l.min_close) / l.min_close as ret_20d
+                    FROM latest l
+                    INNER JOIN stock.stock_info si ON si.code = l.code
+                    WHERE si.industry = ?
+                      AND si.market NOT IN ('BJ','北交所')
+                )
+                SELECT countIf(ret_20d > ?) + 1 as rank
+                FROM ret20
+                """;
+            Integer rank = clickHouseJdbcTemplate.queryForObject(rankSql, Integer.class, industry, targetRet);
+            return rank != null ? rank : 0;
+        } catch (Exception e) {
+            log.warn("计算行业内排名失败: industry={}, {}", industry, e.getMessage());
+            return 0;
+        }
+    }
+
+    /**
+     * 计算行业内股票总数
+     */
+    private int calcIndustryTotal(String industry) {
+        try {
+            String sql = """
+                SELECT COUNT(DISTINCT sd.code) as cnt
+                FROM stock.stock_daily sd FINAL
+                INNER JOIN stock_info si ON si.code = sd.code
+                WHERE si.industry = ?
+                  AND si.market NOT IN ('BJ','北交所')
+                  AND sd.trade_date >= subtractDays(today(), 25)
+                """;
+            Integer cnt = clickHouseJdbcTemplate.queryForObject(sql, Integer.class, industry);
+            return cnt != null ? cnt : 0;
+        } catch (Exception e) {
+            log.warn("计算行业内总数失败: industry={}, {}", industry, e.getMessage());
+            return 0;
+        }
+    }
+
+    private String rsRatingToLabel(int rating) {
+        if (rating >= 90) return "极强（Top 10%）";
+        if (rating >= 80) return "很强（Top 20%）";
+        if (rating >= 70) return "较强（Top 30%）";
+        if (rating >= 50) return "中等偏强";
+        if (rating >= 30) return "中等偏弱";
+        if (rating >= 20) return "较弱（Bottom 30%）";
+        if (rating >= 10) return "很弱（Bottom 20%）";
+        return "极弱（Bottom 10%）";
+    }
+
+    private double round2(double v) {
+        return Math.round(v * 100.0) / 100.0;
+    }
+
+    /**
      * 信心水平：基于数据完整性评分（低/中/高）
      * 研报覆盖 + 基本面数据完整度 + 缠论信号
      */
@@ -2556,5 +2915,20 @@ public class AnalysisService {
         if (score >= 6) return "高";
         if (score >= 3) return "中";
         return "低";
+    }
+
+    /**
+     * 新闻面评分（满分10分，供评分引擎使用）
+     * 规则：有新闻+1，利好偏多+3，利好远超风险+2，有事件标签+2，情感偏向强烈+2
+     */
+    private int calcNewsScore(int positive, int negative, int tagged, double sentimentBias) {
+        int score = 0;
+        if (positive + negative > 0) score += 1;  // 有新闻
+        if (positive > negative) score += 3;       // 利好偏多
+        else if (positive > 0 && negative == 0) score += 2;  // 纯利好
+        if (tagged > 0) score += 2;                // 有重大事件标签
+        if (sentimentBias > 0.5) score += 2;       // 强烈利好偏向
+        else if (sentimentBias < -0.5) score -= 1; // 强烈风险偏向
+        return Math.max(0, Math.min(10, score));
     }
 }

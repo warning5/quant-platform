@@ -38,6 +38,10 @@ def extract(data):
         ts_code = code_m.group(1)  # e.g. "002084.SZ"
         code = ts_code.split(".")[0]
 
+        # ⚠️ 过滤 B 股（900xxx/200xxx），避免 A/B 股数据混淆
+        if code.startswith("900") or code.startswith("200"):
+            continue
+
         for line in content.split("\n"):
             if not line.strip().startswith("|"):
                 continue
@@ -49,13 +53,14 @@ def extract(data):
                 continue
             trade_date = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
             try:
+                # NeoData 表格列顺序: 日期|中单净流入|主力流入|主力流入占比(%)|主力净流入|主力流出|主力流出占比(%)|散户流入|小单净流入|散户净流入|散户流出|超大单净流入|大单净流入
                 result.setdefault(ts_code, {})[trade_date] = {
-                    "net_main":     float(cols[4])  if cols[4]  else 0.0,
-                    "net_main_pct": float(cols[3])  if cols[3]  else 0.0,
-                    "net_huge":     float(cols[11]) if cols[11] else 0.0,
-                    "net_big":      float(cols[12]) if cols[12] else 0.0,
-                    "net_medium":   float(cols[1])  if cols[1]  else 0.0,
-                    "net_small":    float(cols[8])  if cols[8]  else 0.0,
+                    "net_main":     float(cols[4])  if cols[4]  else 0.0,   # 主力净流入
+                    "net_main_pct": float(cols[3])  if cols[3]  else 0.0,   # 主力流入占比
+                    "net_huge":     float(cols[11]) if cols[11] else 0.0,   # 超大单净流入
+                    "net_big":      float(cols[12]) if cols[12] else 0.0,   # 大单净流入
+                    "net_medium":   float(cols[1])  if cols[1]  else 0.0,   # 中单净流入
+                    "net_small":    float(cols[8])  if cols[8]  else 0.0,   # 小单净流入
                     "close":        None,
                     "pct_change":   None,
                 }

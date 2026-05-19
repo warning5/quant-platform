@@ -232,11 +232,17 @@ function DataUpdate() {
   const [sentimentValidateLoading, setSentimentValidateLoading] = useState(false);
   const [sentimentMoneyflowSource, setSentimentMoneyflowSource] = useState('AKSHARE');
 
+  // 内外盘数据
+  const [bidaskTask, setBidaskTask] = useState(null);
+  const [bidaskLogs, setBidaskLogs] = useState([]);
+  const bidaskLogRef = useRef(null);
+
   // 研报数据
   const [researchTask, setResearchTask] = useState(null);
   const [researchLogs, setResearchLogs] = useState([]);
   const researchLogRef = useRef(null);
   const [researchForm] = Form.useForm();
+  const [bidaskForm] = Form.useForm();
   const [researchCoverage, setResearchCoverage] = useState(null);
   const [researchCoverageLoading, setResearchCoverageLoading] = useState(true);
   const researchCoverageFetchedRef = useRef(false);
@@ -469,6 +475,7 @@ function DataUpdate() {
       case 'DIVIDEND': return setDividendTask;
       case 'FINANCIAL': return setFinancialTask;
       case 'SENTIMENT': return setSentimentTask;
+      case 'BIDASK': return setBidaskTask;
       case 'RESEARCH': return setResearchTask;
       default: return setDailyTask;
     }
@@ -480,6 +487,7 @@ function DataUpdate() {
       case 'DIVIDEND': return setDividendLogs;
       case 'FINANCIAL': return setFinancialLogs;
       case 'SENTIMENT': return setSentimentLogs;
+      case 'BIDASK': return setBidaskLogs;
       case 'RESEARCH': return setResearchLogs;
       default: return setDailyLogs;
     }
@@ -539,6 +547,7 @@ function DataUpdate() {
               if (msg.startTime !== undefined) t.startTime = msg.startTime;
               if (msg.endTime !== undefined) t.endTime = msg.endTime;
               if (msg.error !== undefined) t.error = msg.error;
+              if (msg.bidAskStats !== undefined) t.bidAskStats = msg.bidAskStats;
               t.updateType = ut;
               // 保存配置信息用于展示
               if (msg.market !== undefined) t.configMarket = msg.market;
@@ -609,6 +618,10 @@ function DataUpdate() {
   useEffect(() => {
     if (sentimentLogRef.current) sentimentLogRef.current.scrollTop = sentimentLogRef.current.scrollHeight;
   }, [sentimentLogs]);
+
+  useEffect(() => {
+    if (bidaskLogRef.current) bidaskLogRef.current.scrollTop = bidaskLogRef.current.scrollHeight;
+  }, [bidaskLogs]);
 
   useEffect(() => {
     if (researchLogRef.current) researchLogRef.current.scrollTop = researchLogRef.current.scrollHeight;
@@ -721,6 +734,11 @@ function DataUpdate() {
       return () => clearInterval(timer);
     }
   }, [sentimentTask?.status, fetchSentimentCoverage]);
+
+  // 内外盘数据
+  const fetchBidaskCoverage = useCallback(async () => {
+    // 内外盘数据只需要进度，不需要额外 coverage
+  }, []);
 
   // 财务任务运行时自动刷新概览（每10秒）
   useEffect(() => {
@@ -844,11 +862,14 @@ function DataUpdate() {
   useEffect(() => {
     if (sentimentLogRef.current) sentimentLogRef.current.scrollTop = sentimentLogRef.current.scrollHeight;
   }, [sentimentLogs]);
+  useEffect(() => {
+    if (bidaskLogRef.current) bidaskLogRef.current.scrollTop = bidaskLogRef.current.scrollHeight;
+  }, [bidaskLogs]);
 
   // ========== 提交任务 ==========
   const handleSubmit = async (updateType) => {
     // 检查是否已有其它任务在运行
-    const runningTask = [dailyTask, indexTask, dividendTask, financialTask, sentimentTask, researchTask]
+    const runningTask = [dailyTask, indexTask, dividendTask, financialTask, sentimentTask, bidaskTask, researchTask]
       .find(t => t?.status === 'RUNNING');
     if (runningTask) {
       message.warning('已有数据更新任务正在运行，请等待完成后再启动新任务');
@@ -860,7 +881,8 @@ function DataUpdate() {
         : updateType === 'DIVIDEND' ? dividendForm
         : updateType === 'FINANCIAL' ? financialForm
         : updateType === 'SENTIMENT' ? sentimentForm
-        : updateType === 'RESEARCH' ? researchForm : form;
+        : updateType === 'RESEARCH' ? researchForm
+        : updateType === 'BIDASK' ? bidaskForm : form;
       const values = await currentForm.validateFields();
       const dates = values.dateRange;
       const request = {
@@ -939,6 +961,7 @@ function DataUpdate() {
       : updateType === 'FINANCIAL' ? financialTask
       : updateType === 'SENTIMENT' ? sentimentTask
       : updateType === 'RESEARCH' ? researchTask
+      : updateType === 'BIDASK' ? bidaskTask
       : dailyTask;
     if (!task || !task.taskId) return;
     try {
@@ -993,6 +1016,7 @@ function DataUpdate() {
   // 页面初始化时根据当前 tab 加载数据
   useEffect(() => {
     if (activeTab === 'DELISTED') fetchDelistedStocks();
+    if (activeTab === 'BIDASK') fetchBidaskCoverage();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onTabChange = (key) => {
@@ -1958,6 +1982,116 @@ function DataUpdate() {
     );
   };
 
+  // ========== 内外盘数据 Tab ==========
+  const renderBidaskTab = () => {
+    const isRunning = bidaskTask?.status === 'RUNNING';
+
+    return (
+      <>
+        {/* 参数配置 */}
+        <Card size="small" style={{ marginBottom: 12 }}>
+          <Form form={bidaskForm} layout="inline" initialValues={{
+            singleCode: '',
+          }}>
+            <Row gutter={[12, 12]} style={{ width: '100%' }}>
+              <Col>
+                <Form.Item name="dateRange" label="日期范围">
+                  <RangePicker size="small" />
+                </Form.Item>
+              </Col>
+              <Col>
+                <Form.Item name="singleCode" label="单只股票">
+                  <Input placeholder="留空则更新全部，如 600519" style={{ width: 180 }} allowClear />
+                </Form.Item>
+              </Col>
+              <Col>
+                <Space size={12}>
+                  <Button type="primary" icon={<PlayCircleOutlined />}
+                    onClick={() => handleSubmit('BIDASK')} disabled={isRunning}>
+                    开始采集
+                  </Button>
+                  <Button danger icon={<StopOutlined />}
+                    onClick={() => handleCancel('BIDASK')} disabled={!isRunning}>
+                    取消任务
+                  </Button>
+                  {isRunning && <Tag color="processing">采集中...</Tag>}
+                  {bidaskTask && bidaskTask.status === 'SUCCESS' && <Tag color="success">采集完成</Tag>}
+                  {bidaskTask && bidaskTask.status === 'FAILED' && <Tag color="error">采集失败</Tag>}
+                </Space>
+              </Col>
+            </Row>
+          </Form>
+        </Card>
+
+        {/* 统计卡片 */}
+        <Card size="small" style={{ marginBottom: 12 }}>
+          <Row gutter={24} style={{ marginBottom: 12 }}>
+            <Col span={6}>
+              <Statistic
+                title="总目标"
+                value={bidaskTask?.totalStocks || 0}
+                suffix="只"
+                valueStyle={{ fontSize: 18, color: '#1677ff' }}
+              />
+            </Col>
+            <Col span={6}>
+              <Statistic
+                title="已处理"
+                value={bidaskTask?.processedStocks || 0}
+                suffix="只"
+                valueStyle={{ fontSize: 18, color: '#52c41a' }}
+              />
+            </Col>
+            <Col span={6}>
+              <Statistic
+                title="成功率"
+                value={bidaskTask?.totalStocks > 0
+                  ? ((bidaskTask.processedStocks / bidaskTask.totalStocks) * 100).toFixed(1)
+                  : 0}
+                suffix="%"
+                valueStyle={{ fontSize: 18, color: '#faad14' }}
+              />
+            </Col>
+          </Row>
+          {/* 市场维度统计（完成后显示） */}
+          {bidaskTask?.bidAskStats && (
+            <Table
+              size="small"
+              dataSource={Object.entries(bidaskTask.bidAskStats).map(([mkt, s]) => ({
+                key: mkt,
+                market: mkt,
+                total: s.total,
+                success: s.success,
+                failed: s.failed,
+                rate: s.rate,
+              }))}
+              columns={[
+                { title: '市场', dataIndex: 'market', width: 80 },
+                { title: '目标', dataIndex: 'total', align: 'right', width: 80 },
+                { title: '成功', dataIndex: 'success', align: 'right', width: 80,
+                  render: v => <span style={{ color: '#52c41a' }}>{v}</span> },
+                { title: '失败', dataIndex: 'failed', align: 'right', width: 80,
+                  render: v => v > 0 ? <span style={{ color: '#ff4d4f' }}>{v}</span> : v },
+                { title: '成功率', dataIndex: 'rate', align: 'right', width: 80 },
+              ]}
+              pagination={false}
+              style={{ marginTop: 8 }}
+            />
+          )}
+        </Card>
+
+        {/* 进度条 */}
+        {renderProgressBar(bidaskTask)}
+
+        {/* 日志 */}
+        <Card title={<span>采集日志 <Text type="secondary" style={{ fontSize: 12 }}>({bidaskLogs.length} 条)</Text></span>}
+          size="small" extra={<Button size="small" onClick={() => setBidaskLogs([])}>清空</Button>}>
+          {renderLogs(bidaskLogs, bidaskLogRef)}
+        </Card>
+      </>
+    );
+  };
+
   // ========== 研报数据 Tab ==========
   const renderResearchTab = () => {
     const isRunning = researchTask?.status === 'RUNNING';
@@ -2327,6 +2461,12 @@ function DataUpdate() {
               forceRender: true,
               label: <span><ThunderboltOutlined /> 情绪数据</span>,
               children: <div style={{ padding: '16px 0' }}>{renderSentimentTab()}</div>,
+            },
+            {
+              key: 'BIDASK',
+              forceRender: true,
+              label: <span><PieChartOutlined /> 内外盘</span>,
+              children: <div style={{ padding: '16px 0' }}>{renderBidaskTab()}</div>,
             },
             {
               key: 'RESEARCH',

@@ -135,21 +135,25 @@
             (SELECT COUNT(*) FROM stock_sentiment_lhb
              WHERE code = #{code}
                AND trade_date >= DATE_SUB(CURDATE(), INTERVAL 20 DAY)) as lhbAppearCount,
-            -- 正面公告数（近30日：回购/增持/业绩预增/股权激励）
+            -- 正面公告数（近30日：回购/增持/业绩预增/股权激励/投资/建厂/产能扩张）
             (SELECT COUNT(*) FROM stock_sentiment_notice
              WHERE code = #{code}
                AND notice_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
                AND (title LIKE '%回购%' OR title LIKE '%增持%'
                     OR title LIKE '%预增%' OR title LIKE '%股权激励%'
-                    OR title LIKE '%业绩快报%' OR title LIKE '%业绩预告%预增%')) as noticePositiveCount,
-            -- 负面公告数（近30日：减持/定增/业绩预降/被调查）
+                    OR title LIKE '%业绩快报%' OR title LIKE '%业绩预告%预增%'
+                    OR title LIKE '%投资%' OR title LIKE '%建厂%'
+                    OR title LIKE '%产能%' OR title LIKE '%扩产%'
+                    OR title LIKE '%在建%' OR title LIKE '%项目投产%')) as noticePositiveCount,
+            -- 负面公告数（近30日：减持/定增/业绩预降/被调查/立案/行政处罚/退市）
             (SELECT COUNT(*) FROM stock_sentiment_notice
              WHERE code = #{code}
                AND notice_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
                AND (title LIKE '%减持%' OR title LIKE '%定增%'
                     OR title LIKE '%预降%' OR title LIKE '%预亏%'
                     OR title LIKE '%被调查%' OR title LIKE '%立案%'
-                    OR title LIKE '%行政处罚%' OR title LIKE '%退市%')) as noticeNegativeCount
+                    OR title LIKE '%行政处罚%' OR title LIKE '%退市%'
+                    OR title LIKE '%诉讼%' OR title LIKE '%仲裁%')) as noticeNegativeCount
         FROM dual
     </select>
     
@@ -319,14 +323,14 @@
         ORDER BY sc.concept_name, sc.code
     </select>
 
-    <!-- 大盘蓝筹：融资余额变化百分比（最新 vs 5日前） -->
+    <!-- 融资余额变化百分比（最新 vs 前一交易日，日环比） -->
     <select id="selectMarginChangePct" resultType="java.math.BigDecimal">
         SELECT
             (b.latest_balance - b.past_balance) / b.past_balance * 100 as chgPct
         FROM (
             SELECT
                 (SELECT margin_balance FROM stock_sentiment_margin_detail WHERE code = #{code} ORDER BY trade_date DESC LIMIT 1) as latest_balance,
-                (SELECT margin_balance FROM stock_sentiment_margin_detail WHERE code = #{code} ORDER BY trade_date DESC LIMIT 1 OFFSET 4) as past_balance
+                (SELECT margin_balance FROM stock_sentiment_margin_detail WHERE code = #{code} ORDER BY trade_date DESC LIMIT 1 OFFSET 1) as past_balance
         ) b
         WHERE b.past_balance IS NOT NULL
           AND b.past_balance != 0
@@ -346,6 +350,72 @@
         FROM stock_sentiment_survey
         WHERE code = #{code}
           AND meeting_date >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)
+    </select>
+
+    <!-- 资金面：5日累计主力净流入 -->
+    <select id="selectNetMain5d" resultType="java.util.Map">
+        SELECT
+            COALESCE(SUM(net_main), 0) as netMain5d,
+            COALESCE(AVG(net_main_pct), 0) as netMainPct5d
+        FROM (
+            SELECT net_main, net_main_pct
+            FROM stock_sentiment_moneyflow
+            WHERE code = #{code}
+            ORDER BY trade_date DESC
+            LIMIT 5
+        ) t
+    </select>
+
+    <!-- 资金面：股东人数变化（最新一季度，负值=筹码集中） -->
+    <select id="selectShareholderChangePct" resultType="java.math.BigDecimal">
+        SELECT change_pct
+        FROM stock_shareholder
+        WHERE code = #{code}
+        ORDER BY report_date DESC
+        LIMIT 1
+    </select>
+
+    <!-- 事件面：机构调研热度（近90天研报数量，替代 stock_institution_research） -->
+    <select id="selectResearchReportCount90d" resultType="java.lang.Integer">
+        SELECT COUNT(*) as cnt
+        FROM stock_research_report
+        WHERE code = #{code}
+          AND report_date >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)
+    </select>
+
+    <!-- 事件面：基金持仓集中度（最新一期，float_ratio 合计=基金持仓占流通股比例） -->
+    <select id="selectFundHolderRatio" resultType="java.math.BigDecimal">
+        SELECT COALESCE(SUM(float_ratio), 0) as fundRatio
+        FROM stock_fund_holder
+        WHERE stock_code = #{code}
+        AND report_date = (
+            SELECT MAX(report_date) FROM stock_fund_holder WHERE stock_code = #{code}
+        )
+    </select>
+
+    <!-- 事件面：公告关键词扩展（投资/建厂/产能扩张等） -->
+    <select id="selectNoticeExpanded" resultType="java.util.Map">
+        SELECT
+            SUM(CASE WHEN positive_keyword = 1 THEN 1 ELSE 0 END) as positiveCount,
+            SUM(CASE WHEN negative_keyword = 1 THEN 1 ELSE 0 END) as negativeCount
+        FROM (
+            SELECT
+                CASE WHEN title LIKE '%回购%' OR title LIKE '%增持%'
+                     OR title LIKE '%预增%' OR title LIKE '%股权激励%'
+                     OR title LIKE '%业绩快报%' OR title LIKE '%业绩预告%预增%'
+                     OR title LIKE '%投资%' OR title LIKE '%建厂%'
+                     OR title LIKE '%产能%' OR title LIKE '%扩产%'
+                     OR title LIKE '%在建%' OR title LIKE '%项目投产%'
+                     THEN 1 ELSE 0 END as positive_keyword,
+                CASE WHEN title LIKE '%减持%' OR title LIKE '%定增%'
+                     OR title LIKE '%预降%' OR title LIKE '%预亏%'
+                     OR title LIKE '%被调查%' OR title LIKE '%立案%'
+                     OR title LIKE '%行政处罚%' OR title LIKE '%退市%'
+                     THEN 1 ELSE 0 END as negative_keyword
+            FROM stock_sentiment_notice
+            WHERE code = #{code}
+              AND notice_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+        ) t
     </select>
 
 </mapper>

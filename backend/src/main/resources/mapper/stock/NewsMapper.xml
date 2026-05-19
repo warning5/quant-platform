@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.quant.platform.stock.analysis.mapper.NewsMapper">
+
+    <!-- 新闻列表查询（支持情感类型过滤） -->
+    <select id="selectNewsByCode" resultType="java.util.Map">
+        SELECT
+            id,
+            code,
+            title,
+            content,
+            source,
+            DATE_FORMAT(publish_date, '%Y-%m-%d %H:%i') as publish_date,
+            news_type,
+            sentiment_score,
+            event_tag,
+            url
+        FROM stock_news
+        WHERE code = #{code}
+        <if test="newsType != null and newsType != ''">
+            AND news_type = #{newsType}
+        </if>
+        <if test="eventTag != null and eventTag != ''">
+            AND event_tag LIKE CONCAT(#{eventTag}, '%')
+        </if>
+        ORDER BY publish_date DESC
+        LIMIT #{limit}
+    </select>
+
+    <!-- 按事件标签查询 -->
+    <select id="selectNewsByEventTag" resultType="java.util.Map">
+        SELECT
+            id,
+            code,
+            title,
+            content,
+            source,
+            DATE_FORMAT(publish_date, '%Y-%m-%d %H:%i') as publish_date,
+            news_type,
+            sentiment_score,
+            event_tag,
+            url
+        FROM stock_news
+        WHERE code = #{code}
+          AND event_tag LIKE CONCAT(#{eventTag}, '%')
+        ORDER BY publish_date DESC
+        LIMIT #{limit}
+    </select>
+
+    <!-- 新闻汇总统计（全部历史） -->
+    <select id="selectNewsSummary" resultType="java.util.Map">
+        SELECT
+            COUNT(*) as total_count,
+            SUM(CASE WHEN news_type = 'positive' THEN 1 ELSE 0 END) as positive_count,
+            SUM(CASE WHEN news_type = 'negative' THEN 1 ELSE 0 END) as negative_count,
+            SUM(CASE WHEN news_type = 'neutral' THEN 1 ELSE 0 END) as neutral_count,
+            MAX(publish_date) as latest_date
+        FROM stock_news
+        WHERE code = #{code}
+    </select>
+
+    <!-- 近N天新闻统计（用于评分） -->
+    <select id="selectNewsStats30d" resultType="java.util.Map">
+        SELECT
+            COUNT(*) as total_30d,
+            SUM(CASE WHEN news_type = 'positive' THEN 1 ELSE 0 END) as positive_30d,
+            SUM(CASE WHEN news_type = 'negative' THEN 1 ELSE 0 END) as negative_30d,
+            SUM(CASE WHEN event_tag IS NOT NULL THEN 1 ELSE 0 END) as tagged_30d
+        FROM stock_news
+        WHERE code = #{code}
+          AND publish_date >= DATE_SUB(NOW(), INTERVAL #{days} DAY)
+    </select>
+
+    <!-- 最新新闻（用于评分引擎） -->
+    <select id="selectLatestNews" resultType="java.util.Map">
+        SELECT
+            title,
+            news_type,
+            sentiment_score,
+            event_tag,
+            DATE_FORMAT(publish_date, '%Y-%m-%d') as publish_date
+        FROM stock_news
+        WHERE code = #{code}
+        ORDER BY publish_date DESC
+        LIMIT #{limit}
+    </select>
+
+</mapper>

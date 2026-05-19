@@ -244,8 +244,8 @@ public class WorkflowReportService {
                 bullArgs.add(new BullBearArgument("涨停基因", "情绪",
                         "近20日涨停" + sentiment.getLimitUpDays() + "次，市场情绪积极", 3));
             }
-            if (sentiment.getMarginChgPct() != null) {
-                double margin = sentiment.getMarginChgPct().doubleValue();
+            if (money != null && money.getMarginChgPct() != null) {
+                double margin = money.getMarginChgPct().doubleValue();
                 if (margin > 5) {
                     bullArgs.add(new BullBearArgument("融资加仓", "情绪",
                             "融资余额较5日前增长" + formatDecimal(margin) + "%，杠杆资金看多", 3));

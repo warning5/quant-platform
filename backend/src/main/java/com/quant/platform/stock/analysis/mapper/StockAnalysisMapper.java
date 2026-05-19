@@ -140,4 +140,28 @@ public interface StockAnalysisMapper {
      * 返回：chgPct（百分比，负值=筹码集中）
      */
     BigDecimal selectHolderChangePct(@Param("code") String code);
+
+    /**
+     * 资金面：5日累计主力净流入（绝对值+占比）
+     * 返回：netMain5d（元）, netMainPct5d（%）
+     */
+    Map<String, Object> selectNetMain5d(@Param("code") String code);
+
+    /**
+     * 资金面：股东人数变化百分比（最新一季度，负值=筹码集中）
+     * 返回：change_pct（%）
+     */
+    BigDecimal selectShareholderChangePct(@Param("code") String code);
+
+    /**
+     * 事件面：机构调研热度（近90天研报数量）
+     * 返回：cnt（整数）
+     */
+    Integer selectResearchReportCount90d(@Param("code") String code);
+
+    /**
+     * 事件面：基金持仓集中度（最新一期，float_ratio合计=基金持仓占流通股比例）
+     * 返回：fundRatio（% of float）
+     */
+    BigDecimal selectFundHolderRatio(@Param("code") String code);
 }

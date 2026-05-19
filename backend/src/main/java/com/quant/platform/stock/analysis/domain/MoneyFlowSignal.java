@@ -64,4 +64,34 @@ public class MoneyFlowSignal {
      * 量能状态：HIGH/MEDIUM/LOW
      */
     private String volumeStatus;
+
+    /**
+     * 融资余额变化百分比（最新 vs 5日前）
+     */
+    private BigDecimal marginChgPct;
+
+    /**
+     * 股东人数变化百分比（最新一季度 vs 上一季度，负值=筹码集中）
+     */
+    private BigDecimal shareholderChangePct;
+
+    /**
+     * 5日累计主力净流入（元）
+     */
+    private BigDecimal netMain5d;
+
+    /**
+     * 5日累计主力净流入占比（%）
+     */
+    private BigDecimal netMainPct5d;
+
+    /**
+     * 内外盘比（外盘/内盘，>1买方强势）
+     */
+    private BigDecimal outerInnerRatio;
+
+    /**
+     * 内外盘趋势（3日均值判断）：BUYER_STRONG / BUYER_SLIGHT / BALANCED / SELLER_SLIGHT / SELLER_STRONG / NO_DATA
+     */
+    private String bidAskTrend;
 }

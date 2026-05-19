@@ -217,7 +217,7 @@ public class AnalysisChMapper {
      */
     public java.util.Map<String, Object> selectLatestMoneyFlow(String code) {
         String sql = """
-            SELECT net_main, net_main_pct, net_huge, net_big
+            SELECT trade_date, net_main, net_main_pct, net_huge, net_big
             FROM stock.stock_sentiment_moneyflow FINAL             WHERE code = ?
             ORDER BY trade_date DESC
             LIMIT 1
@@ -227,6 +227,7 @@ public class AnalysisChMapper {
             return clickHouseJdbcTemplate.queryForObject(sql,
                     (rs, rowNum) -> {
                         java.util.Map<String, Object> map = new java.util.HashMap<>();
+                        map.put("tradeDate", rs.getString("trade_date"));
                         map.put("net_main", rs.getBigDecimal("net_main"));
                         map.put("net_main_pct", rs.getBigDecimal("net_main_pct"));
                         map.put("net_huge", rs.getBigDecimal("net_huge"));

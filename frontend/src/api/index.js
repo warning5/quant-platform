@@ -294,6 +294,16 @@ export const stockAnalysisApi = {
   getMoneyFlowHistory: (code, days = 120) => api.get('/analysis/money-flow-history', { params: { code, days } }),
   getRelativeStrength: (code) => api.get('/analysis/relative-strength', { params: { code } }),
   getKLine: (code, days = 60) => api.get('/analysis/kline', { params: { code, days } }),
+  // P0 新闻事件分析
+  getNewsAnalysis: (code, config) => api.get('/analysis/news', { ...config, params: { code } }),
+  getNewsByTag: (code, tag, config) => api.get('/analysis/news/tag', { ...config, params: { code, tag } }),
+  getNewsSignal: (code, config) => api.get('/analysis/news-signal', { ...config, params: { code } }),
+  // P1 内外盘比
+  getBidAskAnalysis: (code, config) => api.get('/analysis/bid-ask', { ...config, params: { code } }),
+  // P1 机构覆盖度（Tab④）
+  getInstitutionCoverage: (code, config) => api.get('/analysis/institution-coverage', { ...config, params: { code } }),
+  // P2 个股长周期表现（YTD、超额收益、RS Rating、行业内排名）
+  getStockPerformance: (code, config) => api.get('/analysis/stock-performance', { ...config, params: { code } }),
 };
 
 export default api;
