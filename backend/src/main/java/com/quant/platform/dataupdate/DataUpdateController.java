@@ -127,6 +127,12 @@ public class DataUpdateController {
         return ApiResponse.success(ok ? "任务已取消" : "取消失败", Map.of("cancelled", ok));
     }
 
+    @GetMapping("/logs/{taskId}")
+    @Operation(summary = "获取任务历史日志")
+    public ApiResponse<java.util.List<Map<String, Object>>> getTaskLogs(@PathVariable String taskId) {
+        return ApiResponse.success(dataUpdateService.getTaskLogs(taskId));
+    }
+
     @GetMapping("/coverage")
     @Operation(summary = "数据覆盖率概览")
     public ApiResponse<Map<String, Object>> getCoverage() {

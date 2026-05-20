@@ -39,7 +39,7 @@ const sentimentLabel = (bias) => {
 const tagColorMap = {
   PERFORMANCE: 'blue',
   EXPANSION: 'cyan',
-  INDIA_HOT: 'orange',
+  INDUSTRY_EVENT: 'orange',
   POLICY_RISK: 'red',
   RAW_MATERIAL: 'purple',
   M_A: 'magenta',
@@ -52,7 +52,7 @@ const tagColorMap = {
 const tagLabelMap = {
   PERFORMANCE: '业绩',
   EXPANSION: '扩产/建厂',
-  INDIA_HOT: '印度高温',
+  INDUSTRY_EVENT: '行业事件',
   POLICY_RISK: '政策风险',
   RAW_MATERIAL: '原材料',
   M_A: '并购定增',

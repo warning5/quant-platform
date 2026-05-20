@@ -23,7 +23,7 @@ public class NewsService {
     static {
         TAG_LABELS.put("PERFORMANCE", "业绩");
         TAG_LABELS.put("EXPANSION", "扩产/建厂");
-        TAG_LABELS.put("INDIA_HOT", "印度高温");
+        TAG_LABELS.put("INDUSTRY_EVENT", "行业事件");
         TAG_LABELS.put("POLICY_RISK", "政策风险");
         TAG_LABELS.put("RAW_MATERIAL", "原材料");
         TAG_LABELS.put("M_A", "并购定增");

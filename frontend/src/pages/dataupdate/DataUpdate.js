@@ -231,6 +231,7 @@ function DataUpdate() {
   const [sentimentValidateResult, setSentimentValidateResult] = useState(null);
   const [sentimentValidateLoading, setSentimentValidateLoading] = useState(false);
   const [sentimentMoneyflowSource, setSentimentMoneyflowSource] = useState('AKSHARE');
+  const [sentimentEmMode, setSentimentEmMode] = useState('realtime'); // EM 模式子选项：realtime / hist
 
   // 内外盘数据
   const [bidaskTask, setBidaskTask] = useState(null);
@@ -574,6 +575,7 @@ function DataUpdate() {
               if (msg.fetchShareholder !== undefined) t.configFetchShareholder = msg.fetchShareholder;
               if (msg.fetchNews !== undefined) t.configFetchNews = msg.fetchNews;
               if (msg.moneyflowSource !== undefined) t.configMoneyflowSource = msg.moneyflowSource;
+              if (msg.emMoneyflowMode !== undefined) t.configEmMoneyflowMode = msg.emMoneyflowMode;
               if (msg.singleCode !== undefined) t.configSingleCode = msg.singleCode;
               if (msg.force !== undefined) t.configForce = msg.force;
               return t;
@@ -594,7 +596,14 @@ function DataUpdate() {
       }
     };
 
-    ws.onclose = () => { setWsConnected(false); wsRef.current = null; };
+    ws.onclose = () => {
+      setWsConnected(false);
+      wsRef.current = null;
+      // 断线后 3 秒自动重连
+      setTimeout(() => {
+        if (!wsRef.current) connectWs();
+      }, 3000);
+    };
     ws.onerror = () => { setWsConnected(false); };
   }, [getTaskUpdater, getLogUpdater]);
 
@@ -905,7 +914,7 @@ function DataUpdate() {
         force: values.force || false,
         // 情绪数据专属字段
         ...(updateType === 'SENTIMENT' ? {
-          ...(values.moneyflowSource !== 'NEODATA' ? {
+          ...(values.moneyflowSource !== 'NEODATA' && values.moneyflowSource !== 'EM' ? {
             fetchLhb: values.fetchLhb !== false,
             fetchMargin: values.fetchMargin !== false,
             fetchSurvey: values.fetchSurvey !== false,
@@ -918,7 +927,7 @@ function DataUpdate() {
             fetchShareholder: values.fetchShareholder !== false,
             fetchNews: values.fetchNews !== false,
           } : {
-            // NeoData 模式：显式关闭其他模块，防止 Java 默认值 true 导致误执行
+            // EM/NeoData 模式：显式关闭其他模块，防止 Java 默认值 true 导致误执行
             fetchLhb: false,
             fetchMargin: false,
             fetchSurvey: false,
@@ -932,6 +941,10 @@ function DataUpdate() {
             fetchNews: false,
           }),
           moneyflowSource: values.moneyflowSource || 'AKSHARE',
+          ...(values.moneyflowSource === 'EM' ? {
+            emMoneyflowMode: sentimentEmMode,
+          } : {}),
+          sentimentCodes: (values.sentimentCodes || '').trim() || null,
         } : {}),
       };
 
@@ -942,10 +955,43 @@ function DataUpdate() {
 
       const res = await dataUpdateApi.startTask(request);
       if (res) {
-        const t = res;
-        t.updateType = updateType;
+        const t = { ...res, updateType, currentStep: '启动中...' };
         getTaskUpdater(updateType)(t);
+        getLogUpdater(updateType)(prev => [...prev, {
+          id: Date.now(),
+          time: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
+          text: '[任务已启动] taskId=' + t.taskId,
+        }]);
         message.success('任务已启动');
+        // 兜底轮询：等 6 秒后若状态还是 RUNNING，拉一次最新状态+历史日志
+        setTimeout(async () => {
+          try {
+            // 补拉历史日志（WS 可能断连或来不及收）
+            const logs = await dataUpdateApi.getTaskLogs(t.taskId);
+            if (logs && logs.length > 0) {
+              getLogUpdater(updateType)(prev => {
+                const existingIds = new Set(prev.map(l => l.text));
+                const newLogs = logs
+                  .filter(l => !existingIds.has(l.line))
+                  .map(l => ({ id: Date.now() + Math.random(), time: l.time || '', text: l.line || '' }));
+                return newLogs.length > 0 ? [...prev, ...newLogs] : prev;
+              });
+            }
+            // 同步状态
+            const recent = await dataUpdateApi.getRecentTasks();
+            if (recent && Array.isArray(recent)) {
+              const found = recent.find(r => (r.request?.updateType || 'DAILY') === updateType);
+              if (found && found.taskId === t.taskId) {
+                getTaskUpdater(updateType)(prev => {
+                  if (prev && prev.status === 'RUNNING') {
+                    return { ...prev, ...found, updateType };
+                  }
+                  return prev;
+                });
+              }
+            }
+          } catch (_) {}
+        }, 6000);
       }
     } catch (e) {
       if (e.message && !e.message.includes('validateFields')) {
@@ -967,6 +1013,8 @@ function DataUpdate() {
     try {
       await dataUpdateApi.cancelTask(task.taskId);
       message.info('任务已取消');
+      // 立即更新本地状态，防止 WS 推送延迟导致按钮卡住
+      getTaskUpdater(updateType)(prev => prev ? { ...prev, status: 'CANCELLED', endTime: new Date().toISOString() } : prev);
     } catch (e) {
       message.error('取消任务失败，请稍后重试');
     }
@@ -1699,9 +1747,9 @@ function DataUpdate() {
           </Row>
           {/* 各表详细统计 */}
           {sentimentCoverage?.tables && sentimentCoverage.tables.length > 0 && (
-            <Row gutter={[16, 16]} style={{ marginTop: 12 }}>
+            <Row gutter={[12, 12]} style={{ marginTop: 12 }}>
               {sentimentCoverage.tables.map(table => (
-                <Col span={6} key={table.table}>
+                <Col style={{ flex: '0 0 19.8%', maxWidth: '19.8%' }} key={table.table}>
                   <Card size="small" style={{ backgroundColor: '#fafafa', borderLeft: '3px solid #722ed1', marginBottom: 4 }}>
                     <Statistic
                       title={table.name}
@@ -1755,14 +1803,19 @@ function DataUpdate() {
                 </Form.Item>
               </Col>
               <Col>
+                <Form.Item name="sentimentCodes" label="股票代码" tooltip="逗号分隔，为空则全部股票">
+                  <Input placeholder="000001,600519" style={{ width: 160 }} allowClear />
+                </Form.Item>
+              </Col>
+              <Col>
                 <Form.Item name="moneyflowSource" noStyle>
-                  <Radio.Group onChange={e => {
+                  <Radio.Group value={sentimentMoneyflowSource} onChange={e => {
                     const val = e.target.value;
                     setSentimentMoneyflowSource(val);
                     // 显式同步 form 字段，防止 Form.Item 绑定失效
                     sentimentForm.setFieldsValue({ moneyflowSource: val });
-                    if (val === 'NEODATA') {
-                      // NeoData 模式：只保留资金流向勾选，其他全部取消
+                    if (val === 'NEODATA' || val === 'EM') {
+                      // EM/NeoData 模式：只保留资金流向勾选，其他全部取消
                       sentimentForm.setFieldsValue({
                         fetchLhb: false,
                         fetchMargin: false,
@@ -1798,10 +1851,21 @@ function DataUpdate() {
                     <Radio.Button value="AKSHARE">
                       <CloudSyncOutlined /> akshare（默认）
                     </Radio.Button>
+                    <Radio.Button value="EM" style={{ marginLeft: 8 }}>
+                      <ThunderboltOutlined /> 东方财富（最快）
+                    </Radio.Button>
                     <Radio.Button value="NEODATA" style={{ marginLeft: 8 }}>
-                      <ThunderboltOutlined /> NeoData（更快，推荐）
+                      <ThunderboltOutlined /> NeoData
                     </Radio.Button>
                   </Radio.Group>
+                  {sentimentMoneyflowSource === 'EM' && (
+                    <span style={{ marginLeft: 12 }}>
+                      <Radio.Group value={sentimentEmMode} onChange={e => setSentimentEmMode(e.target.value)} size="small">
+                        <Radio.Button value="realtime">实时全市场</Radio.Button>
+                        <Radio.Button value="hist" style={{ marginLeft: 4 }}>历史120天</Radio.Button>
+                      </Radio.Group>
+                    </span>
+                  )}
                   {sentimentMoneyflowSource === 'NEODATA' && (
                     <Tag color="purple" icon={<ThunderboltOutlined />} style={{ marginLeft: 12 }}>
                       NeoData 模式：仅采集资金流向
@@ -1813,8 +1877,8 @@ function DataUpdate() {
             <Row gutter={[16, 12]} style={{ width: '100%', marginBottom: 12 }}>
               <Col>
                 <div style={{
-                  opacity: sentimentMoneyflowSource === 'NEODATA' ? 0.5 : 1,
-                  pointerEvents: sentimentMoneyflowSource === 'NEODATA' ? 'none' : 'auto',
+                  opacity: (sentimentMoneyflowSource === 'NEODATA' || sentimentMoneyflowSource === 'EM') ? 0.5 : 1,
+                  pointerEvents: (sentimentMoneyflowSource === 'NEODATA' || sentimentMoneyflowSource === 'EM') ? 'none' : 'auto',
                   transition: 'opacity 0.2s',
                 }}>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '8px 16px' }}>
@@ -1897,13 +1961,15 @@ function DataUpdate() {
               </Text>
               <Text style={{ fontSize: 12 }}>
                 <ThunderboltOutlined /> 模式：
-                {sentimentTask.configMoneyflowSource === 'NEODATA' ? (
+                {sentimentTask.configMoneyflowSource === 'EM' ? (
+                  <Tag size="small" color="orange">东方财富（{sentimentTask.configEmMoneyflowMode === 'hist' ? '历史120天' : '实时'})</Tag>
+                ) : sentimentTask.configMoneyflowSource === 'NEODATA' ? (
                   <Tag size="small" color="purple">NeoData（仅资金流向）</Tag>
                 ) : (
                   <Tag size="small">akshare</Tag>
                 )}
               </Text>
-              {sentimentTask.configMoneyflowSource !== 'NEODATA' && (
+              {(sentimentTask.configMoneyflowSource !== 'NEODATA' && sentimentTask.configMoneyflowSource !== 'EM') && (
                 <Text style={{ fontSize: 12 }}>
                   模块：
                   {sentimentTask.configFetchLhb && <Tag size="small">龙虎榜</Tag>}

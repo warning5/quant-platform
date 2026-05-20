@@ -50,22 +50,34 @@ public class ResearchController {
     }
 
     @GetMapping("/list")
-    @Operation(summary = "分页查询研报列表", description = "支持按股票代码、名称、标题关键字搜索")
+    @Operation(summary = "分页查询研报列表", description = "支持按股票代码、名称、标题关键字搜索，支持日期范围过滤")
     public ApiResponse<Map<String, Object>> getList(
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int size,
-            @RequestParam(required = false) String keyword) {
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) String startDate,
+            @RequestParam(required = false) String endDate) {
         try {
-            String where = "";
+            List<String> whereClauses = new ArrayList<>();
             List<Object> params = new ArrayList<>();
+
             if (keyword != null && !keyword.trim().isEmpty()) {
-                where = " WHERE code LIKE ? OR name LIKE ? OR report_title LIKE ? ";
+                whereClauses.add("(code LIKE ? OR name LIKE ? OR report_title LIKE ?)");
                 String kw = "%" + keyword.trim() + "%";
                 params.add(kw);
                 params.add(kw);
                 params.add(kw);
             }
+            if (startDate != null && !startDate.trim().isEmpty()) {
+                whereClauses.add("report_date >= ?");
+                params.add(startDate.trim());
+            }
+            if (endDate != null && !endDate.trim().isEmpty()) {
+                whereClauses.add("report_date <= ?");
+                params.add(endDate.trim());
+            }
 
+            String where = whereClauses.isEmpty() ? "" : " WHERE " + String.join(" AND ", whereClauses);
             String countSql = "SELECT COUNT(*) FROM stock_research_report" + where;
             Integer total = jdbcTemplate.queryForObject(countSql, Integer.class, params.toArray());
             int totalInt = total != null ? total : 0;

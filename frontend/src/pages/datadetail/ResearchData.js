@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Card, Table, Tag, Space, Typography, Row, Col, Statistic, Input, Button, Popconfirm, message, Spin, Tooltip } from 'antd';
+import { Card, Table, Tag, Space, Typography, Row, Col, Statistic, Input, Button, Popconfirm, message, Spin, Tooltip, DatePicker } from 'antd';
 import { SearchOutlined, ReloadOutlined, FileTextOutlined, BankOutlined, CalendarOutlined, QuestionCircleOutlined, DeleteOutlined } from '@ant-design/icons';
+import dayjs from 'dayjs';
 import { researchApi, silentConfig } from '../../api';
 
 const { Title, Text } = Typography;
@@ -38,6 +39,7 @@ function ResearchData() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [keyword, setKeyword] = useState('');
+  const [dateRange, setDateRange] = useState(null);
   const [checkCode, setCheckCode] = useState('');
   const [checkResult, setCheckResult] = useState(null);
   const [checkLoading, setCheckLoading] = useState(false);
@@ -74,7 +76,12 @@ function ResearchData() {
   // 加载研报列表
   const fetchReports = (pageNum = 1, size = pageSize) => {
     setTableLoading(true);
-    researchApi.getList({ page: pageNum, size, keyword }, silentConfig)
+    const params = { page: pageNum, size, keyword };
+    if (dateRange && dateRange[0] && dateRange[1]) {
+      params.startDate = dateRange[0].format('YYYY-MM-DD');
+      params.endDate = dateRange[1].format('YYYY-MM-DD');
+    }
+    researchApi.getList(params, silentConfig)
       .then(data => {
         const normalized = (data.list || []).map(norm).filter(r => r.reportTitle && r.reportTitle.trim());
         setReports(normalized);
@@ -245,9 +252,11 @@ function ResearchData() {
           <Space>
             <Input placeholder="搜索股票代码/名称/标题" value={keyword}
               onChange={e => setKeyword(e.target.value)} onPressEnter={() => fetchReports(1)}
-              style={{ width: 250 }} prefix={<SearchOutlined />} allowClear />
+              style={{ width: 200 }} prefix={<SearchOutlined />} allowClear />
+            <DatePicker.RangePicker value={dateRange} onChange={setDateRange}
+              allowClear style={{ width: 240 }} />
             <Button type="primary" icon={<SearchOutlined />} onClick={() => fetchReports(1)}>搜索</Button>
-            <Button icon={<ReloadOutlined />} onClick={() => { setKeyword(''); fetchReports(1); }}>重置</Button>
+            <Button icon={<ReloadOutlined />} onClick={() => { setKeyword(''); setDateRange(null); fetchReports(1); }}>重置</Button>
             {selectedRowKeys.length > 0 && (
               <Popconfirm title={`确定删除 ${selectedRowKeys.length} 条记录？`} onConfirm={handleBatchDelete}
                 okText="确定" cancelText="取消" okButtonProps={{ danger: true }}>

@@ -58,6 +58,10 @@ public class DataUpdateService {
      * 各类型最近完成的任务（页面刷新后恢复状态用）
      */
     private final ConcurrentHashMap<String, DataUpdateTask> recentFinishedTasks = new ConcurrentHashMap<>();
+    /**
+     * 各任务最近 500 条日志缓存（taskId -> 日志列表），供前端断线后补拉
+     */
+    private final ConcurrentHashMap<String, java.util.List<Map<String, Object>>> taskLogCache = new ConcurrentHashMap<>();
     @Value("${quant.data-update.python-path:python}")
     private String pythonPath;
     @Value("${quant.data-update.script-dir:scripts}")
@@ -732,7 +736,24 @@ public class DataUpdateService {
                     cmd.add("--end-date");
                     cmd.add(endDate);
                 }
+                if (request.getSentimentCodes() != null && !request.getSentimentCodes().isEmpty()) {
+                    cmd.add("--codes");
+                    cmd.add(request.getSentimentCodes());
+                }
                 log.info("[DataUpdate] NEODATA 模式：仅更新资金流向，日期 {} ~ {}", startDate, endDate);
+                return cmd;
+            }
+            // EM（东方财富）模式：跑东财实时/历史资金流向，跳过其他所有子模块
+            if ("EM".equalsIgnoreCase(request.getMoneyflowSource())) {
+                cmd.add("update_sentiment_data.py");
+                boolean isHist = "hist".equalsIgnoreCase(request.getEmMoneyflowMode());
+                cmd.add(isHist ? "--em-moneyflow-hist" : "--em-moneyflow");
+                if (request.getSentimentCodes() != null && !request.getSentimentCodes().isEmpty()) {
+                    cmd.add("--codes");
+                    cmd.add(request.getSentimentCodes());
+                }
+                if (request.isForce()) cmd.add("--force");
+                log.info("[DataUpdate] EM（东方财富）模式：{}，codes={}", isHist ? "历史120天" : "实时全市场", request.getSentimentCodes());
                 return cmd;
             }
             // AKSHARE 模式（默认）：原有逻辑
@@ -746,6 +767,10 @@ public class DataUpdateService {
             if (endDate != null && !endDate.isEmpty()) {
                 cmd.add("--end-date");
                 cmd.add(endDate);
+            }
+            if (request.getSentimentCodes() != null && !request.getSentimentCodes().isEmpty()) {
+                cmd.add("--codes");
+                cmd.add(request.getSentimentCodes());
             }
             // 未勾选的数据源传 --skip-xxx 参数
             if (!request.isFetchLhb()) {
@@ -1044,6 +1069,7 @@ public class DataUpdateService {
                 msg.put("fetchShareholder", req.isFetchShareholder());
                 msg.put("fetchNews", req.isFetchNews());
                 msg.put("moneyflowSource", req.getMoneyflowSource());
+                msg.put("emMoneyflowMode", req.getEmMoneyflowMode());
             }
             messagingTemplate.convertAndSend("/topic/data-update/status", msg);
         } catch (Exception e) {
@@ -1066,10 +1092,24 @@ public class DataUpdateService {
             if (task != null && task.getRequest() != null) {
                 msg.put("updateType", task.getRequest().getUpdateType());
             }
+            // 写入缓存（最多保留 500 条）
+            taskLogCache.compute(taskId, (k, list) -> {
+                if (list == null) list = new java.util.ArrayList<>();
+                list.add(Map.copyOf(msg));
+                if (list.size() > 500) list = new java.util.ArrayList<>(list.subList(list.size() - 500, list.size()));
+                return list;
+            });
             messagingTemplate.convertAndSend("/topic/data-update/log", msg);
         } catch (Exception e) {
             log.warn("[DataUpdate] 广播日志失败: {}", e.getMessage());
         }
+    }
+
+    /**
+     * 获取指定任务的历史日志（供前端断线重连后补拉）
+     */
+    public java.util.List<Map<String, Object>> getTaskLogs(String taskId) {
+        return taskLogCache.getOrDefault(taskId, java.util.Collections.emptyList());
     }
 
     // ==================== 数据完整性检查 ====================

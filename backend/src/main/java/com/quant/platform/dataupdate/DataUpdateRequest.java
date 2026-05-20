@@ -149,11 +149,24 @@ public class DataUpdateRequest {
      * 情绪数据：资金流向数据源
      * AKSHARE = akshare（默认，与原行为一致）
      * NEODATA = NeoData（更快，推荐）
+     * EM     = 东方财富（实时全市场/历史120天，最快，推荐）
      */
     private String moneyflowSource = "AKSHARE";
+
+    /**
+     * 情绪数据：EM（东财）模式子选项
+     * realtime = 实时全市场资金流向（--em-moneyflow，默认）
+     * hist     = 历史120天全市场资金流向（--em-moneyflow-hist）
+     */
+    private String emMoneyflowMode = "realtime";
 
     /**
      * 研报数据：单只股票代码（为空则更新全部）
      */
     private String singleCode;
+
+    /**
+     * 情绪数据：股票代码列表（逗号分隔，为空则更新全部）
+     */
+    private String sentimentCodes;
 }
