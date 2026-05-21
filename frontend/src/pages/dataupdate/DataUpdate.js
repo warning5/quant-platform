@@ -237,6 +237,9 @@ function DataUpdate() {
   const [bidaskTask, setBidaskTask] = useState(null);
   const [bidaskLogs, setBidaskLogs] = useState([]);
   const bidaskLogRef = useRef(null);
+  const [bidaskCoverage, setBidaskCoverage] = useState(null);
+  const [bidaskCoverageLoading, setBidaskCoverageLoading] = useState(true);
+  const bidaskCoverageFetchedRef = useRef(false);
 
   // 研报数据
   const [researchTask, setResearchTask] = useState(null);
@@ -744,9 +747,18 @@ function DataUpdate() {
     }
   }, [sentimentTask?.status, fetchSentimentCoverage]);
 
-  // 内外盘数据
+  // 内外盘数据概览
   const fetchBidaskCoverage = useCallback(async () => {
-    // 内外盘数据只需要进度，不需要额外 coverage
+    const isFirst = !bidaskCoverageFetchedRef.current;
+    if (isFirst) setBidaskCoverageLoading(true);
+    try {
+      const res = await dataUpdateApi.getBidaskCoverage();
+      setBidaskCoverage(res);
+      bidaskCoverageFetchedRef.current = true;
+    } catch (e) {
+      console.error('fetchBidaskCoverage failed:', e);
+    }
+    if (isFirst) setBidaskCoverageLoading(false);
   }, []);
 
   // 财务任务运行时自动刷新概览（每10秒）
@@ -1075,6 +1087,7 @@ function DataUpdate() {
     if (key === 'FINANCIAL') fetchFinancialCoverage();
     if (key === 'SENTIMENT') fetchSentimentCoverage();
     if (key === 'RESEARCH') fetchResearchCoverage();
+    if (key === 'BIDASK') fetchBidaskCoverage();
     if (key === 'DELISTED') fetchDelistedStocks();
   };
 
@@ -2051,9 +2064,82 @@ function DataUpdate() {
   // ========== 内外盘数据 Tab ==========
   const renderBidaskTab = () => {
     const isRunning = bidaskTask?.status === 'RUNNING';
+    const mktColors = { SH: '#1677ff', SZ: '#52c41a', BJ: '#fa8c16' };
 
     return (
       <>
+        {/* 数据概览 */}
+        <Card
+          title={<span><DatabaseOutlined /> 数据概览</span>}
+          size="small"
+          style={{ marginBottom: 12 }}
+          loading={bidaskCoverageLoading}
+          extra={<Button size="small" icon={<ReloadOutlined />} onClick={fetchBidaskCoverage}>刷新</Button>}
+        >
+          <Row gutter={[12, 12]} style={{ marginBottom: 8 }}>
+            <Col span={4}>
+              <Statistic
+                title="总记录数"
+                value={bidaskCoverage?.totalRecords || 0}
+                suffix="条"
+                formatter={(v) => {
+                  const n = Number(v) || 0;
+                  return n >= 10000 ? (n / 10000).toFixed(1) + ' 万' : n.toLocaleString();
+                }}
+                valueStyle={{ fontSize: 16, color: '#1677ff' }}
+                prefix={<DatabaseOutlined />}
+              />
+            </Col>
+            <Col span={4}>
+              <Statistic
+                title="覆盖股票"
+                value={bidaskCoverage?.coveredStocks || 0}
+                suffix="只"
+                valueStyle={{ fontSize: 16, color: '#722ed1' }}
+              />
+            </Col>
+            <Col span={5}>
+              <Statistic
+                title="最早日期"
+                value={bidaskCoverage?.minDate ? String(bidaskCoverage.minDate).slice(0, 10) : '--'}
+                valueStyle={{ fontSize: 14, color: '#8c8c8c' }}
+              />
+            </Col>
+            <Col span={5}>
+              <Statistic
+                title="最新日期"
+                value={bidaskCoverage?.maxDate ? String(bidaskCoverage.maxDate).slice(0, 10) : '--'}
+                valueStyle={{ fontSize: 14, color: '#8c8c8c' }}
+              />
+            </Col>
+          </Row>
+          {/* 各市场统计 */}
+          {bidaskCoverage?.marketStats && bidaskCoverage.marketStats.length > 0 && (
+            <Row gutter={[12, 8]}>
+              {bidaskCoverage.marketStats.map((s) => (
+                <Col style={{ flex: '0 0 19.8%', maxWidth: '19.8%' }} key={s.market}>
+                  <Card size="small" style={{ backgroundColor: '#fafafa', borderLeft: `3px solid ${mktColors[s.market] || '#999'}`, marginBottom: 4 }}>
+                    <Statistic
+                      title={s.market === 'SH' ? '沪市' : s.market === 'SZ' ? '深市' : '北交所'}
+                      value={s.record_count || 0}
+                      formatter={(v) => {
+                        const n = Number(v) || 0;
+                        return n >= 10000 ? (n / 10000).toFixed(1) + ' 万' : n.toLocaleString();
+                      }}
+                      suffix={
+                        <span style={{ fontSize: 11, color: '#8c8c8c', fontWeight: 400 }}>
+                          条 · {s.stock_count || 0} 只
+                        </span>
+                      }
+                      valueStyle={{ fontSize: 14, fontWeight: 600, color: mktColors[s.market] || '#999' }}
+                    />
+                  </Card>
+                </Col>
+              ))}
+            </Row>
+          )}
+        </Card>
+
         {/* 参数配置 */}
         <Card size="small" style={{ marginBottom: 12 }}>
           <Form form={bidaskForm} layout="inline" initialValues={{

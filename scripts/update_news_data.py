@@ -29,6 +29,7 @@ os.environ["TRANSFORMERS_VERBOSITY"] = "error"
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 os.environ["HF_HUB_HTTP_ENDPOINT"] = "https://hf-mirror.com"
 
+import time
 import warnings
 warnings.filterwarnings('ignore')
 

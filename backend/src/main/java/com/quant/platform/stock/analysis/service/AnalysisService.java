@@ -1683,11 +1683,13 @@ public class AnalysisService {
             // 对齐日期序列
             List<Double> alignedStock = new ArrayList<>();
             List<Double> alignedInd = new ArrayList<>();
+            List<java.time.LocalDate> alignedDates = new ArrayList<>();  // 同步保存日期
             for (int i = 1; i < bars.size(); i++) {
                 java.time.LocalDate td = bars.get(i).getTradeDate();
                 if (td != null && indRetMap.containsKey(td) && i - 1 < stockReturns.size()) {
                     alignedStock.add(stockReturns.get(i - 1));
                     alignedInd.add(indRetMap.get(td));
+                    alignedDates.add(td);  // 保存对应日期
                 }
             }
 
@@ -1724,10 +1726,9 @@ public class AnalysisService {
                 for (int i = Math.max(0, n - 5); i < n; i++) {
                     Map<String, Object> day = new LinkedHashMap<>();
                     day.put("dayIndex", i - Math.max(0, n - 5) + 1);
-                    // 取对应的交易日期
-                    int barIdx = i + 1; // alignedStock 从 bars[1] 开始（i=1 对应 bars[1]）
-                    if (barIdx < bars.size() && bars.get(barIdx).getTradeDate() != null) {
-                        day.put("tradeDate", bars.get(barIdx).getTradeDate().toString());
+                    // 使用对齐时保存的日期（避免 bars 索引错位）
+                    if (i < alignedDates.size()) {
+                        day.put("tradeDate", alignedDates.get(i).toString());
                     }
                     day.put("stockRet", Math.round(alignedStock.get(i) * 10000.0) / 100.0);
                     day.put("industryRet", Math.round(alignedInd.get(i) * 10000.0) / 100.0);

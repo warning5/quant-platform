@@ -1364,6 +1364,47 @@ public class DataUpdateService {
     }
 
     /**
+     * 内外盘数据概览
+     */
+    public Map<String, Object> getBidaskCoverage() {
+        Map<String, Object> result = new LinkedHashMap<>();
+
+        // 总记录数
+        long totalRecords = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM stock_bid_ask", Long.class);
+        result.put("totalRecords", totalRecords);
+
+        // 覆盖股票数
+        long distinctCodes = jdbcTemplate.queryForObject(
+                "SELECT COUNT(DISTINCT code) FROM stock_bid_ask", Long.class);
+        result.put("coveredStocks", distinctCodes);
+
+        // 时间范围
+        Map<String, Object> dateRange = jdbcTemplate.queryForMap(
+                "SELECT MIN(trade_date) as min_date, MAX(trade_date) as max_date FROM stock_bid_ask");
+        result.put("minDate", dateRange.get("min_date"));
+        result.put("maxDate", dateRange.get("max_date"));
+
+        // 各市场统计
+        List<Map<String, Object>> marketStats = jdbcTemplate.queryForList(
+                "SELECT " +
+                "  CASE " +
+                "    WHEN LEFT(code, 1) = '6' THEN 'SH' " +
+                "    WHEN LEFT(code, 1) IN ('0','3') THEN 'SZ' " +
+                "    ELSE 'BJ' " +
+                "  END as market, " +
+                "  COUNT(*) as record_count, " +
+                "  COUNT(DISTINCT code) as stock_count " +
+                "FROM stock_bid_ask " +
+                "GROUP BY market " +
+                "ORDER BY market"
+        );
+        result.put("marketStats", marketStats);
+
+        return result;
+    }
+
+    /**
      * 分红数据完整性统计
      */
     public Map<String, Object> getMissingDividendStats() {

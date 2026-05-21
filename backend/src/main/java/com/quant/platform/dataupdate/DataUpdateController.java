@@ -158,6 +158,12 @@ public class DataUpdateController {
         return ApiResponse.success(dataUpdateService.getDividendCoverage());
     }
 
+    @GetMapping("/coverage/bidask")
+    @Operation(summary = "内外盘数据覆盖率")
+    public ApiResponse<Map<String, Object>> getBidaskCoverage() {
+        return ApiResponse.success(dataUpdateService.getBidaskCoverage());
+    }
+
     @GetMapping("/missing-dividend-stats")
     @Operation(summary = "分红数据完整性统计")
     public ApiResponse<Map<String, Object>> getMissingDividendStats() {

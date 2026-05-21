@@ -172,7 +172,23 @@ public class FactorService {
                 // 新增情绪因子 (2026-04-16)
                 new String[]{"LIMIT_UP_COUNT", "涨停次数", "近20日涨停次数（涨跌幅>=9.8%）", "SENTIMENT"},
                 new String[]{"TURNOVER_ANOMALY", "换手率异常度", "近5日均换手率/60日均换手率，反映关注度突变", "SENTIMENT"},
-                new String[]{"VOLUME_SURPRISE", "成交量惊喜", "近5日均量/20日均量的自然对数，反映资金涌入程度", "SENTIMENT"}
+                new String[]{"VOLUME_SURPRISE", "成交量惊喜", "近5日均量/20日均量的自然对数，反映资金涌入程度", "SENTIMENT"},
+                // DMI方向指标 (2026-05-21 修复 author=000000 问题)
+                new String[]{"PLUS_DI14", "DMI上升方向指标", "14日+DI，衡量上涨趋势强度，+DI>25配合ADX>25确认强趋势", "TECHNICAL"},
+                new String[]{"MINUS_DI14", "DMI下降方向指标", "14日-DI，衡量下跌趋势强度，-DI>+DI看空", "TECHNICAL"},
+                new String[]{"DX14", "方向移动指数", "14日DX，多空分歧程度，值越大分歧越大", "TECHNICAL"},
+                new String[]{"ADX14", "平均方向移动指数", "14日ADX，趋势强度终极指标，>25强趋势，<20震荡", "TECHNICAL"},
+                new String[]{"ADX20", "平均方向移动指数(长周期)", "20日ADX，长周期版，更稳定，判断中长期趋势", "TECHNICAL"},
+                // SAR/KDJ扩展/BOLL扩展/均线排列/支撑阻力 (2026-05-17)
+                new String[]{"SAR", "抛物转向指标", "抛物线转向指标，判断趋势反转和止损点", "TECHNICAL"},
+                new String[]{"KDJ_D", "随机指标D线", "KDJ指标D线（慢速随机），衡量超买超卖", "TECHNICAL"},
+                new String[]{"KDJ_J", "随机指标J线", "KDJ指标J线（快速敏感），极端值提示反转", "TECHNICAL"},
+                new String[]{"BOLL_UPPER", "布林带上轨", "20日布林带上轨线（MA+2σ）", "TECHNICAL"},
+                new String[]{"BOLL_LOWER", "布林带下轨", "20日布林带下轨线（MA-2σ）", "TECHNICAL"},
+                new String[]{"BOLL_WIDTH", "布林带宽度", "(上轨-下轨)/中轨×100，衡量波动率", "TECHNICAL"},
+                new String[]{"MA_ALIGNMENT", "均线多头排列", "5/10/20/60日均线向上排列程度，0-100打分", "TECHNICAL"},
+                new String[]{"NEAR_RESISTANCE", "近阻力位幅度", "价格距离上方最近高点的距离比率", "TECHNICAL"},
+                new String[]{"NEAR_SUPPORT", "近支撑位幅度", "价格距离下方最近低点的距离比率", "TECHNICAL"}
         );
 
         for (String[] b : builtins) {

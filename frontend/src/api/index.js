@@ -260,6 +260,8 @@ export const dataUpdateApi = {
   // 退市清理
   getDelistedStocks: (inactiveDays = 30) => api.get('/data-update/delisted/list', { params: { inactiveDays } }),
   cleanDelistedStocks: (codes) => api.post('/data-update/delisted/clean', codes),
+  // 内外盘数据
+  getBidaskCoverage: () => api.get('/data-update/coverage/bidask'),
 };
 
 // ===== 研报数据 API =====

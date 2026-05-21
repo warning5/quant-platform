@@ -108,8 +108,8 @@ def _check_neodata_token(verbose=True):
         sys.exit(42)
 
 
-# 脚本启动时自动检查 token（首次 NeoData 调用前）
-_check_neodata_token(verbose=True)
+# 延迟检查：akshare 模式不用 NeoData，不该被 token 过期阻断。
+# 只在实际调用 NeoData 前调用 _check_neodata_token 检查。
 
 
 # ─── 工具函数 ────────────────────────────────────────────────────
@@ -1114,21 +1114,25 @@ def fetch_zt_data(date_str: str) -> list:
     import akshare as ak
     zt_rows = []
     try:
-        # 涨停强势池
-        df = ak.stock_zt_pool_strong_em(date=date_str)
+        # 涨停板行情（stock_zt_pool_em 是真正的涨停板，不含60日新高等非涨停）
+        df = ak.stock_zt_pool_em(date=date_str)
         if df is not None and not df.empty:
             for _, r in df.iterrows():
                 code = str(r.get("代码", "")).zfill(6)
                 zt_stat = str(r.get("涨停统计", ""))
+                lb_count = str(r.get("连板数", ""))
                 is_new = 1 if zt_stat.startswith("1/") else 0
+                reason = f"{zt_stat}" if zt_stat else "涨停"
+                if lb_count and lb_count != "nan":
+                    reason += f" 连板{lb_count}"
                 zt_rows.append([
                     code, to_date(date_str), code,
                     str(r.get("名称", "")),
                     to_float(r.get("最新价")), to_float(r.get("涨跌幅")),
-                    "zt", str(r.get("入选理由", ""))[:200], is_new,
+                    "zt", reason[:200], is_new,
                     datetime.datetime.now(),
                 ])
-            print(f"  涨停强势池: {len(zt_rows)} 条")
+            print(f"  涨停板: {len(df)} 条")
     except Exception as e:
         print(f"  涨停强势池获取失败: {e}")
 
@@ -1460,6 +1464,7 @@ def _fetch_batch_moneyflow_fallback(stocks: list, date_label: str):
 
 def run_neodata_moneyflow(args):
     """通过 NeoData 补全资金流向，支持双写 CH + MySQL（批量优化版）"""
+    _check_neodata_token(verbose=True)  # 实际调用 NeoData 前检查 token
     # 确定日期范围
     start_str = args.start_date or "2026-05-07"
     end_str = args.end_date or datetime.date.today().isoformat()
@@ -1645,6 +1650,7 @@ def run_neodata_refresh(args):
       python update_sentiment_data.py --moneyflow-refresh --refresh-codes 600519,000001  # 指定股票
       python update_sentiment_data.py --moneyflow-refresh --refresh-start 2026-01-01   # 指定起始月
     """
+    _check_neodata_token(verbose=True)  # 实际调用 NeoData 前检查 token
     # ── 确定日期范围 ─────────────────────────────────────────────
     start_str = args.refresh_start  # e.g. "2025-11-01"
     end_str = datetime.date.today().isoformat()
