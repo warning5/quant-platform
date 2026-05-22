@@ -324,7 +324,7 @@ public class DataUpdateService {
                     task.setCurrentStep(bidaskOk ? "采集完成" : "采集失败");
                     // 成功后从数据库查询市场维度统计
                     if (bidaskOk) {
-                        LocalDate tradeDate = request.getEndDate() != null
+                        LocalDate tradeDate = (request.getEndDate() != null && !request.getEndDate().isEmpty())
                             ? LocalDate.parse(request.getEndDate()) : LocalDate.now();
                         task.setBidAskStats(loadBidAskStats(tradeDate));
                         broadcastStatus(task);
