@@ -11,6 +11,7 @@ import com.quant.platform.stock.analysis.mapper.AnalysisChMapper;
 import com.quant.platform.stock.analysis.mapper.BidAskMapper;
 import com.quant.platform.stock.analysis.mapper.NewsMapper;
 import com.quant.platform.stock.analysis.mapper.StockAnalysisMapper;
+import com.quant.platform.stock.service.ClickHouseStockService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -44,6 +45,8 @@ public class AnalysisService {
     private final BidAskMapper bidAskMapper;
 
     private final TradingSignalEngine tradingSignalEngine;
+
+    private final ClickHouseStockService clickHouseStockService;
     
     /**
      * 获取个股分析总览
@@ -324,8 +327,38 @@ public class AnalysisService {
         overview.setStopLossPrice(stopLossPriceStr);
         overview.setConfidenceLevel(calcConfidenceLevel(fundamentalSignal, researchSignal));
 
-        log.info("个股分析完成: code={}, totalScore={}, action={}",
-                code, overview.getTotalScore(), overview.getAction());
+        // ========== P0-P2 新增逻辑 ==========
+
+        // 7.4 多级目标价：第二目标价（估值回归位）+ 极端目标价（PB=1x）
+        if (currentPrice != null) {
+            // 第二目标价：基于PE分位均值回归估算
+            // 公式：当前价 × (合理PE / 当前PE)，合理PE取行业中性值
+            BigDecimal target2 = calcTargetPrice2(currentPrice, fundamentalSignal);
+            overview.setTargetPrice2(target2 != null ? target2.setScale(2, RoundingMode.HALF_UP).toString() : null);
+
+            // 极端目标价：PB=1x 极端估值
+            BigDecimal extremeTgt = calcExtremeTargetPrice(currentPrice, fundamentalSignal, stockInfo);
+            overview.setExtremeTargetPrice(extremeTgt != null ? extremeTgt.setScale(2, RoundingMode.HALF_UP).toString() : null);
+        }
+
+        // 7.5 分批执行方案
+        overview.setExecutionPlan(buildExecutionPlan(signal, currentPrice, targetPriceStr, stopLossPriceStr,
+                overview.getTargetPrice2()));
+
+        // 7.6 三方分析师独立评分（保守/中性/激进）
+        calcMultiAnalystScores(overview, techSignal, moneySignal, sentimentSignal, fundamentalSignal,
+                isBlueChip, currentPrice, supportPrice, resistancePrice);
+
+        // 7.7 尾部风险暴露度计算（传入 code 用于动态计算）
+        overview.setTailRisks(buildTailRisks(code, fundamentalSignal, stockInfo, currentPrice));
+
+        // 7.8 催化剂追踪矩阵
+        overview.setCatalysts(buildCatalysts(code, fundamentalSignal, sentimentSignal, researchSignal));
+
+        log.info("个股分析完成: code={}, totalScore={}, action={}, tailRisks={}, catalysts={}",
+                code, overview.getTotalScore(), overview.getAction(),
+                overview.getTailRisks() != null ? overview.getTailRisks().size() : 0,
+                overview.getCatalysts() != null ? overview.getCatalysts().size() : 0);
 
         return overview;
     }
@@ -2900,6 +2933,535 @@ public class AnalysisService {
     }
 
     /**
+     * P1: 第二目标价 — PE均值回归估算
+     * 公式：当前价 × (合理PE / 当前PE)
+     * 合理PE取：若PE分位>80%则取中位数PE，若PE分位<20%则取当前PE，否则取均值
+     */
+    private BigDecimal calcTargetPrice2(BigDecimal currentPrice, FundamentalSignal fs) {
+        if (fs == null || fs.getPeTtm() == null || fs.getPeTtm().doubleValue() <= 0) return null;
+        double curPE = fs.getPeTtm().doubleValue();
+        double pePct = fs.getPePercentile() != null ? fs.getPePercentile().doubleValue() : 50;
+
+        // 合理PE：高估值时回归中位，低估值时保持
+        double fairPE;
+        if (pePct > 80) fairPE = curPE * 0.5;       // 极端高估→腰斩
+        else if (pePct > 60) fairPE = curPE * 0.65;  // 偏高→回落35%
+        else if (pePct > 40) fairPE = curPE * 0.85;  // 中性略高
+        else fairPE = curPE * 1.0;                    // 低位保持
+
+        return currentPrice.multiply(BigDecimal.valueOf(fairPE / curPE));
+    }
+
+    /**
+     * P1: 极端目标价 — PB=1x 极端估值
+     */
+    private BigDecimal calcExtremeTargetPrice(BigDecimal currentPrice, FundamentalSignal fs,
+                                              Map<String, Object> stockInfo) {
+        if (fs == null || fs.getPb() == null || fs.getPb().doubleValue() <= 0) return null;
+        double curPB = fs.getPb().doubleValue();
+        if (curPB <= 1.0) return currentPrice; // 已经破净，不再跌
+
+        return currentPrice.multiply(BigDecimal.valueOf(1.0 / curPB));
+    }
+
+    /**
+     * P2: 分批执行方案
+     * 根据操作方向（买入/卖出）生成多批操作指令
+     */
+    private String buildExecutionPlan(TradingSignal signal, BigDecimal currentPrice,
+                                       String targetPrice, String stopLossPrice, String targetPrice2) {
+        if (signal == null || signal.getAction() == null) return null;
+        String action = signal.getAction();
+
+        if ("CLEAR".equals(action) || "REDUCE".equals(action)) {
+            // 卖出执行方案
+            StringBuilder sb = new StringBuilder();
+            sb.append("第一批60%立即卖出");
+            if (targetPrice != null) sb.append("；第二批25%反弹至").append(targetPrice).append("卖出");
+            if (targetPrice2 != null) sb.append("，跌破").append(targetPrice2).append("清仓剩余");
+            else sb.append("；第三批15%止损位").append(stopLossPrice != null ? stopLossPrice : "自定").append("清仓");
+            return sb.toString();
+        } else if ("BUY".equals(action) || "STRONG_BUY".equals(action)) {
+            StringBuilder sb = new StringBuilder();
+            sb.append("第一批40%当前价建仓");
+            if (stopLossPrice != null) sb.append("；第二批30%回调至").append(stopLossPrice).append("加仓");
+            if (targetPrice2 != null) sb.append("；第三批30%突破").append(targetPrice2).append("追击");
+            return sb.toString();
+        }
+        return "暂无明显买卖信号，建议观望";
+    }
+
+    /**
+     * P1: 三方分析师独立评分
+     * 保守分析师：重防守（估值+负债+现金流），轻进攻（趋势+情绪）
+     * 中性分析师：四维度均衡加权（当前评分体系）
+     * 激进分析师：重进攻（趋势+资金+情绪），轻防守（估值容忍度高）
+     * 每方输出0-10分的综合评分 + 仓位建议 + 一句话描述
+     */
+    private void calcMultiAnalystScores(AnalysisOverview overview, TechSignal tech,
+                                         MoneyFlowSignal money, SentimentSignal sentiment,
+                                         FundamentalSignal fundamental, boolean isBlueChip,
+                                         BigDecimal currentPrice, BigDecimal supportPrice,
+                                         BigDecimal resistancePrice) {
+        try {
+            // === 保守分析师：防守导向 ===
+            int conservativeScore = 5; // 起点5分
+            if (fundamental != null) {
+                // 估值惩罚（高PE高PB=扣分，低PE低PB=加分）
+                if (fundamental.getPeTtm() != null) {
+                    double pe = fundamental.getPeTtm().doubleValue();
+                    if (pe > 100) conservativeScore -= 3;
+                    else if (pe > 50) conservativeScore -= 2;
+                    else if (pe > 30) conservativeScore -= 1;
+                    else if (pe < 10) conservativeScore += 2;
+                    else if (pe < 15) conservativeScore += 1;
+                }
+                if (fundamental.getPb() != null) {
+                    double pb = fundamental.getPb().doubleValue();
+                    if (pb > 8) conservativeScore -= 2;
+                    else if (pb > 5) conservativeScore -= 1;
+                    else if (pb < 1) conservativeScore += 2;
+                    else if (pb < 2) conservativeScore += 1;
+                }
+                // 资产负债率
+                if (fundamental.getDebtRatio() != null) {
+                    double dr = fundamental.getDebtRatio().doubleValue();
+                    if (dr > 80) conservativeScore -= 2;
+                    else if (dr > 60) conservativeScore -= 1;
+                    else if (dr < 30) conservativeScore += 1;
+                }
+                // PE分位高=扣分
+                if (fundamental.getPePercentile() != null) {
+                    double pct = fundamental.getPePercentile().doubleValue();
+                    if (pct > 90) conservativeScore -= 2;
+                    else if (pct > 70) conservativeScore -= 1;
+                    else if (pct < 20) conservativeScore += 1;
+                }
+            }
+            // 技术面微弱加分（保守派不太看技术）
+            if (tech != null && "BUY".equals(tech.getChanSignal())) conservativeScore += 1;
+            conservativeScore = Math.max(1, Math.min(10, conservativeScore));
+            overview.setConservativeScore(conservativeScore);
+
+            // 保守仓位：评分≤3→清仓，≤5→10-15%，≤6→20-25%，>6→30%
+            int conservativePos;
+            if (conservativeScore <= 3) conservativePos = 0;
+            else if (conservativeScore <= 5) conservativePos = 12;
+            else if (conservativeScore <= 6) conservativePos = 22;
+            else conservativePos = 30;
+            overview.setConservativePosition(conservativePos + "%");
+            overview.setConservativeDesc(conservativeScore <= 3 ? "极端保守，建议空仓" :
+                conservativeScore <= 5 ? "偏保守，低仓试探" :
+                conservativeScore <= 6 ? "谨慎乐观，适度参与" : "相对看好，中仓持有");
+
+            // === 中性分析师：当前评分归一化到10分 ===
+            int totalScore = overview.getTotalScore() != null ? overview.getTotalScore() : 50;
+            int neutralScore = Math.max(1, Math.min(10, (int) Math.round(totalScore / 13.5))); // 135→10
+            overview.setNeutralScore(neutralScore);
+            int neutralPos = overview.getPosition() != null ? overview.getPosition() : 30;
+            overview.setNeutralPosition(neutralPos + "%");
+            overview.setNeutralDesc(neutralScore >= 7 ? "四维度均衡看多" :
+                neutralScore >= 4 ? "中性偏谨慎" : "结构性问题需警惕");
+
+            // === 激进分析师：进攻导向 ===
+            int aggressiveScore = 5;
+            if (tech != null) {
+                // 趋势加分
+                if ("BULLISH".equals(tech.getTrend())) aggressiveScore += 2;
+                else if ("SIDEWAYS".equals(tech.getTrend())) aggressiveScore += 1;
+                if ("BUY".equals(tech.getChanSignal())) aggressiveScore += 1;
+                // 量能加分
+                if (tech.getVolumeRatio() != null && tech.getVolumeRatio().doubleValue() > 1.5) aggressiveScore += 1;
+            }
+            if (fundamental != null) {
+                // 增速加分（激进派重成长）
+                if (fundamental.getRevenueYoy() != null) {
+                    double revYoy = fundamental.getRevenueYoy().doubleValue();
+                    if (revYoy > 30) aggressiveScore += 2;
+                    else if (revYoy > 15) aggressiveScore += 1;
+                    else if (revYoy < -10) aggressiveScore -= 2;
+                }
+                if (fundamental.getNetProfitYoy() != null) {
+                    double npYoy = fundamental.getNetProfitYoy().doubleValue();
+                    if (npYoy > 50) aggressiveScore += 2;
+                    else if (npYoy > 20) aggressiveScore += 1;
+                    else if (npYoy < -20) aggressiveScore -= 2;
+                }
+                // 估值容忍（高PE不减分，低PE加分）
+                if (fundamental.getPeTtm() != null) {
+                    double pe = fundamental.getPeTtm().doubleValue();
+                    if (pe < 15) aggressiveScore += 1;
+                    // PE>100 不减分（激进派看重成长而非当前估值）
+                }
+            }
+            if (money != null) {
+                if (money.getNetMain() != null && money.getNetMain().doubleValue() > 1e8) aggressiveScore += 1;
+            }
+            aggressiveScore = Math.max(1, Math.min(10, aggressiveScore));
+            overview.setAggressiveScore(aggressiveScore);
+
+            int aggressivePos;
+            if (aggressiveScore >= 8) aggressivePos = 70;
+            else if (aggressiveScore >= 6) aggressivePos = 50;
+            else if (aggressiveScore >= 4) aggressivePos = 30;
+            else aggressivePos = 10;
+            overview.setAggressivePosition(aggressivePos + "%");
+            overview.setAggressiveDesc(aggressiveScore >= 8 ? "强烈看多，重仓出击" :
+                aggressiveScore >= 6 ? "看好成长，中等仓位" :
+                aggressiveScore >= 4 ? "谨慎参与，轻仓观察" : "回避风险");
+
+        } catch (Exception e) {
+            log.warn("三方分析师评分计算失败: code={}, error={}", overview.getCode(), e.getMessage());
+        }
+    }
+
+    /**
+     * P0: 尾部风险暴露度表（动态计算版）
+     * 概率/影响/潜在跌幅均基于实际数据计算，不再硬编码
+     */
+    private List<TailRisk> buildTailRisks(String code, FundamentalSignal fs,
+                                           Map<String, Object> stockInfo,
+                                           BigDecimal currentPrice) {
+        List<TailRisk> risks = new ArrayList<>();
+        if (fs == null) return risks;
+
+        // 动态参数：市值 + CH 历史波动率
+        BigDecimal totalMarketCap = (stockInfo != null && stockInfo.get("totalMarketCap") != null)
+                ? new BigDecimal(stockInfo.get("totalMarketCap").toString()) : null;
+        Double annualVol = null;
+        try { annualVol = clickHouseStockService.getHistoricalVolatility(code); } catch (Exception ignore) {}
+        String impactLevel  = calcImpactLevel(totalMarketCap);
+        String drawdown    = calcPotentialDrawdown(annualVol, totalMarketCap);
+
+        // 1. 估值泡沫风险（PE>100且PE分位>80%）
+        if (fs.getPeTtm() != null && fs.getPePercentile() != null) {
+            double pe = fs.getPeTtm().doubleValue();
+            double pePct = fs.getPePercentile().doubleValue();
+            if (pe > 100 && pePct > 80) {
+                // 概率：PE 越高、分位越极端 → 概率越大
+                double peScore = Math.min(1.0, pe / 300.0);
+                double pctScore = pePct / 100.0;
+                double comb = (peScore + pctScore) / 2.0;
+                double prob = 5.0 + comb * 18.0;
+                prob = Math.max(3.0, Math.min(25.0, prob));
+                int pLow = (int) Math.floor(prob - 1);
+                int pHigh = (int) Math.ceil(prob + 1);
+                pLow = Math.max(2, Math.min(24, pLow));
+                pHigh = Math.max(pLow + 1, Math.min(26, pHigh));
+                risks.add(new TailRisk("估值泡沫破裂",
+                        pLow + "-" + pHigh + "%",
+                        "毁灭性", drawdown,
+                        String.format("实际PE(%.0f)>100x阈值且分位(%.0f%%)>80%%阈值，估值泡沫信号强烈", pe, pePct),
+                        "PE=" + String.format("%.0f", pe) + "x，" + String.format("%.0f", pePct) + "%历史分位",
+                        "VALUATION"));
+            } else if (pe > 50 && pePct > 70) {
+                double prob = 4.0 + (pePct - 70) / 30.0 * 10.0;
+                prob = Math.max(3.0, Math.min(20.0, prob));
+                int pLow = (int) Math.floor(prob - 1);
+                int pHigh = (int) Math.ceil(prob + 1);
+                pLow = Math.max(2, Math.min(19, pLow));
+                pHigh = Math.max(pLow + 1, Math.min(21, pHigh));
+                risks.add(new TailRisk("估值回归压力",
+                        pLow + "-" + pHigh + "%",
+                        impactLevel, drawdown,
+                        String.format("实际PE(%.0f)>50x阈值且分位(%.0f%%)>70%%阈值，存在均值回归压力", pe, pePct),
+                        "PE=" + String.format("%.0f", pe) + "x，分位" + String.format("%.0f", pePct) + "%",
+                        "VALUATION"));
+            }
+        }
+
+        // 2. 商誉减值风险
+        if (fs.getGoodwill() != null) {
+            double goodwill = fs.getGoodwill().doubleValue();
+            BigDecimal totalAssets = stockInfo != null && stockInfo.get("total_assets") != null
+                    ? new BigDecimal(stockInfo.get("total_assets").toString()) : null;
+            if (totalAssets != null && totalAssets.doubleValue() > 0) {
+                double ratio = goodwill / totalAssets.doubleValue();
+                String prob = calcTailRiskProbability(ratio, 0.15);
+                String dd   = (annualVol != null && annualVol > 0.01)
+                        ? calcPotentialDrawdown(annualVol * 1.2, null)  // 商誉减值跌幅更大
+                        : drawdown;
+                if (ratio > 0.2) {
+                    risks.add(new TailRisk("商誉减值", prob,
+                            "重大", dd,
+                            String.format("商誉占比(%.0f%%)逾20%%高阈值，收购标的业绩下滑即可触发减值", ratio * 100),
+                            "商誉" + formatAmount(goodwill) + "，占总资产" + String.format("%.0f", ratio * 100) + "%",
+                            "FINANCIAL"));
+                } else if (ratio > 0.1 && goodwill > 3e8) {
+                    risks.add(new TailRisk("商誉风险关注", prob,
+                            "中等", dd,
+                            String.format("商誉占比(%.0f%%)超10%%关注线且商誉>3亿，需持续跟踪", ratio * 100),
+                            "商誉" + formatAmount(goodwill) + "，占比" + String.format("%.0f", ratio * 100) + "%",
+                            "FINANCIAL"));
+                }
+            }
+        }
+
+        // 3. 存货崩塌风险
+        if (fs.getInventory() != null) {
+            double inventory = fs.getInventory().doubleValue();
+            BigDecimal totalAssets = stockInfo != null && stockInfo.get("total_assets") != null
+                    ? new BigDecimal(stockInfo.get("total_assets").toString()) : null;
+            if (totalAssets != null && totalAssets.doubleValue() > 0) {
+                double ratio = inventory / totalAssets.doubleValue();
+                String prob = calcTailRiskProbability(ratio, 0.15);
+                String dd  = (annualVol != null && annualVol > 0.01)
+                        ? calcPotentialDrawdown(annualVol * 1.3, null)
+                        : drawdown;
+                if (ratio > 0.25) {
+                    risks.add(new TailRisk("存货积压减值", prob,
+                            "严重", dd,
+                            String.format("存货占比(%.0f%%)逾25%%高阈值，需求萎缩或跌价均可触发减值", ratio * 100),
+                            "存货" + formatAmount(inventory) + "，占总资产" + String.format("%.0f", ratio * 100) + "%",
+                            "FINANCIAL"));
+                } else if (ratio > 0.15 && inventory > 10e8) {
+                    risks.add(new TailRisk("存货周转压力", prob,
+                            "中等", dd,
+                            String.format("存货占比(%.0f%%)超15%%关注线且规模>10亿，下游走弱即承压", ratio * 100),
+                            "存货" + formatAmount(inventory) + "，占比" + String.format("%.0f", ratio * 100) + "%",
+                            "FINANCIAL"));
+                }
+            }
+        }
+
+        // 4. 流动性危机
+        if (fs.getCurrentRatio() != null && fs.getQuickRatio() != null) {
+            double cr = fs.getCurrentRatio().doubleValue();
+            double qr = fs.getQuickRatio().doubleValue();
+            String liqProb = calcLiquidityProbability(cr, qr, 1.5, 0.8);
+            String dd       = (annualVol != null && annualVol > 0.01)
+                    ? calcPotentialDrawdown(annualVol * 2.0, totalMarketCap)  // 流动性危机跌幅更大
+                    : drawdown;
+            if (cr < 1.0 || qr < 0.5) {
+                risks.add(new TailRisk("流动性危机", liqProb,
+                        "致命", dd,
+                        String.format("流动比率(%.2f)<1.0低阈值或速动比率(%.2f)<0.5危机线，融资能力枯竭", cr, qr),
+                        "流动比率" + String.format("%.2f", cr) + "，速动比率" + String.format("%.2f", qr),
+                        "FINANCIAL"));
+            } else if (cr < 1.5 && qr < 0.8) {
+                risks.add(new TailRisk("流动性偏紧", liqProb,
+                        impactLevel, dd,
+                        String.format("流动比率(%.2f)<1.5安全线且速动比率(%.2f)<0.8警戒线，再融资渠道收窄", cr, qr),
+                        "流动比率" + String.format("%.2f", cr) + "，速动比率" + String.format("%.2f", qr),
+                        "FINANCIAL"));
+            }
+        }
+
+        // 5. 应收账款坏账风险
+        if (fs.getArTurnoverDays() != null) {
+            double arDays = fs.getArTurnoverDays().doubleValue();
+            String arProb = calcArProbability(arDays);
+            String dd     = (annualVol != null && annualVol > 0.01)
+                    ? calcPotentialDrawdown(annualVol * 1.8, null)
+                    : drawdown;
+            if (arDays > 180) {
+                risks.add(new TailRisk("应收账款坏账", arProb,
+                        "重大", dd,
+                        String.format("周转天数(%.0f)>180天高危线，大客户违约概率大幅上升", arDays),
+                        "应收账款周转天数" + String.format("%.0f", arDays) + "天",
+                        "FINANCIAL"));
+            } else if (arDays > 120) {
+                risks.add(new TailRisk("回款周期偏长", arProb,
+                        "中等", dd,
+                        String.format("周转天数(%.0f)>120天关注线，下游回款周期明显拉长", arDays),
+                        "应收账款周转天数" + String.format("%.0f", arDays) + "天",
+                        "FINANCIAL"));
+            }
+        }
+
+        return risks;
+    }
+
+    /**
+     * 格式化金额（亿/万）
+     */
+    private String formatAmount(double amount) {
+        if (amount >= 1e8) return String.format("%.1f亿", amount / 1e8);
+        if (amount >= 1e4) return String.format("%.0f万", amount / 1e4);
+        return String.format("%.0f", amount);
+    }
+
+    // ============================================================
+    // 尾部风险动态计算 Helper
+    // ============================================================
+
+    /**
+     * 动态计算尾部风险发生概率
+     * 基准 3%（行业常态），财务指标距阈值越远概率越高，单因子最高 +18%
+     * 结果钳位 [2%, 25%]，输出格式 "X-Y%"
+     */
+    private String calcTailRiskProbability(double actual, double threshold) {
+        double distance = Math.max(0, (threshold - actual) / Math.max(threshold, 0.01));
+        double prob = 3.0 + distance * 18.0;
+        prob = Math.max(2.0, Math.min(25.0, prob));
+        int low  = Math.max(1,  Math.min(24, (int) Math.floor(prob) - 1));
+        int high = Math.max(2,  Math.min(25, (int) Math.ceil(prob) + 1));
+        return low + "-" + high + "%";
+    }
+
+    /**
+     * 动态计算尾部风险潜在跌幅
+     * 优先用 CH 历史年化波动率 × 危机乘数(1.5~2.5)
+     * CH 不可用则用市值分级经验值兜底
+     */
+    private String calcPotentialDrawdown(Double annualVol, BigDecimal totalMarketCap) {
+        if (annualVol != null && annualVol > 0.01) {
+            double ddLow  = annualVol * 1.5;
+            double ddHigh = annualVol * 2.5;
+            int lowPct  = Math.max(5,  Math.min(65, (int) Math.floor(ddLow  * 100)));
+            int highPct = Math.max(lowPct + 1, Math.min(70, (int) Math.ceil(ddHigh * 100)));
+            return lowPct + "-" + highPct + "%";
+        }
+        // 兜底：按市值分级
+        if (totalMarketCap == null) return "20-30%";
+        double cap = totalMarketCap.doubleValue();
+        if (cap > 1000e8) return "15-25%";
+        if (cap > 100e8)  return "20-35%";
+        return "30-50%";
+    }
+
+    /**
+     * 动态计算影响程度（基于总市值）
+     * 大市值 → 市场消化能力强 → 影响较小
+     */
+    private String calcImpactLevel(BigDecimal totalMarketCap) {
+        if (totalMarketCap == null) return "重大";
+        double cap = totalMarketCap.doubleValue();
+        if (cap > 1000e8) return "中等";
+        if (cap > 100e8)  return "重大";
+        return "致命";
+    }
+
+    /**
+     * 流动性危机专用：同时考虑流动比率和速动比率，取更危险者的概率
+     */
+    private String calcLiquidityProbability(double cr, double qr,
+                                             double thresholdCr, double thresholdQr) {
+        double distCr  = Math.max(0, (thresholdCr  - cr)  / Math.max(thresholdCr, 0.01));
+        double distQr  = Math.max(0, (thresholdQr  - qr)  / Math.max(thresholdQr, 0.01));
+        double dist    = Math.max(distCr, distQr);
+        double prob    = 3.0 + dist * 18.0;
+        prob = Math.max(2.0, Math.min(25.0, prob));
+        int low  = Math.max(1,  Math.min(24, (int) Math.floor(prob) - 1));
+        int high = Math.max(2,  Math.min(25, (int) Math.ceil(prob) + 1));
+        return low + "-" + high + "%";
+    }
+
+    /**
+     * 应收账款风险概率：周转天数越长 → 概率越高
+     * 基准 120 天，超过后每 60 天 +12% 概率，钳位 [2%, 25%]
+     */
+    private String calcArProbability(double arDays) {
+        double excess = Math.max(0, arDays - 120.0);
+        double prob = 3.0 + excess / 60.0 * 12.0;
+        prob = Math.max(2.0, Math.min(25.0, prob));
+        int low  = Math.max(1,  Math.min(24, (int) Math.floor(prob) - 1));
+        int high = Math.max(low + 1, Math.min(26, (int) Math.ceil(prob) + 1));
+        return low + "-" + high + "%";
+    }
+
+    // ============================================================
+
+    /**
+     * P0: 催化剂追踪矩阵
+     * 从基本面信号、事件面信号、研报信号提取正面/负面催化剂，双列展示
+     */
+    private List<CatalystItem> buildCatalysts(String code, FundamentalSignal fs,
+                                               SentimentSignal ss, ResearchSignal rs) {
+        List<CatalystItem> catalysts = new ArrayList<>();
+
+        // === 正面催化剂 ===
+        // 从基本面提取
+        if (fs != null) {
+            if (fs.getRevenueYoy() != null && fs.getRevenueYoy().doubleValue() > 20) {
+                catalysts.add(new CatalystItem("营收高速增长（+" + String.format("%.0f", fs.getRevenueYoy().doubleValue()) + "%）",
+                        "POSITIVE", "Q2维持同等增速", 4, "FINANCE"));
+            }
+            if (fs.getNetProfitYoy() != null && fs.getNetProfitYoy().doubleValue() > 30) {
+                catalysts.add(new CatalystItem("净利润大幅增长（+" + String.format("%.0f", fs.getNetProfitYoy().doubleValue()) + "%）",
+                        "POSITIVE", "盈利质量改善（扣非同步增长）", 5, "FINANCE"));
+            }
+            if (fs.getDeductedNpYoY() != null && fs.getDeductedNpYoY().doubleValue() > 30) {
+                catalysts.add(new CatalystItem("扣非净利润高速增长（+" + String.format("%.0f", fs.getDeductedNpYoY().doubleValue()) + "%）",
+                        "POSITIVE", "主业持续向好", 5, "FINANCE"));
+            }
+            if (fs.getRoe() != null && fs.getRoe().doubleValue() > 15) {
+                catalysts.add(new CatalystItem("ROE>15%高盈利质量",
+                        "POSITIVE", "ROE维持高位", 3, "FINANCE"));
+            }
+            if (fs.getOperatingCfToNp() != null && fs.getOperatingCfToNp().doubleValue() > 1.5) {
+                catalysts.add(new CatalystItem("经营现金流远超净利润",
+                        "POSITIVE", "现金流持续强劲", 3, "FINANCE"));
+            }
+        }
+
+        // 从事件面提取
+        if (ss != null) {
+            if (ss.getNewsPositive30d() > 0 && ss.getNewsSentimentBias() > 0.3) {
+                catalysts.add(new CatalystItem("近30日利好新闻占优（偏向" + String.format("%.0f", ss.getNewsSentimentBias() * 100) + "%）",
+                        "POSITIVE", "持续正面新闻催化市场关注", 3, "NEWS"));
+            }
+            if (ss.getResearchReportCount90d() > 5) {
+                catalysts.add(new CatalystItem("机构覆盖度提升（近90日" + ss.getResearchReportCount90d() + "篇研报）",
+                        "POSITIVE", "新增机构覆盖+买入评级", 3, "EVENT"));
+            }
+            if (ss.getFundHolderRatio() != null && ss.getFundHolderRatio().doubleValue() > 0.05) {
+                catalysts.add(new CatalystItem("基金持仓>5%流通盘",
+                        "POSITIVE", "机构持续加仓", 2, "EVENT"));
+            }
+        }
+
+        // 从研报提取
+        if (rs != null && rs.getLatestRating() != null) {
+            if ("买入".equals(rs.getLatestRating()) || "增持".equals(rs.getLatestRating())) {
+                catalysts.add(new CatalystItem("最新研报" + rs.getLatestRating() + "评级",
+                        "POSITIVE", "机构上调目标价", 3, "EVENT"));
+            }
+        }
+
+        // === 负面催化剂 ===
+        if (fs != null) {
+            if (fs.getPeTtm() != null && fs.getPeTtm().doubleValue() > 100) {
+                catalysts.add(new CatalystItem("PE>100x极度高估",
+                        "NEGATIVE", "业绩不及预期直接暴跌", 4, "VALUATION"));
+            } else if (fs.getPeTtm() != null && fs.getPeTtm().doubleValue() > 50) {
+                catalysts.add(new CatalystItem("PE>50x估值偏高",
+                        "NEGATIVE", "估值中枢下移或增长放缓", 3, "VALUATION"));
+            }
+            if (fs.getPePercentile() != null && fs.getPePercentile().doubleValue() > 80) {
+                catalysts.add(new CatalystItem("PE处于历史" + String.format("%.0f", fs.getPePercentile().doubleValue()) + "%分位高位",
+                        "NEGATIVE", "均值回归压力", 3, "VALUATION"));
+            }
+            if (fs.getDebtRatio() != null && fs.getDebtRatio().doubleValue() > 70) {
+                catalysts.add(new CatalystItem("资产负债率" + String.format("%.0f", fs.getDebtRatio().doubleValue()) + "%偏高",
+                        "NEGATIVE", "利率上行或融资收紧", 3, "FINANCE"));
+            }
+            if (fs.getRevenueYoy() != null && fs.getRevenueYoy().doubleValue() < -10) {
+                catalysts.add(new CatalystItem("营收大幅下滑（" + String.format("%.0f", fs.getRevenueYoy().doubleValue()) + "%）",
+                        "NEGATIVE", "持续下滑确认衰退趋势", 4, "FINANCE"));
+            }
+            if (fs.getDeductedNpYoY() != null && fs.getDeductedNpYoY().doubleValue() < -20) {
+                catalysts.add(new CatalystItem("扣非净利润大幅下滑",
+                        "NEGATIVE", "主业盈利恶化", 4, "FINANCE"));
+            }
+        }
+
+        // 从事件面提取
+        if (ss != null) {
+            if (ss.getNewsNegative30d() > 5 && ss.getNewsSentimentBias() < -0.3) {
+                catalysts.add(new CatalystItem("近30日风险新闻频现（偏向" + String.format("%.0f", ss.getNewsSentimentBias() * 100) + "%）",
+                        "NEGATIVE", "负面舆情持续发酵", 3, "NEWS"));
+            }
+            if (ss.getResearchReportCount90d() == 0) {
+                catalysts.add(new CatalystItem("近90日零研报覆盖",
+                        "NEGATIVE", "机构不关注=淘汰信号", 2, "EVENT"));
+            }
+        }
+
+        return catalysts;
+    }
+
+    /**
      * 信心水平：基于数据完整性评分（低/中/高）
      * 研报覆盖 + 基本面数据完整度 + 缠论信号
      */
@@ -2931,5 +3493,50 @@ public class AnalysisService {
         if (sentimentBias > 0.5) score += 2;       // 强烈利好偏向
         else if (sentimentBias < -0.5) score -= 1; // 强烈风险偏向
         return Math.max(0, Math.min(10, score));
+    }
+
+    /**
+     * 股东结构分析（Tab：股东结构）
+     * 返回：股东人数趋势 + 基金持仓明细 + 筹码集中度信号
+     */
+    public Map<String, Object> getShareholderStructure(String code) {
+        Map<String, Object> result = new HashMap<>();
+
+        try {
+            // 1. 股东人数历史（最近8期）
+            List<Map<String, Object>> history = stockAnalysisMapper.selectShareholderHistory(code);
+            result.put("shareholderHistory", history);
+
+            // 2. 基金持仓明细（最新期前10）
+            List<Map<String, Object>> fundHolders = stockAnalysisMapper.selectFundHolderTop(code);
+            result.put("fundHolders", fundHolders);
+
+            // 3. 筹码集中度信号
+            if (history != null && !history.isEmpty()) {
+                BigDecimal latestChange = (BigDecimal) history.get(0).get("change_pct");
+                Long latestCount = (Long) history.get(0).get("holder_count");
+                result.put("latestHolderCount", latestCount);
+                result.put("changePct", latestChange);
+
+                // 集中度判断
+                String concentration;
+                if (latestChange == null) concentration = "未知";
+                else if (latestChange.doubleValue() < -10) concentration = "高度集中（筹码快速收敛）";
+                else if (latestChange.doubleValue() < -3) concentration = "趋于集中（散户离场）";
+                else if (latestChange.doubleValue() > 5) concentration = "趋于分散（新散户进场）";
+                else if (latestChange.doubleValue() > 10) concentration = "高度分散（筹码大幅扩散）";
+                else concentration = "相对稳定";
+                result.put("concentration", concentration);
+            }
+
+            // 4. 基金持仓汇总
+            BigDecimal fundRatio = stockAnalysisMapper.selectFundHolderRatio(code);
+            result.put("totalFundRatio", fundRatio);
+        } catch (Exception e) {
+            log.warn("股东结构查询失败: code={}, error={}", code, e.getMessage());
+            result.put("error", e.getMessage());
+        }
+
+        return result;
     }
 }

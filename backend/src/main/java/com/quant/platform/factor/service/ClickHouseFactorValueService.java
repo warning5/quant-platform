@@ -54,6 +54,7 @@ public class ClickHouseFactorValueService {
     public java.util.List<com.quant.platform.factor.domain.FactorValue> findByFactorCodeAndDateRange(
             String factorCode, java.time.LocalDate startDate, java.time.LocalDate endDate) {
         if (!clickHouseConfig.isEnabled()) {
+            log.debug("[ClickHouse] 因子值查询已禁用, factorCode={}", factorCode);
             return List.of(); // 回退到 Mapper
         }
 
@@ -63,8 +64,12 @@ public class ClickHouseFactorValueService {
                 log.debug("[ClickHouse] 因子值范围查询命中: {} {}~{}", factorCode, startDate, endDate);
                 return result;
             }
+            log.warn("[ClickHouse] 因子值范围查询返回空: code={}, 范围={}~{}", factorCode, startDate, endDate);
         } catch (Exception e) {
-            log.warn("[ClickHouse] 因子值范围查询失败，回退: {}", e.getMessage());
+            log.error("[ClickHouse] 因子值范围查询异常: code={}, 范围={}~{}，错误: {}", 
+                    factorCode, startDate, endDate, e.getMessage());
+            // 重新抛出，让上游感知 CH 不可用，不要静默吞异常导致假阴性
+            throw new RuntimeException("ClickHouse 查询因子值失败: " + factorCode, e);
         }
         return List.of(); // 回退到 Mapper
     }
@@ -913,6 +918,147 @@ public class ClickHouseFactorValueService {
     private String escapeJson(String s) {
         if (s == null) return "";
         return s.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
+
+    /**
+     * 批量获取多因子的日度截面中位数（CH 侧聚合，避免拉取全量数据）
+     * @return Map<factorCode, Map<日期, 中位数>>
+     */
+    public Map<String, Map<java.time.LocalDate, Double>> getDailyMedians(
+            List<String> factorCodes, java.time.LocalDate startDate, java.time.LocalDate endDate) {
+        if (!clickHouseConfig.isEnabled() || factorCodes == null || factorCodes.isEmpty()) {
+            return Map.of();
+        }
+
+        String placeholders = factorCodes.stream()
+                .map(c -> "'" + c.replace("'", "''") + "'")
+                .collect(java.util.stream.Collectors.joining(","));
+
+        String sql = String.format("""
+                SELECT factor_code, calc_date, quantileExact(0.5)(factor_val) AS median_val
+                FROM stock.factor_value FINAL
+                WHERE factor_code IN (%s)
+                  AND calc_date >= '%s'
+                  AND calc_date <= '%s'
+                  AND factor_val IS NOT NULL
+                  AND factor_val = factor_val
+                GROUP BY factor_code, calc_date
+                ORDER BY factor_code, calc_date
+                """, placeholders, startDate.toString(), endDate.toString());
+
+        Map<String, Map<java.time.LocalDate, Double>> result = new java.util.LinkedHashMap<>();
+        try (Connection conn = getConnection();
+             java.sql.Statement stmt = conn.createStatement();
+             java.sql.ResultSet rs = stmt.executeQuery(sql)) {
+
+            while (rs.next()) {
+                String fc = rs.getString("factor_code");
+                java.time.LocalDate date = rs.getDate("calc_date").toLocalDate();
+                double medianVal = rs.getDouble("median_val");
+
+                result.computeIfAbsent(fc, k -> new java.util.LinkedHashMap<>())
+                        .put(date, medianVal);
+            }
+            log.info("[ClickHouse] 批量日度中位数查询完成: {} factors, {} dates total",
+                    result.size(), 
+                    result.values().stream().mapToInt(Map::size).sum());
+        } catch (Exception e) {
+            log.error("[ClickHouse] 批量日度中位数查询失败: factors={}, error={}", factorCodes, e.getMessage());
+            throw new RuntimeException("ClickHouse 批量日度中位数查询失败", e);
+        }
+        return result;
+    }
+
+    /**
+     * 批量获取多因子的日度截面 rank_value 中位数（CH 侧聚合）
+     * 用于权重优化等需要因子截面排名的场景
+     * @return Map<factorCode, Map<日期, rank_value中位数>>
+     */
+    public Map<String, Map<java.time.LocalDate, Double>> getDailyRankMedians(
+            List<String> factorCodes, java.time.LocalDate startDate, java.time.LocalDate endDate) {
+        if (!clickHouseConfig.isEnabled() || factorCodes == null || factorCodes.isEmpty()) {
+            return Map.of();
+        }
+
+        String placeholders = factorCodes.stream()
+                .map(c -> "'" + c.replace("'", "''") + "'")
+                .collect(java.util.stream.Collectors.joining(","));
+
+        String sql = String.format("""
+                SELECT factor_code, calc_date, quantileExact(0.5)(rank_value) AS median_val
+                FROM stock.factor_value FINAL
+                WHERE factor_code IN (%s)
+                  AND calc_date >= '%s'
+                  AND calc_date <= '%s'
+                  AND rank_value IS NOT NULL
+                  AND rank_value = rank_value
+                GROUP BY factor_code, calc_date
+                ORDER BY factor_code, calc_date
+                """, placeholders, startDate.toString(), endDate.toString());
+
+        Map<String, Map<java.time.LocalDate, Double>> result = new java.util.LinkedHashMap<>();
+        try (Connection conn = getConnection();
+             java.sql.Statement stmt = conn.createStatement();
+             java.sql.ResultSet rs = stmt.executeQuery(sql)) {
+
+            while (rs.next()) {
+                String fc = rs.getString("factor_code");
+                java.time.LocalDate date = rs.getDate("calc_date").toLocalDate();
+                double medianVal = rs.getDouble("median_val");
+
+                result.computeIfAbsent(fc, k -> new java.util.LinkedHashMap<>())
+                        .put(date, medianVal);
+            }
+            log.info("[ClickHouse] 批量日度 rank 中位数查询完成: {} factors, {} dates total",
+                    result.size(),
+                    result.values().stream().mapToInt(Map::size).sum());
+        } catch (Exception e) {
+            log.error("[ClickHouse] 批量日度 rank 中位数查询失败: factors={}, error={}", factorCodes, e.getMessage());
+            throw new RuntimeException("ClickHouse 批量日度 rank 中位数查询失败", e);
+        }
+        return result;
+    }
+
+    /**
+     * 获取因子最新数据日期
+     */
+    public java.time.LocalDate getLatestDate(String factorCode) {
+        if (!clickHouseConfig.isEnabled() || factorCode == null) return null;
+        String sql = String.format(
+                "SELECT max(calc_date) FROM stock.factor_value FINAL WHERE factor_code='%s'",
+                factorCode.replace("'", "''"));
+        try (Connection conn = getConnection();
+             java.sql.Statement stmt = conn.createStatement();
+             java.sql.ResultSet rs = stmt.executeQuery(sql)) {
+            if (rs.next()) {
+                java.sql.Date d = rs.getDate(1);
+                return d != null ? d.toLocalDate() : null;
+            }
+        } catch (Exception e) {
+            log.warn("[ClickHouse] getLatestDate 查询失败: code={}, error={}", factorCode, e.getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * 获取因子有数据的所有股票代码
+     */
+    public java.util.Set<String> getDistinctSymbols(String factorCode) {
+        if (!clickHouseConfig.isEnabled() || factorCode == null) return java.util.Set.of();
+        String sql = String.format(
+                "SELECT DISTINCT symbol FROM stock.factor_value FINAL WHERE factor_code='%s'",
+                factorCode.replace("'", "''"));
+        java.util.Set<String> symbols = new java.util.HashSet<>();
+        try (Connection conn = getConnection();
+             java.sql.Statement stmt = conn.createStatement();
+             java.sql.ResultSet rs = stmt.executeQuery(sql)) {
+            while (rs.next()) {
+                symbols.add(rs.getString("symbol"));
+            }
+        } catch (Exception e) {
+            log.warn("[ClickHouse] getDistinctSymbols 查询失败: code={}, error={}", factorCode, e.getMessage());
+        }
+        return symbols;
     }
 
     /** BigDecimal -> JSON 数值（null -> null） */

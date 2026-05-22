@@ -216,7 +216,7 @@ const neutralColumns = [
 ];
 
 // 主组件
-export function NewsEventTab({ data, code }) {
+export function NewsEventTab({ data, code, catalysts }) {
   if (!data) return <Empty description="暂无新闻数据，请先更新新闻数据" />;
   if (data.error) return <Alert type="warning" message={data.error} showIcon />;
 
@@ -361,6 +361,36 @@ export function NewsEventTab({ data, code }) {
           <Empty description="暂无其他新闻" />
         )}
       </Card>
+
+      {/* ── 催化剂追踪（从后端buildCatalysts提取）─────────────── */}
+      {catalysts && catalysts.length > 0 && (
+        <Card size="small" title={<span><Text strong>催化剂追踪</Text></span>} style={{ marginBottom: 16 }}>
+          <Row gutter={24}>
+            <Col span={11} style={{ paddingRight: 8 }}>
+              <Card size="small" title="🟢 正面催化剂" style={{ background: '#f6ffed', border: 'none' }} styles={{ body: { padding: 8 } }}>
+                {catalysts.filter(c => c.type === 'POSITIVE').map((c, i) => (
+                  <div key={i} style={{ marginBottom: 6, padding: '4px 8px', background: '#fff', borderRadius: 4, fontSize: 13 }}>
+                    <Text strong>{c.description}</Text>
+                    <div style={{ fontSize: 11, color: '#666' }}>触发：{c.trigger} | 重要度：{'★'.repeat(c.importance)}{'☆'.repeat(5 - c.importance)}</div>
+                  </div>
+                ))}
+                {catalysts.filter(c => c.type === 'POSITIVE').length === 0 && <Text type="secondary" style={{ fontSize: 12 }}>暂无</Text>}
+              </Card>
+            </Col>
+            <Col span={11} style={{ paddingLeft: 8 }}>
+              <Card size="small" title="🔴 风险事件" style={{ background: '#fff2f0', border: 'none' }} styles={{ body: { padding: 8 } }}>
+                {catalysts.filter(c => c.type === 'NEGATIVE').map((c, i) => (
+                  <div key={i} style={{ marginBottom: 6, padding: '4px 8px', background: '#fff', borderRadius: 4, fontSize: 13 }}>
+                    <Text strong>{c.description}</Text>
+                    <div style={{ fontSize: 11, color: '#666' }}>触发：{c.trigger} | 重要度：{'★'.repeat(c.importance)}{'☆'.repeat(5 - c.importance)}</div>
+                  </div>
+                ))}
+                {catalysts.filter(c => c.type === 'NEGATIVE').length === 0 && <Text type="secondary" style={{ fontSize: 12 }}>暂无</Text>}
+              </Card>
+            </Col>
+          </Row>
+        </Card>
+      )}
 
       {/* 数据说明 */}
       <div style={{ fontSize: 11, color: '#999', marginTop: 12, paddingLeft: 4 }}>

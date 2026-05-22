@@ -487,6 +487,42 @@ public class DataUpdateService {
             if (!ok) allSuccess = false;
         }
 
+        // ─── Part 1.5: 更新指数日线（仅非 dailyOnly 时）────────────
+        if (!request.isDailyOnly() && !"CANCELLED".equals(task.getStatus())) {
+            broadcastLog(taskId, "\n========== 指数日线 ==========");
+            task.setCurrentStep("指数日线");
+            task.setProcessedStocks(0);
+            task.setTotalStocks(10); // 10个指数
+            task.setProgress(0);
+            broadcastStatus(task);
+
+            List<String> indexCmd = new ArrayList<>();
+            indexCmd.add(pythonPath);
+            indexCmd.add("-u");
+            indexCmd.add("update_index_daily_baostock.py");
+            // 透传日期参数
+            String idxStart = request.getStartDate();
+            String idxEnd = request.getEndDate();
+            // 指数默认用更长的历史起始
+            if ((idxStart == null || idxStart.isEmpty()) && (idxEnd == null || idxEnd.isEmpty())) {
+                java.time.LocalDate today = java.time.LocalDate.now();
+                idxStart = "2018-01-02";
+                idxEnd = today.toString();
+            }
+            if (idxStart != null && !idxStart.isEmpty()) {
+                indexCmd.add("--start-date");
+                indexCmd.add(idxStart);
+            }
+            if (idxEnd != null && !idxEnd.isEmpty()) {
+                indexCmd.add("--end-date");
+                indexCmd.add(idxEnd);
+            }
+            if (request.isForce()) indexCmd.add("--force");
+
+            boolean indexOk = runSingleScript(taskId, task, indexCmd, "指数日线");
+            if (!indexOk) allSuccess = false;
+        }
+
         broadcastLog(taskId, "\n========== 全部完成 ==========");
         if (!"CANCELLED".equals(task.getStatus())) {
             task.setStatus(allSuccess ? "SUCCESS" : "FAILED");

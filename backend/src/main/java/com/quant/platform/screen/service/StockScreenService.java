@@ -2,7 +2,7 @@ package com.quant.platform.screen.service;
 
 import com.quant.platform.factor.domain.FactorValue;
 import com.quant.platform.factor.mapper.FactorDefinitionMapper;
-import com.quant.platform.factor.mapper.FactorValueMapper;
+import com.quant.platform.factor.service.ClickHouseFactorValueService;
 import com.quant.platform.market.domain.MarketDailyBar;
 import com.quant.platform.market.service.MarketDataService;
 import com.quant.platform.screen.dto.ScreenRequest;
@@ -31,7 +31,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class StockScreenService {
 
-    private final FactorValueMapper factorValueMapper;
+    private final ClickHouseFactorValueService clickHouseFactorValueService;
     private final FactorDefinitionMapper factorDefMapper;
     private final MarketDataService marketDataService;
     private final PriceAdvisorService priceAdvisorService;
@@ -173,10 +173,7 @@ public class StockScreenService {
             List<FactorValue> crossSection = Collections.emptyList();
             LocalDate searchDate = screenDate;
             for (int i = 0; i <= 5; i++) {
-                crossSection = factorValueMapper.selectList(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<FactorValue>()
-                        .eq(FactorValue::getFactorCode, code)
-                        .eq(FactorValue::getCalcDate, searchDate)
-                        .orderByAsc(FactorValue::getSymbol));
+                crossSection = clickHouseFactorValueService.findByFactorCodeAndDate(code, searchDate);
                 if (!crossSection.isEmpty()) break;
                 searchDate = searchDate.minusDays(1);
             }
@@ -525,15 +522,10 @@ public class StockScreenService {
         List<String> keyCodes = List.of("MOM20", "VOL20", "SIZE", "MOM60");
         LocalDate latest = null;
         for (String code : keyCodes) {
-            // 使用MyBatis-Plus查询最大日期
-            var wrapper = new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<FactorValue>();
-            wrapper.eq(FactorValue::getFactorCode, code)
-                    .orderByDesc(FactorValue::getCalcDate)
-                    .last("LIMIT 1");
-            FactorValue fv = factorValueMapper.selectOne(wrapper);
-            if (fv != null && fv.getCalcDate() != null) {
-                if (latest == null || fv.getCalcDate().isBefore(latest)) {
-                    latest = fv.getCalcDate();
+            LocalDate d = clickHouseFactorValueService.getLatestDate(code);
+            if (d != null) {
+                if (latest == null || d.isBefore(latest)) {
+                    latest = d;
                 }
             }
         }
@@ -547,14 +539,10 @@ public class StockScreenService {
         if (factors == null || factors.isEmpty()) return LocalDate.now().minusDays(1);
         LocalDate latest = null;
         for (ScreenRequest.FactorWeight fw : factors) {
-            var wrapper = new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<FactorValue>();
-            wrapper.eq(FactorValue::getFactorCode, fw.getFactorCode())
-                    .orderByDesc(FactorValue::getCalcDate)
-                    .last("LIMIT 1");
-            FactorValue fv = factorValueMapper.selectOne(wrapper);
-            if (fv != null && fv.getCalcDate() != null) {
-                if (latest == null || fv.getCalcDate().isBefore(latest)) {
-                    latest = fv.getCalcDate();
+            LocalDate d = clickHouseFactorValueService.getLatestDate(fw.getFactorCode());
+            if (d != null) {
+                if (latest == null || d.isBefore(latest)) {
+                    latest = d;
                 }
             }
         }

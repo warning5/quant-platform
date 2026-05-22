@@ -903,7 +903,7 @@ def fetch_moneyflow_em_hist_single(code: str, market: str = "", max_retries: int
            net_main, net_main_pct, net_huge, net_big, net_medium, net_small,
            update_time]
     klines[i] 逗号分隔:
-      [0]=日期 [1]=主力净流入 [2]=超大单 [3]=大单 [4]=中单 [5]=小单
+      [0]=日期 [1]=主力净流入(f51) [2]=小单(f52) [3]=中单(f53) [4]=大单(f54) [5]=超大单(f55)
       [6-10]=各档占比 [11]=收盘价 [12]=涨跌幅 [13]=成交量 [14]=成交额
     """
     import requests
@@ -960,11 +960,11 @@ def fetch_moneyflow_em_hist_single(code: str, market: str = "", max_retries: int
             # 日期格式：YYYY-MM-DD（不是 YYYYMMDD）
             date_str = parts[0]
             td = datetime.date.fromisoformat(date_str)
-            net_main     = to_float(parts[1])
-            net_huge     = to_float(parts[2])
-            net_big      = to_float(parts[3])
-            net_med      = to_float(parts[4])
-            net_sml      = to_float(parts[5])
+            net_main     = to_float(parts[1])   # f51 主力净流入
+            net_sml      = to_float(parts[2])   # f52 小单净流入
+            net_med      = to_float(parts[3])   # f53 中单净流入
+            net_big      = to_float(parts[4])   # f54 大单净流入
+            net_huge     = to_float(parts[5])   # f55 超大单净流入
             net_main_pct = to_float(parts[7]) if len(parts) > 7 else 0.0
             close        = to_float(parts[11])
             pct          = to_float(parts[12])
@@ -1915,11 +1915,24 @@ def process_single_date(args, date_str: str):
     today = datetime.date.today()
     try:
         req_date = datetime.date(int(date_str[:4]), int(date_str[4:6]), int(date_str[6:]))
-        if req_date > today:
-            print(f"[SKIP] 日期 {date_str} 是未来日期，跳过 (today={today.isoformat()})")
-            return
     except (ValueError, IndexError):
         print(f"[WARN] 无效日期格式: {date_str}，跳过")
+        return
+
+    if req_date > today:
+        print(f"[SKIP] 日期 {date_str} 是未来日期，跳过 (today={today.isoformat()})")
+        return
+
+    # 智能回退：当天 17:00 前数据未发布，自动用昨天
+    if req_date == today:
+        now = datetime.datetime.now()
+        if now.hour < 17:
+            yesterday = today - datetime.timedelta(days=1)
+            date_str = yesterday.strftime("%Y%m%d")
+            req_date = yesterday
+            print(f"[INFO] 当天 {now.hour:02d}:{now.minute:02d}，"
+                  f"情绪数据（龙虎榜/融资融券等）通常收盘后 ~17:00 发布，"
+                  f"自动回退到 {date_str[:4]}-{date_str[4:6]}-{date_str[6:]}")
 
     date_disp = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
     start_str = date_str

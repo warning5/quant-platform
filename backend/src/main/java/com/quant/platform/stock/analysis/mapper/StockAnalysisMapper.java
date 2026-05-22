@@ -164,4 +164,14 @@ public interface StockAnalysisMapper {
      * 返回：fundRatio（% of float）
      */
     BigDecimal selectFundHolderRatio(@Param("code") String code);
+
+    /**
+     * 股东结构：股东人数历史（最近8期）
+     */
+    List<Map<String, Object>> selectShareholderHistory(@Param("code") String code);
+
+    /**
+     * 股东结构：基金持仓明细（最新一期前10）
+     */
+    List<Map<String, Object>> selectFundHolderTop(@Param("code") String code);
 }

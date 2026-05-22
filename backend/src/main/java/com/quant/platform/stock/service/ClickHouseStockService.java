@@ -1129,4 +1129,66 @@ public class ClickHouseStockService {
             stmt.setNull(index, Types.BIGINT);
         }
     }
+
+    // ============================================================
+    // 历史波动率（用于尾部风险动态计算）
+    // ============================================================
+
+    /**
+     * 计算个股历史年化波动率
+     * 取最近 300 个交易日的日收益率，计算 stddev × √252
+     * @return 年化波动率（小数形式，如 0.25 = 25%），失败返回 null
+     */
+    public Double getHistoricalVolatility(String code) {
+        if (!clickHouseConfig.isEnabled()) {
+            log.debug("[ClickHouse] disabled，跳过波动率计算");
+            return null;
+        }
+        String chCode = normalizeCodeForCH(code);
+        // CH SQL: 用 neighbor 窗口函数取前一交易日收盘价，计算日收益率，再年化
+        String sql = """
+                WITH daily_ret AS (
+                    SELECT
+                        close / nullIf(neighbor(close, -1) OVER (ORDER BY trade_date), 0) - 1 AS ret
+                    FROM stock_daily
+                    WHERE code = ? AND trade_date >= today() - 400
+                )
+                SELECT stddevPop(ret) * sqrt(252) AS annual_vol
+                FROM daily_ret
+                WHERE ret IS NOT NULL AND abs(ret) < 0.25
+                """;
+        try (Connection conn = this.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, chCode);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    double vol = rs.getDouble(1);
+                    if (!rs.wasNull()) {
+                        log.debug("[ClickHouse] {} 年化波动率: {}%", code, String.format("%.1f", vol * 100));
+                        return vol;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[ClickHouse] 波动率计算失败({}): {}", code, e.getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * 将 A 股代码转为 CH 存储格式（无前缀无后缀，如 600519）
+     */
+    private String normalizeCodeForCH(String code) {
+        if (code == null) return null;
+        String c = code.trim().toLowerCase();
+        // 去掉 sh/sz/bj 前缀
+        if (c.matches("^(sh|sz|bj)\\d+")) {
+            return c.substring(2);
+        }
+        // 去掉 .SH/.SZ/.BJ 后缀
+        if (c.matches("^\\d+\\.(sh|sz|bj)$")) {
+            return c.split("\\.")[0];
+        }
+        return c;
+    }
 }

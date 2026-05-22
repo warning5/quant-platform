@@ -14,7 +14,7 @@
             padding: 20px;
         }
         .container {
-            max-width: 900px;
+            max-width: 960px;
             margin: 0 auto;
             background: #fff;
             border-radius: 12px;
@@ -28,257 +28,115 @@
             padding: 32px;
             text-align: center;
         }
-        .header h1 {
-            font-size: 24px;
-            font-weight: 600;
-            margin-bottom: 8px;
-        }
-        .header .subtitle {
-            font-size: 14px;
-            opacity: 0.9;
-        }
-        .header .meta {
-            margin-top: 12px;
-            font-size: 12px;
-            opacity: 0.8;
-        }
+        .header h1 { font-size: 24px; font-weight: 600; margin-bottom: 8px; }
+        .header .subtitle { font-size: 14px; opacity: 0.9; }
+        .header .meta { margin-top: 12px; font-size: 12px; opacity: 0.8; }
 
         /* 综合评分区 */
-        .score-section {
-            padding: 24px 32px;
-            border-bottom: 1px solid #eee;
-        }
-        .score-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 20px;
-        }
-        .score-big {
-            display: flex;
-            align-items: baseline;
-            gap: 8px;
-        }
-        .score-number {
-            font-size: 48px;
-            font-weight: 700;
-            color: #1a73e8;
-        }
-        .score-label {
-            font-size: 14px;
-            color: #666;
-        }
-        .score-badge {
-            display: inline-block;
-            padding: 6px 16px;
-            border-radius: 20px;
-            font-size: 14px;
-            font-weight: 600;
-        }
+        .score-section { padding: 24px 32px; border-bottom: 1px solid #eee; }
+        .score-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+        .score-big { display: flex; align-items: baseline; gap: 8px; }
+        .score-number { font-size: 48px; font-weight: 700; color: #1a73e8; }
+        .score-label { font-size: 14px; color: #666; }
+        .score-badge { display: inline-block; padding: 6px 16px; border-radius: 20px; font-size: 14px; font-weight: 600; }
         .badge-buy { background: #e8f5e9; color: #2e7d32; }
         .badge-hold { background: #fff3e0; color: #ef6c00; }
         .badge-reduce { background: #fce4ec; color: #c62828; }
         .badge-clear { background: #f3e5f5; color: #6a1b9a; }
 
-        .score-dimensions {
+        .score-dimensions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 16px; }
+        .dim-card { background: #f8f9fa; border-radius: 8px; padding: 16px; text-align: center; }
+        .dim-name { font-size: 12px; color: #666; margin-bottom: 4px; }
+        .dim-score { font-size: 24px; font-weight: 700; color: #333; }
+        .dim-bar { height: 6px; background: #e0e0e0; border-radius: 3px; margin-top: 8px; overflow: hidden; }
+        .dim-bar-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
+
+        /* 多级目标价 */
+        .price-grid {
             display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 16px;
-        }
-        .dim-card {
-            background: #f8f9fa;
+            grid-template-columns: repeat(6, 1fr);
+            gap: 0;
+            border: 1px solid #e0e0e0;
             border-radius: 8px;
-            padding: 16px;
-            text-align: center;
-        }
-        .dim-name {
-            font-size: 12px;
-            color: #666;
-            margin-bottom: 4px;
-        }
-        .dim-score {
-            font-size: 24px;
-            font-weight: 700;
-            color: #333;
-        }
-        .dim-bar {
-            height: 6px;
-            background: #e0e0e0;
-            border-radius: 3px;
-            margin-top: 8px;
             overflow: hidden;
+            margin-bottom: 16px;
         }
-        .dim-bar-fill {
-            height: 100%;
-            border-radius: 3px;
-            transition: width 0.3s;
-        }
+        .price-item { text-align: center; padding: 10px 8px; border-right: 1px solid #e0e0e0; }
+        .price-item:last-child { border-right: none; }
+        .price-label { font-size: 11px; color: #888; margin-bottom: 2px; }
+        .price-value { font-size: 20px; font-weight: 700; color: #333; line-height: 1; }
+        .price-sub { font-size: 10px; color: #aaa; margin-top: 2px; }
+
+        /* 三方分析师三角 */
+        .analyst-triangle { margin-top: 16px; padding: 16px; background: #f8f9fa; border-radius: 8px; }
+        .analyst-title { font-size: 12px; color: #888; margin-bottom: 8px; text-align: center; }
+        .analyst-grid { display: flex; justify-content: center; gap: 32px; text-align: center; }
 
         /* 模块区 */
-        .section {
-            padding: 24px 32px;
-            border-bottom: 1px solid #eee;
-        }
-        .section:last-child {
-            border-bottom: none;
-        }
-        .section-title {
-            font-size: 16px;
-            font-weight: 600;
-            color: #333;
-            margin-bottom: 16px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        .section-title .icon {
-            width: 28px;
-            height: 28px;
-            border-radius: 6px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 14px;
-        }
+        .section { padding: 24px 32px; border-bottom: 1px solid #eee; }
+        .section:last-child { border-bottom: none; }
+        .section-title { font-size: 16px; font-weight: 600; color: #333; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+        .section-title .icon { width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 14px; }
 
         /* 指标网格 */
-        .metric-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-            gap: 12px;
-        }
-        .metric-item {
-            background: #f8f9fa;
-            border-radius: 8px;
-            padding: 12px 16px;
-        }
-        .metric-label {
-            font-size: 11px;
-            color: #888;
-            margin-bottom: 2px;
-        }
-        .metric-value {
-            font-size: 16px;
-            font-weight: 600;
-            color: #333;
-        }
+        .metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+        .metric-item { background: #f8f9fa; border-radius: 8px; padding: 12px 16px; }
+        .metric-label { font-size: 11px; color: #888; margin-bottom: 2px; }
+        .metric-value { font-size: 16px; font-weight: 600; color: #333; }
         .metric-value.up { color: #d32f2f; }
         .metric-value.down { color: #2e7d32; }
 
+        /* 尾部风险表格 */
+        .risk-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .risk-table th { background: #f1f5f9; padding: 8px 12px; text-align: left; font-weight: 600; border-bottom: 2px solid #e2e8f0; }
+        .risk-table td { padding: 8px 12px; border-bottom: 1px solid #f1f5f9; }
+        .risk-table tr:hover td { background: #f8fafc; }
+
+        /* 催化剂矩阵 */
+        .catalyst-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .catalyst-col { border-radius: 8px; padding: 16px; }
+        .catalyst-bull { background: #e8f5e9; border: 1px solid #c8e6c9; }
+        .catalyst-bear { background: #ffebee; border: 1px solid #ffcdd2; }
+        .catalyst-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+        .catalyst-bull .catalyst-title { color: #2e7d32; }
+        .catalyst-bear .catalyst-title { color: #c62828; }
+        .catalyst-item { background: rgba(255,255,255,0.7); border-radius: 6px; padding: 10px 12px; margin-bottom: 8px; }
+        .catalyst-item:last-child { margin-bottom: 0; }
+        .catalyst-desc { font-size: 12px; font-weight: 600; color: #333; margin-bottom: 2px; }
+        .catalyst-trigger { font-size: 11px; color: #666; }
+
         /* 多空辩论 */
-        .debate-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 16px;
-        }
-        .debate-col {
-            border-radius: 8px;
-            padding: 16px;
-        }
-        .debate-bull {
-            background: #e8f5e9;
-            border: 1px solid #c8e6c9;
-        }
-        .debate-bear {
-            background: #ffebee;
-            border: 1px solid #ffcdd2;
-        }
-        .debate-title {
-            font-size: 14px;
-            font-weight: 600;
-            margin-bottom: 12px;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
+        .debate-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .debate-col { border-radius: 8px; padding: 16px; }
+        .debate-bull { background: #e8f5e9; border: 1px solid #c8e6c9; }
+        .debate-bear { background: #ffebee; border: 1px solid #ffcdd2; }
+        .debate-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; gap: 6px; }
         .debate-bull .debate-title { color: #2e7d32; }
         .debate-bear .debate-title { color: #c62828; }
-        .debate-item {
-            background: rgba(255,255,255,0.7);
-            border-radius: 6px;
-            padding: 10px 12px;
-            margin-bottom: 8px;
-        }
+        .debate-item { background: rgba(255,255,255,0.7); border-radius: 6px; padding: 10px 12px; margin-bottom: 8px; }
         .debate-item:last-child { margin-bottom: 0; }
-        .debate-rule {
-            font-size: 12px;
-            font-weight: 600;
-            color: #333;
-            margin-bottom: 2px;
-        }
-        .debate-desc {
-            font-size: 12px;
-            color: #555;
-        }
-        .debate-dim {
-            display: inline-block;
-            font-size: 10px;
-            padding: 1px 6px;
-            border-radius: 4px;
-            background: rgba(0,0,0,0.06);
-            color: #666;
-            margin-top: 4px;
-        }
-        .stars {
-            color: #ffc107;
-            font-size: 11px;
-            letter-spacing: 1px;
-        }
+        .debate-rule { font-size: 12px; font-weight: 600; color: #333; margin-bottom: 2px; }
+        .debate-desc { font-size: 12px; color: #555; }
+        .debate-dim { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 4px; background: rgba(0,0,0,0.06); color: #666; margin-top: 4px; }
+        .stars { color: #ffc107; font-size: 11px; letter-spacing: 1px; }
 
         /* 结论区 */
-        .conclusion {
-            background: #e3f2fd;
-            border-radius: 8px;
-            padding: 20px;
-            margin-top: 8px;
-        }
-        .conclusion-title {
-            font-size: 14px;
-            font-weight: 600;
-            color: #1565c0;
-            margin-bottom: 8px;
-        }
-        .conclusion-text {
-            font-size: 13px;
-            color: #333;
-            line-height: 1.8;
-        }
+        .conclusion { background: #e3f2fd; border-radius: 8px; padding: 20px; margin-top: 8px; }
+        .conclusion-title { font-size: 14px; font-weight: 600; color: #1565c0; margin-bottom: 8px; }
+        .conclusion-text { font-size: 13px; color: #333; line-height: 1.8; }
+        .execution-plan { background: #e0f7fa; border-radius: 6px; padding: 10px 12px; margin-top: 8px; font-size: 12px; color: #00695c; }
 
         /* 研报列表 */
-        .report-list {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-        .report-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 10px 12px;
-            background: #f8f9fa;
-            border-radius: 6px;
-            font-size: 12px;
-        }
-        .report-rating {
-            display: inline-block;
-            padding: 2px 8px;
-            border-radius: 4px;
-            font-size: 11px;
-            font-weight: 600;
-        }
+        .report-list { display: flex; flex-direction: column; gap: 8px; }
+        .report-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; background: #f8f9fa; border-radius: 6px; font-size: 12px; }
+        .report-rating { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
         .rating-buy { background: #e8f5e9; color: #2e7d32; }
         .rating-add { background: #e3f2fd; color: #1565c0; }
         .rating-neutral { background: #fff3e0; color: #ef6c00; }
         .rating-reduce { background: #ffebee; color: #c62828; }
 
         /* 页脚 */
-        .footer {
-            padding: 16px 32px;
-            text-align: center;
-            font-size: 11px;
-            color: #999;
-            background: #f8f9fa;
-        }
+        .footer { padding: 16px 32px; text-align: center; font-size: 11px; color: #999; background: #f8f9fa; }
 
         @media print {
             body { background: #fff; padding: 0; }
@@ -308,17 +166,82 @@
                 </span>
             </div>
         </div>
+
         <#if report.overview?? && report.overview.scoreDetails??>
         <div class="score-dimensions">
             <#list report.overview.scoreDetails as detail>
+                <#-- 计算比例，避免嵌套三元导致FreeMarker解析失败 -->
+                <#assign maxS = (detail.maxScore!1)!1>
+                <#assign score = (detail.score!0)!0>
+                <#assign ratio = (maxS > 0)?then(score / maxS, 0)>
+                <#assign pct = (ratio * 100)?string('0.0')>
+                <#assign barColor = (ratio > 0.6)?then('#4caf50', (ratio > 0.3)?then('#ff9800', '#f44336'))>
             <div class="dim-card">
                 <div class="dim-name">${detail.dimensionName!detail.dimension!'--'}</div>
-                <div class="dim-score">${detail.score!0}/${detail.maxScore!0}</div>
+                <div class="dim-score">${score}/${maxS}</div>
                 <div class="dim-bar">
-                    <div class="dim-bar-fill" style="width: ${(detail.maxScore!1 > 0)?then((detail.score!0 / detail.maxScore!1 * 100)?string('0.0'), '0')}%; background: ${(detail.score!0 / detail.maxScore!1 > 0.6)?then('#4caf50', (detail.score!0 / detail.maxScore!1 > 0.3)?then('#ff9800', '#f44336')}"></div>
+                    <div class="dim-bar-fill" style="width: ${pct}%; background: ${barColor}"></div>
                 </div>
             </div>
             </#list>
+        </div>
+        </#if>
+
+        <!-- P1: 多级目标价 -->
+        <#if report.overview?? && (report.overview.targetPrice?? || report.overview.targetPrice2?? || report.overview.extremeTargetPrice??)>
+        <div class="price-grid">
+            <div class="price-item">
+                <div class="price-label">当前价</div>
+                <div class="price-value ${(report.overview.price?? && report.overview.price?number > 0)?then('up', 'down')}">${report.overview.price!'--'}</div>
+            </div>
+            <div class="price-item">
+                <div class="price-label">第一目标价</div>
+                <div class="price-value" style="color:#1565c0;">${report.overview.targetPrice!'--'}</div>
+                <div class="price-sub">阻力×1.05</div>
+            </div>
+            <div class="price-item">
+                <div class="price-label">第二目标价</div>
+                <div class="price-value" style="color:#7b1fa2;">${report.overview.targetPrice2!'--'}</div>
+                <div class="price-sub">PE均值回归</div>
+            </div>
+            <div class="price-item">
+                <div class="price-label">止损价</div>
+                <div class="price-value" style="color:#d32f2f;">${report.overview.stopLossPrice!'--'}</div>
+            </div>
+            <div class="price-item">
+                <div class="price-label">极端目标价</div>
+                <div class="price-value" style="color:#c2185b;">${report.overview.extremeTargetPrice!'--'}</div>
+                <div class="price-sub">PB=1x估值</div>
+            </div>
+            <div class="price-item">
+                <div class="price-label">建议仓位</div>
+                <div class="price-value">${report.overview.position!'--'}%</div>
+                <div class="price-sub">${report.overview.confidenceLevel!'--'}</div>
+            </div>
+        </div>
+        </#if>
+
+        <!-- P1: 三方分析师三角 -->
+        <#if report.overview?? && (report.overview.conservativeScore?? || report.overview.neutralScore?? || report.overview.aggressiveScore??)>
+        <div class="analyst-triangle">
+            <div class="analyst-title">三方分析师独立评分</div>
+            <div class="analyst-grid">
+                <div>
+                    <div style="font-size:11px;color:#888;">🔴 保守</div>
+                    <div style="font-size:24px;font-weight:700;color:#d32f2f;line-height:1;">${report.overview.conservativeScore!'--'}</div>
+                    <div style="font-size:10px;color:#666;">${report.overview.conservativePosition!'--'}</div>
+                </div>
+                <div>
+                    <div style="font-size:11px;color:#888;">🟡 中性</div>
+                    <div style="font-size:24px;font-weight:700;color:#f57c00;line-height:1;">${report.overview.neutralScore!'--'}</div>
+                    <div style="font-size:10px;color:#666;">${report.overview.neutralPosition!'--'}</div>
+                </div>
+                <div>
+                    <div style="font-size:11px;color:#888;">🟢 激进</div>
+                    <div style="font-size:24px;font-weight:700;color:#388e3c;line-height:1;">${report.overview.aggressiveScore!'--'}</div>
+                    <div style="font-size:10px;color:#666;">${report.overview.aggressivePosition!'--'}</div>
+                </div>
+            </div>
         </div>
         </#if>
     </div>
@@ -423,14 +346,78 @@
             <strong>估值分位（近3年）：</strong>
             PE分位 <span style="color:#1a73e8;font-weight:600;">${(report.valuationPercentile.pePercentile!0)?string('0.0')}%</span>
             | PB分位 <span style="color:#1a73e8;font-weight:600;">${(report.valuationPercentile.pbPercentile!0)?string('0.0')}%</span>
-            | 当前PE <span style="color:#666;">${report.valuationPercentile.peCurrent!'--'}</span>
-            | 当前PB <span style="color:#666;">${report.valuationPercentile.pbCurrent!'--'}</span>
         </div>
         </#if>
         <#else>
         <p style="color:#888;font-size:13px;">暂无基本面数据</p>
         </#if>
     </div>
+
+    <!-- P0: 尾部风险暴露度 -->
+    <#if (report.overview.tailRisks![])?size gt 0>
+    <div class="section">
+        <div class="section-title">
+            <span class="icon" style="background:#ffebee;color:#c62828;">&#x26A0;&#xFE0F;</span>
+            P0 尾部风险暴露度
+        </div>
+        <table class="risk-table">
+            <thead>
+                <tr>
+                    <th>尾部风险</th>
+                    <th>概率</th>
+                    <th>影响</th>
+                    <th>潜在跌幅</th>
+                    <th>触发条件</th>
+                </tr>
+            </thead>
+            <tbody>
+                <#list report.overview.tailRisks as risk>
+                <tr>
+                    <td><strong>${risk.name}</strong><br><span style="font-size:11px;color:#888;">${risk.metric!''}</span></td>
+                    <td>${risk.probability!''}</td>
+                    <td><span style="color:${risk.impact!'中等' == '毁灭性' || risk.impact!'中等' == '致命'?then('#c62828', '#ef6c00')}">${risk.impact!''}</span></td>
+                    <td style="color:#c62828;font-weight:600;">${risk.potentialDecline!''}</td>
+                    <td>${risk.triggerCondition!''}</td>
+                </tr>
+                </#list>
+            </tbody>
+        </table>
+    </div>
+    </#if>
+
+    <!-- P0: 催化剂追踪矩阵 -->
+    <#if (report.overview.catalysts![])?size gt 0>
+    <div class="section">
+        <div class="section-title">
+            <span class="icon" style="background:#e8f5e9;color:#2e7d32;">&#x2728;</span>
+            P0 催化剂追踪矩阵
+        </div>
+        <div class="catalyst-grid">
+            <div class="catalyst-col catalyst-bull">
+                <div class="catalyst-title">&#x1F53A; 正面催化剂</div>
+                <#list report.overview.catalysts as c>
+                <#if c.type == 'POSITIVE'>
+                <div class="catalyst-item">
+                    <div class="catalyst-desc">${c.description}</div>
+                    <div class="catalyst-trigger">触发：${c.trigger!''} | 重要度：<#list 1..c.importance as i>&#x2605;</#list><#list (c.importance+1)..5 as i>&#x2606;</#list></div>
+                </div>
+                </#if>
+                </#list>
+            </div>
+            <div class="catalyst-col catalyst-bear">
+                <div class="catalyst-title">&#x1F53B; 风险事件</div>
+                <#list report.overview.catalysts as c>
+                <#if c.type == 'NEGATIVE'>
+                <div class="catalyst-item">
+                    <div class="catalyst-desc">${c.description}</div>
+                    <div class="catalyst-trigger">触发：${c.trigger!''} | 重要度：<#list 1..c.importance as i>&#x2605;</#list><#list (c.importance+1)..5 as i>&#x2606;</#list></div>
+                </div>
+                </#if>
+                </#list>
+            </div>
+        </div>
+    </div>
+    </#if>
 
     <!-- 新闻分析师 -->
     <div class="section">
@@ -461,9 +448,11 @@
                 <div class="metric-value">${(rs.coverage!{}).reportCount90d!0}份</div>
             </div>
         </div>
-        <#if rs.recentReports?? && rs.recentReports?size > 0>
+        </#if>
+        <#if (rs.recentReports![])?size gt 0>
         <div class="report-list">
-            <#list rs.recentReports?take(5) as r>
+            <#list rs.recentReports as r>
+                <#if r_index >= 5><#break></#if>
             <div class="report-item">
                 <span>${r.institution!'--'} | ${r.reportDate!'--'}</span>
                 <span>
@@ -512,18 +501,6 @@
                 <div class="metric-value">${mf.turnoverRate}%</div>
             </div>
             </#if>
-            <#if mf.netHuge??>
-            <div class="metric-item">
-                <div class="metric-label">超大单净流入</div>
-                <div class="metric-value ${(mf.netHuge > 0)?then('up', 'down')}">${mf.netHuge}</div>
-            </div>
-            </#if>
-            <#if mf.netBig??>
-            <div class="metric-item">
-                <div class="metric-label">大单净流入</div>
-                <div class="metric-value ${(mf.netBig > 0)?then('up', 'down')}">${mf.netBig}</div>
-            </div>
-            </#if>
         </div>
         <#else>
         <p style="color:#888;font-size:13px;">暂无资金流向数据</p>
@@ -540,7 +517,7 @@
         <div class="debate-grid">
             <div class="debate-col debate-bull">
                 <div class="debate-title">&#x1F4C8; 多头论据 (${report.bullCount})</div>
-                <#if report.bullArguments?? && report.bullArguments?size > 0>
+                <#if (report.bullArguments![])?size gt 0>
                 <#list report.bullArguments as arg>
                 <div class="debate-item">
                     <div class="debate-rule">${arg.rule}</div>
@@ -557,7 +534,7 @@
             </div>
             <div class="debate-col debate-bear">
                 <div class="debate-title">&#x1F4C9; 空头论据 (${report.bearCount})</div>
-                <#if report.bearArguments?? && report.bearArguments?size > 0>
+                <#if (report.bearArguments![])?size gt 0>
                 <#list report.bearArguments as arg>
                 <div class="debate-item">
                     <div class="debate-rule">${arg.rule}</div>
@@ -585,6 +562,11 @@
             <div class="conclusion-title">${report.name!report.code}(${report.code}) - ${report.actionName!'--'} | 仓位 ${report.position!0}%</div>
             <div class="conclusion-text">${report.conclusion!'暂无结论'}</div>
         </div>
+        <#if report.overview?? && report.overview.executionPlan??>
+        <div class="execution-plan">
+            <strong>&#x1F4CB; 分批执行方案：</strong>${report.overview.executionPlan}
+        </div>
+        </#if>
         <#if report.overview?? && report.overview.risks??>
         <div style="margin-top:12px;padding:12px;background:#fff3e0;border-radius:6px;font-size:12px;color:#666;">
             <strong style="color:#ef6c00;">&#x26A0;&#xFE0F; 风险提示：</strong>${report.overview.risks}

@@ -1,14 +1,14 @@
 package com.quant.platform.factor.service;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.quant.platform.factor.domain.FactorValue;
-import com.quant.platform.factor.mapper.FactorValueMapper;
+import com.quant.platform.factor.mapper.FactorDefinitionMapper;
+import com.quant.platform.factor.domain.FactorDefinition;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.util.*;
 
 /**
@@ -19,13 +19,17 @@ import java.util.*;
  * 3. RISK_PARITY     — 风险平价（每个因子对组合风险的贡献相等）
  * 输入：多个因子代码 + 日期范围（用 factor_value.rank_value 作为截面收益代理）
  * 输出：每个因子的推荐权重
+ * 数据点要求（按因子类别）：
+ * - 财务类(FINANCIAL)：最低3个数据点，用原始rank值（季度财报本身即基本面指标）
+ * - 其他因子：最低5个数据点，用rank差分值（捕捉因子变化趋势）
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class FactorWeightOptimizeService {
 
-    private final FactorValueMapper factorValueMapper;
+    private final ClickHouseFactorValueService clickHouseFactorValueService;
+    private final FactorDefinitionMapper factorDefinitionMapper;
 
     // ──────────────────────────────────────────────────────────────────────────
     // 公开接口
@@ -47,22 +51,56 @@ public class FactorWeightOptimizeService {
             throw new IllegalArgumentException("至少需要2个因子");
         }
 
+        // ── 0.5 获取因子类别（用于区分数据点阈值）─────────────────────
+        Map<String, String> factorCategories = getFactorCategories(factorCodes);
+        Set<String> financialCodes = new HashSet<>();
+        for (String code : factorCodes) {
+            if ("FINANCIAL".equalsIgnoreCase(factorCategories.getOrDefault(code, ""))) {
+                financialCodes.add(code);
+            }
+        }
+
         // ── 1. 获取各因子的截面 IC 时序（代理收益率）─────────────────────
-        Map<String, List<Double>> returns = loadFactorReturns(factorCodes, startDate, endDate);
+        Map<String, List<Double>> returns = loadFactorReturns(factorCodes, startDate, endDate, financialCodes);
+
+        // ── 1.5 过滤无有效数据的因子（分类别阈值）────────────────────
+        List<String> skippedFactors = new ArrayList<>();
+        List<String> skippedDetails = new ArrayList<>();
+        List<String> validCodes = new ArrayList<>();
+        for (String code : factorCodes) {
+            List<Double> r = returns.getOrDefault(code, Collections.emptyList());
+            boolean isFinancial = financialCodes.contains(code);
+            int minRequired = isFinancial ? 3 : 5;
+            if (r.size() < minRequired) {
+                skippedFactors.add(code);
+                String reason = isFinancial
+                        ? String.format("%s(财务因子,%d点,需≥%d)", code, r.size(), minRequired)
+                        : String.format("%s(%d点,需≥%d)", code, r.size(), minRequired);
+                skippedDetails.add(reason);
+                log.warn("因子 {} 有效数据点不足（{} 个，最低要求 {}），已跳过", code, r.size(), minRequired);
+            } else {
+                validCodes.add(code);
+            }
+        }
+        if (validCodes.size() < 2) {
+            String detail = skippedFactors.isEmpty() ? "" : "；以下因子数据不足已被跳过: " + String.join(", ", skippedFactors);
+            throw new IllegalStateException("有效因子不足（需≥2个，当前" + validCodes.size() + "个）" + detail);
+        }
 
         // ── 2. 对齐日期（取交集）─────────────────────────────────────────
-        List<String> aligned = alignDates(returns, factorCodes);
-        if (aligned.size() < 10) {
+        List<String> aligned = alignDates(returns, validCodes);
+        int minAligned = validCodes.stream().anyMatch(financialCodes::contains) ? 3 : 5;
+        if (aligned.size() < minAligned) {
             throw new IllegalStateException("有效数据点不足（" + aligned.size() + " 个），无法进行优化");
         }
 
-        int n = factorCodes.size();
+        int n = validCodes.size();
         int T = aligned.size();
 
         // ── 3. 提取对齐后的收益矩阵 [n × T] ─────────────────────────────
         double[][] retMatrix = new double[n][T];
         for (int i = 0; i < n; i++) {
-            List<Double> r = returns.get(factorCodes.get(i));
+            List<Double> r = returns.get(validCodes.get(i));
             for (int t = 0; t < T; t++) {
                 retMatrix[i][t] = r.get(t);
             }
@@ -88,14 +126,14 @@ public class FactorWeightOptimizeService {
         // ── 7. 组装结果 ────────────────────────────────────────────────────
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("method", method.toUpperCase());
-        result.put("factorCodes", factorCodes);
+        result.put("factorCodes", validCodes);
         result.put("dataPoints", T);
 
         // 权重列表
         List<Map<String, Object>> weightList = new ArrayList<>();
         for (int i = 0; i < n; i++) {
             Map<String, Object> w = new LinkedHashMap<>();
-            w.put("factorCode", factorCodes.get(i));
+            w.put("factorCode", validCodes.get(i));
             w.put("weight", round4(weights[i]));
             w.put("meanReturn", round4(means[i] * 252));
             w.put("volatility", round4(Math.sqrt(cov[i][i] * 252)));
@@ -123,7 +161,37 @@ public class FactorWeightOptimizeService {
             result.put("efficientFrontier", calcEfficientFrontier(means, cov, n, 30));
         }
 
+        // 警告：跳过的因子
+        if (!skippedFactors.isEmpty()) {
+            String detail = String.join("; ", skippedDetails);
+            result.put("warnings", List.of(
+                "以下因子因数据点不足被跳过: " + detail + "。" +
+                "数据点要求：财务因子≥3（用原始rank值），其他因子≥5（用rank差分值）。"));
+        }
+
         return result;
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // 私有：类别查询
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /**
+     * 批量查询因子类别
+     */
+    private Map<String, String> getFactorCategories(List<String> factorCodes) {
+        Map<String, String> categories = new HashMap<>();
+        try {
+            List<FactorDefinition> defs = factorDefinitionMapper.selectList(
+                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<FactorDefinition>()
+                            .in(FactorDefinition::getFactorCode, factorCodes));
+            for (FactorDefinition def : defs) {
+                categories.put(def.getFactorCode(), def.getCategory() != null ? def.getCategory().name() : null);
+            }
+        } catch (Exception e) {
+            log.warn("查询因子类别失败: {}", e.getMessage());
+        }
+        return categories;
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -131,48 +199,49 @@ public class FactorWeightOptimizeService {
     // ──────────────────────────────────────────────────────────────────────────
 
     /**
-     * 加载因子截面收益率：用 rank_value 的日变化量（差分）作为日收益代理
+     * 加载因子截面收益率
+     * - 财务因子(FINANCIAL)：用原始 rank_value 中位数作为收益（季度财报本身即基本面度量）
+     * - 其他因子：用 rank_value 中位数差分作为日收益代理（捕捉因子变化趋势）
      */
     private Map<String, List<Double>> loadFactorReturns(List<String> factorCodes,
-                                                        String startDate, String endDate) {
+                                                        String startDate, String endDate,
+                                                        Set<String> financialCodes) {
+        LocalDate start = startDate != null ? LocalDate.parse(startDate) : LocalDate.of(2020, 1, 1);
+        LocalDate end = endDate != null ? LocalDate.parse(endDate) : LocalDate.now();
+
+        // CH 侧批量聚合：每个因子每日 rank_value 截面中位数
+        Map<String, Map<LocalDate, Double>> rankMedians;
+        try {
+            rankMedians = clickHouseFactorValueService.getDailyRankMedians(factorCodes, start, end);
+        } catch (Exception e) {
+            log.error("ClickHouse 批量 rank 中位数查询失败: {}", e.getMessage());
+            throw new RuntimeException("ClickHouse rank 中位数查询失败，请稍后重试", e);
+        }
+
         Map<String, List<Double>> result = new HashMap<>();
         for (String code : factorCodes) {
-            // 取全市场 rank_value 的中位数作为因子"收益"
-            List<FactorValue> vals = factorValueMapper.selectList(
-                    new LambdaQueryWrapper<FactorValue>()
-                            .eq(FactorValue::getFactorCode, code)
-                            .ge(startDate != null, FactorValue::getCalcDate, startDate)
-                            .le(endDate != null, FactorValue::getCalcDate, endDate)
-                            .orderByAsc(FactorValue::getCalcDate)
-                            .select(FactorValue::getCalcDate, FactorValue::getRankValue)
-            );
+            Map<LocalDate, Double> dailyMedian = rankMedians.getOrDefault(code, new LinkedHashMap<>());
+            List<LocalDate> dates = new ArrayList<>(dailyMedian.keySet());
+            List<Double> returns;
 
-            // 按日期分组取中位数
-            Map<String, Double> dailyMedian = new TreeMap<>();
-            Map<String, List<Double>> byDate = new TreeMap<>();
-            for (FactorValue fv : vals) {
-                if (fv.getRankValue() == null || fv.getCalcDate() == null) continue;
-                byDate.computeIfAbsent(fv.getCalcDate().toString(), k -> new ArrayList<>())
-                        .add(fv.getRankValue().doubleValue());
+            if (financialCodes.contains(code)) {
+                // 财务因子：直接用 rank 值（季度频率，rank值本身就是截面排序度量）
+                returns = new ArrayList<>();
+                for (LocalDate date : dates) {
+                    returns.add(dailyMedian.get(date));
+                }
+                log.debug("Factor {} (FINANCIAL) loaded {} raw rank points as returns", code, returns.size());
+            } else {
+                // 非财务因子：差分得到日变化率
+                returns = new ArrayList<>();
+                for (int i = 1; i < dates.size(); i++) {
+                    double prev = dailyMedian.get(dates.get(i - 1));
+                    double curr = dailyMedian.get(dates.get(i));
+                    returns.add(prev != 0 ? (curr - prev) / Math.abs(prev) : 0.0);
+                }
+                log.debug("Factor {} loaded {} daily return points (diff)", code, returns.size());
             }
-            byDate.forEach((date, list) -> {
-                list.sort(Double::compareTo);
-                int mid = list.size() / 2;
-                dailyMedian.put(date, list.size() % 2 == 0
-                        ? (list.get(mid - 1) + list.get(mid)) / 2.0
-                        : list.get(mid));
-            });
-
-            // 差分得到日变化率
-            List<String> dates = new ArrayList<>(dailyMedian.keySet());
-            List<Double> dailyReturns = new ArrayList<>();
-            for (int i = 1; i < dates.size(); i++) {
-                double prev = dailyMedian.get(dates.get(i - 1));
-                double curr = dailyMedian.get(dates.get(i));
-                dailyReturns.add(prev != 0 ? (curr - prev) / Math.abs(prev) : 0.0);
-            }
-            result.put(code, dailyReturns);
-            log.debug("Factor {} loaded {} daily return points", code, dailyReturns.size());
+            result.put(code, returns);
         }
         return result;
     }

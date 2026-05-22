@@ -30,9 +30,10 @@ public class ClickHouseConfig {
     /**
      * 获取 JDBC URL
      * compress=0 禁用 LZ4 压缩，避免 native 库缺失问题
+     * connection_timeout=30000 / socket_timeout=300000 防止长查询被中断
      */
     public String getJdbcUrl() {
-        return String.format("jdbc:clickhouse://%s:%d/%s?user=%s&password=%s&compress=0",
+        return String.format("jdbc:clickhouse://%s:%d/%s?user=%s&password=%s&compress=0&connection_timeout=30000&socket_timeout=300000",
                 host, port, database, username, password);
     }
 

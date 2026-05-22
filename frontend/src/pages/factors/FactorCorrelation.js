@@ -59,7 +59,8 @@ export default function FactorCorrelation() {
       endDate: end.format('YYYY-MM-DD')
     })
       .then(res => {
-        const data = res.data || [];
+        // axios 拦截器已解包 res.data.data，res 直接是数组
+        const data = Array.isArray(res) ? res : (res.data || []);
         setCorrelationData(data);
         if (data.length > 0) {
           console.log('[Correlation] 返回', data.length, '对, correlation类型:', typeof data[0].correlation, '示例:', data[0]);
@@ -71,6 +72,9 @@ export default function FactorCorrelation() {
       .catch(err => {
         console.error('相关性计算失败:', err);
         setCorrelationData([]);
+        // 优先展示后端返回的具体错误信息
+        const errMsg = err?.response?.data?.message || err?.message || 'ClickHouse 连接超时或不可用';
+        message.error('相关性计算失败: ' + errMsg, 5);
       })
       .finally(() => setCorrelationLoading(false));
   };

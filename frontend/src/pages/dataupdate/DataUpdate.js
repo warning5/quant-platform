@@ -1874,7 +1874,7 @@ function DataUpdate() {
                   {sentimentMoneyflowSource === 'EM' && (
                     <span style={{ marginLeft: 12 }}>
                       <Radio.Group value={sentimentEmMode} onChange={e => setSentimentEmMode(e.target.value)} size="small">
-                        <Radio.Button value="realtime">实时全市场</Radio.Button>
+                        <Radio.Button value="realtime">昨天</Radio.Button>
                         <Radio.Button value="hist" style={{ marginLeft: 4 }}>历史120天</Radio.Button>
                       </Radio.Group>
                     </span>

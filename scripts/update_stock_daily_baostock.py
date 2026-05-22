@@ -391,7 +391,7 @@ def main():
                 from db_config import CLICKHOUSE_CONFIG
                 ch = clickhouse_connect.get_client(
                     host=CLICKHOUSE_CONFIG["host"], port=CLICKHOUSE_CONFIG["port"],
-                    username=CLICKHOUSE_CONFIG["user"], password=CLICKHOUSE_CONFIG["password"],
+                    username=CLICKHOUSE_CONFIG["username"], password=CLICKHOUSE_CONFIG["password"],
                     database=CLICKHOUSE_CONFIG["database"],
                 )
                 print(f"\n  ClickHouse OPTIMIZE TABLE FINAL（去重合并）...")

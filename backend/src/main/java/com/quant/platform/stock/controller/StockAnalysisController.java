@@ -640,6 +640,27 @@ public class StockAnalysisController {
         }
     }
 
+    /**
+     * 股东结构分析（股东人数趋势 + 基金持仓明细 + 筹码集中度）
+     * GET /api/analysis/shareholder-structure?code=600519
+     */
+    @GetMapping("/shareholder-structure")
+    public ResponseEntity<?> getShareholderStructure(@RequestParam String code) {
+        if (analysisService == null) {
+            return ResponseEntity.status(503).body(errorBody("分析服务不可用，ClickHouse未启用"));
+        }
+        if (code == null || code.trim().isEmpty()) {
+            return ResponseEntity.badRequest().body(errorBody("股票代码不能为空"));
+        }
+        try {
+            Map<String, Object> data = analysisService.getShareholderStructure(code.trim());
+            return ResponseEntity.ok(new ApiResponse<>(data));
+        } catch (Exception e) {
+            log.error("股东结构查询失败: code={}, error={}", code, e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(errorBody("股东结构查询失败：" + e.getMessage()));
+        }
+    }
+
     private String escapeHtml(String text) {
         if (text == null) return "";
         return text.replace("&", "&amp;")

@@ -328,7 +328,7 @@ def main():
         all_snapshots = fetch_qq_snapshot_batch(codes_markets, batch_size=100)
         print(f"  快照获取完成: {len(all_snapshots)}/{len(stocks)} 只有数据\n")
 
-        total_success = total_skipped = total_no_data = 0
+        total_success = total_skipped = total_no_data = total_failed = 0
 
         for i, (code, name, market) in enumerate(stocks, 1):
             if args.resume and code in stock_start_dates:
@@ -394,7 +394,7 @@ def main():
                 from db_config import CLICKHOUSE_CONFIG
                 ch = clickhouse_connect.get_client(
                     host=CLICKHOUSE_CONFIG["host"], port=CLICKHOUSE_CONFIG["port"],
-                    username=CLICKHOUSE_CONFIG["user"], password=CLICKHOUSE_CONFIG["password"],
+                    username=CLICKHOUSE_CONFIG["username"], password=CLICKHOUSE_CONFIG["password"],
                     database=CLICKHOUSE_CONFIG["database"],
                 )
                 print(f"\n  ClickHouse OPTIMIZE TABLE FINAL（去重合并）...")

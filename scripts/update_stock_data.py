@@ -221,7 +221,7 @@ def run_index_daily(start_date, end_date, extra_args):
 
 
 def run_sentiment(date_str=None):
-    """调用情绪数据采集脚本（涨跌停/资金情绪）"""
+    """调用情绪数据采集脚本（涨跌停/龙虎榜/融资融券等，不含资金流向）"""
     if not os.path.exists(SENTIMENT_SCRIPT):
         print(f"[ERROR] 找不到脚本: {SENTIMENT_SCRIPT}")
         return False
@@ -230,7 +230,7 @@ def run_sentiment(date_str=None):
     if date_str:
         cmd += ["--date", date_str.replace("-", "")]
 
-    return run_cmd(cmd, "市场情绪数据 (涨跌停/资金)")
+    return run_cmd(cmd, "市场情绪数据 (涨跌停/龙虎榜/融资融券等)")
 
 
 def run_bidask(date_str=None, code=None, limit=0, all_mode=False):
@@ -382,7 +382,7 @@ def main():
     )
     parser.add_argument(
         "--sentiment-only", action="store_true",
-        help="只采集市场情绪数据（涨跌停/资金情绪），不更新日线和info"
+        help="只采集市场情绪数据（涨跌停/龙虎榜/融资融券等），不更新日线和info"
     )
     parser.add_argument(
         "--bidask-only", action="store_true",
@@ -471,7 +471,7 @@ def main():
     elif args.index_only:
         print(f"  更新模式:   仅指数日线")
     elif args.sentiment_only:
-        print(f"  更新模式:   仅市场情绪数据（涨跌停/北向/资金情绪）")
+        print(f"  更新模式:   仅市场情绪数据（涨跌停/龙虎榜/融资融券等）")
     elif args.bidask_only:
         print(f"  更新模式:   仅内外盘数据")
     else:
@@ -555,7 +555,7 @@ def main():
             from db_config import CLICKHOUSE_CONFIG
             ch = clickhouse_connect.get_client(
                 host=CLICKHOUSE_CONFIG["host"], port=CLICKHOUSE_CONFIG["port"],
-                username=CLICKHOUSE_CONFIG["user"], password=CLICKHOUSE_CONFIG["password"],
+                username=CLICKHOUSE_CONFIG["username"], password=CLICKHOUSE_CONFIG["password"],
                 database=CLICKHOUSE_CONFIG["database"],
             )
             print(f"\n{'=' * 70}")

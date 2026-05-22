@@ -14,6 +14,13 @@ const { Text, Title } = Typography;
 const fmtPct = (v, d = 2) => v != null ? `${(+v * 100).toFixed(d)}%` : '-';
 const fmt = (v, d = 3) => v != null ? (+v).toFixed(d) : '-';
 
+// 不适合参与权重优化的因子（分类/方向型因子，factor_val 为离散值）
+const WEIGHT_OPTIMIZE_UNSUITABLE = new Set([
+  'CHAN_PEN_DIR',   // 笔方向（1/-1/0）
+  'CHAN_TREND',     // 趋势方向（1/-1）
+  'CHAN_BUY_SELL',  // 买卖信号（1/-1）
+]);
+
 // ─── 权重饼图 ──────────────────────────────────────────────────────────────────
 function WeightPieChart({ weights, title }) {
   if (!weights || weights.length === 0) return null;
@@ -23,11 +30,11 @@ function WeightPieChart({ weights, title }) {
       trigger: 'item',
       formatter: p => `${p.name}: ${(p.value * 100).toFixed(2)}%`,
     },
-    legend: { orient: 'vertical', right: 10, top: 'center', type: 'scroll' },
+    legend: { orient: 'horizontal', right: 0, bottom: 10, type: 'scroll' },
     series: [{
       type: 'pie',
-      radius: ['40%', '70%'],
-      center: ['40%', '50%'],
+      radius: ['40%', '65%'],
+      center: ['50%', '34%'],
       data: weights.map(w => ({ name: w.factorCode, value: +w.weight })),
       label: {
         formatter: p => `${p.name}\n${(p.value * 100).toFixed(1)}%`,
@@ -95,7 +102,12 @@ function EfficientFrontierChart({ frontier }) {
     backgroundColor: 'transparent',
     tooltip: {
       trigger: 'item',
-      formatter: p => `波动率: ${(p.data[0] * 100).toFixed(2)}%<br/>收益率: ${(p.data[1] * 100).toFixed(2)}%<br/>Sharpe: ${p.data[2]}`,
+      formatter: params => {
+        const idx = params.dataIndex;
+        const fp = frontier[idx];
+        if (!fp) return '';
+        return `波动率: ${(fp.volatility * 100).toFixed(2)}%<br/>收益率: ${(fp.return * 100).toFixed(2)}%<br/>Sharpe: ${fp.sharpe}`;
+      },
     },
     grid: { top: 20, left: 70, right: 20, bottom: 50 },
     xAxis: { 
@@ -112,65 +124,125 @@ function EfficientFrontierChart({ frontier }) {
       nameGap: 40,
       axisLabel: { formatter: v => `${(v * 100).toFixed(0)}%`, fontSize: 11 },
     },
-    series: [{
-      type: 'scatter',
-      data: frontier.map(p => [p.volatility, p.return, p.sharpe]),
-      symbolSize: 8,
-      itemStyle: {
-        color: p => {
-          const sharpe = p.data[2];
-          const maxS = Math.max(...frontier.map(f => f.sharpe));
-          const ratio = Math.max(0, sharpe / maxS);
-          const r = Math.round(207 * (1 - ratio) + 82 * ratio);
-          const g = Math.round(19 * (1 - ratio) + 196 * ratio);
-          return `rgb(${r},${g},26)`;
+    series: [
+      // 蓝线：视觉展示有效前沿弧线
+      {
+        type: 'line',
+        data: frontier.map(p => [p.volatility, p.return]),
+        smooth: true,
+        symbol: 'none',
+        lineStyle: { color: '#1677ff', width: 2, opacity: 0.7 },
+      },
+      // 散点：负责 tooltip 触发（圆点始终可见）
+      {
+        type: 'scatter',
+        data: frontier.map((p, i) => [p.volatility, p.return, p.sharpe]),
+        symbolSize: 10,
+        itemStyle: {
+          color: params => {
+            // params.data = [volatility, return, sharpe]
+            const sharpe = (params.data && params.data[2]) || 0;
+            const allSharpe = frontier.map(f => f.sharpe);
+            const minS = Math.min(...allSharpe);
+            const maxS = Math.max(...allSharpe);
+            const range = maxS - minS || 0.001;
+            // ratio: 0(最差) → 1(最优)，即使全为负也能区分色差
+            const ratio = (sharpe - minS) / range;
+            // 红(207,19,26) → 绿(82,196,26)
+            const r = Math.round(207 * (1 - ratio) + 82 * ratio);
+            const g = Math.round(19 * (1 - ratio) + 196 * ratio);
+            return `rgb(${r},${g},26)`;
+          },
+        },
+        tooltip: {
+          trigger: 'item',
+          formatter: p => {
+            const idx = p.dataIndex;
+            const fp = frontier[idx];
+            if (!fp) return '';
+            return `波动率: ${(fp.volatility * 100).toFixed(2)}%<br/>收益率: ${(fp.return * 100).toFixed(2)}%<br/>Sharpe: ${fp.sharpe}`;
+          },
         },
       },
-    }],
+    ],
   };
 
+  // 同质化检测：前沿点全部挤在一起 → 因子差异太小，优化无意义
+  const vols = frontier.map(f => f.volatility);
+  const rets = frontier.map(f => f.return);
+  const volRange = Math.max(...vols) - Math.min(...vols);
+  const retRange = Math.max(...rets) - Math.min(...rets);
+  const avgVol = vols.reduce((a, b) => a + b, 0) / vols.length || 0.0001;
+  const avgRet = Math.max(Math.abs(rets.reduce((a, b) => a + b, 0) / rets.length), 0.0001);
+
+  // 波动率跨度 < 均值的 5% 且 收益率跨度 < 均值的 10% → 判断为过聚类
+  const isClustered = volRange / avgVol < 0.05 && retRange / avgRet < 0.10;
+
   return (
-    <Card title="有效前沿（Markowitz）" size="small">
+    <Card
+      title={
+        <span>
+          有效前沿（Markowitz）
+          <Tooltip title='有效前沿是所有"最优"投资组合的集合——在相同风险下收益最高，相同收益下风险最低。横轴为年化波动率（风险），纵轴为年化收益率，上边界弧线上的每个点代表给定风险水平下的最高收益组合。弧线内部任何点都不值得持有。'>
+            <InfoCircleOutlined style={{ color: '#8c8c8c', marginLeft: 6, cursor: 'help' }} />
+          </Tooltip>
+        </span>
+      }
+      size="small"
+    >
+      {isClustered && (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 8, fontSize: 12 }}
+          message="因子高度同质化"
+          description={
+            <span>
+              所有前沿点高度聚集（波动率跨度 {(volRange * 100).toFixed(2)}%，
+              收益跨度 {(retRange * 100).toFixed(3)}%），
+              优化结果几乎没有区分度。<b>建议更换因子组合</b>——选择不同类别、低相关性的因子，
+              让有效前沿拉开为明显的左上凸弧线。
+            </span>
+          }
+        />
+      )}
       <ReactECharts option={option} style={{ height: 240 }} notMerge={true} />
     </Card>
   );
 }
 
 // ─── 主面板 ────────────────────────────────────────────────────────────────────
-// 因子分类映射（用于检测同类因子）
-const factorCategories = {
-  // 动量类
-  MOM5: 'momentum', MOM10: 'momentum', MOM20: 'momentum', MOM60: 'momentum',
-  // 波动率类
-  VOL5: 'volatility', VOL10: 'volatility', VOL20: 'volatility', VOL60: 'volatility',
-  // 价值类
-  PE_TTM: 'value', PB: 'value', PS_TTM: 'value', PCF_TTM: 'value', DIVIDEND_YIELD: 'value',
-  // 质量类
-  ROE: 'quality', ROA: 'quality', ROIC: 'quality', GROSS_MARGIN: 'quality', NET_MARGIN: 'quality',
-  // 成长类
-  REVENUE_GROWTH: 'growth', PROFIT_GROWTH: 'growth', EPS_GROWTH: 'growth',
-};
-
-// 分类中文名称
+// 分类中文名称（与后端 FactorDefinition.FactorCategory 枚举对应）
 const categoryNames = {
-  momentum: '动量（追涨杀跌）',
-  volatility: '波动率',
-  value: '价值（低估值）',
-  quality: '质量（盈利能力）',
-  growth: '成长',
-  other: '其他',
+  MOMENTUM: '动量',
+  VALUE: '价值',
+  QUALITY: '质量',
+  VOLATILITY: '波动率',
+  TECHNICAL: '技术',
+  FINANCIAL: '财务',
+  SENTIMENT: '情绪',
+  LIQUIDITY: '流动性',
+  VOLUME_PRICE: '量价',
+  CHANTHEORY: '缠论',
+  CUSTOM: '自定义',
 };
 
-const getFactorCategory = (code) => factorCategories[code] || 'other';
+// 通过因子列表获取因子的 DB 分类
+const getFactorCategory = (code, factorList) => {
+  const f = factorList.find(f => f.factorCode === code);
+  return f?.category || null;
+};
 
-const checkFactorDiversity = (codes) => {
-  const categories = codes.map(getFactorCategory);
+const checkFactorDiversity = (codes, factorList) => {
+  const categories = codes.map(c => getFactorCategory(c, factorList)).filter(Boolean);
+  if (categories.length < 2) return null;
+  
   const uniqueCategories = [...new Set(categories)];
   
   // 情况1：所有因子都是同一类别
   if (uniqueCategories.length === 1 && codes.length > 1) {
     const cnName = categoryNames[uniqueCategories[0]] || uniqueCategories[0];
-    return '您选择的因子均为同一类别（' + cnName + '），建议搭配不同类别的因子（如动量+价值+质量）以获得更好的分散效果';
+    return `您选择的因子均为同一类别（${cnName}），建议搭配不同类别的因子（如动量+价值+质量）以获得更好的分散效果`;
   }
   
   // 情况2：某类因子占比过高（>=60%）
@@ -181,7 +253,7 @@ const checkFactorDiversity = (codes) => {
   
   if (maxCount >= 2 && maxCount / codes.length >= 0.6) {
     const cnName = categoryNames[maxCategory] || maxCategory;
-    return '您选择的因子中，' + maxCount + '个属于' + cnName + '类，占比过高。建议搭配价值、质量等不同风格的因子以降低相关性';
+    return `${maxCount}个因子属于${cnName}类，占比过高。建议搭配不同风格的因子以降低相关性`;
   }
   
   return null;
@@ -233,7 +305,7 @@ export default function FactorWeightOptimizePanel({ defaultFactorCodes = [] }) {
     if (selectedCodes.length < 2) { setError('至少选择2个因子'); return; }
     
     // 检查因子多样性
-    const diversityWarning = checkFactorDiversity(selectedCodes);
+    const diversityWarning = checkFactorDiversity(selectedCodes, factorList);
     if (diversityWarning) {
       // 显示确认弹框
       setDiversityWarningVisible(true);
@@ -373,7 +445,28 @@ export default function FactorWeightOptimizePanel({ defaultFactorCodes = [] }) {
             maxTagCount={4}
             showSearch
             optionFilterProp="label"
-            options={factorList.map(f => ({ value: f.factorCode, label: `${f.factorCode} — ${f.factorName}` }))}
+            options={factorList.map(f => ({
+              value: f.factorCode,
+              label: `${f.factorCode} — ${f.factorName}`,
+              searchText: `${f.factorCode} ${f.factorName} ${categoryNames[f.category] || ''}`,
+              disabled: WEIGHT_OPTIMIZE_UNSUITABLE.has(f.factorCode),
+            }))}
+            optionRender={(opt) => {
+              const f = factorList.find(ff => ff.factorCode === opt.value);
+              const cat = f?.category ? categoryNames[f.category] || f.category : null;
+              const unsuitable = WEIGHT_OPTIMIZE_UNSUITABLE.has(opt.value);
+              return (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, opacity: unsuitable ? 0.45 : 1 }}>
+                  <span style={{ color: unsuitable ? '#999' : undefined }}>
+                    <b>{opt.data.value}</b> — {f?.factorName || ''}
+                  </span>
+                  <Space size={4}>
+                    {cat && <Tag style={{ marginLeft: 4, fontSize: 11 }}>{cat}</Tag>}
+                    {unsuitable && <Tag color="default" style={{ fontSize: 10 }}>不适合</Tag>}
+                  </Space>
+                </div>
+              );
+            }}
           />
         </Col>
         <Col span={5}>
@@ -384,10 +477,17 @@ export default function FactorWeightOptimizePanel({ defaultFactorCodes = [] }) {
               color="#fff"
               styles={{ body: { color: '#333', padding: 12 }, root: { maxWidth: 360 } }}
               title={
-                <div>
-                  <div style={{ marginBottom: 4, color: '#333' }}>⚖️ <b>等权</b>：各因子权重相同（1/n）</div>
-                  <div style={{ marginBottom: 4, color: '#333' }}>🎯 <b>均值-方差</b>：最大化夏普比率（收益/风险）</div>
-                  <div style={{ color: '#333' }}>⚡ <b>风险平价</b>：各因子对组合风险贡献相等</div>
+                <div style={{ color: '#333' }}>
+                  <div style={{ marginBottom: 4 }}>⚖️ <b>等权</b>：各因子权重相同（1/n）</div>
+                  <div style={{ marginBottom: 4 }}>
+                    🎯 <b>均值-方差（最大Sharpe）</b><br/>
+                    <span style={{ fontSize: 11, color: '#666' }}>
+                      公式：<code>Sharpe = (E[R] - r<sub>f</sub>) / σ</code><br/>
+                      E[R]=组合年化收益，r<sub>f</sub>=无风险利率(3%)，σ=年化波动率<br/>
+                      目标：找到让 Sharpe 最大的权重配比，即每担 1 份风险能获得最多超额收益
+                    </span>
+                  </div>
+                  <div>⚡ <b>风险平价</b>：各因子对组合风险贡献相等</div>
                 </div>
               }
             >
@@ -429,6 +529,17 @@ export default function FactorWeightOptimizePanel({ defaultFactorCodes = [] }) {
 
       {error && <Alert type="error" message={error} showIcon style={{ marginBottom: 12 }} />}
 
+      {/* 跳因子警告 */}
+      {result?.warnings && result.warnings.length > 0 && (
+        <Alert
+          type="warning"
+          showIcon
+          message="部分因子被跳过"
+          description={result.warnings[0]}
+          style={{ marginBottom: 12 }}
+        />
+      )}
+
       {/* 因子多样性警告弹框 */}
       <Modal
         title="⚠️ 因子相关性警告"
@@ -442,7 +553,7 @@ export default function FactorWeightOptimizePanel({ defaultFactorCodes = [] }) {
           type="warning"
           showIcon
           message="因子选择建议"
-          description={checkFactorDiversity(selectedCodes)}
+          description={checkFactorDiversity(selectedCodes, factorList)}
           style={{ marginBottom: 12 }}
         />
         <div style={{ color: '#666', fontSize: 13 }}>
@@ -553,8 +664,15 @@ export default function FactorWeightOptimizePanel({ defaultFactorCodes = [] }) {
                       styles={{ body: { color: '#333', padding: 12 }, root: { maxWidth: 320 } }}
                       title={
                         <div style={{ color: '#333' }}>
-                          <div style={{ fontWeight: 'bold', marginBottom: 4 }}>📈 预期年化收益</div>
-                          <div style={{ fontSize: 12 }}>基于历史数据回测，该因子组合在未来一年的预期收益率。注意：历史表现不代表未来收益。</div>
+                          <div style={{ fontWeight: 'bold', marginBottom: 6 }}>📈 预期年化收益</div>
+                          <div style={{ fontSize: 12, marginBottom: 6 }}>
+                            公式：<code>年化收益 = Σ(权重_i × 因子日均收益_i) × 252</code>
+                          </div>
+                          <div style={{ fontSize: 12, borderTop: '1px solid #eee', paddingTop: 6, lineHeight: 1.8 }}>
+                            将各因子的加权日均收益求和后折算为年化（×252交易日）。<br/>
+                            日均收益：财务因子用原始 rank 中位数，其他因子用 rank 差分值。<br/>
+                            <span style={{ color: '#888' }}>注意：历史回测结果不代表未来表现。</span>
+                          </div>
                         </div>
                       }
                     >
@@ -576,8 +694,15 @@ export default function FactorWeightOptimizePanel({ defaultFactorCodes = [] }) {
                       styles={{ body: { color: '#333', padding: 12 }, root: { maxWidth: 320 } }}
                       title={
                         <div style={{ color: '#333' }}>
-                          <div style={{ fontWeight: 'bold', marginBottom: 4 }}>📊 预期年化波动率</div>
-                          <div style={{ fontSize: 12 }}>衡量组合收益波动的剧烈程度。波动率越高，短期盈亏波动越大。一般而言，波动率&lt;20%为低风险，20%-30%为中风险，&gt;30%为高风险。</div>
+                          <div style={{ fontWeight: 'bold', marginBottom: 6 }}>📊 预期年化波动率</div>
+                          <div style={{ fontSize: 12, marginBottom: 6 }}>
+                            公式：<code>波动率 = √(w<sup>T</sup> × 日协方差矩阵 × w × 252)</code>
+                          </div>
+                          <div style={{ fontSize: 12, borderTop: '1px solid #eee', paddingTop: 6, lineHeight: 1.8 }}>
+                            权重向量 w 通过因子日收益协方差矩阵计算组合方差，<br/>
+                            再年化（×252）后开平方根得到年化标准差。<br/>
+                            <span style={{ color: '#888' }}>衡量组合收益的波动剧烈程度，越低越稳定。</span>
+                          </div>
                         </div>
                       }
                     >
@@ -596,16 +721,23 @@ export default function FactorWeightOptimizePanel({ defaultFactorCodes = [] }) {
                     <Tooltip
                       placement="top"
                       color="#fff"
-                      styles={{ body: { color: '#333', padding: 12 }, root: { maxWidth: 320 } }}
+                      styles={{ body: { color: '#333', padding: 12 }, root: { maxWidth: 380 } }}
                       title={
                         <div style={{ color: '#333' }}>
-                          <div style={{ fontWeight: 'bold', marginBottom: 4 }}>🎯 预期Sharpe比率</div>
-                          <div style={{ fontSize: 12 }}>风险调整后收益指标 = 年化收益 / 年化波动率。衡量每承担一份风险所获得的超额收益。</div>
-                          <div style={{ fontSize: 12, marginTop: 4, borderTop: '1px solid #eee', paddingTop: 4 }}>
-                            <span style={{ color: '#52c41a' }}>≥1.5 优秀</span> | 
-                            <span style={{ color: '#1677ff' }}> ≥1.0 良好</span> | 
-                            <span style={{ color: '#fa8c16' }}> ≥0.5 一般</span> | 
-                            <span style={{ color: '#cf1322' }}> &lt;0.5 较差</span>
+                          <div style={{ fontWeight: 'bold', marginBottom: 4 }}>🎯 Sharpe 比率计算</div>
+                          <div style={{ fontSize: 12, marginBottom: 8 }}>
+                            公式：<code>Sharpe = (年化收益 − 无风险利率) ÷ 年化波动率</code>
+                          </div>
+                          <div style={{ fontSize: 12, borderTop: '1px solid #eee', paddingTop: 6 }}>
+                            无风险利率 = 3%（年化）<br/>
+                            当前组合年化收益 = <b>{(result && (result.portfolioReturn * 100).toFixed(2))}%</b><br/>
+                            当前组合年化波动率 = <b>{(result && (result.portfolioVolatility * 100).toFixed(2))}%</b><br/>
+                            <span style={{ color: '#1677ff', fontWeight: 'bold' }}>
+                              → Sharpe = ({((result && result.portfolioReturn * 100) || 0).toFixed(2)}% − 3%) ÷ {((result && result.portfolioVolatility * 100) || 0).toFixed(2)}% = <b>{result?.sharpe}</b>
+                            </span>
+                          </div>
+                          <div style={{ fontSize: 11, marginTop: 6, color: '#888' }}>
+                            Sharpe 越高，每承担 1 份风险获得的超额收益越多
                           </div>
                         </div>
                       }
@@ -650,15 +782,26 @@ export default function FactorWeightOptimizePanel({ defaultFactorCodes = [] }) {
                       { title: '因子', dataIndex: 'factorCode', key: 'code', render: v => <Tag color="geekblue">{v}</Tag> },
                       {
                         title: '权重', dataIndex: 'weight', key: 'weight',
-                        render: v => (
-                          <Space>
-                            <span style={{ fontWeight: 600 }}>{fmtPct(v)}</span>
-                            <div style={{ display: 'inline-block', width: +(v * 80).toFixed(0), height: 8, background: '#1677ff', borderRadius: 4, verticalAlign: 'middle' }} />
-                          </Space>
-                        ),
+                        render: v => <span style={{ fontWeight: 600 }}>{fmtPct(v)}</span>,
                       },
-                      { title: '年化收益', dataIndex: 'meanReturn', key: 'ret', render: v => <span style={{ color: +v > 0 ? '#cf1322' : '#3f8600' }}>{fmtPct(v)}</span> },
-                      { title: '波动率', dataIndex: 'volatility', key: 'vol', render: v => fmtPct(v) },
+                      {
+                        title: (
+                          <Tooltip title="该因子在历史期间的年化平均收益率。基于每日 rank_value 差分中位数计算，反映因子选股能力">
+                            年化收益 <InfoCircleOutlined style={{ color: '#1677ff', fontSize: 10 }} />
+                          </Tooltip>
+                        ),
+                        dataIndex: 'meanReturn', key: 'ret',
+                        render: v => <span style={{ color: +v > 0 ? '#cf1322' : '#3f8600' }}>{fmtPct(v)}</span>,
+                      },
+                      {
+                        title: (
+                          <Tooltip title="该因子收益的年化标准差，衡量因子表现的稳定性。波动率越低，因子选股效果越稳定">
+                            波动率 <InfoCircleOutlined style={{ color: '#1677ff', fontSize: 10 }} />
+                          </Tooltip>
+                        ),
+                        dataIndex: 'volatility', key: 'vol',
+                        render: v => fmtPct(v),
+                      },
                     ]}
                   />
                 </Card>

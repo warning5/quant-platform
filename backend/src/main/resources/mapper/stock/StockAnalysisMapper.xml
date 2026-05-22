@@ -418,4 +418,31 @@
         ) t
     </select>
 
+    <!-- 股东结构：股东人数历史趋势（最近8期） -->
+    <select id="selectShareholderHistory" resultType="java.util.Map">
+        SELECT report_date, holder_count, avg_shares, change_pct, change_count
+        FROM stock_shareholder
+        WHERE code = #{code}
+        ORDER BY report_date DESC
+        LIMIT 8
+    </select>
+
+    <!-- 股东结构：基金持仓明细（最新一期，前10大） -->
+    <select id="selectFundHolderTop" resultType="java.util.Map">
+        SELECT fund_name, fund_code,
+               COALESCE(float_ratio, 0) as float_ratio,
+               COALESCE(shares_held, 0) as shares_held,
+               COALESCE(change_pct_qoq, 0) as change_pct_qoq,
+               report_date
+        FROM stock_fund_holder
+        WHERE stock_code = #{code}
+          AND report_date = (
+              SELECT MAX(report_date)
+              FROM stock_fund_holder
+              WHERE stock_code = #{code}
+          )
+        ORDER BY float_ratio DESC
+        LIMIT 10
+    </select>
+
 </mapper>

@@ -119,4 +119,81 @@ public class AnalysisOverview {
      * 信心水平（低/中/高）
      */
     private String confidenceLevel;
+
+    // ========== P0-P2 新增字段 ==========
+
+    /**
+     * 第二目标价（估值回归位，基于PE均值回归）
+     */
+    private String targetPrice2;
+
+    /**
+     * 极端目标价（PB=1x极端估值）
+     */
+    private String extremeTargetPrice;
+
+    /**
+     * 分批执行方案描述
+     */
+    private String executionPlan;
+
+    /**
+     * 保守分析师评分（0-10）
+     */
+    private Integer conservativeScore;
+
+    /**
+     * 中性分析师评分（0-10）
+     */
+    private Integer neutralScore;
+
+    /**
+     * 激进分析师评分（0-10）
+     */
+    private Integer aggressiveScore;
+
+    /**
+     * 尾部风险列表
+     */
+    private List<TailRisk> tailRisks;
+
+    /**
+     * 催化剂追踪矩阵
+     */
+    private List<CatalystItem> catalysts;
+
+    /**
+     * 分析师三角额外信息：保守分析师仓位建议
+     */
+    private String conservativePosition;
+
+    /**
+     * 分析师三角额外信息：保守分析师描述
+     */
+    private String conservativeDesc;
+
+    /**
+     * 分析师三角额外信息：中性分析师仓位建议
+     */
+    private String neutralPosition;
+
+    /**
+     * 分析师三角额外信息：中性分析师描述
+     */
+    private String neutralDesc;
+
+    /**
+     * 分析师三角额外信息：激进分析师仓位建议
+     */
+    private String aggressivePosition;
+
+    /**
+     * 分析师三角额外信息：激进分析师描述
+     */
+    private String aggressiveDesc;
+
+    /**
+     * 多空辩论结论文本
+     */
+    private String bullBearConclusion;
 }

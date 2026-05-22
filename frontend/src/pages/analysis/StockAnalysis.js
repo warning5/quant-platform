@@ -7,6 +7,7 @@ import {
   QuestionCircleOutlined, SearchOutlined,
   ArrowUpOutlined, ArrowDownOutlined,
   FileTextOutlined, DownloadOutlined,
+  InfoCircleOutlined,
 } from '@ant-design/icons';
 import { useSearchParams, Link } from 'react-router-dom';
 import { stockAnalysisApi, silentConfig } from '../../api';
@@ -17,6 +18,8 @@ import { NewsEventTab } from './NewsEventTab';
 import { BidAskPanel } from './BidAskPanel';
 import { InstitutionCoverageTab } from './InstitutionCoverageTab';
 import { StockPerformanceTab } from './StockPerformanceTab';
+import { ShareholderStructureTab } from './ShareholderStructureTab';
+import { TriggerDashboard } from './TriggerDashboard';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -67,6 +70,7 @@ export default function StockAnalysis() {
   const [stockPerformanceData, setStockPerformanceData] = useState(null);
   const [bullBearData, setBullBearData] = useState(null);
   const [klineData, setKlineData] = useState(null);
+  const [shareholderData, setShareholderData] = useState(null);
   const [error, setError] = useState(null);
   const [rulesVisible, setRulesVisible] = useState(false);
   const [rules, setRules] = useState(null);
@@ -264,6 +268,14 @@ export default function StockAnalysis() {
       .catch(() => setBullBearData(null));
   }, [overview?.code]);
 
+  // 加载股东结构数据
+  useEffect(() => {
+    if (!overview?.code) { setShareholderData(null); return; }
+    stockAnalysisApi.getShareholderStructure(overview.code, silentConfig)
+      .then(data => setShareholderData(data))
+      .catch(() => setShareholderData(null));
+  }, [overview?.code]);
+
   // 加载评分规则
   const showRules = useCallback(() => {
     if (rules) {
@@ -299,8 +311,21 @@ export default function StockAnalysis() {
   const tabItems = overview ? [
     {
       key: 'tech',
-      label: tabLabel('技术面', '通过均线排列、MACD、RSI、缠论信号等技术指标，判断股票短期走势和买卖时机。适合把握趋势和择时。'),
-      children: <ScoreDetailTab detail={overview.scoreDetails?.find(d => d.dimension === 'tech')} />,
+      label: tabLabel('技术面', '通过均线排列、MACD、RSI等技术指标评分 + K线走势图 + 缠论信号，综合判断短期趋势和买卖时机。'),
+      children: (
+        <div>
+          <ScoreDetailTab detail={overview.scoreDetails?.find(d => d.dimension === 'tech')} />
+          <div style={{ marginTop: 16 }}>
+            {klineData && klineData.length > 0 ? (
+              <Card size="small" title="近60日K线" style={{ marginBottom: 0 }}>
+                <KLineChart data={klineData} />
+              </Card>
+            ) : (
+              <Alert type="info" message="暂无K线数据" showIcon />
+            )}
+          </div>
+        </div>
+      ),
     },
     {
       key: 'fundamental',
@@ -312,18 +337,40 @@ export default function StockAnalysis() {
     },
     {
       key: 'money',
-      label: tabLabel('资金面', '通过量比、换手率偏离指标，捕捉资金异动信号。放量上涨通常为积极信号，缩量下跌需警惕。'),
-      children: <ScoreDetailTab detail={overview.scoreDetails?.find(d => d.dimension === 'money')} />,
+      label: tabLabel('资金全景', '量比/换手率评分 + 120日主力资金趋势 + 内外盘比，综合评估资金异动和流向变化。'),
+      children: (
+        <div>
+          <ScoreDetailTab detail={overview.scoreDetails?.find(d => d.dimension === 'money')} />
+          {moneyFlowHistoryData && (
+            <div style={{ marginTop: 16 }}>
+              <MoneyFlowHistoryTab data={moneyFlowHistoryData} bidAskData={bidAskData} code={overview.code} />
+            </div>
+          )}
+        </div>
+      ),
     },
     {
       key: 'sentiment',
       label: tabLabel('事件面', '通过涨停连板、炸板率、阶段涨幅等市场情绪指标，判断当前市场热度和投机氛围，辅助规避炒作风险。'),
-      children: <ScoreDetailTab detail={overview.scoreDetails?.find(d => d.dimension === 'sentiment')} />,
+      children: (
+        <div>
+          <ScoreDetailTab detail={overview.scoreDetails?.find(d => d.dimension === 'sentiment')} />
+          <TriggerDashboard
+            tech={overview.techSignal}
+            money={overview.moneySignal}
+            sentiment={overview.sentimentSignal}
+            fundamental={overview.fundamentalSignal}
+            tailRisks={overview.tailRisks}
+            catalysts={overview.catalysts}
+            price={overview.price}
+          />
+        </div>
+      ),
     },
     {
       key: 'news-event',
       label: tabLabel('新闻事件', '基于东方财富个股新闻，提取利好/风险分类、事件标签（业绩/扩产/政策/解禁等）、情感评分，辅助捕捉基本面催化信息。'),
-      children: <NewsEventTab data={newsData} code={overview.code} />,
+      children: <NewsEventTab data={newsData} code={overview.code} catalysts={overview?.catalysts} />,
     },
     {
       key: 'institution-coverage',
@@ -331,11 +378,9 @@ export default function StockAnalysis() {
       children: <InstitutionCoverageTab data={institutionCoverageData} code={overview.code} />,
     },
     {
-      key: 'kline',
-      label: tabLabel('价格走势', '近60交易日K线图，含均线（MA5/10/20/60）叠加，辅助判断价格趋势和均线支撑压力位。'),
-      children: klineData && klineData.length > 0 ? <KLineChart data={klineData} /> : (
-        <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>暂无K线数据</div>
-      ),
+      key: 'shareholder-structure',
+      label: tabLabel('股东结构', '股东人数趋势反映筹码集中度变化；基金持仓明细展示机构资金流向。股东户数减少=筹码集中，通常利好。'),
+      children: <ShareholderStructureTab data={shareholderData} code={overview.code} />,
     },
     {
       key: 'research',
@@ -371,11 +416,6 @@ export default function StockAnalysis() {
       key: 'chan-chart',
       label: tabLabel('缠论图谱', '基于缠论理论实时计算K线合并、笔、中枢、买卖点，可视化展示股票的技术结构。红色标记买点，绿色标记卖点。'),
       children: <ChanChartTab data={chanChartData} code={overview.code} />,
-    },
-    {
-      key: 'money-flow-history',
-      label: tabLabel('资金趋势', '展示近120日主力资金净流入/净流出趋势及每日资金面评分（满分25），追踪大资金动向变化。'),
-      children: <MoneyFlowHistoryTab data={moneyFlowHistoryData} bidAskData={bidAskData} code={overview.code} />,
     },
     {
       key: 'relative-strength',
@@ -428,6 +468,36 @@ export default function StockAnalysis() {
         </div>
       ) : (
         <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+      ),
+    },
+    /* ── P0 尾部风险暴露度 ───────────────────────────────────── */
+    {
+      key: 'tail-risk',
+      label: tabLabel('尾部风险', '基于财务指标（商誉/存货/负债/应收账款/流动性）计算的尾部风险暴露度矩阵，含概率/影响/潜在跌幅，辅助极端风险识别。'),
+      children: overview?.tailRisks?.length > 0 ? (
+        <Table
+          dataSource={overview.tailRisks}
+          rowKey={(_, i) => i}
+          size="small"
+          pagination={false}
+          columns={[
+            { title: '尾部风险', dataIndex: 'name', key: 'name', width: 120,
+              render: (t, r) => <Tooltip title={r.metric} className="tip-light"><Text strong>{t}</Text></Tooltip>,
+            },
+            { title: '概率', dataIndex: 'probability', key: 'probability', width: 80,
+              render: t => <Tag color="red">{t}</Tag>,
+            },
+            { title: '影响', dataIndex: 'impact', key: 'impact', width: 80,
+              render: t => <Text type={t === '致命' ? 'danger' : t === '毁灭性' ? 'danger' : 'warning'}>{t}</Text>,
+            },
+            { title: '潜在跌幅', dataIndex: 'potentialDecline', key: 'potentialDecline', width: 90,
+              render: t => <Text type="danger">{t}</Text>,
+            },
+            { title: '触发条件', dataIndex: 'triggerCondition', key: 'triggerCondition' },
+          ]}
+        />
+      ) : (
+        <Alert type="info" message="当前股票财务指标未触发尾部风险预警" showIcon />
       ),
     },
   ] : [];
@@ -548,11 +618,11 @@ export default function StockAnalysis() {
               </Col>
             </Row>
 
-            {/* 决策卡片：当前价 / 目标价 / 止损价 / 仓位 */}
-            {(overview.targetPrice || overview.stopLossPrice) && (
+            {/* 决策卡片：当前价 / 第一目标价 / 第二目标价 / 止损价 / 极端目标价 / 仓位 */}
+            {(overview.targetPrice || overview.stopLossPrice || overview.targetPrice2 || overview.extremeTargetPrice) && (
               <div style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(4, 1fr)',
+                gridTemplateColumns: 'repeat(6, 1fr)',
                 gap: 0,
                 border: '1px solid #f0f0f0',
                 borderRadius: 8,
@@ -562,14 +632,16 @@ export default function StockAnalysis() {
               }}>
                 {[
                   { label: '当前价', value: overview.price || '-', sub: '', color: changePct >= 0 ? '#f5222d' : '#52c41a' },
-                  { label: '目标价', value: overview.targetPrice || '-', sub: '阻力位×1.05', color: '#1890ff' },
+                  { label: '第一目标价', value: overview.targetPrice || '-', sub: '阻力×1.05', color: '#1890ff' },
+                  { label: '第二目标价', value: overview.targetPrice2 || '-', sub: 'PE均值回归', color: '#722ed1' },
                   { label: '止损价', value: overview.stopLossPrice || '-', sub: overview.targetPrice ? `距${((1 - parseFloat(overview.stopLossPrice || 0) / parseFloat(overview.price || 1)) * 100).toFixed(1)}%` : 'ATR×1.5', color: '#f5222d' },
+                  { label: '极端目标价', value: overview.extremeTargetPrice || '-', sub: 'PB=1x估值', color: '#eb2f96' },
                   { label: '建议仓位', value: overview.position != null ? overview.position + '%' : '-', sub: overview.confidenceLevel ? `信心:${overview.confidenceLevel}` : '', color: '#333' },
                 ].map((item, idx) => (
                   <div key={idx} style={{
                     textAlign: 'center',
                     padding: '10px 8px',
-                    borderRight: idx < 3 ? '1px solid #f0f0f0' : 'none',
+                    borderRight: idx < 5 ? '1px solid #f0f0f0' : 'none',
                   }}>
                     <div style={{ fontSize: 11, color: '#999', marginBottom: 2 }}>{item.label}</div>
                     <div style={{ fontSize: 22, fontWeight: 600, color: item.color, lineHeight: 1 }}>{item.value}</div>
@@ -579,7 +651,7 @@ export default function StockAnalysis() {
               </div>
             )}
 
-            {/* 第二行：综合评分（数字+雷达图） + 仓位/时机 */}
+            {/* 第二行：综合评分（数字+雷达图） + 仓位/时机 + 三方分析师 */}
             <Row gutter={24} style={{ marginBottom: 16, textAlign: 'center' }}>
               {/* 左：综合评分数字 */}
               <Col span={4} style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
@@ -603,8 +675,8 @@ export default function StockAnalysis() {
                   <ScoreRadarChart scoreDetails={overview.scoreDetails} />
                 )}
               </Col>
-              {/* 右：操作时机 */}
-              <Col span={10} style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
+              {/* 右：操作时机 + 三方分析师三角 */}
+              <Col span={10} style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', alignItems: 'center' }}>
                 <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>操作时机</div>
                 <Tag
                   color={actionColor(overview.actionName)}
@@ -612,6 +684,92 @@ export default function StockAnalysis() {
                 >
                   {overview.timing || '-'}
                 </Tag>
+
+                {/* 三方分析师三角 */}
+                {(overview.conservativeScore != null || overview.neutralScore != null || overview.aggressiveScore != null) && (
+                  <div style={{ marginTop: 16, width: '100%' }}>
+                    <div style={{ fontSize: 12, color: '#999', marginBottom: 8, textAlign: 'center' }}>
+                      三方分析师独立评分
+                      <Tooltip
+                        overlayStyle={{ maxWidth: 'none' }}
+                        overlayInnerStyle={{ padding: 0, width: 650 }}
+                        title={
+                          <div style={{ padding: '12px 16px', minWidth: 650 }}>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                              <thead>
+                                <tr style={{ background: '#fafafa' }}>
+                                  <th style={{ border: '1px solid #f0f0f0', padding: '6px 10px', textAlign: 'left', fontWeight: 600, width: '72px' }}>分析师</th>
+                                  <th style={{ border: '1px solid #f0f0f0', padding: '6px 10px', textAlign: 'left', fontWeight: 600, whiteSpace: 'nowrap' }}>策略</th>
+                                  <th style={{ border: '1px solid #f0f0f0', padding: '6px 10px', textAlign: 'left', fontWeight: 600 }}>{overview.code || ''} 结果</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                <tr>
+                                  <td style={{ border: '1px solid #f0f0f0', padding: '5px 10px', color: '#f5222d', fontWeight: 600, width: '72px' }}>保守</td>
+                                  <td style={{ border: '1px solid #f0f0f0', padding: '5px 10px', color: '#666', whiteSpace: 'nowrap' }}>重估值(PE/PB)和负债率防守，轻趋势</td>
+                                  <td style={{ border: '1px solid #f0f0f0', padding: '5px 10px' }}>
+                                    <span style={{ color: '#f5222d', fontWeight: 700, fontSize: 13 }}>{overview.conservativeScore ?? '-'}</span>
+                                    <span style={{ color: '#999', marginLeft: 4 }}>分（{overview.conservativeDesc || '-'}）</span>
+                                  </td>
+                                </tr>
+                                <tr>
+                                  <td style={{ border: '1px solid #f0f0f0', padding: '5px 10px', color: '#fa8c16', fontWeight: 600, width: '72px' }}>中性</td>
+                                  <td style={{ border: '1px solid #f0f0f0', padding: '5px 10px', color: '#666', whiteSpace: 'nowrap' }}>四维度均衡加权 = 综合评分 / 13.5 归一化到 0-10</td>
+                                  <td style={{ border: '1px solid #f0f0f0', padding: '5px 10px' }}>
+                                    <span style={{ color: '#fa8c16', fontWeight: 700, fontSize: 13 }}>{overview.neutralScore ?? '-'}</span>
+                                    <span style={{ color: '#999', marginLeft: 4 }}>分（综合{overview.totalScore ?? '-'}分→{overview.neutralScore ?? '-'}）</span>
+                                  </td>
+                                </tr>
+                                <tr>
+                                  <td style={{ border: '1px solid #f0f0f0', padding: '5px 10px', color: '#52c41a', fontWeight: 600, width: '72px' }}>激进</td>
+                                  <td style={{ border: '1px solid #f0f0f0', padding: '5px 10px', color: '#666', whiteSpace: 'nowrap' }}>重趋势+资金+情绪进攻，容忍高估值</td>
+                                  <td style={{ border: '1px solid #f0f0f0', padding: '5px 10px' }}>
+                                    <span style={{ color: '#52c41a', fontWeight: 700, fontSize: 13 }}>{overview.aggressiveScore ?? '-'}</span>
+                                    <span style={{ color: '#999', marginLeft: 4 }}>分（{overview.aggressiveDesc || '-'}）</span>
+                                  </td>
+                                </tr>
+                              </tbody>
+                            </table>
+                            <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid #f0f0f0', fontSize: 11, color: '#999', lineHeight: 1.8 }}>
+                              <div><strong>具体逻辑：</strong></div>
+                              <div>● <strong>保守</strong>（起点5）：PE&gt;100 扣3分，PE&gt;50 扣2，PE&gt;30 扣1；PB&gt;8 扣2；负债率&gt;80 扣2；只有缠论BUY信号才+1</div>
+                              <div>● <strong>中性</strong>：直接 totalScore / 13.5（135满分→10）</div>
+                              <div>● <strong>激进</strong>（起点5）：缠论信号加分多、资金面强势加分多、情绪面研报数量加分</div>
+                            </div>
+                          </div>
+                        }
+                      >
+                        <QuestionCircleOutlined style={{ marginLeft: 4, cursor: 'pointer', color: '#bbb' }} />
+                      </Tooltip>
+                    </div>
+                    <Row gutter={8} style={{ textAlign: 'center' }}>
+                      {/* 保守 */}
+                      <Col span={8}>
+                        <Tooltip title={overview.conservativeDesc || ''}>
+                          <div style={{ fontSize: 11, color: '#999' }}>🔴 保守</div>
+                          <div style={{ fontSize: 24, fontWeight: 700, color: '#f5222d', lineHeight: 1 }}>{overview.conservativeScore ?? '-'}</div>
+                          <div style={{ fontSize: 10, color: '#666' }}>{overview.conservativePosition || '-'}</div>
+                        </Tooltip>
+                      </Col>
+                      {/* 中性 */}
+                      <Col span={8}>
+                        <Tooltip title={overview.neutralDesc || ''}>
+                          <div style={{ fontSize: 11, color: '#999' }}>🟡 中性</div>
+                          <div style={{ fontSize: 24, fontWeight: 700, color: '#fa8c16', lineHeight: 1 }}>{overview.neutralScore ?? '-'}</div>
+                          <div style={{ fontSize: 10, color: '#666' }}>{overview.neutralPosition || '-'}</div>
+                        </Tooltip>
+                      </Col>
+                      {/* 激进 */}
+                      <Col span={8}>
+                        <Tooltip title={overview.aggressiveDesc || ''}>
+                          <div style={{ fontSize: 11, color: '#999' }}>🟢 激进</div>
+                          <div style={{ fontSize: 24, fontWeight: 700, color: '#52c41a', lineHeight: 1 }}>{overview.aggressiveScore ?? '-'}</div>
+                          <div style={{ fontSize: 10, color: '#666' }}>{overview.aggressivePosition || '-'}</div>
+                        </Tooltip>
+                      </Col>
+                    </Row>
+                  </div>
+                )}
               </Col>
             </Row>
 
@@ -619,6 +777,13 @@ export default function StockAnalysis() {
             {overview.risks && (
               <div style={{ marginTop: 12, padding: '8px 12px', background: '#fffbe6', borderRadius: 4, fontSize: 13, color: '#d48806' }}>
                 <span style={{ fontWeight: 500 }}>风险提示：</span>{overview.risks}
+              </div>
+            )}
+
+            {/* 分批执行方案 */}
+            {overview.executionPlan && (
+              <div style={{ marginTop: 8, padding: '8px 12px', background: '#e6fffb', borderRadius: 4, fontSize: 13, color: '#08979c' }}>
+                <span style={{ fontWeight: 500 }}>分批执行：</span>{overview.executionPlan}
               </div>
             )}
 
@@ -630,19 +795,10 @@ export default function StockAnalysis() {
             )}
           </Card>
 
-          {/* ── 分析结论 - 合并多空辩论结论 ───────────────────────────── */}
-          {(overview.conclusion || bullBearData?.conclusion) && (
+          {/* ── 分析结论 ─────────────────────────────────────────────── */}
+          {overview.conclusion && (
             <div style={{ marginBottom: 16, padding: '10px 12px', background: '#e6f7ff', borderRadius: 4, fontSize: 13, color: '#096dd9' }}>
-              {overview.conclusion && (
-                <div style={{ marginBottom: bullBearData?.conclusion ? 8 : 0 }}>
-                  <span style={{ fontWeight: 500 }}>分析结论：</span>{overview.conclusion}
-                </div>
-              )}
-              {bullBearData?.conclusion && (
-                <div>
-                  <span style={{ fontWeight: 500 }}>多空辩论：</span>{bullBearData.conclusion}
-                </div>
-              )}
+              <span style={{ fontWeight: 500 }}>分析结论：</span>{overview.conclusion}
             </div>
           )}
 
@@ -870,8 +1026,8 @@ function KLineChart({ data }) {
           ${vol ? `<br/>成交量：${(d.volume / 10000).toFixed(0)}万` : ''}`;
       },
     },
-    legend: { data: ['K线', 'MA5', 'MA10', 'MA20', 'MA60'], bottom: 0, type: 'scroll' },
-    grid: [{ left: 60, right: 20, top: 20, height: '55%' }, { left: 60, right: 20, top: '75%', height: '15%' }],
+    legend: { data: ['K线', 'MA5', 'MA10', 'MA20', 'MA60'], bottom: -5, type: 'scroll', itemGap: 16 },
+    grid: [{ left: 60, right: 20, top: 20, height: '52%', bottom: '28%' }, { left: 60, right: 20, top: '72%', height: '12%', bottom: '14%' }],
     xAxis: [
       { type: 'category', data: dates, gridIndex: 0, boundaryGap: false, axisLine: { lineStyle: { color: '#e8e8e8' } }, axisLabel: { show: false } },
       { type: 'category', data: dates, gridIndex: 1, boundaryGap: false, axisLine: { lineStyle: { color: '#e8e8e8' } }, axisLabel: { fontSize: 10 } },
@@ -2226,7 +2382,7 @@ function PeerComparisonTab({ data, code }) {
         dataSource={peers}
         columns={columns}
         rowKey="code"
-        pagination={{ pageSize: 15, size: 'small' }}
+        pagination={{ defaultPageSize: 15, showSizeChanger: true, pageSizeOptions: ['10', '15', '20', '30', '50'], size: 'small' }}
         scroll={{ x: 650 }}
         rowClassName={(r) => r.code === code ? 'ant-table-row-selected' : ''}
       />
@@ -2566,7 +2722,7 @@ function LimitUpTab({ data, code }) {
         {records.length > 0 ? (
           <Table
             size="small"
-            pagination={{ pageSize: 10, size: 'small' }}
+            pagination={{ defaultPageSize: 10, showSizeChanger: true, pageSizeOptions: ['10', '20', '30', '50'], size: 'small' }}
             dataSource={records}
             rowKey={(r, i) => r.tradeDate + r.ztType + i}
             columns={[
@@ -2691,7 +2847,7 @@ function BlockTradeTab({ data, code }) {
         {records.length > 0 ? (
           <Table
             size="small"
-            pagination={{ pageSize: 10, size: 'small' }}
+            pagination={{ defaultPageSize: 10, showSizeChanger: true, pageSizeOptions: ['10', '20', '30', '50'], size: 'small' }}
             dataSource={records}
             rowKey={(r, i) => r.tradeDate + r.price + i}
             scroll={{ x: 900 }}

@@ -307,6 +307,8 @@ export const stockAnalysisApi = {
   getInstitutionCoverage: (code, config) => api.get('/analysis/institution-coverage', { ...config, params: { code } }),
   // P2 个股长周期表现（YTD、超额收益、RS Rating、行业内排名）
   getStockPerformance: (code, config) => api.get('/analysis/stock-performance', { ...config, params: { code } }),
+  // 股东结构（股东人数趋势 + 基金持仓明细 + 筹码集中度）
+  getShareholderStructure: (code, config) => api.get('/analysis/shareholder-structure', { ...config, params: { code } }),
 };
 
 export default api;

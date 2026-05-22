@@ -5,7 +5,6 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.quant.platform.common.exception.BusinessException;
 import com.quant.platform.common.exception.ResourceNotFoundException;
-import com.quant.platform.config.ClickHouseConfig;
 import com.quant.platform.factor.domain.FactorDefinition;
 import com.quant.platform.factor.domain.FactorTestReport;
 import com.quant.platform.factor.domain.FactorValue;
@@ -13,7 +12,6 @@ import com.quant.platform.factor.engine.FactorComputeEngine;
 import com.quant.platform.factor.engine.ScriptedFactorEngine;
 import com.quant.platform.factor.mapper.FactorDefinitionMapper;
 import com.quant.platform.factor.mapper.FactorTestReportMapper;
-import com.quant.platform.factor.mapper.FactorValueMapper;
 import com.quant.platform.market.domain.MarketDailyBar;
 import com.quant.platform.market.service.MarketDataService;
 import com.quant.platform.stock.entity.StockInfo;
@@ -38,7 +36,6 @@ import java.util.*;
 public class FactorService {
 
     private final FactorDefinitionMapper factorMapper;
-    private final FactorValueMapper factorValueMapper;
     private final ClickHouseFactorValueService clickHouseFactorValueService;
     private final FactorTestReportMapper testReportMapper;
     private final FactorComputeEngine computeEngine;
@@ -603,17 +600,13 @@ public class FactorService {
      * 全部走 ClickHouse
      */
     public List<Map<String, String>> getFactorSymbols(String factorCode, String keyword) {
-        // 1. 从 CH 获取该因子有数据的股票列表
+        // 从 CH 获取该因子有数据的股票列表
         Set<String> factorSymbols;
         try {
-            List<FactorValue> values = clickHouseFactorValueService
-                    .findByFactorCodeAndDateRange(factorCode, LocalDate.of(2000, 1, 1), LocalDate.now());
-            factorSymbols = values.stream()
-                    .map(FactorValue::getSymbol)
-                    .collect(java.util.stream.Collectors.toSet());
+            factorSymbols = clickHouseFactorValueService.getDistinctSymbols(factorCode);
         } catch (Exception e) {
             log.warn("[FactorService] getFactorSymbols CH 失败: {}", e.getMessage());
-            factorSymbols = getFactorSymbolsFromMySQL(factorCode);
+            return List.of();
         }
 
         if (factorSymbols.isEmpty()) {
@@ -643,19 +636,6 @@ public class FactorService {
                 .limit(50)
                 .map(sym -> Map.of("symbol", sym, "name", nameMap.getOrDefault(sym, "")))
                 .toList();
-    }
-
-    /**
-     * 从 MySQL 获取因子有数据的股票列表
-     */
-    private Set<String> getFactorSymbolsFromMySQL(String factorCode) {
-        LambdaQueryWrapper<FactorValue> fvWrapper = new LambdaQueryWrapper<>();
-        fvWrapper.select(FactorValue::getSymbol)
-                .eq(FactorValue::getFactorCode, factorCode)
-                .groupBy(FactorValue::getSymbol);
-        return factorValueMapper.selectList(fvWrapper).stream()
-                .map(FactorValue::getSymbol)
-                .collect(java.util.stream.Collectors.toSet());
     }
 
     /**
