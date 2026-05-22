@@ -110,13 +110,27 @@ public class DataUpdateService {
             } else {
                 log.error("[DataUpdate] 脚本目录不存在: {} (也尝试过 {})", dir.getAbsolutePath(), fallback);
                 log.error("[DataUpdate] 请在 application.yml 中设置 quant.data-update.script-dir 为绝对路径");
-                resolvedScriptDir = null;
-            }
+            resolvedScriptDir = null;
         }
+
+        // ★ 清理上次异常退出（重启/崩溃）遗留的 RUNNING 状态
+        try {
+            int cleaned = jdbcTemplate.update(
+                "UPDATE data_schedule_config SET last_run_status = 'INTERRUPTED', updated_at = ? " +
+                "WHERE last_run_status = 'RUNNING'",
+                LocalDateTime.now()
+            );
+            if (cleaned > 0) {
+                log.info("[DataUpdate] 启动时清理了 {} 条残留 RUNNING 任务状态 → INTERRUPTED", cleaned);
+            }
+        } catch (Exception e) {
+            log.warn("[DataUpdate] 清理残留 RUNNING 状态失败: {}", e.getMessage());
+        }
+    }
     }
 
     /**
-     * 提交数据更新任务
+     * 提交数据更新任务（有单任务互斥锁，用于数据更新UI页面）
      */
     public synchronized DataUpdateTask submitTask(DataUpdateRequest request) {
         // 检查是否有任务正在运行
@@ -124,6 +138,21 @@ public class DataUpdateService {
             throw new IllegalStateException("已有任务正在运行，请等待完成或取消");
         }
 
+        return doSubmit(request);
+    }
+
+    /**
+     * 提交数据更新任务（无单任务限制，支持并发，用于定时调度）
+     * 定时任务场景下多个任务可同时执行
+     */
+    public synchronized DataUpdateTask submitTaskConcurrent(DataUpdateRequest request) {
+        return doSubmit(request);
+    }
+
+    /**
+     * 内部统一提交逻辑
+     */
+    private DataUpdateTask doSubmit(DataUpdateRequest request) {
         String taskId = "TASK-" + System.currentTimeMillis();
         DataUpdateTask task = new DataUpdateTask();
         task.setTaskId(taskId);
@@ -221,6 +250,19 @@ public class DataUpdateService {
 
         broadcastStatus(task);
         return true;
+    }
+
+    /**
+     * 根据 updateType 取消正在运行的任务
+     */
+    public synchronized boolean cancelByUpdateType(String updateType) {
+        for (DataUpdateTask task : activeTasks.values()) {
+            if (task.isRunning() && task.getRequest() != null
+                && updateType.equals(task.getRequest().getUpdateType())) {
+                return cancelTask(task.getTaskId());
+            }
+        }
+        return false;
     }
 
     /**
@@ -394,9 +436,38 @@ public class DataUpdateService {
             // 从活跃任务中移除（避免阻止新任务启动）
             activeTasks.remove(taskId);
             currentProcess = null;
-        currentProcessPid = -1;
+            currentProcessPid = -1;
             broadcastStatus(task);
             log.info("[DataUpdate] 任务 {} 结束, 状态: {}", taskId, task.getStatus());
+
+            // ★ 回写 data_schedule_config 的 last_run_status（让定时任务页面能正确显示最终状态）
+            try {
+                String finalStatus = task.getStatus();
+                long durationSec = java.time.Duration.between(task.getStartTime(), task.getEndTime()).getSeconds();
+                // 直接按 task_key 更新，不依赖 RUNNING 条件（更健壮）
+                int rows = jdbcTemplate.update(
+                    "UPDATE data_schedule_config SET last_run_status=?, last_run_duration_sec=?, updated_at=? " +
+                    "WHERE task_key=?",
+                    finalStatus, durationSec, LocalDateTime.now(), ut
+                );
+                if (rows > 0) {
+                    log.info("[DataUpdate] ★ 回写 DB: task_key={}, status={}, 耗时{}s", ut, finalStatus, durationSec);
+                } else {
+                    log.warn("[DataUpdate] 回写 DB 未匹配任何行: task_key={}", ut);
+                }
+                // SENTIMENT 类型需要额外映射到 MF/OTHER 子表
+                if ("SENTIMENT".equals(ut)) {
+                    String mfSource = request.isFetchMoneyflow() ? "SENTIMENT_MF" : "SENTIMENT_OTHER";
+                    int rows2 = jdbcTemplate.update(
+                        "UPDATE data_schedule_config SET last_run_status=?, last_run_duration_sec=?, updated_at=? " +
+                        "WHERE task_key=?",
+                        finalStatus, durationSec, LocalDateTime.now(), mfSource
+                    );
+                    log.info("[DataUpdate] ★ 回写 DB(SENTIMENT子表): task_key={}, status={}", mfSource, finalStatus);
+                }
+            } catch (Exception dbEx) {
+                log.error("[DataUpdate] ★★ 回写 schedule_config 失败!! task_key={}, error: {}", ut, dbEx.getMessage());
+            }
         }
     }
 

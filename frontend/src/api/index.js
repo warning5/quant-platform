@@ -264,6 +264,18 @@ export const dataUpdateApi = {
   getBidaskCoverage: () => api.get('/data-update/coverage/bidask'),
 };
 
+// ===== 定时任务配置 API =====
+export const scheduleApi = {
+  getAll: () => api.get('/schedule-config'),
+  getGlobal: () => api.get('/schedule-config/global'),
+  update: (taskKey, data) => api.put(`/schedule-config/${taskKey}`, data),
+  batchUpdate: (items) => api.put('/schedule-config/batch', items),
+  trigger: (taskKey) => api.post(`/schedule-config/trigger/${taskKey}`),
+  cancel: (taskKey) => api.post(`/schedule-config/cancel/${taskKey}`),
+  getHistory: () => api.get('/schedule-config/history'),
+  delete: (taskKey) => api.delete(`/schedule-config/${taskKey}`),
+};
+
 // ===== 研报数据 API =====
 export const researchApi = {
   getOverview: (config) => api.get('/research/overview', config),

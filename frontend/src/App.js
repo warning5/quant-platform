@@ -42,6 +42,7 @@ import ManualBacktestPage from './pages/manual/ManualBacktestPage';
 import FinancialData from './pages/financial/FinancialData';
 import ResearchData from './pages/datadetail/ResearchData';
 import DataUpdate from './pages/dataupdate/DataUpdate';
+import ScheduledTasks from './pages/dataupdate/ScheduledTasks';
 import StockAnalysis from './pages/analysis/StockAnalysis';
 import MarketThermometer from './pages/analysis/MarketThermometer';
 import SectorRanking from './pages/market/SectorRanking';
@@ -106,6 +107,7 @@ function AppLayout() {
         { key: '/data-detail/financial', label: <Link to="/data-detail/financial">财务数据</Link> },
         { key: '/data-detail/research', label: <Link to="/data-detail/research">研报数据</Link> },
         { key: '/sector-ranking', label: <Link to="/sector-ranking">行业排行</Link> },
+        { key: '/scheduled-tasks', label: <Link to="/scheduled-tasks">定时任务</Link> },
       ],
     },
     {
@@ -132,7 +134,7 @@ function AppLayout() {
     if (path.startsWith('/backtest')) return ['backtests'];
     if (path === '/screen') return ['screen'];
     if (path.startsWith('/data-detail')) return ['data-info'];
-    if (path === '/data-update' || path === '/sector-ranking') return ['data-info'];
+    if (path === '/data-update' || path === '/scheduled-tasks' || path === '/sector-ranking') return ['data-info'];
     if (path.startsWith('/manual/')) return ['manual'];
     return [];
   });
@@ -233,6 +235,7 @@ function AppLayout() {
             <Route path="/data-detail/research" element={<ResearchData />} />
             <Route path="/data-detail/financial" element={<FinancialData />} />
             <Route path="/data-update" element={<DataUpdate />} />
+            <Route path="/scheduled-tasks" element={<ScheduledTasks />} />
             <Route path="/factors" element={<FactorList />} />
             <Route path="/factors/new" element={<FactorEditor />} />
             <Route path="/factors/:id" element={<FactorDetail />} />
