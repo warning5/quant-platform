@@ -178,13 +178,17 @@ def query_neodata(q: str) -> dict | None:
         return None
 
 
-def extract_neodata_moneyflow(data: dict) -> list:
+def extract_neodata_moneyflow(data: dict, target_date: datetime.date = None) -> list:
     """从 NeoData 响应中提取资金流向 rows，格式同 _dual_write 的 stock_sentiment_moneyflow
     返回 [ts_code, trade_date, code, name, close, pct_change,
            net_main, net_main_pct, net_huge, net_big, net_medium, net_small, update_time]
     支持两种 NeoData 响应格式:
       - "历史资金流向": 表格格式，多日数据
       - "今日资金流向": 纯文本格式，单日数据
+
+    target_date: 格式2("今日资金流向")的交易日日期。
+                 默认 None 时回退 datetime.date.today()（仅向后兼容），
+                 调用方应传入实际查询目标日期以避免周末/节假日标错。
     NeoData 表格实际列顺序（14列，末尾空列已丢弃）:
       0=交易日期 1=中单净流入 2=主力流入(超大+大买盘) 3=主力流入占比(%)
       4=主力净流入 5=主力流出(超大+大卖盘) 6=主力流出占比(%)
@@ -277,7 +281,7 @@ def extract_neodata_moneyflow(data: dict) -> list:
             # 只有 net_main 是严格净流入，方向可信；其他降级为近似值，标记时间以便识别
             result.append([
                 ts_code,                  # ts_code
-                datetime.date.today(),    # trade_date（今日）
+                (target_date or datetime.date.today()),  # trade_date（目标日期，避免周末标错）
                 code,                     # code
                 0.0,                     # close
                 0.0,                     # pct_change
@@ -759,33 +763,59 @@ def fetch_activity() -> list:
 # 9a. 资金流向（东方财富 实时全市场接口）
 # ═══════════════════════════════════════════════════════════════
 
+def _curl_json(url: str, params: dict, headers: dict, timeout: int = 30) -> dict:
+    """用 Windows 原生 curl.exe 绕过 Python SSL / MinGW curl 问题。"""
+    import subprocess, urllib.parse, json as _json, sys, os
+    query = urllib.parse.urlencode(params)
+    full_url = url + "?" + query
+    hdr_args = []
+    for k, v in headers.items():
+        hdr_args += ["-H", f"{k}: {v}"]
+    # 优先使用 Windows 原生 curl.exe（Git MinGW curl 在 HTTPS 上有兼容问题）
+    if sys.platform == "win32" and os.path.exists(r"C:\Windows\System32\curl.exe"):
+        curl_bin = r"C:\Windows\System32\curl.exe"
+    else:
+        curl_bin = "curl"
+    cmd = [
+        curl_bin, "-s", "-L",
+        "--max-time", str(timeout),
+    ] + hdr_args + [full_url]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 5)
+    if r.returncode != 0:
+        raise RuntimeError(f"curl failed (rc={r.returncode}): {r.stderr[:200]}")
+    return _json.loads(r.stdout)
+
+
 def fetch_moneyflow_em_realtime() -> list:
     """
-    东方财富实时全市场资金流向，分页请求（每页500条）确保稳定。
+    东方财富实时全市场资金流向，用 curl 绕过 Python SSL 问题。
+    非交易日自动往前回溯最近 N 个交易日获取数据。
     返回 [ts_code, trade_date, code, close, pct_change,
            net_main, net_main_pct, net_huge, net_big, net_medium, net_small,
            update_time]
     """
     rows = []
 
-    today_str = datetime.date.today().isoformat().replace("-", "")
-    yesterday = (datetime.date.today() - datetime.timedelta(days=1)).strftime("%Y%m%d")
-    trade_date_candidates = [today_str, yesterday]
+    today = datetime.date.today()
+    trade_date_candidates = []
+    for i in range(14):
+        d = today - datetime.timedelta(days=i)
+        trade_date_candidates.append(d.strftime("%Y%m%d"))
 
-    url = "https://push2.eastmoney.com/api/qt/clist/get"
+    url = "http://stock.hwtx.site/api/qt/clist/get"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         "Referer": "https://data.eastmoney.com/",
         "Accept": "application/json",
     }
 
-    # 分页参数：东财在大请求时不稳定，改用较小分页+重试
     PAGE_SIZE = 300
     all_items = []
-    detected_date = today_str
+    detected_date = None
 
     for td_candidate in trade_date_candidates:
         page = 1
+        page_failed = False
         while True:
             params = {
                 "fid": "f62",
@@ -798,21 +828,24 @@ def fetch_moneyflow_em_realtime() -> list:
                 "ut": "b2884a393a59ad64002292a3e90d46a5",
                 "fields": "f12,f14,f2,f3,f62,f72,f75,f78,f66",
                 "fs": "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23",
+                "token": "95508b664a61ff632843c2d25ef6dfcb",
             }
-            # 重试3次处理连接被截断
+            json_data = None
             for attempt in range(3):
                 try:
-                    resp = requests.get(url, params=params, headers=headers, timeout=30, verify=False)
-                    resp.raise_for_status()
-                    json_data = resp.json()
+                    json_data = _curl_json(url, params, headers, timeout=30)
                     break
                 except Exception as e:
                     if attempt < 2:
                         time.sleep(2 ** attempt)
                     else:
                         if page == 1:
-                            print(f"  [EM realtime] 第{page}页请求失败: {e}")
+                            print(f"  [EM realtime] {td_candidate} 第1页请求失败: {e}")
+                            page_failed = True
                         break
+
+            if page_failed:
+                break
 
             try:
                 diff = json_data.get("data", {})
@@ -826,6 +859,7 @@ def fetch_moneyflow_em_realtime() -> list:
             if page == 1:
                 detected_date = td_candidate
                 if total == 0:
+                    print(f"  [EM realtime] {td_candidate} 无数据，尝试更早日期...")
                     break
 
             page_items = diff.get("diff", [])
@@ -834,19 +868,21 @@ def fetch_moneyflow_em_realtime() -> list:
 
             all_items.extend(page_items)
 
-            # 已取完
             if page * PAGE_SIZE >= total:
                 break
             page += 1
-            time.sleep(0.3)  # 避免请求过快被截断
+            time.sleep(0.3)
 
         if all_items:
-            break  # 有数据就退出候选循环
+            break
         all_items = []
+        detected_date = None
 
     if not all_items:
         print("  [EM realtime] 全市场资金流向无数据（可能非交易日）")
         return rows
+
+    print(f"  [EM realtime] 检测到交易日: {detected_date}, 共 {len(all_items)} 只股票")
 
     try:
         ch_client = clickhouse_connect.get_client(**CLICKHOUSE_CONFIG)
@@ -888,9 +924,9 @@ def fetch_moneyflow_em_realtime() -> list:
 
     if ch_client:
         ch_client.close()
-
     print(f"  资金流向(EM实时全市场): {len(rows)} 条  日期={detected_date}")
     return rows
+
 
 
 def fetch_moneyflow_em_hist_single(code: str, market: str = "", max_retries: int = 3) -> list:
@@ -914,7 +950,7 @@ def fetch_moneyflow_em_hist_single(code: str, market: str = "", max_retries: int
     else:
         secid = "0." + code
 
-    url = "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get"
+    url = "http://stock.hwtx.site/api/qt/stock/fflow/daykline/get"
     params = {
         "secid": secid,
         "klt": 101,
@@ -922,6 +958,7 @@ def fetch_moneyflow_em_hist_single(code: str, market: str = "", max_retries: int
         "ut": "b2884a393a59ad64002292a3e90d46a5",
         "fields1": "f1,f2,f3,f7",
         "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65",
+        "token": "95508b664a61ff632843c2d25ef6dfcb",
     }
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -929,13 +966,14 @@ def fetch_moneyflow_em_hist_single(code: str, market: str = "", max_retries: int
         "Accept": "application/json",
     }
 
+    # Windows 上 curl 访问 push2his.eastmoney.com 会被 MinGW curl 的 schannel renegotiation 截断
+    # 改用 _curl_json()（自动选择 Windows 原生 curl.exe）
+
     for attempt in range(max_retries):
         try:
-            resp = requests.get(url, params=params, headers=headers, timeout=30, verify=False)
-            resp.raise_for_status()
-            json_data = resp.json()
+            json_data = _curl_json(url, params, headers, timeout=30)
             break
-        except requests.RequestException as e:
+        except Exception as e:
             if attempt < max_retries - 1:
                 time.sleep(min(2 ** attempt * 3.0, 20.0))  # 递增退避：3s, 6s, 12s（上限20s）
             else:
@@ -1007,102 +1045,13 @@ def run_em_moneyflow_realtime(args):
 
 
 def run_em_moneyflow_hist(args):
-    """东方财富历史资金流向：批量并发多只股票，每只 ~120 天。
+    """东方财富历史资金流向（push2 fflow 路径被 CDN 墙，转走 NeoData）。
     用法:
       python update_sentiment_data.py --em-moneyflow-hist              # 全市场
       python update_sentiment_data.py --em-moneyflow-hist --codes 600519,000001  # 指定股票
     """
-    if args.codes:
-        raw_codes = [c.strip().zfill(6) for c in args.codes.split(",")]
-    elif args.moneyflow_codes:
-        raw_codes = [c.strip().zfill(6) for c in args.moneyflow_codes.split(",")]
-    else:
-        conn = pymysql.connect(**MYSQL_CONFIG)
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT code FROM stock_info
-            WHERE code NOT LIKE '920%'
-              AND code NOT LIKE '8%'
-              AND LENGTH(code) = 6
-            ORDER BY code
-        """)
-        raw_codes = [r[0] for r in cur.fetchall()]
-        cur.close()
-        conn.close()
-
-    print(f"=== 东方财富 历史资金流向: {len(raw_codes)} 只股票 ===")
-    print(f"  并发=2，每只间隔1秒，预计 {len(raw_codes) * 1.0 / 120:.0f} 分钟（东财限速，2并发更稳定）")
-
-    MF_CH_COLS = ["ts_code","trade_date","code","close","pct_change",
-                  "net_main","net_main_pct","net_huge","net_big","net_medium","net_small","update_time"]
-    MF_MY_COLS = MF_CH_COLS[:]
-    MF_UNIQUE  = ["code", "trade_date"]
-
-    ch_client = clickhouse_connect.get_client(**CLICKHOUSE_CONFIG)
-
-    grand_start = datetime.datetime.now()
-    total_ok = total_fail = total_rows = 0
-    done = 0
-
-    WORKERS = 2  # 东财接口有速率限制，2并发足够，5并发会触发限速
-
-    def _fetch_one(code):
-        try:
-            rows = fetch_moneyflow_em_hist_single(code, "", max_retries=5)  # 5次重试
-            return (code, rows, None)
-        except ConnectionError as e:
-            return (code, [], str(e))  # 网络错误，第三项携带错误信息
-
-    with ThreadPoolExecutor(max_workers=WORKERS) as pool:
-        futures = {pool.submit(_fetch_one, c): c for c in raw_codes}
-        for future in as_completed(futures):
-            code = futures[future]
-            done += 1
-            try:
-                cd, rows, err_msg = future.result()
-            except Exception as e:
-                print(f"[{done}/{len(raw_codes)}] {cd}... ✗ 异常 {e}")
-                total_fail += 1
-                continue
-
-            if err_msg:
-                # 网络错误，单独打印
-                total_fail += 1
-                if done % 10 == 0 or done == len(raw_codes):
-                    print(f"[{done}/{len(raw_codes)}] {cd}... ⚠ 网络异常（{err_msg[:30]}...）")
-                continue
-
-            if not rows:
-                total_fail += 1
-                if done % 50 == 0 or done == len(raw_codes):
-                    print(f"[{done}/{len(raw_codes)}] {cd}... ✗ 东财无数据")
-                continue
-
-            fill_close_pct_from_stock_daily(rows, ch_client)
-
-            _dual_write(
-                "stock_sentiment_moneyflow", rows,
-                MF_CH_COLS, MF_MY_COLS, MF_UNIQUE,
-                dry_run=args.dry_run,
-                force=args.force,
-            )
-            total_ok   += 1
-            total_rows += len(rows)
-            if done % 20 == 0 or done == len(raw_codes):
-                elapsed = (datetime.datetime.now() - grand_start).total_seconds()
-                speed = done / elapsed if elapsed > 0 else 0
-                eta = (len(raw_codes) - done) / speed if speed > 0 else 0
-                print(f"[{done}/{len(raw_codes)}] {cd}... ✓ {len(rows)}条  {speed:.1f}只/s  ETA={eta/60:.1f}min")
-
-            time.sleep(1.0)
-
-    ch_client.close()
-    elapsed = (datetime.datetime.now() - grand_start).total_seconds()
-    print(f"\n{'=' * 60}")
-    print(f"  东方财富 历史资金流向完成")
-    print(f"  总耗时 {elapsed:.0f}s ({elapsed/60:.0f}min)")
-    print(f"  成功 {total_ok} 只  失败 {total_fail} 只  总写入 {total_rows} 条")
-    print(f"{'=' * 60}")
+    print("=== 东方财富 历史资金流向（push2 不可达，转 NeoData）===")
+    run_neodata_moneyflow(args)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1389,7 +1338,7 @@ def _single_moneyflow_query(names: str, start: datetime.date, end: datetime.date
             else:
                 print(f"  [BATCH ERROR] 查询 {names[:20]}... [{start_fmt}→{end_fmt}] 失败: {e}")
                 return []
-    return extract_neodata_moneyflow(data)
+    return extract_neodata_moneyflow(data, target_date=end)
 
 
 def _fetch_batch_moneyflow(stocks: list, date_label: str):
@@ -1453,7 +1402,8 @@ def _fetch_batch_moneyflow_fallback(stocks: list, date_label: str):
             else:
                 print(f"  [BATCH ERROR] 查询批次 {names[:30]}... 失败: {e}")
                 return {cd: [] for _, cd, _ in stocks}
-    all_rows = extract_neodata_moneyflow(data)
+    _, fb_end = _parse_date_label(date_label)
+    all_rows = extract_neodata_moneyflow(data, target_date=fb_end)
     result: dict = {cd: [] for _, cd, _ in stocks}
     for row in all_rows:
         cd = str(row[2])
@@ -1539,6 +1489,33 @@ def run_neodata_moneyflow(args):
     MF_MY_COLS = MF_CH_COLS[:]
     MF_UNIQUE = ["code", "trade_date"]
 
+    # 进度日志文件（供监控服务读取）
+    _PROGRESS_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               'moneyflow_progress.log')
+
+    def _write_progress(batch_idx, total_batches, code, name, status, extra=''):
+        """写进度到日志文件，供 moneyflow_progress_server.py 读取"""
+        line = f"[{batch_idx+1}/{total_batches}] {code}.{name}... {status}{extra}\n"
+        try:
+            with open(_PROGRESS_LOG, 'a', encoding='utf-8') as f:
+                f.write(line)
+        except Exception:
+            pass
+        # 也写 summary 行（覆盖模式，供 API 快速读取）
+        try:
+            summary = json.dumps({
+                'current_batch': batch_idx + 1,
+                'total_batches': total_batches,
+                'current_code': code,
+                'current_name': name,
+                'status': 'running',
+                'updated_at': datetime.datetime.now().isoformat(),
+            }, ensure_ascii=False)
+            with open(_PROGRESS_LOG + '.json', 'w', encoding='utf-8') as f:
+                f.write(summary)
+        except Exception:
+            pass
+
     # CH 客户端用于回填 close/pct_change
     ch_client = clickhouse_connect.get_client(**CLICKHOUSE_CONFIG)
 
@@ -1551,6 +1528,14 @@ def run_neodata_moneyflow(args):
 
     total_batches = len(batches)
     print(f"  共 {total_batches} 批，每批 ~{BATCH_SIZE} 只，顺序执行")
+
+    # 初始化进度日志
+    try:
+        with open(_PROGRESS_LOG, 'w', encoding='utf-8') as f:
+            f.write(f"=== NeoData 资金流向补全: {total_stocks} 只 ===\n")
+            f.write(f"  共 {total_batches} 批，每批 ~{BATCH_SIZE} 只\n")
+    except Exception:
+        pass
 
     for idx, batch in enumerate(batches):
         done = idx + 1
@@ -1574,6 +1559,7 @@ def run_neodata_moneyflow(args):
 
             if not rows:
                 print(f"[{done}/{total_batches}] {label}... ✗ 无数据")
+                _write_progress(idx, total_batches, code, name, "✗ 无数据")
                 fail_count += 1
             else:
                 batch_all_rows.append((ts_code, code, name, rows))
@@ -1594,7 +1580,20 @@ def run_neodata_moneyflow(args):
                 dry_run=args.dry_run,
             )
             print(f"[{done}/{total_batches}] {label}... ✓ {len(rows)}条")
+            _write_progress(idx, total_batches, code, name, f"✓ {len(rows)}条")
             ok_count += 1
+
+    # 写完：标记完成
+    try:
+        with open(_PROGRESS_LOG + '.json', 'w', encoding='utf-8') as f:
+            f.write(json.dumps({
+                'current_batch': total_batches,
+                'total_batches': total_batches,
+                'status': 'done',
+                'finished_at': datetime.datetime.now().isoformat(),
+            }, ensure_ascii=False))
+    except Exception:
+        pass
 
     ch_client.close()
     grand_elapsed = (datetime.datetime.now() - grand_start).total_seconds()
@@ -1627,7 +1626,7 @@ def _fetch_stock_moneyflow(args, ts_code: str, code: str, name: str, months: lis
                     data = query_neodata(query_str)
                     if not isinstance(data, dict):
                         continue
-                    rows = extract_neodata_moneyflow(data)
+                    rows = extract_neodata_moneyflow(data, target_date=sub_end)
                     for row in rows:
                         td = row[1]
                         if td not in seen_dates:
