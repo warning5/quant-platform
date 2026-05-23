@@ -49,6 +49,20 @@ const scoreColor = (score, max) => {
 // ── 辅助：指标值颜色（涨红跌绿） ────────────────────────────────────────────
 const valueColor = (positive) => positive ? '#f5222d' : '#52c41a';
 
+// ── 最近查询历史（localStorage） ────────────────────────────────────────────
+const RECENT_KEY = 'stock_analysis_recent';
+const RECENT_MAX = 15;
+
+const loadRecent = () => {
+  try { return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]'); }
+  catch { return []; }
+};
+
+const saveRecent = (list) => {
+  try { localStorage.setItem(RECENT_KEY, JSON.stringify(list)); }
+  catch { /* quota exceeded, ignore */ }
+};
+
 // ── 主页面 ──────────────────────────────────────────────────────────────────
 export default function StockAnalysis() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -79,6 +93,28 @@ export default function StockAnalysis() {
   const searchTimerRef = useRef(null);
   const { data: thData, status: thStatus } = useMarketThermometer();
 
+  // 最近查询历史
+  const [recentQueries, setRecentQueries] = useState(loadRecent);
+
+  // 查询成功后保存到历史
+  const addToRecent = useCallback((code, name) => {
+    if (!code || !name) return;
+    setRecentQueries(prev => {
+      const filtered = prev.filter(item => item.code !== code);
+      const next = [{ code, name }, ...filtered].slice(0, RECENT_MAX);
+      saveRecent(next);
+      return next;
+    });
+  }, []);
+
+  const removeRecent = useCallback((code) => {
+    setRecentQueries(prev => {
+      const next = prev.filter(item => item.code !== code);
+      saveRecent(next);
+      return next;
+    });
+  }, []);
+
   // 从 URL 读取初始股票代码
   const urlCode = searchParams.get('code') || '';
 
@@ -89,6 +125,13 @@ export default function StockAnalysis() {
       doSearch(urlCode);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 查询成功后记录历史
+  useEffect(() => {
+    if (overview?.code && overview?.name) {
+      addToRecent(overview.code, overview.name);
+    }
+  }, [overview?.code]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 搜索
   const doSearch = useCallback((c) => {
@@ -572,6 +615,28 @@ export default function StockAnalysis() {
             )}
           </Col>
         </Row>
+        {/* ── 最近查询历史 ──────────────────────────────────────────────── */}
+        {recentQueries.length > 0 && (
+          <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid #f0f0f0' }}>
+            <Text type="secondary" style={{ fontSize: 12, marginRight: 8 }}>最近:</Text>
+            {recentQueries.map(item => (
+              <Tag
+                key={item.code}
+                closable
+                onClose={(e) => { e.preventDefault(); removeRecent(item.code); }}
+                style={{ cursor: 'pointer', marginBottom: 4 }}
+                onClick={() => {
+                  setInputCode(item.code);
+                  doSearch(item.code);
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = '#1890ff'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = ''; }}
+              >
+                {item.name}({item.code})
+              </Tag>
+            ))}
+          </div>
+        )}
       </Card>
 
       {/* ── 加载/错误 ──────────────────────────────────────────────────── */}

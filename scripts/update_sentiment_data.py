@@ -1063,11 +1063,15 @@ def fetch_zt_data(date_str: str) -> list:
     import akshare as ak
     zt_rows = []
     try:
-        # 涨停板行情（stock_zt_pool_em 是真正的涨停板，不含60日新高等非涨停）
+        # 涨停板行情（stock_zt_pool_em 有时混入"60日新高"等非真实涨停）
         df = ak.stock_zt_pool_em(date=date_str)
         if df is not None and not df.empty:
             for _, r in df.iterrows():
                 code = str(r.get("代码", "")).zfill(6)
+                pct_chg = to_float(r.get("涨跌幅"))
+                # 过滤：涨幅必须 ≥ 9.8% 才算真实涨停（与因子/回测一致）
+                if pct_chg is None or pct_chg < 9.8:
+                    continue
                 zt_stat = str(r.get("涨停统计", ""))
                 lb_count = str(r.get("连板数", ""))
                 is_new = 1 if zt_stat.startswith("1/") else 0
@@ -1077,7 +1081,7 @@ def fetch_zt_data(date_str: str) -> list:
                 zt_rows.append([
                     code, to_date(date_str), code,
                     str(r.get("名称", "")),
-                    to_float(r.get("最新价")), to_float(r.get("涨跌幅")),
+                    to_float(r.get("最新价")), pct_chg,
                     "zt", reason[:200], is_new,
                     datetime.datetime.now(),
                 ])

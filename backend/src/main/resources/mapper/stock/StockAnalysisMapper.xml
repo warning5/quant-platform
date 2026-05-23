@@ -101,12 +101,13 @@
     <!-- 查询事件面数据 -->
     <select id="selectSentimentSignal" resultType="com.quant.platform.stock.analysis.domain.SentimentSignal">
         SELECT
-            -- 近10日涨停天数（只统计zt_type='zt'，按日期去重）
+            -- 近10日涨停天数（只统计zt_type='zt'且涨幅≥9.8%，按日期去重）
             COALESCE((
                 SELECT COUNT(DISTINCT trade_date) FROM stock_sentiment_zt
                 WHERE code = #{code}
                   AND trade_date >= DATE_SUB(CURDATE(), INTERVAL 10 DAY)
                   AND zt_type = 'zt'
+                  AND pct_change >= 9.8
             ), 0) as limitUpDays,
             0 as limitUpStrength,
             -- 近20日炸板次数
@@ -431,8 +432,8 @@
     <select id="selectFundHolderTop" resultType="java.util.Map">
         SELECT fund_name, fund_code,
                COALESCE(float_ratio, 0) as float_ratio,
-               COALESCE(shares_held, 0) as shares_held,
-               COALESCE(change_pct_qoq, 0) as change_pct_qoq,
+               COALESCE(holding_quantity, 0) as shares_held,
+               COALESCE(market_value, 0) as market_value,
                report_date
         FROM stock_fund_holder
         WHERE stock_code = #{code}
