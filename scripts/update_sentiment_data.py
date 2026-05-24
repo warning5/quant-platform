@@ -116,6 +116,17 @@ def _check_neodata_token(verbose=True):
 
 # ─── 工具函数 ────────────────────────────────────────────────────
 
+def _latest_trading_day() -> datetime.date:
+    """返回最近的交易日：周一至周五返回今天，周末返回上周五。"""
+    today = datetime.date.today()
+    wd = today.weekday()  # 0=Mon ... 6=Sun
+    if wd == 5:
+        return today - datetime.timedelta(days=1)
+    if wd == 6:
+        return today - datetime.timedelta(days=2)
+    return today
+
+
 def to_float(val, default=0.0):
     if val is None or str(val).strip() in ("", "-", "None", "nan"):
         return default
@@ -187,8 +198,8 @@ def extract_neodata_moneyflow(data: dict, target_date: datetime.date = None) -> 
       - "今日资金流向": 纯文本格式，单日数据
 
     target_date: 格式2("今日资金流向")的交易日日期。
-                 默认 None 时回退 datetime.date.today()（仅向后兼容），
-                 调用方应传入实际查询目标日期以避免周末/节假日标错。
+                 默认 None 时回退 _latest_trading_day()（避免周末标错），
+                 调用方应传入实际查询目标日期。
     NeoData 表格实际列顺序（14列，末尾空列已丢弃）:
       0=交易日期 1=中单净流入 2=主力流入(超大+大买盘) 3=主力流入占比(%)
       4=主力净流入 5=主力流出(超大+大卖盘) 6=主力流出占比(%)
@@ -281,7 +292,7 @@ def extract_neodata_moneyflow(data: dict, target_date: datetime.date = None) -> 
             # 只有 net_main 是严格净流入，方向可信；其他降级为近似值，标记时间以便识别
             result.append([
                 ts_code,                  # ts_code
-                (target_date or datetime.date.today()),  # trade_date（目标日期，避免周末标错）
+                (target_date or _latest_trading_day()),  # trade_date（目标日期，避免周末标错）
                 code,                     # code
                 0.0,                     # close
                 0.0,                     # pct_change
@@ -763,6 +774,14 @@ def fetch_activity() -> list:
 # 9a. 资金流向（东方财富 实时全市场接口）
 # ═══════════════════════════════════════════════════════════════
 
+def _http_json(url: str, params: dict, headers: dict, timeout: int = 30) -> dict:
+    """用 Python requests 请求 HTTP 接口（push2 等域名 http 可达，https 被封）。"""
+    import requests as _requests, json as _json
+    r = _requests.get(url, params=params, headers=headers, timeout=timeout)
+    r.raise_for_status()
+    return r.json()
+
+
 def _curl_json(url: str, params: dict, headers: dict, timeout: int = 30) -> dict:
     """用 Windows 原生 curl.exe 绕过 Python SSL / MinGW curl 问题。"""
     import subprocess, urllib.parse, json as _json, sys, os
@@ -779,6 +798,7 @@ def _curl_json(url: str, params: dict, headers: dict, timeout: int = 30) -> dict
     cmd = [
         curl_bin, "-s", "-L",
         "--max-time", str(timeout),
+        "--noproxy", "*",    # 禁止走系统代理，直接连目标 IP
     ] + hdr_args + [full_url]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 5)
     if r.returncode != 0:
@@ -802,7 +822,7 @@ def fetch_moneyflow_em_realtime() -> list:
         d = today - datetime.timedelta(days=i)
         trade_date_candidates.append(d.strftime("%Y%m%d"))
 
-    url = "http://stock.hwtx.site/api/qt/clist/get"
+    url = "http://push2.eastmoney.com/api/qt/clist/get"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         "Referer": "https://data.eastmoney.com/",
@@ -833,7 +853,8 @@ def fetch_moneyflow_em_realtime() -> list:
             json_data = None
             for attempt in range(3):
                 try:
-                    json_data = _curl_json(url, params, headers, timeout=30)
+                    # push2 域名 HTTPS 被封，改用 HTTP + requests（curl 对 http 也失败）
+                    json_data = _http_json(url, params, headers, timeout=30)
                     break
                 except Exception as e:
                     if attempt < 2:
@@ -950,7 +971,7 @@ def fetch_moneyflow_em_hist_single(code: str, market: str = "", max_retries: int
     else:
         secid = "0." + code
 
-    url = "http://stock.hwtx.site/api/qt/stock/fflow/daykline/get"
+    url = "http://push2.eastmoney.com/api/qt/stock/fflow/daykline/get"
     params = {
         "secid": secid,
         "klt": 101,
@@ -1024,11 +1045,12 @@ def fetch_moneyflow_em_hist_single(code: str, market: str = "", max_retries: int
 def run_em_moneyflow_realtime(args):
     """东方财富实时全市场资金流向（单次请求 ~5500 只）。
     用法: python update_sentiment_data.py --em-moneyflow
+    直接走东财接口，不降级。
     """
     print("=== 东方财富 实时资金流向（全市场）===")
     rows = fetch_moneyflow_em_realtime()
     if not rows:
-        print("  无数据，退出")
+        print("  [无数据，可能非交易日或接口异常]")
         return
 
     MF_CH_COLS = ["ts_code","trade_date","code","close","pct_change",
@@ -1421,7 +1443,7 @@ def run_neodata_moneyflow(args):
     _check_neodata_token(verbose=True)  # 实际调用 NeoData 前检查 token
     # 确定日期范围
     start_str = args.start_date or "2026-05-07"
-    end_str = args.end_date or datetime.date.today().isoformat()
+    end_str = args.end_date or _latest_trading_day().isoformat()
 
     # 计算期望日期数（自然日，作为数据完整性的近似阈值）
     start_dt = datetime.datetime.strptime(start_str, "%Y-%m-%d").date()
@@ -1656,10 +1678,10 @@ def run_neodata_refresh(args):
     _check_neodata_token(verbose=True)  # 实际调用 NeoData 前检查 token
     # ── 确定日期范围 ─────────────────────────────────────────────
     start_str = args.refresh_start  # e.g. "2025-11-01"
-    end_str = datetime.date.today().isoformat()
+    end_str = _latest_trading_day().isoformat()
 
     start_dt = datetime.datetime.strptime(start_str, "%Y-%m-%d").date()
-    end_dt = datetime.date.today()
+    end_dt = _latest_trading_day()
 
     # 生成月首/月尾列表
     months = []

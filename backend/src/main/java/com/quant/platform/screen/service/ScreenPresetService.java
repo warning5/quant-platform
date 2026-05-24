@@ -64,12 +64,12 @@ public class ScreenPresetService {
 
         // 4. 技术动量组合
         builtins.add(buildPreset("技术动量", "纯技术面选股：趋势跟踪+量价确认，适合短线交易",
-                "[{\"factorCode\":\"MOM20\",\"direction\":1,\"weight\":1.5,\"filterOp\":\"NONE\",\"filterValue\":null}," +
-                        "{\"factorCode\":\"MOM60\",\"direction\":1,\"weight\":1,\"filterOp\":\"NONE\",\"filterValue\":null}," +
-                        "{\"factorCode\":\"RSI14\",\"direction\":-1,\"weight\":1,\"filterOp\":\"LTE\",\"filterValue\":70}," +
-                        "{\"factorCode\":\"MACD\",\"direction\":1,\"weight\":1,\"filterOp\":\"NONE\",\"filterValue\":null}," +
-                        "{\"factorCode\":\"VOLUME_RATIO\",\"direction\":1,\"weight\":1,\"filterOp\":\"NONE\",\"filterValue\":null}," +
-                        "{\"factorCode\":\"BOLL_POS\",\"direction\":1,\"weight\":0.5,\"filterOp\":\"NONE\",\"filterValue\":null}]"));
+                "[{\"factorCode\":\"MOM20\",\"direction\":1,\"weight\":1.5,\"filterOp\":\"GT\",\"filterValue\":0.10}," +
+                        "{\"factorCode\":\"MOM60\",\"direction\":1,\"weight\":1,\"filterOp\":\"GT\",\"filterValue\":0.10}," +
+                        "{\"factorCode\":\"RSI14\",\"direction\":-1,\"weight\":1,\"filterOp\":\"LTE\",\"filterValue\":60}," +
+                        "{\"factorCode\":\"MACD\",\"direction\":1,\"weight\":1,\"filterOp\":\"GT\",\"filterValue\":0.5}," +
+                        "{\"factorCode\":\"VOLUME_RATIO\",\"direction\":1,\"weight\":1,\"filterOp\":\"GT\",\"filterValue\":0.8}," +
+                        "{\"factorCode\":\"BOLL_POS\",\"direction\":1,\"weight\":0.5,\"filterOp\":\"GT\",\"filterValue\":0.40}]"));
 
         // 5. 价值投资组合
         builtins.add(buildPreset("价值投资", "深度价值：低估值+高质量+高安全边际",
@@ -82,12 +82,12 @@ public class ScreenPresetService {
 
         // 6. 趋势突破组合
         builtins.add(buildPreset("趋势突破", "量价配合的趋势跟踪：强动量+放量确认+低波动率偏离，捕捉持续上涨个股",
-                "[{\"factorCode\":\"MOM60\",\"direction\":1,\"weight\":2,\"filterOp\":\"GT\",\"filterValue\":5}," +
-                        "{\"factorCode\":\"MOM20\",\"direction\":1,\"weight\":1.5,\"filterOp\":\"GT\",\"filterValue\":0}," +
+                "[{\"factorCode\":\"MOM60\",\"direction\":1,\"weight\":2,\"filterOp\":\"GT\",\"filterValue\":0.10}," +
+                        "{\"factorCode\":\"MOM20\",\"direction\":1,\"weight\":1.5,\"filterOp\":\"GT\",\"filterValue\":0.10}," +
                         "{\"factorCode\":\"VOLUME_RATIO\",\"direction\":1,\"weight\":1.5,\"filterOp\":\"GT\",\"filterValue\":1}," +
-                        "{\"factorCode\":\"BOLL_POS\",\"direction\":1,\"weight\":1,\"filterOp\":\"NONE\",\"filterValue\":null}," +
-                        "{\"factorCode\":\"VPCORR20\",\"direction\":1,\"weight\":1,\"filterOp\":\"GT\",\"filterValue\":0}," +
-                        "{\"factorCode\":\"VOL20\",\"direction\":-1,\"weight\":0.5,\"filterOp\":\"NONE\",\"filterValue\":null}]"));
+                        "{\"factorCode\":\"BOLL_POS\",\"direction\":1,\"weight\":1,\"filterOp\":\"GT\",\"filterValue\":0.40}," +
+                        "{\"factorCode\":\"VPCORR20\",\"direction\":1,\"weight\":1,\"filterOp\":\"GT\",\"filterValue\":0.30}," +
+                        "{\"factorCode\":\"VOL20\",\"direction\":-1,\"weight\":0.5,\"filterOp\":\"LTE\",\"filterValue\":55}]"));
 
         // 7. 高盈利质量组合
         builtins.add(buildPreset("高盈利质量", "聚焦盈利能力强、利润含金量高、财务健康的优质公司，适合价值成长型配置",
@@ -146,22 +146,31 @@ public class ScreenPresetService {
                         "{\"factorCode\":\"RSI14\",\"direction\":-1,\"weight\":0.8,\"filterOp\":\"LTE\",\"filterValue\":70}]"));
 
         // 13. 经典技术指标组合（参考 baostock 用户案例：均线+MACD+RSI+布林带）
+        // 阈值基于 2026-05-22 全市场分位数校准 (Round 4)
         builtins.add(buildPreset("经典技术指标", "均线趋势+MACD动能+RSI超卖回避+布林带位置：经典技术分析四件套，适合中短线选股",
-                "[{\"factorCode\":\"MOM20\",\"direction\":1,\"weight\":1.5,\"filterOp\":\"GT\",\"filterValue\":0}," +
-                        "{\"factorCode\":\"MOM60\",\"direction\":1,\"weight\":1.5,\"filterOp\":\"GT\",\"filterValue\":0}," +
-                        "{\"factorCode\":\"MACD\",\"direction\":1,\"weight\":1.5,\"filterOp\":\"NONE\",\"filterValue\":null}," +
-                        "{\"factorCode\":\"RSI14\",\"direction\":-1,\"weight\":1,\"filterOp\":\"LTE\",\"filterValue\":70}," +
-                        "{\"factorCode\":\"BOLL_POS\",\"direction\":1,\"weight\":1,\"filterOp\":\"GT\",\"filterValue\":0.2}," +
-                        "{\"factorCode\":\"VPCORR20\",\"direction\":1,\"weight\":0.8,\"filterOp\":\"GT\",\"filterValue\":0}," +
-                        "{\"factorCode\":\"VOL20\",\"direction\":-1,\"weight\":0.7,\"filterOp\":\"NONE\",\"filterValue\":null}]"));
+                "[{\"factorCode\":\"MOM20\",\"direction\":1,\"weight\":1.5,\"filterOp\":\"GT\",\"filterValue\":0.10}," +
+                        "{\"factorCode\":\"MOM60\",\"direction\":1,\"weight\":1.5,\"filterOp\":\"GT\",\"filterValue\":0.10}," +
+                        "{\"factorCode\":\"MACD\",\"direction\":1,\"weight\":1.5,\"filterOp\":\"GT\",\"filterValue\":0.5}," +
+                        "{\"factorCode\":\"RSI14\",\"direction\":-1,\"weight\":1,\"filterOp\":\"LTE\",\"filterValue\":60}," +
+                        "{\"factorCode\":\"BOLL_POS\",\"direction\":1,\"weight\":1,\"filterOp\":\"GT\",\"filterValue\":0.40}," +
+                        "{\"factorCode\":\"VPCORR20\",\"direction\":1,\"weight\":0.8,\"filterOp\":\"GT\",\"filterValue\":0.30}," +
+                        "{\"factorCode\":\"VOL20\",\"direction\":-1,\"weight\":0.7,\"filterOp\":\"LTE\",\"filterValue\":55}]"));
 
         for (ScreenPreset preset : builtins) {
-            long count = presetMapper.selectCount(
+            ScreenPreset existing = presetMapper.selectOne(
                     new LambdaQueryWrapper<ScreenPreset>()
                             .eq(ScreenPreset::getPresetName, preset.getPresetName())
-                            .eq(ScreenPreset::getIsBuiltin, 1));
-            if (count == 0) {
+                            .eq(ScreenPreset::getIsBuiltin, 1)
+                            .last("LIMIT 1"));
+            if (existing == null) {
                 presetMapper.insert(preset);
+            } else if (!preset.getFactorConfig().equals(existing.getFactorConfig())) {
+                // 内置预设配置有更新，自动覆盖（用户自定义的 isBuiltin=0 不受影响）
+                existing.setFactorConfig(preset.getFactorConfig());
+                existing.setDescription(preset.getDescription());
+                existing.setUpdatedAt(LocalDateTime.now());
+                presetMapper.updateById(existing);
+                log.info("Updated built-in preset: {}", preset.getPresetName());
             }
         }
         log.info("Built-in screen presets initialized");

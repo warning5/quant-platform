@@ -40,6 +40,11 @@ public class ScreenResult {
     private Map<String, Integer> factorCoverage;
 
     /**
+     * 因子筛选通过数（因子代码 -> 通过筛选条件的股票数量）
+     */
+    private Map<String, Integer> factorFilterPass;
+
+    /**
      * 单只股票的综合评分结果
      */
     @Data

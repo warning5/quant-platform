@@ -91,11 +91,25 @@ public class StockScreenService {
         Map<String, MarketDailyBar> barMap = bars.stream()
                 .collect(Collectors.toMap(MarketDailyBar::getSymbol, b -> b, (a, b) -> a));
 
+        // factor_value.symbol 无后缀，MarketDailyBar.symbol 有后缀（如 600519.SH）
+        // 构建纯净代码到完整 symbol 的映射，以及按纯净代码索引的 barMap
+        Map<String, String> codeToSymbol = new HashMap<>();
+        Map<String, MarketDailyBar> barMapByCode = new HashMap<>();
+        for (Map.Entry<String, MarketDailyBar> entry : barMap.entrySet()) {
+            String fullSym = entry.getKey();
+            int dot = fullSym.lastIndexOf('.');
+            String code = dot > 0 ? fullSym.substring(0, dot) : fullSym;
+            codeToSymbol.put(code, fullSym);
+            if (!barMapByCode.containsKey(code)) {
+                barMapByCode.put(code, entry.getValue());
+            }
+        }
+
         // 候选股票池（若 excludeSt，则剔除名称含"ST"的）
-        Set<String> candidates = barMap.keySet().stream()
+        Set<String> candidates = barMapByCode.keySet().stream()
                 .filter(sym -> {
                     if (Boolean.TRUE.equals(req.getExcludeSt())) {
-                        MarketDailyBar b = barMap.get(sym);
+                        MarketDailyBar b = barMapByCode.get(sym);
                         String name = b.getName() != null ? b.getName().toUpperCase() : "";
                         return !name.contains("ST");
                     }
@@ -145,7 +159,10 @@ public class StockScreenService {
                     || Boolean.TRUE.equals(mpf.getAboveMA100());
             if (needMaFilter) {
                 // 将候选 symbol 转为带后缀格式（barMap key），批量计算均线位置
-                List<String> candidateList = new ArrayList<>(candidates);
+                // MA过滤器需要完整symbol（带后缀）
+                List<String> candidateList = candidates.stream()
+                        .map(code -> codeToSymbol.getOrDefault(code, code))
+                        .collect(Collectors.toList());
                 Map<String, Map<String, Object>> maPositions =
                         priceAdvisorService.batchCalcMaPositions(candidateList, screenDate);
                 candidates.removeIf(sym -> {
@@ -182,6 +199,15 @@ public class StockScreenService {
             List<FactorValue> filtered = crossSection.stream()
                     .filter(fv -> candidates.contains(fv.getSymbol()))
                     .toList();
+
+            // 诊断：symbol 格式不匹配时打印样本
+            if (filtered.isEmpty() && !crossSection.isEmpty()) {
+                log.warn("[Screen] symbol mismatch! crossSection size={}, first 5 symbols={}, candidates size={}, first 5 candidates={}",
+                        crossSection.size(),
+                        crossSection.stream().limit(5).map(FactorValue::getSymbol).collect(Collectors.toList()),
+                        candidates.size(),
+                        candidates.stream().limit(5).collect(Collectors.toList()));
+            }
 
             // 极值处理
             String outlierMethod = fw.getOutlierMethod() != null && !fw.getOutlierMethod().isEmpty()
@@ -228,7 +254,7 @@ public class StockScreenService {
             applyOrthogonalization(factorData, orthoMethod);
         }
 
-        // ── 4. 计算综合得分 ──────────────────────────────────────────
+        // ── 4. 筛选 + 计算综合得分 ───────────────────────────────────
         // 权重归一化（绝对值之和 = 1）
         double totalAbsWeight = req.getFactors().stream()
                 .mapToDouble(fw -> Math.abs(fw.getWeight())).sum();
@@ -237,46 +263,109 @@ public class StockScreenService {
         // 只选在所有因子中都有值的股票（或放宽到至少有 50% 因子有值）
         int minFactors = Math.max(1, (int) Math.ceil(req.getFactors().size() * 0.5));
 
-        List<ScreenResult.StockScore> scores = new ArrayList<>();
+        // 统计每个因子的筛选通过数
+        Map<String, Integer> filterPassCount = new LinkedHashMap<>();
+        for (ScreenRequest.FactorWeight fw : req.getFactors()) {
+            filterPassCount.put(fw.getFactorCode(), 0);
+        }
+
+        // 第一遍：收集通过筛选的股票及其原始因子值
+        List<String> passedSymbols = new ArrayList<>();
+        Map<String, Map<String, Double>> passedRawValues = new LinkedHashMap<>(); // symbol -> {factorCode: rawValue}
+
         for (String sym : candidates) {
-            Map<String, Double> rankMap = new LinkedHashMap<>();
             Map<String, Double> valueMap = new LinkedHashMap<>();
-            int validCount = 0;
-            double compositeScore = 0.0;
+            boolean passed = true;
 
             for (ScreenRequest.FactorWeight fw : req.getFactors()) {
                 FactorValue fv = factorData.get(fw.getFactorCode()).get(sym);
                 if (fv != null) {
-                    double normalized = fv.getRankValue() != null ? fv.getRankValue().doubleValue() : 0.5;
                     double raw = fv.getFactorVal() != null ? fv.getFactorVal().doubleValue() : 0.0;
-
                     // 筛选条件过滤
                     if (!passFilter(raw, fw.getFilterOp(), fw.getFilterValue())) {
-                        validCount = -9999; // 标记为不满足筛选条件
+                        passed = false;
                         break;
                     }
-
-                    rankMap.put(fw.getFactorCode(), normalized);
+                    filterPassCount.merge(fw.getFactorCode(), 1, Integer::sum);
                     valueMap.put(fw.getFactorCode(), raw);
-
-                    // 权重 * 方向 * 标准化值
-                    double normalizedWeight = fw.getWeight() / totalAbsWeight;
-                    // direction: 1=正向（越高越好），-1=反向（越低越好）
-                    double factorScore = fw.getDirection() >= 0 ? normalized : (1.0 - normalized);
-                    compositeScore += normalizedWeight * factorScore;
-                    validCount++;
                 }
             }
 
-            if (validCount < minFactors) continue;
+            if (passed && !valueMap.isEmpty()) {
+                passedSymbols.add(sym);
+                passedRawValues.put(sym, valueMap);
+            }
+        }
 
-            MarketDailyBar bar = barMap.get(sym);
+        log.info("[Screen] Filter passed: {} stocks (from {} candidates)", passedSymbols.size(), candidates.size());
+
+        // 第二遍：在通过池内对每个因子重新做 rank 归一化（0~1），使排名有区分度
+        for (ScreenRequest.FactorWeight fw : req.getFactors()) {
+            final String fc = fw.getFactorCode();
+            // 收集该因子所有通过股票的原始值
+            List<Map.Entry<String, Double>> vals = new ArrayList<>();
+            for (String s : passedSymbols) {
+                Map<String, Double> vm = passedRawValues.get(s);
+                if (vm == null) continue;
+                Double v = vm.get(fc);
+                if (v != null) vals.add(new AbstractMap.SimpleEntry<>(s, v));
+            }
+
+            if (vals.isEmpty()) continue;
+
+            // 按 raw 值排序，分配 rank（0~1）
+            List<Map.Entry<String, Double>> sorted = vals.stream()
+                    .sorted((a, b) -> Double.compare(a.getValue(), b.getValue()))
+                    .toList();
+
+            int n = sorted.size();
+            for (int i = 0; i < n; i++) {
+                // rank = (i + 0.5) / n，均匀分布在 (0, 1)
+                double rank = (i + 0.5) / n;
+                String sym = sorted.get(i).getKey();
+                passedRawValues.get(sym).put("__rank_" + fc, rank);
+            }
+        }
+
+        // 第三遍：计算综合得分 + 构建 result
+        List<ScreenResult.StockScore> scores = new ArrayList<>();
+        for (String sym : passedSymbols) {
+            Map<String, Double> rankMap = new LinkedHashMap<>();
+            Map<String, Double> valueMap = passedRawValues.get(sym);
+            int validCount = valueMap.size();
+            double compositeScore = 0.0;
+
+            for (ScreenRequest.FactorWeight fw : req.getFactors()) {
+                String fc = fw.getFactorCode();
+                Double raw = valueMap.get(fc);
+                if (raw == null) continue;
+
+                // 使用池内 rank 归一化值
+                Double normalized = valueMap.get("__rank_" + fc);
+                if (normalized == null) normalized = 0.5;
+
+                rankMap.put(fc, normalized);
+
+                // 权重 * 方向 * 标准化值
+                double normalizedWeight = fw.getWeight() / totalAbsWeight;
+                // direction: 1=正向（越高越好），-1=反向（越低越好）
+                double factorScore = fw.getDirection() >= 0 ? normalized : (1.0 - normalized);
+                compositeScore += normalizedWeight * factorScore;
+                validCount++;
+            }
+
+            // 从 valueMap 中剥离 __rank_ 前缀的临时数据
+            Map<String, Double> cleanValueMap = valueMap.entrySet().stream()
+                    .filter(e -> !e.getKey().startsWith("__rank_"))
+                    .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue, (a,b) -> a, LinkedHashMap::new));
+
+            MarketDailyBar bar = barMapByCode.get(sym);
             scores.add(ScreenResult.StockScore.builder()
-                    .symbol(sym)
+                    .symbol(codeToSymbol.getOrDefault(sym, sym))
                     .name(bar != null ? bar.getName() : sym)
                     .compositeScore(compositeScore)
                     .factorRanks(rankMap)
-                    .factorValues(valueMap)
+                    .factorValues(cleanValueMap)
                     .build());
         }
 
@@ -337,6 +426,7 @@ public class StockScreenService {
                 .candidateCount(candidates.size())
                 .stocks(topStocks)
                 .factorCoverage(coverage)
+                .factorFilterPass(filterPassCount)
                 .build();
     }
 

@@ -92,14 +92,14 @@ const PRESET_DESCRIPTIONS = {
     ],
   },
   '技术动量': {
-    desc: '纯技术面选股：趋势跟踪+量价确认，适合短线交易',
+    desc: '纯技术面选股：趋势跟踪+量价确认+超买回避，适合短线交易',
     factors: [
-      { code: 'MOM20', name: '20日动量', direction: '正向', weight: 1.5, reason: '中短期趋势' },
-      { code: 'MOM60', name: '60日动量', direction: '正向', weight: 1, reason: '中长期趋势' },
-      { code: 'RSI14', name: 'RSI(14)', direction: '反向', weight: 1, reason: '回避超买' },
-      { code: 'MACD', name: 'MACD', direction: '正向', weight: 1, reason: '趋势动能' },
-      { code: 'VOLUME_RATIO', name: '量比', direction: '正向', weight: 1, reason: '放量确认' },
-      { code: 'BOLL_POS', name: '布林位置', direction: '正向', weight: 0.5, reason: '中轨上方' },
+      { code: 'MOM20', name: '20日动量', direction: '正向', weight: 1.5, reason: '短期正动量（>10%）' },
+      { code: 'MOM60', name: '60日动量', direction: '正向', weight: 1, reason: '中长期上升趋势（>10%）' },
+      { code: 'RSI14', name: 'RSI(14)', direction: '反向', weight: 1, reason: '回避超买区间（≤60）' },
+      { code: 'MACD', name: 'MACD', direction: '正向', weight: 1, reason: '趋势动能增强（>0.5）' },
+      { code: 'VOLUME_RATIO', name: '量比', direction: '正向', weight: 1, reason: '放量确认（>0.8）' },
+      { code: 'BOLL_POS', name: '布林位置', direction: '正向', weight: 0.5, reason: '布林带中上区（>0.4）' },
     ],
   },
   '价值投资': {
@@ -114,14 +114,14 @@ const PRESET_DESCRIPTIONS = {
     ],
   },
   '趋势突破': {
-    desc: '量价配合的趋势跟踪：强动量+放量确认+低波动率偏离，捕捉持续上涨个股',
+    desc: '量价配合的趋势跟踪：强动量+放量确认+布林带位置验证，捕捉持续上涨个股',
     factors: [
-      { code: 'MOM60', name: '60日动量', direction: '正向', weight: 2, reason: '核心：中长期强趋势（>5%）' },
-      { code: 'MOM20', name: '20日动量', direction: '正向', weight: 1.5, reason: '中短期趋势确认（>0）' },
+      { code: 'MOM60', name: '60日动量', direction: '正向', weight: 2, reason: '核心：中长期强趋势（>10%）' },
+      { code: 'MOM20', name: '20日动量', direction: '正向', weight: 1.5, reason: '短期趋势确认（>10%）' },
       { code: 'VOLUME_RATIO', name: '量比', direction: '正向', weight: 1.5, reason: '放量确认（>1倍）' },
-      { code: 'BOLL_POS', name: '布林位置', direction: '正向', weight: 1, reason: '中轨上方运行' },
-      { code: 'VPCORR20', name: '量价相关性', direction: '正向', weight: 1, reason: '量价齐升（>0）' },
-      { code: 'VOL20', name: '20日波动率', direction: '反向', weight: 0.5, reason: '趋势稳定性' },
+      { code: 'BOLL_POS', name: '布林位置', direction: '正向', weight: 1, reason: '布林带中上区（>0.4）' },
+      { code: 'VPCORR20', name: '量价相关性', direction: '正向', weight: 1, reason: '量价齐升（>0.30）' },
+      { code: 'VOL20', name: '20日波动率', direction: '反向', weight: 0.5, reason: '低波动稳健（≤55）' },
     ],
   },
   '高盈利质量': {
@@ -193,15 +193,15 @@ const PRESET_DESCRIPTIONS = {
     ],
   },
   '经典技术指标': {
-    desc: '均线趋势+MACD动能+RSI超卖回避+布林带位置：经典技术分析四件套，参考 baostock 社区用户实战经验',
+    desc: '均线趋势+MACD动能+RSI超卖回避+布林带位置+量价确认：经典技术分析四件套，适合中短线选股',
     factors: [
-      { code: 'MOM20', name: '20日动量', direction: '正向', weight: 1.5, reason: '核心：短期均线趋势（>0）' },
-      { code: 'MOM60', name: '60日动量', direction: '正向', weight: 1.5, reason: '核心：中长期均线趋势（>0），价格在均线上方' },
-      { code: 'MACD', name: 'MACD', direction: '正向', weight: 1.5, reason: '核心：MACD金叉/动能增强，趋势确认信号' },
-      { code: 'RSI14', name: 'RSI(14)', direction: '反向', weight: 1, reason: '回避超买区间（≤70）' },
-      { code: 'BOLL_POS', name: '布林位置', direction: '正向', weight: 1, reason: '布林带中轨上方运行（>0.2）' },
-      { code: 'VPCORR20', name: '量价相关性', direction: '正向', weight: 0.8, reason: '量价齐升（>0），趋势健康度验证' },
-      { code: 'VOL20', name: '20日波动率', direction: '反向', weight: 0.7, reason: '低波动更稳健' },
+      { code: 'MOM20', name: '20日动量', direction: '正向', weight: 1.5, reason: '短期正动量（>10%）' },
+      { code: 'MOM60', name: '60日动量', direction: '正向', weight: 1.5, reason: '中长期上升趋势（>10%）' },
+      { code: 'MACD', name: 'MACD', direction: '正向', weight: 1.5, reason: 'MACD金叉/动能增强（>0.5）' },
+      { code: 'RSI14', name: 'RSI(14)', direction: '反向', weight: 1, reason: '回避超买区间（≤60）' },
+      { code: 'BOLL_POS', name: '布林位置', direction: '正向', weight: 1, reason: '布林带中上区运行（>0.4）' },
+      { code: 'VPCORR20', name: '量价相关性', direction: '正向', weight: 0.8, reason: '量价齐升（>0.30），趋势健康度验证' },
+      { code: 'VOL20', name: '20日波动率', direction: '反向', weight: 0.7, reason: '低波动更稳健（≤55）' },
     ],
   },
 };
@@ -1210,20 +1210,41 @@ export default function StockScreen() {
                   </Col>
                 </Row>
 
-                {result.factorCoverage && (
+                {(result.factorFilterPass || result.factorCoverage) && (
                   <>
                     <Divider style={{ margin: '12px 0' }} />
-                    <Row gutter={[8, 6]} wrap>
-                      {Object.entries(result.factorCoverage).map(([code, cnt]) => (
-                        <Col key={code}>
-                          <Tooltip title={`${code}：${cnt} 只股票有数据`}>
-                            <Tag color={cnt > 20 ? 'green' : cnt > 5 ? 'orange' : 'red'}>
-                              {code}: {cnt} 只
-                            </Tag>
-                          </Tooltip>
-                        </Col>
-                      ))}
-                    </Row>
+                    {result.factorFilterPass && Object.keys(result.factorFilterPass).length > 0 && (
+                      <div style={{ marginBottom: result.factorCoverage ? 6 : 0 }}>
+                        <span style={{ fontSize: 12, color:'#888', marginRight: 8 }}>筛选通过：</span>
+                        <Row gutter={[8, 6]} wrap>
+                          {Object.entries(result.factorFilterPass).map(([code, cnt]) => (
+                            <Col key={`fp-${code}`}>
+                              <Tooltip title={`${code}：${cnt} 只股票通过筛选条件`}>
+                                <Tag color={cnt > 500 ? 'red' : cnt > 100 ? 'orange' : cnt > 20 ? 'green' : 'blue'}>
+                                  {code}: {cnt} 只
+                                </Tag>
+                              </Tooltip>
+                            </Col>
+                          ))}
+                        </Row>
+                      </div>
+                    )}
+                    {result.factorCoverage && Object.keys(result.factorCoverage).length > 0 && (
+                      <div>
+                        <span style={{ fontSize: 12, color:'#aaa', marginRight: 8 }}>数据覆盖：</span>
+                        <Row gutter={[8, 4]} wrap>
+                          {Object.entries(result.factorCoverage).map(([code, cnt]) => (
+                            <Col key={`cov-${code}`}>
+                              <Tooltip title={`${code}：${cnt} 只股票有因子数据`}>
+                                <span style={{ fontSize: 11, color: '#bbb', cursor: 'default' }}>
+                                  {code}({cnt})
+                                </span>
+                              </Tooltip>
+                            </Col>
+                          ))}
+                        </Row>
+                      </div>
+                    )}
                   </>
                 )}
               </Card>

@@ -10,7 +10,7 @@ import {
   DatabaseOutlined, RiseOutlined, FallOutlined,
   CalendarOutlined, BarChartOutlined, PieChartOutlined, DollarOutlined,
   LineChartOutlined, GiftOutlined, FileTextOutlined, DeleteOutlined, ExclamationCircleOutlined,
-  LockOutlined
+  LockOutlined, CheckSquareOutlined, CloseSquareOutlined
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { dataUpdateApi, financialApi, silentConfig } from '../../api/index';
@@ -1822,11 +1822,9 @@ function DataUpdate() {
               </Col>
               <Col>
                 <Form.Item name="moneyflowSource" noStyle>
-                  <Radio.Group value={sentimentMoneyflowSource} onChange={e => {
+                  <Radio.Group onChange={e => {
                     const val = e.target.value;
                     setSentimentMoneyflowSource(val);
-                    // 显式同步 form 字段，防止 Form.Item 绑定失效
-                    sentimentForm.setFieldsValue({ moneyflowSource: val });
                     if (val === 'NEODATA' || val === 'EM') {
                       // EM/NeoData 模式：只保留资金流向勾选，其他全部取消
                       sentimentForm.setFieldsValue({
@@ -1894,6 +1892,31 @@ function DataUpdate() {
                   pointerEvents: (sentimentMoneyflowSource === 'NEODATA' || sentimentMoneyflowSource === 'EM') ? 'none' : 'auto',
                   transition: 'opacity 0.2s',
                 }}>
+                  <Space style={{ marginBottom: 12, marginTop: 4 }}>
+                    <Button size="small" icon={<CheckSquareOutlined />}
+                      onClick={() => sentimentForm.setFieldsValue({
+                        fetchLhb: true, fetchMargin: true, fetchSurvey: true,
+                        fetchBlockTrade: true, fetchActivity: true, fetchZtPool: true,
+                        fetchMoneyflow: true, fetchNotice: true, fetchFundHolder: true,
+                        fetchShareholder: true, fetchNews: true,
+                      })}>
+                      全选
+                    </Button>
+                    <Button size="small"
+                      onClick={() => {
+                        const vals = sentimentForm.getFieldsValue();
+                        sentimentForm.setFieldsValue({
+                          fetchLhb: !vals.fetchLhb, fetchMargin: !vals.fetchMargin,
+                          fetchSurvey: !vals.fetchSurvey, fetchBlockTrade: !vals.fetchBlockTrade,
+                          fetchActivity: !vals.fetchActivity, fetchZtPool: !vals.fetchZtPool,
+                          fetchMoneyflow: !vals.fetchMoneyflow, fetchNotice: !vals.fetchNotice,
+                          fetchFundHolder: !vals.fetchFundHolder,
+                          fetchShareholder: !vals.fetchShareholder, fetchNews: !vals.fetchNews,
+                        });
+                      }}>
+                      反选
+                    </Button>
+                  </Space>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '8px 16px' }}>
                     <Form.Item name="fetchLhb" valuePropName="checked" style={{ marginBottom: 0 }}>
                       <Checkbox>龙虎榜</Checkbox>

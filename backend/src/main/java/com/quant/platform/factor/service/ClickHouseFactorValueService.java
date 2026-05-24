@@ -33,19 +33,25 @@ public class ClickHouseFactorValueService {
     public java.util.List<com.quant.platform.factor.domain.FactorValue> findByFactorCodeAndDate(
             String factorCode, java.time.LocalDate calcDate) {
         if (!clickHouseConfig.isEnabled()) {
-            return List.of(); // 回退到 Mapper
+            log.warn("[ClickHouse] CH disabled by config, returning empty. factorCode={}, date={}, jdbcUrl={}",
+                    factorCode, calcDate, clickHouseConfig.getJdbcUrl());
+            return List.of();
         }
 
+        log.info("[ClickHouse] Querying CH: factorCode={}, date={}, url={}",
+                factorCode, calcDate, clickHouseConfig.getJdbcUrl());
         try {
             java.util.List<com.quant.platform.factor.domain.FactorValue> result = queryByFactorCodeAndDateFromCH(factorCode, calcDate);
             if (!result.isEmpty()) {
-                log.debug("[ClickHouse] 因子值命中: {} {}", factorCode, calcDate);
+                log.info("[ClickHouse] 因子值命中: {} {} size={}", factorCode, calcDate, result.size());
                 return result;
             }
+            log.warn("[ClickHouse] 因子值查询返回空: code={}, date={}", factorCode, calcDate);
         } catch (Exception e) {
-            log.warn("[ClickHouse] 因子值查询失败，回退: {}", e.getMessage());
+            log.error("[ClickHouse] 因子值查询异常: code={}, date={}, error={}",
+                    factorCode, calcDate, e.toString());
         }
-        return List.of(); // 回退到 Mapper
+        return List.of();
     }
 
     /**
@@ -402,24 +408,21 @@ public class ClickHouseFactorValueService {
 
     private java.util.List<com.quant.platform.factor.domain.FactorValue> queryByFactorCodeAndDateFromCH(
             String factorCode, java.time.LocalDate calcDate) {
-        String sql = """
+        // CH JDBC v0.6.3 对 PreparedStatement 参数绑定处理有问题，改为字符串拼接
+        String sql = String.format("""
                 SELECT id, factor_code, symbol, calc_date, factor_val, rank_value, z_score, created_at
                 FROM stock.factor_value FINAL
-                WHERE factor_code = ? AND calc_date = ?
+                WHERE factor_code = '%s' AND calc_date = '%s'
                 ORDER BY symbol
-                """;
+                """, factorCode.replace("'", "''"), calcDate);
 
         java.util.List<com.quant.platform.factor.domain.FactorValue> result = new ArrayList<>();
         try (Connection conn = getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
+             PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
 
-            stmt.setString(1, factorCode);
-            stmt.setString(2, calcDate.toString());
-
-            try (ResultSet rs = stmt.executeQuery()) {
-                while (rs.next()) {
-                    result.add(convertResultSet(rs));
-                }
+            while (rs.next()) {
+                result.add(convertResultSet(rs));
             }
         } catch (Exception e) {
             log.warn("[ClickHouse] findByFactorCodeAndDate 查询失败: {}", e.getMessage());
@@ -430,25 +433,21 @@ public class ClickHouseFactorValueService {
 
     private java.util.List<com.quant.platform.factor.domain.FactorValue> queryByFactorCodeAndDateRangeFromCH(
             String factorCode, java.time.LocalDate startDate, java.time.LocalDate endDate) {
-        String sql = """
+        // CH JDBC v0.6.3 对 PreparedStatement 参数绑定处理有问题，改为字符串拼接
+        String sql = String.format("""
                 SELECT id, factor_code, symbol, calc_date, factor_val, rank_value, z_score, created_at
                 FROM stock.factor_value FINAL
-                WHERE factor_code = ? AND calc_date >= ? AND calc_date <= ?
+                WHERE factor_code = '%s' AND calc_date >= '%s' AND calc_date <= '%s'
                 ORDER BY calc_date, symbol
-                """;
+                """, factorCode.replace("'", "''"), startDate, endDate);
 
         java.util.List<com.quant.platform.factor.domain.FactorValue> result = new ArrayList<>();
         try (Connection conn = getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
+             PreparedStatement stmt = conn.prepareStatement(sql);
+             ResultSet rs = stmt.executeQuery()) {
 
-            stmt.setString(1, factorCode);
-            stmt.setString(2, startDate.toString());
-            stmt.setString(3, endDate.toString());
-
-            try (ResultSet rs = stmt.executeQuery()) {
-                while (rs.next()) {
-                    result.add(convertResultSet(rs));
-                }
+            while (rs.next()) {
+                result.add(convertResultSet(rs));
             }
         } catch (Exception e) {
             log.warn("[ClickHouse] findByFactorCodeAndDateRange 查询失败: {}", e.getMessage());
