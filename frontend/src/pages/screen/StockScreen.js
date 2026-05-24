@@ -393,6 +393,8 @@ export default function StockScreen() {
 
   /* ── 选股参数 ─────────────────────────────────────────────────── */
   const [screenDate, setScreenDate] = useState(null);
+  const [screenDateRange, setScreenDateRange] = useState(null); // [startDate, endDate] 多日平均模式
+  const [useMultiDayMode, setUseMultiDayMode] = useState(false); // 是否使用多日平均模式
   const [topN, setTopN] = useState(10);
   const [direction, setDirection] = useState('LONG');
   const [excludeSt, setExcludeSt] = useState(true);
@@ -405,6 +407,7 @@ export default function StockScreen() {
   /* ── 结果 ─────────────────────────────────────────────────────── */
   const [result, setResult] = useState(null);
   const [running, setRunning] = useState(false);
+  const [resultPageSize, setResultPageSize] = useState(20);
 
   /* ── 左侧面板折叠 ────────────────────────────────────────────── */
   const [collapsed, setCollapsed] = useState(false);
@@ -574,7 +577,13 @@ export default function StockScreen() {
     setResult(null);
 
     const payload = {
-      screenDate: screenDate ? screenDate.format('YYYY-MM-DD') : null,
+      // 多日平均模式：传 screenStartDate + screenEndDate；单日模式：传 screenDate
+      ...(useMultiDayMode && screenDateRange?.[0] && screenDateRange?.[1]
+        ? {
+            screenStartDate: screenDateRange[0].format('YYYY-MM-DD'),
+            screenEndDate:   screenDateRange[1].format('YYYY-MM-DD'),
+          }
+        : { screenDate: screenDate ? screenDate.format('YYYY-MM-DD') : null }),
       globalOutlierMethod: globalOutlier,
       globalNormalizeMethod: globalNormalize,
       orthogonalizationMethod: orthogonalMethod,
@@ -608,9 +617,10 @@ export default function StockScreen() {
       })
       .catch(() => {})
       .finally(() => setRunning(false));
-  }, [factors, screenDate, topN, direction, excludeSt, globalOutlier, globalNormalize, orthogonalMethod, totalWeight, valuationWeight, selectedPresetId, customSqlWhere, maAbove30, maAbove60, maAbove100]);
+  }, [factors, screenDate, screenDateRange, useMultiDayMode, topN, direction, excludeSt, globalOutlier, globalNormalize, orthogonalMethod, totalWeight, valuationWeight, selectedPresetId, customSqlWhere, maAbove30, maAbove60, maAbove100]);
 
   /* ── 结果表格列 ───────────────────────────────────────────────── */
+  const isMultiDay = !!(result?.screenStartDate && result?.screenEndDate);
   const factorColumns = useMemo(() => (result?.factors || []).map(fw => ({
     title: (
       <Tooltip title={`权重: ${fw.weight}  方向: ${fw.direction >= 0 ? '正向' : '反向'}`}>
@@ -618,25 +628,46 @@ export default function StockScreen() {
       </Tooltip>
     ),
     key: fw.factorCode,
-    width: 100,
+    width: isMultiDay ? 120 : 100,
     align: 'center',
     render: (_, row) => {
       const rank = row.factorRanks?.[fw.factorCode];
       const val = row.factorValues?.[fw.factorCode];
+      const trend = row.factorTrends?.[fw.factorCode]; // 多日模式才有
       if (rank == null) return <Text type="secondary">-</Text>;
       const pct = Math.min(100, Math.max(0, Math.round(rank * 100)));
+      // 趋势高亮逻辑：|trend| > 0.3 认为变化显著
+      const absTrend = trend != null ? Math.abs(trend) : 0;
+      const trendSignificant = absTrend > 0.3;
+      let trendColor = '#888';
+      if (trendSignificant) trendColor = trend > 0 ? '#52c41a' : '#ff4d4f';
       return (
-        <Tooltip title={`原始值: ${val != null ? Number(val).toFixed(4) : '-'}`}>
-          <Progress
-            percent={pct}
-            size="small"
-            strokeColor={pct >= 70 ? '#52c41a' : pct >= 40 ? '#1677ff' : '#ff4d4f'}
-            format={p => `${p}%`}
-          />
-        </Tooltip>
+        <div>
+          <Tooltip title={`原始值: ${val != null ? Number(val).toFixed(4) : '-'}`}>
+            <Progress
+              percent={pct}
+              size="small"
+              strokeColor={pct >= 70 ? '#52c41a' : pct >= 40 ? '#1677ff' : '#ff4d4f'}
+              format={p => `${p}%`}
+            />
+          </Tooltip>
+          {trend != null && isMultiDay && (
+            <Tooltip title={`趋势动量: ${(trend * 100).toFixed(1)}% (${trend > 0 ? '改善' : '恶化'})`}>
+              <span style={{
+                fontSize: 10, color: trendColor,
+                fontWeight: trendSignificant ? 600 : 400,
+                display: 'inline-block',
+                background: trendSignificant ? (trend > 0 ? '#f6ffed' : '#fff2f0') : 'transparent',
+                padding: '0 3px', borderRadius: 3, marginTop: 2
+              }}>
+                {trend > 0 ? '↑' : '↓'}{Math.abs(trend * 100).toFixed(1)}%
+              </span>
+            </Tooltip>
+          )}
+        </div>
       );
     },
-  })), [result]);
+  })), [result, isMultiDay]);
 
   const resultColumns = useMemo(() => [
     {
@@ -728,7 +759,35 @@ export default function StockScreen() {
       },
     },
     {
-      title: '风险', key: 'risk', width: 65, align: 'center',
+      title: (
+        <span>
+          风险
+          <Tooltip
+            title={
+              <div style={{ maxWidth: 360, lineHeight: 1.7 }}>
+                <div style={{ fontWeight: 600, marginBottom: 6 }}>风险等级判定逻辑</div>
+                <div>基于<strong>波动率(σ)</strong>和<strong>最大回撤</strong>两个维度，将候选股票分为低/中/高三档：</div>
+                <div style={{ marginTop: 6 }}>
+                  <Tag color="green" size="small">低风险</Tag> 年化波动率 &lt; 25% 且近20日最大回撤 &lt; 10%
+                </div>
+                <div style={{ marginTop: 4 }}>
+                  <Tag color="orange" size="small">中风险</Tag> 年化波动率 25%~40% 或近20日最大回撤 10%~20%
+                </div>
+                <div style={{ marginTop: 4 }}>
+                  <Tag color="red" size="small">高风险</Tag> 年化波动率 &gt; 40% 或近20日最大回撤 &gt; 20%
+                </div>
+                <Divider style={{ margin: '8px 0' }} />
+                <div style={{ fontSize: 12, color: '#888' }}>
+                  💡 高风险 ≠ 不能买。波动率高的股票弹性大，适合短线/波段策略；低风险适合稳健持仓。建议结合「止损」列和自身风险承受能力决策。
+                </div>
+              </div>
+            }
+          >
+            <QuestionCircleOutlined style={{ color: '#bbb', marginLeft: 4, fontSize: 12, cursor: 'pointer' }} />
+          </Tooltip>
+        </span>
+      ),
+      key: 'risk', width: 80, align: 'center',
       render: (_, row) => {
         if (!row.riskLevel) return <Text type="secondary">-</Text>;
         return <Tag color={riskColor(row.riskLevel)} style={{ fontSize: 11 }}>{riskLabel(row.riskLevel)}</Tag>;
@@ -1006,15 +1065,76 @@ export default function StockScreen() {
 
           {/* ── 选股参数 ─────────────────────────────────────────── */}
           <Card title="选股参数" style={{ marginBottom: 16 }} styles={{ body: { padding: '16px 16px 4px' } }}>
-            <Row gutter={[12, 12]}>
-              <Col span={12}>
+            {/* 第一行：选股日期（独立） */}
+            <Row style={{ marginBottom: 12 }}>
+              <Col span={24}>
                 <div style={paramLabelStyle}>选股日期</div>
-                <DatePicker
-                  value={screenDate} onChange={setScreenDate}
-                  placeholder="最新可用"
-                  style={{ width: '100%' }} size="small"
-                />
+                <Space size={8}>
+                  <Button
+                    size="small"
+                    type={!useMultiDayMode ? 'primary' : 'default'}
+                    onClick={() => { setUseMultiDayMode(false); }}
+                  >单日</Button>
+                  <Button
+                    size="small"
+                    type={useMultiDayMode ? 'primary' : 'default'}
+                    onClick={() => { setUseMultiDayMode(true); }}
+                  >多日</Button>
+                  <Tooltip
+                    title={
+                      <div style={{ width: 480, lineHeight: 1.8 }}>
+                        <div style={{ fontWeight: 600, marginBottom: 4 }}>单日模式（默认）</div>
+                        <div>取<strong>某一天</strong>的因子值快照做截面筛选。</div>
+                        <div style={{ color: '#52c41a' }}>✓ 信号灵敏，能捕捉短期异动</div>
+                        <div style={{ color: '#ff4d4f' }}>✗ 受单日噪声/异常值影响大</div>
+                        <Divider style={{ margin: '10px 0' }} />
+
+                        <div style={{ fontWeight: 600, marginBottom: 4 }}>多日模式（最新值 + 稳定性过滤）</div>
+                        <div>取范围内<strong>最新一天</strong>的因子值做筛选，同时计算该范围内的<strong>变异系数(CV)</strong>，CV 过高说明因子波动剧烈、不稳定，予以剔除。</div>
+                        <div style={{ color: '#52c41a' }}>✓ 保留单日灵敏度 + 过滤噪声票</div>
+                        <div style={{ color: '#ff4d4f' }}>✗ 强势异动股（如连续涨停）CV 也高，可能被误杀</div>
+                        <Divider style={{ margin: '10px 0' }} />
+
+                        <div style={{ fontWeight: 600, marginBottom: 4 }}>📈 趋势动量（Trend）— 仅多日模式显示</div>
+                        <div>在结果表每个因子的进度条下方，额外展示该因子在选定时间范围内的<strong>变化方向与幅度</strong>。</div>
+                        <div style={{ background: '#fafafa', padding: '6px 8px', borderRadius: 4, marginTop: 4 }}>
+                          <div><strong>公式：</strong>trend = (结束日因子值 - 起始日因子值) / |起始日因子值|</div>
+                          <div><strong>含义：</strong>正值表示因子在该区间内走强（如 RSI 从 40→65），负值表示走弱。</div>
+                          <div><strong>高亮：</strong>|trend| &gt; 30% 时彩色标注 —— 绿色↑=持续改善，红色↓=持续恶化；灰色=平稳无大幅波动。</div>
+                          <div><strong>作用：</strong>帮助判断该股票的因子得分是"趋势性改善"还是"偶然跳升"，辅助区分真假信号。例如一只股票 PE 因子排名靠前但 trend 为红色↓，说明它在靠估值回归临时上位，持续性存疑。</div>
+                        </div>
+                        <Divider style={{ margin: '10px 0' }} />
+
+                        <div style={{ fontSize: 12, color: '#888', background: '#fafafa', padding: '6px 8px', borderRadius: 4 }}>
+                          💡 建议：日常快速选股用「单日」；市场波动剧烈或验证策略时切「多日」
+                        </div>
+                      </div>
+                    }
+                    placement="bottom"
+                    overlayStyle={{ maxWidth: 530 }}
+                  >
+                    <QuestionCircleOutlined style={{ cursor: 'pointer', color: '#999', fontSize: 14 }} />
+                  </Tooltip>
+                  {!useMultiDayMode ? (
+                    <DatePicker
+                      value={screenDate} onChange={(d) => { setScreenDate(d); }}
+                      placeholder="最新可用"
+                      style={{ width: 240 }} size="small"
+                    />
+                  ) : (
+                    <DatePicker.RangePicker
+                      value={screenDateRange}
+                      onChange={(dates) => { setScreenDateRange(dates); }}
+                      placeholder={['开始日期', '结束日期']}
+                      style={{ width: 360 }} size="small"
+                    />
+                  )}
+                </Space>
               </Col>
+            </Row>
+
+            {/* 第二行：持仓数量 | 极值处理 */}
+            <Row gutter={[12, 12]}>
               <Col span={12}>
                 <div style={paramLabelStyle}>持仓数量</div>
                 <InputNumber
@@ -1022,24 +1142,6 @@ export default function StockScreen() {
                   min={5} max={500} style={{ width: '100%' }} size="small"
                   addonAfter="只"
                 />
-              </Col>
-              <Col span={12}>
-                <div style={paramLabelStyle}>选股方向</div>
-                <Select value={direction} onChange={setDirection} style={{ width: '100%' }} size="small">
-                  <Option value="LONG">做多（高分优先）</Option>
-                  <Option value="SHORT">做空（低分优先）</Option>
-                </Select>
-              </Col>
-              <Col span={12}>
-                <div style={paramLabelStyle}>剔除ST股</div>
-                <Button
-                  size="small"
-                  type={excludeSt ? 'primary' : 'default'}
-                  onClick={() => setExcludeSt(!excludeSt)}
-                  style={{ width: '100%' }}
-                >
-                  {excludeSt ? '✓ 剔除' : '不剔除'}
-                </Button>
               </Col>
               <Col span={12}>
                 <div style={paramLabelStyle}>
@@ -1052,6 +1154,15 @@ export default function StockScreen() {
                   {OUTLIER_OPTIONS.map(o => <Option key={o.value} value={o.value}>{o.label}</Option>)}
                 </Select>
               </Col>
+
+              {/* 第三行：选股方向 | 标准化处理 */}
+              <Col span={12}>
+                <div style={paramLabelStyle}>选股方向</div>
+                <Select value={direction} onChange={setDirection} style={{ width: '100%' }} size="small">
+                  <Option value="LONG">做多（高分优先）</Option>
+                  <Option value="SHORT">做空（低分优先）</Option>
+                </Select>
+              </Col>
               <Col span={12}>
                 <div style={paramLabelStyle}>
                   标准化处理
@@ -1062,6 +1173,19 @@ export default function StockScreen() {
                 <Select value={globalNormalize} onChange={setGlobalNormalize} style={{ width: '100%' }} size="small">
                   {NORMALIZE_OPTIONS.map(o => <Option key={o.value} value={o.value}>{o.label}</Option>)}
                 </Select>
+              </Col>
+
+              {/* 第四行：剔除ST股（独占或可扩展） */}
+              <Col span={12}>
+                <div style={paramLabelStyle}>剔除ST股</div>
+                <Button
+                  size="small"
+                  type={excludeSt ? 'primary' : 'default'}
+                  onClick={() => setExcludeSt(!excludeSt)}
+                  style={{ width: '100%' }}
+                >
+                  {excludeSt ? '✓ 剔除' : '不剔除'}
+                </Button>
               </Col>
               <Col span={12}>
                 <div style={paramLabelStyle}>
@@ -1194,7 +1318,11 @@ export default function StockScreen() {
               <Card style={{ marginBottom: 16 }}>
                 <Row gutter={16} align="middle">
                   <Col span={6}>
-                    <Statistic title="选股日期" value={result.screenDate} valueStyle={{ fontSize: 15 }} />
+                    <Statistic
+                      title="选股日期"
+                      value={result.screenStartDate ? `${result.screenStartDate} ~ ${result.screenEndDate}` : result.screenDate}
+                      valueStyle={{ fontSize: 13 }}
+                    />
                   </Col>
                   <Col span={6}>
                     <Statistic title="候选股票" value={result.candidateCount} suffix="只" />
@@ -1283,7 +1411,13 @@ export default function StockScreen() {
                   rowKey="symbol"
                   size="small"
                   scroll={{ x: 800 + (result.factors?.length ?? 0) * 100 }}
-                  pagination={{ defaultPageSize: 20, showSizeChanger: true, pageSizeOptions: ['10', '20', '50', '100'], showTotal: t => `共 ${t} 只` }}
+                  pagination={{
+                    pageSize: resultPageSize,
+                    showSizeChanger: true,
+                    pageSizeOptions: ['10', '20', '50', '100'],
+                    showTotal: t => `共 ${t} 只`,
+                    onChange: (page, size) => setResultPageSize(size),
+                  }}
                   rowClassName={(_, i) => i < 3 ? 'top10-row' : ''}
                   expandable={{
                     expandedRowRender: (record) => <ExpandedRow record={record} />,

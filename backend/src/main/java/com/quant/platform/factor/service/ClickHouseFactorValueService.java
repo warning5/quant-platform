@@ -237,7 +237,7 @@ public class ClickHouseFactorValueService {
         }
         sqlBuilder.append("\n");
         sqlBuilder.append(") d\n");
-        sqlBuilder.append("LEFT JOIN stock_info si ON si.symbol = d.symbol\n");
+        sqlBuilder.append("LEFT JOIN stock_info si ON si.code = d.symbol\n");
         sqlBuilder.append("WHERE 1=1").append(where).append("\n");
         sqlBuilder.append("ORDER BY d.symbol\n");
 

@@ -15,9 +15,19 @@ import java.util.Map;
 public class ScreenResult {
 
     /**
-     * 实际选股日期
+     * 实际选股日期（单日模式）或 结束日期（多日平均模式）
      */
     private LocalDate screenDate;
+
+    /**
+     * 多日平均模式起始日期（null = 单日模式）
+     */
+    private LocalDate screenStartDate;
+
+    /**
+     * 多日平均模式结束日期
+     */
+    private LocalDate screenEndDate;
 
     /**
      * 使用的因子列表（含权重）
@@ -74,6 +84,13 @@ public class ScreenResult {
          * 各因子原始值（因子代码 -> value）
          */
         private Map<String, Double> factorValues;
+
+        /**
+         * 多日模式下各因子的趋势动量（因子代码 -> trend值）
+         * trend = (结束日因子值 - 起始日因子值) / |起始日因子值|
+         * null 表示单日模式或起始日无数据
+         */
+        private Map<String, Double> factorTrends;
 
         // ── 买入价建议 ──
         /**

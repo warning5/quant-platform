@@ -93,6 +93,13 @@ public class FactorDefinition implements Serializable {
     private String stockPool;
 
     /**
+     * 多日模式 CV 稳定性过滤阈值
+     * NULL 表示未设置，由 category 自动推导
+     */
+    @TableField("cv_threshold")
+    private Double cvThreshold;
+
+    /**
      * 创建时间
      */
     @TableField(value = "created_at", fill = FieldFill.INSERT)

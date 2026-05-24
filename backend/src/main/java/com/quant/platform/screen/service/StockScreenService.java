@@ -1,5 +1,8 @@
 package com.quant.platform.screen.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.quant.platform.factor.domain.FactorDefinition;
+import com.quant.platform.factor.domain.FactorDefinition.FactorCategory;
 import com.quant.platform.factor.domain.FactorValue;
 import com.quant.platform.factor.mapper.FactorDefinitionMapper;
 import com.quant.platform.factor.service.ClickHouseFactorValueService;
@@ -41,6 +44,12 @@ public class StockScreenService {
     private DataSource dataSource;
 
     /**
+     * 多日模式下的因子趋势动量缓存：factorCode -> (symbol -> trend)
+     * trend = (latestVal - earliestVal) / |earliestVal|
+     */
+    private Map<String, Map<String, Double>> multiDayTrendCache = new HashMap<>();
+
+    /**
      * 执行多因子选股
      */
     public ScreenResult screen(ScreenRequest req) {
@@ -67,13 +76,27 @@ public class StockScreenService {
             }
         }
 
-        // ── 1. 确定选股日期 ─────────────────────────────────────────
+        // ── 1. 确定选股日期（支持单日 / 多日平均模式）────────────────
         LocalDate screenDate = req.getScreenDate();
-        if (screenDate == null) {
-            screenDate = resolveLatestDate(req.getFactors());
+        LocalDate screenStartDate = req.getScreenStartDate();
+        LocalDate screenEndDate = req.getScreenEndDate();
+        boolean useMultiDayMode = (screenStartDate != null && screenEndDate != null);
+
+        // 清空多日趋势缓存
+        this.multiDayTrendCache.clear();
+
+        // 多日平均模式下，screenDate = endDate（用于行情加载、MA计算等）
+        if (useMultiDayMode) {
+            screenDate = screenEndDate;
+            log.info("Running stock screen in MULTI-DAY mode: range={} ~ {}, factors={}, topN={}",
+                    screenStartDate, screenEndDate, req.getFactors().size(), req.getTopN());
+        } else {
+            if (screenDate == null) {
+                screenDate = resolveLatestDate(req.getFactors());
+            }
+            log.info("Running stock screen on SINGLE date={}, factors={}, topN={}",
+                    screenDate, req.getFactors().size(), req.getTopN());
         }
-        log.info("Running stock screen on date={}, factors={}, topN={}",
-                screenDate, req.getFactors().size(), req.getTopN());
 
         // ── 2. 加载当日行情（用于股票名称、过滤ST）─────────────────
         List<MarketDailyBar> bars = marketDataService.getBarsAtDate(screenDate);
@@ -186,13 +209,22 @@ public class StockScreenService {
         for (ScreenRequest.FactorWeight fw : req.getFactors()) {
             String code = fw.getFactorCode();
 
-            // 尝试当天，不够就向前最多5日
-            List<FactorValue> crossSection = Collections.emptyList();
-            LocalDate searchDate = screenDate;
-            for (int i = 0; i <= 5; i++) {
-                crossSection = clickHouseFactorValueService.findByFactorCodeAndDate(code, searchDate);
-                if (!crossSection.isEmpty()) break;
-                searchDate = searchDate.minusDays(1);
+            List<FactorValue> crossSection;
+
+            if (useMultiDayMode) {
+                // ── 多日平均模式：查询日期范围，按 symbol 聚合取均值 ──
+                crossSection = loadFactorAverage(code, screenStartDate, screenEndDate, candidates);
+                log.info("[Screen] Multi-day factor {} avg: {} stocks, range={} ~ {}",
+                        code, crossSection.size(), screenStartDate, screenEndDate);
+            } else {
+                // ── 单日模式：尝试当天，不够就向前最多5日 ──
+                crossSection = Collections.emptyList();
+                LocalDate searchDate = screenDate;
+                for (int i = 0; i <= 5; i++) {
+                    crossSection = clickHouseFactorValueService.findByFactorCodeAndDate(code, searchDate);
+                    if (!crossSection.isEmpty()) break;
+                    searchDate = searchDate.minusDays(1);
+                }
             }
 
             // 过滤候选股票，并提取原始值
@@ -240,9 +272,9 @@ public class StockScreenService {
             }
 
             factorData.put(code, symbolMap);
-            coverage.put(code, symbolMap.size());
-            log.info("[Screen] Factor {} coverage: {} stocks on {}, outlier={}, normalize={}",
-                    code, symbolMap.size(), searchDate, outlierMethod, normalizeMethod);
+        coverage.put(code, symbolMap.size());
+        log.info("[Screen] Factor {} coverage: {} stocks on {}, outlier={}, normalize={}",
+                code, symbolMap.size(), useMultiDayMode ? (screenStartDate + " ~ " + screenEndDate) : screenDate, outlierMethod, normalizeMethod);
         }
 
         // 调试：打印候选股票数和各因子覆盖情况
@@ -359,6 +391,19 @@ public class StockScreenService {
                     .filter(e -> !e.getKey().startsWith("__rank_"))
                     .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue, (a,b) -> a, LinkedHashMap::new));
 
+            // 多日模式：提取因子趋势动量
+            Map<String, Double> factorTrends = null;
+            if (useMultiDayMode && !multiDayTrendCache.isEmpty()) {
+                factorTrends = new LinkedHashMap<>();
+                for (ScreenRequest.FactorWeight fw : req.getFactors()) {
+                    Map<String, Double> tMap = multiDayTrendCache.get(fw.getFactorCode());
+                    if (tMap != null && tMap.containsKey(sym)) {
+                        factorTrends.put(fw.getFactorCode(), tMap.get(sym));
+                    }
+                }
+                if (factorTrends.isEmpty()) factorTrends = null;
+            }
+
             MarketDailyBar bar = barMapByCode.get(sym);
             scores.add(ScreenResult.StockScore.builder()
                     .symbol(codeToSymbol.getOrDefault(sym, sym))
@@ -366,6 +411,7 @@ public class StockScreenService {
                     .compositeScore(compositeScore)
                     .factorRanks(rankMap)
                     .factorValues(cleanValueMap)
+                    .factorTrends(factorTrends)
                     .build());
         }
 
@@ -422,6 +468,8 @@ public class StockScreenService {
 
         return ScreenResult.builder()
                 .screenDate(screenDate)
+                .screenStartDate(useMultiDayMode ? screenStartDate : null)
+                .screenEndDate(useMultiDayMode ? screenEndDate : null)
                 .factors(req.getFactors())
                 .candidateCount(candidates.size())
                 .stocks(topStocks)
@@ -443,6 +491,151 @@ public class StockScreenService {
             case "EQ" -> Math.abs(value - threshold) < 1e-10;
             default -> true;
         };
+    }
+
+    /**
+     * 多日平均模式：查询日期范围内的因子值，按 symbol 聚合取均值
+     * 返回的 FactorValue 列表中每个 symbol 只有一条记录，factor_val = 范围内均值
+     */
+    /**
+     * 多日模式：最新值优先 + 稳定性过滤 + 趋势动量
+     * 取每个 symbol 在范围内最新一天的因子值（保留灵敏度），
+     * 同时计算该范围内的变异系数 CV = std/|mean|，
+     * CV 过高说明因子值波动剧烈、不稳定，予以剔除。
+     * 另外计算趋势动量 trend = (latest - earliest) / |earliest|，存入 multiDayTrendCache。
+     *
+     * 阈值从 factor_definition.cv_threshold 读取（数据驱动）。
+     * 若该因子未设置 cv_threshold，则按 category 推导默认值：
+     * - MOMENTUM / 含 CORR/VPCORR 的技术因子：宽松(3.0)
+     * - VOLATILITY / LIQUIDITY / VOLUME_PRICE：中等(2.0)
+     * - 其他（TECHNICAL/FINANCIAL/VALUE/SENTIMENT/CHANTHEORY）：严格(0.5)
+     */
+    private static final double DEFAULT_CV_THRESHOLD = 0.5;
+
+    /**
+     * 从 DB factor_definition.cv_threshold 查询 CV 阈值（数据驱动）。
+     * 未设置时回退到 category 推导的默认值。
+     */
+    private double getCVThreshold(String factorCode) {
+        FactorDefinition def = factorDefMapper.selectOne(
+                new LambdaQueryWrapper<FactorDefinition>()
+                        .eq(FactorDefinition::getFactorCode, factorCode)
+                        .last("LIMIT 1"));
+        if (def != null && def.getCvThreshold() != null) {
+            return def.getCvThreshold();
+        }
+        // 回退：根据 category 推导
+        if (def != null && def.getCategory() != null) {
+            return getCategoryBasedCV(def.getCategory());
+        }
+        return DEFAULT_CV_THRESHOLD;
+    }
+
+    /**
+     * 根据 FactorCategory 推导 CV 阈值默认值
+     */
+    private static double getCategoryBasedCV(FactorCategory category) {
+        return switch (category) {
+            case MOMENTUM -> 3.0;
+            case VOLATILITY, LIQUIDITY, VOLUME_PRICE -> 2.0;
+            default -> DEFAULT_CV_THRESHOLD;
+        };
+    }
+
+    /**
+     * 统一 symbol 格式：去掉 .SZ/.SH/.BJ 等交易所后缀
+     * 解决 CH factor_value 中 5月12日前后 symbol 格式不一致的问题
+     */
+    private static String normalizeSymbol(String symbol) {
+        if (symbol == null || symbol.isEmpty()) return symbol;
+        int dot = symbol.lastIndexOf('.');
+        if (dot > 0) {
+            String suffix = symbol.substring(dot + 1).toUpperCase();
+            if (suffix.equals("SZ") || suffix.equals("SH") || suffix.equals("BJ")) {
+                return symbol.substring(0, dot);
+            }
+        }
+        return symbol;
+    }
+
+    private List<FactorValue> loadFactorAverage(String factorCode, LocalDate startDate, LocalDate endDate, Set<String> candidates) {
+        // 查询范围内所有因子值
+        List<FactorValue> allValues = clickHouseFactorValueService.findByFactorCodeAndDateRange(factorCode, startDate, endDate);
+        if (allValues.isEmpty()) {
+            log.warn("[Screen] Multi-day: no data for {} in {} ~ {}", factorCode, startDate, endDate);
+            return Collections.emptyList();
+        }
+
+        // 按 symbol 分组，保留每条记录以便取最新值 + 计算统计量
+        // CH 中 symbol 格式可能不一致（如 300905 vs 300905.SZ），统一 strip 后缀再分组
+        Map<String, List<FactorValue>> grouped = allValues.stream()
+                .filter(fv -> fv.getFactorVal() != null)
+                .collect(Collectors.groupingBy(fv -> normalizeSymbol(fv.getSymbol())));
+
+        // 用结束日期作为 calc_date
+        LocalDate refDate = endDate;
+        int totalSymbols = 0, stableCount = 0, filteredByCV = 0;
+        List<FactorValue> result = new ArrayList<>();
+        Map<String, Double> trendMap = new LinkedHashMap<>(); // symbol -> trend
+
+        // 动态 CV 阈值：根据因子数值特性选择
+        double cvThreshold = getCVThreshold(factorCode);
+
+        for (Map.Entry<String, List<FactorValue>> entry : grouped.entrySet()) {
+            String symbol = entry.getKey();
+            if (!candidates.contains(symbol)) continue;
+            totalSymbols++;
+
+            List<FactorValue> values = entry.getValue();
+            if (values.isEmpty()) continue;
+
+            // 按日期排序：正序（最早→最晚）
+            values.sort(Comparator.comparing(FactorValue::getCalcDate));
+            FactorValue earliest = values.get(0);
+            FactorValue latest = values.get(values.size() - 1);
+            double latestVal = latest.getFactorVal().doubleValue();
+            double earliestVal = earliest.getFactorVal().doubleValue();
+
+            // 计算趋势动量: (latest - earliest) / |earliest|
+            double trend = 0;
+            if (earliestVal != 0) {
+                trend = (latestVal - earliestVal) / Math.abs(earliestVal);
+            }
+            trendMap.put(symbol, trend);
+
+            // 计算范围内的均值和标准差 → 变异系数 CV
+            double mean = values.stream().mapToDouble(v -> v.getFactorVal().doubleValue()).average().orElse(0);
+            double cv = 0;
+            double variance = 0;
+            if (mean != 0) {
+                variance = values.stream()
+                        .mapToDouble(v -> Math.pow(v.getFactorVal().doubleValue() - mean, 2))
+                        .average().orElse(0);
+                cv = Math.sqrt(variance) / Math.abs(mean);
+            }
+
+            // 稳定性过滤：CV 超阈值则剔除（阈值按因子数值特性动态选择）
+            // 数据不足 10 个点时跳过 CV 过滤（样本太少时 CV 不可靠）
+            if (values.size() >= 10 && cv > cvThreshold) {
+                filteredByCV++;
+                continue;
+            }
+
+            stableCount++;
+            FactorValue fv = new FactorValue();
+            fv.setSymbol(symbol);
+            fv.setFactorCode(factorCode);
+            fv.setCalcDate(refDate);
+            fv.setFactorVal(BigDecimal.valueOf(latestVal));
+            result.add(fv);
+        }
+
+        // 存入趋势缓存
+        multiDayTrendCache.put(factorCode, trendMap);
+
+        log.info("[Screen] Multi-day (latest+stable) for {}: candidates={} -> stable={} filtered_by_CV={} (threshold={})",
+                factorCode, totalSymbols, stableCount, filteredByCV, cvThreshold);
+        return result;
     }
 
     /**
