@@ -810,7 +810,9 @@ function AttributionPanel({ taskId }) {
   if (loading) {
     return (
       <div style={{ textAlign: 'center', padding: 60 }}>
-        <Spin tip="正在计算 Brinson 归因分析..." />
+        <Spin tip="正在计算 Brinson 归因分析...">
+          <div />
+        </Spin>
       </div>
     );
   }
@@ -980,7 +982,9 @@ export default function BacktestReport() {
   if (loading) {
     return (
       <div style={{ textAlign: 'center', padding: 80 }}>
-        <Spin size="large" tip="加载回测报告..." />
+        <Spin size="large" tip="加载回测报告...">
+          <div />
+        </Spin>
       </div>
     );
   }

@@ -383,7 +383,7 @@ function PaperDetail({ paperId, onBack }) {
     } catch (e) {}
   };
 
-  if (loading) return <Spin tip="加载中..." style={{ display: 'block', margin: '80px auto' }} />;
+  if (loading) return (<Spin tip="加载中..."><div style={{ display: 'block', margin: '80px auto' }} /></Spin>);
   if (!data) return <Card><Text type="danger">加载失败</Text></Card>;
 
   const { paper, positions = [], navHistory = [], benchmarkNav = [], benchmarkCode = '000300',

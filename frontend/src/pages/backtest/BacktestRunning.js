@@ -302,7 +302,9 @@ export default function BacktestRunning() {
   if (loading) {
     return (
       <div style={{ textAlign: 'center', padding: 80 }}>
-        <Spin size="large" tip="加载回测任务..." />
+        <Spin size="large" tip="加载回测任务...">
+          <div />
+        </Spin>
       </div>
     );
   }

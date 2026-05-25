@@ -2,6 +2,7 @@ package com.quant.platform.screen.dto;
 
 import lombok.Data;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import java.time.LocalDate;
 import java.util.List;
@@ -10,6 +11,7 @@ import java.util.List;
  * 多因子选股请求
  */
 @Data
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class ScreenRequest {
 
     /**

@@ -94,7 +94,7 @@ function SectorDetail({ conceptName, onBack }) {
       .catch(() => setData(null))
       .finally(() => setLoading(false));
   }, [conceptName]);
-  if (loading) return <Spin tip="加载板块详情..." style={{ display: 'block', margin: '80px auto' }} />;
+  if (loading) return (<Spin tip="加载板块详情..."><div style={{ display: 'block', margin: '80px auto' }} /></Spin>);
   if (!data || data.error) return <Card><Text type="danger">{data?.error || '加载失败'}</Text></Card>;
   const { stocks = [], trend = [], upCount = 0, downCount = 0, avgChange } = data;
   const trendOption = trend.length > 0 ? {

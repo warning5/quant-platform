@@ -364,8 +364,7 @@ export default function MarketList() {
                         </div>
                       </div>
                     }
-                    styles={{ root: { maxWidth: 420 } }}
-                    overlayInnerStyle={{ padding: '12px 16px' }}
+                    styles={{ root: { maxWidth: 420 }, body: { padding: '12px 16px' } }}
                     color="#fff"
                   >
                     <QuestionCircleOutlined style={{ marginLeft: 6, color: '#1890ff', cursor: 'pointer', fontSize: 14 }} />

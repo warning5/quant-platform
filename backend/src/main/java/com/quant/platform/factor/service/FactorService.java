@@ -591,13 +591,18 @@ public class FactorService {
         List<FactorValue> result = clickHouseFactorValueService
                 .findByFactorCodeAndDateRange(factorCode, start, end);
         return result.stream()
-                .filter(fv -> fv.getSymbol().equals(symbol))
+                .filter(fv -> {
+                    String raw = fv.getSymbol();
+                    int dot = raw.indexOf('.');
+                    String code = dot > 0 ? raw.substring(0, dot) : raw;
+                    return code.equals(symbol);
+                })
                 .toList();
     }
 
     /**
-     * 查询该因子有数据的股票列表（带名称），支持关键词搜索，最多返回 50 条
-     * 全部走 ClickHouse
+     * 查询该因子有数据的股票列表（带名称），支持关键词搜索
+     * 全部走 ClickHouse；无关键词时返回前 200 条（按代码排序），有关键词时不限条数
      */
     public List<Map<String, String>> getFactorSymbols(String factorCode, String keyword) {
         // 从 CH 获取该因子有数据的股票列表
@@ -614,8 +619,9 @@ public class FactorService {
         }
 
         // 2. 查 stock_info 获取名称，支持关键词过滤
+        boolean hasKeyword = keyword != null && !keyword.trim().isEmpty();
         LambdaQueryWrapper<StockInfo> siWrapper = new LambdaQueryWrapper<>();
-        if (keyword != null && !keyword.trim().isEmpty()) {
+        if (hasKeyword) {
             String kw = keyword.trim();
             siWrapper.and(w -> w
                     .like(StockInfo::getCode, kw)
@@ -624,18 +630,35 @@ public class FactorService {
         }
         List<StockInfo> stocks = stockInfoMapper.selectList(siWrapper);
 
-        // 3. 取交集：CH 返回的 symbol 是纯代码(如 300290)，用 code 做 key 匹配
+        // 3. 取交集：CH symbol 可能带后缀(000001.SZ)，去后缀后与 stock_info.code 匹配
         Map<String, String> nameMap = stocks.stream()
                 .collect(java.util.stream.Collectors.toMap(
                         StockInfo::getCode,
                         StockInfo::getName,
                         (a, existing) -> a));
 
-        return factorSymbols.stream()
-                .filter(nameMap::containsKey)
-                .limit(50)
-                .map(sym -> Map.of("symbol", sym, "name", nameMap.getOrDefault(sym, "")))
-                .toList();
+        java.util.stream.Stream<Map<String, String>> resultStream = factorSymbols.stream()
+                .map(sym -> {
+                    int dot = sym.indexOf('.');
+                    String code = dot > 0 ? sym.substring(0, dot) : sym;
+                    return new AbstractMap.SimpleEntry<>(code, sym);
+                })
+                .filter(e -> nameMap.containsKey(e.getKey()))
+                // 按 code 去重：CH 里 symbol 可能同时存在带后缀(000001.SZ)和不带后缀(000001)
+                .collect(java.util.stream.Collectors.toMap(
+                        java.util.Map.Entry::getKey,
+                        e -> Map.of("symbol", e.getKey(), "name", nameMap.getOrDefault(e.getKey(), "")),
+                        (existing, replacement) -> existing,  // 重复时保留第一个
+                        java.util.TreeMap::new))               // 按 code 排序
+                .values()
+                .stream();
+
+        // 无关键词：限制 200 条防止下拉框过大；有关键词：不限条数
+        if (!hasKeyword) {
+            resultStream = resultStream.limit(200);
+        }
+
+        return resultStream.toList();
     }
 
     /**

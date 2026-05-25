@@ -200,21 +200,52 @@ public class PriceAdvisorService {
     /**
      * 批量计算股票的均线位置（供 StockScreenService 做 MA 位置过滤使用）
      * 返回 symbol -> {ma30, ma60, ma100, aboveMA30, aboveMA60, aboveMA100}
+     *
+     * 优化：一次批量查询所有股票的 K 线数据，内存中按 code 分组计算均线
      */
     public Map<String, Map<String, Object>> batchCalcMaPositions(List<String> symbols, LocalDate screenDate) {
+        long t0 = System.currentTimeMillis();
         Map<String, Map<String, Object>> result = new LinkedHashMap<>();
-        LocalDate histStart = screenDate.minusDays(180);
+        if (symbols.isEmpty()) return result;
+
+        // 1. 提取纯 code（去后缀），批量查询最近120天K线（MA100够用，留余量）
+        LocalDate histStart = screenDate.minusDays(120);
+        List<String> codes = symbols.stream()
+                .map(s -> s.contains(".") ? s.substring(0, s.indexOf('.')) : s)
+                .distinct()
+                .toList();
+
+        log.info("[batchCalcMaPositions] 批量查询 {} 只代码 {}~{} ...", codes.size(), histStart, screenDate);
+        long queryStart = System.currentTimeMillis();
+
+        // useFinal=false：不需要去重，速度更快（MA 计算对少量重复不敏感）
+        List<StockDaily> allBars = clickHouseStockService.getStockDailyBatch(codes, histStart, screenDate, false);
+
+        long queryElapsed = System.currentTimeMillis() - queryStart;
+        log.info("[batchCalcMaPositions] 批量查询返回 {} 条数据，耗时 {} ms", allBars.size(), queryElapsed);
+
+        // 2. 按 code 分组
+        Map<String, List<StockDaily>> barsByCode = new LinkedHashMap<>();
+        for (StockDaily bar : allBars) {
+            barsByCode.computeIfAbsent(bar.getCode(), k -> new ArrayList<>()).add(bar);
+        }
+
+        // 3. 逐个 code 计算 MA（纯内存操作，很快）
+        int calcCount = 0;
         for (String symbol : symbols) {
             try {
                 String code = symbol.contains(".") ? symbol.substring(0, symbol.indexOf('.')) : symbol;
-                List<StockDaily> history = clickHouseStockService.getStockDaily(code, histStart, screenDate);
-                if (history.isEmpty()) continue;
+                List<StockDaily> history = barsByCode.get(code);
+                if (history == null || history.isEmpty()) continue;
+
                 StockDaily today = history.get(history.size() - 1);
                 if (today.getClosePrice() == null || today.getClosePrice().doubleValue() <= 0) continue;
+
                 double close = today.getClosePrice().doubleValue();
                 double ma30 = calcMA(history, 30);
                 double ma60 = calcMA(history, 60);
                 double ma100 = calcMA(history, 100);
+
                 Map<String, Object> pos = new LinkedHashMap<>();
                 pos.put("ma30", round2(ma30));
                 pos.put("ma60", round2(ma60));
@@ -223,10 +254,14 @@ public class PriceAdvisorService {
                 pos.put("aboveMA60", close >= ma60 && ma60 > 0);
                 pos.put("aboveMA100", close >= ma100 && ma100 > 0);
                 result.put(symbol, pos);
+                calcCount++;
             } catch (Exception e) {
                 log.warn("MA position calc failed for {}: {}", symbol, e.getMessage());
             }
         }
+
+        log.info("[batchCalcMaPositions] symbols={}, 查询{}条→计算{}只结果, 总耗时={} ms",
+                symbols.size(), allBars.size(), calcCount, System.currentTimeMillis() - t0);
         return result;
     }
 

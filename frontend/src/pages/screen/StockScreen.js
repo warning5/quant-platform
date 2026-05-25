@@ -1,8 +1,8 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import {
   Card, Button, Space, Typography, Table, Tag, InputNumber, Select,
   DatePicker, Row, Col, Statistic, Divider, Tooltip, Badge,
-  Empty, Spin, message, Progress, Alert, Form, Popover, Modal, Input, Slider, Tabs, Checkbox,
+  Empty, Spin, Progress, Alert, Form, Popover, Modal, Input, Slider, Tabs, Checkbox, App,
 } from 'antd';
 import {
   PlusOutlined, DeleteOutlined, PlayCircleOutlined, FilterOutlined,
@@ -375,6 +375,7 @@ function ExpandedRow({ record }) {
 
 /* ══════════════════════════════════════════════════════════════════ */
 export default function StockScreen() {
+  const { message } = App.useApp();
   /* ── 可用因子 ──────────────────────────────────────────────────── */
   const [availableFactors, setAvailableFactors] = useState([]);
   const [loadingFactors, setLoadingFactors] = useState(false);
@@ -382,6 +383,7 @@ export default function StockScreen() {
   /* ── 预设组合 ──────────────────────────────────────────────────── */
   const [presets, setPresets] = useState([]);
   const [selectedPresetId, setSelectedPresetId] = useState(null);
+  const pendingRestorePresetName = useRef(null);
   const [saveModalVisible, setSaveModalVisible] = useState(false);
   const [saveForm] = Form.useForm();
 
@@ -464,11 +466,13 @@ export default function StockScreen() {
   const [searchParams, setSearchParams] = useSearchParams();
   useEffect(() => {
     const restoreParam = searchParams.get('__restore');
+    console.log('[restore] __restore 参数:', restoreParam ? '有值(长度' + restoreParam.length + ')' : '无/空');
     if (!restoreParam) return;
 
     try {
       const decoded = decodeURIComponent(atob(restoreParam));
       const config = JSON.parse(decoded);
+      console.log('[restore] 解析后 config keys:', Object.keys(config), 'presetName:', config.presetName);
 
       // 清除 URL 参数（避免刷新重复回填）
       setSearchParams({}, { replace: true });
@@ -519,14 +523,15 @@ export default function StockScreen() {
         setMaAbove100(!!config.maPositionFilter.aboveMA100);
       }
 
-      // 回填策略组合名称
+      // 回填策略组合名称（presets 可能还没加载完，先存到 ref，等 presets 就绪后再匹配）
       if (config.presetName) {
-        // 尝试匹配已有 preset（按名称模糊匹配）
+        console.log('[restore] 收到 presetName:', config.presetName, '当前presets数量:', presets.length);
+        pendingRestorePresetName.current = config.presetName;
+        // 立即尝试匹配一次（presets 已加载时）
         const matched = presets.find(p => p.presetName === config.presetName);
         if (matched) {
           setSelectedPresetId(matched.id);
-        } else {
-          setSelectedPresetId(null);
+          pendingRestorePresetName.current = null;
         }
       }
 
@@ -538,6 +543,20 @@ export default function StockScreen() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams.get('__restore')]);
+
+  /* ── presets 加载后延迟匹配策略组合回填 ───────────────────── */
+  useEffect(() => {
+    if (!pendingRestorePresetName.current || presets.length === 0) return;
+    const name = pendingRestorePresetName.current;
+    console.log('[restore-preset] 尝试匹配 presetName:', name, '当前presets:', presets.map(p => ({ id: p.id, name: p.presetName })));
+    const matched = presets.find(p => p.presetName === name);
+    console.log('[restore-preset] 匹配结果:', matched);
+    if (matched) {
+      setSelectedPresetId(matched.id);
+      pendingRestorePresetName.current = null;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presets]);
 
   /* ── 选择预设组合 ─────────────────────────────────────────────── */
   const handlePresetSelect = useCallback((presetId) => {
@@ -1233,7 +1252,7 @@ export default function StockScreen() {
                       </div>
                     }
                     placement="bottom"
-                    overlayStyle={{ maxWidth: 530 }}
+                    styles={{ root: { maxWidth: 530 } }}
                   >
                     <QuestionCircleOutlined style={{ cursor: 'pointer', color: '#999', fontSize: 14 }} />
                   </Tooltip>
@@ -1418,7 +1437,9 @@ export default function StockScreen() {
           {running && (
             <Card>
               <div style={{ textAlign: 'center', padding: '80px 0' }}>
-                <Spin size="large" tip="正在执行多因子选股..." />
+                <Spin size="large" tip="正在执行多因子选股...">
+                  <div />
+                </Spin>
               </div>
             </Card>
           )}
@@ -1821,7 +1842,7 @@ function ChanScreenTab() {
       </div>
 
       {metaLoading ? (
-        <Card size="small" style={{ marginBottom: 16 }}><Spin tip="加载因子定义..." /></Card>
+        <Card size="small" style={{ marginBottom: 16 }}><Spin tip="加载因子定义..."><div /></Spin></Card>
       ) : (
         <>
           <Card size="small" style={{ marginBottom: 16 }}>

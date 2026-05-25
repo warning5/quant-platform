@@ -5,7 +5,7 @@ import {
 } from 'antd';
 import {
   ArrowLeftOutlined, ReloadOutlined, DeleteOutlined,
-  StopOutlined, QuestionCircleOutlined
+  StopOutlined, QuestionCircleOutlined, DownOutlined, RightOutlined
 } from '@ant-design/icons';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import ReactECharts from 'echarts-for-react';
@@ -63,6 +63,7 @@ function ScreenConfigCard({ screenConfigJson }) {
   try { config = JSON.parse(screenConfigJson); } catch { return null; }
   if (!config) return null;
 
+  const [expanded, setExpanded] = useState(false);
   const navigate = useNavigate();
   const factors = Array.isArray(config.factors) ? config.factors : [];
   const maFilter = config.maPositionFilter || null;
@@ -95,11 +96,28 @@ function ScreenConfigCard({ screenConfigJson }) {
     }
   };
 
-  const collapseItems = [
-    {
-      key: 'detail',
-      label: '',
-      children: (
+  return (
+    <Card
+      title={
+        <Space>
+          {expanded ? <DownOutlined onClick={() => setExpanded(false)} style={{ cursor: 'pointer', fontSize: 12 }} /> : <RightOutlined onClick={() => setExpanded(true)} style={{ cursor: 'pointer', fontSize: 12 }} />}
+          <span
+            onClick={handleGotoScreen}
+            style={{
+              cursor: 'pointer',
+              fontWeight: 600,
+            }}
+            title="点击跳转到因子选股页面并自动回填此策略配置"
+          >
+            选股策略配置
+          </span>
+          <Tag color={dirInfo.color}>{dirInfo.text}</Tag>
+        </Space>
+      }
+      style={{ marginBottom: 16 }}
+      size="small"
+    >
+      {expanded && (
         <Row gutter={[16, 12]}>
           {/* ── 基本参数 ── */}
           <Col span={24}>
@@ -167,7 +185,7 @@ function ScreenConfigCard({ screenConfigJson }) {
           <Col span={24}>
             <Divider plain orientation="left" style={{ margin: '8px 0 8px', fontSize: 12 }}>
               <Text type="secondary">
-                筛选因子
+                {config.presetName || '筛选因子'}
                 <Tag style={{ marginLeft: 6 }} color="processing">{factors.length} 个</Tag>
               </Text>
             </Divider>
@@ -226,38 +244,7 @@ function ScreenConfigCard({ screenConfigJson }) {
             )}
           </Col>
         </Row>
-      ),
-    },
-  ];
-
-  return (
-    <Card
-      title={
-        <Space>
-          <Collapse
-            defaultActiveKey={[]}
-            ghost
-            size="small"
-            items={collapseItems}
-            onChange={() => {}}
-          />
-          <span
-            onClick={handleGotoScreen}
-            style={{
-              cursor: 'pointer',
-              fontWeight: 600,
-            }}
-            title="点击跳转到因子选股页面并自动回填此策略配置"
-          >
-            选股策略配置
-          </span>
-          <Tag color={dirInfo.color}>{dirInfo.text}</Tag>
-        </Space>
-      }
-      style={{ marginBottom: 16 }}
-      size="small"
-    >
-      <div />
+      )}
     </Card>
   );
 }
@@ -323,7 +310,9 @@ function ReportDetail({ taskId, onBack }) {
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', padding: 100 }}>
-        <Spin size="large" tip="加载回测报告..." />
+        <Spin size="large" tip="加载回测报告...">
+          <div />
+        </Spin>
       </div>
     );
   }
@@ -499,7 +488,7 @@ function ReportDetail({ taskId, onBack }) {
               },
             ].map((item, i) => (
               <Col key={i} xs={12} sm={8} md={6} lg={6} xl={3}>
-                <Card size="small" bodyStyle={{ padding: '12px 16px' }}>
+                <Card size="small" styles={{ body: { padding: '12px 16px' } }}>
                   <Statistic
                     title={<Text type="secondary" style={{ fontSize: 12 }}>{item.title}</Text>}
                     value={item.value}
@@ -677,7 +666,7 @@ function RollingBacktestList({ onSelect }) {
                 · 观察最大回撤、夏普比率等风险指标
               </div>
             }
-            overlayInnerStyle={{ width: 420 }}
+            styles={{ body: { width: 420 } }}
           >
             <QuestionCircleOutlined style={{ color: '#999', cursor: 'help' }} />
           </Tooltip>
@@ -720,9 +709,12 @@ function RollingBacktestList({ onSelect }) {
                   const c = JSON.parse(r.screenConfigJson);
                   const factors = Array.isArray(c.factors) ? c.factors : [];
                   const dirLabel = c.direction === 'LONG' ? '多' : c.direction === 'SHORT' ? '空' : '';
+                  // 优先显示策略组合名，没有则显示因子摘要
+                  const displayName = c.presetName || `${factors.length}因子·Top${c.topN ?? '-'}`;
                   return (
                     <Tooltip title={
                       <div style={{ fontSize: 12, maxWidth: 300 }}>
+                        {c.presetName && <div><b>组合:</b> {c.presetName}</div>}
                         <div>方向: {c.direction || '-'} | TopN: {c.topN ?? '-'}</div>
                         <div style={{ marginTop: 4 }}>因子: {factors.map(f => f.factorCode).join(', ')}</div>
                         {c.maPositionFilter && (c.maPositionFilter.aboveMA30 || c.maPositionFilter.aboveMA60) && (
@@ -734,7 +726,7 @@ function RollingBacktestList({ onSelect }) {
                     }>
                       <span>
                         <Tag color={c.direction === 'LONG' ? 'red' : 'green'} size="small">{dirLabel}</Tag>
-                        <Text style={{ fontSize: 12 }}>{factors.length}因子·Top{c.topN ?? '-'}</Text>
+                        <Text style={{ fontSize: 12 }}>{displayName}</Text>
                       </span>
                     </Tooltip>
                   );

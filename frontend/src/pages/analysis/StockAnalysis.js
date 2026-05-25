@@ -756,8 +756,7 @@ export default function StockAnalysis() {
                     <div style={{ fontSize: 12, color: '#999', marginBottom: 8, textAlign: 'center' }}>
                       三方分析师独立评分
                       <Tooltip
-                        overlayStyle={{ maxWidth: 'none' }}
-                        overlayInnerStyle={{ padding: 0, width: 650 }}
+                        styles={{ root: { maxWidth: 'none' }, body: { padding: 0, width: 650 } }}
                         title={
                           <div style={{ padding: '12px 16px', minWidth: 650 }}>
                             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
@@ -2523,7 +2522,7 @@ function ValuationTab({ data, code }) {
       {/* 指标名 + 问号 */}
       <span style={{ width: 90, flexShrink: 0, fontWeight: 500, color: '#333', display: 'flex', alignItems: 'center', gap: 2 }}>
         {label}
-        <Tooltip title={tooltip} placement="right" overlayInnerStyle={{ width: 500, maxWidth: 520, background: '#fff', color: '#333', fontSize: 12, lineHeight: '20px', boxShadow: '0 6px 16px rgba(0,0,0,0.12), 0 3px 6px rgba(0,0,0,0.08)', borderRadius: 10, padding: '10px 14px', border: '1px solid #e8e8e8' }}>
+        <Tooltip title={tooltip} placement="right" styles={{ body: { width: 500, maxWidth: 520, background: '#fff', color: '#333', fontSize: 12, lineHeight: '20px', boxShadow: '0 6px 16px rgba(0,0,0,0.12), 0 3px 6px rgba(0,0,0,0.08)', borderRadius: 10, padding: '10px 14px', border: '1px solid #e8e8e8' } }}>
           <QuestionCircleOutlined style={{ fontSize: 12, color: '#bbb', cursor: 'pointer' }} />
         </Tooltip>
       </span>

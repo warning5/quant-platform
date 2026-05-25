@@ -181,6 +181,7 @@ public class StockScreenService {
                     || Boolean.TRUE.equals(mpf.getAboveMA60())
                     || Boolean.TRUE.equals(mpf.getAboveMA100());
             if (needMaFilter) {
+                long maStart = System.currentTimeMillis();
                 // 将候选 symbol 转为带后缀格式（barMap key），批量计算均线位置
                 // MA过滤器需要完整symbol（带后缀）
                 List<String> candidateList = candidates.stream()
@@ -198,16 +199,18 @@ public class StockScreenService {
                     return Boolean.TRUE.equals(mpf.getAboveMA100())
                             && !Boolean.TRUE.equals(pos.get("aboveMA100"));
                 });
-                log.info("[Screen] After MA position filter: {} stocks remain", candidates.size());
+                log.info("[Screen] After MA position filter: {} stocks remain (took {} ms)", candidates.size(), System.currentTimeMillis() - maStart);
             }
         }
 
         // ── 3. 加载各因子的截面数据，并进行极值处理、标准化 ────────────
         Map<String, Map<String, FactorValue>> factorData = new LinkedHashMap<>();
         Map<String, Integer> coverage = new LinkedHashMap<>();
+        long factorLoadStart = System.currentTimeMillis();
 
         for (ScreenRequest.FactorWeight fw : req.getFactors()) {
             String code = fw.getFactorCode();
+            long fStart = System.currentTimeMillis();
 
             List<FactorValue> crossSection;
 
@@ -277,9 +280,10 @@ public class StockScreenService {
 
             factorData.put(code, symbolMap);
         coverage.put(code, symbolMap.size());
-        log.info("[Screen] Factor {} coverage: {} stocks on {}, outlier={}, normalize={}",
-                code, symbolMap.size(), useMultiDayMode ? (screenStartDate + " ~ " + screenEndDate) : screenDate, outlierMethod, normalizeMethod);
+        log.info("[Screen] Factor {} coverage: {} stocks on {}, outlier={}, normalize={} (took {} ms)",
+                code, symbolMap.size(), useMultiDayMode ? (screenStartDate + " ~ " + screenEndDate) : screenDate, outlierMethod, normalizeMethod, System.currentTimeMillis() - fStart);
         }
+        log.info("[Screen] All factors loaded: total took {} ms", System.currentTimeMillis() - factorLoadStart);
 
         // 调试：打印候选股票数和各因子覆盖情况
         log.info("[Screen] Candidates: {}, FactorData keys: {}", candidates.size(), factorData.keySet());
@@ -566,8 +570,20 @@ public class StockScreenService {
         // 查询范围内所有因子值
         List<FactorValue> allValues = clickHouseFactorValueService.findByFactorCodeAndDateRange(factorCode, startDate, endDate);
         if (allValues.isEmpty()) {
-            log.warn("[Screen] Multi-day: no data for {} in {} ~ {}", factorCode, startDate, endDate);
-            return Collections.emptyList();
+            // 范围内无数据（常见于季度财务因子：如选股 5 月但最新财报只到 3/31）
+            // 自动回退到该因子的最新可用日期
+            LocalDate latestDate = clickHouseFactorValueService.getLatestDate(factorCode);
+            if (latestDate != null && !latestDate.isAfter(endDate) && !latestDate.isBefore(startDate.minusYears(2))) {
+                log.info("[Screen] Multi-day: 回退查询 {} 范围 {}~{} → 最新可用日期 {}", factorCode, startDate, endDate, latestDate);
+                allValues = clickHouseFactorValueService.findByFactorCodeAndDateRange(factorCode, latestDate, latestDate);
+                if (!allValues.isEmpty()) {
+                    log.info("[Screen] Multi-day: 回退成功，{} 在 {} 有 {} 条数据", factorCode, latestDate, allValues.size());
+                }
+            }
+            if (allValues.isEmpty()) {
+                log.warn("[Screen] Multi-day: no data for {} in {} ~ {} (回退后仍无数据)", factorCode, startDate, endDate);
+                return Collections.emptyList();
+            }
         }
 
         // 按 symbol 分组，保留每条记录以便取最新值 + 计算统计量
@@ -617,10 +633,26 @@ public class StockScreenService {
                         .average().orElse(0);
                 cv = Math.sqrt(variance) / Math.abs(mean);
             }
+            double stdDev = Math.sqrt(variance);
 
             // 稳定性过滤：CV 超阈值则剔除（阈值按因子数值特性动态选择）
             // 数据不足 10 个点时跳过 CV 过滤（样本太少时 CV 不可靠）
-            if (values.size() >= 10 && cv > cvThreshold) {
+            //
+            // ⚠️ 特殊处理：REVERSAL 类短期反转因子的均值天然接近 0（多空对称），
+            //   导致 CV = std/|mean| 爆炸式偏大（如 mean=0.000017 → CV=2492），
+            //   此时 CV 不再反映"不稳定"，而是数学伪影。
+            //   改用绝对标准差阈值：std > 20% 则认为波动过大（日反转值超过 ±20% 属异常）
+            boolean isReversal = factorCode.startsWith("REVERSAL");
+            boolean unstable = false;
+            if (values.size() >= 10) {
+                if (isReversal) {
+                    // 反转因子用绝对 std 阈值（值域通常在 ±10% 以内）
+                    unstable = (stdDev > 0.20);
+                } else {
+                    unstable = (cv > cvThreshold);
+                }
+            }
+            if (unstable) {
                 filteredByCV++;
                 continue;
             }
@@ -637,8 +669,9 @@ public class StockScreenService {
         // 存入趋势缓存
         multiDayTrendCache.put(factorCode, trendMap);
 
-        log.info("[Screen] Multi-day (latest+stable) for {}: candidates={} -> stable={} filtered_by_CV={} (threshold={})",
-                factorCode, totalSymbols, stableCount, filteredByCV, cvThreshold);
+        log.info("[Screen] Multi-day (latest+stable) for {}: candidates={} -> stable={} filtered_by_CV={} (threshold={}, mode={})",
+                factorCode, totalSymbols, stableCount, filteredByCV, cvThreshold,
+                factorCode.startsWith("REVERSAL") ? "std_abs" : "cv_ratio");
         return result;
     }
 
