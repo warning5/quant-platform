@@ -202,6 +202,17 @@ export const backtestApi = {
   deleteParamOptimize: (jobId) => api.delete(`/backtests/param-optimize/${jobId}`),
 };
 
+// ===== 滚动选股回测 API =====
+export const rollingScreenApi = {
+  run: (data) => api.post('/rolling-screen/run', data),
+  listTasks: (params) => api.get('/rolling-screen/tasks', { params }),
+  getTask: (taskId) => api.get(`/rolling-screen/tasks/${taskId}`),
+  getRecords: (taskId) => api.get(`/rolling-screen/tasks/${taskId}/records`),
+  getCurve: (taskId) => api.get(`/rolling-screen/tasks/${taskId}/curve`),
+  cancel: (taskId) => api.put(`/rolling-screen/tasks/${taskId}/cancel`),
+  delete: (taskId) => api.delete(`/rolling-screen/tasks/${taskId}`),
+};
+
 // ===== 行情 API =====
 export const marketApi = {
   getOverview: () => api.get('/market/overview'),

@@ -189,7 +189,7 @@ public class StockScreenService {
                 Map<String, Map<String, Object>> maPositions =
                         priceAdvisorService.batchCalcMaPositions(candidateList, screenDate);
                 candidates.removeIf(sym -> {
-                    Map<String, Object> pos = maPositions.get(sym);
+                    Map<String, Object> pos = maPositions.get(codeToSymbol.getOrDefault(sym, sym));
                     if (pos == null) return true; // 无数据，剔除
                     if (Boolean.TRUE.equals(mpf.getAboveMA30())
                             && !Boolean.TRUE.equals(pos.get("aboveMA30"))) return true;
@@ -228,8 +228,10 @@ public class StockScreenService {
             }
 
             // 过滤候选股票，并提取原始值
+            // factor_value.symbol 可能带后缀（如 000001.SZ），candidates 是纯代码（如 000001）
+            // 需要做 symbol 归一化：去掉 .SH/.SZ/.BJ 后缀
             List<FactorValue> filtered = crossSection.stream()
-                    .filter(fv -> candidates.contains(fv.getSymbol()))
+                    .filter(fv -> candidates.contains(normalizeFactorSymbol(fv.getSymbol())))
                     .toList();
 
             // 诊断：symbol 格式不匹配时打印样本
@@ -258,17 +260,19 @@ public class StockScreenService {
             List<Double> normalized = applyNormalization(outlierProcessed, normalizeMethod);
 
             // 重新组装 FactorValue（用标准化后的值替换 rankValue）
+            // key 使用归一化后的纯代码 symbol（与 candidates 格式一致）
             Map<String, FactorValue> symbolMap = new LinkedHashMap<>();
             for (int i = 0; i < filtered.size(); i++) {
                 FactorValue orig = filtered.get(i);
+                String normSym = normalizeFactorSymbol(orig.getSymbol());
                 FactorValue processed = new FactorValue();
-                processed.setSymbol(orig.getSymbol());
+                processed.setSymbol(normSym);
                 processed.setFactorCode(orig.getFactorCode());
                 processed.setCalcDate(orig.getCalcDate());
                 processed.setFactorVal(orig.getFactorVal());
                 // 用标准化后的值作为 rankValue 参与后续计算
                 processed.setRankValue(BigDecimal.valueOf(normalized.get(i)));
-                symbolMap.put(orig.getSymbol(), processed);
+                symbolMap.put(normSym, processed);
             }
 
             factorData.put(code, symbolMap);
@@ -636,6 +640,16 @@ public class StockScreenService {
         log.info("[Screen] Multi-day (latest+stable) for {}: candidates={} -> stable={} filtered_by_CV={} (threshold={})",
                 factorCode, totalSymbols, stableCount, filteredByCV, cvThreshold);
         return result;
+    }
+
+    /**
+     * 归一化 symbol：去掉 .SH/.SZ/.BJ 等交易所后缀，返回纯代码。
+     * 用于统一 factor_value.symbol（可能带后缀）和 candidates（纯代码）的格式。
+     */
+    private static String normalizeFactorSymbol(String symbol) {
+        if (symbol == null) return null;
+        int dot = symbol.lastIndexOf('.');
+        return dot > 0 ? symbol.substring(0, dot) : symbol;
     }
 
     /**

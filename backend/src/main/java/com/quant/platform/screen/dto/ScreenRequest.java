@@ -2,6 +2,7 @@ package com.quant.platform.screen.dto;
 
 import lombok.Data;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -15,18 +16,21 @@ public class ScreenRequest {
      * 选股日期（单日模式），不填则取最新可用日期
      * 与 screenStartDate 互斥：优先使用 screenStartDate
      */
+    @JsonFormat(pattern = "yyyy-MM-dd")
     private LocalDate screenDate;
 
     /**
      * 多日平均模式的起始日期（含）
      * 设定时启用多日平均模式，因子值取 [screenStartDate, screenEndDate] 范围内的均值
      */
+    @JsonFormat(pattern = "yyyy-MM-dd")
     private LocalDate screenStartDate;
 
     /**
      * 多日平均模式的结束日期（含）
      * 必须与 screenStartDate 配合使用
      */
+    @JsonFormat(pattern = "yyyy-MM-dd")
     private LocalDate screenEndDate;
 
     /**

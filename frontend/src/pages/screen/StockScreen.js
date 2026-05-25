@@ -11,11 +11,13 @@ import {
   SafetyCertificateOutlined, ArrowUpOutlined, ArrowDownOutlined,
   PlusSquareOutlined, MinusSquareOutlined, ThunderboltOutlined, LineChartOutlined, FundOutlined,
   MenuFoldOutlined, MenuUnfoldOutlined, RiseOutlined, StockOutlined,
+  HistoryOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import api, { factorApi } from '../../api';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useMarketThermometer } from '../../hooks/useMarketThermometer';
+import RollingBacktestModal from './RollingBacktestModal';
 
 const { Title, Text, Paragraph } = Typography;
 const { Option } = Select;
@@ -408,6 +410,7 @@ export default function StockScreen() {
   const [result, setResult] = useState(null);
   const [running, setRunning] = useState(false);
   const [resultPageSize, setResultPageSize] = useState(20);
+  const [backtestModalVisible, setBacktestModalVisible] = useState(false);
 
   /* ── 左侧面板折叠 ────────────────────────────────────────────── */
   const [collapsed, setCollapsed] = useState(false);
@@ -456,6 +459,85 @@ export default function StockScreen() {
       }
     }
   }, []);
+
+  /* ── 从回测报告页跳转回填配置 ─────────────────────────────────── */
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const restoreParam = searchParams.get('__restore');
+    if (!restoreParam) return;
+
+    try {
+      const decoded = decodeURIComponent(atob(restoreParam));
+      const config = JSON.parse(decoded);
+
+      // 清除 URL 参数（避免刷新重复回填）
+      setSearchParams({}, { replace: true });
+
+      // 回填因子列表
+      if (Array.isArray(config.factors) && config.factors.length > 0) {
+        const factorMap = {};
+        availableFactors.forEach(af => { factorMap[af.factorCode] = af; });
+        const restoredFactors = config.factors.map(f => {
+          const base = factorMap[f.factorCode] || { factorCode: f.factorCode };
+          return {
+            factorCode: f.factorCode,
+            name: base.name || f.factorCode,
+            direction: f.direction ?? 1,
+            weight: f.weight ?? 1,
+            filterOp: f.filterOp || 'NONE',
+            filterValue: f.filterValue != null ? f.filterValue : null,
+            outlierMethod: f.outlierMethod || null,
+            normalizeMethod: f.normalizeMethod || null,
+          };
+        });
+        setFactors(restoredFactors);
+      }
+
+      // 回填基本参数
+      if (config.direction) setDirection(config.direction);
+      if (config.topN != null) setTopN(config.topN);
+      if (config.excludeSt !== undefined) setExcludeSt(config.excludeSt);
+      if (config.globalOutlierMethod) setGlobalOutlier(config.globalOutlierMethod);
+      if (config.globalNormalizeMethod) setGlobalNormalize(config.globalNormalizeMethod);
+      if (config.orthogonalizationMethod) setOrthogonalMethod(config.orthogonalizationMethod);
+      if (config.valuationWeight != null) setValuationWeight(Math.round(config.valuationWeight * 100));
+      if (config.customSqlWhere) setCustomSqlWhere(config.customSqlWhere);
+
+      // 回填选股日期
+      if (config.screenStartDate && config.screenEndDate) {
+        setUseMultiDayMode(true);
+        setScreenDateRange([dayjs(config.screenStartDate), dayjs(config.screenEndDate)]);
+      } else if (config.screenDate) {
+        setUseMultiDayMode(false);
+        setScreenDate(dayjs(config.screenDate));
+      }
+
+      // 回填 MA 过滤
+      if (config.maPositionFilter) {
+        setMaAbove30(!!config.maPositionFilter.aboveMA30);
+        setMaAbove60(!!config.maPositionFilter.aboveMA60);
+        setMaAbove100(!!config.maPositionFilter.aboveMA100);
+      }
+
+      // 回填策略组合名称
+      if (config.presetName) {
+        // 尝试匹配已有 preset（按名称模糊匹配）
+        const matched = presets.find(p => p.presetName === config.presetName);
+        if (matched) {
+          setSelectedPresetId(matched.id);
+        } else {
+          setSelectedPresetId(null);
+        }
+      }
+
+      message.success('已从回测报告自动回填策略配置');
+    } catch (e) {
+      console.error('回填配置失败:', e);
+      message.error('回填配置解析失败');
+      setSearchParams({}, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams.get('__restore')]);
 
   /* ── 选择预设组合 ─────────────────────────────────────────────── */
   const handlePresetSelect = useCallback((presetId) => {
@@ -609,15 +691,55 @@ export default function StockScreen() {
       })),
     };
 
-    api.post('/screen/run', payload)
+    api.post('/screen/run', payload, { timeout: 180000 })
       .then(res => {
         setResult(res);
         setCollapsed(true);
         message.success(`选股完成，共选出 ${res?.stocks?.length ?? 0} 只股票`);
       })
-      .catch(() => {})
+      .catch((err) => {
+        if (err.message && !err.response) {
+          message.error('请求超时或网络异常，请稍后重试（MA均线过滤计算量较大，可能需要2-3分钟）');
+        }
+      })
       .finally(() => setRunning(false));
   }, [factors, screenDate, screenDateRange, useMultiDayMode, topN, direction, excludeSt, globalOutlier, globalNormalize, orthogonalMethod, totalWeight, valuationWeight, selectedPresetId, customSqlWhere, maAbove30, maAbove60, maAbove100]);
+
+  /* ── 构建当前选股配置（供回测弹窗使用） ──────────────────────── */
+  const buildScreenRequest = useCallback(() => ({
+    ...(useMultiDayMode && screenDateRange?.[0] && screenDateRange?.[1]
+      ? {
+          screenStartDate: screenDateRange[0].format('YYYY-MM-DD'),
+          screenEndDate:   screenDateRange[1].format('YYYY-MM-DD'),
+        }
+      : { screenDate: screenDate ? screenDate.format('YYYY-MM-DD') : null }),
+    globalOutlierMethod: globalOutlier,
+    globalNormalizeMethod: globalNormalize,
+    orthogonalizationMethod: orthogonalMethod,
+    topN,
+    direction,
+    excludeSt,
+    valuationWeight: valuationWeight / 100,
+    customSqlWhere: customSqlWhere || null,
+    presetId: selectedPresetId || null,
+    presetName: selectedPresetId
+      ? (presets.find(p => p.id === selectedPresetId)?.presetName || null)
+      : null,
+    maPositionFilter: (maAbove30 || maAbove60 || maAbove100) ? {
+      aboveMA30:  maAbove30  || null,
+      aboveMA60:  maAbove60  || null,
+      aboveMA100: maAbove100 || null,
+    } : null,
+    factors: factors.map(f => ({
+      factorCode: f.factorCode,
+      direction: f.direction,
+      weight: f.weight,
+      filterOp: f.filterOp,
+      filterValue: f.filterOp !== 'NONE' ? f.filterValue : null,
+      outlierMethod: f.outlierMethod || null,
+      normalizeMethod: f.normalizeMethod || null,
+    })),
+  }), [factors, screenDate, screenDateRange, useMultiDayMode, topN, direction, excludeSt, globalOutlier, globalNormalize, orthogonalMethod, totalWeight, valuationWeight, selectedPresetId, customSqlWhere, maAbove30, maAbove60, maAbove100]);
 
   /* ── 结果表格列 ───────────────────────────────────────────────── */
   const isMultiDay = !!(result?.screenStartDate && result?.screenEndDate);
@@ -1392,6 +1514,12 @@ export default function StockScreen() {
                 }
                 extra={
                   <Space size="small">
+                    {result && (
+                      <Button type="primary" size="small" icon={<PlayCircleOutlined />}
+                        onClick={() => setBacktestModalVisible(true)}>
+                        滚动回测
+                      </Button>
+                    )}
                     <Button
                       size="small"
                       icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
@@ -1468,6 +1596,13 @@ export default function StockScreen() {
           style={{ marginTop: 8 }}
         />
       </Modal>
+
+      {/* ── 滚动选股回测弹窗 ─────────────────────────────────────── */}
+      <RollingBacktestModal
+        visible={backtestModalVisible}
+        onClose={() => setBacktestModalVisible(false)}
+        screenConfig={buildScreenRequest()}
+      />
     </div>
   );
 }

@@ -285,11 +285,11 @@ public class BacktestEngine {
             boolean dividendReinvest = task.getDividendReinvest() != null && task.getDividendReinvest();
             if (dividendReinvest) {
                 double[] divCashRef = new double[]{0.0};
-                processDividendEvents(positions, divCashRef, barMap, today, tradeLog, adjFactors);
+                BacktestUtils.processDividendEvents(positions, divCashRef, barMap, today, tradeLog, adjFactors, dividendService);
                 cash += divCashRef[0]; // 分红现金到账
             } else {
                 // 即使不启用分红处理，也要更新复权因子（用于价格连续性）
-                updateAdjFactors(adjFactors, barMap, today);
+                BacktestUtils.updateAdjFactors(adjFactors, barMap, today, dividendService);
             }
 
             // 更新持仓市值
@@ -360,7 +360,7 @@ public class BacktestEngine {
                         double amount = shares * closePrice;
                         double dayAmount = bar.getAmount() != null ? bar.getAmount().doubleValue() * 1000 : 0;
                         double price = applySlippage(execPrice, false, slippage, amount, dayAmount, slippageModel);
-                        double fee = calcFee(amount, true, commission, stampTaxRate, minCommission, symbol, transferFeeRate);
+                        double fee = BacktestUtils.calcFee(amount, true, commission, stampTaxRate, minCommission, symbol, transferFeeRate);
 
                         Map<String, Object> trade = new HashMap<>();
                         trade.put("date", today.toString());

@@ -624,10 +624,10 @@ public class FactorService {
         }
         List<StockInfo> stocks = stockInfoMapper.selectList(siWrapper);
 
-        // 3. 取交集，构建 code.market -> name 映射
+        // 3. 取交集：CH 返回的 symbol 是纯代码(如 300290)，用 code 做 key 匹配
         Map<String, String> nameMap = stocks.stream()
                 .collect(java.util.stream.Collectors.toMap(
-                        s -> s.getCode() + "." + (s.getMarket() != null ? s.getMarket() : ""),
+                        StockInfo::getCode,
                         StockInfo::getName,
                         (a, existing) -> a));
 
@@ -643,7 +643,7 @@ public class FactorService {
      * 全部走 ClickHouse
      */
     public Map<String, Object> getFactorCrossSection(String factorCode, LocalDate date, int page, int size) {
-        List<FactorValue> values = clickHouseFactorValueService.findByFactorCodeAndDate(factorCode, date);
+        List<FactorValue> values = new java.util.ArrayList<>(clickHouseFactorValueService.findByFactorCodeAndDate(factorCode, date));
 
         // 批量查询股票名称：从 symbol（如 000001.SZ）中提取 code，关联 stock_info
         Set<String> allSymbols = values.stream()

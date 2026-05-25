@@ -417,9 +417,9 @@ public class ClickHouseFactorValueService {
                 """, factorCode.replace("'", "''"), calcDate);
 
         java.util.List<com.quant.platform.factor.domain.FactorValue> result = new ArrayList<>();
-        try (Connection conn = getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql);
-             ResultSet rs = stmt.executeQuery()) {
+        try (java.sql.Connection conn = getConnection();
+             java.sql.Statement stmt = conn.createStatement();
+             java.sql.ResultSet rs = stmt.executeQuery(sql)) {
 
             while (rs.next()) {
                 result.add(convertResultSet(rs));
@@ -442,9 +442,9 @@ public class ClickHouseFactorValueService {
                 """, factorCode.replace("'", "''"), startDate, endDate);
 
         java.util.List<com.quant.platform.factor.domain.FactorValue> result = new ArrayList<>();
-        try (Connection conn = getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql);
-             ResultSet rs = stmt.executeQuery()) {
+        try (java.sql.Connection conn = getConnection();
+             java.sql.Statement stmt = conn.createStatement();
+             java.sql.ResultSet rs = stmt.executeQuery(sql)) {
 
             while (rs.next()) {
                 result.add(convertResultSet(rs));
