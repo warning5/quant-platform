@@ -82,8 +82,9 @@ FIN_FACTORS = [
     "FIN_ASSETS_TURNOVER",   # 总资产周转率
     "FIN_INVENTORY_TURNOVER",    # 存货周转率
     "FIN_INVENTORY_TURNOVER_DAYS",# 存货周转天数
-    # 现金流 (7)  — 新增 operating_cf_to_debt
+    # 现金流 (8)  — 新增 operating_cf_to_debt / earnings_quality
     "FIN_CF_TO_NP",          # 经营现金流/净利润
+    "FIN_EARNINGS_QUALITY",  # 盈余质量（同 operating_cf_to_np）
     "FIN_CF_PER_SHARE",      # 每股经营现金流
     "FIN_CF_TO_REVENUE",     # 经营现金流/营收
     "FIN_FCF",               # 自由现金流
@@ -92,7 +93,11 @@ FIN_FACTORS = [
     "FIN_OPERATING_CF_TO_DEBT", # 经营现金流/总负债（新增）
     # 每股指标 (1)
     "FIN_BPS",               # 每股净资产
-]  # 共32个财务因子
+    # TTM指标 (3) — 滚动12个月，消除单季度季节性
+    "FIN_ROE_TTM",           # ROE(TTM)
+    "FIN_REVENUE_TTM_YOY",   # 营收同比(TTM)
+    "FIN_NET_PROFIT_TTM_YOY",# 净利同比(TTM)
+]  # 共36个财务因子
 
 
 def load_stock_daily():
@@ -170,6 +175,7 @@ def load_financial_data():
                    fi.operating_cf_to_np, fi.free_cash_flow, fi.net_operate_cf,
                    fi.bps, fi.eps_basic,
                    fi.interest_coverage_ratio, fi.roic, fi.operating_cf_to_debt,
+                   fi.roe_ttm, fi.revenue_ttm_yoy, fi.net_profit_ttm_yoy,
                    si.total_revenue, si.total_cost, si.operating_cost,
                    si.operating_profit, si.selling_expense,
                    si.admin_expense, si.finance_expense, si.rd_expense,
@@ -444,8 +450,9 @@ def compute_finance_factors(fin_data, fin_factor_codes, start_date, end_date):
         "FIN_ASSETS_TURNOVER":       (lambda r: _fval(r, "total_assets_turnover"),        "总资产周转率"),
         "FIN_INVENTORY_TURNOVER":    (lambda r: _fval(r, "inventory_turnover"),           "存货周转率"),
         "FIN_INVENTORY_TURNOVER_DAYS":(lambda r: _fval(r, "inventory_turnover_days"),     "存货周转天数"),
-        # 现金流 (7)  — 新增 operating_cf_to_debt
+        # 现金流 (8)  — 新增 operating_cf_to_debt / earnings_quality
         "FIN_CF_TO_NP":              (lambda r: _fval(r, "operating_cf_to_np"),           "经营CF/净利润"),
+        "FIN_EARNINGS_QUALITY":      (lambda r: _fval(r, "operating_cf_to_np"),           "盈余质量"),
         "FIN_CF_PER_SHARE":          (lambda r: _fval(r, "net_operate_cf") / _fval(r, "eps_basic") if _fval(r, "eps_basic") and _fval(r, "eps_basic") != 0 else None, "每股经营CF"),
         "FIN_CF_TO_REVENUE":         (lambda r: _cf_div(r, "net_operate_cf", "total_revenue"), "经营CF/营收"),
         "FIN_FCF":                   (lambda r: _fval(r, "free_cash_flow"),               "FCF"),
@@ -454,6 +461,10 @@ def compute_finance_factors(fin_data, fin_factor_codes, start_date, end_date):
         "FIN_OPERATING_CF_TO_DEBT":  (lambda r: _fval(r, "operating_cf_to_debt"),        "经营CF/总负债"),
         # 每股指标
         "FIN_BPS":                   (lambda r: _fval(r, "bps"),                          "每股净资产"),
+        # TTM 指标
+        "FIN_ROE_TTM":               (lambda r: _fval(r, "roe_ttm"),                       "ROE(TTM)"),
+        "FIN_REVENUE_TTM_YOY":       (lambda r: _fval(r, "revenue_ttm_yoy"),               "营收增速(TTM)"),
+        "FIN_NET_PROFIT_TTM_YOY":    (lambda r: _fval(r, "net_profit_ttm_yoy"),            "净利增速(TTM)"),
     }
 
     for code, reports in fin_data.items():

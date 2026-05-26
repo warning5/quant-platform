@@ -266,6 +266,7 @@ public class ScheduleConfigController {
         String dateMode = "today";
         String customStartDate = null;
         String customEndDate = null;
+        String moneyflowSource = null;  // 从 extra_config 读取，SENTIMENT_MF 用
 
         if (extraConfigJson != null && !extraConfigJson.isEmpty() && !extraConfigJson.equals("null")) {
             try {
@@ -278,6 +279,8 @@ public class ScheduleConfigController {
                     dateMode = ec.get("dateMode") != null ? ec.get("dateMode").toString() : "today";
                     customStartDate = ec.get("startDate") != null ? ec.get("startDate").toString() : null;
                     customEndDate = ec.get("endDate") != null ? ec.get("endDate").toString() : null;
+                    moneyflowSource = ec.get("moneyflowSource") != null
+                        ? ec.get("moneyflowSource").toString() : null;
                 }
             } catch (Exception e) {
                 log.warn("[ScheduleConfig] 解析 extra_config 失败: {}", e.getMessage());
@@ -310,7 +313,8 @@ public class ScheduleConfigController {
             case "SENTIMENT":      req.setUpdateType("SENTIMENT"); break;
             case "SENTIMENT_MF":
                 req.setUpdateType("SENTIMENT");
-                req.setMoneyflowSource("EM");
+                // 从 extra_config 读取 moneyflowSource，默认 EM
+                req.setMoneyflowSource(moneyflowSource != null ? moneyflowSource : "EM");
                 req.setFetchLhb(false); req.setFetchMargin(false); req.setFetchSurvey(false);
                 req.setFetchBlockTrade(false); req.setFetchActivity(false); req.setFetchZtPool(false);
                 req.setFetchNotice(false); req.setFetchFundHolder(false); req.setFetchShareholder(false);

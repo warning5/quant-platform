@@ -117,14 +117,25 @@ def _check_neodata_token(verbose=True):
 # ─── 工具函数 ────────────────────────────────────────────────────
 
 def _latest_trading_day() -> datetime.date:
-    """返回最近的交易日：周一至周五返回今天，周末返回上周五。"""
+    """返回最近的交易日：当前时间 < 15:00（收市前）返回上一交易日，否则返回今天。"""
     today = datetime.date.today()
+    now = datetime.datetime.now()
     wd = today.weekday()  # 0=Mon ... 6=Sun
-    if wd == 5:
+
+    # 周末 → 上周五
+    if wd == 5:  # Saturday
         return today - datetime.timedelta(days=1)
-    if wd == 6:
+    if wd == 6:  # Sunday
         return today - datetime.timedelta(days=2)
-    return today
+
+    # 周一至周五：收市前（<15:00）返回上一交易日
+    if now.hour < 15:
+        if wd == 0:  # 周一 <15:00 → 上周五
+            return today - datetime.timedelta(days=3)
+        else:  # 周二~周五 <15:00 → 昨天
+            return today - datetime.timedelta(days=1)
+
+    return today  # 15:00 之后，今天数据已可获取
 
 
 def to_float(val, default=0.0):

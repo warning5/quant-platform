@@ -45,20 +45,49 @@ public class ScheduleService implements SchedulingConfigurer {
 
     /**
      * 从 DB 重新加载并注册所有 enabled=1 且 cron_expression 非空的配置
+     * - 全局暂停（GLOBAL.enabled=0）时，不注册任何任务
+     * - use_global_cron=1 的任务使用 GLOBAL 的 cron_expression
      */
     public synchronized void refreshFromDb() {
         // 先取消所有现存的调度
         cancelAll();
 
+        // 读取全局配置
+        Integer globalEnabled = jdbcTemplate.queryForObject(
+            "SELECT enabled FROM data_schedule_config WHERE task_key = 'GLOBAL'", Integer.class);
+        if (globalEnabled == null || globalEnabled == 0) {
+            log.info("[ScheduleService] 全局调度已暂停（GLOBAL.enabled=0），不注册任何任务");
+            return;
+        }
+
+        String globalCron = null;
+        try {
+            globalCron = jdbcTemplate.queryForObject(
+                "SELECT cron_expression FROM data_schedule_config WHERE task_key = 'GLOBAL'", String.class);
+        } catch (Exception ignored) {}
+
         List<Map<String, Object>> configs = jdbcTemplate.queryForList(
-            "SELECT task_key, cron_expression FROM data_schedule_config " +
-            "WHERE enabled = 1 AND cron_expression IS NOT NULL AND cron_expression <> '' " +
-            "AND task_key <> 'GLOBAL'"
+            "SELECT task_key, cron_expression, use_global_cron FROM data_schedule_config " +
+            "WHERE enabled = 1 AND task_key <> 'GLOBAL'"
         );
 
         for (Map<String, Object> row : configs) {
             String taskKey = (String) row.get("task_key");
-            String cron = (String) row.get("cron_expression");
+            Integer useGlobal = row.get("use_global_cron") != null
+                ? ((Number) row.get("use_global_cron")).intValue() : 1;
+
+            String cron;
+            if (useGlobal == 1 && globalCron != null && !globalCron.isEmpty()) {
+                cron = globalCron;
+            } else {
+                cron = (String) row.get("cron_expression");
+            }
+
+            if (cron == null || cron.isEmpty()) {
+                log.info("[ScheduleService] 跳过 {}：无有效 cron 表达式", taskKey);
+                continue;
+            }
+
             try {
                 registerTask(taskKey, cron);
             } catch (Exception e) {
@@ -159,6 +188,7 @@ public class ScheduleService implements SchedulingConfigurer {
         String dateMode = "today";
         String customStartDate = null;
         String customEndDate = null;
+        String moneyflowSource = null;  // 从 extra_config 读取，SENTIMENT_MF 用
 
         if (extraConfigJson != null && !extraConfigJson.isEmpty() && !extraConfigJson.equals("null")) {
             try {
@@ -171,6 +201,8 @@ public class ScheduleService implements SchedulingConfigurer {
                     dateMode = ec.get("dateMode") != null ? ec.get("dateMode").toString() : "today";
                     customStartDate = ec.get("startDate") != null ? ec.get("startDate").toString() : null;
                     customEndDate = ec.get("endDate") != null ? ec.get("endDate").toString() : null;
+                    moneyflowSource = ec.get("moneyflowSource") != null
+                        ? ec.get("moneyflowSource").toString() : null;
                 }
             } catch (Exception e) {
                 log.warn("[ScheduleService] 解析 extra_config 失败: {}", e.getMessage());
@@ -217,7 +249,8 @@ public class ScheduleService implements SchedulingConfigurer {
             case "SENTIMENT"     -> { req.setUpdateType("SENTIMENT");     yield req; }
             case "SENTIMENT_MF"  -> {
                 req.setUpdateType("SENTIMENT");
-                req.setMoneyflowSource("EM");
+                // 从 extra_config 读取 moneyflowSource，默认 EM
+                req.setMoneyflowSource(moneyflowSource != null ? moneyflowSource : "EM");
                 // 资金流向只跑资金相关，关掉其它
                 req.setFetchLhb(false);
                 req.setFetchMargin(false);

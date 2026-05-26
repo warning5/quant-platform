@@ -261,7 +261,7 @@ def _save_fast(df: pd.DataFrame, code: str, table_name: str,
 # ── 预加载 ────────────────────────────────────────────────
 def preload_existing():
     print("  预加载已存在记录...")
-    conn = pymysql.connect(**DB_CONFIG)
+    conn = pymysql.connect(**MYSQL_CONFIG)
     cursor = conn.cursor()
     total = 0
     for t in ['stock_income', 'stock_balance', 'stock_cashflow']:
@@ -288,7 +288,7 @@ def main():
     if args.force:
         print("  FORCE 模式：忽略已有数据，全量写入")
 
-    conn = pymysql.connect(**DB_CONFIG)
+    conn = pymysql.connect(**MYSQL_CONFIG)
     cursor = conn.cursor()
     cursor.execute("SELECT code FROM stock_info ORDER BY code")
     codes = [r[0] for r in cursor.fetchall()]

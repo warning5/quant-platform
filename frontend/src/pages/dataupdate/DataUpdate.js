@@ -1828,6 +1828,7 @@ function DataUpdate() {
                     if (val === 'NEODATA' || val === 'EM') {
                       // EM/NeoData 模式：只保留资金流向勾选，其他全部取消
                       sentimentForm.setFieldsValue({
+                        moneyflowSource: val,
                         fetchLhb: false,
                         fetchMargin: false,
                         fetchSurvey: false,
@@ -1844,6 +1845,7 @@ function DataUpdate() {
                     } else {
                       // AKSHARE 模式：全部恢复默认勾选
                       sentimentForm.setFieldsValue({
+                        moneyflowSource: val,
                         fetchLhb: true,
                         fetchMargin: true,
                         fetchSurvey: true,

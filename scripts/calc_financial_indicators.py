@@ -372,5 +372,168 @@ def main():
     print(f"\n计算完成: 更新 {updated} 条, 错误 {errors} 条")
 
 
+def compute_ttm_indicators(code_filter=None):
+    """
+    计算 TTM（滚动12个月）指标并更新 stock_financial_indicator。
+
+    指标:
+      roe_ttm          = SUM(近4季单季归母净利润) / 最新季度 parent_equity * 100
+      revenue_ttm_yoy  = (SUM(近4季单季营收) / SUM(去年同期4季营收) - 1) * 100
+      net_profit_ttm_yoy = (SUM(近4季单季归母净利润) / SUM(去年同期4季归母净利润) - 1) * 100
+
+    数据源:
+      stock_income   — 累计值 (report_type: 1=Q1, 2=H1, 3=9M, 4=全年)
+      stock_balance  — 时点值 (parent_equity)
+    """
+    from collections import defaultdict
+
+    conn = get_conn()
+    cur = conn.cursor()
+
+    # ── 加载 stock_income (累计值) ──
+    print("[TTM] 加载 stock_income...")
+    cur.execute("""
+        SELECT code, report_date, report_type, revenue, np_parent_company_owners
+        FROM stock_income
+        ORDER BY code, report_date
+    """)
+    income_raw = defaultdict(list)
+    for code, rd, rt, rev, np_attr in cur.fetchall():
+        income_raw[code].append({
+            'report_date': rd,
+            'report_type': rt,
+            'revenue': to_float(rev),
+            'np_attr': to_float(np_attr),
+        })
+    print(f"  共 {sum(len(v) for v in income_raw.values())} 条, {len(income_raw)} 只股票")
+
+    # ── 加载 stock_balance (parent_equity) ──
+    print("[TTM] 加载 stock_balance...")
+    cur.execute("""
+        SELECT code, report_date, parent_equity
+        FROM stock_balance
+        ORDER BY code, report_date
+    """)
+    balance_data = defaultdict(dict)
+    for code, rd, pe in cur.fetchall():
+        balance_data[code][rd] = to_float(pe)
+
+    # ── 去累计 → 单季度 ──
+    print("[TTM] 去累计 → 单季度...")
+    single_q = defaultdict(list)  # {code: [{report_date, revenue, np_attr}, ...]}
+    for code, rows in income_raw.items():
+        # Assume sorted by report_date
+        prev = None
+        for r in rows:
+            rt = r['report_type']
+            rev = r['revenue'] or 0
+            np_val = r['np_attr'] or 0
+
+            if rt == 1:
+                # Q1 is already single quarter
+                sq_rev = rev
+                sq_np = np_val
+            else:
+                # type=2/3/4: cumulative, subtract previous cumulative
+                prev_rev = (prev['revenue'] or 0) if prev else 0
+                prev_np = (prev['np_attr'] or 0) if prev else 0
+                sq_rev = rev - prev_rev
+                sq_np = np_val - prev_np
+
+            single_q[code].append({
+                'report_date': r['report_date'],
+                'revenue': sq_rev,
+                'np_attr': sq_np,
+            })
+            prev = r
+
+    # ── 计算 TTM ──
+    print("[TTM] 计算 TTM 指标...")
+    updated = 0
+    errors = 0
+
+    # 获取所有需要计算的 (code, report_date)
+    if code_filter:
+        cur.execute(
+            "SELECT code, report_date FROM stock_financial_indicator WHERE code = %s",
+            (code_filter,))
+    else:
+        cur.execute(
+            "SELECT code, report_date FROM stock_financial_indicator WHERE LEFT(report_date,4) >= '2010'")
+    target_keys = cur.fetchall()
+
+    for code, report_date in target_keys:
+        sq_list = single_q.get(code, [])
+        if len(sq_list) < 4:
+            continue
+
+        # 找到 report_date 在 sq_list 中的位置
+        idx = None
+        for i, sq in enumerate(sq_list):
+            if sq['report_date'] == report_date:
+                idx = i
+                break
+        if idx is None or idx < 3:
+            continue
+
+        # 近4个单季度: idx-3, idx-2, idx-1, idx
+        q4_rev = sum(sq_list[j]['revenue'] for j in range(idx - 3, idx + 1))
+        q4_np = sum(sq_list[j]['np_attr'] for j in range(idx - 3, idx + 1))
+
+        # 去年同期4个单季度: idx-7, idx-6, idx-5, idx-4
+        if idx >= 7:
+            prev_q4_rev = sum(sq_list[j]['revenue'] for j in range(idx - 7, idx - 3))
+            prev_q4_np = sum(sq_list[j]['np_attr'] for j in range(idx - 7, idx - 3))
+        else:
+            prev_q4_rev = None
+            prev_q4_np = None
+
+        # parent_equity at this report_date
+        pe = balance_data.get(code, {}).get(report_date)
+
+        # ROE TTM
+        roe_ttm = None
+        if q4_np and pe and pe != 0:
+            roe_ttm = round(q4_np / pe * 100, 4)
+
+        # Revenue TTM YoY
+        revenue_ttm_yoy = None
+        if q4_rev and prev_q4_rev and prev_q4_rev != 0:
+            revenue_ttm_yoy = round((q4_rev / prev_q4_rev - 1) * 100, 4)
+
+        # Net profit TTM YoY
+        net_profit_ttm_yoy = None
+        if q4_np and prev_q4_np and prev_q4_np != 0:
+            net_profit_ttm_yoy = round((q4_np / prev_q4_np - 1) * 100, 4)
+
+        # UPDATE
+        set_parts = []
+        vals = []
+        if roe_ttm is not None:
+            set_parts.append("roe_ttm = %s")
+            vals.append(roe_ttm)
+        if revenue_ttm_yoy is not None:
+            set_parts.append("revenue_ttm_yoy = %s")
+            vals.append(revenue_ttm_yoy)
+        if net_profit_ttm_yoy is not None:
+            set_parts.append("net_profit_ttm_yoy = %s")
+            vals.append(net_profit_ttm_yoy)
+
+        if set_parts:
+            sql = f"UPDATE stock_financial_indicator SET {', '.join(set_parts)} WHERE code = %s AND report_date = %s"
+            vals.extend([code, report_date])
+            try:
+                cur.execute(sql, vals)
+                updated += 1
+            except Exception as e:
+                errors += 1
+                if errors <= 5:
+                    print(f"  ERR {code} {report_date}: {e}")
+
+    conn.commit()
+    conn.close()
+    print(f"\n[TTM] 计算完成: 更新 {updated} 条, 错误 {errors} 条")
+
+
 if __name__ == '__main__':
     main()

@@ -4,16 +4,19 @@
 财务数据采集脚本
 采集来源：
   1. stock_yjbb_em        - 东方财富业绩报表（批量，全市场）
-  2. stock_financial_abstract_ths - 同花顺财务摘要（逐只，补充指标）
+  2. stock_financial_abstract_ths - 同花顺财务摘要（逐只/并发，补充指标）
+  3. stock_financial_report_sina   - 新浪三大表（逐只/并发，详细数据）
 
 用法：
-  python update_data/update_financial_data.py [--year-start 2022] [--year-end 2024] [--force] [--validate]
-  --year-start  采集起始年份（默认当前年份-3）
-  --year-end    采集结束年份（默认当前年份）
-  --year        指定年份（已被 year-start/year-end 取代，兼容旧调用）
-  --force       强制重新采集（默认跳过已有数据）
-  --validate    采集完成后进行数据校验（默认启用）
-  --no-validate 跳过数据校验
+  python update_financial_data.py [--year-start 2022] [--year-end 2024] [--force] [--validate]
+  --year-start    采集起始年份（默认当前年份-3）
+  --year-end      采集结束年份（默认当前年份）
+  --year          指定年份（兼容旧调用）
+  --force         强制重新采集（默认跳过已有数据）
+  --validate      采集完成后进行数据校验（默认启用）
+  --no-validate   跳过数据校验
+  --ths-workers N THS步骤并发数（默认8，0=串行原逻辑）
+  --step          只执行指定步骤 (yjbb/ths/sina)
 """
 
 import argparse
@@ -21,9 +24,11 @@ import re
 import sys
 import time
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import akshare as ak
 import pymysql
+from dbutils.pooled_db import PooledDB
 
 from db_config import MYSQL_CONFIG
 
@@ -307,6 +312,30 @@ def save_ths_to_tables(df, code, conn, force=False):
     return inserted
 
 
+def _process_ths_stock(code, force, existing_set):
+    """THS 并发工作线程：拉取单只股票的财务摘要并写入数据库
+
+    每个线程独立获取 DB 连接和 akshare session，无共享状态。
+    existing_set: 预加载的全局 (code, report_date) 去重集合（只读）。
+    返回 (code, inserted_count, error_msg)
+    """
+    conn = None
+    try:
+        conn = pymysql.connect(**MYSQL_CONFIG)
+        df = fetch_ths_abstract(code)
+        if df is None or df.empty:
+            return (code, 0, 'no_data')
+
+        # 用已有的 save_ths_to_tables 逻辑，但传入独立连接
+        n = save_ths_to_tables(df, code, conn, force)
+        return (code, n, None)
+    except Exception as e:
+        return (code, 0, str(e))
+    finally:
+        if conn:
+            conn.close()
+
+
 # ─────────────────────────────────────────────
 # 3. 新浪三大表（逐只股票详细数据）
 # ─────────────────────────────────────────────
@@ -560,6 +589,8 @@ def main():
     parser.add_argument('--start-code', type=str, default=None, help='从指定代码开始（仅 sina 步骤有效，跳过此代码之前的股票）')
     parser.add_argument('--validate', action='store_true', help='强制执行数据校验')
     parser.add_argument('--no-validate', action='store_true', help='跳过数据校验')
+    parser.add_argument('--ths-workers', type=int, default=8,
+                        help='THS步骤并发数（默认8，0=串行原逻辑）')
     args = parser.parse_args()
 
     conn = get_conn()
@@ -592,7 +623,7 @@ def main():
                 save_yjbb_to_indicator(df, conn, year, args.force)
             time.sleep(1)
 
-    # ─── Step 2: 同花顺财务摘要（逐只） ───
+    # ─── Step 2: 同花顺财务摘要（逐只 / 并发） ───
     if args.step is None or args.step == 'ths':
         print()
         print("=" * 60)
@@ -607,18 +638,64 @@ def main():
             codes = [r[0] for r in cursor.fetchall()]
         print(f"共 {len(codes)} 只股票")
 
-        total_inserted = 0
-        for i, code in enumerate(codes):
-            if (i + 1) % 50 == 0:
-                print(f"  进度: {i+1}/{len(codes)}，已插入 {total_inserted} 条")
-            if (i + 1) % 10 == 0:
-                time.sleep(1)  # 控制频率
+        ths_workers = getattr(args, 'ths_workers', 8)
 
-            df = fetch_ths_abstract(code)
-            n = save_ths_to_tables(df, code, conn, args.force)
-            total_inserted += n
+        if ths_workers > 0 and len(codes) > 1:
+            # ── 并发模式 ──
+            print(f"  并发模式: {ths_workers} 线程")
 
-        print(f"  同花顺摘要完成: 共新增/更新 {total_inserted} 条")
+            # 预加载已有记录用于跳过（非 force 模式）
+            existing_set = set()
+            if not args.force:
+                print("  预加载去重集合...")
+                cursor.execute("SELECT code, report_date FROM stock_financial_indicator")
+                existing_set = {(r[0], r[1]) for r in cursor.fetchall()}
+                print(f"  已有 {len(existing_set)} 条记录")
+
+            total_inserted = 0
+            error_count = 0
+            done_count = 0
+
+            t0 = time.time()
+            with ThreadPoolExecutor(max_workers=ths_workers) as executor:
+                futures = {
+                    executor.submit(_process_ths_stock, code, args.force, existing_set): code
+                    for code in codes
+                }
+                for future in as_completed(futures):
+                    done_count += 1
+                    code_result, n, err = future.result()
+                    total_inserted += n
+                    if err and err != 'no_data':
+                        error_count += 1
+                    if done_count % 200 == 0 or done_count == len(codes):
+                        elapsed = time.time() - t0
+                        rate = done_count / elapsed if elapsed > 0 else 0
+                        eta = (len(codes) - done_count) / rate if rate > 0 else 0
+                        print(f"  进度: {done_count}/{len(codes)} "
+                              f"({done_count/len(codes)*100:.1f}%) "
+                              f"插入 {total_inserted} 条 "
+                              f"错误 {error_count} "
+                              f"速度 {rate:.1f}/s "
+                              f"ETA {eta:.0f}s")
+
+            elapsed = time.time() - t0
+            print(f"  同花顺摘要完成(并发): 共新增/更新 {total_inserted} 条, "
+                  f"耗时 {elapsed:.1f}s, 错误 {error_count}")
+        else:
+            # ── 原串行模式（单只股票或 ths_workers=0）──
+            total_inserted = 0
+            for i, code in enumerate(codes):
+                if (i + 1) % 50 == 0:
+                    print(f"  进度: {i+1}/{len(codes)}，已插入 {total_inserted} 条")
+                if (i + 1) % 10 == 0:
+                    time.sleep(1)  # 控制频率
+
+                df = fetch_ths_abstract(code)
+                n = save_ths_to_tables(df, code, conn, args.force)
+                total_inserted += n
+
+            print(f"  同花顺摘要完成: 共新增/更新 {total_inserted} 条")
 
     # ─── Step 3: 新浪三大表（逐只） ───
     if args.step is None or args.step == 'sina':

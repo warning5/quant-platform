@@ -50,6 +50,12 @@ public class StockScreenService {
     private Map<String, Map<String, Double>> multiDayTrendCache = new HashMap<>();
 
     /**
+     * 多日模式下被 CV 过滤掉的原始因子值（不参与排名，仅用于展示）
+     * factorCode -> (symbol -> rawValue)
+     */
+    private Map<String, Map<String, Double>> multiDayUnstableCache = new HashMap<>();
+
+    /**
      * 执行多因子选股
      */
     public ScreenResult screen(ScreenRequest req) {
@@ -82,8 +88,9 @@ public class StockScreenService {
         LocalDate screenEndDate = req.getScreenEndDate();
         boolean useMultiDayMode = (screenStartDate != null && screenEndDate != null);
 
-        // 清空多日趋势缓存
+        // 清空多日趋势缓存 + CV 过滤缓存
         this.multiDayTrendCache.clear();
+        this.multiDayUnstableCache.clear();
 
         // 多日平均模式下，screenDate = endDate（用于行情加载、MA计算等）
         if (useMultiDayMode) {
@@ -220,10 +227,11 @@ public class StockScreenService {
                 log.info("[Screen] Multi-day factor {} avg: {} stocks, range={} ~ {}",
                         code, crossSection.size(), screenStartDate, screenEndDate);
             } else {
-                // ── 单日模式：尝试当天，不够就向前最多5日 ──
+                // ── 单日模式：日频因子回退 5 日，财务因子(FIN_*)回退 400 日(财报按季发布) ──
                 crossSection = Collections.emptyList();
                 LocalDate searchDate = screenDate;
-                for (int i = 0; i <= 5; i++) {
+                int maxLookback = code.startsWith("FIN_") ? 400 : 5;
+                for (int i = 0; i <= maxLookback; i++) {
                     crossSection = clickHouseFactorValueService.findByFactorCodeAndDate(code, searchDate);
                     if (!crossSection.isEmpty()) break;
                     searchDate = searchDate.minusDays(1);
@@ -398,6 +406,21 @@ public class StockScreenService {
             Map<String, Double> cleanValueMap = valueMap.entrySet().stream()
                     .filter(e -> !e.getKey().startsWith("__rank_"))
                     .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue, (a,b) -> a, LinkedHashMap::new));
+
+            // 多日模式：补回被 CV 过滤掉但仍有原始值的因子（不参与排名，仅用于展示）
+            if (useMultiDayMode && !multiDayUnstableCache.isEmpty()) {
+                for (ScreenRequest.FactorWeight fw : req.getFactors()) {
+                    String fc = fw.getFactorCode();
+                    if (cleanValueMap.containsKey(fc)) continue; // 已有排名值的跳过
+                    Map<String, Double> unstableMap = multiDayUnstableCache.get(fc);
+                    if (unstableMap != null) {
+                        Double unstableVal = unstableMap.get(sym);
+                        if (unstableVal != null) {
+                            cleanValueMap.put(fc, unstableVal);
+                        }
+                    }
+                }
+            }
 
             // 多日模式：提取因子趋势动量
             Map<String, Double> factorTrends = null;
@@ -609,8 +632,21 @@ public class StockScreenService {
             List<FactorValue> values = entry.getValue();
             if (values.isEmpty()) continue;
 
-            // 按日期排序：正序（最早→最晚）
-            values.sort(Comparator.comparing(FactorValue::getCalcDate));
+            // 按日期排序：正序（最早→最晚），同日期无后缀优先
+            values.sort(Comparator.comparing(FactorValue::getCalcDate)
+                    .thenComparing(v -> v.getSymbol().contains(".") ? 1 : 0));
+
+            // 去重：同日期只保留一条，解决 ReplacingMergeTree 无法合并不同 symbol 格式的重复行
+            List<FactorValue> deduped = new ArrayList<>();
+            LocalDate prevDate = null;
+            for (FactorValue v : values) {
+                if (v.getCalcDate().equals(prevDate)) continue;
+                deduped.add(v);
+                prevDate = v.getCalcDate();
+            }
+            values = deduped;
+            if (values.isEmpty()) continue;
+
             FactorValue earliest = values.get(0);
             FactorValue latest = values.get(values.size() - 1);
             double latestVal = latest.getFactorVal().doubleValue();
@@ -654,6 +690,9 @@ public class StockScreenService {
             }
             if (unstable) {
                 filteredByCV++;
+                // 保存原始值到不稳定缓存（仅用于结果展示，不参与排名）
+                multiDayUnstableCache.computeIfAbsent(factorCode, k -> new LinkedHashMap<>())
+                        .put(symbol, latestVal);
                 continue;
             }
 
@@ -871,7 +910,7 @@ public class StockScreenService {
         for (ScreenRequest.FactorWeight fw : factors) {
             LocalDate d = clickHouseFactorValueService.getLatestDate(fw.getFactorCode());
             if (d != null) {
-                if (latest == null || d.isBefore(latest)) {
+                if (latest == null || d.isAfter(latest)) {
                     latest = d;
                 }
             }
