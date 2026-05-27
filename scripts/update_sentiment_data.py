@@ -83,11 +83,14 @@ def _check_neodata_token(verbose=True):
 
     code = r.returncode
     if code == 0:
-        # 正常，打印一行即可
+        # 正常，打印一行即可（编码错误时用 ascii 兜底）
         if verbose:
             out = r.stdout.decode("utf-8", errors="ignore").strip()
             if out:
-                print(f"[NeoData token] {out}")
+                try:
+                    print(f"[NeoData token] {out}")
+                except UnicodeEncodeError:
+                    print(f"[NeoData token] {out.encode('ascii', errors='replace').decode('ascii')}")
         return
 
     stderr = r.stderr.decode("utf-8", errors="ignore") if r.stderr else ""
@@ -96,14 +99,20 @@ def _check_neodata_token(verbose=True):
         # 快过期警告，不阻断
         warn_line = [l for l in stderr.splitlines() if l.strip()]
         if warn_line:
-            print(f"[NeoData token] ⚠️  {warn_line[0].strip()}", file=sys.stderr)
+            try:
+                print(f"[NeoData token] ⚠️  {warn_line[0].strip()}", file=sys.stderr)
+            except UnicodeEncodeError:
+                pass
         return
 
     if code == 42:
         # 已过期 → 打印提示后退出（AI 检测到 exit 42 会自动刷新）
         expired_lines = [l for l in stderr.splitlines() if l.strip()]
         for line in expired_lines[-4:]:
-            print(f"[NeoData token] {line.strip()}", file=sys.stderr)
+            try:
+                print(f"[NeoData token] {line.strip()}", file=sys.stderr)
+            except UnicodeEncodeError:
+                pass
         # AI 会检测到这个 exit code 并自动刷新，无需手动提示
         sys.exit(42)
 
@@ -276,6 +285,13 @@ def extract_neodata_moneyflow(data: dict, target_date: datetime.date = None) -> 
 
         # ── 格式2: "今日资金流向"（纯文本格式，单日数据）──────────────
         elif recall_type == "今日资金流向":
+            # ⚠️ "今日资金流向" 返回的一律是"最新交易日"的数据，不含日期字段。
+            # 如果查询的是历史日期（target_date 不是最近交易日），数据日期
+            # 对不上，必须丢弃——否则会把最新日数据标成历史日期写入。
+            if target_date is not None:
+                latest = _latest_trading_day()
+                if target_date != latest:
+                    continue  # 张冠李戴，丢弃
             # 匹配代码: "代码：000001.SZ"
             code_m = re.search(r"代码[：:]\s*([0-9]{6}\.[A-Z]{2})", content)
             if not code_m:
@@ -303,7 +319,7 @@ def extract_neodata_moneyflow(data: dict, target_date: datetime.date = None) -> 
             # 只有 net_main 是严格净流入，方向可信；其他降级为近似值，标记时间以便识别
             result.append([
                 ts_code,                  # ts_code
-                (target_date or _latest_trading_day()),  # trade_date（目标日期，避免周末标错）
+                target_date or latest,    # trade_date（已验证 target_date == latest）
                 code,                     # code
                 0.0,                     # close
                 0.0,                     # pct_change
@@ -1489,15 +1505,24 @@ def run_neodata_moneyflow(args):
             prefix = ".SH" if c.startswith(("6", "5")) else ".SZ"
             target.append((c + prefix, c, name_map.get(c, c)))
     else:
+        # 从 ClickHouse 查已有数据（不用 MySQL，MySQL 可能残留已从 CH 删除的脏数据）
+        # 统计所有记录（含 close=0 的 NeoData 数据），避免重复查询
+        ch_temp = clickhouse_connect.get_client(**CLICKHOUSE_CONFIG)
+        result = ch_temp.query(f"""
+            SELECT code, COUNT(DISTINCT trade_date) as cnt
+            FROM stock_sentiment_moneyflow
+            WHERE trade_date >= '{start_str}' AND trade_date <= '{end_str}'
+            GROUP BY code
+        """)
+        existing = {}
+        for row in result.named_results():
+            code = row['code']
+            ts = code + (".SH" if code.startswith(("6", "5")) else ".SZ")
+            existing[ts] = row['cnt']
+        ch_temp.close()
+
         conn = pymysql.connect(**MYSQL_CONFIG)
         cur = conn.cursor()
-        cur.execute("""
-            SELECT ts_code, COUNT(DISTINCT trade_date) as cnt
-            FROM stock_sentiment_moneyflow
-            WHERE trade_date >= %s AND trade_date <= %s
-            GROUP BY ts_code
-        """, (start_str, end_str))
-        existing = {r[0]: r[1] for r in cur.fetchall()}
         cur.execute("SELECT code, name FROM stock_info")
         all_name_map = dict(cur.fetchall())
         cur.close()
@@ -1509,7 +1534,9 @@ def run_neodata_moneyflow(args):
                 continue
             ts = code + (".SH" if code.startswith(("6", "5")) else ".SZ")
             cnt = existing.get(ts, 0)
-            if cnt >= expected_days * 0.8:
+            # force=True 时忽略 80% 覆盖阈值，强制所有股票重新查询 NeoData
+            # （应对 NeoData 数据回填延迟：之前只能拿到部分数据，后来上游补全了）
+            if not args.force and cnt >= expected_days * 0.8:
                 continue
             target.append((ts, code, all_name_map[code]))
         target.sort()
@@ -1610,11 +1637,20 @@ def run_neodata_moneyflow(args):
 
         # 第三步：逐只双写（必须按股票分开，以正确处理主键冲突）
         for ts_code, code, name, rows in batch_all_rows:
+            # 过滤 close=0 的停牌股数据（fill_close 无法回填已停牌股票的收盘价）
+            # 行格式: [ts_code(0), trade_date(1), code(2), close(3), pct_change(4), ...]
+            # ⚠️ 不能用 r[4]（pct_change可为0），必须用 r[3]（close）
+            rows = [r for r in rows if r[3] is not None and r[3] != 0]
+            if not rows:
+                continue
             label = f"{code}.{name}" if name != code else code
             _dual_write(
                 "stock_sentiment_moneyflow", rows,
                 MF_CH_COLS, MF_MY_COLS, MF_UNIQUE,
                 dry_run=args.dry_run,
+                # 注意：不传 force=args.force
+                # Layer 1 的 --force 只控制候选筛选（跳过 80% 阈值），
+                # Layer 2 去重过滤保持不变——只写入 NeoData 新回填的数据
             )
             print(f"[{done}/{total_batches}] {label}... ✓ {len(rows)}条")
             _write_progress(idx, total_batches, code, name, f"✓ {len(rows)}条")
@@ -1784,6 +1820,14 @@ def run_neodata_refresh(args):
 
             # 回填 close/pct_change
             fill_close_pct_from_stock_daily(rows, ch_client)
+            # 过滤 close=0 的停牌股（fill_close 无法回填已停牌股票的收盘价）
+            # 行格式: [ts_code(0), trade_date(1), code(2), close(3), pct_change(4), ...]
+            # ⚠️ 不能用 r[4]（pct_change可为0），必须用 r[3]（close）
+            rows = [r for r in rows if r[3] is not None and r[3] != 0]
+            if not rows:
+                print(f"[{done}/{len(target)}] {label}... ✗ 停牌无收盘价")
+                total_fail += 1
+                continue
 
             _dual_write(
                 "stock_sentiment_moneyflow", rows,

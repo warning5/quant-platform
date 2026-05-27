@@ -902,7 +902,8 @@ class StockDailyDB:
             with self.mysql_conn.cursor() as cur:
                 cur.execute(
                     "SELECT DISTINCT code FROM stock_daily "
-                    "WHERE (pre_close IS NULL OR change_percent IS NULL OR change_amount IS NULL) "
+                    "WHERE (pre_close IS NULL OR change_percent IS NULL OR change_amount IS NULL "
+                    "       OR pre_close = close_price) "
                     "ORDER BY code"
                 )
                 codes = [r["code"] for r in cur.fetchall()]
@@ -1046,6 +1047,7 @@ class StockDailyDB:
             r = self.ch_client.query(
                 f"SELECT DISTINCT code FROM {table} "
                 f"WHERE pre_close IS NULL OR change_percent IS NULL OR change_amount IS NULL "
+                f"OR pre_close = close_price "
                 f"ORDER BY code"
             )
             codes = [row[0] for row in r.result_rows]
