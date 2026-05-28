@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Table, Tag, Button, Space, Card, Typography, Popconfirm, message, Progress, Tooltip } from 'antd';
+import { Table, Tag, Button, Space, Card, Typography, Popconfirm, Progress, Tooltip } from 'antd';
+import { message } from '../../utils/messageUtil';
 import { PlusOutlined, EyeOutlined, DeleteOutlined, ReloadOutlined, StopOutlined, LoadingOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { backtestApi } from '../../api';

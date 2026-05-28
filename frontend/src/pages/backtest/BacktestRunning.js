@@ -77,6 +77,7 @@ function LiveChart({ points }) {
         data: stratVals,
         smooth: true,
         lineStyle: { color: '#1677ff', width: 2.5 },
+        itemStyle: { color: '#1677ff' },
         areaStyle: {
           color: {
             type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
@@ -95,6 +96,7 @@ function LiveChart({ points }) {
         data: bmVals,
         smooth: true,
         lineStyle: { color: '#faad14', width: 2, type: 'dashed' },
+        itemStyle: { color: '#faad14' },
         symbol: 'none',
         z: 2,
       },
@@ -104,6 +106,7 @@ function LiveChart({ points }) {
         data: excessVals,
         smooth: true,
         lineStyle: { color: '#52c41a', width: 1.5, type: 'dotted' },
+        itemStyle: { color: '#52c41a' },
         areaStyle: {
           color: {
             type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
@@ -188,15 +191,13 @@ export default function BacktestRunning() {
     const loadData = async () => {
       try {
         // 1. 获取任务基本信息
-        const taskRes = await backtestApi.getTask(taskId);
-        const t = taskRes.data;
+        const t = await backtestApi.getTask(taskId);
         setTask(t);
         setStage(t.status);
         setProgress(t.progress || 0);
 
         // 2. 获取曲线数据（如果已完成，会返回完整数据）
-        const curveRes = await backtestApi.getCurve(taskId);
-        const curveData = curveRes.data;
+        const curveData = await backtestApi.getCurve(taskId);
         
         if (curveData.stratCurve?.length && curveData.bmCurve?.length) {
           // 合并策略和基准曲线数据
@@ -253,7 +254,7 @@ export default function BacktestRunning() {
 
             // 完成时刷新任务信息
             if (data.stage === 'COMPLETED' || data.stage === 'FAILED') {
-              backtestApi.getTask(taskId).then(res => setTask(res.data)).catch(() => {});
+              backtestApi.getTask(taskId).then(res => setTask(res)).catch(() => {});
               // 完成后重新加载完整曲线数据
               backtestApi.getCurve(taskId).then(res => {
                 const d = res.data;

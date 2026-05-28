@@ -97,6 +97,7 @@ export default function RollingBacktestModal({ visible, onClose, screenConfig, o
     <Modal
       title="⏱ 滚动选股回测"
       open={visible}
+      forceRender
       onCancel={onClose}
       width={720}
       footer={[

@@ -13,12 +13,14 @@ dayjs.extend(timezone);
 dayjs.tz.setDefault('Asia/Shanghai');
 dayjs.locale('zh-cn');
 import App from './App';
+import MessageBridge from './components/MessageBridge';
 import './index.css';
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
   <ConfigProvider locale={zhCN} theme={{ token: { colorPrimary: '#1677ff' } }}>
     <AntdApp>
+      <MessageBridge />
       <App />
     </AntdApp>
   </ConfigProvider>

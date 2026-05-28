@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Card, Row, Col, Statistic, Button, Input, Select, DatePicker, Form,
-  Checkbox, Tag, Typography, Space, Alert, Table, Tooltip, Progress, Badge, message, Divider, Tabs, Spin, Modal, Popconfirm, Radio
+  Checkbox, Tag, Typography, Space, Alert, Table, Tooltip, Progress, Badge, Divider, Tabs, Spin, Modal, Popconfirm, Radio
 } from 'antd';
+import { message } from '../../utils/messageUtil';
 import {
   PlayCircleOutlined, StopOutlined, ReloadOutlined,
   ClockCircleOutlined, ThunderboltOutlined, WarningOutlined,

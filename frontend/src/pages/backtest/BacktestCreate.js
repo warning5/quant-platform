@@ -2,8 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Card, Form, Input, Select, InputNumber, DatePicker, Button, Space,
-  Typography, message, Divider, Row, Col, Switch, Tooltip, Alert, Tag
+  Typography, Divider, Row, Col, Switch, Tooltip, Alert, Tag
 } from 'antd';
+import { message } from '../../utils/messageUtil';
 import { ArrowLeftOutlined, PlayCircleOutlined, QuestionCircleOutlined, RocketOutlined, ThunderboltFilled } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { backtestApi, strategyApi } from '../../api';
@@ -184,7 +185,7 @@ export default function BacktestCreate() {
                   placeholder="选择回测策略"
                   showSearch
                   filterOption={(input, option) =>
-                    option?.children?.toLowerCase().includes(input.toLowerCase())
+                    (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
                   }
                   onChange={v => {
                     const s = strategies.find(s => s.id === v);
@@ -445,22 +446,20 @@ export default function BacktestCreate() {
             <Col span={8}>
               <div style={highlightedFields.has('maxPositionCount') ? highlightStyle : {}}>
                 <Form.Item
-                  name="maxPositionCount"
                   label={highlightedFields.has('maxPositionCount')
                     ? <OptLabel label="最大持仓数" tip="来自参数优化的最优持仓数（在策略配置中生效）" />
                     : '最大持仓数'}
                   tooltip="最多同时持有几只股票，0 = 不限制"
                   extra={highlightedFields.has('maxPositionCount') ? '此参数在策略配置中生效' : undefined}
                 >
-
                   <Space.Compact style={{ width: '100%' }}>
-                    <InputNumber
-                      style={{ width: '100%' }}
-                      min={0}
-                      value={form.getFieldValue('maxPositionCount')}
-                      onChange={v => form.setFieldValue('maxPositionCount', v)}
-                      placeholder="默认不限制"
-                    />
+                    <Form.Item name="maxPositionCount" noStyle>
+                      <InputNumber
+                        style={{ width: '100%' }}
+                        min={0}
+                        placeholder="默认不限制"
+                      />
+                    </Form.Item>
                     <span style={{ padding: '0 8px', lineHeight: '32px', background: '#f5f5f5', border: '1px solid #d9d9d9', borderLeft: 'none' }}>只</span>
                   </Space.Compact>
                 </Form.Item>

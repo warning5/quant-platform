@@ -3,9 +3,10 @@ import dayjs from 'dayjs';
 import {
   Card, Row, Col, Table, Button, Space, Typography, Spin, Alert,
   Form, InputNumber, Select, Slider, Tag, Tooltip, Divider, Badge,
-  Steps, Statistic, Empty, Input, Switch, DatePicker, Modal, message,
+  Steps, Statistic, Empty, Input, Switch, DatePicker, Modal,
   Collapse, Popconfirm,
 } from 'antd';
+import { message } from '../../utils/messageUtil';
 const { Panel } = Collapse;
 const { RangePicker } = DatePicker;
 import {

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Card, Table, Tag, Space, Typography, Row, Col, Statistic, Input, Button, Popconfirm, message, Spin, Tooltip, DatePicker } from 'antd';
+import { Card, Table, Tag, Space, Typography, Row, Col, Statistic, Input, Button, Popconfirm, Spin, Tooltip, DatePicker } from 'antd';
+import { message } from '../../utils/messageUtil';
 import { SearchOutlined, ReloadOutlined, FileTextOutlined, BankOutlined, CalendarOutlined, QuestionCircleOutlined, DeleteOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { researchApi, silentConfig } from '../../api';

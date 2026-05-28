@@ -1640,6 +1640,7 @@ export default function StockScreen() {
       <Modal
         title="保存策略组合"
         open={saveModalVisible}
+        forceRender
         onOk={handleSavePreset}
         onCancel={() => { setSaveModalVisible(false); saveForm.resetFields(); }}
         okText="保存"

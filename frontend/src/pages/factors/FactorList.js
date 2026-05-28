@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import { Table, Tag, Button, Space, Input, Select, Card, Typography, Popconfirm, message, Tooltip, Badge, DatePicker, Alert, Modal, Radio } from 'antd';
+import { Table, Tag, Button, Space, Input, Select, Card, Typography, Popconfirm, Tooltip, Badge, DatePicker, Alert, Modal, Radio } from 'antd';
+import { message } from '../../utils/messageUtil';
 import { PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined, PlayCircleOutlined, ClearOutlined, SearchOutlined, CalculatorOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { factorApi } from '../../api';

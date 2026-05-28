@@ -861,6 +861,7 @@ function FactorMonitor() {
       <Modal
         title={<Space><PlayCircleOutlined />触发因子批量计算</Space>}
         open={computeModal}
+        forceRender
         onCancel={() => { setComputeModal(false); form.resetFields(); }}
         onOk={handleBatchCompute}
         confirmLoading={computeLoading}

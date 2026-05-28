@@ -700,6 +700,7 @@ function PaperDetail({ paperId, onBack }) {
           {
             key: 'risk',
             label: <span><SafetyCertificateOutlined /> 风控配置</span>,
+            forceRender: true,
             children: (
               <>
                 <Row gutter={12} style={{ marginBottom: 16 }}>
