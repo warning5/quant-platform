@@ -161,7 +161,8 @@ public class BrinsonAttributionService {
             computeBenchmarkIndustryData(midDate, benchmarkIndustryWeight, benchmarkIndustryReturn);
 
             if (benchmarkIndustryWeight.isEmpty()) {
-                log.warn("无法获取 {} 全市场行业数据，尝试回溯到最近交易日", midDate);
+                String reason = getDateReason(midDate);
+                log.warn("无法获取 {} 全市场行业数据（{}），尝试回溯到最近交易日", midDate, reason);
                 // 回溯：向前查找最近的交易日，最多尝试5天（覆盖最长假期）
                 LocalDate adjusted = null;
                 for (int back = 1; back <= 5; back++) {
@@ -170,7 +171,7 @@ public class BrinsonAttributionService {
                     benchmarkIndustryReturn.clear();
                     computeBenchmarkIndustryData(adjusted, benchmarkIndustryWeight, benchmarkIndustryReturn);
                     if (!benchmarkIndustryWeight.isEmpty()) {
-                        log.info("回溯成功: {} -> {} (前{}天)", midDate, adjusted, back);
+                        log.info("回溯成功: {} -> {}（原因: {}，向前{}天）", midDate, adjusted, reason, back);
                         break;
                     }
                 }
@@ -552,5 +553,16 @@ public class BrinsonAttributionService {
     private double round4(double v) {
         if (Double.isNaN(v) || Double.isInfinite(v)) return 0;
         return BigDecimal.valueOf(v).setScale(4, RoundingMode.HALF_UP).doubleValue();
+    }
+
+    /**
+     * 判断日期为何无法获取行情数据（周末/节假日）
+     */
+    private String getDateReason(LocalDate date) {
+        var dow = date.getDayOfWeek();
+        if (dow == java.time.DayOfWeek.SATURDAY || dow == java.time.DayOfWeek.SUNDAY) {
+            return "周末休市";
+        }
+        return "节假日或数据缺失";
     }
 }
