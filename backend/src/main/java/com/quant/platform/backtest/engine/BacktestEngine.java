@@ -1118,7 +1118,22 @@ public class BacktestEngine {
             investedValue += portfolioValue * entry.getValue();
         }
 
-        return portfolioValue - investedValue - totalFee;
+        // 扣除保留持仓的市值：这些持仓没卖，不能当现金用
+        double keptValue = 0;
+        for (String sym : oldPositions.keySet()) {
+            if (!targetWeights.containsKey(sym)) continue;
+            MarketDailyBar bar = barMap.get(sym);
+            if (bar == null) continue;
+            keptValue += oldPositions.get(sym) * bar.getClose().doubleValue();
+        }
+
+        double cash = portfolioValue - keptValue - investedValue - totalFee;
+        if (cash < 0) {
+            log.warn("Negative cash after rebalance: {}, clamping to 0 (portfolioValue={}, keptValue={}, invested={}, fee={})",
+                    cash, portfolioValue, keptValue, investedValue, totalFee);
+            cash = 0;
+        }
+        return cash;
     }
 
     /**
@@ -1323,21 +1338,20 @@ public class BacktestEngine {
             // 超额胜率：跑赢大盘的天数占比
             long exWins = excessReturns.stream().filter(r -> r > 0).count();
             excessWinRate = (double) exWins / excessReturns.size();
-            // 超额收益最大回撤（从累计超额曲线计算）
-            double cumExcess = 0, peakExcess = 0;
+            // 超额收益最大回撤（复利累计超额曲线，避免算术累加放大偏差）
+            double cumExcess = 1.0, peakExcess = 1.0;
             for (double er : excessReturns) {
-                cumExcess += er;
+                cumExcess *= (1 + er);
                 if (cumExcess > peakExcess) peakExcess = cumExcess;
-                double dd = peakExcess - cumExcess;
+                double dd = 1 - cumExcess / peakExcess;
                 if (dd > excessMaxDrawdown) excessMaxDrawdown = dd;
             }
-            // Alpha贡献占比 = alpha / (alpha + beta * benchmark_return) 近似为 alpha/超额年化收益
-            double totalExcess = annualReturn - benchmarkAnnualReturn;
-            if (totalExcess != 0) {
-                alphaContribution = Math.abs(alpha / (alpha + beta * benchmarkAnnualReturn));
-            } else {
-                alphaContribution = 0;
-            }
+            // Alpha贡献占比 = |alpha| / (|alpha| + |beta * benchmark_return|)
+            // 这样与市场贡献之和为100%，避免CAPM残差导致>100%无意义值
+            double absAlpha = Math.abs(alpha);
+            double absMarket = Math.abs(beta * benchmarkAnnualReturn);
+            double denom = absAlpha + absMarket;
+            alphaContribution = denom > 1e-10 ? absAlpha / denom : 0;
         }
 
         return BacktestReport.builder()

@@ -41,6 +41,12 @@ public class BacktestTask implements Serializable {
     private String strategyCode;
 
     /**
+     * 策略名称（非DB字段，查询时填充）
+     */
+    @TableField(exist = false)
+    private String strategyName;
+
+    /**
      * 任务名称
      */
     @TableField("task_name")

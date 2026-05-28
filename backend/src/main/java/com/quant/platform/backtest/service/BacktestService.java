@@ -38,6 +38,7 @@ public class BacktestService {
         // 检查策略是否存在（strategyService.getById 有自己的事务）
         var strategy = strategyService.getById(task.getStrategyId());
         task.setStrategyCode(strategy.getStrategyCode());
+        task.setStrategyName(strategy.getStrategyName());
 
         // 直接保存并立即刷到数据库
         taskMapper.insert(task);
@@ -70,6 +71,15 @@ public class BacktestService {
         BacktestTask task = taskMapper.selectById(taskId);
         if (task == null) {
             throw new ResourceNotFoundException("回测任务", taskId);
+        }
+        // 填充策略名称
+        if (task.getStrategyId() != null) {
+            try {
+                var strategy = strategyService.getById(task.getStrategyId());
+                task.setStrategyName(strategy.getStrategyName());
+            } catch (Exception e) {
+                log.warn("Failed to resolve strategy name for taskId={}, strategyId={}", taskId, task.getStrategyId());
+            }
         }
         return task;
     }

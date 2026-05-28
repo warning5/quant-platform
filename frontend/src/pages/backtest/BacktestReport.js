@@ -9,6 +9,7 @@ import {
   RiseOutlined, FallOutlined, BarChartOutlined,
   PieChartOutlined, LineChartOutlined,
   SwapOutlined, FundOutlined, ExperimentOutlined,
+  QuestionCircleOutlined,
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import { backtestApi } from '../../api';
@@ -1063,21 +1064,21 @@ export default function BacktestReport() {
     },
     {
       key: 'attribution',
-      label: '归因分析',
+      label: <>归因分析 <AntTooltip title="Brinson 模型将超额收益拆解为配置效应（行业权重偏离基准）、选股效应（行业内个股选择能力）、交互效应（权重与选股的协同），帮助判断收益来源是择时还是选股，定位策略优势与短板"> <QuestionCircleOutlined style={{ color: '#8c8c8c', fontSize: 12 }} /></AntTooltip></>,
       children: (
         <AttributionPanel taskId={taskId} />
       ),
     },
     {
       key: 'excess',
-      label: <><LineChartOutlined />Alpha 分析</>,
+      label: <><LineChartOutlined />Alpha 分析 <AntTooltip title="CAPM 框架下分离 Alpha（选股能力）与 Beta（市场暴露），展示超额收益来源拆解：Alpha 贡献 vs 市场贡献，反应策略是否能独立于大盘产生正收益"> <QuestionCircleOutlined style={{ color: '#8c8c8c', fontSize: 12 }} /></AntTooltip></>,
       children: (
         <ExcessAnalysisPanel report={report} />
       ),
     },
     {
       key: 'montecarlo',
-      label: <><ExperimentOutlined />蒙特卡洛</>,
+      label: <><ExperimentOutlined />蒙特卡洛 <AntTooltip title="基于历史收益分布随机抽样模拟 10,000 条净值路径，计算 VaR/CVaR 尾部风险和收益分布概率区间，评估策略在极端市场下可能面临的最大损失"> <QuestionCircleOutlined style={{ color: '#8c8c8c', fontSize: 12 }} /></AntTooltip></>,
       children: (
         <MonteCarloPanel taskId={taskId} />
       ),
@@ -1105,6 +1106,16 @@ export default function BacktestReport() {
       {/* 基本信息 */}
       <Card size="small" style={{ marginBottom: 16 }}>
         <Row gutter={24}>
+          <Col>
+            <Text type="secondary">策略名称：</Text>
+            {task?.strategyId ? (
+              <a onClick={() => navigate(`/strategies/${task.strategyId}`)} style={{ fontWeight: 600, cursor: 'pointer' }}>
+                {task?.strategyName || task?.strategyCode || '-'}
+              </a>
+            ) : (
+              <Text strong>{task?.strategyName || task?.strategyCode || '-'}</Text>
+            )}
+          </Col>
           <Col><Text type="secondary">回测区间：</Text><Text strong>{task?.startDate} ~ {task?.endDate}</Text></Col>
           <Col><Text type="secondary">初始资金：</Text><Text strong>¥{fmtNum(task?.initialCapital)}</Text></Col>
           <Col><Text type="secondary">总交易次数：</Text><Text strong>{report?.totalTrades || 0}</Text></Col>
