@@ -288,7 +288,7 @@ public class AnalysisService {
         overview.setScoreDetails(signal.getScoreDetails());
         // 资金面数据日期更新到 money detail 的 dataRange
         try {
-            java.util.Map<String, Object> mfForDate = analysisChMapper.selectLatestMoneyFlow(code);
+            java.util.Map<String, Object> mfForDate = analysisChMapper.selectLatestMoneyFlow(code, getLatestTradeDate());
             if (mfForDate != null && mfForDate.get("tradeDate") != null) {
                 String mfDate = mfForDate.get("tradeDate").toString();
                 for (ScoreDetail detail : overview.getScoreDetails()) {
@@ -334,6 +334,11 @@ public class AnalysisService {
             // 第二目标价：基于PE分位均值回归估算
             // 公式：当前价 × (合理PE / 当前PE)，合理PE取行业中性值
             BigDecimal target2 = calcTargetPrice2(currentPrice, fundamentalSignal);
+            // 防御：第二目标价必须高于止损价才有意义
+            if (target2 != null && stopLossPriceStr != null) {
+                BigDecimal sl = new BigDecimal(stopLossPriceStr);
+                if (target2.compareTo(sl) <= 0) target2 = null;
+            }
             overview.setTargetPrice2(target2 != null ? target2.setScale(2, RoundingMode.HALF_UP).toString() : null);
 
             // 极端目标价：PB=1x 极端估值
@@ -522,7 +527,7 @@ public class AnalysisService {
         
         // 从 CH stock_sentiment_moneyflow 获取主力资金流向
         try {
-            java.util.Map<String, Object> mf = analysisChMapper.selectLatestMoneyFlow(code);
+            java.util.Map<String, Object> mf = analysisChMapper.selectLatestMoneyFlow(code, getLatestTradeDate());
             if (mf != null) {
                 if (mf.get("net_main") != null) {
                     signal.setNetMain((BigDecimal) mf.get("net_main"));
@@ -984,7 +989,7 @@ public class AnalysisService {
 
         // 从 CH 查近5日主力净流入累计值
         double netMain5d = 0;
-        List<Map<String, Object>> mfList = analysisChMapper.selectMoneyFlowHistory(code, 5);
+        List<Map<String, Object>> mfList = analysisChMapper.selectMoneyFlowHistory(code, 5, getLatestTradeDate());
         if (mfList != null && !mfList.isEmpty()) {
             for (Map<String, Object> mf : mfList) {
                 if (mf.get("netMain") != null) {
@@ -2401,7 +2406,7 @@ public class AnalysisService {
 
         try {
             // 1. 获取历史资金流向
-            List<Map<String, Object>> mfHistory = analysisChMapper.selectMoneyFlowHistory(code, days);
+            List<Map<String, Object>> mfHistory = analysisChMapper.selectMoneyFlowHistory(code, days, getLatestTradeDate());
             if (mfHistory == null || mfHistory.isEmpty()) {
                 result.put("error", "无资金流向数据");
                 return result;
@@ -2440,7 +2445,8 @@ public class AnalysisService {
                 if (sc instanceof Number) totalScore += ((Number) sc).doubleValue();
             }
             int n = scoredList.size();
-            result.put("avgNetMain", BigDecimal.valueOf(avgNetMain / n).setScale(2, RoundingMode.HALF_UP));
+            // 转亿为单位，与前端 suffix="亿" 对齐
+            result.put("avgNetMain", BigDecimal.valueOf(avgNetMain / n / 100_000_000.0).setScale(2, RoundingMode.HALF_UP));
             result.put("avgNetMainPct", BigDecimal.valueOf(avgPct / n).setScale(2, RoundingMode.HALF_UP));
             result.put("avgMoneyScore", BigDecimal.valueOf(totalScore / n).setScale(1, RoundingMode.HALF_UP));
             result.put("inflowDays", inflowDays);
@@ -2933,23 +2939,27 @@ public class AnalysisService {
     }
 
     /**
-     * P1: 第二目标价 — PE均值回归估算
+     * P1: 第二目标价 — PE均值回归估算（仅低估时有效）
      * 公式：当前价 × (合理PE / 当前PE)
-     * 合理PE取：若PE分位>80%则取中位数PE，若PE分位<20%则取当前PE，否则取均值
+     * PE分位<40（低估）时，合理PE取历史中位数，目标价>当前价
+     * PE分位≥40 时，回归方向向下，不作为获利目标，返回null
      */
     private BigDecimal calcTargetPrice2(BigDecimal currentPrice, FundamentalSignal fs) {
         if (fs == null || fs.getPeTtm() == null || fs.getPeTtm().doubleValue() <= 0) return null;
         double curPE = fs.getPeTtm().doubleValue();
         double pePct = fs.getPePercentile() != null ? fs.getPePercentile().doubleValue() : 50;
 
-        // 合理PE：高估值时回归中位，低估值时保持
-        double fairPE;
-        if (pePct > 80) fairPE = curPE * 0.5;       // 极端高估→腰斩
-        else if (pePct > 60) fairPE = curPE * 0.65;  // 偏高→回落35%
-        else if (pePct > 40) fairPE = curPE * 0.85;  // 中性略高
-        else fairPE = curPE * 1.0;                    // 低位保持
+        // PE分位≥40 → 估值中性或偏高，均值回归方向向下，不适用
+        if (pePct >= 40) return null;
 
-        return currentPrice.multiply(BigDecimal.valueOf(fairPE / curPE));
+        // PE低于历史中位，回归中位 → 目标价向上
+        // 合理PE = curPE / 分位比例（近似回到中位）
+        double fairPE = curPE / (pePct / 100.0 + 0.01); // 回到中位附近，下限防除零
+        double ratio = fairPE / curPE;
+        // 目标价合理上限：不超过当前价2倍
+        if (ratio > 2.0) ratio = 2.0;
+
+        return currentPrice.multiply(BigDecimal.valueOf(ratio));
     }
 
     /**

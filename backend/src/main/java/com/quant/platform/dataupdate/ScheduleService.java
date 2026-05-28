@@ -1,6 +1,5 @@
 package com.quant.platform.dataupdate;
 
-import com.quant.platform.common.dto.ApiResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -249,8 +248,8 @@ public class ScheduleService implements SchedulingConfigurer {
             case "SENTIMENT"     -> { req.setUpdateType("SENTIMENT");     yield req; }
             case "SENTIMENT_MF"  -> {
                 req.setUpdateType("SENTIMENT");
-                // 从 extra_config 读取 moneyflowSource，默认 EM
-                req.setMoneyflowSource(moneyflowSource != null ? moneyflowSource : "EM");
+                // 从 extra_config 读取 moneyflowSource，默认 WESTOCK
+                req.setMoneyflowSource(moneyflowSource != null ? moneyflowSource : "WESTOCK");
                 // 资金流向只跑资金相关，关掉其它
                 req.setFetchLhb(false);
                 req.setFetchMargin(false);

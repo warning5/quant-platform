@@ -823,10 +823,10 @@ public class DataUpdateService {
 
         // 情绪数据
         if ("SENTIMENT".equals(updateType)) {
-            // NEODATA 模式：只用 NeoData 跑资金流向，跳过其他所有子模块
-            if ("NEODATA".equalsIgnoreCase(request.getMoneyflowSource())) {
+            // WESTOCK 模式：只用 westock-data 跑资金流向，跳过其他所有子模块
+            if ("WESTOCK".equalsIgnoreCase(request.getMoneyflowSource())) {
                 cmd.add("update_sentiment_data.py");
-                cmd.add("--moneyflow-neodata");
+                cmd.add("--moneyflow-westock");
                 String startDate = request.getStartDate();
                 String endDate = request.getEndDate();
                 if ((startDate == null || startDate.isEmpty()) && (endDate == null || endDate.isEmpty())) {
@@ -847,7 +847,7 @@ public class DataUpdateService {
                     cmd.add("--codes");
                     cmd.add(request.getSentimentCodes());
                 }
-                log.info("[DataUpdate] NEODATA 模式：仅更新资金流向，日期 {} ~ {}", startDate, endDate);
+                log.info("[DataUpdate] WESTOCK 模式：仅更新资金流向，日期 {} ~ {}", startDate, endDate);
                 return cmd;
             }
             // EM（东方财富）模式：跑东财实时/历史资金流向，跳过其他所有子模块

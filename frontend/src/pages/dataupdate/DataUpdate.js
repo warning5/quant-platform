@@ -231,7 +231,6 @@ function DataUpdate() {
   const [sentimentValidateResult, setSentimentValidateResult] = useState(null);
   const [sentimentValidateLoading, setSentimentValidateLoading] = useState(false);
   const [sentimentMoneyflowSource, setSentimentMoneyflowSource] = useState('AKSHARE');
-  const [sentimentEmMode, setSentimentEmMode] = useState('realtime'); // EM 模式子选项：realtime / hist
 
   // 内外盘数据
   const [bidaskTask, setBidaskTask] = useState(null);
@@ -926,7 +925,7 @@ function DataUpdate() {
         force: values.force || false,
         // 情绪数据专属字段
         ...(updateType === 'SENTIMENT' ? {
-          ...(values.moneyflowSource !== 'NEODATA' && values.moneyflowSource !== 'EM' ? {
+          ...(sentimentMoneyflowSource !== 'WESTOCK' ? {
             fetchLhb: values.fetchLhb !== false,
             fetchMargin: values.fetchMargin !== false,
             fetchSurvey: values.fetchSurvey !== false,
@@ -939,7 +938,7 @@ function DataUpdate() {
             fetchShareholder: values.fetchShareholder !== false,
             fetchNews: values.fetchNews !== false,
           } : {
-            // EM/NeoData 模式：显式关闭其他模块，防止 Java 默认值 true 导致误执行
+            // westock 模式：显式关闭其他模块，防止 Java 默认值 true 导致误执行
             fetchLhb: false,
             fetchMargin: false,
             fetchSurvey: false,
@@ -952,10 +951,7 @@ function DataUpdate() {
             fetchShareholder: false,
             fetchNews: false,
           }),
-          moneyflowSource: values.moneyflowSource || 'AKSHARE',
-          ...(values.moneyflowSource === 'EM' ? {
-            emMoneyflowMode: sentimentEmMode,
-          } : {}),
+          moneyflowSource: sentimentMoneyflowSource,
           sentimentCodes: (values.sentimentCodes || '').trim() || null,
         } : {}),
       };
@@ -1822,11 +1818,11 @@ function DataUpdate() {
               </Col>
               <Col>
                 <Form.Item name="moneyflowSource" noStyle>
-                  <Radio.Group onChange={e => {
+                  <Radio.Group value={sentimentMoneyflowSource} onChange={e => {
                     const val = e.target.value;
                     setSentimentMoneyflowSource(val);
-                    if (val === 'NEODATA' || val === 'EM') {
-                      // EM/NeoData 模式：只保留资金流向勾选，其他全部取消
+                    if (val === 'WESTOCK') {
+                      // westock 模式：只保留资金流向勾选，其他全部取消
                       sentimentForm.setFieldsValue({
                         moneyflowSource: val,
                         fetchLhb: false,
@@ -1864,24 +1860,13 @@ function DataUpdate() {
                     <Radio.Button value="AKSHARE">
                       <CloudSyncOutlined /> akshare（默认）
                     </Radio.Button>
-                    <Radio.Button value="EM" style={{ marginLeft: 8 }}>
-                      <ThunderboltOutlined /> 东方财富（最快）
-                    </Radio.Button>
-                    <Radio.Button value="NEODATA" style={{ marginLeft: 8 }}>
-                      <ThunderboltOutlined /> NeoData
+                    <Radio.Button value="WESTOCK" style={{ marginLeft: 8 }}>
+                      <ThunderboltOutlined /> westock
                     </Radio.Button>
                   </Radio.Group>
-                  {sentimentMoneyflowSource === 'EM' && (
-                    <span style={{ marginLeft: 12 }}>
-                      <Radio.Group value={sentimentEmMode} onChange={e => setSentimentEmMode(e.target.value)} size="small">
-                        <Radio.Button value="realtime">实时</Radio.Button>
-                        <Radio.Button value="hist" style={{ marginLeft: 4 }}>历史120天</Radio.Button>
-                      </Radio.Group>
-                    </span>
-                  )}
-                  {sentimentMoneyflowSource === 'NEODATA' && (
+                  {sentimentMoneyflowSource === 'WESTOCK' && (
                     <Tag color="purple" icon={<ThunderboltOutlined />} style={{ marginLeft: 12 }}>
-                      NeoData 模式：仅采集资金流向
+                      westock 模式：仅采集资金流向
                     </Tag>
                   )}
                 </Form.Item>
@@ -1890,8 +1875,8 @@ function DataUpdate() {
             <Row gutter={[16, 12]} style={{ width: '100%', marginBottom: 12 }}>
               <Col>
                 <div style={{
-                  opacity: (sentimentMoneyflowSource === 'NEODATA' || sentimentMoneyflowSource === 'EM') ? 0.5 : 1,
-                  pointerEvents: (sentimentMoneyflowSource === 'NEODATA' || sentimentMoneyflowSource === 'EM') ? 'none' : 'auto',
+                  opacity: sentimentMoneyflowSource === 'WESTOCK' ? 0.5 : 1,
+                  pointerEvents: sentimentMoneyflowSource === 'WESTOCK' ? 'none' : 'auto',
                   transition: 'opacity 0.2s',
                 }}>
                   <Space style={{ marginBottom: 12, marginTop: 4 }}>
@@ -1999,15 +1984,13 @@ function DataUpdate() {
               </Text>
               <Text style={{ fontSize: 12 }}>
                 <ThunderboltOutlined /> 模式：
-                {sentimentTask.configMoneyflowSource === 'EM' ? (
-                  <Tag size="small" color="orange">东方财富（{sentimentTask.configEmMoneyflowMode === 'hist' ? '历史120天' : '实时'})</Tag>
-                ) : sentimentTask.configMoneyflowSource === 'NEODATA' ? (
-                  <Tag size="small" color="purple">NeoData（仅资金流向）</Tag>
+                {sentimentTask.configMoneyflowSource === 'WESTOCK' ? (
+                  <Tag size="small" color="purple">westock（仅资金流向）</Tag>
                 ) : (
                   <Tag size="small">akshare</Tag>
                 )}
               </Text>
-              {(sentimentTask.configMoneyflowSource !== 'NEODATA' && sentimentTask.configMoneyflowSource !== 'EM') && (
+              {(sentimentTask.configMoneyflowSource !== 'WESTOCK') && (
                 <Text style={{ fontSize: 12 }}>
                   模块：
                   {sentimentTask.configFetchLhb && <Tag size="small">龙虎榜</Tag>}
@@ -2082,6 +2065,31 @@ function DataUpdate() {
           ]}
           size="small" pagination={false}
         />
+
+        {/* 资金流向深度校验 */}
+        {(tables || []).filter(t => t.table === 'stock_sentiment_moneyflow' && t.extraChecks && t.extraChecks.length > 0).map(mfTable => (
+          <Card key="mf-deep-check" size="small" style={{ marginTop: 12, backgroundColor: '#fafafa' }}
+            title={<span style={{ fontSize: 13 }}>资金流向表深度校验</span>}>
+            <Table
+              dataSource={mfTable.extraChecks.map((c, i) => ({ ...c, key: i }))}
+              columns={[
+                { title: '检测项', dataIndex: 'type', width: 120,
+                  render: v => {
+                    const labels = { CH_MYSQL_DIFF: 'CH/MySQL一致性', ALL_ZERO: '全零资金流向', CLOSE_ZERO: '收盘价=0' };
+                    return labels[v] || v;
+                  }
+                },
+                { title: '状态', dataIndex: 'status', width: 72,
+                  render: v => v === 'OK' ? <Tag color="success">正常</Tag> : <Tag color="warning">异常</Tag>
+                },
+                { title: '详情', dataIndex: 'message',
+                  render: v => <span style={{ fontSize: 12 }}>{v}</span>
+                },
+              ]}
+              size="small" pagination={false} showHeader={true}
+            />
+          </Card>
+        ))}
       </Card>
     );
   };

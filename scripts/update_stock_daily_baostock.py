@@ -344,7 +344,8 @@ def main():
                     total_skipped += len(df) - n
                     processed_codes.append((code, market))
                     print(f"[{i}/{len(stocks)}] {code} {name}: 写入 {n} 条")
-                elif df is None:
+                else:
+                    # df is None 或 df 为空（如所有行 tradestatus=0 被过滤）
                     total_no_data += 1
 
                 if i % args.batch_size == 0 and i < len(stocks):

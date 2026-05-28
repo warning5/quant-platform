@@ -215,10 +215,11 @@ public class AnalysisChMapper {
      * 查询最新一日资金流向数据（从 stock_sentiment_moneyflow 表）
      * 返回：net_main, net_main_pct, net_huge, net_big
      */
-    public java.util.Map<String, Object> selectLatestMoneyFlow(String code) {
+    public java.util.Map<String, Object> selectLatestMoneyFlow(String code, String lastTradeDate) {
         String sql = """
             SELECT trade_date, net_main, net_main_pct, net_huge, net_big
-            FROM stock.stock_sentiment_moneyflow FINAL             WHERE code = ?
+            FROM stock.stock_sentiment_moneyflow FINAL
+            WHERE code = ? AND trade_date <= ?
             ORDER BY trade_date DESC
             LIMIT 1
             """;
@@ -233,7 +234,7 @@ public class AnalysisChMapper {
                         map.put("net_huge", rs.getBigDecimal("net_huge"));
                         map.put("net_big", rs.getBigDecimal("net_big"));
                         return map;
-                    }, normalized);
+                    }, normalized, lastTradeDate);
         } catch (Exception e) {
             log.warn("查询资金流向失败: code={}, error={}", code, e.getMessage());
             return null;
@@ -244,11 +245,11 @@ public class AnalysisChMapper {
      * 查询历史资金流向数据（从 stock_sentiment_moneyflow 表）
      * 返回近 N 天的 net_main/net_main_pct/net_huge/net_big/volume_ratio/turnover_rate
      */
-    public List<java.util.Map<String, Object>> selectMoneyFlowHistory(String code, int days) {
+    public List<java.util.Map<String, Object>> selectMoneyFlowHistory(String code, int days, String lastTradeDate) {
         String sql = """
             SELECT trade_date, net_main, net_main_pct, net_huge, net_big
             FROM stock.stock_sentiment_moneyflow FINAL
-            WHERE code = ?
+            WHERE code = ? AND trade_date <= ?
             ORDER BY trade_date DESC
             LIMIT ?
             """;
@@ -263,7 +264,7 @@ public class AnalysisChMapper {
                         map.put("netHuge", rs.getBigDecimal("net_huge"));
                         map.put("netBig", rs.getBigDecimal("net_big"));
                         return map;
-                    }, normalized, days);
+                    }, normalized, lastTradeDate, days);
         } catch (Exception e) {
             log.warn("查询历史资金流向失败: code={}, error={}", code, e.getMessage());
             return new ArrayList<>();

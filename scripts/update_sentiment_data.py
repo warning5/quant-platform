@@ -28,9 +28,9 @@ update_sentiment_data.py v4
   python update_sentiment_data.py --em-moneyflow --codes 600519,000001  # 指定股票
   python update_sentiment_data.py --em-moneyflow-hist      # 历史120天全市场（并发，~5500只）
   python update_sentiment_data.py --em-moneyflow-hist --codes 600519,000001  # 指定股票
-  # 资金流（NeoData 备选）
-  python update_sentiment_data.py --moneyflow-neodata     # NeoData 补全
-  python update_sentiment_data.py --moneyflow-refresh     # NeoData 全量重刷
+  # 资金流（westock-data）
+  python update_sentiment_data.py --moneyflow-westock     # westock-data 补全
+  python update_sentiment_data.py --moneyflow-refresh     # westock-data 全量重刷
   python update_sentiment_data.py --moneyflow-hist        # akshare 历史补全（慢）
 """
 
@@ -61,64 +61,11 @@ urllib3.disable_warnings()
 from db_helper import ch_dedup_filter
 from db_config import CLICKHOUSE_CONFIG, MYSQL_CONFIG
 
-# ─── NeoData Token 自动刷新 ───────────────────────────────────────
-
-_REFRESH_SCRIPT = str(__file__).replace("\\", "/").rsplit("/", 1)[0] + "/refresh_neodata_token.py"
-
-def _check_neodata_token(verbose=True):
-    """检查 NeoData token 状态，快过期则警告，已过期则退出并提示刷新
-
-    已过期时脚本以退出码 42 退出 → AI 检测到后会调用 connect_cloud_service 刷新
-    """
-    try:
-        r = subprocess.run(
-            [sys.executable, _REFRESH_SCRIPT],
-            capture_output=True, timeout=15,
-            cwd=str(__file__).replace("\\", "/").rsplit("/", 1)[0] or ".",
-        )
-    except Exception as e:
-        if verbose:
-            print(f"[NeoData token] 检查失败: {e}，跳过（NeoData 功能可能不可用）")
-        return  # 不阻断，允许继续
-
-    code = r.returncode
-    if code == 0:
-        # 正常，打印一行即可（编码错误时用 ascii 兜底）
-        if verbose:
-            out = r.stdout.decode("utf-8", errors="ignore").strip()
-            if out:
-                try:
-                    print(f"[NeoData token] {out}")
-                except UnicodeEncodeError:
-                    print(f"[NeoData token] {out.encode('ascii', errors='replace').decode('ascii')}")
-        return
-
-    stderr = r.stderr.decode("utf-8", errors="ignore") if r.stderr else ""
-
-    if code == 43:
-        # 快过期警告，不阻断
-        warn_line = [l for l in stderr.splitlines() if l.strip()]
-        if warn_line:
-            try:
-                print(f"[NeoData token] ⚠️  {warn_line[0].strip()}", file=sys.stderr)
-            except UnicodeEncodeError:
-                pass
-        return
-
-    if code == 42:
-        # 已过期 → 打印提示后退出（AI 检测到 exit 42 会自动刷新）
-        expired_lines = [l for l in stderr.splitlines() if l.strip()]
-        for line in expired_lines[-4:]:
-            try:
-                print(f"[NeoData token] {line.strip()}", file=sys.stderr)
-            except UnicodeEncodeError:
-                pass
-        # AI 会检测到这个 exit code 并自动刷新，无需手动提示
-        sys.exit(42)
+# ─── westock-data 资金流向（已替代 NeoData，无需 token）───────────
 
 
-# 延迟检查：akshare 模式不用 NeoData，不该被 token 过期阻断。
-# 只在实际调用 NeoData 前调用 _check_neodata_token 检查。
+
+
 
 
 # ─── 工具函数 ────────────────────────────────────────────────────
@@ -180,161 +127,12 @@ def to_date(val):
     return None
 
 
-# ─── NeoData 资金流向 ────────────────────────────────────────────
+# ─── westock-data 资金流向 ───────────────────────────────────
 
 NEO_QUERY = r"C:\Users\warning5\.workbuddy\plugins\marketplaces\cb_teams_marketplace\plugins\finance-data\skills\neodata-financial-search\scripts\query.py"
 
 
-def query_neodata(q: str) -> dict | None:
-    """通过 NeoData query.py 查询，返回解析后的 JSON 或 None"""
-    try:
-        r = subprocess.run(
-            [sys.executable, NEO_QUERY, "--query", q],
-            capture_output=True, timeout=60,
-        )
-    except subprocess.TimeoutExpired:
-        return None
-    if r.returncode != 0:
-        # 打印 stderr 方便排查
-        if r.stderr:
-            try:
-                print(f"  [NeoData stderr] {r.stderr.decode('utf-8', errors='ignore')[:200]}")
-            except Exception:
-                pass
-        return None
-    try:
-        out = r.stdout.decode("utf-8", errors="ignore") if r.stdout else ""
-        return json.loads(out)
-    except Exception:
-        return None
-
-
-def extract_neodata_moneyflow(data: dict, target_date: datetime.date = None) -> list:
-    """从 NeoData 响应中提取资金流向 rows，格式同 _dual_write 的 stock_sentiment_moneyflow
-    返回 [ts_code, trade_date, code, name, close, pct_change,
-           net_main, net_main_pct, net_huge, net_big, net_medium, net_small, update_time]
-    支持两种 NeoData 响应格式:
-      - "历史资金流向": 表格格式，多日数据
-      - "今日资金流向": 纯文本格式，单日数据
-
-    target_date: 格式2("今日资金流向")的交易日日期。
-                 默认 None 时回退 _latest_trading_day()（避免周末标错），
-                 调用方应传入实际查询目标日期。
-    NeoData 表格实际列顺序（14列，末尾空列已丢弃）:
-      0=交易日期 1=中单净流入 2=主力流入(超大+大买盘) 3=主力流入占比(%)
-      4=主力净流入 5=主力流出(超大+大卖盘) 6=主力流出占比(%)
-      7=散户流入(中单+小单买盘) 8=小单净流入 9=散户净流出
-      10=散户流出 11=超大单净流入 12=大单净流入
-    """
-    result = []
-    # 防御性访问：data 可能为 None，data.get("data") 也可能为 None
-    api_recall = (((data or {}).get("data") or {}).get("apiData") or {}).get("apiRecall") or []
-    for recall in api_recall:
-        recall_type = recall.get("type", "")
-        content = recall.get("content", "")
-
-        # ── 格式1: "历史资金流向"（表格格式，支持多日）──────────────────
-        if recall_type == "历史资金流向":
-            # 按 "##" 分割内容，每段是一个股票的数据块
-            # 例: "## 名称：海立股份 代码：600619.SH\n\n| 日期 | ..."
-            blocks = re.split(r"(?=## )", content)
-            for block in blocks:
-                block = block.strip()
-                if not block:
-                    continue
-                # 从块中提取该股票代码
-                code_m = re.search(r"代码[：:]\s*([0-9]{6}\.[A-Z]{2})", block)
-                if not code_m:
-                    continue
-                ts_code = code_m.group(1)
-                code = ts_code.split(".")[0]
-                # 过滤 B 股（900xxx/200xxx）
-                if code.startswith("900") or code.startswith("200"):
-                    continue
-
-                for line in block.split("\n"):
-                    if not line.strip().startswith("|"):
-                        continue
-                    cols = [c.strip() for c in line.split("|")][1:]
-                    if len(cols) < 13:
-                        continue
-                    date_str = cols[0]
-                    if not re.match(r"^\d{8}$", date_str):
-                        continue
-                    try:
-                        td = datetime.date(int(date_str[:4]), int(date_str[4:6]), int(date_str[6:8]))
-                    except ValueError:
-                        continue
-                    try:
-                        result.append([
-                            ts_code,                              # ts_code
-                            td,                                   # trade_date (datetime.date，CH需要)
-                            code,                                 # code
-                            0.0,                                  # close (NeoData 无此字段)
-                            0.0,                                  # pct_change (NeoData 无此字段)
-                            to_float(cols[4]),                    # net_main 主力净流入
-                            to_float(cols[3]),                    # net_main_pct 主力流入占比
-                            to_float(cols[11]),                   # net_huge 超大单净流入
-                            to_float(cols[12]),                   # net_big 大单净流入
-                            to_float(cols[1]),                    # net_medium 中单净流入
-                            to_float(cols[8]),                    # net_small 小单净流入
-                            datetime.datetime.now(),               # update_time
-                        ])
-                    except (ValueError, IndexError):
-                        continue
-
-        # ── 格式2: "今日资金流向"（纯文本格式，单日数据）──────────────
-        elif recall_type == "今日资金流向":
-            # ⚠️ "今日资金流向" 返回的一律是"最新交易日"的数据，不含日期字段。
-            # 如果查询的是历史日期（target_date 不是最近交易日），数据日期
-            # 对不上，必须丢弃——否则会把最新日数据标成历史日期写入。
-            if target_date is not None:
-                latest = _latest_trading_day()
-                if target_date != latest:
-                    continue  # 张冠李戴，丢弃
-            # 匹配代码: "代码：000001.SZ"
-            code_m = re.search(r"代码[：:]\s*([0-9]{6}\.[A-Z]{2})", content)
-            if not code_m:
-                continue
-            ts_code = code_m.group(1)
-            code = ts_code.split(".")[0]
-            if code.startswith("900") or code.startswith("200"):
-                continue
-
-            # 从文本中提数（所有金额单位为"元"，提取后保持一致）
-            def extract_yuan(pattern, text):
-                m = re.search(pattern, text)
-                return float(m.group(1).replace(",", "")) if m else 0.0
-
-            net_main      = extract_yuan(r"主力净流入([-+]?\d[\d,]*\.?\d*)元", content)
-            # 第一个"占比："即为"主力净流入"的占比（文字格式中顺序固定）
-            net_main_pct  = extract_yuan(r"占比[：:]([0-9.]+)", content)
-            # 文本格式中"超大单流入/大单流入"是"流入量"而非"净流入"（缺卖出数据）
-            net_huge      = extract_yuan(r"超大单流入([-+]?\d[\d,]*\.?\d*)元", content)
-            net_big       = extract_yuan(r"大单流入([-+]?\d[\d,]*\.?\d*)元", content)
-            net_medium    = extract_yuan(r"中单流入([-+]?\d[\d,]*\.?\d*)元", content)
-            net_small     = extract_yuan(r"小单流入([-+]?\d[\d,]*\.?\d*)元", content)
-
-            # 文本格式的 net_huge/big 是"流入量"而非"净流入"，与表格语义不同
-            # 只有 net_main 是严格净流入，方向可信；其他降级为近似值，标记时间以便识别
-            result.append([
-                ts_code,                  # ts_code
-                target_date or latest,    # trade_date（已验证 target_date == latest）
-                code,                     # code
-                0.0,                     # close
-                0.0,                     # pct_change
-                net_main,                 # net_main（净流入，精确）
-                net_main_pct,             # net_main_pct
-                net_huge,                # net_huge（仅流入量，降级）
-                net_big,                 # net_big（仅流入量，降级）
-                net_medium,              # net_medium（仅流入量，降级）
-                net_small,               # net_small（仅流入量，降级）
-                datetime.datetime.now(),  # update_time
-            ])
-
-    return result
-
-
+# [DEPRECATED] query_neodata / extract_neodata_moneyflow → 已迁移到 westock_moneyflow.py
 def fill_close_pct_from_stock_daily(rows, ch_client):
     """
     从 CH stock_daily 表回填 close_price → close, change_percent → pct_change
@@ -998,7 +796,7 @@ def fetch_moneyflow_em_hist_single(code: str, market: str = "", max_retries: int
     else:
         secid = "0." + code
 
-    url = "http://push2.eastmoney.com/api/qt/stock/fflow/daykline/get"
+    url = "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get"
     params = {
         "secid": secid,
         "klt": 101,
@@ -1014,8 +812,7 @@ def fetch_moneyflow_em_hist_single(code: str, market: str = "", max_retries: int
         "Accept": "application/json",
     }
 
-    # Windows 上 curl 访问 push2his.eastmoney.com 会被 MinGW curl 的 schannel renegotiation 截断
-    # 改用 _curl_json()（自动选择 Windows 原生 curl.exe）
+    # 用 _curl_json()（自动选择 Windows 原生 curl.exe，绕过 MinGW curl SSL 兼容问题）
 
     for attempt in range(max_retries):
         try:
@@ -1094,13 +891,80 @@ def run_em_moneyflow_realtime(args):
 
 
 def run_em_moneyflow_hist(args):
-    """东方财富历史资金流向（push2 fflow 路径被 CDN 墙，转走 NeoData）。
+    """东方财富历史资金流向（push2his 权威接口，与东财网页数据一致）。
     用法:
       python update_sentiment_data.py --em-moneyflow-hist              # 全市场
       python update_sentiment_data.py --em-moneyflow-hist --codes 600519,000001  # 指定股票
     """
-    print("=== 东方财富 历史资金流向（push2 不可达，转 NeoData）===")
-    run_neodata_moneyflow(args)
+    # 确定日期范围
+    start_str = args.start_date or "2026-05-07"
+    end_str = args.end_date or _latest_trading_day().isoformat()
+
+    # 获取股票列表
+    conn = pymysql.connect(**MYSQL_CONFIG)
+    cur = conn.cursor()
+    if args.codes:
+        raw_codes = [c.strip().zfill(6) for c in args.codes.split(",")]
+        cur.execute("SELECT code, name FROM stock_info WHERE code IN (" +
+                    ",".join(["%s"] * len(raw_codes)) + ")", raw_codes)
+        name_map = dict(cur.fetchall())
+        codes = [(c, name_map.get(c, c)) for c in raw_codes]
+    else:
+        cur.execute("SELECT code, name FROM stock_info WHERE code NOT LIKE '8%' AND code NOT LIKE '4%'")
+        codes = list(cur.fetchall())
+    cur.close()
+    conn.close()
+
+    print(f"=== 东方财富 历史资金流向（push2his）: {len(codes)} 只 ===")
+
+    # 获取 CH 客户端用于 close 回填
+    ch_client = clickhouse_connect.get_client(**CLICKHOUSE_CONFIG)
+
+    MF_CH_COLS = ["ts_code","trade_date","code","close","pct_change",
+                  "net_main","net_main_pct","net_huge","net_big","net_medium","net_small","update_time"]
+    MF_MY_COLS = MF_CH_COLS[:]
+    MF_UNIQUE = ["code", "trade_date"]
+
+    ok_count = fail_count = 0
+    for i, (code, name) in enumerate(codes):
+        label = f"{code}.{name}"
+        try:
+            rows = fetch_moneyflow_em_hist_single(code)
+            if not rows:
+                print(f"[{i+1}/{len(codes)}] {label}... ✗ 无数据")
+                fail_count += 1
+                continue
+
+            # 过滤日期范围 + close=0 的停牌数据
+            start_dt = datetime.date.fromisoformat(start_str)
+            end_dt = datetime.date.fromisoformat(end_str)
+            rows = [r for r in rows
+                    if start_dt <= r[1] <= end_dt
+                    and r[3] is not None and r[3] != 0]
+            if not rows:
+                print(f"[{i+1}/{len(codes)}] {label}... ✗ 日期范围内无有效数据")
+                fail_count += 1
+                continue
+
+            fill_close_pct_from_stock_daily(rows, ch_client)
+            rows = [r for r in rows if r[3] is not None and r[3] != 0]
+            if not rows:
+                print(f"[{i+1}/{len(codes)}] {label}... ✗ close回填后无有效数据")
+                fail_count += 1
+                continue
+
+            _dual_write("stock_sentiment_moneyflow", rows, MF_CH_COLS, MF_MY_COLS, MF_UNIQUE)
+            print(f"[{i+1}/{len(codes)}] {label}... ✓ {len(rows)}条")
+            ok_count += 1
+        except Exception as e:
+            print(f"[{i+1}/{len(codes)}] {label}... ✗ {e}")
+            fail_count += 1
+
+        # 每100只输出进度
+        if (i + 1) % 100 == 0:
+            print(f"  进度: {i+1}/{len(codes)}  成功={ok_count}  失败={fail_count}")
+
+    print(f"=== 完成: 成功={ok_count}  失败={fail_count} ===")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1335,11 +1199,11 @@ def fetch_notice_report(date_str: str) -> list:
 
 
 # ═══════════════════════════════════════════════════════════════
-# NeoData 资金流向（补数据模式）
+# westock-data 资金流向（补数据模式）
 # 用法：
-#   python update_sentiment_data.py --moneyflow-neodata                        # 全部缺失股票
-#   python update_sentiment_data.py --moneyflow-neodata --moneyflow-codes 600519,000001  # 指定股票
-#   python update_sentiment_data.py --moneyflow-neodata --start-date 2026-05-07 --end-date 2026-05-17  # 日期范围
+#   python update_sentiment_data.py --moneyflow-westock                        # 全部缺失股票（westock-data）
+#   python update_sentiment_data.py --moneyflow-westock --moneyflow-codes 600519,000001  # 指定股票（westock-data）
+#   python update_sentiment_data.py --moneyflow-westock --start-date 2026-05-07 --end-date 2026-05-17  # 日期范围（westock-data）
 # ═══════════════════════════════════════════════════════════════
 
 def _parse_date_label(date_label: str):
@@ -1354,7 +1218,7 @@ def _parse_date_label(date_label: str):
 
 def _split_date_range_backward(start: datetime.date, end: datetime.date):
     """
-    反向分页：NeoData 每次返回 end_date 之前最近约10个交易日，
+    [DEPRECATED] 反向分页逻辑（westock 已废弃）
     所以 end_date 需要递减约10天，start_date 相应跟随。
     返回 [(cur_start, cur_end), ...] 列表（从后往前排列）。
     """
@@ -1370,104 +1234,94 @@ def _split_date_range_backward(start: datetime.date, end: datetime.date):
     return chunks
 
 
-def _single_moneyflow_query(names: str, start: datetime.date, end: datetime.date):
-    """执行一次 NeoData 查询，返回原始 rows 列表"""
-    start_fmt = start.strftime("%Y年%m月%d日")
-    end_fmt   = end.strftime("%Y年%m月%d日")
-    query_str = f"{names}资金流向{start_fmt}到{end_fmt}"
-    MAX_RETRIES = 4
-    for attempt in range(MAX_RETRIES):
-        try:
-            data = query_neodata(query_str)
-            if not data:
-                if attempt < MAX_RETRIES - 1:
-                    time.sleep(min(2 ** attempt * 2.0, 30.0))
-                    continue
-                return []
-            break
-        except Exception as e:
-            if attempt < MAX_RETRIES - 1:
-                time.sleep(min(2 ** attempt * 2.0, 30.0))
-            else:
-                print(f"  [BATCH ERROR] 查询 {names[:20]}... [{start_fmt}→{end_fmt}] 失败: {e}")
-                return []
-    return extract_neodata_moneyflow(data, target_date=end)
+def _single_moneyflow_query(codes: list, start: datetime.date, end: datetime.date):
+    """通过 westock-data asfund 查询资金流向，返回原始 rows 列表
+    codes: ["sh600619", "sz000001"] 格式
+    """
+    from westock_moneyflow import query_westock, extract_westock_moneyflow
+    start_str = start.strftime("%Y-%m-%d")
+    end_str = end.strftime("%Y-%m-%d")
+    md_text = query_westock(codes, start_str, end_str)
+    if not md_text:
+        return []
+    return extract_westock_moneyflow(md_text)
 
 
 def _fetch_batch_moneyflow(stocks: list, date_label: str):
-    """批量查询多只股票的资金流向（自动处理 NeoData 10条限制，分页查询并去重合并）
+    """批量查询多只股票的资金流向（westock-data asfund，最多10只）
 
     stocks: list of (ts_code, code, name)
     date_label: 自然语言日期标签，如 "2026年03月01日到2026年03月31日"
 
     Returns:
         dict { code(str): rows_list }
+        row 格式: [ts_code, trade_date, code, close, pct_change,
+                   net_main, net_main_pct, net_huge, net_big,
+                   net_medium, net_small, update_time]
     """
     if not stocks:
         return {}
 
-    names = "、".join(nm for _, _, nm in stocks)
     start, end = _parse_date_label(date_label)
     if start is None:
-        return _fetch_batch_moneyflow_fallback(stocks, date_label)
+        return {cd: [] for _, cd, _ in stocks}
 
-    # 反向分页：NeoData 每次返回 end_date 之前约10个交易日
-    chunks = _split_date_range_backward(start, end)
+    # ts_code "600619.SH" -> westock code "sh600619"
+    code_list = []
+    # 建立 westock_ts_code -> (ts_code, plain_code, name) 映射
+    ws_map = {}
+    for ts, cd, name in stocks:
+        parts = ts.split(".")
+        if len(parts) == 2:
+            ws_key = parts[1].lower() + parts[0]
+        else:
+            ws_key = ts.lower()
+        code_list.append(ws_key)
+        ws_map[ws_key.upper()] = (ts, cd, name)
 
-    # 分页查询，每页单独调 API，结果合并（按 trade_date 去重）
-    seen_dates: dict = {cd: set() for _, cd, _ in stocks}
-    all_rows_by_stock: dict = {cd: [] for _, cd, _ in stocks}
-
-    for chunk_start, chunk_end in chunks:
-        rows = _single_moneyflow_query(names, chunk_start, chunk_end)
-        for row in rows:
-            cd = str(row[2])
-            td = row[1]
-            if cd in seen_dates and td not in seen_dates[cd]:
-                seen_dates[cd].add(td)
-                all_rows_by_stock[cd].append(row)
-
-    # 按日期排序
-    for cd in all_rows_by_stock:
-        all_rows_by_stock[cd].sort(key=lambda r: r[1])
-    return all_rows_by_stock
-
-
-def _fetch_batch_moneyflow_fallback(stocks: list, date_label: str):
-    """原有逻辑（当 date_label 无法解析时的兜底）"""
-    if not stocks:
-        return {}
-    names = "、".join(nm for _, _, nm in stocks)
-    query_str = f"{names}资金流向{date_label}"
-    MAX_RETRIES = 4
-    for attempt in range(MAX_RETRIES):
-        try:
-            data = query_neodata(query_str)
-            if not data:
-                if attempt < MAX_RETRIES - 1:
-                    time.sleep(min(2 ** attempt * 2.0, 30.0))
-                    continue
-                return {cd: [] for _, cd, _ in stocks}
-            break
-        except Exception as e:
-            if attempt < MAX_RETRIES - 1:
-                time.sleep(min(2 ** attempt * 2.0, 30.0))
-            else:
-                print(f"  [BATCH ERROR] 查询批次 {names[:30]}... 失败: {e}")
-                return {cd: [] for _, cd, _ in stocks}
-    _, fb_end = _parse_date_label(date_label)
-    all_rows = extract_neodata_moneyflow(data, target_date=fb_end)
+    data = _single_moneyflow_query(code_list, start, end)
     result: dict = {cd: [] for _, cd, _ in stocks}
-    for row in all_rows:
-        cd = str(row[2])
-        if cd in result:
-            result[cd].append(row)
+
+    # extract_westock_moneyflow 返回 dict 格式:
+    # {"SZ000001": {"20260525": {"close": ..., "net_main": ...}, ...}}
+    if isinstance(data, dict):
+        for ws_ts, date_dict in data.items():
+            if ws_ts not in ws_map:
+                continue
+            ts_code, code, name = ws_map[ws_ts]
+            for trade_date_str, vals in date_dict.items():
+                trade_date = datetime.datetime.strptime(trade_date_str, "%Y%m%d").date()
+                row = [
+                    ts_code,                                    # 0: ts_code
+                    trade_date,                                 # 1: trade_date (date obj)
+                    code,                                       # 2: code
+                    vals.get("close", None),                    # 3: close
+                    0.0,                                        # 4: pct_change (回填)
+                    vals.get("net_main", 0.0),                  # 5: net_main
+                    vals.get("net_main_pct", 0.0),              # 6: net_main_pct
+                    vals.get("net_huge", 0.0),                  # 7: net_huge
+                    vals.get("net_big", 0.0),                   # 8: net_big
+                    vals.get("net_medium", 0.0),                # 9: net_medium
+                    vals.get("net_small", 0.0),                 # 10: net_small
+                    datetime.datetime.now(),                                # 11: update_time
+                ]
+                result[code].append(row)
+    else:
+        # 向后兼容：旧版返回 list of rows 格式
+        for row in data:
+            cd = str(row[2])
+            if cd in result:
+                result[cd].append(row)
+
     return result
 
 
-def run_neodata_moneyflow(args):
-    """通过 NeoData 补全资金流向，支持双写 CH + MySQL（批量优化版）"""
-    _check_neodata_token(verbose=True)  # 实际调用 NeoData 前检查 token
+
+
+
+def run_westock_moneyflow(args):
+    """通过 westock-data 补全资金流向，支持双写 CH + MySQL（批量优化版）"""
+    # westock-data 无需 token
     # 确定日期范围
     start_str = args.start_date or "2026-05-07"
     end_str = args.end_date or _latest_trading_day().isoformat()
@@ -1506,7 +1360,7 @@ def run_neodata_moneyflow(args):
             target.append((c + prefix, c, name_map.get(c, c)))
     else:
         # 从 ClickHouse 查已有数据（不用 MySQL，MySQL 可能残留已从 CH 删除的脏数据）
-        # 统计所有记录（含 close=0 的 NeoData 数据），避免重复查询
+        # 统计所有记录（含 close=0 的数据），避免重复查询
         ch_temp = clickhouse_connect.get_client(**CLICKHOUSE_CONFIG)
         result = ch_temp.query(f"""
             SELECT code, COUNT(DISTINCT trade_date) as cnt
@@ -1527,21 +1381,21 @@ def run_neodata_moneyflow(args):
         all_name_map = dict(cur.fetchall())
         cur.close()
         conn.close()
-        bex = {s for s in all_name_map if s.startswith("8") or s.startswith("4")}
+        bex = {s for s in all_name_map if s.startswith(("8", "4", "9", "2"))}
         target = []
         for code in all_name_map:
             if code in bex or len(code) != 6:
                 continue
             ts = code + (".SH" if code.startswith(("6", "5")) else ".SZ")
             cnt = existing.get(ts, 0)
-            # force=True 时忽略 80% 覆盖阈值，强制所有股票重新查询 NeoData
-            # （应对 NeoData 数据回填延迟：之前只能拿到部分数据，后来上游补全了）
+            # force=True 时忽略 80% 覆盖阈值，强制所有股票重新查询
+
             if not args.force and cnt >= expected_days * 0.8:
                 continue
             target.append((ts, code, all_name_map[code]))
         target.sort()
 
-    print(f"=== NeoData 资金流向补全: {len(target)} 只 ===")
+    print(f"=== Westock 资金流向补全: {len(target)} 只 ===")
 
     # 格式化为自然语言查询日期标签
     start_fmt = start_str.replace("-", "年", 1).replace("-", "月") + "日"
@@ -1583,64 +1437,104 @@ def run_neodata_moneyflow(args):
     # CH 客户端用于回填 close/pct_change
     ch_client = clickhouse_connect.get_client(**CLICKHOUSE_CONFIG)
 
-    BATCH_SIZE = 10
-    NUM_WORKERS = 5  # 5批次并行，每批14分块 × 5 ≈ 70个NeoData请求同时等待
+    BATCH_SIZE = 20  # 每批 20 只，减少 API 调用次数
+    PARALLEL = 3     # 并行 API 调用数（降低避免 westock 限流）
     batches = [target[i:i + BATCH_SIZE] for i in range(0, len(target), BATCH_SIZE)]
+    total_batches = len(batches)
     grand_start = datetime.datetime.now()
     ok_count = fail_count = 0
     total_stocks = len(target)
 
-    total_batches = len(batches)
-    print(f"  共 {total_batches} 批，每批 ~{BATCH_SIZE} 只，顺序执行")
+    print(f"  共 {total_batches} 批，每批 ≤{BATCH_SIZE} 只，{PARALLEL} 路并行查询")
 
     # 初始化进度日志
     try:
         with open(_PROGRESS_LOG, 'w', encoding='utf-8') as f:
-            f.write(f"=== NeoData 资金流向补全: {total_stocks} 只 ===\n")
-            f.write(f"  共 {total_batches} 批，每批 ~{BATCH_SIZE} 只\n")
+            f.write(f"=== Westock 资金流向补全: {total_stocks} 只 ===\n")
+            f.write(f"  共 {total_batches} 批，每批 ≤{BATCH_SIZE} 只，{PARALLEL} 路并行\n")
     except Exception:
         pass
 
-    for idx, batch in enumerate(batches):
-        done = idx + 1
-        code_rows_map = _fetch_batch_moneyflow(batch, date_label)
+    # ── 阶段 1：并行查询（带重试）──
+    retry_rescued = 0  # 被重试救回来的批次数
+    def _query_batch(batch_stocks, batch_label, batch_idx):
+        """单个批次的 API 查询，带 3 次重试（含指数退避）"""
+        import time as _time
+        nonlocal retry_rescued
+        last_err = None
+        for attempt in range(3):
+            try:
+                result = _fetch_batch_moneyflow(batch_stocks, batch_label)
+                if result:
+                    has_data = any(rows for rows in result.values())
+                    if has_data:
+                        if attempt > 0:
+                            retry_rescued += 1
+                            print(f"  [RETRY OK] 第{batch_idx+1}批在第{attempt+1}次重试成功")
+                        return result
+                    last_err = "全空结果"
+                else:
+                    last_err = "空返回"
+            except Exception as e:
+                last_err = str(e)
+            if attempt < 2:
+                wait = 2 ** attempt  # 1s, 2s
+                _time.sleep(wait)
+        raise RuntimeError(f"重试3次仍失败: {last_err}")
 
-        # 第一步：收集批次内每只股票的数据（含逐只回退兜底）
-        batch_all_rows = []   # [(ts_code, code, name, rows), ...]
+    all_results = {}  # batch_idx -> {code: rows_list}
+    query_start = datetime.datetime.now()
+    failed_batch_indices = []  # 重试仍失败的批次
+    with ThreadPoolExecutor(max_workers=PARALLEL) as executor:
+        futures = {executor.submit(_query_batch, batch, date_label, idx): idx
+                   for idx, batch in enumerate(batches)}
+        for f in as_completed(futures):
+            idx = futures[f]
+            try:
+                all_results[idx] = f.result()
+            except Exception as e:
+                print(f"  [ERROR] 第 {idx+1} 批查询失败: {e}")
+                all_results[idx] = {}
+                failed_batch_indices.append(idx)
+    query_elapsed = (datetime.datetime.now() - query_start).total_seconds()
+    failed_batch_count = len(failed_batch_indices)
+    print(f"  并行查询完成，耗时 {query_elapsed:.1f}s（失败批次: {failed_batch_count}, 重试救回: {retry_rescued}）")
+
+    # ── 阶段 2：顺序回填 close/pct_change + 双写（确保写入安全）──
+    write_start = datetime.datetime.now()
+    for idx in range(total_batches):
+        done = idx + 1
+        batch = batches[idx]
+        code_rows_map = all_results.get(idx, {})
+
+        # 收集有数据的股票（无回退重试，已修复解析逻辑）
+        batch_all_rows = []
+        no_data_stocks = []
         for ts_code, code, name in batch:
             rows = code_rows_map.get(code, [])
-
-            if not rows:
-                single_map = _fetch_batch_moneyflow([(ts_code, code, name)], date_label)
-                rows = single_map.get(code, [])
-
-            if not rows:
-                code_query = [(ts_code, code, code)]
-                code_map = _fetch_batch_moneyflow(code_query, date_label)
-                rows = code_map.get(code, [])
-
-            label = f"{code}.{name}" if name != code else code
-
-            if not rows:
-                print(f"[{done}/{total_batches}] {label}... ✗ 无数据")
-                _write_progress(idx, total_batches, code, name, "✗ 无数据")
-                fail_count += 1
-            else:
+            if rows:
                 batch_all_rows.append((ts_code, code, name, rows))
+            else:
+                no_data_stocks.append((ts_code, code, name))
+
+        # 报告无数据
+        for ts_code, code, name in no_data_stocks:
+            label = f"{code}.{name}" if name != code else code
+            print(f"[{done}/{total_batches}] {label}... ✗ 无数据")
+            _write_progress(idx, total_batches, code, name, "✗ 无数据")
+            fail_count += 1
 
         if not batch_all_rows:
             continue
 
-        # 第二步：整批合并，一次 CH 查询回填所有股票的 close/pct_change
+        # 回填 close/pct_change
         all_rows_flat = [row for _, _, _, rows in batch_all_rows for row in rows]
         fill_close_pct_from_stock_daily(all_rows_flat, ch_client)
 
-        # 第三步：逐只双写（必须按股票分开，以正确处理主键冲突）
+        # 双写（逐只，保留主键冲突处理）
         for ts_code, code, name, rows in batch_all_rows:
-            # 过滤 close=0 的停牌股数据（fill_close 无法回填已停牌股票的收盘价）
-            # 行格式: [ts_code(0), trade_date(1), code(2), close(3), pct_change(4), ...]
-            # ⚠️ 不能用 r[4]（pct_change可为0），必须用 r[3]（close）
-            rows = [r for r in rows if r[3] is not None and r[3] != 0]
+            rows = [r for r in rows if r[3] is not None and r[3] != 0
+                    and not (r[5] == 0 and r[7] == 0 and r[8] == 0 and r[9] == 0 and r[10] == 0)]
             if not rows:
                 continue
             label = f"{code}.{name}" if name != code else code
@@ -1648,15 +1542,15 @@ def run_neodata_moneyflow(args):
                 "stock_sentiment_moneyflow", rows,
                 MF_CH_COLS, MF_MY_COLS, MF_UNIQUE,
                 dry_run=args.dry_run,
-                # 注意：不传 force=args.force
-                # Layer 1 的 --force 只控制候选筛选（跳过 80% 阈值），
-                # Layer 2 去重过滤保持不变——只写入 NeoData 新回填的数据
             )
             print(f"[{done}/{total_batches}] {label}... ✓ {len(rows)}条")
             _write_progress(idx, total_batches, code, name, f"✓ {len(rows)}条")
             ok_count += 1
 
-    # 写完：标记完成
+    write_elapsed = (datetime.datetime.now() - write_start).total_seconds()
+    print(f"  写入完成，耗时 {write_elapsed:.1f}s")
+
+    # 标记完成
     try:
         with open(_PROGRESS_LOG + '.json', 'w', encoding='utf-8') as f:
             f.write(json.dumps({
@@ -1671,43 +1565,41 @@ def run_neodata_moneyflow(args):
     ch_client.close()
     grand_elapsed = (datetime.datetime.now() - grand_start).total_seconds()
     print(f"\n{'=' * 60}")
-    print(f"  NeoData 资金流向完成（批量版）")
+    print(f"  Westock 资金流向完成（并行版）")
     print(f"  总耗时 {grand_elapsed:.1f}s ({grand_elapsed/60:.1f}min)")
     print(f"  成功 {ok_count} 只  失败 {fail_count} 只")
     print(f"{'=' * 60}")
 
 
 def _fetch_stock_moneyflow(args, ts_code: str, code: str, name: str, months: list):
-    """单只股票的全量资金流向抓取（供并行调用）
+    """单只股票的全量资金流向抓取（westock-data，供并行调用）
 
-    每段日期用反向分页（处理 NeoData 每次最多约10条限制）。
     Returns:
         (ts_code, code, name, rows_list)
     """
+    from westock_moneyflow import query_westock, extract_westock_moneyflow
     try:
+        # ts_code "600619.SH" -> westock code "sh600619"
+        parts = ts_code.split(".")
+        wcode = (parts[1].lower() + parts[0]) if len(parts) == 2 else ts_code.lower()
+
         seen_dates: set = set()
         all_rows = []
         for m_start, m_end in months:
-            # 把每月拆成反向分页的子查询
-            sub_chunks = _split_date_range_backward(m_start, m_end)
-            for sub_start, sub_end in sub_chunks:
-                start_fmt = sub_start.strftime("%Y年%m月%d日")
-                end_fmt   = sub_end.strftime("%Y年%m月%d日")
-                date_label = f"{start_fmt}到{end_fmt}"
-                query_str  = f"{name}资金流向{date_label}"
-                try:
-                    data = query_neodata(query_str)
-                    if not isinstance(data, dict):
-                        continue
-                    rows = extract_neodata_moneyflow(data, target_date=sub_end)
-                    for row in rows:
-                        td = row[1]
-                        if td not in seen_dates:
-                            seen_dates.add(td)
-                            all_rows.append(row)
-                except Exception as e:
-                    print(f"  [WARN] {code} [{date_label}] 抓取失败: {e}")
-                time.sleep(0.2)
+            start_str = m_start.strftime("%Y-%m-%d")
+            end_str = m_end.strftime("%Y-%m-%d")
+            try:
+                md_text = query_westock([wcode], start_str, end_str)
+                if not md_text:
+                    continue
+                rows = extract_westock_moneyflow(md_text)
+                for row in rows:
+                    td = row[1]
+                    if td not in seen_dates:
+                        seen_dates.add(td)
+                        all_rows.append(row)
+            except Exception as e:
+                print(f"  [WARN] {code} [{start_str}->{end_str}] 抓取失败: {e}")
         all_rows.sort(key=lambda r: r[1])
         return (ts_code, code, name, all_rows)
     except Exception as e:
@@ -1715,14 +1607,14 @@ def _fetch_stock_moneyflow(args, ts_code: str, code: str, name: str, months: lis
         return (ts_code, code, name, [])
 
 
-def run_neodata_refresh(args):
-    """NeoData 全量重刷：多线程并行查询，覆盖全部已有数据
+def run_westock_refresh(args):
+    """Westock 全量重刷：多线程并行查询，覆盖全部已有数据
     用法：
-      python update_sentiment_data.py --moneyflow-refresh              # 全量重刷 2025-11 起
-      python update_sentiment_data.py --moneyflow-refresh --refresh-codes 600519,000001  # 指定股票
-      python update_sentiment_data.py --moneyflow-refresh --refresh-start 2026-01-01   # 指定起始月
+      python update_sentiment_data.py --moneyflow-refresh              # westock-data 全量重刷
+      python update_sentiment_data.py --moneyflow-refresh --refresh-codes 600519,000001  # westock-data 指定股票
+      python update_sentiment_data.py --moneyflow-refresh --refresh-start 2026-01-01   # westock-data 指定起始月
     """
-    _check_neodata_token(verbose=True)  # 实际调用 NeoData 前检查 token
+    # westock-data 无需 token
     # ── 确定日期范围 ─────────────────────────────────────────────
     start_str = args.refresh_start  # e.g. "2025-11-01"
     end_str = _latest_trading_day().isoformat()
@@ -1744,7 +1636,7 @@ def run_neodata_refresh(args):
         months.append((cur, last_day))
         cur = next_month
 
-    print(f"=== NeoData 全量重刷: {len(months)} 个月 [{start_str} ~ {end_str}] ===")
+    print(f"=== Westock 全量重刷: {len(months)} 个月 [{start_str} ~ {end_str}] ===")
 
     # ── 获取股票列表 ─────────────────────────────────────────────
     conn = pymysql.connect(**MYSQL_CONFIG)
@@ -1791,9 +1683,9 @@ def run_neodata_refresh(args):
     total_ok = total_fail = total_rows = 0
     done = 0
 
-    # ── 多线程并行查询 NeoData ───────────────────────────────────
+    # ── 多线程并行查询 westock-data ──────────────────────────
     # 每只股票内部按月串行（同一 API 并发无意义），不同股票间并行
-    WORKERS = 5   # NeoData 限流约 7-8 次/秒，5 并发留余量（每只股票内部按月串行）
+    WORKERS = 5   # westock 限流约 7-8 次/秒，5 并发留余量（每只股票内部按月串行）
 
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
         futures = {
@@ -1842,7 +1734,7 @@ def run_neodata_refresh(args):
     ch_client.close()
     elapsed = (datetime.datetime.now() - grand_start).total_seconds()
     print(f"\n{'=' * 60}")
-    print(f"  NeoData 全量重刷完成")
+    print(f"  Westock 全量重刷完成")
     print(f"  总耗时 {elapsed:.0f}s ({elapsed/60:.0f}min)")
     print(f"  成功 {total_ok} 只  失败 {total_fail} 只  总写入 {total_rows} 条")
     print(f"{'=' * 60}")
@@ -1861,8 +1753,8 @@ def main():
     parser.add_argument("--catchup",    type=int, default=0, help="补最近 N 天数据")
     parser.add_argument("--moneyflow-hist", action="store_true", help="历史资金流向补全（逐只股票120天，akshare东财）")
     parser.add_argument("--moneyflow-codes", default=None, help="指定股票代码补全历史资金流，逗号分隔")
-    parser.add_argument("--moneyflow-neodata", action="store_true", help="NeoData 补全资金流向（更快，推荐）")
-    parser.add_argument("--moneyflow-refresh", action="store_true", help="NeoData 全量重刷（按月分批，覆盖全部已有数据）")
+    parser.add_argument("--moneyflow-westock", action="store_true", help="westock-data 补全资金流向")
+    parser.add_argument("--moneyflow-refresh", action="store_true", help="westock-data 全量重刷（按月分批，覆盖全部已有数据）")
     parser.add_argument("--refresh-start", default="2025-11-01", help="重刷起始月 YYYY-MM-DD（默认 2025-11-01）")
     parser.add_argument("--refresh-codes", default=None, help="仅重刷指定股票，逗号分隔（默认全量）")
     parser.add_argument("--em-moneyflow", action="store_true", help="东方财富实时全市场资金流向（单次请求 ~5500 只）")
@@ -1940,12 +1832,12 @@ def main():
         run_em_moneyflow_hist(args)
         return
 
-    if args.moneyflow_neodata:
-        run_neodata_moneyflow(args)
+    if args.moneyflow_westock:
+        run_westock_moneyflow(args)
         return
 
     if args.moneyflow_refresh:
-        run_neodata_refresh(args)
+        run_westock_refresh(args)
         return
 
     # ── 历史资金流向补全模式 ───────────────────────────────────

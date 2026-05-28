@@ -313,8 +313,8 @@ public class ScheduleConfigController {
             case "SENTIMENT":      req.setUpdateType("SENTIMENT"); break;
             case "SENTIMENT_MF":
                 req.setUpdateType("SENTIMENT");
-                // 从 extra_config 读取 moneyflowSource，默认 EM
-                req.setMoneyflowSource(moneyflowSource != null ? moneyflowSource : "EM");
+                // 从 extra_config 读取 moneyflowSource，默认 WESTOCK
+                req.setMoneyflowSource(moneyflowSource != null ? moneyflowSource : "WESTOCK");
                 req.setFetchLhb(false); req.setFetchMargin(false); req.setFetchSurvey(false);
                 req.setFetchBlockTrade(false); req.setFetchActivity(false); req.setFetchZtPool(false);
                 req.setFetchNotice(false); req.setFetchFundHolder(false); req.setFetchShareholder(false);

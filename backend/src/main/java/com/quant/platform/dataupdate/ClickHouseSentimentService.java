@@ -359,6 +359,96 @@ public class ClickHouseSentimentService {
                 validation.put("recentRecordCount", 0);
             }
 
+            // 资金流向专属深度校验
+            if ("stock_sentiment_moneyflow".equals(table)) {
+                List<Map<String, Object>> extraChecks = new ArrayList<>();
+
+                // 校验1: CH vs MySQL 两端记录数对比
+                try {
+                    Long chCount = (Long) validation.get("recordCount");
+                    Long myCount = jdbcTemplate.queryForObject(
+                            "SELECT COUNT(*) FROM stock_sentiment_moneyflow", Long.class);
+                    if (myCount == null) myCount = 0L;
+                    long diff = Math.abs(chCount - myCount);
+                    Map<String, Object> check = new LinkedHashMap<>();
+                    check.put("type", "CH_MYSQL_DIFF");
+                    if (diff > 0) {
+                        check.put("status", "WARN");
+                        check.put("message", "CH=" + chCount + " / MySQL=" + myCount + "，差异" + diff + "条");
+                        check.put("chCount", chCount);
+                        check.put("myCount", myCount);
+                        check.put("diff", diff);
+                        extraChecks.add(check);
+                        totalWarnings++;
+                    } else {
+                        // 一致时也记录（绿色对勾显示）
+                        check.put("status", "OK");
+                        check.put("message", "两端一致，各" + chCount + "条");
+                        check.put("chCount", chCount);
+                        check.put("myCount", myCount);
+                        check.put("diff", 0);
+                        extraChecks.add(check);
+                    }
+                } catch (Exception e) {
+                    log.warn("CH-MySQL 对比查询失败: {}", e.getMessage());
+                }
+
+                // 校验2: all_zero — 5个资金流向字段全为0
+                try (Connection conn = getConnection();
+                     PreparedStatement stmt = conn.prepareStatement(
+                             "SELECT COUNT(*) FROM stock_sentiment_moneyflow FINAL " +
+                             "WHERE net_main=0 AND net_huge=0 AND net_big=0 AND net_medium=0 AND net_small=0");
+                     ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next()) {
+                        Long allZeroCount = rs.getLong(1);
+                        Map<String, Object> check = new LinkedHashMap<>();
+                        check.put("type", "ALL_ZERO");
+                        if (allZeroCount > 0) {
+                            check.put("status", "WARN");
+                            check.put("message", allZeroCount + " 条资金流向全为0（停牌/ST/westock无数据）");
+                            check.put("count", allZeroCount);
+                            extraChecks.add(check);
+                            totalWarnings++;
+                        } else {
+                            check.put("status", "OK");
+                            check.put("message", "无全0数据");
+                            check.put("count", 0);
+                            extraChecks.add(check);
+                        }
+                    }
+                } catch (Exception e) {
+                    log.warn("all_zero 检查失败: {}", e.getMessage());
+                }
+
+                // 校验3: close=0 — 收盘价为0（停牌股）
+                try (Connection conn = getConnection();
+                     PreparedStatement stmt = conn.prepareStatement(
+                             "SELECT COUNT(*) FROM stock_sentiment_moneyflow FINAL WHERE close=0");
+                     ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next()) {
+                        Long closeZeroCount = rs.getLong(1);
+                        Map<String, Object> check = new LinkedHashMap<>();
+                        check.put("type", "CLOSE_ZERO");
+                        if (closeZeroCount > 0) {
+                            check.put("status", "WARN");
+                            check.put("message", closeZeroCount + " 条收盘价为0（停牌股或westock缺失）");
+                            check.put("count", closeZeroCount);
+                            extraChecks.add(check);
+                            totalWarnings++;
+                        } else {
+                            check.put("status", "OK");
+                            check.put("message", "无close=0数据");
+                            check.put("count", 0);
+                            extraChecks.add(check);
+                        }
+                    }
+                } catch (Exception e) {
+                    log.warn("close=0 检查失败: {}", e.getMessage());
+                }
+
+                validation.put("extraChecks", extraChecks);
+            }
+
             tableValidations.add(validation);
         }
 

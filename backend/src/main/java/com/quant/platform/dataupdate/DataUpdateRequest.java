@@ -148,7 +148,7 @@ public class DataUpdateRequest {
     /**
      * 情绪数据：资金流向数据源
      * AKSHARE = akshare（默认，与原行为一致）
-     * NEODATA = NeoData（更快，推荐）
+     * WESTOCK = westock-data（更快，推荐）
      * EM     = 东方财富（实时全市场/历史120天，最快，推荐）
      */
     private String moneyflowSource = "AKSHARE";
