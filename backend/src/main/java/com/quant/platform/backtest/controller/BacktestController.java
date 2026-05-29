@@ -121,11 +121,10 @@ public class BacktestController {
         BacktestTask task = backtestService.getTask(taskId);
         BacktestReport report = backtestService.getReport(taskId);
         Map<String, Object> result = brinsonAttributionService.computeBrinson(
-                taskId,
+                task,
                 report.getPositionHistoryJson(),
                 report.getEquityCurveJson(),
-                report.getBenchmarkCurveJson(),
-                task.getBenchmarkCode()
+                report.getBenchmarkCurveJson()
         );
         return ApiResponse.success(result);
     }

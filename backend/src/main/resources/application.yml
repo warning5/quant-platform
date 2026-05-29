@@ -2,6 +2,9 @@ server:
   port: 8080
   servlet:
     context-path: /api
+  tomcat:
+    connection-timeout: 300000
+    keep-alive-timeout: 300000
 
 spring:
   application:

@@ -1,4 +1,4 @@
-package com.quant.platform.backtest.engine;
+﻿package com.quant.platform.backtest.engine;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quant.platform.backtest.domain.BacktestReport;
@@ -412,19 +412,64 @@ public class BacktestEngine {
                 // 保存调仓前的持仓快照（用于后续涨跌停/停牌过滤保留未卖出持仓）
                 Map<String, Double> oldPositions = new HashMap<>(positions);
 
-                // 执行调仓
+                // ---- 预计算可用资金上限 ----
+                // 1. 保留持仓市值
+                double keptValue = 0;
+                for (String sym : oldPositions.keySet()) {
+                    if (!targetWeights.containsKey(sym)) continue;
+                    MarketDailyBar bar = barMap.get(sym);
+                    if (bar == null) continue;
+                    keptValue += oldPositions.get(sym) * bar.getClose().doubleValue();
+                }
+
+                // 2. 卖出费用（不在新目标中的旧持仓）
+                double sellFee = 0;
+                for (String sym : oldPositions.keySet()) {
+                    if (targetWeights.containsKey(sym)) continue;
+                    MarketDailyBar bar = barMap.get(sym);
+                    if (bar == null) continue;
+                    if (suspendFilter && isSuspended(bar)) continue;
+                    if (limitFilter && isLimitDown(bar)) continue;
+                    double amount = oldPositions.get(sym) * bar.getClose().doubleValue();
+                    sellFee += calcFee(amount, true, commission, stampTaxRate, minCommission, sym, transferFeeRate);
+                }
+
+                // 3. 新买入费用 + 原始买入总额
+                double newBuyFee = 0;
+                double rawInvestedValue = 0;
+                for (Map.Entry<String, Double> entry : targetWeights.entrySet()) {
+                    if (oldPositions.containsKey(entry.getKey())) continue;
+                    MarketDailyBar bar = barMap.get(entry.getKey());
+                    if (bar == null) continue;
+                    if (suspendFilter && isSuspended(bar)) continue;
+                    if (limitFilter && isLimitUp(bar)) continue;
+                    double amount = portfolioValue * entry.getValue();
+                    rawInvestedValue += amount;
+                    newBuyFee += calcFee(amount, false, commission, stampTaxRate, minCommission, entry.getKey(), transferFeeRate);
+                }
+
+                // 4. 计算买入缩放比例
+                double maxInvestable = portfolioValue - keptValue - sellFee - newBuyFee;
+                double buyScale = rawInvestedValue > 0 ? Math.max(0, Math.min(1.0, maxInvestable / rawInvestedValue)) : 0;
+                if (buyScale < 0.9999) {
+                    log.info("Buy scale capped: {} (available={}, target={}, kept={})",
+                            String.format("%.4f", buyScale), String.format("%.2f", maxInvestable),
+                            String.format("%.2f", rawInvestedValue), String.format("%.2f", keptValue));
+                }
+
+                // 执行调仓（传入缩放因子）
                 List<Map<String, Object>> rebalanceTrades = rebalance(
                         positions, targetWeights, barMap, portfolioValue, commission, slippage,
                         today, positionValues, slippageModel, stampTaxRate, minCommission,
                         limitFilter, suspendFilter, transferFeeRate, orderType, tradingDates, di,
-                        nextDayBarMap, positionCosts);
+                        nextDayBarMap, positionCosts, buyScale);
                 tradeLog.addAll(rebalanceTrades);
                 totalTrades += rebalanceTrades.size();
 
-                // 重新计算cash和持仓
+                // 重新计算cash
                 cash = recalcCash(positions, targetWeights, barMap, portfolioValue, commission, slippage,
                         slippageModel, stampTaxRate, minCommission, limitFilter, suspendFilter,
-                        transferFeeRate, orderType, tradingDates, di);
+                        transferFeeRate, orderType, tradingDates, di, buyScale);
 
                 // 计算实际可买入的标的（排除涨停/停牌）
                 Map<String, Double> effectiveTargets = new HashMap<>(targetWeights);
@@ -458,11 +503,12 @@ public class BacktestEngine {
                         positions.put(sym, oldPositions.get(sym));
                     }
                 }
-                // 加入新买入的持仓
+                // 加入新买入的持仓（应用缩放）
+                final double scale = buyScale;
                 for (Map.Entry<String, Double> entry : effectiveTargets.entrySet()) {
                     if (barMap.containsKey(entry.getKey())) {
                         positions.put(entry.getKey(),
-                                (currentPortfolioValue * entry.getValue()) / barMap.get(entry.getKey()).getClose().doubleValue());
+                                (currentPortfolioValue * entry.getValue() * scale) / barMap.get(entry.getKey()).getClose().doubleValue());
                     }
                 }
 
@@ -978,7 +1024,8 @@ public class BacktestEngine {
                                                 List<LocalDate> tradingDates,
                                                 int di,
                                                 Map<String, MarketDailyBar> nextDayBarMap,
-                                                Map<String, Double> positionCosts) {
+                                                Map<String, Double> positionCosts,
+                                                double buyScale) {
         List<Map<String, Object>> trades = new ArrayList<>();
 
         // 记录卖出
@@ -1039,7 +1086,7 @@ public class BacktestEngine {
 
                 double execPrice = getExecutionPrice(bar, tradingDates, di, orderType, nextDayBarMap);
                 double closePrice = bar.getClose().doubleValue();
-                double amount = portfolioValue * entry.getValue();
+                double amount = portfolioValue * entry.getValue() * buyScale;
                 double dayAmount = bar.getAmount() != null ? bar.getAmount().doubleValue() * 1000 : 0;
                 double price = applySlippage(execPrice, true, slippage, amount, dayAmount, slippageModel);
                 double fee = calcFee(amount, false, commission, stampTaxRate, minCommission, entry.getKey(), transferFeeRate);
@@ -1080,10 +1127,11 @@ public class BacktestEngine {
                               double transferFeeRate,
                               String orderType,
                               List<LocalDate> tradingDates,
-                              int di) {
+                              int di,
+                              double buyScale) {
         double totalFee = 0;
 
-        // 买入费用
+        // 买入费用（应用缩放）
         for (Map.Entry<String, Double> entry : targetWeights.entrySet()) {
             if (oldPositions.containsKey(entry.getKey())) continue;
             MarketDailyBar bar = barMap.get(entry.getKey());
@@ -1091,7 +1139,7 @@ public class BacktestEngine {
             if (suspendFilter && isSuspended(bar)) continue;
             if (limitFilter && isLimitUp(bar)) continue;
 
-            double amount = portfolioValue * entry.getValue();
+            double amount = portfolioValue * entry.getValue() * buyScale;
             totalFee += calcFee(amount, false, commission, stampTaxRate, minCommission, entry.getKey(), transferFeeRate);
         }
 
@@ -1107,7 +1155,7 @@ public class BacktestEngine {
             totalFee += calcFee(amount, true, commission, stampTaxRate, minCommission, symbol, transferFeeRate);
         }
 
-        // 实际投入金额（扣除被过滤掉的买入）
+        // 实际投入金额（扣除被过滤掉的买入，应用缩放）
         double investedValue = 0;
         for (Map.Entry<String, Double> entry : targetWeights.entrySet()) {
             if (oldPositions.containsKey(entry.getKey())) continue;
@@ -1115,7 +1163,7 @@ public class BacktestEngine {
             if (bar == null) continue;
             if (suspendFilter && isSuspended(bar)) continue;
             if (limitFilter && isLimitUp(bar)) continue;
-            investedValue += portfolioValue * entry.getValue();
+            investedValue += portfolioValue * entry.getValue() * buyScale;
         }
 
         // 扣除保留持仓的市值：这些持仓没卖，不能当现金用
@@ -1128,12 +1176,13 @@ public class BacktestEngine {
         }
 
         double cash = portfolioValue - keptValue - investedValue - totalFee;
-        if (cash < 0) {
-            log.warn("Negative cash after rebalance: {}, clamping to 0 (portfolioValue={}, keptValue={}, invested={}, fee={})",
-                    cash, portfolioValue, keptValue, investedValue, totalFee);
-            cash = 0;
+        if (cash < -0.01) {
+            log.warn("Residual negative cash after rebalance: {} (scale={}, portfolioValue={}, keptValue={}, invested={}, fee={})",
+                    String.format("%.2f", cash), String.format("%.4f", buyScale),
+                    String.format("%.2f", portfolioValue), String.format("%.2f", keptValue),
+                    String.format("%.2f", investedValue), String.format("%.2f", totalFee));
         }
-        return cash;
+        return Math.max(0, cash);
     }
 
     /**
@@ -1165,7 +1214,7 @@ public class BacktestEngine {
         // 使用简单年化而非复利年化，避免短周期回测的极端值
         // 复利年化：Math.pow(1 + totalReturn, annualFactor) - 1
         // 简单年化：totalReturn * annualFactor
-        double annualReturn = totalReturn * annualFactor;
+        double annualReturn = years > 0 ? Math.pow(1 + totalReturn, 1.0 / years) - 1 : 0;
 
         // ── 基准收益 ──────────────────────────────────────────────────
         double benchmarkTotalReturn = result.benchmarkTotalReturn();

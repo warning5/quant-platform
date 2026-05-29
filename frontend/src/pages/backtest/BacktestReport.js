@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Card, Row, Col, Statistic, Typography, Button, Space, Spin, Tabs,
@@ -666,26 +666,27 @@ function buildBrinsonTip(label, val, excessVal, residualVal, ratioVal) {
         </div>
       </div>;
 
-    case '残差':
+    case '残差': {
+      const r = residualVal != null ? +residualVal : 0;
+      const absR = Math.abs(r);
+      const absExcess = excessVal != null ? Math.abs(+excessVal) : 0;
+      const relResidual = absExcess > 1e-8 ? absR / absExcess : 0;
       return <div style={tipStyle}>
-        <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 14 }}>残差（Residual）</div>
+        <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 14 }}>多期残差（Multi-period Residual）</div>
         <div style={{ marginBottom: 6 }}>
-          <b>公式：</b>超额收益 − (配置效应 + 选股效应 + 交互效应)
+          <b>含义：</b>多期 Brinson 分解的固有局限。单期恒等式严格成立（配置+选股+交互=超额收益），但多期各期效应算术累加≠总超额收益（收益是几何复合的，效应是算术累加的），差额即为残差。
         </div>
-        <div style={{ marginBottom: 6 }}>
-          <b>含义：</b>Brinson 三因素无法解释的超额收益部分。通常来自：交易成本（佣金+滑点）、非行业因子的暴露（如市值、动量）、数据精度损失等。残差越小，模型解释力越强。
+        <div style={{ marginBottom: 6, padding: '6px 8px', background: '#e6f7ff', borderRadius: 6, border: '1px solid #91d5ff' }}>
+          <b>当前残差：</b>{r > 0 ? '+' : ''}{(r * 100).toFixed(2)}%（相对超额收益占比 {(relResidual * 100).toFixed(1)}%）。残差绝对值越小，归因结论越可靠。
         </div>
         <div style={{ marginBottom: 6, borderTop: '1px solid #f0f0f0', paddingTop: 4 }}>
-          <b>阈值参考：</b>
+          <b>残差来源：</b>多期几何/算术不匹配（根因）、交易成本、非行业因子暴露（市值/动量等）、数据精度损失。
         </div>
-        <div>· 绝对值 &lt; 0.5%&nbsp;&nbsp;模型几乎完全解释</div>
-        <div>· 绝对值 &lt; 2%&nbsp;&nbsp;&nbsp;&nbsp;解释力良好</div>
-        <div>· 绝对值 &lt; 5%&nbsp;&nbsp;&nbsp;&nbsp;存在未解释因素</div>
-        <div>· 绝对值 ≥ 5%&nbsp;&nbsp;&nbsp;&nbsp;大量超额未被模型解释</div>
-        <div style={{ marginTop: 6, borderTop: '1px solid #f0f0f0', paddingTop: 4, color: Math.abs(v) < 0.02 ? '#52c41a' : '#cf1322' }}>
-          <b>解读：</b>当前残差={fmtV(v)}，{Math.abs(v) < 0.005 ? '模型几乎完全解释了超额收益，归因结论非常可靠' : Math.abs(v) < 0.02 ? '模型解释力良好，少量超额来自交易成本等非行业因素' : '残差偏大，存在较多因素未被三因素解释（如市值/动量暴露、交易成本等）'}。{residualVal != null && excessVal != null && Math.abs(+residualVal) > Math.abs(+excessVal) * 0.5 ? '残差已超过超额收益的50%，归因结论仅供参考。' : ''}
+        <div style={{ marginTop: 6, color: relResidual < 0.05 ? '#52c41a' : relResidual < 0.15 ? '#d48806' : '#cf1322' }}>
+          <b>评估：</b>{relResidual < 0.05 ? '残差极小（<5%），归因结论高度可靠' : relResidual < 0.15 ? '残差较小（5%~15%），归因结论可接受' : '残差较大（≥15%），除行业外还有其他重要收益驱动因素，归因参考价值有限'}。
         </div>
       </div>;
+    }
 
     case '解释力':
       const r = ratioVal != null ? +ratioVal : 0;
@@ -693,10 +694,10 @@ function buildBrinsonTip(label, val, excessVal, residualVal, ratioVal) {
       return <div style={tipStyle}>
         <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 14 }}>解释力（Explanation Ratio）</div>
         <div style={{ marginBottom: 6 }}>
-          <b>公式：</b>(配置效应 + 选股效应 + 交互效应) / 超额收益 × 100%
+          <b>公式：</b>1 − |残差| / |超额收益|（= 三效应之和 / 超额收益，等价）
         </div>
         <div style={{ marginBottom: 6 }}>
-          <b>含义：</b>Brinson 模型能解释的超额收益占比。越接近 100% 说明行业配置+选股几乎完全解释了收益来源；越低说明还有其他重要因素在起作用。
+          <b>含义：</b>多期 Brinson 模型能解释的超额收益占比。由于多期几何复合效应，三效应算术累加与总超额收益之间存在固有残差。解释力越高，说明行业配置+选股对收益来源的解释越充分。
         </div>
         <div style={{ marginBottom: 6, borderTop: '1px solid #f0f0f0', paddingTop: 4 }}>
           <b>阈值参考：</b>
@@ -708,6 +709,43 @@ function buildBrinsonTip(label, val, excessVal, residualVal, ratioVal) {
         {isNegativeExcess ? <div style={{ color: '#8c8c8c', marginTop: 4 }}>· 注意：超额收益为负时，解释力解读需适当调整</div> : null}
         <div style={{ marginTop: 6, borderTop: '1px solid #f0f0f0', paddingTop: 4, color: r >= 0.8 ? '#52c41a' : r >= 0.5 ? '#262626' : '#cf1322' }}>
           <b>解读：</b>当前解释力={fmtRatio(ratioVal)}，{r >= 0.8 ? '行业配置+选股几乎完全解释了超额收益，归因结论高度可靠' : r >= 0.5 ? '大部分超额收益可被三因素解释，同时存在少量其他因子贡献' : r >= 0.3 ? '解释力偏弱，除行业外还有其他重要收益驱动因素（如风格/市值/交易成本）' : '超额收益主要来自三因素以外的渠道，行业归因参考价值有限'}。{isNegativeExcess ? '超额为负时，应根据三效应的正负号分析亏损来源。' : ''}
+        </div>
+      </div>;
+
+    case '估算交易成本':
+      return <div style={tipStyle}>
+        <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 14 }}>估算交易成本</div>
+        <div style={{ marginBottom: 6 }}>
+          <b>公式：</b>累计单向换手率 × 单边费率 0.1%
+        </div>
+        <div style={{ marginBottom: 6 }}>
+          <b>含义：</b>回测中每次调仓产生的佣金+印花税估算值。换手率从各期持仓权重变化推算：单向换手率 = Σ|本期权重 − 上期权重| / 2。默认费率 0.1%（含佣金 0.03% + 印花税 0.05% 的近似），可根据实际费率调整。
+        </div>
+        <div style={{ marginBottom: 6, padding: '6px 8px', background: '#fff2f0', borderRadius: 6, border: '1px solid #ffccc7' }}>
+          <b>注意：</b>交易成本是超额收益的直接扣减项。如果换手率过高，交易成本会显著侵蚀超额收益。
+        </div>
+        <div style={{ color: v > 0 ? '#cf1322' : '#8c8c8c', marginTop: 4 }}>
+          <b>本期成本：</b>{v != null ? `${(v * 100).toFixed(2)}%` : '-'}
+        </div>
+      </div>;
+
+    case '净超额收益':
+      return <div style={tipStyle}>
+        <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 14 }}>净超额收益</div>
+        <div style={{ marginBottom: 6 }}>
+          <b>公式：</b>归因超额收益 − 估算交易成本
+        </div>
+        <div style={{ marginBottom: 6 }}>
+          <b>含义：</b>扣除交易成本后的实际超额收益。这是策略真实"落袋"的超额部分。如果净超额收益为负，说明策略超额被交易成本完全吃掉，需要降低换手率。
+        </div>
+        <div style={{ marginBottom: 6, borderTop: '1px solid #f0f0f0', paddingTop: 4 }}>
+          <b>阈值参考：</b>
+        </div>
+        <div>· > 归因超额 × 80%&nbsp;&nbsp;交易成本较低，策略执行效率高</div>
+        <div>· > 0&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;扣除成本后仍有正超额</div>
+        <div>· ≤ 0&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;交易成本吃掉全部超额，需优化</div>
+        <div style={{ marginTop: 6, borderTop: '1px solid #f0f0f0', paddingTop: 4, color: v > 0 ? '#52c41a' : '#cf1322' }}>
+          <b>解读：</b>净超额={fmtV(v)}，{v > 0 ? '扣除交易成本后策略仍保持正超额，执行效率良好' : '交易成本已完全侵蚀归因超额，建议关注换手率控制或降低交易频率'}。
         </div>
       </div>;
 
@@ -724,16 +762,18 @@ function AttributionSummary({ summary }) {
     { label: '选股效应', value: summary.totalSelectionEffect },
     { label: '交互效应', value: summary.totalInteractionEffect },
     { label: '超额收益', value: summary.totalExcessReturn },
-    { label: '残差', value: summary.residual },
     { label: '解释力', value: summary.explanationRatio, fmt: v => v != null ? `${(+v * 100).toFixed(1)}%` : '-' },
+    // 交易成本与净超额
+    { label: '估算交易成本', value: summary.estimatedTransactionCost, color: '#fa541c', fmt: v => v != null ? `-${(v * 100).toFixed(2)}%` : '-', divider: true },
+    { label: '净超额收益', value: summary.netExcessReturn, divider: true },
   ];
 
   return (
     <Card size="small" style={{ marginBottom: 16, background: '#fafafa' }}>
-      <Row gutter={8}>
+      <Row gutter={[8, 4]}>
         {items.map((m, i) => {
           const val = m.value;
-          const color = val != null ? signCol(val) : '#262626';
+          const color = m.color || (val != null ? signCol(val) : '#262626');
           const display = m.fmt ? m.fmt(val) : fmtPct(val);
           const tipContent = buildBrinsonTip(
             m.label, val,
@@ -742,10 +782,10 @@ function AttributionSummary({ summary }) {
             summary.explanationRatio
           );
           return (
-            <Col key={i} style={{ textAlign: 'center', padding: '4px 8px', borderRight: i < items.length - 1 ? '1px solid #e8e8e8' : 'none' }}>
+            <Col key={i} style={{ textAlign: 'center', padding: '4px 8px', borderLeft: m.divider ? '2px solid #e8e8e8' : 'none', borderRight: i < items.length - 1 ? '1px solid #e8e8e8' : 'none' }}>
               <div style={{ fontSize: 12, color: '#888', cursor: 'default', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 2 }}>
                 <span>{m.label}</span>
-                <AntTooltip overlayStyle={{ maxWidth: 460 }} title={tipContent} placement="top">
+                <AntTooltip styles={{ root: { maxWidth: 460 } }} title={tipContent} placement="top">
                   <QuestionCircleOutlined style={{ color: '#8c8c8c', fontSize: 11 }} />
                 </AntTooltip>
               </div>
@@ -893,7 +933,10 @@ function AttributionWaterfall({ periods }) {
 }
 
 /** 行业归因汇总表 */
-function IndustryAttributionTable({ industrySummary }) {
+function IndustryAttributionTable({ industrySummary, height }) {
+  // rightHeight - Card头(38) - body内边距(16) - 表格头(40) = 滚动区
+  const scrollY = height ? Math.max(height - 94, 200) : 420;
+
   if (!industrySummary || industrySummary.length === 0) return <Empty text="暂无行业归因数据" />;
 
   const columns = [
@@ -918,10 +961,9 @@ function IndustryAttributionTable({ industrySummary }) {
       sorter: (a, b) => a.totalContribution - b.totalContribution,
       defaultSortOrder: 'descend',
     },
-    // 迷你条形图
     {
       title: '贡献分布', dataIndex: 'totalContribution', key: 'bar', width: 180,
-      render: (v, record) => {
+      render: (v) => {
         const maxAbs = Math.max(...industrySummary.map(d => Math.abs(d.totalContribution)), 1e-8);
         const pct = Math.abs(v) / maxAbs * 100;
         const color = v >= 0 ? '#52c41a' : '#ff4d4f';
@@ -937,103 +979,251 @@ function IndustryAttributionTable({ industrySummary }) {
   ];
 
   return (
-    <Table
-      dataSource={industrySummary}
-      columns={columns}
-      rowKey="industry"
-      pagination={false}
-      size="small"
-      scroll={{ x: 680, y: 420 }}
-    />
+    <div style={{ height: '100%' }}>
+      <Table
+        dataSource={industrySummary}
+        columns={columns}
+        rowKey="industry"
+        pagination={false}
+        size="small"
+        scroll={{ x: 680, y: scrollY }}
+      />
+    </div>
   );
 }
 
 /** 图形分析结论 */
-function BrinsonConclusion({ summary }) {
+function BrinsonConclusion({ summary, industrySummary, periods }) {
   if (!summary) return null;
 
   const fmtPctV = (v) => v != null ? `${(v * 100).toFixed(2)}%` : '-';
-  const fmtRatioV = (v) => v != null ? `${(v * 100).toFixed(1)}%` : '-';
+  const fmtSigned = (v) => v >= 0 ? `+${(v * 100).toFixed(2)}` : (v * 100).toFixed(2);
   const alloc = summary.totalAllocationEffect != null ? +summary.totalAllocationEffect : 0;
   const select = summary.totalSelectionEffect != null ? +summary.totalSelectionEffect : 0;
   const interaction = summary.totalInteractionEffect != null ? +summary.totalInteractionEffect : 0;
   const excess = summary.totalExcessReturn != null ? +summary.totalExcessReturn : 0;
+  const netExcess = summary.netExcessReturn != null ? +summary.netExcessReturn : 0;
+  const cost = summary.estimatedTransactionCost != null ? +summary.estimatedTransactionCost : 0;
   const residual = summary.residual != null ? +summary.residual : 0;
-  const ratio = summary.explanationRatio != null ? +summary.explanationRatio : 0;
+  const inds = Array.isArray(industrySummary) ? industrySummary : [];
+  const perds = Array.isArray(periods) ? periods : [];
+  const hasIndData = inds.length > 0;
 
-  const threeSum = alloc + select + interaction;
-  const residualAbsRatio = Math.abs(excess) > 0.001 ? Math.abs(residual / excess) : 0;
-  const threeSumAbsRatio = Math.abs(excess) > 0.001 ? Math.abs(threeSum / excess) : 0;
+  // ── 行业级归因数据 ──
+  const topContributors = [...inds].sort((a, b) => -((+b.totalContribution || 0) - (+a.totalContribution || 0))).slice(0, 3);
+  const worstContributors = [...inds].sort((a, b) => (+a.totalContribution || 0) - (+b.totalContribution || 0)).slice(0, 3);
+  // 选股拖累最严重的行业
+  const worstSelectors = [...inds].sort((a, b) => (+a.totalSelection || 0) - (+b.totalSelection || 0)).slice(0, 3);
+  // 配置拖累最严重的行业
+  const worstAllocators = [...inds].sort((a, b) => (+a.totalAllocation || 0) - (+b.totalAllocation || 0)).slice(0, 3);
 
-  // 判断主导因素
-  const maxEffect = Math.max(Math.abs(alloc), Math.abs(select), Math.abs(interaction));
-  let mainEffectName = '';
-  if (maxEffect < 0.001) mainEffectName = '无明显主导效应';
-  else if (Math.abs(alloc) === maxEffect) mainEffectName = '配置效应';
-  else if (Math.abs(select) === maxEffect) mainEffectName = '选股效应';
-  else mainEffectName = '交互效应';
-
-  // 判断情景
-  let scenario = '';       // 情景描述
-  let verdict = '';        // 结论
-  let verdictColor = '#262626';
-  let suggestions = [];    // 建议
-
-  if (residualAbsRatio > 0.7) {
-    scenario = '三效应对超额收益的解释力极弱';
-    verdictColor = '#cf1322';
-    if (Math.abs(excess) < 0.01) {
-      scenario = '超额收益本身接近零，三效应和残差均无显著贡献';
-      verdict = '策略与基准高度贴合，行业归因参考价值有限';
-      verdictColor = '#8c8c8c';
-      suggestions = ['当前策略行业暴露接近基准，如需超额收益，需主动偏离基准行业权重或加强行业内选股'];
-    } else if (Math.abs(residual) > Math.abs(excess)) {
-      verdict = `超额收益主要由非行业因子驱动（残差占比 >100%），图形上三效应曲线紧贴0轴而超额曲线大幅偏离即为表现`;
-      suggestions = [
-        '考虑补充风格因子归因（市值/动量/价值等），定位超额收益的真实来源',
-        '检查策略持仓是否集中在少数个股 — 若个股波动远大于行业均值，残差会被放大',
-        '检查是否存在高换手 → 交易成本计入残差消耗了大量收益',
-      ];
-    } else {
-      verdict = `三效应合计仅解释${fmtRatioV(threeSum/excess)}的超额收益，残差（${fmtPctV(residual)}）占超额收益的${fmtRatioV(residualAbsRatio)}，是主要驱动来源`;
-      suggestions = [
-        '超额收益的驱动不在行业维度，建议结合 Alpha 分析面板验证因子方向',
-        '检查基准选择 — 若基准与策略风格差异大（如大盘基准 vs 小盘策略），残差自然放大',
-      ];
+  // 构建行业建议文本
+  var indSummaryText = '';
+  if (hasIndData) {
+    var parts = [];
+    if (topContributors.length > 0 && +topContributors[0].totalContribution > 0.001) {
+      parts.push('[贡献] ' + topContributors.map(function(x) {
+        return x.industry + '(+' + fmtPctV(x.totalContribution) + ')';
+      }).join(' / '));
     }
-  } else if (ratio > 0.7) {
-    scenario = '三效应能较好解释超额收益，图形可信';
-    verdictColor = '#52c41a';
-    verdict = `行业配置+选股解释了${fmtRatioV(ratio)}的超额收益，图表中三效应与超额收益走势总体上基本一致`;
-    const posCount = (alloc > 0.01 ? 1 : 0) + (select > 0.01 ? 1 : 0);
-    if (posCount >= 2) {
-      suggestions = ['配置和选股双轮驱动，策略在行业和个股层面均有效'];
-    } else if (Math.abs(alloc) > Math.abs(select)) {
-      suggestions = ['超额收益主要来自行业配置择时，选股端可加强'];
-    } else {
-      suggestions = ['超额收益主要来自行业内选股能力，行业配置偏中性'];
+    if (worstContributors.length > 0 && +worstContributors[0].totalContribution < -0.001) {
+      parts.push('[拖累] ' + worstContributors.map(function(x) {
+        return x.industry + '(' + fmtPctV(x.totalContribution) + ')';
+      }).join(' / '));
     }
-  } else if (ratio >= 0.3 && ratio <= 0.7) {
-    scenario = '三效应部分解释超额收益，存在其他重要因素';
-    verdictColor = '#fa8c16';
-    verdict = `Brinson 模型解释了${fmtRatioV(ratio)}的超额收益，另有${fmtRatioV(Math.max(0, 1 - ratio))}来自非行业维度`;
-    suggestions = [
-      '行业归因有参考价值但不完整，建议补充其他因子分析',
-      `当前主导效应为：${mainEffectName}（${fmtPctV(alloc+select+interaction > 0 ? maxEffect : -maxEffect)}），关注该维度的稳定性`,
-    ];
-  } else {
-    scenario = '解释力严重不足，图形参考价值有限';
-    verdictColor = '#cf1322';
-    verdict = `三效应合计仅${fmtPctV(threeSum)}，解释力${fmtRatioV(ratio)} — 超额收益几乎完全由非行业因素驱动，图中三效应曲线与超额曲线严重脱节`;
-    suggestions = [
-      '不建议仅依赖行业归因结论做决策',
-      '建议从因子回测面板定位超额来源（技术因子/基本面因子/事件驱动）',
-      '若超额收益持续为负且残差主导，应重审策略因子信号有效性',
-    ];
+    indSummaryText = parts.join('  ');
   }
 
-  // 公式计算展示
-  const fmtSigned = (v) => v >= 0 ? `+${(v * 100).toFixed(2)}` : (v * 100).toFixed(2);
+  // 因子配置
+  let factors = [];
+  let rebalanceFreq = '?';
+  let weightMode = '?';
+  try {
+    const cfgJson = summary?.screenConfigJson || '{}';
+    const cfg = typeof cfgJson === 'string' ? JSON.parse(cfgJson) : cfgJson;
+    factors = Array.isArray(cfg.factors) ? cfg.factors : [];
+    rebalanceFreq = summary?.rebalanceFreq || '?';
+    weightMode = summary?.weightMode || '?';
+  } catch (e) {}
+  var hasFactors = factors.length > 0;
+
+  // 效应排序
+  const effects = [
+    { name: '配置效应', value: alloc },
+    { name: '选股效应', value: select },
+    { name: '交互效应', value: interaction },
+  ];
+  effects.sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+  const dominant = effects[0];
+  const posCount = effects.filter(function(e) { return e.value > 0.005; }).length;
+  const negCount = effects.filter(function(e) { return e.value < -0.005; }).length;
+  const allNeg = negCount === 3 && effects.every(function(e) { return e.value < -0.01; });
+
+  // 成本分析
+  const costErosion = Math.abs(excess) > 0.001 ? Math.abs(cost / excess) : 0;
+
+  // === 数据驱动结论生成 ===
+  var scenario = '';
+  var verdict = '';
+  var verdictColor = '#262626';
+  var suggestions = [];
+  var summaryLines = [];
+
+  // 1. 超额方向与幅度
+  if (Math.abs(excess) < 0.005) {
+    scenario = '超额收益接近零';
+    verdictColor = '#8c8c8c';
+    verdict = '策略收益与基准持平，行业归因参考价值有限。';
+    suggestions.push('降低候选池宽度（Top% 缩小），加大主动偏离幅度以获取超额。');
+  } else if (excess > 0) {
+    scenario = '超额为正 (' + fmtPctV(excess) + ')';
+    verdictColor = posCount >= 2 ? '#52c41a' : '#fa8c16';
+    verdict = posCount >= 2
+      ? '策略有效：' + effects.filter(function(e) { return e.value > 0.005; }).map(function(e) { return e.name; }).join('、') + '正向贡献，' + (hasIndData ? (topContributors[0]?.industry || '') + '行业贡献最大。' : '')
+      : '超额仅靠' + dominant.name + '(' + fmtPctV(dominant.value) + ')单项驱动，风险集中、缺乏冗余。';
+  } else {
+    scenario = '超额为负 (' + fmtPctV(excess) + ')';
+    verdictColor = allNeg ? '#cf1322' : '#fa8c16';
+    verdict = allNeg
+      ? '三效应全线亏损，策略在回测期内全面失效。'
+      : dominant.name + '(' + fmtPctV(dominant.value) + ')是最大亏损来源，占比 ' + (Math.abs(excess) > 1e-8 ? (Math.abs(dominant.value) / Math.abs(excess) * 100).toFixed(0) : 0) + '%。';
+  }
+
+  // === 行动建议：三层结构 ===
+  // 第一层：可立即操作（基于策略编辑页可控参数）
+  // 第二层：验证步骤（如何确认修复有效）
+  // 第三层：需新增的能力（当前策略不支持，列为后续增强）
+
+  var actionables = [];   // 第一层
+  var verifications = []; // 第二层
+  var missingCaps = [];   // 第三层
+
+  // 辅助：创建操作项
+  function makeAction(label, body) { return { label: label, body: body }; }
+  function makeVerify(label, body) { return { label: label, body: body }; }
+  function makeMissing(label, body) { return { label: label, body: body }; }
+
+  // 因子名称列表
+  var factorNames = hasFactors
+    ? factors.map(function(f) { return f.name || f.factorCode || ''; }).filter(Boolean)
+    : [];
+
+  // ── 第一层：可立即操作 ──
+
+  // 1.1 选股拖累 → 因子调整
+  if (hasIndData && worstSelectors.length > 0) {
+    var wSelNames = worstSelectors
+      .filter(function(x) { return (+x.totalSelection || 0) < -0.002; })
+      .map(function(x) { return x.industry + '(' + fmtPctV(x.totalSelection) + ')'; });
+    if (wSelNames.length > 0) {
+      var selBody = '以下行业选股跑输行业平均：' + wSelNames.join('、') + '。';
+      if (hasFactors && factorNames.length > 0) {
+        selBody += '\n• 当前因子：' + factorNames.slice(0, 5).join('、') + (factorNames.length > 5 ? ' 等' + factorNames.length + '个' : '');
+        selBody += '\n• 操作：去 Alpha 分析面板，按行业筛选 — 查看这些行业内各因子的 IC 均值';
+        selBody += '\n• 移除 IC 均值为负的因子（在策略编辑页删除），或加大 IC 为正的因子权重';
+        selBody += '\n• 如所有因子 IC 均为负 → 该行业内因子全面失效 → 考虑在策略编辑页添加质量因子（FIN_ROE_TTM、PE_TTM）作为替代驱动';
+      } else {
+        selBody += '\n• 当前策略未使用因子选股 → 在策略编辑页为这些行业添加质量/价值因子（如 FIN_ROE_TTM、PE_TTM）';
+      }
+      actionables.push(makeAction('因子调整 — 修复选股拖累', selBody));
+      verifications.push(makeVerify('选股修复验证',
+        '移除负IC因子后重跑回测 → 预期这些行业选股效应从 ' + fmtPctV(worstSelectors[0].totalSelection) + ' 回升到 -1% 以内。如果仍为负，说明行业内因子全面失效 → 缩小 Top N（候选池收缩）来减少对这些行业的暴露。'
+      ));
+    }
+  }
+
+  // 1.2 配置拖累 → weightMode / Top N
+  if (hasIndData && worstAllocators.length > 0) {
+    var wAllocNames = worstAllocators
+      .filter(function(x) { return (+x.totalAllocation || 0) < -0.002; })
+      .map(function(x) { return x.industry + '(' + fmtPctV(x.totalAllocation) + ')'; });
+    if (wAllocNames.length > 0) {
+      var allocBody = '以下行业配置方向亏损：' + wAllocNames.join('、') + '。';
+      if (weightMode !== 'EQUAL' && weightMode !== '?') {
+        allocBody += '\n• 当前 weightMode=' + weightMode + '（主动行业偏离）';
+        allocBody += '\n• 操作：在策略编辑页将 weightMode 从 ' + weightMode + ' 改为 EQUAL';
+        allocBody += '\n• 等权模式下行业分配完全由股票得分决定，没有主动择时风险';
+      } else {
+        allocBody += '\n• 当前已是等权模式，配置拖累来自 Top N 选股后这些行业的股票自然偏多';
+        allocBody += '\n• 操作：缩小候选池宽度（如 Top20% → Top10%），减少被迫暴露的行业数量';
+      }
+      actionables.push(makeAction('权重模式 — 修复配置拖累', allocBody));
+      verifications.push(makeVerify('配置修复验证',
+        weightMode !== 'EQUAL' && weightMode !== '?'
+          ? '改为 EQUAL 后重跑回测 → 预期配置效应绝对值 < 2%（接近归零）。'
+          : '缩小 Top N 后重跑 → 预期配置效应绝对值从 ' + fmtPctV(worstAllocators[0].totalAllocation) + ' 显著缩小。'
+      ));
+    }
+  }
+
+  // 1.3 成本侵蚀
+  if (costErosion > 0.3 && Math.abs(excess) > 0.005) {
+    var suggestedFreq = rebalanceFreq === 'WEEKLY' ? 'BIWEEKLY' : rebalanceFreq === 'BIWEEKLY' ? 'MONTHLY' : '更低的频率';
+    var costBody = '交易成本 ' + fmtPctV(cost) + ' 侵蚀了超额收益的 ' + (costErosion * 100).toFixed(0) + '%。';
+    costBody += '\n• 当前调仓频率：' + rebalanceFreq;
+    costBody += '\n• 操作：在策略编辑页将调仓频率从 ' + rebalanceFreq + ' 改为 ' + suggestedFreq;
+    costBody += '\n• 预期：成本约降低 40%，净超额直接回升';
+    actionables.push(makeAction('调仓频率 — 降低交易成本', costBody));
+    verifications.push(makeVerify('成本优化验证',
+      '改为 ' + suggestedFreq + ' 后重跑 → 预期净超额从 ' + fmtSigned(netExcess) + ' 回升到正值区间。如果因子信号本身弱，降频可能同时降低换手和信号噪声。'
+    ));
+  }
+
+  // 1.4 全额亏损 → 归零重来
+  if (allNeg) {
+    actionables.push(makeAction('全线亏损 — 从零重建策略',
+      '三效应全部负贡献，说明当前因子组合在回测期内全面失效。建议：\n'
+      + '• 在策略编辑页新建一个最小化策略：仅保留1-2个基本面因子（如 FIN_ROE_TTM + PE_TTM）\n'
+      + '• weightMode 设为 EQUAL，调仓频率设为 MONTHLY（最小化成本）\n'
+      + '• 跑一遍回测看选股效应是否转正\n'
+      + '• 如果转正 → 逐个加回原来的因子，每次加一个并回测验证\n'
+      + '• 如果仍为负 → 说明回测期整体市场环境对基本面策略不友好'
+    ));
+    verifications.push(makeVerify('逐因子验证',
+      '最小化策略回测后，选股效应应为正（>0）——如果连这个都做不到，说明回测期内基本面信号也失效，需要换到其他市场区间验证。'
+    ));
+  }
+
+  // ── 第二层：通用验证指引 ──
+  if (actionables.length > 0 && verifications.length === 0) {
+    verifications.push(makeVerify('操作验证',
+      '每次改动一个参数后重跑回测：对比 Brinson 归因面板，确认对应效应数值是否按预期方向改善。如果改了一个参数后效应反而恶化，立刻还原。'
+    ));
+  }
+
+  // ── 第三层：需新增的能力 ──
+  if (hasIndData) {
+    var highConc = worstContributors.filter(function(x) { return Math.abs(+x.totalContribution || 0) > 0.02; });
+    if (highConc.length > 0) {
+      var concNames = highConc.map(function(x) { return x.industry + '(' + fmtPctV(x.totalContribution) + ')'; }).join('、');
+      missingCaps.push(makeMissing('行业集中度控制',
+        concNames + ' 过度集中拖累组合。当前策略没有行业权重上限参数。建议增加：\n'
+        + '• 行业中性化模块：在指定行业内做截面排名（而非全市场排名），避免因子偏好导致单一行业过度集中\n'
+        + '• 策略编辑页新增"单行业最大权重"参数（如 ≤ 15%），超出部分均摊到其他行业\n'
+        + '• 优先级：行业中性化 > 权重上限（前者是根，后者是治标）'
+      ));
+    }
+
+    // 如果配置和选股在相同行业都有问题 → 行业择时能力缺失
+    var sameBothWrong = worstContributors.filter(function(x) {
+      return (+x.totalAllocation || 0) < -0.002 && (+x.totalSelection || 0) < -0.002;
+    });
+    if (sameBothWrong.length > 0) {
+      var bothNames = sameBothWrong.map(function(x) { return x.industry; }).join('、');
+      missingCaps.push(makeMissing('行业择时信号',
+        bothNames + ' 配置和选股双输 — 说明这些行业整体走势判断错误。当前策略没有独立于选股的行业择时能力。建议增加：\n'
+        + '• 行业轮动因子：指数动量的行业截面排名（如过去20日行业指数收益率），独立判断行业方向\n'
+        + '• 实现方式：新增一个"行业择时"配置类型，与选股因子独立计算、各自贡献权重'
+      ));
+    }
+  }
+
+  // 依赖因子但没解析到 → 提示数据缺失
+  if (!hasFactors && negCount > 0) {
+    missingCaps.push(makeMissing('因子配置数据',
+      '未能解析到策略因子配置（screenConfigJson 为空）。行动建议只能给出通用方向，无法定位到具体因子。建议检查 RollingScreenTask 的 screen_config_json 字段是否正确保存。'
+    ));
+  }
 
   return (
     <Card
@@ -1041,18 +1231,21 @@ function BrinsonConclusion({ summary }) {
       style={{ marginTop: 16, borderLeft: `3px solid ${verdictColor}` }}
       title={<span style={{ fontSize: 14 }}>图形分析结论</span>}
     >
-      {/* Brinson 恒等式 + 数值计算 */}
+      {/* Brinson 恒等式 */}
       <div style={{ background: '#fafafa', padding: 12, borderRadius: 4, marginBottom: 12 }}>
         <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 13, color: '#555' }}>Brinson 恒等式</div>
         <div style={{ fontFamily: 'monospace', fontSize: 13, lineHeight: 2.2 }}>
           <div style={{ color: '#888', marginBottom: 2 }}>
-            超额收益 = 配置效应 + 选股效应 + 交互效应 + 残差
+            单期恒等式严格成立：超额收益 = 配置 + 选股 + 交互
           </div>
           <div style={{ fontWeight: 600, color: excess >= 0 ? '#cf1322' : '#3f8600' }}>
-            {fmtPctV(excess).replace('(', '').replace(')', '')} ≈ {fmtSigned(alloc)} + {fmtSigned(select)} + {fmtSigned(interaction)} + {fmtSigned(residual)}
+            {fmtPctV(excess)} = {fmtSigned(alloc)} + {fmtSigned(select)} + {fmtSigned(interaction)}
           </div>
-          <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #e8e8e8', color: '#888' }}>
-            解释力 = (配置+选股+交互) / |超额| = {fmtRatioV(threeSum)} / {fmtRatioV(Math.abs(excess))} = {fmtRatioV(ratio)}
+          <div style={{ marginTop: 4, color: Math.abs(residual) < 0.001 ? '#52c41a' : '#d48806' }}>
+            残差 = {fmtSigned(residual)}（{(Math.abs(residual) > 1e-8 && Math.abs(excess) > 1e-8) ? (Math.abs(residual) / Math.abs(excess) * 100).toFixed(2) + '%' : '≈0'}）
+          </div>
+          <div style={{ marginTop: 4, color: netExcess >= 0 ? '#52c41a' : '#fa541c' }}>
+            净超额 = {fmtSigned(excess)} − {(cost * 100).toFixed(2)}% = {fmtSigned(netExcess)}
           </div>
         </div>
       </div>
@@ -1064,6 +1257,16 @@ function BrinsonConclusion({ summary }) {
         </Tag>
       </div>
 
+      {/* 行业摘要 */}
+      {indSummaryText && (
+        <div style={{
+          background: '#f0f5ff', padding: '6px 10px', borderRadius: 4,
+          border: '1px solid #c6daff', marginBottom: 10, fontSize: 12, lineHeight: 1.6, color: '#2b4acb'
+        }}>
+          {indSummaryText}
+        </div>
+      )}
+
       {/* 核心结论 */}
       <div style={{
         background: '#fffbe6', padding: '8px 12px', borderRadius: 4,
@@ -1072,15 +1275,64 @@ function BrinsonConclusion({ summary }) {
         <span style={{ fontWeight: 700 }}>核心结论：</span>{verdict}
       </div>
 
-      {/* 行动建议 */}
-      {suggestions.length > 0 && (
-        <div style={{ fontSize: 13, lineHeight: 1.8 }}>
-          <div style={{ fontWeight: 700, marginBottom: 4, color: '#555' }}>行动建议：</div>
-          {suggestions.map((s, i) => (
-            <div key={i} style={{ paddingLeft: 8, marginBottom: 2 }}>
-              <span style={{ color: '#888' }}>{i + 1}.</span> {s}
-            </div>
-          ))}
+      {/* 第一层：可立即操作 */}
+      {actionables.length > 0 && (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontWeight: 700, marginBottom: 6, color: '#cf1322', fontSize: 13 }}>
+            可立即操作（策略编辑页直接改）
+          </div>
+          {actionables.map(function(a, i) {
+            return <div key={'act-' + i} style={{
+              background: '#fff2f0', padding: '8px 10px', borderRadius: 4,
+              border: '1px solid #ffccc7', marginBottom: 6, fontSize: 12, lineHeight: 1.7
+            }}>
+              <div style={{ fontWeight: 700, marginBottom: 2 }}>{a.label}</div>
+              <div style={{ whiteSpace: 'pre-wrap', color: '#434343' }}>{a.body}</div>
+            </div>;
+          })}
+        </div>
+      )}
+
+      {/* 第二层：验证步骤 */}
+      {verifications.length > 0 && (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontWeight: 700, marginBottom: 6, color: '#0958d9', fontSize: 13 }}>
+            如何验证修复有效
+          </div>
+          {verifications.map(function(v, i) {
+            return <div key={'ver-' + i} style={{
+              background: '#e6f4ff', padding: '6px 10px', borderRadius: 4,
+              border: '1px solid #91caff', marginBottom: 4, fontSize: 12, lineHeight: 1.7
+            }}>
+              <span style={{ fontWeight: 600 }}>{v.label}：</span>
+              <span style={{ color: '#434343' }}>{v.body}</span>
+            </div>;
+          })}
+        </div>
+      )}
+
+      {/* 第三层：需新增的能力 */}
+      {missingCaps.length > 0 && (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontWeight: 700, marginBottom: 6, color: '#8c8c8c', fontSize: 13 }}>
+            需新增的策略能力（当前不支持，建议后续开发）
+          </div>
+          {missingCaps.map(function(m, i) {
+            return <div key={'mis-' + i} style={{
+              background: '#fafafa', padding: '6px 10px', borderRadius: 4,
+              border: '1px solid #d9d9d9', marginBottom: 4, fontSize: 12, lineHeight: 1.7
+            }}>
+              <div style={{ fontWeight: 600, marginBottom: 2, color: '#595959' }}>{m.label}</div>
+              <div style={{ whiteSpace: 'pre-wrap', color: '#8c8c8c' }}>{m.body}</div>
+            </div>;
+          })}
+        </div>
+      )}
+
+      {/* 无建议时的兜底 */}
+      {actionables.length === 0 && missingCaps.length === 0 && (
+        <div style={{ color: '#8c8c8c', fontSize: 12, padding: '4px 0' }}>
+          当前归因结果良好，无需调整。
         </div>
       )}
     </Card>
@@ -1091,6 +1343,8 @@ function BrinsonConclusion({ summary }) {
 function AttributionPanel({ taskId }) {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState(null);
+  const leftRef = useRef(null);
+  const [rightHeight, setRightHeight] = useState(null);
 
   const loadAttribution = useCallback(() => {
     setLoading(true);
@@ -1100,7 +1354,20 @@ function AttributionPanel({ taskId }) {
       .finally(() => setLoading(false));
   }, [taskId]);
 
-  useEffect(() => { loadAttribution(); }, [taskId]);
+  // 组件挂载时自动加载（Tabs destroyOnHidden 保证只在切到此 tab 时才挂载）
+  useEffect(() => { loadAttribution(); }, [loadAttribution]);
+
+  // 监听左侧高度，同步给右侧
+  useEffect(() => {
+    if (!data || !leftRef.current) return;
+    const calc = () => {
+      if (leftRef.current) setRightHeight(leftRef.current.offsetHeight);
+    };
+    calc();
+    const ro = new ResizeObserver(calc);
+    ro.observe(leftRef.current);
+    return () => ro.disconnect();
+  }, [data]);
 
   if (loading) {
     return (
@@ -1114,8 +1381,8 @@ function AttributionPanel({ taskId }) {
 
   if (!data) {
     return (
-      <Card size="small">
-        <Alert type="info" message="归因分析需要行业分类数据，请确认股票信息中包含行业字段" showIcon />
+      <Card size="small" style={{ margin: '0 auto', maxWidth: 360 }}>
+        <Alert type="info" message="归因分析计算失败或数据缺失" description="可能后端计算超时或行业分类数据不完整" showIcon action={<Button size="small" onClick={loadAttribution}>重试</Button>} />
       </Card>
     );
   }
@@ -1141,14 +1408,16 @@ function AttributionPanel({ taskId }) {
 
       <Row gutter={16}>
         <Col span={16}>
+          <div ref={leftRef}>
           <Card title="累计归因曲线" size="small">
             <AttributionCumulativeChart cumulativeChart={data.cumulativeChart} />
           </Card>
-          <BrinsonConclusion summary={data.summary} />
+          <BrinsonConclusion summary={data.summary} industrySummary={data.industrySummary} periods={data.periods} />
+          </div>
         </Col>
-        <Col span={8}>
-          <Card title="行业归因汇总" size="small" bodyStyle={{ padding: '8px 12px' }}>
-            <IndustryAttributionTable industrySummary={data.industrySummary} />
+        <Col span={8} style={{ height: rightHeight || 'auto' }}>
+          <Card title="行业归因汇总" size="small" styles={{ body: { padding: '8px 12px', height: '100%', overflow: 'hidden' } }} style={{ width: '100%', height: rightHeight || 'auto' }}>
+            <IndustryAttributionTable industrySummary={data.industrySummary} height={rightHeight} />
           </Card>
         </Col>
       </Row>
@@ -1438,7 +1707,7 @@ export default function BacktestReport() {
     },
     {
       key: 'attribution',
-      label: <>Brinson归因 <AntTooltip overlayStyle={{ maxWidth: 420 }} title={<div style={{ lineHeight: 1.8, fontSize: 13 }}>
+      label: <>Brinson归因 <AntTooltip styles={{ root: { maxWidth: 420 } }} title={<div style={{ lineHeight: 1.8, fontSize: 13 }}>
           <div style={{ fontWeight: 700, marginBottom: 4 }}>Brinson 归因模型（行业维度）</div>
           <div style={{ marginBottom: 6, color: '#8c8c8c', fontSize: 12 }}>
             Brinson 模型基于<b>行业分类</b>分析超额收益来源。它假设收益差异来自两个层面：<b>行业配置</b>（是否超配了强势行业）和<b>行业内选股</b>（是否挑出了行业中的佼佼者）。若策略收益主要由非行业因子驱动（如市值/动量/事件），三效应解释力会偏低。
@@ -1460,7 +1729,7 @@ export default function BacktestReport() {
     },
     {
       key: 'excess',
-      label: <><LineChartOutlined />Alpha 分析 <AntTooltip overlayStyle={{ maxWidth: 420 }} title={<div style={{ lineHeight: 1.8, fontSize: 13 }}>
+      label: <><LineChartOutlined />Alpha 分析 <AntTooltip styles={{ root: { maxWidth: 420 } }} title={<div style={{ lineHeight: 1.8, fontSize: 13 }}>
           <div style={{ fontWeight: 700, marginBottom: 4 }}>CAPM 超额收益拆解</div>
           <div>将策略收益分离为两部分：</div>
           <div>· <b>Alpha</b> — 独立于市场涨跌的选股/择时收益</div>
@@ -1482,7 +1751,7 @@ export default function BacktestReport() {
     },
     {
       key: 'montecarlo',
-      label: <><ExperimentOutlined />蒙特卡洛 <AntTooltip overlayStyle={{ maxWidth: 420 }} title={<div style={{ lineHeight: 1.8, fontSize: 13 }}>
+      label: <><ExperimentOutlined />蒙特卡洛 <AntTooltip styles={{ root: { maxWidth: 420 } }} title={<div style={{ lineHeight: 1.8, fontSize: 13 }}>
           <div style={{ fontWeight: 700, marginBottom: 4 }}>Bootstrap 重采样模拟</div>
           <div>基于历史日收益率随机抽样，生成数千条未来净值路径，评估策略在不同市场环境下的表现分布。</div>
           <div style={{ marginTop: 6, borderTop: '1px solid #f0f0f0', paddingTop: 4 }}>
@@ -1560,7 +1829,7 @@ export default function BacktestReport() {
       </Card>
 
       {/* Tab 切换 */}
-      <Tabs items={tabItems} defaultActiveKey="overview" />
+      <Tabs items={tabItems} defaultActiveKey="overview" destroyOnHidden />
     </div>
   );
 }

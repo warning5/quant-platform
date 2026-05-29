@@ -19,9 +19,8 @@ import { dataUpdateApi, financialApi, silentConfig } from '../../api/index';
 const { Text, Title } = Typography;
 const { RangePicker } = DatePicker;
 
-// WebSocket 地址
-const WS_URL = (window.location.protocol === 'https:' ? 'wss:' : 'ws:') +
-  '//' + window.location.host + '/ws-native';
+// WebSocket 地址 - 开发环境直接连后端（绕过 Vite WS 代理兼容性问题）
+const WS_URL = 'ws://localhost:8080/api/ws-native';
 
 const SOURCE_OPTIONS = [
   { value: 'ALL', label: '全部数据源' },
@@ -195,6 +194,7 @@ function DataUpdate() {
   const [indexForm] = Form.useForm();
   const [dividendForm] = Form.useForm();
   const wsRef = useRef(null);
+  const reconnectTimerRef = useRef(null);
 
   // 三个 Tab 各自独立的任务状态和日志
   const [dailyTask, setDailyTask] = useState(null);
@@ -603,11 +603,18 @@ function DataUpdate() {
       setWsConnected(false);
       wsRef.current = null;
       // 断线后 3 秒自动重连
-      setTimeout(() => {
+      reconnectTimerRef.current = setTimeout(() => {
         if (!wsRef.current) connectWs();
       }, 3000);
     };
-    ws.onerror = () => { setWsConnected(false); };
+    ws.onerror = () => {
+      setWsConnected(false);
+      wsRef.current = null;
+      // 连接失败时也要重连（onerror 不一定触发 onclose）
+      reconnectTimerRef.current = setTimeout(() => {
+        if (!wsRef.current) connectWs();
+      }, 3000);
+    };
   }, [getTaskUpdater, getLogUpdater]);
 
   // ========== 日志自动滚动 ==========
@@ -864,7 +871,10 @@ function DataUpdate() {
       }
     }).catch(() => {});
 
-    return () => { if (wsRef.current) wsRef.current.close(); };
+    return () => {
+      if (reconnectTimerRef.current) { clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null; }
+      if (wsRef.current) { wsRef.current.close(); wsRef.current = null; }
+    };
   }, []);
 
   // 日志自动滚动

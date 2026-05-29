@@ -222,6 +222,7 @@ public class RollingScreenEngine {
         int total = tradingDates.size();
         sendProgress(task.getId(), "RUNNING", 1,
                 "开始回测, 共 " + total + " 个交易日, " + rebalanceDates.size() + " 个调仓日");
+        int lastSentProgress = 1; // 确保进度单调不减
 
         // ════════════════════════════════════════════════════════
         //  主循环：遍历每个交易日
@@ -277,7 +278,8 @@ public class RollingScreenEngine {
 
             if (isRebalance) {
                 log.info("[{}] === REBALANCE DAY (#{}/{}) ===", today, di + 1, total);
-                int progressPct = Math.min(95, (int) ((double) di / total * 100));
+                int progressPct = Math.min(95, (int) ((double) (di + 1) / total * 100));
+                progressPct = Math.max(progressPct, lastSentProgress); // 单调不减
 
                 // 6a. 调用选股服务获取当期股票池
                 ScreenRequest screenReq = buildScreenRequest(baseScreenReq, today);
@@ -477,6 +479,16 @@ public class RollingScreenEngine {
                 sendProgress(task.getId(), "RUNNING", progressPct,
                         String.format("调仓 %s: %d 只股票, 现金 %.0f, 总资产 %.0f",
                                 today, targets.size(), cash, portfolioValue));
+                lastSentProgress = progressPct;
+            }
+
+            // ── 每日进度更新（非调仓日每 5% 发一次，减少 DB 写入）──
+            int dailyPct = Math.min(95, (int) ((double) (di + 1) / total * 100));
+            dailyPct = Math.max(dailyPct, lastSentProgress);
+            if (dailyPct > lastSentProgress && (dailyPct % 5 == 0 || dailyPct >= 95)) {
+                sendProgress(task.getId(), "RUNNING", dailyPct,
+                        String.format("回测进行中 %s (%d/%d)", today, di + 1, total));
+                lastSentProgress = dailyPct;
             }
 
             // ── 记录权益曲线和基准曲线 ─────────────────────────

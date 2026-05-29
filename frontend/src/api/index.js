@@ -3,7 +3,7 @@ import { message } from '../utils/messageUtil';
 
 const api = axios.create({
   baseURL: '/api',
-  timeout: 30000,
+  timeout: 120000,
 });
 
 // 友好错误提示映射：对服务器内部错误统一显示友好文案
@@ -184,7 +184,7 @@ export const backtestApi = {
   getReport: (taskId) => api.get(`/backtests/${taskId}/report`),
   getReportById: (reportId) => api.get(`/backtests/reports/${reportId}`),
   getCurve: (taskId) => api.get(`/backtests/${taskId}/curve`),
-  getAttribution: (taskId) => api.get(`/backtests/${taskId}/attribution`),
+  getAttribution: (taskId) => api.get(`/backtests/${taskId}/attribution`, { timeout: 300000 }),
   cancel: (taskId) => api.post(`/backtests/${taskId}/cancel`),
   delete: (taskId) => api.delete(`/backtests/${taskId}`),
   // P1: 多策略对比

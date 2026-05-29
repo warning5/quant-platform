@@ -155,6 +155,14 @@ public class BacktestTask implements Serializable {
     private Integer maxPositionCount;
 
     /**
+     * 选股配置 JSON（因子列表/权重/阈值等），
+     * 用于 Brinson 归因结论中的因子级诊断。
+     * 格式对应 {@code ScreenRequest} 的序列化结果。
+     */
+    @TableField("screen_config_json")
+    private String screenConfigJson;
+
+    /**
      * 状态
      */
     @TableField("status")

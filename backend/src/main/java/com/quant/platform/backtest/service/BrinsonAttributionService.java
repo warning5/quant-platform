@@ -2,6 +2,9 @@ package com.quant.platform.backtest.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.quant.platform.backtest.domain.BacktestTask;
+import com.quant.platform.backtest.domain.RollingScreenTask;
+import com.quant.platform.backtest.mapper.RollingScreenTaskMapper;
 import com.quant.platform.common.exception.BusinessException;
 import com.quant.platform.stock.entity.StockDaily;
 import com.quant.platform.stock.entity.StockInfo;
@@ -35,6 +38,7 @@ public class BrinsonAttributionService {
     private final StockInfoMapper stockInfoMapper;
     private final ClickHouseStockService clickHouseStockService;
     private final ObjectMapper objectMapper;
+    private final RollingScreenTaskMapper rollingScreenTaskMapper;
 
     /**
      * 需要排除的指数名称
@@ -54,11 +58,12 @@ public class BrinsonAttributionService {
      * @return 归因结果
      */
     @SuppressWarnings("unchecked")
-    public Map<String, Object> computeBrinson(Long taskId,
+    public Map<String, Object> computeBrinson(BacktestTask task,
                                               String positionHistoryJson,
                                               String equityCurveJson,
-                                              String benchmarkCurveJson,
-                                              String benchmarkCode) {
+                                              String benchmarkCurveJson) {
+        Long taskId = task.getId();
+        String benchmarkCode = task.getBenchmarkCode();
         if (positionHistoryJson == null || positionHistoryJson.isBlank()) {
             throw new BusinessException("持仓历史数据为空，无法进行归因分析");
         }
@@ -88,16 +93,16 @@ public class BrinsonAttributionService {
         }
         Map<String, String> codeIndustryMap = loadIndustryMap(allCodes);
 
-        // 建立基准日期→净值映射
-        Map<String, Double> bmNavMap = new LinkedHashMap<>();
-        for (Map<String, Object> bm : benchmarkCurve) {
-            bmNavMap.put((String) bm.get("date"), ((Number) bm.get("value")).doubleValue());
-        }
-
         // 建立策略日期→净值映射
         Map<String, Double> stratNavMap = new LinkedHashMap<>();
         for (Map<String, Object> eq : equityCurve) {
             stratNavMap.put((String) eq.get("date"), ((Number) eq.get("value")).doubleValue());
+        }
+
+        // 建立基准日期→净值映射（用于获取真实区间基准收益）
+        Map<String, Double> bmNavMap = new LinkedHashMap<>();
+        for (Map<String, Object> bm : benchmarkCurve) {
+            bmNavMap.put((String) bm.get("date"), ((Number) bm.get("value")).doubleValue());
         }
 
         // 逐期计算归因
@@ -106,6 +111,7 @@ public class BrinsonAttributionService {
         double totalSelection = 0;
         double totalInteraction = 0;
         double totalExcess = 0;
+        double totalTurnover = 0; // 累计单向换手率，用于估算交易成本
 
         for (int i = 0; i < positionHistory.size(); i++) {
             Map<String, Object> snap = positionHistory.get(i);
@@ -132,15 +138,34 @@ public class BrinsonAttributionService {
             if (stratStart == null || stratEnd == null || stratStart <= 0) continue;
             double stratReturn = stratEnd / stratStart - 1;
 
-            // 计算该期基准收益率
+            // 计算该期基准收益率（从基准净值曲线 — 真实区间收益）
             Double bmStart = bmNavMap.get(startDate);
             Double bmEnd = findClosestNav(bmNavMap, endDate);
             if (bmStart == null || bmEnd == null || bmStart <= 0) continue;
-            double bmReturn = bmEnd / bmStart - 1;
+            double benchCurveReturn = bmEnd / bmStart - 1; // 基准区间真实收益
 
             // 提取持仓股票
             Map<String, Object> positions = (Map<String, Object>) snap.get("positions");
             if (positions == null || positions.isEmpty()) continue;
+
+            // 计算本期换手率（本期持仓 vs 上期持仓的权重变化）
+            double periodTurnover = 0;
+            if (i > 0) {
+                Map<String, Object> prevPositions = (Map<String, Object>) positionHistory.get(i - 1).get("positions");
+                if (prevPositions != null) {
+                    Set<String> allSymbols = new HashSet<>();
+                    allSymbols.addAll(prevPositions.keySet());
+                    allSymbols.addAll(positions.keySet());
+                    for (String symbol : allSymbols) {
+                        double prevW = prevPositions.containsKey(symbol)
+                                ? ((Number) prevPositions.get(symbol)).doubleValue() : 0;
+                        double currW = ((Number) positions.getOrDefault(symbol, 0)).doubleValue();
+                        periodTurnover += Math.abs(currW - prevW);
+                    }
+                    periodTurnover /= 2.0; // 单向换手率
+                }
+            }
+            totalTurnover += periodTurnover;
 
             // 计算组合行业权重
             Map<String, Double> portfolioIndustryWeight = new HashMap<>();
@@ -185,6 +210,25 @@ public class BrinsonAttributionService {
             // 计算组合各行业收益率
             Map<String, Double> portfolioIndustryReturn = new HashMap<>();
             computePortfolioIndustryReturn(positions, start, end, portfolioIndustryReturn, codeIndustryMap);
+
+            // ── 缩放校准：rb_i 是单日收益，需缩放到区间尺度 ──
+            // 原理：在单期内，各行业相对强弱 vs 全市场的排序保持，但绝对尺度应该与
+            // 基准曲线的区间收益匹配。缩放后 Σ(wb_i × rb_i) = benchCurveReturn。
+            // 这保证 Brinson 恒等式在单期内严格成立。
+            double rawBmSum = 0;
+            for (Map.Entry<String, Double> entry : benchmarkIndustryWeight.entrySet()) {
+                double wb = entry.getValue();
+                double rb = benchmarkIndustryReturn.getOrDefault(entry.getKey(), 0.0);
+                rawBmSum += wb * rb;
+            }
+            double bmScale = Math.abs(rawBmSum) > 1e-8 ? benchCurveReturn / rawBmSum : 1.0;
+            // 缩放所有 rb_i
+            for (Map.Entry<String, Double> entry : benchmarkIndustryReturn.entrySet()) {
+                double rb = entry.getValue() * bmScale;
+                entry.setValue(rb);
+            }
+            // 缩放后 bmReturn = Σ(wb_i × scaled_rb_i) = benchCurveReturn
+            double bmReturn = benchCurveReturn;
 
             // Brinson 归因分解
             double allocation = 0;
@@ -270,15 +314,24 @@ public class BrinsonAttributionService {
 
         // 汇总归因
         Map<String, Object> summary = new LinkedHashMap<>();
+
         summary.put("totalAllocationEffect", round4(totalAllocation));
         summary.put("totalSelectionEffect", round4(totalSelection));
         summary.put("totalInteractionEffect", round4(totalInteraction));
         summary.put("totalExcessReturn", round4(totalExcess));
-        // 残差 = 超额收益 - 三项之和（衡量模型解释力）
-        double residual = totalExcess - totalAllocation - totalSelection - totalInteraction;
-        summary.put("residual", round4(residual));
-        summary.put("explanationRatio", totalExcess != 0
-                ? round4((totalAllocation + totalSelection + totalInteraction) / totalExcess) : 0);
+        // 多期 Brinson 残差（单期恒等式成立，多期算术累加不闭合，属模型固有局限）
+        double residual = round4(totalExcess - (totalAllocation + totalSelection + totalInteraction));
+        summary.put("residual", residual);
+        // 解释力 = 1 - |残差| / |超额收益|（残差越小，解释力越高）
+        summary.put("explanationRatio",
+            Math.abs(totalExcess) > 1e-8
+                ? round4(1 - Math.abs(residual) / Math.abs(totalExcess)) : 0);
+        // 估算交易成本：累计单向换手率 × 单边费率 0.1%（回测环境默认值）
+        double estimatedTransactionCost = totalTurnover * 0.001;
+        summary.put("totalTurnover", round4(totalTurnover));
+        summary.put("estimatedTransactionCost", round4(estimatedTransactionCost));
+        // 净超额收益 = 归因超额收益 - 估算交易成本
+        summary.put("netExcessReturn", round4(totalExcess - estimatedTransactionCost));
 
         result.put("summary", summary);
 
@@ -289,6 +342,35 @@ public class BrinsonAttributionService {
         // 行业汇总归因（所有期各行业贡献加总）
         List<Map<String, Object>> industrySummary = buildIndustrySummary(periodResults);
         result.put("industrySummary", industrySummary);
+
+        // 查询关联的 RollingScreenTask 以获取策略配置（用于前端 Brinson 结论诊断）
+        // 注意：backtest_task 和 rolling_screen_task 是两个独立表的独立 ID，需按业务字段匹配
+        try {
+            LambdaQueryWrapper<RollingScreenTask> wrapper = new LambdaQueryWrapper<>();
+            wrapper.eq(RollingScreenTask::getBenchmarkCode, task.getBenchmarkCode())
+                   .eq(RollingScreenTask::getStatus, "COMPLETED")
+                   .le(RollingScreenTask::getStartDate, task.getEndDate())
+                   .ge(RollingScreenTask::getEndDate, task.getStartDate())
+                   .orderByDesc(RollingScreenTask::getCreatedAt)
+                   .last("LIMIT 1");
+            RollingScreenTask rsTask = rollingScreenTaskMapper.selectList(wrapper)
+                    .stream().findFirst().orElse(null);
+            if (rsTask != null && rsTask.getScreenConfigJson() != null) {
+                summary.put("screenConfigJson", rsTask.getScreenConfigJson());
+                summary.put("rebalanceFreq", rsTask.getRebalanceFreq());
+                summary.put("weightMode", rsTask.getWeightMode());
+                log.info("匹配到 RollingScreenTask id={}，已注入 screenConfigJson", rsTask.getId());
+            } else {
+                summary.put("screenConfigJson", null);
+                summary.put("rebalanceFreq", null);
+                summary.put("weightMode", null);
+            }
+        } catch (Exception e) {
+            log.debug("查找 RollingScreenTask 失败 (taskId={}): {}", taskId, e.getMessage());
+            summary.put("screenConfigJson", null);
+            summary.put("rebalanceFreq", null);
+            summary.put("weightMode", null);
+        }
 
         return result;
     }
@@ -408,12 +490,27 @@ public class BrinsonAttributionService {
             String industry = entry.getKey();
             List<String> stocks = entry.getValue();
 
-            double totalReturn = 0;
-            int validCount = 0;
+            // 第一步：计算该行业内所有股票的总权重（用于内部归一化）
+            double industryTotalWeight = 0;
+            for (String symbol : stocks) {
+                Object w = positions.get(symbol);
+                if (w != null) industryTotalWeight += ((Number) w).doubleValue();
+            }
+
+            // 第二步：按持仓权重加权计算行业收益率
+            double weightedReturn = 0;
+            double accountedWeight = 0; // 实际计入的权重（skip无效数据）
 
             for (String symbol : stocks) {
                 int dot = symbol.lastIndexOf('.');
                 String code = dot > 0 ? symbol.substring(0, dot) : symbol;
+
+                // 该股票在行业内的权重
+                double stockWeight = 0;
+                Object w = positions.get(symbol);
+                if (w != null) stockWeight = ((Number) w).doubleValue();
+                double withinIndustryWeight = industryTotalWeight > 0
+                        ? stockWeight / industryTotalWeight : 1.0 / stocks.size();
 
                 // 查询该股票在期初和期末的收盘价
                 List<StockDaily> bars = clickHouseStockService.getStockDaily(code, startDate, endDate);
@@ -422,21 +519,28 @@ public class BrinsonAttributionService {
                     double startClose = bars.getFirst().getClosePrice().doubleValue();
                     double endClose = bars.getLast().getClosePrice().doubleValue();
                     if (startClose > 0) {
-                        totalReturn += endClose / startClose - 1;
-                        validCount++;
+                        weightedReturn += withinIndustryWeight * (endClose / startClose - 1);
+                        accountedWeight += withinIndustryWeight;
                     }
                 } else if (bars.size() == 1) {
                     // 只有一天数据，用当日涨跌幅
                     StockDaily bar = bars.getFirst();
                     if (bar.getPreClose() != null && bar.getPreClose().doubleValue() > 0) {
-                        totalReturn += bar.getClosePrice().doubleValue() / bar.getPreClose().doubleValue() - 1;
-                        validCount++;
+                        weightedReturn += withinIndustryWeight
+                                * (bar.getClosePrice().doubleValue() / bar.getPreClose().doubleValue() - 1);
+                        accountedWeight += withinIndustryWeight;
                     }
                 }
             }
 
-            // 行业收益 = 等权平均（因为组合是等权的）
-            double avgReturn = validCount > 0 ? totalReturn / validCount : 0;
+            // 归一化：如缺失超50%，拒绝归一化（避免放大数据缺失误差）
+            double avgReturn;
+            if (accountedWeight > 0.5) {
+                avgReturn = weightedReturn / accountedWeight;
+            } else {
+                // 数据缺失严重，用原始加权收益或不归零（不做放大）
+                avgReturn = weightedReturn;
+            }
             industryReturn.put(industry, round4(avgReturn));
         }
     }
