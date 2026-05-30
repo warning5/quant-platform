@@ -1,15 +1,15 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
-  Card, Row, Col, Statistic, Typography, Button, Space, Spin, Tabs,
-  Tag, Table, Alert, Badge, Tooltip as AntTooltip,
+  Card, Row, Col, Statistic, Typography, Button, Space, Spin, Tabs, Skeleton,
+  Tag, Table, Alert, Badge, Tooltip as AntTooltip, Popconfirm, message, Progress,
 } from 'antd';
 import {
   ArrowLeftOutlined, ReloadOutlined,
   RiseOutlined, FallOutlined, BarChartOutlined,
   PieChartOutlined, LineChartOutlined,
   SwapOutlined, FundOutlined, ExperimentOutlined,
-  QuestionCircleOutlined,
+  QuestionCircleOutlined, RedoOutlined,
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import { backtestApi } from '../../api';
@@ -763,6 +763,7 @@ function AttributionSummary({ summary }) {
     { label: '交互效应', value: summary.totalInteractionEffect },
     { label: '超额收益', value: summary.totalExcessReturn },
     { label: '解释力', value: summary.explanationRatio, fmt: v => v != null ? `${(+v * 100).toFixed(1)}%` : '-' },
+    { label: '残差', value: summary.residual },
     // 交易成本与净超额
     { label: '估算交易成本', value: summary.estimatedTransactionCost, color: '#fa541c', fmt: v => v != null ? `-${(v * 100).toFixed(2)}%` : '-', divider: true },
     { label: '净超额收益', value: summary.netExcessReturn, divider: true },
@@ -871,6 +872,65 @@ function AttributionCumulativeChart({ cumulativeChart }) {
 function AttributionWaterfall({ periods }) {
   if (!periods || periods.length === 0) return null;
 
+  // ── 智能 Y 轴范围：按数据分布裁剪极端异常值，避免个别极端值撑爆 Y 轴 ──
+  const allAbs = [];
+  periods.forEach(p => {
+    allAbs.push(Math.abs(p.allocationEffect * 100));
+    allAbs.push(Math.abs(p.selectionEffect * 100));
+    allAbs.push(Math.abs(p.interactionEffect * 100));
+    allAbs.push(Math.abs(p.excessReturn * 100));
+  });
+  allAbs.sort((a, b) => a - b);
+  const p90 = allAbs[Math.floor(allAbs.length * 0.92)];
+  // 基础区间 ±max(p92*1.3, 3%)，不超过 ±600% 兜底
+  const rawRange = Math.max(p90 * 1.3, 3);
+  const yMax = Math.min(rawRange, 600);
+  const yMin = -yMax;
+
+  // 统计被裁剪的期间
+  let clippedCount = 0;
+  let worstPeriod = '';
+  let worstVal = 0;
+  periods.forEach(p => {
+    const vals = [
+      Math.abs(p.allocationEffect * 100),
+      Math.abs(p.selectionEffect * 100),
+      Math.abs(p.interactionEffect * 100),
+      Math.abs(p.excessReturn * 100),
+    ];
+    const maxV = Math.max(...vals);
+    if (maxV > yMax + 0.5) {
+      clippedCount++;
+      if (maxV > worstVal) { worstVal = maxV; worstPeriod = p.period; }
+    }
+  });
+  const hasClipped = clippedCount > 0;
+
+  // ── X 轴标签自动间隔：超过 30 根柱子时每隔一根显示，超过 60 根时隔两根 ──
+  const rawLabels = periods.map(p => p.period?.split(' ~ ')[1] || p.startDate);
+  const labelInterval = rawLabels.length > 60 ? 2 : rawLabels.length > 30 ? 1 : 0;
+
+  // 累计归因（用于特殊高亮裁剪期）
+  const clippedPeriodIndices = new Set();
+  periods.forEach((p, i) => {
+    const vals = [
+      Math.abs(p.allocationEffect * 100),
+      Math.abs(p.selectionEffect * 100),
+      Math.abs(p.interactionEffect * 100),
+      Math.abs(p.excessReturn * 100),
+    ];
+    if (Math.max(...vals) > yMax + 0.5) clippedPeriodIndices.add(i);
+  });
+
+  // 裁剪期标记线
+  const markLines = [];
+  if (hasClipped) {
+    markLines.push(
+      { yAxis: yMax, lineStyle: { color: '#ff4d4f', type: 'dashed', width: 1 }, label: { show: false } },
+      { yAxis: yMin, lineStyle: { color: '#ff4d4f', type: 'dashed', width: 1 }, label: { show: false } },
+    );
+  }
+
   const option = {
     backgroundColor: 'transparent',
     tooltip: {
@@ -878,11 +938,15 @@ function AttributionWaterfall({ periods }) {
       formatter: params => {
         const idx = params[0].dataIndex;
         const p = periods[idx];
+        const isClippedPeriod = clippedPeriodIndices.has(idx);
+        const clipWarn = isClippedPeriod
+          ? `<div style="color:#ff4d4f;font-size:11px;margin-top:4px">⚠ 此期数值过大，已超出图表可视范围</div>`
+          : '';
         return `<div style="font-weight:600">${p.period}</div>
           <div>配置效应: ${fmtPct(p.allocationEffect)}</div>
           <div>选股效应: ${fmtPct(p.selectionEffect)}</div>
           <div>交互效应: ${fmtPct(p.interactionEffect)}</div>
-          <div>超额收益: ${fmtPct(p.excessReturn)}</div>`;
+          <div>超额收益: ${fmtPct(p.excessReturn)}</div>${clipWarn}`;
       },
     },
     legend: {
@@ -890,14 +954,21 @@ function AttributionWaterfall({ periods }) {
       top: 4,
       textStyle: { color: '#666' },
     },
-    grid: { left: 56, right: 16, top: 40, bottom: 60 },
+    grid: { left: 56, right: 16, top: 40, bottom: hasClipped ? 72 : 56 },
     xAxis: {
       type: 'category',
-      data: periods.map(p => p.period?.split(' ~ ')[1] || p.startDate),
-      axisLabel: { rotate: 45, fontSize: 10, color: '#888' },
+      data: rawLabels,
+      axisLabel: {
+        rotate: 45,
+        fontSize: 10,
+        color: '#888',
+        interval: labelInterval,
+      },
     },
     yAxis: {
       type: 'value',
+      min: yMin,
+      max: yMax,
       axisLabel: { formatter: v => `${v.toFixed(1)}%`, color: '#888' },
       splitLine: { lineStyle: { color: '#f0f0f0', type: 'dashed' } },
     },
@@ -908,28 +979,72 @@ function AttributionWaterfall({ periods }) {
     series: [
       {
         name: '配置效应', type: 'bar', stack: 'attribution',
-        data: periods.map(p => +(p.allocationEffect * 100).toFixed(4)),
-        itemStyle: { color: '#1677ff' }, barMaxWidth: 30,
+        data: periods.map((p, i) => {
+          const raw = +(p.allocationEffect * 100).toFixed(4);
+          if (clippedPeriodIndices.has(i) && Math.abs(raw) > yMax + 0.5) {
+            return { value: raw, itemStyle: { color: '#1677ff', borderColor: '#ff4d4f', borderWidth: 2, borderType: 'dashed' } };
+          }
+          return raw;
+        }),
+        barMaxWidth: 30,
+        markLine: hasClipped ? { silent: true, symbol: 'none', data: markLines } : undefined,
       },
       {
         name: '选股效应', type: 'bar', stack: 'attribution',
-        data: periods.map(p => +(p.selectionEffect * 100).toFixed(4)),
-        itemStyle: { color: '#52c41a' }, barMaxWidth: 30,
+        data: periods.map((p, i) => {
+          const raw = +(p.selectionEffect * 100).toFixed(4);
+          if (clippedPeriodIndices.has(i) && Math.abs(raw) > yMax + 0.5) {
+            return { value: raw, itemStyle: { color: '#52c41a', borderColor: '#ff4d4f', borderWidth: 2, borderType: 'dashed' } };
+          }
+          return raw;
+        }),
+        barMaxWidth: 30,
       },
       {
         name: '交互效应', type: 'bar', stack: 'attribution',
-        data: periods.map(p => +(p.interactionEffect * 100).toFixed(4)),
-        itemStyle: { color: '#fa8c16' }, barMaxWidth: 30,
+        data: periods.map((p, i) => {
+          const raw = +(p.interactionEffect * 100).toFixed(4);
+          if (clippedPeriodIndices.has(i) && Math.abs(raw) > yMax + 0.5) {
+            return { value: raw, itemStyle: { color: '#fa8c16', borderColor: '#ff4d4f', borderWidth: 2, borderType: 'dashed' } };
+          }
+          return raw;
+        }),
+        barMaxWidth: 30,
       },
       {
         name: '超额收益', type: 'bar',
-        data: periods.map(p => +(p.excessReturn * 100).toFixed(4)),
-        itemStyle: { color: params => params.value >= 0 ? '#cf1322' : '#3f8600' },
+        data: periods.map((p, i) => {
+          const raw = +(p.excessReturn * 100).toFixed(4);
+          if (clippedPeriodIndices.has(i) && Math.abs(raw) > yMax + 0.5) {
+            return {
+              value: raw,
+              itemStyle: {
+                color: raw >= 0 ? '#cf1322' : '#3f8600',
+                borderColor: '#ff4d4f',
+                borderWidth: 2,
+                borderType: 'dashed',
+              },
+            };
+          }
+          return raw;
+        }),
         barMaxWidth: 30,
       },
     ],
   };
-  return <ReactECharts option={option} style={{ height: 280 }} />;
+
+  return (
+    <div>
+      <ReactECharts option={option} style={{ height: 280 }} />
+      {hasClipped && (
+        <div style={{ fontSize: 11, color: '#ff4d4f', marginTop: 4, textAlign: 'center' }}>
+          ⚠ Y 轴已自动裁剪至 ±{yMax.toFixed(0)}% 以增强可读性（P92={p90.toFixed(1)}%）。
+          最极端值位于「{worstPeriod}」（{worstVal.toFixed(1)}%），悬停查看精确数值。
+          也可拖拽底部滑块放大局部区间。
+        </div>
+      )}
+    </div>
+  );
 }
 
 /** 行业归因汇总表 */
@@ -1010,25 +1125,37 @@ function BrinsonConclusion({ summary, industrySummary, periods }) {
   const hasIndData = inds.length > 0;
 
   // ── 行业级归因数据 ──
-  const topContributors = [...inds].sort((a, b) => -((+b.totalContribution || 0) - (+a.totalContribution || 0))).slice(0, 3);
-  const worstContributors = [...inds].sort((a, b) => (+a.totalContribution || 0) - (+b.totalContribution || 0)).slice(0, 3);
-  // 选股拖累最严重的行业
-  const worstSelectors = [...inds].sort((a, b) => (+a.totalSelection || 0) - (+b.totalSelection || 0)).slice(0, 3);
-  // 配置拖累最严重的行业
-  const worstAllocators = [...inds].sort((a, b) => (+a.totalAllocation || 0) - (+b.totalAllocation || 0)).slice(0, 3);
+  // 排序用 avgContribution（平均每期贡献），更直观；降级用 total/期数
+  function getAvg(x, field) {
+    var avgField = 'avg' + field.charAt(0).toUpperCase() + field.slice(1);
+    if (x[avgField] != null) return +x[avgField];
+    var totalField = 'total' + field.charAt(0).toUpperCase() + field.slice(1);
+    return perds.length > 0 ? (+x[totalField] || 0) / perds.length : (+x[totalField] || 0);
+  }
+  function indAvg(x) { return getAvg(x, 'Contribution'); }
+  const topContributors = [...inds].sort((a, b) => indAvg(b) - indAvg(a)).slice(0, 3);
+  const worstContributors = [...inds].sort((a, b) => indAvg(a) - indAvg(b)).slice(0, 3);
+  const worstSelectors = [...inds].sort((a, b) => getAvg(a, 'Selection') - getAvg(b, 'Selection')).slice(0, 3);
+  const worstAllocators = [...inds].sort((a, b) => getAvg(a, 'Allocation') - getAvg(b, 'Allocation')).slice(0, 3);
 
-  // 构建行业建议文本
+  // 构建行业建议文本（展示平均每期贡献，更直观）
   var indSummaryText = '';
   if (hasIndData) {
     var parts = [];
-    if (topContributors.length > 0 && +topContributors[0].totalContribution > 0.001) {
+    // 优先用 avgContribution，没有则降级用 totalContribution/期数
+    function getAvg(x) {
+      if (x.avgContribution != null) return +x.avgContribution;
+      return perds.length > 0 ? (+x.totalContribution || 0) / perds.length : (+x.totalContribution || 0);
+    }
+    function fmtAvg(x) { return fmtPctV(getAvg(x)); }
+    if (topContributors.length > 0 && getAvg(topContributors[0]) > 0.0001) {
       parts.push('[贡献] ' + topContributors.map(function(x) {
-        return x.industry + '(+' + fmtPctV(x.totalContribution) + ')';
+        return x.industry + '(+' + fmtAvg(x) + '/期)';
       }).join(' / '));
     }
-    if (worstContributors.length > 0 && +worstContributors[0].totalContribution < -0.001) {
+    if (worstContributors.length > 0 && getAvg(worstContributors[0]) < -0.0001) {
       parts.push('[拖累] ' + worstContributors.map(function(x) {
-        return x.industry + '(' + fmtPctV(x.totalContribution) + ')';
+        return x.industry + '(' + fmtAvg(x) + '/期)';
       }).join(' / '));
     }
     indSummaryText = parts.join('  ');
@@ -1062,32 +1189,187 @@ function BrinsonConclusion({ summary, industrySummary, periods }) {
   // 成本分析
   const costErosion = Math.abs(excess) > 0.001 ? Math.abs(cost / excess) : 0;
 
-  // === 数据驱动结论生成 ===
-  var scenario = '';
-  var verdict = '';
-  var verdictColor = '#262626';
-  var suggestions = [];
-  var summaryLines = [];
-
-  // 1. 超额方向与幅度
+  // === 数据驱动结论生成（先给总体判断，再解释各项） ===
+  // 总体判断：好 / 不好 / 不确定
+  var overall = '';
+  var overallColor = '';
   if (Math.abs(excess) < 0.005) {
-    scenario = '超额收益接近零';
-    verdictColor = '#8c8c8c';
-    verdict = '策略收益与基准持平，行业归因参考价值有限。';
-    suggestions.push('降低候选池宽度（Top% 缩小），加大主动偏离幅度以获取超额。');
+    overall = '不确定（超额接近零）';
+    overallColor = '#8c8c8c';
   } else if (excess > 0) {
-    scenario = '超额为正 (' + fmtPctV(excess) + ')';
-    verdictColor = posCount >= 2 ? '#52c41a' : '#fa8c16';
-    verdict = posCount >= 2
-      ? '策略有效：' + effects.filter(function(e) { return e.value > 0.005; }).map(function(e) { return e.name; }).join('、') + '正向贡献，' + (hasIndData ? (topContributors[0]?.industry || '') + '行业贡献最大。' : '')
-      : '超额仅靠' + dominant.name + '(' + fmtPctV(dominant.value) + ')单项驱动，风险集中、缺乏冗余。';
+    if (posCount >= 2 && netExcess > 0) { overall = '好（有效）'; overallColor = '#52c41a'; }
+    else if (posCount >= 1) { overall = '一般（单项驱动）'; overallColor = '#d48806'; }
+    else { overall = '不好（仅靠残差）'; overallColor = '#cf1322'; }
   } else {
-    scenario = '超额为负 (' + fmtPctV(excess) + ')';
-    verdictColor = allNeg ? '#cf1322' : '#fa8c16';
-    verdict = allNeg
-      ? '三效应全线亏损，策略在回测期内全面失效。'
-      : dominant.name + '(' + fmtPctV(dominant.value) + ')是最大亏损来源，占比 ' + (Math.abs(excess) > 1e-8 ? (Math.abs(dominant.value) / Math.abs(excess) * 100).toFixed(0) : 0) + '%。';
+    if (allNeg) { overall = '不好（全线亏损）'; overallColor = '#cf1322'; }
+    else if (negCount >= 2) { overall = '不好（多效应拖累）'; overallColor = '#cf1322'; }
+    else { overall = '一般（部分效应为负）'; overallColor = '#d48806'; }
   }
+
+  // === 各效应详细分解（含计算推导） ===
+  var avgAlloc = perds.length > 0 ? alloc / perds.length : alloc;
+  var avgSelect = perds.length > 0 ? select / perds.length : select;
+  var avgInter = perds.length > 0 ? interaction / perds.length : interaction;
+
+  // 从 inds 中提取各效应的 top/bottom 行业
+  function getTopInds(field, n) {
+    return [...inds].sort(function(a, b) { return getAvg(b, field) - getAvg(a, field); }).slice(0, n);
+  }
+  function getBottomInds(field, n) {
+    return [...inds].sort(function(a, b) { return getAvg(a, field) - getAvg(b, field); }).slice(0, n);
+  }
+
+  // 读取行业中间值（后端新增字段）
+  function wpct(v) { return v != null ? (+v*100).toFixed(1) : '-'; }
+  function wtPct(x)  { return wpct(x.avgPortfolioWeight); }
+  function wbPct(x)  { return wpct(x.avgBenchmarkWeight); }
+  function wdPct(x)  { return wpct(x.avgWeightDiff); }
+  function rePct(x)  { return wpct(x.avgBenchmarkReturnExcess); }
+  function srPct(x)  { return wpct(x.avgSelectionReturn); }
+
+  // === 配置效应卡片 ===
+  // 公式: allocation = Σ (wp - wb) × (rb - benchmarkReturn)
+  // 负来源: 超配(>wb)但行业弱(<bmRet) + 低配(<wb)但行业强(>bmRet)
+  function buildAllocCard() {
+    var abs = Math.abs(alloc);
+    var title = '配置效应：' + fmtSigned(alloc) + '（平均每期 ' + fmtSigned(avgAlloc) + '）';
+    if (abs < 0.005) return { title: title, verdict: '贡献极小，可忽略', posFactors: [], negFactors: [],
+      formula: 'A = Σ [ (wp−wb) × (rb−R) ]',
+      formulaLegend: 'wp=策略行业权重, wb=基准行业权重, rb=基准行业收益, R=基准总收益' };
+
+    var posFactors = []; // 正贡献: 赌对方向
+    var negFactors = []; // 负贡献: 赌错方向
+
+    // 取 |allocation| 最大的 6 个行业做展示
+    var sorted = [...inds].sort(function(a,b) { return Math.abs(getAvg(b,'Allocation')) - Math.abs(getAvg(a,'Allocation')); });
+    sorted.slice(0, 6).forEach(function(x) {
+      var avgA = getAvg(x, 'Allocation');
+      var wd = x.avgWeightDiff != null ? +x.avgWeightDiff : 0;
+      var re = x.avgBenchmarkReturnExcess != null ? +x.avgBenchmarkReturnExcess : 0;
+      var item = {
+        name: x.industry,
+        effect: avgA,
+        weightDiff: wd,
+        retExcess: re,
+        // 根据符号解释原因
+        reason: wd > 0 && re > 0 ? '超配' + wdPct(x) + '%且行业跑赢' + rePct(x) + '%' :
+                wd < 0 && re < 0 ? '低配' + wdPct(x) + '%且行业跑输' + rePct(x) + '%' :
+                wd > 0 ? '超配' + wdPct(x) + '%但行业跑输' + rePct(x) + '%' :
+                '低配' + wdPct(x) + '%但行业跑赢' + rePct(x) + '%'
+      };
+      if (avgA > 0) posFactors.push(item);
+      else negFactors.push(item);
+    });
+
+    var verdict = alloc > 0
+      ? '行业配置方向正确：多数行业超配(=跑赢)&低配(=跑输)，赌对了方向'
+      : '行业配置方向错误：多数行业超配(=跑输)&低配(=跑赢)，赌错了方向';
+    return { title: title, verdict: verdict, posFactors: posFactors, negFactors: negFactors,
+      formula: 'A = Σ [ (wp−wb) × (rb−R) ]',
+      formulaLegend: 'wp=策略行业权重, wb=基准行业权重, rb=基准行业收益, R=基准总收益' };
+  }
+
+  // === 选股效应卡片 ===
+  function buildSelectCard() {
+    var abs = Math.abs(select);
+    var title = '选股效应：' + fmtSigned(select) + '（平均每期 ' + fmtSigned(avgSelect) + '）';
+    if (abs < 0.005) return { title: title, verdict: '贡献极小，可忽略', posFactors: [], negFactors: [],
+      formula: 'S = Σ [ wb × (rp−rb) ]',
+      formulaLegend: 'wb=基准行业权重, rp=策略行业收益, rb=基准行业收益' };
+
+    var posFactors = [];
+    var negFactors = [];
+    var sorted = [...inds].sort(function(a,b) { return Math.abs(getAvg(b,'Selection')) - Math.abs(getAvg(a,'Selection')); });
+    sorted.slice(0, 6).forEach(function(x) {
+      var avgS = getAvg(x, 'Selection');
+      var sr = x.avgSelectionReturn != null ? +x.avgSelectionReturn : 0;
+      var wb = x.avgBenchmarkWeight != null ? +x.avgBenchmarkWeight : 0;
+      var item = {
+        name: x.industry,
+        effect: avgS,
+        selReturn: sr,
+        benchWeight: wb,
+        reason: sr > 0 ? '选股跑赢行业' + srPct(x) + '%' : '选股跑输行业' + srPct(x) + '%'
+      };
+      if (avgS > 0) posFactors.push(item);
+      else negFactors.push(item);
+    });
+
+    var verdict = select > 0
+      ? '选股能力有效：多数行业选股跑赢行业均值'
+      : '选股跑输行业均值：所选个股整体弱于行业平均水平';
+    return { title: title, verdict: verdict, posFactors: posFactors, negFactors: negFactors,
+      formula: 'S = Σ [ wb × (rp−rb) ]',
+      formulaLegend: 'wb=基准行业权重, rp=策略行业收益, rb=基准行业收益' };
+  }
+
+  // === 交互效应卡片 ===
+  function buildInteractCard() {
+    var abs = Math.abs(interaction);
+    var title = '交互效应：' + fmtSigned(interaction) + '（平均每期 ' + fmtSigned(avgInter) + '）';
+    if (abs < 0.005) return { title: title, verdict: '贡献极小，可忽略', posFactors: [], negFactors: [],
+      formula: 'I = Σ [ (wp−wb) × (rp−rb) ]',
+      formulaLegend: 'wp=策略权重, wb=基准权重, rp=策略行业收益, rb=基准行业收益' };
+
+    var posFactors = [];
+    var negFactors = [];
+    var sorted = [...inds].sort(function(a,b) { return Math.abs(getAvg(b,'Interaction')) - Math.abs(getAvg(a,'Interaction')); });
+    sorted.slice(0, 6).forEach(function(x) {
+      var avgI = getAvg(x, 'Interaction');
+      var wd = x.avgWeightDiff != null ? +x.avgWeightDiff : 0;
+      var sr = x.avgSelectionReturn != null ? +x.avgSelectionReturn : 0;
+      var item = {
+        name: x.industry,
+        effect: avgI,
+        weightDiff: wd,
+        selReturn: sr,
+        reason: wd>0 && sr>0 ? '超配' + wdPct(x) + '% × 选股赢' + srPct(x) + '% = 正向协同' :
+                wd<0 && sr<0 ? '低配' + wdPct(x) + '% × 选股输' + srPct(x) + '% = 正向协同' :
+                wd>0 ? '超配' + wdPct(x) + '% × 选股输' + srPct(x) + '% = 互相抵消' :
+                '低配' + wdPct(x) + '% × 选股赢' + srPct(x) + '% = 互相抵消'
+      };
+      if (avgI > 0) posFactors.push(item);
+      else negFactors.push(item);
+    });
+
+    // 关键洞察：
+    // 1) 交互为什么这么大？
+    // 2) 为什么同一行业在配置效应和交互效应中符号不同？——因为公式不同！
+    //    配置:A=(wp-wb)×(rb-R)  交互:I=(wp-wb)×(rp-rb)
+    //    同一行业 (wp-wb) 相同，但乘数不同：(rb-R)是用"行业相对于市场"衡量，(rp-rb)是用"策略在该行业选股 vs 行业均值"衡量
+    var insight = '';
+    if (abs > 0.02) {
+      var bigBoth = sorted.filter(function(x) {
+        return Math.abs(+x.avgWeightDiff) > 0.02 && Math.abs(+x.avgSelectionReturn) > 0.02;
+      });
+      insight = '交互效应绝对值较大（>' + fmtSigned(interaction > 0 ? 0.02 : -0.02) + '），根因是有 ' + bigBoth.length + ' 个行业「权重偏离大 + 选股偏离大」。';
+      if (interaction > 0) {
+        insight += '\n正值说明：权重方向和选股方向一致 — 超配的行业选股也准，低配的行业选股也差 → 乘积效应放大了收益。';
+      } else {
+        insight += '\n负值说明：权重方向与选股方向相反 — 超配了选不好的行业，或低配了选得好的行业 → 两者互相抵消。';
+      }
+      insight += '\n\n💡 同一行业在配置效应和交互效应中正负可能不同，这是正常的！因为两个效应使用不同的收益率口径：';
+      insight += '\n   - 配置效应用 rb−R（行业相对市场的收益率）判断方向对不对';
+      insight += '\n   - 交互效应用 rp−rb（策略选股相对行业的收益率）判断选股好不好';
+      insight += '\n   例如：某个行业市场表现好（rb>R，配置正），但策略在该行业的选股跑输行业均值（rp<rb），则交互效应在该行业为负。';
+    }
+
+    var verdict = (interaction > 0 ? '正向协同：' : '互相抵消：');
+    if (abs > 0.1) verdict += '权重差与选股收益差方向高度一致，乘积效应被显著放大';
+    else if (interaction > 0) verdict += '多数行业权重与选股同向，有小幅正向加成';
+    else verdict += '多数行业权重与选股反向，产生对冲';
+
+    return { title: title, verdict: verdict, posFactors: posFactors, negFactors: negFactors,
+      formula: 'I = Σ [ (wp−wb) × (rp−rb) ]',
+      formulaLegend: 'wp=策略权重, wb=基准权重, rp=策略行业收益, rb=基准行业收益 — 注意与配置效应A的变量不同！I用的是rp而非rb',
+      insight: insight };
+  }
+
+  var effectCards = [
+    buildAllocCard(),
+    buildSelectCard(),
+    buildInteractCard()
+  ];
 
   // === 行动建议：三层结构 ===
   // 第一层：可立即操作（基于策略编辑页可控参数）
@@ -1193,7 +1475,7 @@ function BrinsonConclusion({ summary, industrySummary, periods }) {
 
   // ── 第三层：需新增的能力 ──
   if (hasIndData) {
-    var highConc = worstContributors.filter(function(x) { return Math.abs(+x.totalContribution || 0) > 0.02; });
+    var highConc = worstContributors.filter(function(x) { return Math.abs((x.avgContribution != null ? +x.avgContribution : (+x.totalContribution || 0) / Math.max(perds.length, 1))) > 0.005; });
     if (highConc.length > 0) {
       var concNames = highConc.map(function(x) { return x.industry + '(' + fmtPctV(x.totalContribution) + ')'; }).join('、');
       missingCaps.push(makeMissing('行业集中度控制',
@@ -1225,36 +1507,53 @@ function BrinsonConclusion({ summary, industrySummary, periods }) {
     ));
   }
 
+  // 可信度标记：解释力 < 30% 时行动建议可信度低
+  var lowCredibility = summary.explanationRatio != null && +summary.explanationRatio < 0.3;
+  var totExcessAbs = Math.abs(excess);
+  var modelExplained = lowCredibility ? (+summary.explanationRatio * 100).toFixed(1) : null;
+
+  // 可折叠状态：低解释力默认收起
+  var [showActions, setShowActions] = useState(!lowCredibility);
+
   return (
     <Card
       size="small"
-      style={{ marginTop: 16, borderLeft: `3px solid ${verdictColor}` }}
-      title={<span style={{ fontSize: 14 }}>图形分析结论</span>}
+      style={{ marginTop: 16, borderLeft: '3px solid ' + overallColor }}
+      title={<span style={{ fontSize: 14 }}>归因结论</span>}
     >
-      {/* Brinson 恒等式 */}
-      <div style={{ background: '#fafafa', padding: 12, borderRadius: 4, marginBottom: 12 }}>
-        <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 13, color: '#555' }}>Brinson 恒等式</div>
-        <div style={{ fontFamily: 'monospace', fontSize: 13, lineHeight: 2.2 }}>
-          <div style={{ color: '#888', marginBottom: 2 }}>
-            单期恒等式严格成立：超额收益 = 配置 + 选股 + 交互
-          </div>
-          <div style={{ fontWeight: 600, color: excess >= 0 ? '#cf1322' : '#3f8600' }}>
-            {fmtPctV(excess)} = {fmtSigned(alloc)} + {fmtSigned(select)} + {fmtSigned(interaction)}
-          </div>
-          <div style={{ marginTop: 4, color: Math.abs(residual) < 0.001 ? '#52c41a' : '#d48806' }}>
-            残差 = {fmtSigned(residual)}（{(Math.abs(residual) > 1e-8 && Math.abs(excess) > 1e-8) ? (Math.abs(residual) / Math.abs(excess) * 100).toFixed(2) + '%' : '≈0'}）
-          </div>
-          <div style={{ marginTop: 4, color: netExcess >= 0 ? '#52c41a' : '#fa541c' }}>
-            净超额 = {fmtSigned(excess)} − {(cost * 100).toFixed(2)}% = {fmtSigned(netExcess)}
-          </div>
-        </div>
-      </div>
-
-      {/* 情景判断 */}
-      <div style={{ marginBottom: 8 }}>
-        <Tag color={verdictColor === '#52c41a' ? 'success' : verdictColor === '#fa8c16' ? 'warning' : verdictColor === '#8c8c8c' ? 'default' : 'error'}>
-          {scenario}
-        </Tag>
+      {/* 关键指标概览 */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 0, marginBottom: 12, background: '#fafafa', padding: '4px 0', borderRadius: 4 }}>
+        {[
+          { label: '超额收益', val: excess, fmt: fmtSigned,
+            tip: '策略累计收益 − 基准累计收益。正数表示跑赢基准，负数为跑输。这是 Brinson 归因要拆解的目标——三效应之和 ≈ 超额（差值为残差）。' },
+          { label: '配置效应', val: alloc, fmt: fmtSigned,
+            tip: '行业配置（择时）贡献。公式: Σ(策略权重−基准权重)×(行业基准收益−基准总收益)。正数 = 超配了强势行业/低配了弱势行业。' },
+          { label: '选股效应', val: select, fmt: fmtSigned,
+            tip: '行业内选股贡献。公式: Σ 基准权重×(策略行业内收益−行业基准收益)。正数 = 所选个股跑赢行业均值。' },
+          { label: '交互效应', val: interaction, fmt: fmtSigned,
+            tip: '配置与选股的乘积效应。公式: Σ(权重差)×(选股收益差)。正数 = 权重方向与选股方向一致（乘数效应放大），负数 = 互相抵消。' },
+          Math.abs(residual) > 0.001 ? { label: '残差', val: residual, fmt: fmtSigned,
+            tip: '超额收益 − (配置+选股+交互)。单期 Brinson 恒等式保证残差=0，但多期累加时由于各期权重变化不闭合。残差绝对值大 = 模型解释力低（如高换手策略导致多期偏离大）。' } : null,
+          summary.explanationRatio != null ? { label: '解释力', val: (+summary.explanationRatio * 100), fmt: v => (v).toFixed(1) + '%',
+            tip: '1 − |残差| / |超额收益|。范围 0~100%，越高说明三效应对超额的拆解越完整。<30% 时模型参考价值有限。' } : null,
+        ].filter(Boolean).map(function(item, idx, arr) {
+          var posColor = item.val >= 0 ? '#52c41a' : '#cf1322';
+          var isExpl = item.label === '解释力';
+          var valColor = isExpl
+            ? (item.val >= 70 ? '#52c41a' : item.val < 30 ? '#cf1322' : '#faad14')
+            : posColor;
+          return (
+            <div key={idx} style={{ textAlign: 'center', padding: '2px 10px', borderRight: idx < arr.length - 1 ? '1px solid #e8e8e8' : 'none', whiteSpace: 'nowrap', cursor: item.tip ? 'help' : 'default' }}>
+              <AntTooltip title={item.tip} placement="top">
+                <div style={{ fontSize: 12, color: '#888' }}>
+                  {item.label}
+                  {item.tip && <span style={{ marginLeft: 2, color: '#bbb', fontSize: 10 }}>ⓘ</span>}
+                </div>
+              </AntTooltip>
+              <div style={{ fontSize: 14, fontWeight: 600, color: valColor }}>{item.fmt(item.val)}</div>
+            </div>
+          );
+        })}
       </div>
 
       {/* 行业摘要 */}
@@ -1267,73 +1566,374 @@ function BrinsonConclusion({ summary, industrySummary, periods }) {
         </div>
       )}
 
-      {/* 核心结论 */}
+      {/* 总体判断 */}
       <div style={{
-        background: '#fffbe6', padding: '8px 12px', borderRadius: 4,
-        border: '1px solid #ffe58f', marginBottom: 12, fontSize: 13, lineHeight: 1.8
+        background: overallColor === '#52c41a' ? '#f6ffed' : overallColor === '#d48806' ? '#fff7e6' : overallColor === '#8c8c8c' ? '#fafafa' : '#fff2f0',
+        padding: '10px 12px', borderRadius: 4,
+        border: '1px solid ' + (overallColor === '#52c41a' ? '#b7eb8f' : overallColor === '#d48806' ? '#ffd591' : overallColor === '#8c8c8c' ? '#d9d9d9' : '#ffccc7'),
+        marginBottom: 12, fontWeight: 700, fontSize: 14
       }}>
-        <span style={{ fontWeight: 700 }}>核心结论：</span>{verdict}
+        总体判断：<span style={{ color: overallColor }}>{overall}</span>
+        {overall !== '好' && overall !== '一般' && summary.explanationRatio != null && +summary.explanationRatio < 0.3 ? (
+          <span style={{ fontWeight: 400, fontSize: 12, color: '#8c8c8c' }}>
+            {' （注意：模型解释力仅 ' + (+summary.explanationRatio * 100).toFixed(1) + '%，以下配置、选股、交互仅能解释超额收益的极小部分，此归因参考价值有限）'}
+          </span>
+        ) : null}
       </div>
 
-      {/* 第一层：可立即操作 */}
-      {actionables.length > 0 && (
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ fontWeight: 700, marginBottom: 6, color: '#cf1322', fontSize: 13 }}>
-            可立即操作（策略编辑页直接改）
-          </div>
-          {actionables.map(function(a, i) {
-            return <div key={'act-' + i} style={{
-              background: '#fff2f0', padding: '8px 10px', borderRadius: 4,
-              border: '1px solid #ffccc7', marginBottom: 6, fontSize: 12, lineHeight: 1.7
-            }}>
-              <div style={{ fontWeight: 700, marginBottom: 2 }}>{a.label}</div>
-              <div style={{ whiteSpace: 'pre-wrap', color: '#434343' }}>{a.body}</div>
-            </div>;
-          })}
-        </div>
-      )}
+      {/* 低解释力特殊提示：此策略不适合 Brinson 归因 */}
+      {summary.explanationRatio != null && +summary.explanationRatio < 0.3 ? (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 12, fontSize: 12, lineHeight: 1.8 }}
+          message="此策略收益来源不在行业配置/选股维度，Brinson 归因参考价值有限"
+          description={
+            <div style={{ fontSize: 12, lineHeight: 1.8 }}>
+              <div>当前模型解释力仅 <b>{(+summary.explanationRatio * 100).toFixed(1)}%</b>，
+                说明超额收益主要来自 <b>行业配置以外的因素</b>（如动量/波动率/换手择时等因子暴露）。</div>
+              <div style={{ marginTop: 6, padding: '6px 8px', background: '#fafafa', borderRadius: 4, color: '#666' }}>
+                <b>💡 什么是因子风格归因？</b><br/>
+                Brinson 归因按「行业」拆解收益，因子风格归因则按「风格因子」拆解：<br/>
+                &nbsp;&nbsp;• <b>动量因子</b> — 追涨杀跌带来的收益（高换手策略天然暴露）<br/>
+                &nbsp;&nbsp;• <b>波动率因子</b> — 高波动股票的短期溢价<br/>
+                &nbsp;&nbsp;• <b>流动性因子</b> — 小市值/低流动性股票的溢价<br/>
+                &nbsp;&nbsp;• <b>市值因子</b> — 小盘股 vs 大盘股的收益差<br/>
+                &nbsp;&nbsp;• <b>残差 α</b> — 所有因子解释完后剩下的纯选股能力<br/>
+                方法是把策略收益对以上因子做回归：<code style={{ fontSize: 11 }}>R_p − R_b = β₁×动量 + β₂×波动率 + ... + α</code>，
+                β 显著 ≠ 0 说明策略在有意/无意地暴露这个因子。
+              </div>
+              <div style={{ marginTop: 6, color: '#fa8c16' }}>
+                ⚠ 当前平台暂未实现因子风格归因，如需分析请手动检查策略持仓特征（换手率/市值分布/波动率偏好）。
+              </div>
+            </div>
+          }
+        />
+      ) : null}
 
-      {/* 第二层：验证步骤 */}
-      {verifications.length > 0 && (
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ fontWeight: 700, marginBottom: 6, color: '#0958d9', fontSize: 13 }}>
-            如何验证修复有效
-          </div>
-          {verifications.map(function(v, i) {
-            return <div key={'ver-' + i} style={{
-              background: '#e6f4ff', padding: '6px 10px', borderRadius: 4,
-              border: '1px solid #91caff', marginBottom: 4, fontSize: 12, lineHeight: 1.7
-            }}>
-              <span style={{ fontWeight: 600 }}>{v.label}：</span>
-              <span style={{ color: '#434343' }}>{v.body}</span>
-            </div>;
-          })}
-        </div>
-      )}
+      {/* 三者关系解释（当有大正值抵消大负值时特别重要） */}
+      {((function() {
+        var absAlloc = Math.abs(alloc), absSelect = Math.abs(select), absInter = Math.abs(interaction);
+        var hasBigOffset = (absAlloc > 0.05 && absInter > 0.05) || (absSelect > 0.05 && absInter > 0.05) || (absAlloc > 0.05 && absSelect > 0.05);
+        if (!hasBigOffset) return null;
+        var modelSum = alloc + select + interaction;
+        var parts = [];
+        if (Math.abs(alloc) > 0.005) parts.push('配置 ' + fmtSigned(alloc));
+        if (Math.abs(select) > 0.005) parts.push('选股 ' + fmtSigned(select));
+        if (Math.abs(interaction) > 0.005) parts.push('交互 ' + fmtSigned(interaction));
+        var hasBigResidual = Math.abs(residual) > 0.05;
+        var relation = '三效应加法关系：' + parts.join(' + ') + ' ≈ ' + fmtSigned(modelSum) + '。';
+        if (hasBigResidual) {
+          relation += ' 但注意：这不是最终超额！实际超额 = ' + fmtSigned(excess) + '，包含残差 ' + fmtSigned(residual) + '（三效应解释不了的部分）。';
+        }
+        var note = '';
+        if (hasBigResidual) {
+          note = '残差 ' + fmtSigned(residual) + ' 很大，说明行业配置/选股以外的因素主导了最终超额（如高换手带来的交易摩擦、市场Beta暴露、黑天鹅日暴跌等）。';
+          if (summary.explanationRatio != null && +summary.explanationRatio < 0.3) {
+            note += '\n模型解释力仅 ' + (+summary.explanationRatio * 100).toFixed(0) + '%，三效应能解释的超额极少，此归因参考价值有限。';
+          }
+        }
+        if (alloc < -0.03 && interaction > 0.03) {
+          note += (note ? '\n' : '') + '配置大亏' + fmtSigned(alloc) + '被交互大赚' + fmtSigned(interaction) + '部分对冲。交互赚钱说明：虽然行业配置方向错了，但在错误配置的行业里选股方向反过来产生了乘积效应（超配但行业内选股差→低配/避开，低配但行业内选股好→超配追入）。';
+        }
+        return <div style={{
+          background: '#f9f0ff', padding: '8px 12px', borderRadius: 4,
+          border: '1px solid #d3adf7', marginBottom: 12, fontSize: 12, lineHeight: 1.8, color: '#531dab', whiteSpace: 'pre-wrap'
+        }}>
+          {relation}<br/>
+          {note}
+        </div>;
+      })())}
 
-      {/* 第三层：需新增的能力 */}
-      {missingCaps.length > 0 && (
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ fontWeight: 700, marginBottom: 6, color: '#8c8c8c', fontSize: 13 }}>
-            需新增的策略能力（当前不支持，建议后续开发）
+      {/* 三效应详情卡片 */}
+      {/* 第一行：配置效应 + 选股效应 左右两列 */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+        {(function() { return [effectCards[0], effectCards[1]].map(function(card, idx) {
+          return <div key={idx} style={{ flex: 1, minWidth: 0 }}>
+            <Card size="small" type="inner"
+              title={<span style={{ fontWeight: 700, fontSize: 13 }}>{card.title}</span>}
+              style={{ background: '#fff' }}
+            >
+              <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>{card.verdict}</div>
+              <div style={{ fontSize: 11, color: '#aaa', marginBottom: 4, fontFamily: 'monospace', background: '#fafafa', padding: '2px 6px', borderRadius: 3 }}>
+                {card.formula}
+              </div>
+              {card.formulaLegend ? (
+                <div style={{ fontSize: 10, color: '#bbb', marginBottom: 8, paddingLeft: 6, lineHeight: 1.5 }}>
+                  {card.formulaLegend}
+                </div>
+              ) : null}
+              {card.posFactors && card.posFactors.length > 0 ? (
+                <div style={{ marginBottom: 4 }}>
+                  <Tag color="success" style={{ marginRight: 4, fontSize: 10 }}>正贡献</Tag>
+                  {card.posFactors.map(function(f, fi) {
+                    return <div key={'pos-' + fi} style={{ fontSize: 12, margin: '2px 0', paddingLeft: 16, lineHeight: 1.6 }}>
+                      <b>{f.name}</b>: {fmtPctV(f.effect)}/期 &mdash; {f.reason}
+                    </div>;
+                  })}
+                </div>
+              ) : null}
+              {card.negFactors && card.negFactors.length > 0 ? (
+                <div>
+                  <Tag color="error" style={{ marginRight: 4, fontSize: 10 }}>负贡献</Tag>
+                  {card.negFactors.map(function(f, fi) {
+                    return <div key={'neg-' + fi} style={{ fontSize: 12, margin: '2px 0', paddingLeft: 16, lineHeight: 1.6 }}>
+                      <b>{f.name}</b>: {fmtPctV(f.effect)}/期 &mdash; {f.reason}
+                    </div>;
+                  })}
+                </div>
+              ) : null}
+              {(!card.posFactors || !card.posFactors.length) && (!card.negFactors || !card.negFactors.length) ? (
+                <div style={{ fontSize: 12, color: '#999' }}>无显著行业贡献</div>
+              ) : null}
+            </Card>
+          </div>;
+        }); })()}
+      </div>
+      {/* 第二行：交互效应 独占整行 */}
+      {(function() { var card = effectCards[2];
+        return <Card size="small" type="inner"
+          title={<span style={{ fontWeight: 700, fontSize: 13 }}>{card.title}</span>}
+          style={{ marginBottom: 8, background: '#fff' }}
+        >
+          <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>{card.verdict}</div>
+          <div style={{ fontSize: 11, color: '#aaa', marginBottom: 4, fontFamily: 'monospace', background: '#fafafa', padding: '2px 6px', borderRadius: 3 }}>
+            {card.formula}
           </div>
-          {missingCaps.map(function(m, i) {
-            return <div key={'mis-' + i} style={{
-              background: '#fafafa', padding: '6px 10px', borderRadius: 4,
-              border: '1px solid #d9d9d9', marginBottom: 4, fontSize: 12, lineHeight: 1.7
-            }}>
-              <div style={{ fontWeight: 600, marginBottom: 2, color: '#595959' }}>{m.label}</div>
-              <div style={{ whiteSpace: 'pre-wrap', color: '#8c8c8c' }}>{m.body}</div>
-            </div>;
-          })}
-        </div>
-      )}
+          {card.formulaLegend ? (
+            <div style={{ fontSize: 10, color: '#bbb', marginBottom: 8, paddingLeft: 6, lineHeight: 1.5 }}>
+              {card.formulaLegend}
+            </div>
+          ) : null}
+          {card.insight ? (
+            <div style={{ fontSize: 12, color: '#d48806', background: '#fffbe6', padding: '6px 8px', borderRadius: 3, border: '1px solid #ffe58f', marginBottom: 8, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+              {card.insight}
+            </div>
+          ) : null}
+          {card.posFactors && card.posFactors.length > 0 ? (
+            <div style={{ marginBottom: 4 }}>
+              <Tag color="success" style={{ marginRight: 4, fontSize: 10 }}>正贡献</Tag>
+              {card.posFactors.map(function(f, fi) {
+                return <div key={'pos-' + fi} style={{ fontSize: 12, margin: '2px 0', paddingLeft: 16, lineHeight: 1.6 }}>
+                  <b>{f.name}</b>: {fmtPctV(f.effect)}/期 &mdash; {f.reason}
+                </div>;
+              })}
+            </div>
+          ) : null}
+          {card.negFactors && card.negFactors.length > 0 ? (
+            <div>
+              <Tag color="error" style={{ marginRight: 4, fontSize: 10 }}>负贡献</Tag>
+              {card.negFactors.map(function(f, fi) {
+                return <div key={'neg-' + fi} style={{ fontSize: 12, margin: '2px 0', paddingLeft: 16, lineHeight: 1.6 }}>
+                  <b>{f.name}</b>: {fmtPctV(f.effect)}/期 &mdash; {f.reason}
+                </div>;
+              })}
+            </div>
+          ) : null}
+          {(!card.posFactors || !card.posFactors.length) && (!card.negFactors || !card.negFactors.length) ? (
+            <div style={{ fontSize: 12, color: '#999' }}>无显著行业贡献</div>
+          ) : null}
+        </Card>;
+      })()} 
 
-      {/* 无建议时的兜底 */}
-      {actionables.length === 0 && missingCaps.length === 0 && (
-        <div style={{ color: '#8c8c8c', fontSize: 12, padding: '4px 0' }}>
-          当前归因结果良好，无需调整。
+      {/* ─── 行动建议（可折叠） ─── */}
+      {actionables.length > 0 ? (
+        <div style={{ marginBottom: 12 }}>
+          {/* 折叠头 */}
+          <div
+            onClick={function() { setShowActions(!showActions); }}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer',
+              padding: '8px 12px', borderRadius: 4,
+              background: lowCredibility ? '#fafafa' : '#fff2f0',
+              border: '1px solid ' + (lowCredibility ? '#d9d9d9' : '#ffccc7'),
+              userSelect: 'none',
+            }}
+          >
+            <span style={{ fontSize: 13, fontWeight: 700, color: lowCredibility ? '#595959' : '#cf1322' }}>
+              {lowCredibility ? '观察到的问题 & 推断性建议' : '可立即操作（策略编辑页直接改）'}
+              {lowCredibility && <Tag color="warning" style={{ marginLeft: 6, fontSize: 10 }}>低可信度</Tag>}
+            </span>
+            <span style={{ flex: 1, fontSize: 11, color: '#8c8c8c' }}>
+              {lowCredibility
+                ? 'Brinson 模型解释力仅 ' + modelExplained + '%，行业/选股维度无法有效解析此策略的收益来源'
+                : '以下操作可直接提升策略表现'}
+            </span>
+            <span style={{ fontSize: 11, color: '#8c8c8c' }}>
+              {showActions ? '收起 ▲' : '展开 ▼'}
+            </span>
+          </div>
+
+          {showActions && (
+            <div style={{ marginTop: 8 }}>
+              {/* 低可信度警告（折叠内） */}
+              {lowCredibility && (
+                <div style={{
+                  background: '#fff7e6', padding: '8px 12px', borderRadius: 4,
+                  border: '1px solid #ffd591', marginBottom: 12, fontSize: 12, lineHeight: 1.7, color: '#ad6800'
+                }}>
+                  <b>归因模型解释力仅 {modelExplained}%，以下行动建议中：</b><br/>
+                  • <span style={{ color: '#52c41a' }}>绿色标记</span> = 基于原始数据的事实观察（如"某行业选股跑输 X%"） — 可信<br/>
+                  • <span style={{ color: '#faad14' }}>黄色标记</span> = 基于归因模型的推断 — <b>仅 {modelExplained} 超额能被模型解释，推断准确性很低，仅供参考</b><br/>
+                  • 建议：关注事实部分（哪些行业出问题），推断部分仅作思路启发，勿直接照做
+                </div>
+              )}
+
+              {/* 第一层：观察到的问题 + 推断性建议 */}
+              <div style={{ marginBottom: 12 }}>
+                {actionables.map(function(a, i) {
+                  var lines = a.body.split('\n');
+                  var factLines = [];
+                  var inferLines = [];
+                  var currentIsFact = false;
+                  var currentIsInfer = false;
+                  for (var l = 0; l < lines.length; l++) {
+                    var line = lines[l];
+                    if (!line.trim()) { currentIsFact = false; currentIsInfer = false; continue; }
+                    if (lowCredibility && (
+                      /^以下行业/.test(line) ||
+                      /^当前因子/.test(line) ||
+                      /^当前 /.test(line) ||
+                      /^当前已是/.test(line) ||
+                      /交易成本.*侵蚀/.test(line)
+                    )) {
+                      factLines.push({ text: line, prefix: '📊 ' });
+                      currentIsFact = true;
+                      currentIsInfer = false;
+                    } else if (lowCredibility && (
+                      /^• 操作/.test(line) ||
+                      /^• 移除/.test(line) ||
+                      /^• 如所有/.test(line) ||
+                      /^• 预期/.test(line) ||
+                      /预期/.test(line) ||
+                      /预期 /.test(line)
+                    )) {
+                      inferLines.push({ text: line, prefix: '💡 ' });
+                      currentIsFact = false;
+                      currentIsInfer = true;
+                    } else if (currentIsFact) {
+                      factLines.push({ text: line, prefix: '' });
+                    } else if (currentIsInfer) {
+                      inferLines.push({ text: line, prefix: '' });
+                    } else {
+                      inferLines.push({ text: line, prefix: lowCredibility ? '💡 ' : '' });
+                    }
+                  }
+                  return (
+                    <div key={'act-' + i} style={{
+                      background: lowCredibility ? '#fafafa' : '#fff2f0',
+                      padding: '8px 10px', borderRadius: 4,
+                      border: '1px solid ' + (lowCredibility ? '#d9d9d9' : '#ffccc7'),
+                      marginBottom: 6, fontSize: 12, lineHeight: 1.7
+                    }}>
+                      <div style={{ fontWeight: 700, marginBottom: 2, color: lowCredibility ? '#595959' : '#262626' }}>{a.label}</div>
+                      {lowCredibility ? (
+                        <>
+                          {factLines.length > 0 && (
+                            <div style={{ background: '#f6ffed', padding: '4px 8px', borderRadius: 3, marginBottom: 4, border: '1px solid #d9f7be' }}>
+                              <Tag color="success" style={{ marginRight: 4, fontSize: 10 }}>事实</Tag>
+                              {factLines.map(function(fl, fi) {
+                                return <div key={'fl-' + fi} style={{ whiteSpace: 'pre-wrap', color: '#135200' }}>{fl.prefix}{fl.text}</div>;
+                              })}
+                            </div>
+                          )}
+                          {inferLines.length > 0 && (
+                            <div style={{ background: '#fffbe6', padding: '4px 8px', borderRadius: 3, border: '1px solid #ffe58f' }}>
+                              <Tag color="warning" style={{ marginRight: 4, fontSize: 10 }}>推断</Tag>
+                              {inferLines.map(function(il, ii) {
+                                return <div key={'il-' + ii} style={{ whiteSpace: 'pre-wrap', color: '#ad6800' }}>{il.prefix}{il.text}</div>;
+                              })}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <div style={{ whiteSpace: 'pre-wrap', color: '#434343' }}>{a.body}</div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* 第二层：验证步骤 */}
+              {verifications.length > 0 && (
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ fontWeight: 700, marginBottom: 6, color: lowCredibility ? '#8c8c8c' : '#0958d9', fontSize: 13 }}>
+                    {lowCredibility ? '验证预测（低可信度，仅供参考）' : '如何验证修复有效'}
+                    {lowCredibility && <Tag color="warning" style={{ marginLeft: 6, fontSize: 10 }}>低可信度</Tag>}
+                  </div>
+                  {verifications.map(function(v, i) {
+                    return <div key={'ver-' + i} style={{
+                      background: lowCredibility ? '#fafafa' : '#e6f4ff',
+                      padding: '6px 10px', borderRadius: 4,
+                      border: '1px solid ' + (lowCredibility ? '#d9d9d9' : '#91caff'),
+                      marginBottom: 4, fontSize: 12, lineHeight: 1.7
+                    }}>
+                      {lowCredibility && <Tag color="warning" style={{ marginRight: 4, fontSize: 10 }}>推断</Tag>}
+                      <span style={{ fontWeight: 600, color: lowCredibility ? '#8c8c8c' : '#262626' }}>{v.label}：</span>
+                      <span style={{ color: lowCredibility ? '#8c8c8c' : '#434343' }}>{v.body}</span>
+                    </div>;
+                  })}
+                </div>
+              )}
+
+              {/* 第三层：需新增的能力 */}
+              {missingCaps.length > 0 && (
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ fontWeight: 700, marginBottom: 6, color: '#8c8c8c', fontSize: 13 }}>
+                    需新增的策略能力（当前不支持，建议后续开发）
+                  </div>
+                  {missingCaps.map(function(m, i) {
+                    return <div key={'mis-' + i} style={{
+                      background: '#fafafa', padding: '6px 10px', borderRadius: 4,
+                      border: '1px solid #d9d9d9', marginBottom: 4, fontSize: 12, lineHeight: 1.7
+                    }}>
+                      <div style={{ fontWeight: 600, marginBottom: 2, color: '#595959' }}>{m.label}</div>
+                      <div style={{ whiteSpace: 'pre-wrap', color: '#8c8c8c' }}>{m.body}</div>
+                    </div>;
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
+      ) : (
+        missingCaps.length > 0 ? (
+          /* 无可操作建议但有缺失能力 */
+          <div style={{ marginBottom: 12 }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer',
+              padding: '8px 12px', borderRadius: 4,
+              background: '#fafafa', border: '1px solid #d9d9d9',
+              userSelect: 'none',
+            }}
+              onClick={function() { setShowActions(!showActions); }}
+            >
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#595959' }}>
+                当前归因结果良好，无需调整
+              </span>
+              <span style={{ flex: 1 }} />
+              <span style={{ fontSize: 11, color: '#8c8c8c' }}>
+                {showActions ? '收起 ▲' : '展开 ▼'}
+              </span>
+            </div>
+            {showActions && (
+              <div style={{ marginTop: 8 }}>
+                <div style={{ fontWeight: 700, marginBottom: 6, color: '#8c8c8c', fontSize: 13 }}>
+                  需新增的策略能力（当前不支持，建议后续开发）
+                </div>
+                {missingCaps.map(function(m, i) {
+                  return <div key={'mis-' + i} style={{
+                    background: '#fafafa', padding: '6px 10px', borderRadius: 4,
+                    border: '1px solid #d9d9d9', marginBottom: 4, fontSize: 12, lineHeight: 1.7
+                  }}>
+                    <div style={{ fontWeight: 600, marginBottom: 2, color: '#595959' }}>{m.label}</div>
+                    <div style={{ whiteSpace: 'pre-wrap', color: '#8c8c8c' }}>{m.body}</div>
+                  </div>;
+                })}
+              </div>
+            )}
+          </div>
+        ) : null
       )}
     </Card>
   );
@@ -1369,13 +1969,14 @@ function AttributionPanel({ taskId }) {
     return () => ro.disconnect();
   }, [data]);
 
-  if (loading) {
+  if (loading && !data) {
     return (
-      <div style={{ textAlign: 'center', padding: 60 }}>
-        <Spin tip="正在计算 Brinson 归因分析...">
-          <div />
-        </Spin>
-      </div>
+      <>
+        <div style={{ textAlign: 'center', padding: '40px 0 24px' }}>
+          <Spin size="default" />
+          <div style={{ marginTop: 8, color: '#999', fontSize: 13 }}>Brinson 归因分析加载中...</div>
+        </div>
+      </>
     );
   }
 
@@ -1404,7 +2005,30 @@ function AttributionPanel({ taskId }) {
         </Row>
       </Card>
 
-      <AttributionSummary summary={data.summary} />
+      {/* 行业归因概览：覆盖行业数 + 说明 */}
+      <Card size="small" style={{ marginBottom: 16, background: '#f6f8fa' }}>
+        <Row gutter={16} align="middle">
+          <Col>
+            <Statistic 
+              title="覆盖行业数" 
+              value={data.industrySummary ? data.industrySummary.length : 0} 
+              suffix="个" 
+              valueStyle={{ fontSize: 20, fontWeight: 600, color: '#1677ff' }}
+            />
+          </Col>
+          <Col flex="auto">
+            <div style={{ fontSize: 12, color: '#666', lineHeight: 1.8 }}>
+              <AntTooltip title="行业归因需对比「策略」与「基准」在各行业的配置差异。只看持仓会遗漏「应该配但没配」的行业（如基准重仓银行而策略空仓 → 负配置效应）。">
+                <Text type="secondary" underline style={{ cursor: 'help' }}>
+                  行业范围 = 策略持仓行业 ∪ 基准行业（并集）
+                </Text>
+              </AntTooltip>
+              <br />
+              <Text type="secondary">归因期数：{data.periodCount || 0} 期</Text>
+            </div>
+          </Col>
+        </Row>
+      </Card>
 
       <Row gutter={16}>
         <Col span={16}>
@@ -1617,6 +2241,14 @@ export default function BacktestReport() {
     }).finally(() => { setLoading(false); setPolling(false); });
   }, [taskId]);
 
+  const handleRerun = () => {
+    backtestApi.rerun(taskId).then(() => {
+      message.success('已重新提交，回测正在执行...');
+      setReport(null);
+      load();
+    }).catch(() => message.error('重跑失败，请稍后重试'));
+  };
+
   useEffect(() => { load(); }, [taskId]);
 
   useEffect(() => {
@@ -1637,25 +2269,27 @@ export default function BacktestReport() {
     );
   }
 
-  if (!task || task.status !== 'COMPLETED') {
+  if (!task) {
+    return (
+      <div style={{ padding: 24 }}>
+        <Alert type="info" showIcon message="加载中..." description={<Spin size="small" />} />
+      </div>
+    );
+  }
+
+  if (task.status === 'FAILED') {
     return (
       <div style={{ padding: 24 }}>
         <Alert
-          type={task?.status === 'FAILED' ? 'error' : 'info'}
-          showIcon
-          message={task?.status === 'FAILED' ? '回测失败' : '回测未完成'}
-          description={
-            <Space>
-              <span>当前状态: {task?.status}</span>
-              {task?.status !== 'FAILED' && <Spin size="small" />}
-            </Space>
-          }
+          type="error" showIcon
+          message="回测失败"
+          description={task.errorMessage || '未知错误，请检查后端日志'}
         />
       </div>
     );
   }
 
-  const tabItems = [
+  const tabItems = report ? [
     {
       key: 'overview',
       label: '收益概览',
@@ -1717,7 +2351,11 @@ export default function BacktestReport() {
           <div>· <b>选股效应</b> — 行业内个股选择带来的收益，判断选股能力</div>
           <div>· <b>交互效应</b> — 配置与选股的协同效应</div>
           <div style={{ marginTop: 6, borderTop: '1px solid #f0f0f0', paddingTop: 4 }}>
-            <b>如何解读：</b>三效应之和 = 总超额收益。配置正 → 行业择时好；选股正 → 个股挑选强；两者同正则策略全面优秀。
+            <b>如何解读：</b>三效应之和 ≈ 总超额收益（忽略残差）。三者是加法关系，一个大正效应可能只是抵消另一个大负效应。
+            <br/>· 配置正 → 行业择时对（超配了强势行业/低配了弱势行业）
+            <br/>· 选股正 → 个股挑选强（在行业内选到比行业均值更好的股票）
+            <br/>· 交互正 → 权重方向与选股方向一致（超配的行业选股也强、低配的行业选股也差），乘积效应放大
+            <br/>· 交互负 → 权重方向与选股方向相反（超配了选不好的行业、或踏空了选得好的行业），互相抵消
           </div>
           <div style={{ marginTop: 4 }}>
             <b>联动关系：</b>若 Alpha 分析中 Alpha 为正但归因中选股效应为负，说明超额收益可能来自市场 Beta 暴露而非个股能力。
@@ -1769,7 +2407,7 @@ export default function BacktestReport() {
         <MonteCarloPanel taskId={taskId} />
       ),
     },
-  ];
+  ] : [];
 
   return (
     <div>
@@ -1786,6 +2424,9 @@ export default function BacktestReport() {
         </Space>
         <Space>
           <Button icon={<ReloadOutlined />} onClick={load} loading={polling}>刷新</Button>
+          <Popconfirm title="将清空旧结果并重新执行，确认重跑？" onConfirm={handleRerun}>
+            <Button icon={<RedoOutlined />}>重跑</Button>
+          </Popconfirm>
         </Space>
       </div>
 
@@ -1828,8 +2469,30 @@ export default function BacktestReport() {
         </Row>
       </Card>
 
+      {/* 进度条 */}
+      {(task.status === 'RUNNING' || task.status === 'PENDING') && (
+        <Card size="small" style={{ marginBottom: 16 }}>
+          <div style={{ marginBottom: 8 }}>
+            <Text strong>执行进度</Text>
+            <Text type="secondary" style={{ float: 'right' }}>
+              {task.status === 'PENDING' ? '等待调度...' : `回测进行中 ${task.progress || 0}%`}
+            </Text>
+          </div>
+          <Progress percent={task.progress || 0} status="active" />
+        </Card>
+      )}
+
       {/* Tab 切换 */}
-      <Tabs items={tabItems} defaultActiveKey="overview" destroyOnHidden />
+      {tabItems.length > 0 && (
+        <Tabs items={tabItems} defaultActiveKey="overview" destroyOnHidden />
+      )}
+
+      {/* 运行中占位提示 */}
+      {(task.status === 'RUNNING' || task.status === 'PENDING') && tabItems.length === 0 && (
+        <Card size="small" style={{ textAlign: 'center', padding: 40 }}>
+          <Spin size="large" tip="回测计算中，完成后自动显示报告..." />
+        </Card>
+      )}
     </div>
   );
 }

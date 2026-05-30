@@ -159,4 +159,19 @@ public class RollingScreenController {
         rollingScreenService.deleteTask(taskId);
         return ApiResponse.ok();
     }
+
+    /**
+     * 重跑滚动选股回测任务：清空旧结果并重新执行。
+     * <p>
+     * POST /rolling-screen/tasks/{id}/rerun
+     * 仅 COMPLETED / FAILED / CANCELLED 状态可重跑。
+     *
+     * @param taskId 任务 ID
+     * @return 重置后的任务
+     */
+    @PostMapping("/tasks/{id}/rerun")
+    @Operation(summary = "重跑回测任务（清空旧结果并重新执行）")
+    public ApiResponse<RollingScreenTask> rerun(@PathVariable("id") Long taskId) {
+        return ApiResponse.success("已重新提交回测任务", rollingScreenService.rerunTask(taskId));
+    }
 }

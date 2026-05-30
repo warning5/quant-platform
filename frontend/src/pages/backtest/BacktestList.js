@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Table, Tag, Button, Space, Card, Typography, Popconfirm, Progress, Tooltip } from 'antd';
 import { message } from '../../utils/messageUtil';
-import { PlusOutlined, EyeOutlined, DeleteOutlined, ReloadOutlined, StopOutlined, LoadingOutlined } from '@ant-design/icons';
+import { PlusOutlined, EyeOutlined, DeleteOutlined, ReloadOutlined, StopOutlined, LoadingOutlined, RedoOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { backtestApi } from '../../api';
 
@@ -58,6 +58,13 @@ export default function BacktestList() {
     backtestApi.cancel(id).then(() => { message.success('已发送取消请求'); fetchData(); });
   };
 
+  const handleRerun = (id) => {
+    backtestApi.rerun(id).then(() => {
+      message.success('已重新提交，回测正在执行...');
+      fetchData();
+    }).catch(() => message.error('重跑失败，请稍后重试'));
+  };
+
   const columns = [
     { title: 'ID', dataIndex: 'id', key: 'id', width: 70 },
     {
@@ -83,7 +90,7 @@ export default function BacktestList() {
     },
     { title: '创建时间', dataIndex: 'createdAt', key: 'created', width: 160, ellipsis: true, render: v => v ? v.replace('T', ' ').substring(0, 19) : '-' },
     {
-      title: '操作', key: 'action', width: 130, fixed: 'right',
+      title: '操作', key: 'action', width: 160, fixed: 'right',
       render: (_, record) => (
         <Space size="small">
           {record.status === 'COMPLETED' && (
@@ -91,6 +98,13 @@ export default function BacktestList() {
               <Button size="small" type="primary" icon={<EyeOutlined />}
                       onClick={() => navigate(`/backtests/${record.id}/report`)} />
             </Tooltip>
+          )}
+          {(record.status === 'COMPLETED' || record.status === 'FAILED' || record.status === 'CANCELLED') && (
+            <Popconfirm title="将清空旧结果并重新执行，确认重跑？" onConfirm={() => handleRerun(record.id)}>
+              <Tooltip title="重跑">
+                <Button size="small" icon={<RedoOutlined />} />
+              </Tooltip>
+            </Popconfirm>
           )}
           {(record.status === 'RUNNING' || record.status === 'PENDING') && (
             <Tooltip title="查看执行进度">

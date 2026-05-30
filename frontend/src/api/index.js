@@ -186,6 +186,7 @@ export const backtestApi = {
   getCurve: (taskId) => api.get(`/backtests/${taskId}/curve`),
   getAttribution: (taskId) => api.get(`/backtests/${taskId}/attribution`, { timeout: 300000 }),
   cancel: (taskId) => api.post(`/backtests/${taskId}/cancel`),
+  rerun: (taskId) => api.post(`/backtests/${taskId}/rerun`),
   delete: (taskId) => api.delete(`/backtests/${taskId}`),
   // P1: 多策略对比
   compare: (taskIds) => api.post('/backtests/compare', { taskIds }, { timeout: 60000 }),
@@ -210,6 +211,7 @@ export const rollingScreenApi = {
   getRecords: (taskId) => api.get(`/rolling-screen/tasks/${taskId}/records`),
   getCurve: (taskId) => api.get(`/rolling-screen/tasks/${taskId}/curve`),
   cancel: (taskId) => api.put(`/rolling-screen/tasks/${taskId}/cancel`),
+  rerun: (taskId) => api.post(`/rolling-screen/tasks/${taskId}/rerun`),
   delete: (taskId) => api.delete(`/rolling-screen/tasks/${taskId}`),
 };
 

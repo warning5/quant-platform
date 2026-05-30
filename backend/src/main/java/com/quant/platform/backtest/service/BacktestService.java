@@ -132,4 +132,27 @@ public class BacktestService {
         }
         taskMapper.deleteById(taskId);
     }
+
+    /**
+     * 重跑回测任务：清空旧结果，重置状态，重新触发引擎。
+     * 所有终态（COMPLETED / FAILED / CANCELLED）及后端重启后遗留的 RUNNING/PENDING 僵尸任务均可重跑。
+     */
+    @Transactional
+    public BacktestTask rerunTask(Long taskId) {
+        BacktestTask task = getTask(taskId);
+        // 1. 清空旧报告
+        BacktestReport oldReport = reportMapper.findByTaskId(taskId);
+        if (oldReport != null) {
+            reportMapper.deleteById(oldReport.getId());
+        }
+        // 2. 重置任务状态
+        task.setStatus(BacktestTask.BacktestStatus.PENDING);
+        task.setProgress(0);
+        task.setErrorMessage(null);
+        taskMapper.updateById(task);
+        log.info("回测任务重跑: taskId={}, strategy={}", taskId, task.getStrategyCode());
+        // 3. 异步触发引擎（事务提交后执行，确保状态已持久化）
+        backtestEngine.runBacktest(taskId);
+        return task;
+    }
 }

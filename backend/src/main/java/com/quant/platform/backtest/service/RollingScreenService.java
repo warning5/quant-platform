@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.quant.platform.backtest.domain.RebalanceRecord;
 import com.quant.platform.backtest.domain.RollingScreenTask;
 import com.quant.platform.backtest.engine.RollingScreenEngine;
+import com.quant.platform.backtest.mapper.EquityCurveMapper;
 import com.quant.platform.backtest.mapper.RebalanceRecordMapper;
 import com.quant.platform.backtest.mapper.RollingScreenTaskMapper;
 import com.quant.platform.common.exception.BusinessException;
@@ -35,6 +36,7 @@ public class RollingScreenService {
 
     private final RollingScreenTaskMapper taskMapper;
     private final RebalanceRecordMapper recordMapper;
+    private final EquityCurveMapper equityCurveMapper;
     private final RollingScreenEngine rollingScreenEngine;
 
     /**
@@ -149,6 +151,39 @@ public class RollingScreenService {
         // 删除任务
         taskMapper.deleteById(taskId);
         log.info("任务已删除: taskId={}, name={}", taskId, task.getTaskName());
+    }
+
+    /**
+     * 重跑滚动选股回测：清空旧净值曲线和调仓记录，重置状态，重新触发引擎。
+     * 仅 COMPLETED / FAILED / CANCELLED 状态可重跑。
+     *
+     * @param taskId 任务 ID
+     * @return 重置后的任务
+     */
+    @Transactional
+    public RollingScreenTask rerunTask(Long taskId) {
+        RollingScreenTask task = getTask(taskId);
+        // 所有状态均可重跑（RUNNING/PENDING 在后端重启后会成为僵尸任务，需要强制重跑清理）
+        // 1. 清空旧数据
+        equityCurveMapper.deleteByTaskId(taskId);
+        recordMapper.deleteByTaskId(taskId);
+        // 2. 重置任务摘要字段
+        task.setStatus("PENDING");
+        task.setProgress(0);
+        task.setErrorMessage(null);
+        task.setFinalNav(null);
+        task.setTotalReturn(null);
+        task.setAnnualReturn(null);
+        task.setMaxDrawdown(null);
+        task.setSharpeRatio(null);
+        task.setBenchmarkReturn(null);
+        task.setTotalTrades(null);
+        task.setWinRate(null);
+        taskMapper.updateById(task);
+        log.info("滚动回测任务重跑: taskId={}, name={}", taskId, task.getTaskName());
+        // 3. 重新触发引擎（事务提交后执行）
+        rollingScreenEngine.runRollingScreen(taskId);
+        return task;
     }
 
     /**

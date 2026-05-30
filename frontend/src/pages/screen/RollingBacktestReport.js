@@ -5,7 +5,7 @@ import {
 } from 'antd';
 import {
   ArrowLeftOutlined, ReloadOutlined, DeleteOutlined,
-  StopOutlined, QuestionCircleOutlined, DownOutlined, RightOutlined
+  StopOutlined, QuestionCircleOutlined, DownOutlined, RightOutlined, RedoOutlined
 } from '@ant-design/icons';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import ReactECharts from 'echarts-for-react';
@@ -307,6 +307,16 @@ function ReportDetail({ taskId, onBack }) {
     fetchAll();
   };
 
+  const handleRerun = async () => {
+    try {
+      await rollingScreenApi.rerun(taskId);
+      message.success('已重新提交，回测正在执行...');
+      fetchAll();
+    } catch {
+      message.error('重跑失败，请稍后重试');
+    }
+  };
+
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', padding: 100 }}>
@@ -395,6 +405,11 @@ function ReportDetail({ taskId, onBack }) {
         {isRunning && (
           <Popconfirm title="确定取消该回测任务？" onConfirm={handleCancel}>
             <Button danger icon={<StopOutlined />}>取消任务</Button>
+          </Popconfirm>
+        )}
+        {(isCompleted || task.status === 'FAILED' || task.status === 'CANCELLED') && (
+          <Popconfirm title="将清空旧结果并重新执行，确认重跑？" onConfirm={handleRerun}>
+            <Button icon={<RedoOutlined />}>重跑</Button>
           </Popconfirm>
         )}
         {isCompleted && (
@@ -644,6 +659,17 @@ function RollingBacktestList({ onSelect }) {
     }
   };
 
+  const handleRerunList = async (taskId, e) => {
+    e.stopPropagation();
+    try {
+      await rollingScreenApi.rerun(taskId);
+      message.success('已重新提交，回测正在执行...');
+      loadTasks();
+    } catch {
+      message.error('重跑失败，请稍后重试');
+    }
+  };
+
   return (
     <div>
       {/* 页面头部：标题 + 操作 */}
@@ -758,21 +784,37 @@ function RollingBacktestList({ onSelect }) {
               render: v => v ? String(v).replace('T', ' ').slice(0, 19) : '-',
             },
             {
-              title: '操作', width: 70, align: 'center', fixed: 'right',
+              title: '操作', width: 110, align: 'center', fixed: 'right',
               render: (_, r) => (
-                <Popconfirm
-                  title="确定删除？"
-                  onConfirm={(e) => handleDelete(r.id, e)}
-                  onClick={e => e.stopPropagation()}
-                >
-                  <Button
-                    type="text"
-                    danger
-                    size="small"
-                    icon={<DeleteOutlined />}
+                <Space size={4}>
+                  {(r.status === 'COMPLETED' || r.status === 'FAILED' || r.status === 'CANCELLED') && (
+                    <Popconfirm
+                      title="将清空旧结果并重新执行？"
+                      onConfirm={(e) => handleRerunList(r.id, e)}
+                      onClick={e => e.stopPropagation()}
+                    >
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<RedoOutlined />}
+                        onClick={e => e.stopPropagation()}
+                      />
+                    </Popconfirm>
+                  )}
+                  <Popconfirm
+                    title="确定删除？"
+                    onConfirm={(e) => handleDelete(r.id, e)}
                     onClick={e => e.stopPropagation()}
-                  />
-                </Popconfirm>
+                  >
+                    <Button
+                      type="text"
+                      danger
+                      size="small"
+                      icon={<DeleteOutlined />}
+                      onClick={e => e.stopPropagation()}
+                    />
+                  </Popconfirm>
+                </Space>
               ),
             },
           ]}

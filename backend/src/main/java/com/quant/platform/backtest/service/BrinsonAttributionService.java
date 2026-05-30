@@ -335,13 +335,11 @@ public class BrinsonAttributionService {
 
         result.put("summary", summary);
 
-        // 累计归因曲线（用于前端绘图）
+        // 行业汇总归因（所有期各行业贡献加总 + 平均每期贡献）
+        List<Map<String, Object>> industrySummary = buildIndustrySummary(periodResults, periodResults.size());
+        result.put("industrySummary", industrySummary);
         List<Map<String, Object>> cumulativeChart = buildCumulativeChart(periodResults);
         result.put("cumulativeChart", cumulativeChart);
-
-        // 行业汇总归因（所有期各行业贡献加总）
-        List<Map<String, Object>> industrySummary = buildIndustrySummary(periodResults);
-        result.put("industrySummary", industrySummary);
 
         // 查询关联的 RollingScreenTask 以获取策略配置（用于前端 Brinson 结论诊断）
         // 注意：backtest_task 和 rolling_screen_task 是两个独立表的独立 ID，需按业务字段匹配
@@ -604,12 +602,18 @@ public class BrinsonAttributionService {
     /**
      * 构建行业汇总归因（各行业在所有期的贡献加总）
      */
-    private List<Map<String, Object>> buildIndustrySummary(List<Map<String, Object>> periods) {
+    private List<Map<String, Object>> buildIndustrySummary(List<Map<String, Object>> periods, int periodCount) {
+        // arr[0]=alloc, arr[1]=selection, arr[2]=interaction, arr[3]=totalContribution
+        // arr[4]=sum portfolioWeight, arr[5]=sum benchmarkWeight
+        // arr[6]=sum (wp-wb), arr[7]=sum (rb-bmReturn), arr[8]=sum (rp-rb)
+        // arr[9]=count of periods with this industry
         Map<String, double[]> industryTotals = new LinkedHashMap<>();
 
         for (Map<String, Object> period : periods) {
             List<Map<String, Object>> details = (List<Map<String, Object>>) period.get("industryDetails");
             if (details == null) continue;
+
+            double bmReturn = ((Number) period.get("benchmarkReturn")).doubleValue();
 
             for (Map<String, Object> detail : details) {
                 String industry = (String) detail.get("industry");
@@ -617,13 +621,23 @@ public class BrinsonAttributionService {
                 double select = ((Number) detail.get("selection")).doubleValue();
                 double interact = ((Number) detail.get("interaction")).doubleValue();
                 double total = ((Number) detail.get("totalContribution")).doubleValue();
+                double wp = ((Number) detail.get("portfolioWeight")).doubleValue();
+                double wb = ((Number) detail.get("benchmarkWeight")).doubleValue();
+                double rp = ((Number) detail.get("portfolioReturn")).doubleValue();
+                double rb = ((Number) detail.get("benchmarkReturn")).doubleValue();
 
-                industryTotals.computeIfAbsent(industry, k -> new double[4]);
+                industryTotals.computeIfAbsent(industry, k -> new double[10]);
                 double[] arr = industryTotals.get(industry);
                 arr[0] += alloc;
                 arr[1] += select;
                 arr[2] += interact;
                 arr[3] += total;
+                arr[4] += wp;
+                arr[5] += wb;
+                arr[6] += (wp - wb);
+                arr[7] += (rb - bmReturn);
+                arr[8] += (rp - rb);
+                arr[9] += 1;
             }
         }
 
@@ -632,15 +646,29 @@ public class BrinsonAttributionService {
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("industry", entry.getKey());
             double[] arr = entry.getValue();
+            double n = arr[9];
             item.put("totalAllocation", round4(arr[0]));
             item.put("totalSelection", round4(arr[1]));
             item.put("totalInteraction", round4(arr[2]));
             item.put("totalContribution", round4(arr[3]));
+            // 平均每期贡献（归一化，便于跨回测周期对比）
+            item.put("avgContribution",   round4(n > 0 ? arr[3] / n : 0));
+            item.put("avgAllocation",     round4(n > 0 ? arr[0] / n : 0));
+            item.put("avgSelection",      round4(n > 0 ? arr[1] / n : 0));
+            item.put("avgInteraction",    round4(n > 0 ? arr[2] / n : 0));
+            // 中间计算值（平均每期）
+            item.put("avgPortfolioWeight",  round4(n > 0 ? arr[4] / n : 0));
+            item.put("avgBenchmarkWeight",  round4(n > 0 ? arr[5] / n : 0));
+            item.put("avgWeightDiff",       round4(n > 0 ? arr[6] / n : 0));
+            item.put("avgBenchmarkReturnExcess", round4(n > 0 ? arr[7] / n : 0));
+            item.put("avgSelectionReturn",  round4(n > 0 ? arr[8] / n : 0));
+            // 计数值（出现过几期）
+            item.put("periodCount", (int) n);
             summary.add(item);
         }
 
-        // 按总贡献排序
-        summary.sort(Comparator.comparingDouble(a -> -((Number) a.get("totalContribution")).doubleValue()));
+        // 按总贡献绝对值排序
+        summary.sort(Comparator.comparingDouble(a -> -Math.abs(((Number) a.get("totalContribution")).doubleValue())));
 
         return summary;
     }

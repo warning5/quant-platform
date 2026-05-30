@@ -82,6 +82,12 @@ public class BacktestController {
         return ApiResponse.ok();
     }
 
+    @PostMapping("/{taskId}/rerun")
+    @Operation(summary = "重跑回测任务（清空旧结果并重新执行）")
+    public ApiResponse<BacktestTask> rerun(@PathVariable Long taskId) {
+        return ApiResponse.success("已重新提交回测任务", backtestService.rerunTask(taskId));
+    }
+
     /**
      * 获取回测实时/历史净值曲线数据（用于前端执行中页面展示）
      * 如果报告已生成，返回完整数据；否则返回空数组

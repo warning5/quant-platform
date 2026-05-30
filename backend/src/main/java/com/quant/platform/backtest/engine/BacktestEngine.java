@@ -1,4 +1,4 @@
-﻿package com.quant.platform.backtest.engine;
+package com.quant.platform.backtest.engine;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quant.platform.backtest.domain.BacktestReport;
@@ -275,8 +275,17 @@ public class BacktestEngine {
         for (int di = 0; di < tradingDates.size(); di++) {
             LocalDate today = tradingDates.get(di);
 
-            // 获取今日行情快照
-            List<MarketDailyBar> bars = marketDataService.getBarsAtDate(today);
+            // 获取今日行情快照，过滤 ST/*ST/退市股（name 含 ST 或 close<=0）
+            List<MarketDailyBar> barsRaw = marketDataService.getBarsAtDate(today);
+            List<MarketDailyBar> bars = new ArrayList<>();
+            for (MarketDailyBar bar : barsRaw) {
+                String name = bar.getName();
+                boolean isST = name != null && name.contains("ST");
+                boolean isDelisted = bar.getClose() == null || bar.getClose().doubleValue() <= 0;
+                if (!isST && !isDelisted) {
+                    bars.add(bar);
+                }
+            }
             Map<String, MarketDailyBar> barMap = bars.stream()
                     .collect(Collectors.toMap(MarketDailyBar::getSymbol, b -> b));
 
@@ -1208,17 +1217,14 @@ public class BacktestEngine {
      */
     private BacktestReport buildReport(BacktestTask task, BacktestResult result) throws Exception {
         int tradingDays = result.tradingDays();
-        double annualFactor = tradingDays > 0 ? 252.0 / tradingDays : 1;
+        double years = tradingDays > 0 ? tradingDays / 252.0 : 1.0;
 
         double totalReturn = result.totalReturn();
-        // 使用简单年化而非复利年化，避免短周期回测的极端值
-        // 复利年化：Math.pow(1 + totalReturn, annualFactor) - 1
-        // 简单年化：totalReturn * annualFactor
         double annualReturn = years > 0 ? Math.pow(1 + totalReturn, 1.0 / years) - 1 : 0;
 
         // ── 基准收益 ──────────────────────────────────────────────────
         double benchmarkTotalReturn = result.benchmarkTotalReturn();
-        double benchmarkAnnualReturn = benchmarkTotalReturn * annualFactor;
+        double benchmarkAnnualReturn = years > 0 ? Math.pow(1 + benchmarkTotalReturn, 1.0 / years) - 1 : 0;
         double excessAnnualReturn = annualReturn - benchmarkAnnualReturn;
 
         // ── 从策略净值曲线计算日收益序列 ─────────────────────────────
