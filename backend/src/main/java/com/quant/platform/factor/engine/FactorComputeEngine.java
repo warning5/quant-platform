@@ -1745,8 +1745,11 @@ public class FactorComputeEngine {
         } catch (Exception e) {
             log.error("Factor test failed for [{}]", factor.getFactorCode(), e);
             report.setStatus(FactorTestReport.TestStatus.FAILED);
-            report.setErrorMessage(e.getMessage());
+            String errMsg = e.getMessage();
+            if (errMsg != null && errMsg.length() > 200) errMsg = errMsg.substring(0, 200) + "...";
+            report.setErrorMessage(errMsg);
             testReportMapper.updateById(report);
+            sendProgress(factor.getFactorCode(), "TEST_FAILED", 0, "因子检测失败: " + errMsg);
         }
     }
 

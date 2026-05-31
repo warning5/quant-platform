@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
-  Card, Form, Input, Select, InputNumber, Button, Space, Typography, Spin, message, Tabs, Row, Col,
+  Card, Form, Input, Select, InputNumber, Button, Space, Typography, Spin, App, Tabs, Row, Col,
   Table, Tag, Tooltip, Modal, InputNumber as AntInputNumber
 } from 'antd';
 import {
@@ -15,6 +15,7 @@ const { TextArea } = Input;
 const { Option } = Select;
 
 export default function StrategyEditor() {
+  const { message } = App.useApp();
   const { id } = useParams();
   const navigate = useNavigate();
   const [form] = Form.useForm();
@@ -59,7 +60,7 @@ export default function StrategyEditor() {
   useEffect(() => {
     if (id) {
       strategyApi.getById(id).then(res => {
-        const s = res.data;
+        const s = res;
         form.setFieldsValue({
           strategyCode: s.strategyCode,
           strategyName: s.strategyName,
@@ -73,7 +74,7 @@ export default function StrategyEditor() {
           author: s.author,
         });
         setScriptCode(s.scriptCode || '');
-        setFactorConfig(s.factorConfigJson || factorConfig);
+        setFactorConfig(s.factorConfigJson || '');
       }).finally(() => setLoading(false));
     } else {
       setLoading(false);
@@ -91,7 +92,7 @@ export default function StrategyEditor() {
       const req = isEdit ? strategyApi.update(id, payload) : strategyApi.create(payload);
       req.then(res => {
         message.success(isEdit ? '策略更新成功' : '策略创建成功');
-        navigate(`/strategies/${res.data.id}`);
+        navigate(`/strategies/${res.id}`);
       }).finally(() => setSaving(false));
     });
   };

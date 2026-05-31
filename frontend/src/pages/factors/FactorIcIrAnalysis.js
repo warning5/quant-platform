@@ -2,14 +2,14 @@ import React, { useState, useEffect, useMemo } from 'react';
 import dayjs from 'dayjs';
 import {
   Card, Row, Col, Select, Button, Tag, Spin, Alert, Space,
-  Typography, Table, Tooltip, Divider, Statistic, DatePicker, InputNumber, message,
+  Typography, Table, Tooltip, Divider, Statistic, DatePicker, InputNumber, App,
 } from 'antd';
 import {
   BarChartOutlined, LineChartOutlined, ReloadOutlined, InfoCircleOutlined,
   CheckCircleOutlined, WarningOutlined, CloseCircleOutlined,
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
-import { factorApi } from '../../api';
+import { factorApi, strategyApi } from '../../api';
 
 const { Text, Title } = Typography;
 const { RangePicker } = DatePicker;
@@ -109,12 +109,17 @@ function IcCumulativeChart({ icTimeline, factorCode }) {
 
 // ─── 主组件 ─────────────────────────────────────────────────────────────────────
 export default function FactorIcIrAnalysis() {
+  const { message } = App.useApp();
   const [factorList, setFactorList] = useState([]);
   const [selectedCodes, setSelectedCodes] = useState([]);
   const [dateRange, setDateRange] = useState([dayjs().subtract(1, 'year'), dayjs()]);
   const [forwardDays, setForwardDays] = useState(5);
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState(null);
+
+  // 策略批量选择
+  const [strategies, setStrategies] = useState([]);
+  const [selectedStrategyId, setSelectedStrategyId] = useState(null);
 
   // IC趋势详情
   const [trendFactor, setTrendFactor] = useState(null);
@@ -126,7 +131,53 @@ export default function FactorIcIrAnalysis() {
       const content = res?.records || res?.content || res || [];
       setFactorList(Array.isArray(content) ? content : []);
     }).catch(() => {});
+    strategyApi.list({ page: 0, size: 200 }).then(res => {
+      const content = res?.records || res?.content || res || [];
+      setStrategies(Array.isArray(content) ? content : []);
+    }).catch(() => {});
   }, []);
+
+  // 从策略 factorConfigJson 中提取因子代码
+  const handleStrategyChange = (strategyId) => {
+    setSelectedStrategyId(strategyId);
+    if (!strategyId) {
+      setSelectedCodes([]);
+      return;
+    }
+    const s = strategies.find(x => x.id === strategyId || x.strategyId === strategyId);
+    if (!s || !s.factorConfigJson) {
+      message.warning('该策略没有配置因子');
+      setSelectedCodes([]);
+      return;
+    }
+    try {
+      const obj = JSON.parse(s.factorConfigJson);
+      const codes = (obj.factors || []).map(f => f.code).filter(Boolean);
+      if (codes.length === 0) {
+        message.warning('该策略因子配置为空');
+        setSelectedCodes([]);
+        return;
+      }
+      const validCodes = codes.filter(c => factorList.some(f => f.factorCode === c));
+      if (validCodes.length === 0) {
+        message.warning('策略中的因子在当前系统中不存在');
+        setSelectedCodes([]);
+        return;
+      }
+      setSelectedCodes(validCodes);
+      message.success(`已加载策略「${s.strategyName || s.name || '未命名'}」的 ${validCodes.length} 个因子`);
+    } catch {
+      message.error('策略因子配置格式错误');
+      setSelectedCodes([]);
+    }
+  };
+
+  const strategyOptions = useMemo(() => {
+    return strategies.map(s => ({
+      label: `${s.strategyName || s.name || '未命名'} (${s.strategyCode || s.code || ''})`,
+      value: s.id ?? s.strategyId,
+    }));
+  }, [strategies]);
 
   const factorOptions = useMemo(() => {
     return factorList.map(f => ({
@@ -276,39 +327,61 @@ export default function FactorIcIrAnalysis() {
   }, [results]);
 
   return (
-    <div style={{ padding: 16 }}>
-      <Title level={4} style={{ marginBottom: 16 }}>
-        <BarChartOutlined style={{ marginRight: 8 }} />
-        因子 IC/IR 批量分析
-        <Tooltip
-          title={
-            <div style={{ whiteSpace: 'nowrap' }}>
-              <p style={{ margin: '0 0 6px' }}><b>什么是 IC/IR？</b></p>
-              <p style={{ margin: '0 0 6px', whiteSpace: 'normal' }}>IC（信息系数）：因子值与未来收益率的横截面相关系数。IC 越大，因子预测能力越强。</p>
-              <p style={{ margin: '0 0 6px', whiteSpace: 'normal' }}>IR（信息比率）：IC均值/IC标准差。衡量因子预测的稳定性，IR 越高越可靠。</p>
-              <p style={{ margin: '0 0 6px', whiteSpace: 'normal' }}><b style={{ color: '#fa8c16' }}>⚠️ 前提：因子值必须存在</b> — 仅当 factor_value 表中有该因子的时序数据时才能分析，无数据的因子代码将显示为红色不可点击。</p>
-              <p style={{ margin: '0 0 6px' }}><b>评估标准：</b></p>
-              <p style={{ margin: '0 0 4px' }}>有效因子：IC均值 ≥ 0.05 且 IR ≥ 0.5</p>
-              <p style={{ margin: '0 0 4px' }}>弱有效：IC均值 ≥ 0.03 且 IR ≥ 0.3</p>
-              <p style={{ margin: '0 0 6px' }}>无效：低于弱有效标准</p>
-              <p style={{ margin: '0 0 6px' }}><b>如何使用：</b></p>
-              <p style={{ margin: '0 0 4px' }}>1. 选因子+日期+前瞻天数 → 点"分析"</p>
-              <p style={{ margin: '0 0 4px' }}>2. 查看结果表格，点击因子代码查看IC趋势</p>
-              <p style={{ margin: '0 0 4px' }}>3. 累计IC持续上升 = 因子稳定有效</p>
-              <p style={{ margin: 0 }}>4. 用有效因子构建策略或优化权重</p>
-            </div>
-          }
-          placement="right"
-          styles={{ body: { width: 480, maxWidth: 480 } }}
-        >
-          <InfoCircleOutlined style={{ marginLeft: 6, color: '#bbb', fontSize: 16, cursor: 'pointer' }} />
-        </Tooltip>
-      </Title>
+    <div>
+      <div className="page-header">
+        <Title level={4} style={{ margin: 0 }}>
+          <BarChartOutlined style={{ marginRight: 8 }} />
+          因子 IC/IR 批量分析
+          <Tooltip
+            title={
+              <div style={{ whiteSpace: 'nowrap' }}>
+                <p style={{ margin: '0 0 6px' }}><b>什么是 IC/IR？</b></p>
+                <p style={{ margin: '0 0 6px', whiteSpace: 'normal' }}>IC（信息系数）：因子值与未来收益率的横截面相关系数。IC 越大，因子预测能力越强。</p>
+                <p style={{ margin: '0 0 6px', whiteSpace: 'normal' }}>IR（信息比率）：IC均值/IC标准差。衡量因子预测的稳定性，IR 越高越可靠。</p>
+                <p style={{ margin: '0 0 6px', whiteSpace: 'normal' }}><b style={{ color: '#fa8c16' }}>⚠️ 前提：因子值必须存在</b> — 仅当 factor_value 表中有该因子的时序数据时才能分析，无数据的因子代码将显示为红色不可点击。</p>
+                <p style={{ margin: '0 0 6px' }}><b>评估标准：</b></p>
+                <p style={{ margin: '0 0 4px' }}>有效因子：IC均值 ≥ 0.05 且 IR ≥ 0.5</p>
+                <p style={{ margin: '0 0 4px' }}>弱有效：IC均值 ≥ 0.03 且 IR ≥ 0.3</p>
+                <p style={{ margin: '0 0 6px' }}>无效：低于弱有效标准</p>
+                <p style={{ margin: '0 0 6px' }}><b>如何使用：</b></p>
+                <p style={{ margin: '0 0 4px' }}>1. 选因子+日期+前瞻天数 → 点"分析"</p>
+                <p style={{ margin: '0 0 4px' }}>2. 查看结果表格，点击因子代码查看IC趋势</p>
+                <p style={{ margin: '0 0 4px' }}>3. 累计IC持续上升 = 因子稳定有效</p>
+                <p style={{ margin: 0 }}>4. 用有效因子构建策略或优化权重</p>
+              </div>
+            }
+            placement="right"
+            styles={{ body: { width: 480, maxWidth: 480 } }}
+          >
+            <InfoCircleOutlined style={{ marginLeft: 6, color: '#bbb', fontSize: 16, cursor: 'pointer' }} />
+          </Tooltip>
+        </Title>
+      </div>
 
       {/* 参数选择区 */}
       <Card size="small" style={{ marginBottom: 16 }}>
         <Row gutter={[16, 12]} align="middle">
-          <Col span={12}>
+          <Col span={4}>
+            <Space direction="vertical" size={4} style={{ width: '100%' }}>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                选择策略
+                <Tooltip title="选择一个策略，自动加载其配置的所有因子">
+                  <InfoCircleOutlined style={{ marginLeft: 4, color: '#bbb' }} />
+                </Tooltip>
+              </Text>
+              <Select
+                placeholder="选择策略批量加载因子"
+                value={selectedStrategyId}
+                onChange={handleStrategyChange}
+                options={strategyOptions}
+                style={{ width: '100%' }}
+                showSearch
+                allowClear
+                filterOption={(input, option) => (option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
+              />
+            </Space>
+          </Col>
+          <Col span={8}>
             <Space direction="vertical" size={4} style={{ width: '100%' }}>
               <Text type="secondary" style={{ fontSize: 12 }}>
                 选择因子
@@ -320,11 +393,15 @@ export default function FactorIcIrAnalysis() {
                 mode="multiple"
                 placeholder="搜索或选择因子"
                 value={selectedCodes}
-                onChange={setSelectedCodes}
+                onChange={(codes) => {
+                  setSelectedCodes(codes);
+                  if (selectedStrategyId) setSelectedStrategyId(null);
+                }}
                 options={factorOptions}
                 style={{ width: '100%' }}
                 maxCount={20}
                 showSearch
+                allowClear
                 filterOption={(input, option) => (option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
                 maxTagCount="responsive"
               />

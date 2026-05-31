@@ -459,10 +459,10 @@ function HoldingPeriodPanel({ periods, totalTrades }) {
         capability: 'can_adjust',
         capabilityLabel: '可调整',
         capabilityColor: '#389e0d',
-        path: '步骤1：回测管理 → IC/IR 分析 → 逐个排查各因子 Rank IC 均值/IR，标出 IC<0.02 或 IR<0.3 的失效因子\n步骤2：策略管理 → 策略列表 → 编辑策略 → 因子配置 Tab → 替换或降低这些因子权重\n步骤3：回测验证 → 若整体胜率仍低，考虑减少因子数量或切换因子大类',
-        limitation: '⚠️ 因子 IC 值在「回测管理 → IC/IR 分析」中查看；策略编辑器的因子配置 Tab 只显示权重，不显示 IC，需手动交叉对照。IC/IR 数据为全局统计，未按持仓周期分组。',
+        path: '步骤1：回测管理 → IC/IR 分析 → 选因子+日期 → 点"分析" → 在结果表格中点击蓝色因子代码，下方展开 IC 趋势图 → 看累计 IC 曲线是持续下降（长期失效）还是近期才掉（暂时波动）\n步骤2：检查该因子与备选因子的相关系数，确认有低相关（<0.3）的替代品才值得替换\n步骤3：策略管理 → 模拟盘 → 新建副本策略 → 修改因子配置 → 跑同期回测 A/B 对比 → 夏普/回撤都改善再正式替换',
+        limitation: '⚠️ IC低≠去掉就好：该因子可能在组合中起噪声抵消或分散化作用，去掉反而更差。系统暂无自动 A/B 对比功能，需手动在模拟盘建副本验证。IC/IR 分析中的因子趋势图可辅助判断是否真的失效。',
         text: `【因子整体失效】${fmtPct(losingRatio)} 的交易（${totalLosingTrades}/${totalTrades}笔）全线亏损，不仅限于特定持有周期——说明选股因子在样本期内大面积失效，不是调仓频率能解决的。`,
-        action: '不同于建议1的"特定周期亏"问题，75%+的交易无论持有多久都亏，根因在因子整体选股能力下降。优先到 IC/IR 分析排查因子有效性，替换低 IC 因子后再回测。',
+        action: 'IC 低不代表替换一定有效。先看趋势（近期突变=可能暂时波动，长期失效=确实该换），再看因子相关性（有低相关替代品才值得换），最后必须跑 A/B 回测——只有夏普和回撤都改善才确认有效。盲目按 IC 排序删因子可能更差。',
       });
     }
     // 建议4: 高度集中风险
@@ -1477,7 +1477,7 @@ function FactorDetail({ taskId }) {
             贡献占比: ${fmtPct(b.contributionRatio)}`;
         },
       },
-      grid: { left: 40, right: 30, top: 48, bottom: 32 },
+      grid: { left: 70, right: 30, top: 48, bottom: 32 },
       xAxis: {
         type: 'category', data: factorNames,
         axisLabel: { fontSize: 12 },
@@ -1523,7 +1523,7 @@ function FactorDetail({ taskId }) {
         dataSource={betas} pagination={false}
         rowKey={(r) => r.factorCode}
         columns={[
-          { title: '因子', dataIndex: 'factorName', width: 80, render: (v, r) => {
+          { title: '因子', dataIndex: 'factorName', width: 130, render: (v, r) => {
             const sig = Math.abs(r.tStat || 0) >= 1.96;
             return <span>{v || r.factorCode}{sig && <Tag color="orange" style={{marginLeft:4,fontSize:10,padding:'0 4px',lineHeight:'16px'}}>显著</Tag>}</span>;
           }},
@@ -1685,7 +1685,8 @@ function FactorConclusionHeader({ betas, summary, regressionDetail }) {
     concentratedBeta.forEach(f => {
       body += `• ${f.factor.factorName}：β=${fmt(f.betaVal,3)}\n`;
     });
-    body += '\n操作：在策略编辑页降低高风险因子的权重（如从 0.5 降到 0.2），避免集中暴露。';
+    body += '\n操作：在策略编辑页降低高风险因子的权重（如从 0.5 降到 0.2），降低集中暴露。\n';
+    body += '⚠️ 改完后必须在模拟盘建副本做 A/B 回测对比，确认夏普和回撤确实改善再正式替换。';
     actionables.push(makeAction('风控 — 降低因子暴露集中度', body));
   }
 
@@ -1964,7 +1965,8 @@ function FactorConclusionBody({ betas, summary, regressionDetail, observationDay
     concentratedBeta.forEach(f => {
       body += `• ${f.factor.factorName}：β=${fmt(f.betaVal,3)}\n`;
     });
-    body += '\n操作：在策略编辑页降低高风险因子的权重（如从 0.5 降到 0.2），避免集中暴露。';
+    body += '\n操作：在策略编辑页降低高风险因子的权重（如从 0.5 降到 0.2），降低集中暴露。\n';
+    body += '⚠️ 改完后必须在模拟盘建副本做 A/B 回测对比，确认夏普和回撤确实改善再正式替换。';
     actionables.push(makeAction('风控 — 降低因子暴露集中度', body));
   }
 

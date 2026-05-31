@@ -7,7 +7,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
+import com.quant.platform.factor.domain.FactorValue;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -27,6 +29,9 @@ public class FactorAnalysisService {
     private JdbcTemplate clickHouseJdbcTemplate;
 
     private final JdbcTemplate jdbcTemplate; // MySQL
+
+    @Autowired(required = false)
+    private ClickHouseFactorValueService clickHouseFactorValueService;
 
     /**
      * 批量计算多因子 IC/IR
@@ -78,26 +83,49 @@ public class FactorAnalysisService {
         result.put("factorCode", factorCode);
         result.put("forwardDays", forwardDays);
 
-        // 1. 从 MySQL 获取因子值（按日期×股票）
-        String factorSql = """
-            SELECT symbol, calc_date, factor_val
-            FROM factor_value
-            WHERE factor_code = ?
-              AND calc_date BETWEEN ? AND ?
-              AND factor_val IS NOT NULL
-            ORDER BY calc_date, symbol
-            """;
-        List<Map<String, Object>> factorRows = jdbcTemplate.query(factorSql,
-            (rs, rowNum) -> {
-                Map<String, Object> m = new HashMap<>();
-                String symbol = rs.getString("symbol");
-                // 统一去掉后缀
-                if (symbol != null && symbol.contains(".")) symbol = symbol.split("\\.")[0];
-                m.put("symbol", symbol);
-                m.put("calcDate", rs.getDate("calc_date").toLocalDate().toString());
-                m.put("factorVal", rs.getBigDecimal("factor_val"));
-                return m;
-            }, factorCode, startDate, endDate);
+        // 1. 从 ClickHouse 获取因子值（按日期×股票），CH 优先，无数据时回退 MySQL
+        List<Map<String, Object>> factorRows = new ArrayList<>();
+        if (clickHouseFactorValueService != null) {
+            try {
+                List<FactorValue> chRows = clickHouseFactorValueService.findByFactorCodeAndDateRange(
+                        factorCode, LocalDate.parse(startDate), LocalDate.parse(endDate));
+                factorRows = chRows.stream()
+                    .filter(fv -> fv.getFactorVal() != null)
+                    .map(fv -> {
+                        Map<String, Object> m = new HashMap<>();
+                        String symbol = fv.getSymbol();
+                        if (symbol != null && symbol.contains(".")) symbol = symbol.split("\\.")[0];
+                        m.put("symbol", symbol);
+                        m.put("calcDate", fv.getCalcDate().toString());
+                        m.put("factorVal", fv.getFactorVal());
+                        return m;
+                    })
+                    .collect(Collectors.toList());
+            } catch (Exception e) {
+                log.warn("[IC/IR] ClickHouse 因子值查询失败，尝试回退 MySQL: {}", e.getMessage());
+            }
+        }
+        if (factorRows.isEmpty()) {
+            // 回退 MySQL
+            String factorSql = """
+                SELECT symbol, calc_date, factor_val
+                FROM factor_value
+                WHERE factor_code = ?
+                  AND calc_date BETWEEN ? AND ?
+                  AND factor_val IS NOT NULL
+                ORDER BY calc_date, symbol
+                """;
+            factorRows = jdbcTemplate.query(factorSql,
+                (rs, rowNum) -> {
+                    Map<String, Object> m = new HashMap<>();
+                    String symbol = rs.getString("symbol");
+                    if (symbol != null && symbol.contains(".")) symbol = symbol.split("\\.")[0];
+                    m.put("symbol", symbol);
+                    m.put("calcDate", rs.getDate("calc_date").toLocalDate().toString());
+                    m.put("factorVal", rs.getBigDecimal("factor_val"));
+                    return m;
+                }, factorCode, startDate, endDate);
+        }
 
         if (factorRows.isEmpty()) {
             result.put("error", "无因子数据");
@@ -110,7 +138,21 @@ public class FactorAnalysisService {
         Map<String, List<Map<String, Object>>> byDate = factorRows.stream()
             .collect(Collectors.groupingBy(r -> (String) r.get("calcDate"), LinkedHashMap::new, Collectors.toList()));
 
-        // 2. 从 CH 获取前向收益率
+        // 2. 批量从 CH 取价格数据（一次查询替代 N×2 次查询）
+        Set<String> allSymbols = factorRows.stream()
+            .map(r -> (String) r.get("symbol"))
+            .filter(Objects::nonNull)
+            .filter(s -> s.matches("\\d{6}"))
+            .collect(Collectors.toSet());
+
+        // 确定需要的价格日期范围：startDate 到 endDate+forwardDays 缓冲区
+        LocalDate priceEnd = LocalDate.parse(endDate).plusDays(forwardDays * 3L);
+        Map<String, Map<String, Double>> codeDatePrice  // code → date → close_price
+            = queryBulkClosePrices(allSymbols, startDate, priceEnd.toString());
+        Map<String, String> forwardDateMap       // calcDate → forwardDate
+            = buildForwardDateMap(startDate, priceEnd.toString(), forwardDays);
+
+        // 3. 纯内存计算 IC
         List<Double> icSeries = new ArrayList<>();
         List<Map<String, Object>> icTimeline = new ArrayList<>();
 
@@ -118,52 +160,38 @@ public class FactorAnalysisService {
             String calcDate = entry.getKey();
             List<Map<String, Object>> dayFactors = entry.getValue();
 
-            if (dayFactors.size() < 10) continue; // 样本太少跳过
+            if (dayFactors.size() < 10) continue;
+            String fwdDate = forwardDateMap.get(calcDate);
+            if (fwdDate == null) continue;
 
-            Set<String> symbols = dayFactors.stream()
-                .map(r -> (String) r.get("symbol"))
-                .filter(Objects::nonNull)
-                .collect(Collectors.toSet());
+            List<Double> factorVals = new ArrayList<>();
+            List<Double> forwardReturns = new ArrayList<>();
 
-            if (symbols.isEmpty()) continue;
+            for (Map<String, Object> f : dayFactors) {
+                String sym = (String) f.get("symbol");
+                BigDecimal fval = (BigDecimal) f.get("factorVal");
+                if (sym == null || fval == null) continue;
 
-            try {
-                // 当前日收盘价（参数化查询）
-                Map<String, Double> currentPrices = queryClosePrices(symbols, calcDate);
+                Map<String, Double> symPrices = codeDatePrice.get(sym);
+                if (symPrices == null) continue;
+                Double currP = symPrices.get(calcDate);
+                Double fwdP = symPrices.get(fwdDate);
+                if (currP == null || fwdP == null || currP <= 0) continue;
 
-                // 第 N 个交易日收盘价（支持 forwardDays > 1）
-                Map<String, Double> forwardPrices = queryForwardClosePrices(symbols, calcDate, forwardDays);
+                factorVals.add(fval.doubleValue());
+                forwardReturns.add((fwdP - currP) / currP);
+            }
 
-                // 计算前向收益率
-                List<Double> factorVals = new ArrayList<>();
-                List<Double> forwardReturns = new ArrayList<>();
+            if (factorVals.size() < 10) continue;
 
-                for (Map<String, Object> f : dayFactors) {
-                    String sym = (String) f.get("symbol");
-                    BigDecimal fval = (BigDecimal) f.get("factorVal");
-                    Double currP = currentPrices.get(sym);
-                    Double fwdP = forwardPrices.get(sym);
-
-                    if (sym != null && fval != null && currP != null && fwdP != null && currP > 0) {
-                        factorVals.add(fval.doubleValue());
-                        forwardReturns.add((fwdP - currP) / currP);
-                    }
-                }
-
-                if (factorVals.size() < 10) continue;
-
-                // 计算 Spearman 秩相关（IC）
-                double ic = calcSpearmanCorrelation(factorVals, forwardReturns);
-                if (!Double.isNaN(ic)) {
-                    icSeries.add(ic);
-                    Map<String, Object> timelineEntry = new LinkedHashMap<>();
-                    timelineEntry.put("date", calcDate);
-                    timelineEntry.put("ic", Math.round(ic * 10000.0) / 100.0);
-                    timelineEntry.put("sampleSize", factorVals.size());
-                    icTimeline.add(timelineEntry);
-                }
-            } catch (Exception e) {
-                log.debug("IC计算跳过日期 {}: {}", calcDate, e.getMessage());
+            double ic = calcSpearmanCorrelation(factorVals, forwardReturns);
+            if (!Double.isNaN(ic)) {
+                icSeries.add(ic);
+                Map<String, Object> timelineEntry = new LinkedHashMap<>();
+                timelineEntry.put("date", calcDate);
+                timelineEntry.put("ic", Math.round(ic * 10000.0) / 10000.0);
+                timelineEntry.put("sampleSize", factorVals.size());
+                icTimeline.add(timelineEntry);
             }
         }
 
@@ -181,8 +209,8 @@ public class FactorAnalysisService {
         long icPositiveCount = icSeries.stream().filter(v -> v > 0).count();
         double icWinRate = (double) icPositiveCount / icSeries.size() * 100;
 
-        result.put("icMean", Math.round(icMean * 10000.0) / 100.0);
-        result.put("icStd", Math.round(icStd * 10000.0) / 100.0);
+        result.put("icMean", Math.round(icMean * 10000.0) / 10000.0);
+        result.put("icStd", Math.round(icStd * 10000.0) / 10000.0);
         result.put("ir", Math.round(ir * 100.0) / 100.0);
         result.put("icWinRate", Math.round(icWinRate * 10.0) / 10.0);
         result.put("sampleDays", icSeries.size());
@@ -200,79 +228,56 @@ public class FactorAnalysisService {
     }
 
     /**
-     * 查询指定日期的收盘价（参数化查询，防SQL注入）
+     * 批量取收盘价：一次查询所有股票在指定日期范围内的所有收盘价。
+     * @return Map<code, Map<tradeDate, closePrice>>
      */
-    private Map<String, Double> queryClosePrices(Set<String> symbols, String date) {
-        if (clickHouseJdbcTemplate == null) return Collections.emptyMap();
-
-        // CH 不支持 IN 子句用 PreparedStatement 的方式，改用临时表思路
-        // 安全做法：用 List<Object[]> 批量查询或构造安全 IN 子句
-        // symbols 来自 MySQL factor_value.symbol，已去后缀，为6位纯数字，不含特殊字符
-        String inClause = symbols.stream()
-            .filter(s -> s.matches("\\d{6}"))  // 严格校验：仅6位数字
-            .collect(Collectors.joining("','", "'", "'"));
-
-        if (inClause.length() <= 2) return Collections.emptyMap(); // 空集合
-
-        String sql = String.format(
-            "SELECT code, close_price FROM stock.stock_daily FINAL WHERE code IN (%s) AND trade_date = ?",
-            inClause);
-
-        Map<String, Double> prices = new HashMap<>();
-        clickHouseJdbcTemplate.query(sql, (rs) -> {
-            prices.put(rs.getString("code"), rs.getBigDecimal("close_price").doubleValue());
-        }, date);
-        return prices;
-    }
-
-    /**
-     * 查询第 forwardDays 个交易日的收盘价
-     * forwardDays=1 → 下一个交易日, forwardDays=5 → 第5个交易日
-     */
-    private Map<String, Double> queryForwardClosePrices(Set<String> symbols, String calcDate, int forwardDays) {
-        if (clickHouseJdbcTemplate == null) return Collections.emptyMap();
+    private Map<String, Map<String, Double>> queryBulkClosePrices(
+            Set<String> symbols, String startDate, String endDate) {
+        Map<String, Map<String, Double>> result = new LinkedHashMap<>();
+        if (clickHouseJdbcTemplate == null || symbols.isEmpty()) return result;
 
         String inClause = symbols.stream()
             .filter(s -> s.matches("\\d{6}"))
             .collect(Collectors.joining("','", "'", "'"));
+        if (inClause.length() <= 2) return result;
 
-        if (inClause.length() <= 2) return Collections.emptyMap();
+        String sql = String.format("""
+            SELECT code, trade_date, close_price
+            FROM stock.stock_daily FINAL
+            WHERE code IN (%s) AND trade_date BETWEEN ? AND ?
+            ORDER BY code, trade_date
+            """, inClause);
 
-        // 获取 calcDate 之后第 forwardDays 个交易日（全市场统一交易日历）
-        // 先找到从 calcDate 之后的第 forwardDays 个交易日
-        String tradingDateSql;
-        if (forwardDays == 1) {
-            // 简化：下一个交易日
-            tradingDateSql = "SELECT MIN(trade_date) AS td FROM stock.stock_daily FINAL WHERE trade_date > ?";
-        } else {
-            // 第 N 个交易日：取 trade_date > calcDate 的第 forwardDays 个
-            tradingDateSql = String.format("""
-                SELECT trade_date AS td FROM stock.stock_daily FINAL
-                WHERE trade_date > ?
-                GROUP BY trade_date
-                ORDER BY trade_date ASC
-                LIMIT 1 OFFSET %d
-                """, forwardDays - 1);
+        clickHouseJdbcTemplate.query(sql, (rs) -> {
+            String code = rs.getString("code");
+            String date = rs.getString("trade_date");
+            Double price = rs.getBigDecimal("close_price").doubleValue();
+            result.computeIfAbsent(code, k -> new LinkedHashMap<>()).put(date, price);
+        }, startDate, endDate);
+        return result;
+    }
+
+    /**
+     * 构建交易日历前向映射：calcDate → forwardDate (第 forwardDays 个交易日)
+     */
+    private Map<String, String> buildForwardDateMap(String startDate, String endDate, int forwardDays) {
+        Map<String, String> result = new LinkedHashMap<>();
+        if (clickHouseJdbcTemplate == null) return result;
+
+        String sql = """
+            SELECT DISTINCT trade_date FROM stock.stock_daily FINAL
+            WHERE trade_date BETWEEN ? AND ?
+            ORDER BY trade_date
+            """;
+
+        List<String> tradingDates = clickHouseJdbcTemplate.query(sql,
+            (rs, rowNum) -> rs.getString("trade_date"), startDate, endDate);
+
+        int n = tradingDates.size();
+        for (int i = 0; i < n - forwardDays; i++) {
+            result.put(tradingDates.get(i), tradingDates.get(i + forwardDays));
         }
-
-        // 查询目标交易日
-        List<String> targetDates = clickHouseJdbcTemplate.query(tradingDateSql,
-            (rs, rowNum) -> rs.getString("td"), calcDate);
-
-        if (targetDates.isEmpty()) return Collections.emptyMap();
-
-        String targetDate = targetDates.getFirst();
-
-        // 用目标交易日查询收盘价
-        String priceSql = String.format(
-            "SELECT code, close_price FROM stock.stock_daily FINAL WHERE code IN (%s) AND trade_date = ?",
-            inClause);
-
-        Map<String, Double> prices = new HashMap<>();
-        clickHouseJdbcTemplate.query(priceSql, (rs) -> {
-            prices.put(rs.getString("code"), rs.getBigDecimal("close_price").doubleValue());
-        }, targetDate);
-        return prices;
+        return result;
     }
 
     /**

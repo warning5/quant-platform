@@ -332,7 +332,7 @@ export default function MonteCarloPanel({ taskId }) {
                 desc = `正收益概率 ${fmtPct(p)}，中位年化收益 ${fmtPct(r)}。策略盈利持续性良好，可考虑增加仓位验证实盘表现。`;
               }
               return (
-                <Alert type={type} message={<b>{title}</b>} description={desc} showIcon style={{ marginBottom: 12 }} />
+                <Alert type={type} message={<b>{title}</b>} description={desc} showIcon style={{ marginTop: 12, marginBottom: 12 }} />
               );
             })()}
           </>

@@ -1,12 +1,16 @@
 package com.quant.platform.backtest.service;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quant.platform.backtest.domain.BacktestTask;
 import com.quant.platform.common.exception.BusinessException;
 import com.quant.platform.config.ClickHouseConfig;
+import com.quant.platform.strategy.domain.StrategyDefinition;
+import com.quant.platform.strategy.mapper.StrategyDefinitionMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.math3.stat.regression.OLSMultipleLinearRegression;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.sql.Connection;
@@ -20,15 +24,17 @@ import java.util.stream.Collectors;
 /**
  * 因子风格归因服务（Factor-Based Style Attribution）
  * <p>
- * 将策略超额收益对风格因子（动量/波动率/市值/换手率）做多元回归：
+ * 将策略超额收益对策略配置的因子做多元回归（跟随策略 factorConfigJson）：
  * <pre>
- *   R_strategy - R_benchmark = α + β₁×MOM + β₂×VOL + β₃×SIZE + β₄×TURN + ε
+ *   R_strategy - R_benchmark = α + Σ βᵢ×Fᵢ + ε
  * </pre>
  * <p>
  * 因子日收益率 = 多空组合收益（Top 20% 等权 − Bottom 20% 等权），
  * 覆盖 A股全市场（来自 ClickHouse factor_value 表）。
  * <p>
  * 适用场景：高换手率 / 因子驱动 / 量化选股策略（Brinson 行业归因不适用时）。
+ * <p>
+ * 因子集来源：优先从策略 factorConfigJson 读取；无配置时使用默认4因子。
  *
  * @see BrinsonAttributionService
  */
@@ -39,9 +45,11 @@ public class FactorStyleAttributionService {
 
     private final ClickHouseConfig clickHouseConfig;
     private final ObjectMapper objectMapper;
+    private final StrategyDefinitionMapper strategyMapper;
+    private final JdbcTemplate jdbcTemplate;
 
-    /** 归因使用的风格因子 */
-    private static final List<FactorDef> FACTORS = List.of(
+    /** 无配置时的默认因子（向后兼容） */
+    private static final List<FactorDef> DEFAULT_FACTORS = List.of(
             new FactorDef("MOM20", "动量", "20日动量 — 追涨杀跌收益"),
             new FactorDef("VOL20", "波动率", "20日波动率 — 高波动股短期溢价"),
             new FactorDef("SIZE", "市值", "总市值 — 小盘股溢价"),
@@ -78,6 +86,8 @@ public class FactorStyleAttributionService {
 
     /**
      * 执行因子风格归因
+     * <p>
+     * 因子集来自策略的 factorConfigJson；无配置时使用默认4因子。
      */
     @SuppressWarnings("unchecked")
     public Map<String, Object> compute(BacktestTask task,
@@ -124,15 +134,21 @@ public class FactorStyleAttributionService {
             dailyExcessList.add(new DailyExcess(d, stratRet - benchRet));
         }
 
-        // 3. 获取回测期间的日期范围
+        // 3. 加载策略因子集
+        List<FactorDef> factors = loadStrategyFactors(task.getStrategyId());
+        log.info("因子风格归因使用的因子集: {} (共{}个因子)",
+                factors.stream().map(FactorDef::code).collect(Collectors.joining(",")),
+                factors.size());
+
+        // 4. 获取回测期间的日期范围
         LocalDate minDate = sortedDates.getFirst();
         LocalDate maxDate = sortedDates.getLast();
 
-        // 4. 从 ClickHouse 批量加载因子值 → 计算每日因子收益
+        // 5. 从 ClickHouse 批量加载因子值 → 计算每日因子收益
         Map<LocalDate, Map<String, Double>> factorDailyReturns
-                = computeFactorDailyReturns(minDate, maxDate);
+                = computeFactorDailyReturns(minDate, maxDate, factors);
 
-        // 5. 对齐日期：取 dailyExcessList 和 factorDailyReturns 的交集
+        // 6. 对齐日期：取 dailyExcessList 和 factorDailyReturns 的交集
         List<DailyExcess> alignedExcess = new ArrayList<>();
         List<double[]> alignedFactors = new ArrayList<>();
 
@@ -141,10 +157,10 @@ public class FactorStyleAttributionService {
             if (fr == null) continue;
 
             // 需要所有因子都有值
-            double[] row = new double[FACTORS.size()];
+            double[] row = new double[factors.size()];
             boolean allPresent = true;
-            for (int f = 0; f < FACTORS.size(); f++) {
-                Double v = fr.get(FACTORS.get(f).code);
+            for (int f = 0; f < factors.size(); f++) {
+                Double v = fr.get(factors.get(f).code);
                 if (v == null || Double.isNaN(v)) { allPresent = false; break; }
                 row[f] = v;
             }
@@ -155,21 +171,21 @@ public class FactorStyleAttributionService {
         }
 
         int n = alignedExcess.size();
-        if (n < FACTORS.size() + 5) {
+        if (n < factors.size() + 5) {
             throw new BusinessException(
                     String.format("有效数据点不足：%d天（需要≥%d天才能回归），因子日收益数据可能覆盖不足",
-                            n, FACTORS.size() + 5));
+                            n, factors.size() + 5));
         }
 
-        // 6. OLS 回归
-        RegressionResult regResult = runOLS(alignedExcess, alignedFactors, n);
+        // 7. OLS 回归
+        RegressionResult regResult = runOLS(alignedExcess, alignedFactors, n, factors.size());
 
-        // 7. 计算各因子贡献（β_f × 累计因子收益）
+        // 8. 计算各因子贡献（β_f × 累计因子收益）
         List<Map<String, Object>> factorContributions = new ArrayList<>();
         double totalFactorReturn = 0; // Σ(β_f × total_factor_ret)
 
-        for (int f = 0; f < FACTORS.size(); f++) {
-            FactorDef fd = FACTORS.get(f);
+        for (int f = 0; f < factors.size(); f++) {
+            FactorDef fd = factors.get(f);
             double beta = regResult.betas[f];
             double tStat = regResult.tStats[f];
             boolean significant = Math.abs(tStat) >= 1.96;
@@ -210,20 +226,26 @@ public class FactorStyleAttributionService {
         double explanationRatio = Math.abs(totalExcess) > 1e-8
                 ? 1 - Math.abs(residual) / Math.abs(totalExcess) : 0;
 
-        // 8. 分期间归因（按 rebalance 期间分解）
+        // 9. 分期间归因（按 rebalance 期间分解）
         List<Map<String, Object>> periodContributions = computePeriodContributions(
-                positionHistory, alignedExcess, alignedFactors, regResult, stratNav);
+                positionHistory, alignedExcess, alignedFactors, regResult, stratNav, factors);
 
-        // 9. 汇总结果
+        // 10. 汇总结果
+        String factorNames = factors.stream().map(f -> f.name + "(" + f.code + ")")
+                .collect(Collectors.joining(" / "));
+        String modelDescription = factors.size() == 1
+                ? "因子风格归因（单因子: " + factorNames + "）"
+                : "因子风格归因 — " + factorNames;
+
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("taskId", task.getId());
         result.put("model", "FactorStyle");
-        result.put("modelDescription", "因子风格归因 — 动量/波动率/市值/换手率多因子回归");
+        result.put("modelDescription", modelDescription);
         result.put("observationDays", n);
-        result.put("factorCount", FACTORS.size());
+        result.put("factorCount", factors.size());
 
         // 因子定义
-        List<Map<String, Object>> factorDefs = FACTORS.stream().map(fd -> {
+        List<Map<String, Object>> factorDefs = factors.stream().map(fd -> {
             Map<String, Object> d = new LinkedHashMap<>();
             d.put("code", fd.code);
             d.put("name", fd.name);
@@ -255,19 +277,14 @@ public class FactorStyleAttributionService {
         // 按期间归因
         result.put("periodContributions", periodContributions);
 
-        log.info("因子风格归因完成: taskId={}, R²={}, 解释力={}, α/d={}",
-                task.getId(), round4(regResult.rSquared), round4(explanationRatio), round4(regResult.alpha));
+        log.info("因子风格归因完成: taskId={}, 因子数={}, R²={}, 解释力={}, α/d={}",
+                task.getId(), factors.size(), round4(regResult.rSquared), round4(explanationRatio), round4(regResult.alpha));
 
         return result;
     }
 
     /**
      * 检测策略特征 — 用于自动匹配归因方案
-     * <p>
-     * 规则：
-     * - 日均换手率 > 0.5 或平均持仓 < 5天 → 推荐因子风格归因
-     * - 行业集中度 > 0.3 → 推荐 Brinson 归因
-     * - 两者都满足 → 因子风格归因（Brinson 作为辅助可手动切换）
      */
     @SuppressWarnings("unchecked")
     public StrategyCharacteristics detectCharacteristics(BacktestTask task,
@@ -320,8 +337,7 @@ public class FactorStyleAttributionService {
                 }
             }
 
-            // HHI：Σ(weight²)（这里用行业的话需要行业数据，先用持仓集中度近似）
-            // 计算持仓集中度（个股 HHI）
+            // HHI
             double sumW = 0;
             double sumW2 = 0;
             for (Object w : positions.values()) {
@@ -330,15 +346,13 @@ public class FactorStyleAttributionService {
                 sumW2 += weight * weight;
             }
             if (sumW > 0) {
-                totalHHI += sumW2 / (sumW * sumW); // 归一化
+                totalHHI += sumW2 / (sumW * sumW);
                 hhiPeriods++;
             }
         }
 
         double avgTurnover = turnoverPeriods > 0 ? totalTurnover / turnoverPeriods : 0;
         double avgHHI = hhiPeriods > 0 ? totalHHI / hhiPeriods : 0;
-        // 估算平均持仓天数 = 调仓间隔 / 换手率
-        // 假设调仓间隔 = (endDate - startDate) / (periodCount - 1)
         int periodCount = positionHistory.size();
         double avgHoldingDays = 0;
         if (periodCount >= 2 && avgTurnover > 0.001) {
@@ -348,7 +362,7 @@ public class FactorStyleAttributionService {
                 long days = LocalDate.parse(endStr).toEpochDay() - LocalDate.parse(startStr).toEpochDay();
                 double rebalanceInterval = (double) days / (periodCount - 1);
                 avgHoldingDays = rebalanceInterval / Math.max(avgTurnover, 0.01);
-                avgHoldingDays = Math.min(avgHoldingDays, days); // 不超过回测总天数
+                avgHoldingDays = Math.min(avgHoldingDays, days);
             } catch (Exception ignored) {}
         }
 
@@ -380,30 +394,120 @@ public class FactorStyleAttributionService {
     }
 
     // ════════════════════════════════════════════════════════════════
+    // 因子加载
+    // ════════════════════════════════════════════════════════════════
+
+    /**
+     * 从策略 factorConfigJson 读取因子列表，解析为 FactorDef。
+     * 无配置时回退到默认4因子。
+     */
+    private List<FactorDef> loadStrategyFactors(Long strategyId) {
+        if (strategyId == null) {
+            log.info("无策略ID，使用默认因子集");
+            return DEFAULT_FACTORS;
+        }
+
+        StrategyDefinition strategy = strategyMapper.selectById(strategyId);
+        if (strategy == null || strategy.getFactorConfigJson() == null
+                || strategy.getFactorConfigJson().isBlank()) {
+            log.info("策略 {} 无 factorConfigJson，使用默认因子集", strategyId);
+            return DEFAULT_FACTORS;
+        }
+
+        List<String> factorCodes;
+        try {
+            // 解析 factorConfigJson: {"factors":[{"code":"TURN20","weight":1.0}]}
+            List<Map<String, Object>> factorList = objectMapper.readValue(
+                    strategy.getFactorConfigJson(),
+                    new TypeReference<List<Map<String, Object>>>() {});
+            if (factorList == null || factorList.isEmpty()) {
+                factorCodes = List.of();
+            } else {
+                factorCodes = factorList.stream()
+                        .map(m -> (String) m.get("code"))
+                        .filter(Objects::nonNull)
+                        .filter(c -> !c.isBlank())
+                        .distinct()
+                        .collect(Collectors.toList());
+            }
+        } catch (Exception e) {
+            // 可能不是数组而是对象 {"factors": [...]}
+            try {
+                Map<String, Object> root = objectMapper.readValue(
+                        strategy.getFactorConfigJson(), Map.class);
+                Object factorsObj = root.get("factors");
+                if (factorsObj instanceof List) {
+                    @SuppressWarnings("unchecked")
+                    List<Map<String, Object>> factorList = (List<Map<String, Object>>) factorsObj;
+                    factorCodes = factorList.stream()
+                            .map(m -> (String) m.get("code"))
+                            .filter(Objects::nonNull)
+                            .filter(c -> !c.isBlank())
+                            .distinct()
+                            .collect(Collectors.toList());
+                } else {
+                    factorCodes = List.of();
+                }
+            } catch (Exception e2) {
+                log.warn("解析策略 {} 的 factorConfigJson 失败: {}", strategyId, e2.getMessage());
+                return DEFAULT_FACTORS;
+            }
+        }
+
+        if (factorCodes.isEmpty()) {
+            log.info("策略 {} 因子配置为空，使用默认因子集", strategyId);
+            return DEFAULT_FACTORS;
+        }
+
+        // 加载因子名称
+        Map<String, String> nameMap = loadFactorNames(factorCodes);
+
+        List<FactorDef> result = new ArrayList<>();
+        for (String code : factorCodes) {
+            String name = nameMap.getOrDefault(code, code);
+            result.add(new FactorDef(code, name, code + "因子"));
+        }
+
+        log.info("策略 {} 加载到 {} 个因子: {}", strategyId, result.size(),
+                result.stream().map(FactorDef::code).collect(Collectors.joining(",")));
+        return result;
+    }
+
+    /**
+     * 批量加载因子名称
+     */
+    private Map<String, String> loadFactorNames(List<String> codes) {
+        if (codes.isEmpty()) return Map.of();
+        Map<String, String> map = new LinkedHashMap<>();
+        try {
+            String inClause = codes.stream().map(c -> "'" + c + "'").collect(Collectors.joining(","));
+            String sql = "SELECT factor_code, factor_name FROM factor_definition WHERE factor_code IN (" + inClause + ")";
+            jdbcTemplate.query(sql, (rs) -> {
+                map.put(rs.getString("factor_code"), rs.getString("factor_name"));
+            });
+        } catch (Exception e) {
+            log.warn("加载因子名称失败: {}", e.getMessage());
+        }
+        return map;
+    }
+
+    // ════════════════════════════════════════════════════════════════
     // 内部方法
     // ════════════════════════════════════════════════════════════════
 
     /**
      * 计算每日因子收益（多空组合：Top 20% 等权收益 − Bottom 20% 等权收益）
-     * <p>
-     * 实现：CH JOIN factor_value + stock_daily，按因子值排序分5组，
-     * 因子收益 = Top 20% 等权日收益 − Bottom 20% 等权日收益。
-     * <p>
-     * symbol 归一化：factor_value.symbol 可能带后缀(.SZ/.SH)，用 regexp 去除后 JOIN stock_daily.code。
      */
     private Map<LocalDate, Map<String, Double>> computeFactorDailyReturns(
-            LocalDate startDate, LocalDate endDate) {
+            LocalDate startDate, LocalDate endDate, List<FactorDef> factors) {
 
         if (!clickHouseConfig.isEnabled()) {
             throw new BusinessException("ClickHouse 不可用，因子风格归因需要 CH 因子数据");
         }
 
-        String factorList = FACTORS.stream().map(f -> "'" + f.code + "'")
+        String factorList = factors.stream().map(f -> "'" + f.code + "'")
                 .collect(Collectors.joining(","));
 
-        // 用 CH JOIN 一次性获取 因子值 + 日收益率
-        // replaceRegexpOne 去掉符号后缀 (.SZ/.SH/.BJ)
-        // ⚠️ CH FINAL 不能直接用在 JOIN 表上，需要子查询包裹
         String sql = String.format("""
                 SELECT fv.calc_date, fv.factor_code,
                        replaceRegexpOne(fv.symbol, '\\\\.[A-Z]+$', '') AS code,
@@ -437,7 +541,7 @@ public class FactorStyleAttributionService {
                     String factorCode = rs.getString("factor_code");
                     String code = rs.getString("code");
 
-                    // 排除北交所(code 以 8 开头)、B 股(2 开头）
+                    // 排除北交所(code 以 8 开头)、B 股(2 开头）、ST等
                     if (code.startsWith("8") || code.startsWith("4") || code.startsWith("2")) continue;
 
                     double factorVal = rs.getDouble("factor_val");
@@ -460,7 +564,7 @@ public class FactorStyleAttributionService {
 
         // 对每个因子每天：按 factor_val 排序 → 分5组 → Top 20% 等权收益 − Bottom 20% 等权收益
         Map<LocalDate, Map<String, Double>> result = new LinkedHashMap<>();
-        int minTotalStocks = 200;  // 当天该因子至少200只股票有数据
+        int minTotalStocks = 200;
 
         for (Map.Entry<LocalDate, Map<String, List<double[]>>> dateEntry : rawData.entrySet()) {
             LocalDate date = dateEntry.getKey();
@@ -468,28 +572,23 @@ public class FactorStyleAttributionService {
             Map<String, Double> dayResult = new LinkedHashMap<>();
             boolean dayValid = false;
 
-            for (FactorDef fd : FACTORS) {
+            for (FactorDef fd : factors) {
                 List<double[]> rows = factorData.get(fd.code);
                 if (rows == null || rows.size() < minTotalStocks) continue;
 
-                // 按 factor_val 排序（升序）
                 rows.sort(Comparator.comparingDouble(a -> a[0]));
                 int n = rows.size();
                 int qSize = n / QUINTILE;
                 if (qSize < 10) continue;
 
-                // Top 20%: 等权平均日收益（高因子值端）
                 double topReturn = 0;
                 for (int i = n - qSize; i < n; i++) topReturn += rows.get(i)[1];
                 topReturn /= qSize;
 
-                // Bottom 20%: 等权平均日收益（低因子值端）
                 double bottomReturn = 0;
                 for (int i = 0; i < qSize; i++) bottomReturn += rows.get(i)[1];
                 bottomReturn /= qSize;
 
-                // 因子多空收益 = 高因子值端 − 低因子值端
-                // 这样 β>0 表示策略偏好高因子值股票，β<0 表示偏好低因子值股票
                 double factorReturn = topReturn - bottomReturn;
                 dayResult.put(fd.code, round4(factorReturn));
                 dayValid = true;
@@ -506,8 +605,7 @@ public class FactorStyleAttributionService {
     /**
      * OLS 多元回归
      */
-    private RegressionResult runOLS(List<DailyExcess> excess, List<double[]> factors, int n) {
-        int k = FACTORS.size();
+    private RegressionResult runOLS(List<DailyExcess> excess, List<double[]> factors, int n, int k) {
         double[] y = new double[n];
         double[][] x = new double[n][k];
 
@@ -537,15 +635,14 @@ public class FactorStyleAttributionService {
         double rSquared = ols.calculateRSquared();
         double adjRSquared = ols.calculateAdjustedRSquared();
 
-        // F statistic = (SSR / k) / (SSE / (n - k - 1))
-        double sse = 0, ssr = 0, sst = 0;
+        // F statistic
+        double sse = 0, ssr = 0;
         double yMean = Arrays.stream(y).average().orElse(0);
         for (int i = 0; i < n; i++) {
             sse += residuals[i] * residuals[i];
             double pred = alpha;
             for (int f = 0; f < k; f++) pred += betaOnly[f] * x[i][f];
             ssr += (pred - yMean) * (pred - yMean);
-            sst += (y[i] - yMean) * (y[i] - yMean);
         }
         double fStatistic = sse > 1e-10 ? (ssr / k) / (sse / (n - k - 1)) : 0;
 
@@ -560,7 +657,8 @@ public class FactorStyleAttributionService {
             List<DailyExcess> alignedExcess,
             List<double[]> alignedFactors,
             RegressionResult regResult,
-            Map<LocalDate, Double> stratNav) {
+            Map<LocalDate, Double> stratNav,
+            List<FactorDef> factors) {
 
         List<Map<String, Object>> result = new ArrayList<>();
 
@@ -584,7 +682,7 @@ public class FactorStyleAttributionService {
             LocalDate end = LocalDate.parse(endDate);
 
             double periodExcess = 0;
-            double[] periodFactorRets = new double[FACTORS.size()];
+            double[] periodFactorRets = new double[factors.size()];
 
             for (DailyExcess de : alignedExcess) {
                 if (de.date.isAfter(start) && !de.date.isAfter(end)) {
@@ -592,7 +690,7 @@ public class FactorStyleAttributionService {
                     Integer idx = dateToIdx.get(de.date);
                     if (idx != null && idx < alignedFactors.size()) {
                         double[] factorRow = alignedFactors.get(idx);
-                        for (int f = 0; f < FACTORS.size() && f < factorRow.length; f++) {
+                        for (int f = 0; f < factors.size() && f < factorRow.length; f++) {
                             periodFactorRets[f] += factorRow[f];
                         }
                     }
@@ -605,18 +703,18 @@ public class FactorStyleAttributionService {
             period.put("endDate", endDate);
             period.put("excessReturn", round4(periodExcess));
 
-            double[] periodContributions = new double[FACTORS.size()];
+            double[] periodContributions = new double[factors.size()];
             double periodTotalContrib = 0;
-            for (int f = 0; f < FACTORS.size(); f++) {
+            for (int f = 0; f < factors.size(); f++) {
                 periodContributions[f] = regResult.betas[f] * periodFactorRets[f];
                 periodTotalContrib += periodContributions[f];
             }
 
             List<Map<String, Object>> factorBreakdown = new ArrayList<>();
-            for (int f = 0; f < FACTORS.size(); f++) {
+            for (int f = 0; f < factors.size(); f++) {
                 Map<String, Object> fb = new LinkedHashMap<>();
-                fb.put("factorCode", FACTORS.get(f).code);
-                fb.put("factorName", FACTORS.get(f).name);
+                fb.put("factorCode", factors.get(f).code);
+                fb.put("factorName", factors.get(f).name);
                 fb.put("contribution", round4(periodContributions[f]));
                 fb.put("factorReturn", round4(periodFactorRets[f]));
                 factorBreakdown.add(fb);

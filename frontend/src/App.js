@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
-import { Layout, Menu, Typography, Space, Badge, Button, Tooltip } from 'antd';
+import { App as AntApp, Layout, Menu, Typography, Space, Badge, Button, Tooltip } from 'antd';
 import {
   FundOutlined, FundViewOutlined, ThunderboltOutlined,
   DashboardOutlined, BarChartOutlined, StockOutlined,
@@ -286,7 +286,9 @@ export default function App() {
         v7_relativeSplatPath: true,
       }}
     >
-      <AppLayout />
+      <AntApp>
+        <AppLayout />
+      </AntApp>
     </BrowserRouter>
   );
 }

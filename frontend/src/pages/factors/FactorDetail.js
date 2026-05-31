@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   Card, Descriptions, Tag, Button, Space, Tabs, Table,
   Row, Col, Typography, Spin, Modal, DatePicker,
-  Input, message, Progress, Divider, Select, Popconfirm, Alert, Timeline, Badge
+  Input, App, Progress, Divider, Select, Popconfirm, Alert, Timeline, Badge
 } from 'antd';
 import {
   ArrowLeftOutlined, EditOutlined,
@@ -35,6 +35,7 @@ const GROUP_COLORS = ['#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de'];
 const GROUP_NAMES  = ['分组1', '分组2', '分组3', '分组4', '分组5'];
 
 export default function FactorDetail() {
+  const { message } = App.useApp();
   const { id } = useParams();
   const navigate = useNavigate();
 
@@ -64,6 +65,8 @@ export default function FactorDetail() {
   const [runningReportId, setRunningReportId] = useState(null);
   const testPollRef = useRef(null);
   const testStompRef = useRef(null);
+  const testWsDataFlag = useRef(false);  // WebSocket 是否收到过真实数据
+  const testPollStartRef = useRef(null); // 轮询开始时间
 
   // ── 报告选择
   const [selectedReport, setSelectedReport] = useState(null);
@@ -323,6 +326,7 @@ export default function FactorDetail() {
 
           // ── 因子值计算阶段 ──
           if (data.stage === 'COMPUTING') {
+            testWsDataFlag.current = true;  // 收到计算进度，也算真实数据
             setComputing(true);
             setComputeProgress(data.progress || 0);
             const msgText = data.message || '正在计算因子值...';
@@ -346,6 +350,7 @@ export default function FactorDetail() {
           }
 
           if (data.stage?.startsWith('TEST')) {
+            testWsDataFlag.current = true;  // 收到真实数据，标记
             // 如果刚从计算阶段切到检测阶段，标记计算完成
             if (computing) {
               setComputing(false);
@@ -411,6 +416,26 @@ export default function FactorDetail() {
               loadFactor();
             }
           }
+
+          // ── 异常终止消息（不满足 TEST_ 前缀，单独处理）──
+          if (data.stage === 'FAILED' || data.stage === 'TEST_FAILED') {
+            pushTestLog(`❌ ${data.message || '检测失败'}`, 'error');
+            clearInterval(testPollRef.current);
+            testClient.deactivate();
+            setRunningReportId(null);
+            setTestProgress(0);
+            message.error(data.message || '因子检测失败');
+            loadFactor();
+          }
+
+          if (data.stage === 'COMPLETED') {
+            pushTestLog(`ℹ️ ${data.message || '检测已完成'}`, 'info');
+            clearInterval(testPollRef.current);
+            testClient.deactivate();
+            setRunningReportId(null);
+            setTestProgress(100);
+            loadFactor();
+          }
         });
       },
       onStompError: frame => {
@@ -424,7 +449,17 @@ export default function FactorDetail() {
 
     // 启动轮询检查状态
     if (testPollRef.current) clearInterval(testPollRef.current);
+    testWsDataFlag.current = false;
+    testPollStartRef.current = Date.now();
     testPollRef.current = setInterval(() => {
+      const elapsed = Date.now() - testPollStartRef.current;
+      // 如果超过60秒没有收到任何WebSocket数据，停止fake进度
+      if (elapsed > 60000 && !testWsDataFlag.current) {
+        setTestProgress(0);
+        pushTestLog('⚠️ 等待超时（60秒未收到后端检测数据），请检查后端日志', 'error');
+        clearInterval(testPollRef.current);
+        return;
+      }
       setTestProgress(prev => {
         // 如果正在计算因子值，不推进检测的 fake 进度
         if (computing) return prev;
