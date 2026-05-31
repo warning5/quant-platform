@@ -222,7 +222,24 @@ function StrategyOverview({ strategy }) {
         </Col>
         <Col span={8}>
           <Statistic
-            title="行业集中度(HHI)"
+            title={<>
+              行业集中度(HHI)
+              <Tooltip overlayInnerStyle={{ maxWidth: 520 }} title={
+                <div style={{ maxWidth: 520, lineHeight: 1.8 }}>
+                  <p style={{ margin: 0, fontWeight: 600 }}>HHI（赫芬达尔-赫希曼指数）</p>
+                  <p style={{ margin: '4px 0' }}><b>计算：</b>各行业持仓占比的平方和 × 100。取值范围 0~1，越高越集中。</p>
+                  <p style={{ margin: '4px 0' }}><b>解读：</b></p>
+                  <ul style={{ margin: '2px 0', paddingLeft: 16 }}>
+                    <li><b>&gt;0.25</b> 高度集中 — 收益过度依赖少数行业，风险敞口大</li>
+                    <li><b>0.15~0.25</b> 适度集中 — 有行业偏好但不极端</li>
+                    <li><b>&lt;0.15</b> 高度分散 — 行业风险充分分散</li>
+                  </ul>
+                  <p style={{ margin: '4px 0 0' }}><b>价值：</b>如果策略收益高度依赖1-2个行业，一旦行业轮动不利会大幅回撤。结合 Brinson 归因可判断超额收益是来<u>自选对行业</u>还是<u>选对个股</u>。</p>
+                </div>
+              }>
+                <QuestionCircleOutlined style={{ marginLeft: 4, fontSize: 13, color: '#8c8c8c', cursor: 'help' }} />
+              </Tooltip>
+            </>}
             value={fmt(strategy.industryConcentration)}
             suffix={strategy.industryConcentration > 0.3 ? <Tag color="orange">集中</Tag> : <Tag color="blue">分散</Tag>}
           />
@@ -413,12 +430,12 @@ function HoldingPeriodPanel({ periods, totalTrades }) {
         capability: 'partially_adjust',
         capabilityLabel: '半支持',
         capabilityColor: '#d48806',
-        path: '策略管理 → 策略列表 → 编辑策略 → 调仓频率改为 WEEKLY → 回测验证 → 如果短周期胜率仍 <40%，因子配置 Tab 排查低 IC 因子',
-        limitation: '⚠️ 当前只能看到"短周期胜率低"，无法区分是选股问题还是出场时机问题。改为 WEEKLY 是先验"卖早了"的假设，如果无效再查因子。',
+        path: '步骤1：策略管理 → 策略列表 → 编辑策略 → 调仓频率改为 WEEKLY → 回测验证\n步骤2：若胜率仍 <40%，回测管理 → IC/IR 分析 → 标出 IC<0.02 或 IR<0.3 的因子\n步骤3：策略管理 → 策略列表 → 编辑策略 → 因子配置 Tab → 降低或移除这些因子',
+        limitation: '⚠️ (1) 因子 IC 值不在策略编辑页中，需到「回测管理 → IC/IR 分析」查看；(2) 策略编辑器只显示因子权重，不能直接看到 IC，需手动交叉对照。',
         text: `【核心问题】"${worstLoss.bucket}"周期贡献了 ${fmt(Math.abs(worstLoss.contributionPct))}% 的亏损（${fmtMoney(worstLoss.totalPnl)}），${worstLoss.tradeCount}笔交易中胜率仅 ${fmtPct(worstLoss.winRate)}。选股因子在该周期段大面积失效，调模拟盘止损参数治标不治本。`,
         action: worstLoss.winRate < 0.3
-          ? '调仓频率 DAILY→WEEKLY 可减少 80% 的短周期交易量，是最快可执行的验证手段。如果改后短周期胜率仍低于 40%，则需排查因子 IC（因子配置 Tab）。' +
-            '\n注意：当前数据无法判断低胜率是因为"卖早了"还是"选不准"，只能通过实际调整来验证。'
+          ? '调仓频率 DAILY→WEEKLY 是最快可执行的验证手段。如果改后短周期胜率仍低于 40%，则需到「回测管理 → IC/IR 分析」查看各因子 Rank IC 均值，标出 IC<0.02 或 IR<0.3 的因子，再到「策略编辑 → 因子配置 Tab」降低或移除。' +
+            '\n注意：当前数据无法判断胜率低是因为"卖早了"还是"选不准"，只能通过实际调整分步验证。'
           : '审视该周期的选股逻辑，排查是否因子在该周期段失效。编辑策略 → 因子配置 Tab → 调整因子权重。',
       });
     }
@@ -442,10 +459,10 @@ function HoldingPeriodPanel({ periods, totalTrades }) {
         capability: 'can_adjust',
         capabilityLabel: '可调整',
         capabilityColor: '#389e0d',
-        path: '策略管理 → 策略列表 → 编辑策略 → 修改「调仓频率」（DAILY → WEEKLY）；因子配置 Tab → 调整因子权重 / 替换失效因子',
-        limitation: '⚠️ 限制：策略编辑器已支持因子权重配置，但因子 IC 值需在「因子管理 → IC/IR 分析」中查看，作为权重调整依据。',
-        text: `【普遍亏损】${fmtPct(losingRatio)} 的交易（${totalLosingTrades}/${totalTrades}笔）处于亏损状态。`,
-        action: '调仓频率（rebalance_frequency）从 DAILY 改为 WEEKLY 可减少 4/5 交易量，直接降低固定成本暴露。同时排查选股因子在样本期内的 IC 值，替换失效因子。',
+        path: '步骤1：回测管理 → IC/IR 分析 → 逐个排查各因子 Rank IC 均值/IR，标出 IC<0.02 或 IR<0.3 的失效因子\n步骤2：策略管理 → 策略列表 → 编辑策略 → 因子配置 Tab → 替换或降低这些因子权重\n步骤3：回测验证 → 若整体胜率仍低，考虑减少因子数量或切换因子大类',
+        limitation: '⚠️ 因子 IC 值在「回测管理 → IC/IR 分析」中查看；策略编辑器的因子配置 Tab 只显示权重，不显示 IC，需手动交叉对照。IC/IR 数据为全局统计，未按持仓周期分组。',
+        text: `【因子整体失效】${fmtPct(losingRatio)} 的交易（${totalLosingTrades}/${totalTrades}笔）全线亏损，不仅限于特定持有周期——说明选股因子在样本期内大面积失效，不是调仓频率能解决的。`,
+        action: '不同于建议1的"特定周期亏"问题，75%+的交易无论持有多久都亏，根因在因子整体选股能力下降。优先到 IC/IR 分析排查因子有效性，替换低 IC 因子后再回测。',
       });
     }
     // 建议4: 高度集中风险
@@ -548,7 +565,7 @@ function HoldingPeriodPanel({ periods, totalTrades }) {
                   <Text style={{ color: '#555', fontSize: 12 }}>{s.action}</Text>
                   {s.path && (
                     <div style={{ marginTop: 4 }}>
-                      <Tag color="geekblue" style={{ fontSize: 11, marginRight: 0, fontFamily: 'monospace' }}>
+                      <Tag color="geekblue" style={{ fontSize: 11, marginRight: 0, fontFamily: 'monospace', whiteSpace: 'pre-line', lineHeight: 1.6 }}>
                         {s.path}
                       </Tag>
                     </div>

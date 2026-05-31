@@ -2711,7 +2711,7 @@ export default function BacktestReport() {
     },
     {
       key: 'montecarlo',
-      label: <><ExperimentOutlined />蒙特卡洛 <AntTooltip styles={{ root: { maxWidth: 420 } }} title={<div style={{ lineHeight: 1.8, fontSize: 13 }}>
+      label: <><ExperimentOutlined />蒙特卡洛 <AntTooltip styles={{ root: { maxWidth: 560 }, body: { maxWidth: 560 } }} title={<div style={{ lineHeight: 1.8, fontSize: 13 }}>
           <div style={{ fontWeight: 700, marginBottom: 4 }}>Bootstrap 重采样模拟</div>
           <div>基于历史日收益率随机抽样，生成数千条未来净值路径，评估策略在不同市场环境下的表现分布。</div>
           <div style={{ marginTop: 6, borderTop: '1px solid #f0f0f0', paddingTop: 4 }}>
@@ -2724,6 +2724,11 @@ export default function BacktestReport() {
           <div style={{ marginTop: 4 }}>
             <b>联动关系：</b>正收益概率高但 CVaR 也高 → 「赢多输大」，需警惕黑天鹅。最大回撤分布 P95 若超过 Alpha 分析中的超额最大回撤，说明历史最坏情况并非最差可能。结合 Calmar 比率可评估风险调整后收益是否稳健。
           </div>
+          <div style={{ marginTop: 6, borderTop: '1px solid #f0f0f0', paddingTop: 4 }}>
+            <b>参数说明：</b>
+          </div>
+          <div>· <b>模拟次数</b> → 生成的随机路径数量。越多越接近理论分布，但计算越慢。一般 500 次已足够收敛。</div>
+          <div>· <b>预测期</b> → 每条路径的模拟时长（1年/2年/3年）。只改变路径长度，不改变单笔采样逻辑。注意：预测期越长，尾部风险暴露越充分。</div>
         </div>}> <QuestionCircleOutlined style={{ color: '#8c8c8c', fontSize: 12 }} /></AntTooltip></>,
       children: (
         <MonteCarloPanel taskId={taskId} />
