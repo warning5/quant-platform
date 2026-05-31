@@ -5,9 +5,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quant.platform.backtest.domain.BacktestReport;
 import com.quant.platform.backtest.domain.BacktestTask;
 import com.quant.platform.backtest.domain.ParamOptimizeReport;
+import com.quant.platform.backtest.domain.RollingScreenTask;
 import com.quant.platform.backtest.mapper.ParamOptimizeReportMapper;
 import com.quant.platform.backtest.service.*;
 import com.quant.platform.common.dto.ApiResponse;
+import com.quant.platform.common.exception.ResourceNotFoundException;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -28,11 +30,14 @@ import java.util.*;
 public class BacktestController {
 
     private final BacktestService backtestService;
+    private final RollingScreenService rollingScreenService;
     private final BrinsonAttributionService brinsonAttributionService;
+    private final FactorStyleAttributionService factorStyleAttributionService;
     private final CompareService compareService;
     private final MonteCarloService monteCarloService;
     private final ParamOptimizeService paramOptimizeService;
     private final ParamOptimizeReportMapper paramOptimizeReportMapper;
+    private final TradeAnalysisService tradeAnalysisService;
     private final ObjectMapper objectMapper;
 
     @PostMapping
@@ -124,7 +129,7 @@ public class BacktestController {
     @GetMapping("/{taskId}/attribution")
     @Operation(summary = "Brinson归因分析")
     public ApiResponse<Map<String, Object>> getAttribution(@PathVariable Long taskId) {
-        BacktestTask task = backtestService.getTask(taskId);
+        BacktestTask task = getAnyTask(taskId);
         BacktestReport report = backtestService.getReport(taskId);
         Map<String, Object> result = brinsonAttributionService.computeBrinson(
                 task,
@@ -133,6 +138,190 @@ public class BacktestController {
                 report.getBenchmarkCurveJson()
         );
         return ApiResponse.success(result);
+    }
+
+    /**
+     * 因子风格归因分析
+     * 将策略超额收益对动量/波动率/市值/换手率因子做多元回归
+     */
+    @GetMapping("/{taskId}/factor-attribution")
+    @Operation(summary = "因子风格归因分析")
+    public ApiResponse<Map<String, Object>> getFactorAttribution(@PathVariable Long taskId) {
+        BacktestTask task = getAnyTask(taskId);
+        BacktestReport report = backtestService.getReport(taskId);
+        Map<String, Object> result = factorStyleAttributionService.compute(
+                task,
+                report.getPositionHistoryJson(),
+                report.getEquityCurveJson(),
+                report.getBenchmarkCurveJson()
+        );
+        return ApiResponse.success(result);
+    }
+
+    /**
+     * 策略特征检测 + 归因方案推荐
+     * <p>
+     * 新逻辑：Brinson 和因子归因都跑一遍，选解释力(explanationRatio)高的作为推荐。
+     * 如果两者解释力都低 (<0.15)，返回 "UNCLEAR" 并在 reason 中说明。
+     * 特征检测数据（换手率/持仓天数/行业集中度）保留供前端展示参考。
+     */
+    @GetMapping("/{taskId}/attribution-strategy")
+    @Operation(summary = "归因方案推荐（比较两种归因模型后推荐）")
+    public ApiResponse<Map<String, Object>> getAttributionStrategy(@PathVariable Long taskId) {
+        BacktestTask task = getAnyTask(taskId);
+        BacktestReport report = backtestService.getReport(taskId);
+
+        String positionJson = report.getPositionHistoryJson();
+        String equityJson    = report.getEquityCurveJson();
+        String benchJson     = report.getBenchmarkCurveJson();
+
+        // 1. 特征检测（保留，供前端参考）
+        FactorStyleAttributionService.StrategyCharacteristics chars
+                = factorStyleAttributionService.detectCharacteristics(task, positionJson);
+
+        // 2. 尝试 Brinson 归因
+        Map<String, Object> brinsonResult = null;
+        double brinsonExplanatioRatio = -1;
+        try {
+            brinsonResult = brinsonAttributionService.computeBrinson(
+                    task, positionJson, equityJson, benchJson);
+            Object er = brinsonResult.get("explanationRatio");
+            if (er instanceof Number) brinsonExplanatioRatio = ((Number) er).doubleValue();
+        } catch (Exception e) {
+            log.warn("[AttributionStrategy] Brinson归因失败: {}", e.getMessage());
+        }
+
+        // 3. 尝试因子风格归因
+        Map<String, Object> factorResult = null;
+        double factorExplanationRatio = -1;
+        try {
+            factorResult = factorStyleAttributionService.compute(
+                    task, positionJson, equityJson, benchJson);
+            Object er = factorResult.get("summary") instanceof Map
+                    ? ((Map<String, Object>) factorResult.get("summary")).get("explanationRatio")
+                    : null;
+            if (er instanceof Number) factorExplanationRatio = ((Number) er).doubleValue();
+        } catch (Exception e) {
+            log.warn("[AttributionStrategy] 因子归因失败: {}", e.getMessage());
+        }
+
+        // 4. 比较解释力，选高的
+        String recommendedModel;
+        String reason;
+        Map<String, Object> bestResult;
+
+        boolean brinsonOk  = brinsonExplanatioRatio >= 0.15;
+        boolean factorOk    = factorExplanationRatio >= 0.15;
+
+        if (!brinsonOk && !factorOk) {
+            recommendedModel = "UNCLEAR";
+            reason = String.format(
+                    "Brinson解释力=%.1f%%, 因子归因解释力=%.1f%%, 两种模型均适用性不足。" +
+                    "策略收益可能来自：个股alpha、择时能力、或交易成本侵蚀。建议检查策略逻辑。",
+                    brinsonExplanatioRatio * 100, factorExplanationRatio * 100);
+            bestResult = null;
+        } else if (brinsonOk && !factorOk) {
+            recommendedModel = "BRINSON";
+            reason = String.format("Brinson解释力=%.1f%%, 因子归因解释力=%.1f%% — 行业配置是主要收益来源",
+                    brinsonExplanatioRatio * 100, factorExplanationRatio * 100);
+            bestResult = brinsonResult;
+        } else if (!brinsonOk) {
+            recommendedModel = "FACTOR";
+            reason = String.format("因子归因解释力=%.1f%%, Brinson解释力=%.1f%% — 风格因子暴露是主要收益来源",
+                    factorExplanationRatio * 100, brinsonExplanatioRatio * 100);
+            bestResult = factorResult;
+        } else {
+            // 两个都 ok，选解释力高的
+            if (factorExplanationRatio >= brinsonExplanatioRatio) {
+                recommendedModel = "FACTOR";
+                reason = String.format("因子归因解释力=%.1f%% ≥ Brinson解释力=%.1f%% — 推荐因子风格归因",
+                        factorExplanationRatio * 100, brinsonExplanatioRatio * 100);
+                bestResult = factorResult;
+            } else {
+                recommendedModel = "BRINSON";
+                reason = String.format("Brinson解释力=%.1f%% ≥ 因子归因解释力=%.1f%% — 推荐Brinson行业归因",
+                        brinsonExplanatioRatio * 100, factorExplanationRatio * 100);
+                bestResult = brinsonResult;
+            }
+        }
+
+        // 5. 组装返回
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("taskId", taskId);
+        result.put("recommendedModel", recommendedModel);
+        result.put("reason", reason);
+        result.put("availableModels", List.of("BRINSON", "FACTOR"));
+
+        // 特征数据（供前端参考）
+        result.put("avgDailyTurnover",   chars.avgDailyTurnover());
+        result.put("avgHoldingDays",     chars.avgHoldingDays());
+        result.put("industryConcentration", chars.industryConcentration());
+
+        // 两个模型的解释力（前端可展示对比）
+        Map<String, Object> modelComparison = new LinkedHashMap<>();
+        Map<String, Object> bCompariso = new LinkedHashMap<>();
+        bCompariso.put("explanationRatio", round2(brinsonExplanatioRatio));
+        bCompariso.put("available", brinsonResult != null);
+        if (brinsonResult != null) {
+            bCompariso.put("totalExcessReturn",
+                    brinsonResult.getOrDefault("totalExcessReturn", 0));
+        }
+        modelComparison.put("BRINSON", bCompariso);
+
+        Map<String, Object> fCompariso = new LinkedHashMap<>();
+        fCompariso.put("explanationRatio", round2(factorExplanationRatio));
+        fCompariso.put("available", factorResult != null);
+        if (factorResult != null) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> summary = (Map<String, Object>) factorResult.get("summary");
+            fCompariso.put("totalExcessReturn",
+                    summary != null ? summary.getOrDefault("totalExcessReturn", 0) : 0);
+        }
+        modelComparison.put("FACTOR", fCompariso);
+        result.put("modelComparison", modelComparison);
+
+        // 如果推荐明确，附上归因结果供前端直接展示
+        if (bestResult != null && !"UNCLEAR".equals(recommendedModel)) {
+            result.put("attributionResult", bestResult);
+        }
+
+        log.info("[AttributionStrategy] taskId={}, recommended={}, Brinson ER={}, Factor ER={}",
+                taskId, recommendedModel,
+                round2(brinsonExplanatioRatio), round2(factorExplanationRatio));
+        return ApiResponse.success(result);
+    }
+
+    private static double round2(double v) {
+        return Math.round(v * 10000.0) / 10000.0;
+    }
+
+    /**
+     * 交易级分析（含 P1 持仓周期分析 + P2 关键交易分析）
+     */
+    @GetMapping("/{taskId}/trade-analysis")
+    @Operation(summary = "交易级分析（持仓周期 + 关键交易）")
+    public ApiResponse<Map<String, Object>> getTradeAnalysis(@PathVariable Long taskId) {
+        BacktestReport report = backtestService.getReport(taskId);
+        Map<String, Object> analysis = tradeAnalysisService.analyze(report.getTradeLogJson());
+        return ApiResponse.success(analysis);
+    }
+
+    /**
+     * 获取任务（自动兼容 backtest_task 和 rolling_screen_task 两种表）。
+     * 先查 backtest_task，找不到回退到 rolling_screen_task。
+     */
+    private BacktestTask getAnyTask(Long taskId) {
+        try {
+            return backtestService.getTask(taskId);
+        } catch (ResourceNotFoundException e) {
+            RollingScreenTask rt = rollingScreenService.getTask(taskId);
+            return BacktestTask.builder()
+                    .id(rt.getId())
+                    .startDate(rt.getStartDate())
+                    .endDate(rt.getEndDate())
+                    .benchmarkCode(rt.getBenchmarkCode())
+                    .build();
+        }
     }
 
     @SuppressWarnings("unchecked")

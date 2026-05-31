@@ -14,6 +14,7 @@ import {
 import ReactECharts from 'echarts-for-react';
 import { backtestApi } from '../../api';
 import MonteCarloPanel from './MonteCarloPanel';
+import AttributionHub from './AttributionHub';
 
 const { Title, Text } = Typography;
 
@@ -1939,6 +1940,331 @@ function BrinsonConclusion({ summary, industrySummary, periods }) {
   );
 }
 
+/**
+ * 因子风格归因面板
+ * 对动量/波动率/市值/换手率因子做多元回归，拆解策略收益来源
+ */
+function FactorAttributionPanel({ taskId }) {
+  const [loading, setLoading] = useState(false);
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
+  const [strategy, setStrategy] = useState(null); // 推荐模型信息
+
+  useEffect(() => {
+    // 加载归因策略推荐
+    backtestApi.getAttributionStrategy(taskId)
+      .then(res => setStrategy(res))
+      .catch(err => console.warn('加载归因策略推荐失败:', err));
+  }, [taskId]);
+
+  const loadFactorAttr = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    backtestApi.getFactorAttribution(taskId)
+      .then(res => setData(res))
+      .catch(err => {
+        console.error('因子归因分析失败:', err);
+        setError(err?.response?.data?.message || err?.message || '未知错误');
+      })
+      .finally(() => setLoading(false));
+  }, [taskId]);
+
+  useEffect(() => { loadFactorAttr(); }, [taskId]);
+
+  if (loading) {
+    return <Spin tip="正在计算因子风格归因...（需查询 ClickHouse 多空组合收益率，可能较慢）"><div style={{ height: 200 }} /></Spin>;
+  }
+
+  if (error) {
+    return <Alert type="error" showIcon message="因子归因计算失败" description={error} />;
+  }
+
+  if (!data) return null;
+
+  var summary = data.summary || {};
+  var factors = data.factors || [];
+  var contributions = data.factorContributions || [];
+  var regDetail = data.regressionDetail || {};
+  var periodContribs = data.periodContributions || [];
+  var observationDays = data.observationDays || 0;
+  var excess = summary.totalExcessReturn || 0;
+  var factorContrib = summary.totalFactorContribution || 0;
+  var residual = summary.residual || 0;
+  var explRatio = summary.explanationRatio || 0;
+  var r2 = regDetail.rSquared || 0;
+  var adjR2 = regDetail.adjRSquared || 0;
+  var alpha = regDetail.alpha || 0;
+  var annualAlpha = regDetail.annualizedAlpha || 0;
+
+  // ── 关键指标 ──
+  var fmtPctShort = (v) => {
+    if (v == null) return 'N/A';
+    return (v >= 0 ? '+' : '') + (v * 100).toFixed(2) + '%';
+  };
+
+  // ── 因子暴露柱状图 ──
+  var barOption = {
+    tooltip: {
+      trigger: 'axis',
+      formatter: function(params) {
+        var f = contributions[params[0].dataIndex];
+        var sig = f.significant ? '★ 显著' : '(不显著)';
+        return '<div style="font-weight:600">' + f.factorName + ' (' + f.factorCode + ')</div>' +
+          '<div>β 暴露: ' + f.beta.toFixed(4) + ' ' + sig + '</div>' +
+          '<div>t值: ' + (f.tStat != null ? f.tStat.toFixed(2) : 'N/A') + '</div>' +
+          '<div>年化因子收益: ' + fmtPctShort(f.annualizedFactorReturn) + '</div>' +
+          '<div>总因子收益: ' + fmtPctShort(f.totalFactorReturn) + '</div>' +
+          '<div style="font-weight:600;color:' + (f.contribution >= 0 ? '#cf1322' : '#3f8600') + '">贡献: ' + fmtPctShort(f.contribution) + '</div>';
+      }
+    },
+    grid: { left: 140, right: 60, top: 20, bottom: 30 },
+    xAxis: { type: 'value', axisLabel: { formatter: function(v) { return v.toFixed(3); } }, name: 'β 暴露系数' },
+    yAxis: {
+      type: 'category',
+      data: contributions.map(function(f) { return f.factorName; }).reverse(),
+      axisLabel: { fontSize: 12 },
+    },
+    series: [{
+      name: 'β',
+      type: 'bar',
+      data: contributions.map(function(f) {
+        var color = f.contribution >= 0 ? '#cf1322' : '#3f8600';
+        return {
+          value: parseFloat(f.beta.toFixed(4)),
+          itemStyle: {
+            color: color,
+            borderColor: f.significant ? '#000' : '#d9d9d9',
+            borderWidth: f.significant ? 1.5 : 0.5,
+            borderType: f.significant ? 'solid' : 'dashed',
+          }
+        };
+      }).reverse(),
+      barMaxWidth: 28,
+      label: {
+        show: true, position: 'right',
+        formatter: function(p) {
+          var c = contributions[contributions.length - 1 - p.dataIndex];
+          return (c.significant ? '★ ' : '') + (c.tStat != null ? 't=' + c.tStat.toFixed(2) : '');
+        },
+        fontSize: 10,
+      }
+    }],
+  };
+
+  // ── 因子贡献瀑布图 ──
+  var waterfallData = [];
+  var running = 0;
+  contributions.forEach(function(c) {
+    waterfallData.push({ name: c.factorName, value: c.contribution, itemStyle: { color: c.contribution >= 0 ? '#cf1322' : '#3f8600' } });
+    running += c.contribution;
+  });
+  waterfallData.push({ name: '因子合计', value: factorContrib, itemStyle: { color: '#1677ff' } });
+  waterfallData.push({ name: '残差(α)', value: residual, itemStyle: { color: '#8c8c8c' } });
+  waterfallData.push({ name: '实际超额', value: excess, itemStyle: { color: '#000' } });
+
+  var waterfallOption = {
+    tooltip: { trigger: 'axis', formatter: function(p) { return p[0].name + ': ' + fmtPctShort(p[0].value); } },
+    grid: { left: 100, right: 30, top: 20, bottom: 30 },
+    xAxis: { type: 'category', data: waterfallData.map(function(d) { return d.name; }), axisLabel: { fontSize: 11 } },
+    yAxis: { type: 'value', axisLabel: { formatter: function(v) { return (v * 100).toFixed(1) + '%'; } } },
+    series: [{
+      name: '贡献', type: 'bar',
+      data: waterfallData.map(function(d) { return d; }),
+      barMaxWidth: 40,
+    }],
+  };
+
+  return (
+    <div>
+      {/* 策略推荐信息 */}
+      {strategy && (
+        <Alert
+          type={
+            strategy.recommendedModel === 'UNCLEAR' ? 'warning' :
+            strategy.recommendedModel === 'FACTOR' ? 'success' : 'info'
+          }
+          showIcon
+          style={{ marginBottom: 16, fontSize: 12 }}
+          message={
+            <span>
+              推荐模型：<b>{
+                strategy.recommendedModel === 'UNCLEAR' ? '暂不明确（两种模型解释力均不足）' :
+                strategy.recommendedModel === 'FACTOR' ? '因子风格归因' : 'Brinson 归因'
+              }</b>
+              <span style={{ color: '#8c8c8c', marginLeft: 8, fontSize: 11 }}>
+                {strategy.reason}
+              </span>
+            </span>
+          }
+        />
+      )}
+
+      {/* 模型对比数据 */}
+      {strategy && strategy.modelComparison && (
+        <Card size="small" title="归因模型对比" style={{ marginBottom: 16 }}>
+          <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ borderBottom: '2px solid #f0f0f0', textAlign: 'left' }}>
+                <th style={{ padding: '6px 8px' }}>模型</th>
+                <th style={{ padding: '6px 8px', textAlign: 'right' }}>解释力</th>
+                <th style={{ padding: '6px 8px', textAlign: 'right' }}>可用性</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(strategy.modelComparison).map(function([key, val], i) {
+                return (
+                  <tr key={i} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                    <td style={{ padding: '6px 8px' }}>
+                      <b>{key === 'BRINSON' ? 'Brinson 归因' : '因子风格归因'}</b>
+                    </td>
+                    <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 700, color: (val.explanationRatio || 0) > 0.5 ? '#52c41a' : (val.explanationRatio || 0) > 0.2 ? '#fa8c16' : '#ff4d4f' }}>
+                      {((val.explanationRatio || 0) * 100).toFixed(1)}%
+                    </td>
+                    <td style={{ padding: '6px 8px', textAlign: 'right' }}>
+                      {val.available ? <Tag color="success" style={{fontSize:10}}>可用</Tag> : <Tag color="default" style={{fontSize:10}}>不可用</Tag>}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <div style={{ marginTop: 8, fontSize: 11, color: '#8c8c8c' }}>
+            特征参考：换手率 {(strategy.avgDailyTurnover * 100).toFixed(1)}% / 平均持仓 {strategy.avgHoldingDays}天 / 行业集中度 {strategy.industryConcentration.toFixed(2)}
+          </div>
+        </Card>
+      )}
+
+      {/* 关键指标 */}
+      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 16 }}>
+        {[
+          { label: '实际超额', value: fmtPctShort(excess), color: excess >= 0 ? '#cf1322' : '#3f8600' },
+          { label: '因子贡献', value: fmtPctShort(factorContrib), color: factorContrib >= 0 ? '#cf1322' : '#3f8600' },
+          { label: '残差(α)', value: fmtPctShort(residual), color: '#8c8c8c' },
+          { label: '解释力', value: (explRatio * 100).toFixed(1) + '%', color: explRatio > 0.5 ? '#52c41a' : explRatio > 0.2 ? '#fa8c16' : '#ff4d4f' },
+          { label: 'R²', value: (r2 * 100).toFixed(1) + '%', color: '#8c8c8c' },
+          { label: '年化α', value: fmtPctShort(annualAlpha), color: annualAlpha >= 0 ? '#cf1322' : '#3f8600' },
+          { label: '观测天数', value: observationDays + '天', color: '#8c8c8c' },
+        ].map(function(item, i) {
+          return (
+            <div key={i} style={{ textAlign: 'center', minWidth: 80 }}>
+              <div style={{ fontSize: 11, color: '#8c8c8c', marginBottom: 2 }}>{item.label}</div>
+              <div style={{ fontSize: 18, fontWeight: 700, color: item.color }}>{item.value}</div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* 模型说明 */}
+      <div style={{ background: '#f5f5f5', padding: '8px 12px', borderRadius: 4, marginBottom: 12, fontSize: 11, color: '#8c8c8c', lineHeight: 1.7 }}>
+        <b>R_p − R_b = α + Σ(β_f × FactorReturn_f) + ε</b><br/>
+        因子收益 = 多空组合日收益率（Top 20% 等权 − Bottom 20% 等权）<br/>
+        β &gt; 0 且显著(t≥1.96) → 策略<b>偏好高因子值</b>股票。β &lt; 0 → 偏好低因子值。<br/>
+        R² 衡量因子对策略日收益<b>波动</b>的解释程度，解释力衡量因子对总超额收益<b>大小</b>的解释程度。
+      </div>
+
+      <Row gutter={[16, 16]}>
+        {/* 因子暴露 vs 贡献 */}
+        <Col span={12}>
+          <Card size="small" title="因子 β 暴露" extra={<span style={{fontSize:11,color:'#8c8c8c'}}>★ 显著(t≥1.96)</span>}>
+            <ReactECharts option={barOption} style={{ height: 220 }} />
+          </Card>
+        </Col>
+        <Col span={12}>
+          <Card size="small" title="收益归因拆解">
+            <ReactECharts option={waterfallOption} style={{ height: 220 }} />
+          </Card>
+        </Col>
+      </Row>
+
+      {/* 因子贡献表格 */}
+      <Card size="small" title="因子贡献明细" style={{ marginTop: 16 }}>
+        <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+          <thead>
+            <tr style={{ borderBottom: '2px solid #f0f0f0', textAlign: 'left' }}>
+              <th style={{ padding: '6px 8px' }}>因子</th>
+              <th style={{ padding: '6px 8px', textAlign: 'right' }}>β 暴露</th>
+              <th style={{ padding: '6px 8px', textAlign: 'right' }}>t值</th>
+              <th style={{ padding: '6px 8px', textAlign: 'right' }}>显著性</th>
+              <th style={{ padding: '6px 8px', textAlign: 'right' }}>总因子收益</th>
+              <th style={{ padding: '6px 8px', textAlign: 'right' }}>年化因子收益</th>
+              <th style={{ padding: '6px 8px', textAlign: 'right' }}>贡献</th>
+            </tr>
+          </thead>
+          <tbody>
+            {contributions.map(function(c, i) {
+              return (
+                <tr key={i} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                  <td style={{ padding: '6px 8px' }}>
+                    <b>{c.factorName}</b>
+                    <span style={{ color: '#8c8c8c', marginLeft: 4, fontSize: 10 }}>{c.factorCode}</span>
+                  </td>
+                  <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 700, color: c.beta >= 0 ? '#cf1322' : '#3f8600' }}>
+                    {(c.beta != null ? c.beta : 0).toFixed(4)}
+                  </td>
+                  <td style={{ padding: '6px 8px', textAlign: 'right' }}>
+                    {(c.tStat != null ? c.tStat : 0).toFixed(2)}
+                  </td>
+                  <td style={{ padding: '6px 8px', textAlign: 'right' }}>
+                    {c.significant ? <Tag color="success" style={{fontSize:10}}>显著</Tag> : <span style={{color:'#8c8c8c'}}>不显著</span>}
+                  </td>
+                  <td style={{ padding: '6px 8px', textAlign: 'right' }}>
+                    {fmtPctShort(c.totalFactorReturn)}
+                  </td>
+                  <td style={{ padding: '6px 8px', textAlign: 'right' }}>
+                    {fmtPctShort(c.annualizedFactorReturn)}
+                  </td>
+                  <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 700, color: c.contribution >= 0 ? '#cf1322' : '#3f8600' }}>
+                    {fmtPctShort(c.contribution)}
+                  </td>
+                </tr>
+              );
+            })}
+            <tr style={{ borderTop: '2px solid #f0f0f0', background: '#fafafa' }}>
+              <td style={{ padding: '6px 8px', fontWeight: 700 }}>合计</td>
+              <td style={{ padding: '6px 8px' }}></td>
+              <td style={{ padding: '6px 8px' }}></td>
+              <td style={{ padding: '6px 8px' }}></td>
+              <td style={{ padding: '6px 8px' }}></td>
+              <td style={{ padding: '6px 8px' }}></td>
+              <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 700, color: factorContrib >= 0 ? '#cf1322' : '#3f8600' }}>
+                {fmtPctShort(factorContrib)}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </Card>
+
+      {/* 解释力评估 */}
+      <Card size="small" title="归因评估" style={{ marginTop: 16 }}>
+        {explRatio < 0.3 ? (
+          <Alert type="warning" showIcon style={{ fontSize: 12, lineHeight: 1.8 }}
+            message="因子模型解释力偏低"
+            description={
+              <div>
+                R²={r2.toFixed(3)}, 解释力={(explRatio*100).toFixed(1)}%。因子模型对策略<b style={{color: explRatio > 0 ? '#52c41a' : '#ff4d4f'}}>
+                {explRatio > 0.5 ? '解释力较强' : explRatio > 0.2 ? '有一定解释力' : '解释力不足'}</b>。
+                {explRatio <= 0.2 && ' 策略收益来源可能在当前4个因子之外（如事件驱动/短期反转/极端行情），建议扩展因子集合。'}
+              </div>
+            }
+          />
+        ) : (
+          <Alert type="success" showIcon style={{ fontSize: 12 }}
+            message={<>因子模型解释力 <b>{(explRatio*100).toFixed(1)}%</b>，R²={(r2*100).toFixed(1)}%。因子能较好解释策略收益来源。</>}
+          />
+        )}
+        {alpha !== 0 && (
+          <div style={{ marginTop: 8, fontSize: 12, color: '#8c8c8c', lineHeight: 1.7 }}>
+            <b>纯 Alpha（因子无法解释的部分）：</b>日度 {fmtPctShort(alpha)}，年化 {fmtPctShort(annualAlpha)}。
+            {Math.abs(alpha) > 0.001
+              ? ' α显著 ≠ 0，策略在因子暴露之外有独立选股/择时能力。'
+              : ' α接近0，策略收益几乎完全由因子暴露解释。'}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
 /** 完整的归因分析面板 */
 function AttributionPanel({ taskId }) {
   const [loading, setLoading] = useState(false);
@@ -2340,30 +2666,26 @@ export default function BacktestReport() {
       ),
     },
     {
-      key: 'attribution',
-      label: <>Brinson归因 <AntTooltip styles={{ root: { maxWidth: 420 } }} title={<div style={{ lineHeight: 1.8, fontSize: 13 }}>
-          <div style={{ fontWeight: 700, marginBottom: 4 }}>Brinson 归因模型（行业维度）</div>
+      key: 'attribution-hub',
+      label: <>归因分析  <AntTooltip styles={{ root: { maxWidth: 460 } }} title={<div style={{ lineHeight: 1.8, fontSize: 13 }}>
+          <div style={{ fontWeight: 700, marginBottom: 4 }}>归因分析 Hub</div>
           <div style={{ marginBottom: 6, color: '#8c8c8c', fontSize: 12 }}>
-            Brinson 模型基于<b>行业分类</b>分析超额收益来源。它假设收益差异来自两个层面：<b>行业配置</b>（是否超配了强势行业）和<b>行业内选股</b>（是否挑出了行业中的佼佼者）。若策略收益主要由非行业因子驱动（如市值/动量/事件），三效应解释力会偏低。
+            统一归因分析入口，自动对比<b> Brinson 行业归因</b>与<b> 因子风格归因</b>两种模型，
+            推荐解释力更高的方案。同时提供<b>持仓周期分析</b>和<b>关键交易透视</b>。
           </div>
-          <div>将超额收益拆解为三部分：</div>
-          <div>· <b>配置效应</b> — 行业权重偏离基准带来的收益，判断择时能力</div>
-          <div>· <b>选股效应</b> — 行业内个股选择带来的收益，判断选股能力</div>
-          <div>· <b>交互效应</b> — 配置与选股的协同效应</div>
           <div style={{ marginTop: 6, borderTop: '1px solid #f0f0f0', paddingTop: 4 }}>
-            <b>如何解读：</b>三效应之和 ≈ 总超额收益（忽略残差）。三者是加法关系，一个大正效应可能只是抵消另一个大负效应。
-            <br/>· 配置正 → 行业择时对（超配了强势行业/低配了弱势行业）
-            <br/>· 选股正 → 个股挑选强（在行业内选到比行业均值更好的股票）
-            <br/>· 交互正 → 权重方向与选股方向一致（超配的行业选股也强、低配的行业选股也差），乘积效应放大
-            <br/>· 交互负 → 权重方向与选股方向相反（超配了选不好的行业、或踏空了选得好的行业），互相抵消
+            <b>包含四个维度：</b>
           </div>
+          <div>· <b>归因对比</b> — Brinson vs 因子，自动选解释力高的推荐</div>
+          <div>· <b>持仓周期分析</b> — 不同持有天数盈亏分布，定位最优持仓周期</div>
+          <div>· <b>关键交易透视</b> — 帕累托分析，找出贡献 90% 利润的少数交易</div>
+          <div>· <b>归因详情</b> — Brinson 三效应拆解 + 因子 β 暴露回归（可折叠展开）</div>
           <div style={{ marginTop: 4 }}>
-            <b>联动关系：</b>若 Alpha 分析中 Alpha 为正但归因中选股效应为负，说明超额收益可能来自市场 Beta 暴露而非个股能力。
+            <b>联动关系：</b>若两种归因解释力均低（&lt;15%），说明收益不由行业或风格驱动，
+            需通过持仓周期分析和关键交易透视找到真实收益来源。
           </div>
         </div>}> <QuestionCircleOutlined style={{ color: '#8c8c8c', fontSize: 12 }} /></AntTooltip></>,
-      children: (
-        <AttributionPanel taskId={taskId} />
-      ),
+      children: <AttributionHub taskId={taskId} />,
     },
     {
       key: 'excess',
