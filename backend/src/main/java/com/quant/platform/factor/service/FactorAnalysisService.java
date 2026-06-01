@@ -12,6 +12,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.*;
 import java.util.stream.Collectors;
+import org.apache.commons.math3.distribution.TDistribution;
 
 /**
  * 因子有效性分析服务
@@ -212,6 +213,23 @@ public class FactorAnalysisService {
         result.put("icMean", Math.round(icMean * 10000.0) / 10000.0);
         result.put("icStd", Math.round(icStd * 10000.0) / 10000.0);
         result.put("ir", Math.round(ir * 100.0) / 100.0);
+
+        // t 统计量 和 p 值
+        int n = icSeries.size();
+        double tStat = icStd > 0 ? icMean / (icStd / Math.sqrt(n)) : 0;
+        result.put("tStat", Math.round(tStat * 100.0) / 100.0);
+
+        double pValue = 1.0;
+        if (n > 1 && icStd > 0) {
+            try {
+                TDistribution tDist = new TDistribution(n - 1);
+                pValue = 2.0 * (1.0 - tDist.cumulativeProbability(Math.abs(tStat)));
+            } catch (Exception e) {
+                pValue = 1.0;
+            }
+        }
+        result.put("pValue", Math.round(pValue * 10000.0) / 10000.0);
+
         result.put("icWinRate", Math.round(icWinRate * 10.0) / 10.0);
         result.put("sampleDays", icSeries.size());
         result.put("totalFactorRows", factorRows.size());

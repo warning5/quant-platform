@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import dayjs from 'dayjs';
 import {
   Card, Row, Col, Select, Button, Tag, Spin, Alert, Space,
-  Typography, Table, Tooltip, Divider, Statistic, DatePicker, InputNumber, App,
+  Typography, Table, Tooltip, Popover, Divider, Statistic, DatePicker, InputNumber, App,
 } from 'antd';
 import {
   BarChartOutlined, LineChartOutlined, ReloadOutlined, InfoCircleOutlined,
@@ -14,8 +14,20 @@ import { factorApi, strategyApi } from '../../api';
 const { Text, Title } = Typography;
 const { RangePicker } = DatePicker;
 
+// ─── 无效因子子类型判断 ──────────────────────────────────────────────────────────
+function getInvalidSubtype(record) {
+  if (!record) return null;
+  const { icMean, pValue, icStd, ir } = record;
+  // 噪声型：统计不显著，纯随机
+  if (pValue > 0.05) return '噪声型';
+  // 弱负向型：IC稳定为负，统计显著（p<0.05），有反向预测力但很弱
+  if (icMean < 0 && Math.abs(icMean) < 0.05) return '弱负向型';
+  // 不稳定型：IC均值≈0但波动大，IR很低，时灵时不灵
+  return '不稳定型';
+}
+
 // ─── 评估标签 ─────────────────────────────────────────────────────────────────
-function AssessmentTag({ assessment }) {
+function AssessmentTag({ assessment, subType }) {
   if (!assessment) return null;
   const map = {
     '有效因子': { color: 'green', icon: <CheckCircleOutlined /> },
@@ -23,7 +35,12 @@ function AssessmentTag({ assessment }) {
     '无效因子': { color: 'red', icon: <CloseCircleOutlined /> },
   };
   const cfg = map[assessment] || { color: 'default', icon: null };
-  return <Tag color={cfg.color} icon={cfg.icon}>{assessment}</Tag>;
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+      <Tag color={cfg.color} icon={cfg.icon}>{assessment}</Tag>
+      {subType && <Tag style={{ marginLeft: 4 }} color="default">{subType}</Tag>}
+    </span>
+  );
 }
 
 // ─── IC 时序柱状图 ─────────────────────────────────────────────────────────────
@@ -270,6 +287,33 @@ export default function FactorIcIrAnalysis() {
       render: v => v != null ? <Text strong>{(+v).toFixed(2)}</Text> : '-',
     },
     {
+      title: 't 统计量',
+      dataIndex: 'tStat',
+      key: 'tStat',
+      width: 85,
+      sorter: (a, b) => Math.abs(a.tStat || 0) - Math.abs(b.tStat || 0),
+      render: v => {
+        if (v == null) return '-';
+        const absV = Math.abs(v);
+        return <Text style={{ color: absV > 2.58 ? '#1b5e20' : absV > 1.96 ? '#2e7d32' : '#666', fontWeight: absV > 1.96 ? 600 : 400 }}>
+          {(+v).toFixed(2)}
+        </Text>;
+      },
+    },
+    {
+      title: 'p 值',
+      dataIndex: 'pValue',
+      key: 'pValue',
+      width: 80,
+      sorter: (a, b) => (a.pValue || 1) - (b.pValue || 1),
+      render: v => {
+        if (v == null) return '-';
+        return <Text style={{ color: v < 0.01 ? '#1b5e20' : v < 0.05 ? '#2e7d32' : '#999', fontWeight: v < 0.05 ? 600 : 400 }}>
+          {(+v).toFixed(4)}
+        </Text>;
+      },
+    },
+    {
       title: 'IC 胜率',
       dataIndex: 'icWinRate',
       key: 'icWinRate',
@@ -302,7 +346,7 @@ export default function FactorIcIrAnalysis() {
         { text: '无效', value: '无效因子' },
       ],
       onFilter: (value, record) => record.assessment === value,
-      render: v => <AssessmentTag assessment={v} />,
+      render: (v, record) => <AssessmentTag assessment={v} subType={v === '无效因子' ? getInvalidSubtype(record) : null} />,
     },
     {
       title: '错误',
@@ -332,13 +376,74 @@ export default function FactorIcIrAnalysis() {
         <Title level={4} style={{ margin: 0 }}>
           <BarChartOutlined style={{ marginRight: 8 }} />
           因子 IC/IR 批量分析
-          <Tooltip
-            title={
-              <div style={{ whiteSpace: 'nowrap' }}>
+          <Popover
+            trigger="click"
+            placement="rightBottom"
+            content={
+              <div style={{ whiteSpace: 'nowrap', maxHeight: '60vh', overflowY: 'auto' }}>
                 <p style={{ margin: '0 0 6px' }}><b>什么是 IC/IR？</b></p>
                 <p style={{ margin: '0 0 6px', whiteSpace: 'normal' }}>IC（信息系数）：因子值与未来收益率的横截面相关系数。IC 越大，因子预测能力越强。</p>
                 <p style={{ margin: '0 0 6px', whiteSpace: 'normal' }}>IR（信息比率）：IC均值/IC标准差。衡量因子预测的稳定性，IR 越高越可靠。</p>
                 <p style={{ margin: '0 0 6px', whiteSpace: 'normal' }}><b style={{ color: '#fa8c16' }}>⚠️ 前提：因子值必须存在</b> — 仅当 factor_value 表中有该因子的时序数据时才能分析，无数据的因子代码将显示为红色不可点击。</p>
+                <p style={{ margin: '0 0 6px' }}><b>IC 结果速查：</b></p>
+                <table style={{ margin: '0 0 8px', borderCollapse: 'collapse', fontSize: 12, width: '100%' }}>
+                  <thead>
+                    <tr style={{ background: '#f5f5f5' }}>
+                      <th style={{ border: '1px solid #e8e8e8', padding: '4px 8px', textAlign: 'left' }}>指标</th>
+                      <th style={{ border: '1px solid #e8e8e8', padding: '4px 8px', textAlign: 'left' }}>含义</th>
+                      <th style={{ border: '1px solid #e8e8e8', padding: '4px 8px', textAlign: 'left' }}>判断标准</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td style={{ border: '1px solid #e8e8e8', padding: '4px 8px' }}>IC 符号</td>
+                      <td style={{ border: '1px solid #e8e8e8', padding: '4px 8px' }}>因子和收益的方向关系</td>
+                      <td style={{ border: '1px solid #e8e8e8', padding: '4px 8px' }}>正号 = 因子值越高收益越好<br/>负号 = 因子值越低收益越好</td>
+                    </tr>
+                    <tr>
+                      <td style={{ border: '1px solid #e8e8e8', padding: '4px 8px' }}>IC 绝对值</td>
+                      <td style={{ border: '1px solid #e8e8e8', padding: '4px 8px' }}>关系有多强</td>
+                      <td style={{ border: '1px solid #e8e8e8', padding: '4px 8px' }}>越大越强（≥0.05 有效）</td>
+                    </tr>
+                    <tr>
+                      <td style={{ border: '1px solid #e8e8e8', padding: '4px 8px' }}>t 统计量</td>
+                      <td style={{ border: '1px solid #e8e8e8', padding: '4px 8px' }}>关系是真实的还是碰巧的</td>
+                      <td style={{ border: '1px solid #e8e8e8', padding: '4px 8px' }}>|t| &gt; 1.96 = 统计显著<br/>|t| &gt; 2.58 = 高度显著</td>
+                    </tr>
+                  </tbody>
+                </table>
+                <p style={{ margin: '0 0 4px', fontSize: 11, color: '#888', whiteSpace: 'normal' }}>1.96 不是凭空的 — 来自标准正态分布 97.5 分位数（α=0.05, 双侧）。含义：如果因子真无效(IC=0)，随机产生 |t|>1.96 的概率不到 5%，因此认定为真实规律。</p>
+                <p style={{ margin: '0 0 6px' }}><b>IR 和 t 统计量什么关系？</b></p>
+                <p style={{ margin: '0 0 4px', whiteSpace: 'normal' }}>两者本质相同，只是尺度不同：<b>t = IR × sqrt(n)</b>（n = 观察期数/交易天数）。</p>
+                <p style={{ margin: '0 0 4px', whiteSpace: 'normal' }}>IR 是"每期"的信噪比，t 是累积到 n 期后的总信噪比。比如 IR=0.1，观察 400 天：t = 0.1 × 20 = 2.0，刚好跨过 1.96。</p>
+                <p style={{ margin: '0 0 6px', whiteSpace: 'normal', fontSize: 11, color: '#888' }}>反过来算：要 |t|>1.96，需要的 IR_min = 1.96/sqrt(n)。n=100 → IR≥0.20，n=400 → IR≥0.10。</p>
+                <p style={{ margin: '0 0 6px' }}><b>无效因子排查指南：</b></p>
+                <table style={{ margin: '0 0 8px', borderCollapse: 'collapse', fontSize: 12, width: '100%' }}>
+                  <thead>
+                    <tr style={{ background: '#f5f5f5' }}>
+                      <th style={{ border: '1px solid #e8e8e8', padding: '4px 8px', textAlign: 'left' }}>类型</th>
+                      <th style={{ border: '1px solid #e8e8e8', padding: '4px 8px', textAlign: 'left' }}>特征</th>
+                      <th style={{ border: '1px solid #e8e8e8', padding: '4px 8px', textAlign: 'left' }}>判断</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td style={{ border: '1px solid #e8e8e8', padding: '4px 8px' }}>噪声型</td>
+                      <td style={{ border: '1px solid #e8e8e8', padding: '4px 8px' }}>IC≈0, IR≈0, p&gt;0.05</td>
+                      <td style={{ border: '1px solid #e8e8e8', padding: '4px 8px' }}>真没用，可考虑移除</td>
+                    </tr>
+                    <tr>
+                      <td style={{ border: '1px solid #e8e8e8', padding: '4px 8px' }}>弱负向型</td>
+                      <td style={{ border: '1px solid #e8e8e8', padding: '4px 8px' }}>IC 稳定为负但偏小, p&lt;0.05</td>
+                      <td style={{ border: '1px solid #e8e8e8', padding: '4px 8px' }}>有反向预测能力，可利用（做空）</td>
+                    </tr>
+                    <tr>
+                      <td style={{ border: '1px solid #e8e8e8', padding: '4px 8px' }}>不稳定型</td>
+                      <td style={{ border: '1px solid #e8e8e8', padding: '4px 8px' }}>IC 均值≈0 但波动大, IR 很低</td>
+                      <td style={{ border: '1px solid #e8e8e8', padding: '4px 8px' }}>时灵时不灵，慎用</td>
+                    </tr>
+                  </tbody>
+                </table>
                 <p style={{ margin: '0 0 6px' }}><b>评估标准：</b></p>
                 <p style={{ margin: '0 0 4px' }}>有效因子：IC均值 ≥ 0.05 且 IR ≥ 0.5</p>
                 <p style={{ margin: '0 0 4px' }}>弱有效：IC均值 ≥ 0.03 且 IR ≥ 0.3</p>
@@ -350,11 +455,10 @@ export default function FactorIcIrAnalysis() {
                 <p style={{ margin: 0 }}>4. 用有效因子构建策略或优化权重</p>
               </div>
             }
-            placement="right"
-            styles={{ body: { width: 480, maxWidth: 480 } }}
+            overlayStyle={{ maxWidth: 640 }}
           >
             <InfoCircleOutlined style={{ marginLeft: 6, color: '#bbb', fontSize: 16, cursor: 'pointer' }} />
-          </Tooltip>
+          </Popover>
         </Title>
       </div>
 
