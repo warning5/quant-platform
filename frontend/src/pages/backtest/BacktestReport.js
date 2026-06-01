@@ -15,6 +15,7 @@ import ReactECharts from 'echarts-for-react';
 import { backtestApi } from '../../api';
 import MonteCarloPanel from './MonteCarloPanel';
 import AttributionHub from './AttributionHub';
+import { ReportDetail as ScreenReportDetail } from '../screen/RollingBacktestReport';
 
 const { Title, Text } = Typography;
 
@@ -2601,6 +2602,11 @@ export default function BacktestReport() {
         <Alert type="info" showIcon message="加载中..." description={<Spin size="small" />} />
       </div>
     );
+  }
+
+  // SCREEN 模式：使用滚动回测报告视图
+  if (task.signalSource === 'SCREEN') {
+    return <ScreenReportDetail taskId={taskId} onBack={() => navigate('/backtests')} />;
   }
 
   if (task.status === 'FAILED') {

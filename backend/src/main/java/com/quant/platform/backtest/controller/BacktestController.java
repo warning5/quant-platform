@@ -4,12 +4,14 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quant.platform.backtest.domain.BacktestReport;
 import com.quant.platform.backtest.domain.BacktestTask;
+import com.quant.platform.backtest.domain.EquityCurve;
 import com.quant.platform.backtest.domain.ParamOptimizeReport;
-import com.quant.platform.backtest.domain.RollingScreenTask;
+import com.quant.platform.backtest.domain.RebalanceRecord;
+import com.quant.platform.backtest.mapper.EquityCurveMapper;
 import com.quant.platform.backtest.mapper.ParamOptimizeReportMapper;
+import com.quant.platform.backtest.mapper.RebalanceRecordMapper;
 import com.quant.platform.backtest.service.*;
 import com.quant.platform.common.dto.ApiResponse;
-import com.quant.platform.common.exception.ResourceNotFoundException;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -30,7 +32,6 @@ import java.util.*;
 public class BacktestController {
 
     private final BacktestService backtestService;
-    private final RollingScreenService rollingScreenService;
     private final BrinsonAttributionService brinsonAttributionService;
     private final FactorStyleAttributionService factorStyleAttributionService;
     private final CompareService compareService;
@@ -38,6 +39,8 @@ public class BacktestController {
     private final ParamOptimizeService paramOptimizeService;
     private final ParamOptimizeReportMapper paramOptimizeReportMapper;
     private final TradeAnalysisService tradeAnalysisService;
+    private final EquityCurveMapper equityCurveMapper;
+    private final RebalanceRecordMapper rebalanceRecordMapper;
     private final ObjectMapper objectMapper;
 
     @PostMapping
@@ -51,9 +54,10 @@ public class BacktestController {
     public ApiResponse<IPage<BacktestTask>> list(
             @RequestParam(required = false) String strategyCode,
             @RequestParam(required = false) String status,
+            @RequestParam(required = false) String signalSource,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        return ApiResponse.success(backtestService.listTasks(strategyCode, status, page, size));
+        return ApiResponse.success(backtestService.listTasks(strategyCode, status, signalSource, page, size));
     }
 
     @GetMapping("/{taskId}")
@@ -94,6 +98,15 @@ public class BacktestController {
     }
 
     /**
+     * 获取调仓记录（从 rebalance_record 表，SCREEN 模式使用）
+     */
+    @GetMapping("/{taskId}/records")
+    @Operation(summary = "获取回测调仓记录")
+    public ApiResponse<List<RebalanceRecord>> getRecords(@PathVariable Long taskId) {
+        return ApiResponse.success(backtestService.getRebalanceRecords(taskId));
+    }
+
+    /**
      * 获取回测实时/历史净值曲线数据（用于前端执行中页面展示）
      * 如果报告已生成，返回完整数据；否则返回空数组
      */
@@ -102,21 +115,35 @@ public class BacktestController {
     @SneakyThrows
     public ApiResponse<Map<String, Object>> getCurveData(@PathVariable Long taskId) {
         BacktestTask task = backtestService.getTask(taskId);
-        Map<String, Object> result = new HashMap<>();
+        Map<String, Object> result = new LinkedHashMap<>();
         result.put("taskId", taskId);
         result.put("status", task.getStatus().name());
         result.put("progress", task.getProgress());
 
-        // 如果报告已生成，返回完整曲线数据
+        boolean isScreen = "SCREEN".equalsIgnoreCase(task.getSignalSource());
+
         if (task.getStatus() == BacktestTask.BacktestStatus.COMPLETED) {
-            try {
-                BacktestReport report = backtestService.getReport(taskId);
-                List<Map<String, Object>> stratCurve = parseJsonList(report.getEquityCurveJson());
-                List<Map<String, Object>> bmCurve = parseJsonList(report.getBenchmarkCurveJson());
-                result.put("stratCurve", stratCurve);
-                result.put("bmCurve", bmCurve);
-            } catch (Exception e) {
-                // 报告可能还没生成，忽略错误
+            if (isScreen) {
+                // SCREEN 模式：从 equity_curve 表读取
+                List<EquityCurve> curves = backtestService.getEquityCurves(taskId);
+                List<Map<String, Object>> equityCurve = curves.stream().map(ec -> {
+                    Map<String, Object> pt = new LinkedHashMap<>();
+                    pt.put("tradeDate", ec.getTradeDate().toString());
+                    pt.put("nav", ec.getNav());
+                    return pt;
+                }).toList();
+                result.put("equityCurve", equityCurve);
+            } else {
+                // STRATEGY 模式：从报告 JSON 读取
+                try {
+                    BacktestReport report = backtestService.getReport(taskId);
+                    List<Map<String, Object>> stratCurve = parseJsonList(report.getEquityCurveJson());
+                    List<Map<String, Object>> bmCurve = parseJsonList(report.getBenchmarkCurveJson());
+                    result.put("stratCurve", stratCurve);
+                    result.put("bmCurve", bmCurve);
+                } catch (Exception e) {
+                    // 报告可能还没生成，忽略错误
+                }
             }
         }
         return ApiResponse.success(result);
@@ -307,21 +334,10 @@ public class BacktestController {
     }
 
     /**
-     * 获取任务（自动兼容 backtest_task 和 rolling_screen_task 两种表）。
-     * 先查 backtest_task，找不到回退到 rolling_screen_task。
+     * 获取任务（统一从 backtest_task 表查询）。
      */
     private BacktestTask getAnyTask(Long taskId) {
-        try {
-            return backtestService.getTask(taskId);
-        } catch (ResourceNotFoundException e) {
-            RollingScreenTask rt = rollingScreenService.getTask(taskId);
-            return BacktestTask.builder()
-                    .id(rt.getId())
-                    .startDate(rt.getStartDate())
-                    .endDate(rt.getEndDate())
-                    .benchmarkCode(rt.getBenchmarkCode())
-                    .build();
-        }
+        return backtestService.getTask(taskId);
     }
 
     @SuppressWarnings("unchecked")

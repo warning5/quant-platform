@@ -3,13 +3,20 @@ package com.quant.platform.backtest.engine;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quant.platform.backtest.domain.BacktestReport;
 import com.quant.platform.backtest.domain.BacktestTask;
+import com.quant.platform.backtest.domain.EquityCurve;
+import com.quant.platform.backtest.domain.RebalanceRecord;
 import com.quant.platform.backtest.mapper.BacktestReportMapper;
 import com.quant.platform.backtest.mapper.BacktestTaskMapper;
+import com.quant.platform.backtest.mapper.EquityCurveMapper;
+import com.quant.platform.backtest.mapper.RebalanceRecordMapper;
 import com.quant.platform.factor.domain.FactorValue;
 import com.quant.platform.factor.mapper.FactorValueMapper;
 import com.quant.platform.factor.service.ClickHouseFactorValueService;
 import com.quant.platform.market.domain.MarketDailyBar;
 import com.quant.platform.market.service.MarketDataService;
+import com.quant.platform.screen.dto.ScreenRequest;
+import com.quant.platform.screen.dto.ScreenResult;
+import com.quant.platform.screen.service.StockScreenService;
 import com.quant.platform.stock.service.DividendService;
 import com.quant.platform.strategy.domain.StrategyDefinition;
 import com.quant.platform.strategy.service.StrategyService;
@@ -46,6 +53,18 @@ public class BacktestEngine {
     private ClickHouseFactorValueService clickHouseFactorValueService;
     private final StrategyService strategyService;
     private final DividendService dividendService;
+
+    /** SCREEN 模式选股服务 */
+    @Autowired(required = false)
+    private StockScreenService stockScreenService;
+
+    /** 调仓记录写入（统一后两种模式都写） */
+    @Autowired(required = false)
+    private RebalanceRecordMapper rebalanceRecordMapper;
+
+    /** 逐日净值写入 */
+    @Autowired(required = false)
+    private EquityCurveMapper equityCurveMapper;
 
     @Autowired(required = false)
     private SimpMessagingTemplate messagingTemplate;
@@ -85,8 +104,21 @@ public class BacktestEngine {
         sendProgress(task.getId(), "RUNNING", 0, "回测初始化中...");
 
         try {
-            StrategyDefinition strategy = strategyService.getById(task.getStrategyId());
-            BacktestResult result = executeBacktest(task, strategy);
+            boolean isScreen = "SCREEN".equalsIgnoreCase(task.getSignalSource());
+            String modeLabel = isScreen ? "SCREEN" : "STRATEGY";
+            StrategyDefinition strategy = isScreen ? null : strategyService.getById(task.getStrategyId());
+
+            if (!isScreen && strategy == null) {
+                throw new RuntimeException("策略不存在: strategyId=" + task.getStrategyId());
+            }
+            if (isScreen && (stockScreenService == null || rebalanceRecordMapper == null || equityCurveMapper == null)) {
+                throw new RuntimeException("SCREEN 模式需要 StockScreenService/RebalanceRecordMapper/EquityCurveMapper 可用");
+            }
+
+            BacktestResult result = isScreen
+                    ? executeScreenBacktest(task)
+                    : executeBacktest(task, strategy);
+
             BacktestReport report = buildReport(task, result);
             reportMapper.insert(report);
 
@@ -96,7 +128,7 @@ public class BacktestEngine {
             taskMapper.updateById(task);
 
             sendProgress(taskId, "COMPLETED", 100, "回测完成，reportId=" + report.getId());
-            log.info("Backtest task [{}] completed, strategyCode={}", taskId, strategy.getStrategyCode());
+            log.info("Backtest task [{}] completed, mode={}", taskId, modeLabel);
 
         } catch (Exception e) {
             log.error("Backtest task [{}] failed", taskId, e);
@@ -121,8 +153,20 @@ public class BacktestEngine {
         task.setStartedAt(LocalDateTime.now());
         taskMapper.updateById(task);
         try {
-            StrategyDefinition strategy = strategyService.getById(task.getStrategyId());
-            BacktestResult result = executeBacktest(task, strategy);
+            boolean isScreen = "SCREEN".equalsIgnoreCase(task.getSignalSource());
+            StrategyDefinition strategy = isScreen ? null : strategyService.getById(task.getStrategyId());
+
+            if (!isScreen && strategy == null) {
+                throw new RuntimeException("策略不存在: strategyId=" + task.getStrategyId());
+            }
+            if (isScreen && (stockScreenService == null || rebalanceRecordMapper == null || equityCurveMapper == null)) {
+                throw new RuntimeException("SCREEN 模式需要 StockScreenService/RebalanceRecordMapper/EquityCurveMapper 可用");
+            }
+
+            BacktestResult result = isScreen
+                    ? executeScreenBacktest(task)
+                    : executeBacktest(task, strategy);
+
             BacktestReport report = buildReport(task, result);
             reportMapper.insert(report);
             task.setStatus(BacktestTask.BacktestStatus.COMPLETED);
@@ -630,6 +674,477 @@ public class BacktestEngine {
                 tradingDates.size(),
                 benchmarkTotalReturn
         );
+    }
+
+    /**
+     * SCREEN 模式回测：使用 StockScreenService 选股，保持与 STRATEGY 模式一致的交易执行框架。
+     * 复用了 executeBacktest 的大部分逻辑：分红处理、止损止盈、滑点、成交模式等，
+     * 区别仅在于选股阶段调用 StockScreenService.screen() 代替因子算分。
+     */
+    private BacktestResult executeScreenBacktest(BacktestTask task) {
+        LocalDate startDate = task.getStartDate();
+        LocalDate endDate = task.getEndDate();
+        double initialCapital = task.getInitialCapital().doubleValue();
+        double commission = task.getCommissionRate().doubleValue();
+        double slippage = task.getSlippageRate().doubleValue();
+        double stampTaxRate = task.getStampTaxRate() != null ? task.getStampTaxRate().doubleValue() : 0.0005;
+        double minCommission = task.getMinCommission() != null ? task.getMinCommission().doubleValue() : 5.0;
+        double transferFeeRate = task.getTransferFeeRate() != null ? task.getTransferFeeRate().doubleValue() : 0.00002;
+        String slippageModel = task.getSlippageModel() != null ? task.getSlippageModel() : "FIXED";
+        String orderType = task.getOrderType() != null ? task.getOrderType() : "CLOSE";
+        boolean limitFilter = task.getLimitFilter() != null && task.getLimitFilter();
+        boolean suspendFilter = task.getSuspendFilter() != null && task.getSuspendFilter();
+        String freq = task.getRebalanceFreq() != null ? task.getRebalanceFreq() : "MONTHLY";
+        String weightMode = task.getWeightMode() != null ? task.getWeightMode() : "EQUAL";
+
+        // ── 解析 screen_config_json ──
+        ScreenRequest baseScreenReq;
+        try {
+            baseScreenReq = objectMapper.readValue(task.getScreenConfigJson(), ScreenRequest.class);
+        } catch (Exception e) {
+            throw new RuntimeException("解析 screenConfigJson 失败: " + e.getMessage(), e);
+        }
+        if (baseScreenReq.getFactors() == null || baseScreenReq.getFactors().isEmpty()) {
+            throw new RuntimeException("SCREEN 模式必须指定因子配置（factors 不能为空）");
+        }
+
+        List<LocalDate> tradingDates = marketDataService.getTradingDates(startDate, endDate);
+        if (tradingDates.isEmpty()) throw new RuntimeException("无可用交易日数据");
+
+        // ── 止损止盈参数 ──
+        double stopLossPct = task.getStopLossPct() != null ? task.getStopLossPct().doubleValue() : 0.0;
+        double stopProfitPct = task.getStopProfitPct() != null ? task.getStopProfitPct().doubleValue() : 0.0;
+
+        // ── 前复权因子 ──
+        Map<String, Double> adjFactors = new HashMap<>();
+
+        // ── 次日行情预加载 ──
+        Map<String, MarketDailyBar> nextDayBarMap = new HashMap<>();
+        if (tradingDates.size() > 1) {
+            List<MarketDailyBar> nextBars = marketDataService.getBarsAtDate(tradingDates.get(1));
+            nextDayBarMap = nextBars.stream()
+                    .collect(Collectors.toMap(MarketDailyBar::getSymbol, b -> b));
+        }
+
+        // ── 基准 ──
+        String benchmarkSymbol = task.getBenchmarkCode() != null ? task.getBenchmarkCode() : "000300.SH";
+        List<MarketDailyBar> benchmarkBars = marketDataService.getBarsInRange(benchmarkSymbol, startDate, endDate);
+        Map<LocalDate, Double> benchmarkClose = new LinkedHashMap<>();
+        for (MarketDailyBar b : benchmarkBars) {
+            benchmarkClose.put(b.getTradeDate(), b.getClose().doubleValue());
+        }
+        double benchmarkBase = benchmarkClose.isEmpty() ? 1.0
+                : benchmarkClose.values().iterator().next();
+        double lastValidBmClose = benchmarkBase;
+
+        // ── 回测状态 ──
+        double cash = initialCapital;
+        Map<String, Double> positions = new HashMap<>();
+        Map<String, Double> positionCosts = new HashMap<>();
+        double portfolioValue = initialCapital;
+
+        List<Map<String, Object>> equityCurve = new ArrayList<>();
+        List<Map<String, Object>> drawdownSeries = new ArrayList<>();
+        List<Map<String, Object>> benchmarkCurve = new ArrayList<>();
+        List<Map<String, Object>> tradeLog = new ArrayList<>();
+        List<Map<String, Object>> positionHistory = new ArrayList<>();
+        Map<String, Map<String, Double>> monthlyReturns = new TreeMap<>();
+
+        double peakValue = initialCapital;
+        double maxDrawdown = 0;
+        int maxDrawdownDuration = 0;
+        int drawdownDays = 0;
+        int totalTrades = 0;
+        List<Double> tradeReturns = new ArrayList<>();
+
+        LocalDate lastRebalanceDate = null;
+        double prevNav = 0;  // 上一个调仓日的净值，用于计算调仓区间收益
+        int total = tradingDates.size();
+
+        for (int di = 0; di < tradingDates.size(); di++) {
+            LocalDate today = tradingDates.get(di);
+
+            // 获取今日行情，过滤 ST/退市
+            List<MarketDailyBar> barsRaw = marketDataService.getBarsAtDate(today);
+            List<MarketDailyBar> bars = new ArrayList<>();
+            for (MarketDailyBar bar : barsRaw) {
+                String name = bar.getName();
+                boolean isST = name != null && name.contains("ST");
+                boolean isDelisted = bar.getClose() == null || bar.getClose().doubleValue() <= 0;
+                if (!isST && !isDelisted) bars.add(bar);
+            }
+            Map<String, MarketDailyBar> barMap = bars.stream()
+                    .collect(Collectors.toMap(MarketDailyBar::getSymbol, b -> b));
+
+            // ── 分红处理 ──
+            boolean dividendReinvest = task.getDividendReinvest() != null && task.getDividendReinvest();
+            if (dividendReinvest) {
+                double[] divCashRef = new double[]{0.0};
+                BacktestUtils.processDividendEvents(positions, divCashRef, barMap, today, tradeLog, adjFactors, dividendService);
+                cash += divCashRef[0];
+            } else {
+                BacktestUtils.updateAdjFactors(adjFactors, barMap, today, dividendService);
+            }
+
+            // 更新持仓市值
+            double holdingValue = 0;
+            for (Map.Entry<String, Double> pos : positions.entrySet()) {
+                MarketDailyBar bar = barMap.get(pos.getKey());
+                if (bar != null) {
+                    double adj = adjFactors.getOrDefault(pos.getKey(), 1.0);
+                    holdingValue += pos.getValue() * bar.getClose().doubleValue() * adj;
+                }
+            }
+            portfolioValue = cash + holdingValue;
+
+            // ── 止损止盈 ──
+            if ((stopLossPct > 0 || stopProfitPct > 0) && !positions.isEmpty()) {
+                List<String> toSell = new ArrayList<>();
+                for (Map.Entry<String, Double> pos : positions.entrySet()) {
+                    String symbol = pos.getKey();
+                    MarketDailyBar bar = barMap.get(symbol);
+                    if (bar == null) continue;
+                    double cost = positionCosts.getOrDefault(symbol, 0.0);
+                    if (cost <= 0) continue;
+                    double shares = pos.getValue();
+                    double adj = adjFactors.getOrDefault(symbol, 1.0);
+                    double currentValue = shares * bar.getClose().doubleValue() * adj;
+                    double returnPct = (currentValue - cost) / cost;
+                    if (stopLossPct > 0 && returnPct <= -stopLossPct) toSell.add(symbol);
+                    else if (stopProfitPct > 0 && returnPct >= stopProfitPct) toSell.add(symbol);
+                }
+                for (String symbol : toSell) {
+                    MarketDailyBar bar = barMap.get(symbol);
+                    if (bar == null) continue;
+                    if (suspendFilter && isSuspended(bar)) continue;
+                    if (limitFilter && isLimitDown(bar)) continue;
+                    double shares = positions.get(symbol);
+                    double execPrice = getExecutionPrice(bar, tradingDates, di, orderType, nextDayBarMap);
+                    double amount = shares * bar.getClose().doubleValue();
+                    double dayAmount = bar.getAmount() != null ? bar.getAmount().doubleValue() * 1000 : 0;
+                    double price = applySlippage(execPrice, false, slippage, amount, dayAmount, slippageModel);
+                    double fee = calcFee(amount, true, commission, stampTaxRate, minCommission, symbol, transferFeeRate);
+                    Map<String, Object> trade = new HashMap<>();
+                    trade.put("date", today.toString());
+                    trade.put("symbol", symbol);
+                    trade.put("name", bar.getName());
+                    trade.put("action", "STOP_LOSS_SELL");
+                    trade.put("price", round(price, 4));
+                    trade.put("amount", round(shares, 2));
+                    trade.put("total", round(amount - fee, 2));
+                    trade.put("commission", round(fee, 2));
+                    trade.put("fee", round(fee, 2));
+                    tradeLog.add(trade);
+                    cash += (shares * price) - fee;
+                    totalTrades++;
+                    positions.remove(symbol);
+                    positionCosts.remove(symbol);
+                }
+            }
+
+            // ── 调仓判定 ──
+            boolean shouldRebalance = shouldRebalance(today, lastRebalanceDate, freq);
+            if (shouldRebalance && !bars.isEmpty()) {
+                // ── SCREEN 模式选股 ──
+                ScreenRequest screenReq = buildScreenRequest(baseScreenReq, today);
+                ScreenResult screenResult;
+                try {
+                    screenResult = stockScreenService.screen(screenReq);
+                } catch (Exception e) {
+                    log.warn("[{}] 选股失败，跳过本次调仓: {}", today, e.getMessage());
+                    // 选股失败则保持持仓，继续记录权益曲线
+                    screenResult = null;
+                }
+
+                Map<String, Double> targetWeights = new LinkedHashMap<>();
+                Map<String, ScreenResult.StockScore> stockScoreMap = new LinkedHashMap<>();
+                if (screenResult != null && screenResult.getStocks() != null) {
+                    List<ScreenResult.StockScore> stocks = screenResult.getStocks();
+                    if ("SCORE_PROPORTIONAL".equalsIgnoreCase(weightMode)) {
+                        double totalScore = stocks.stream().mapToDouble(ScreenResult.StockScore::getCompositeScore).sum();
+                        if (totalScore <= 0) totalScore = 1.0;
+                        for (ScreenResult.StockScore s : stocks) {
+                            targetWeights.put(s.getSymbol(), s.getCompositeScore() / totalScore);
+                            stockScoreMap.put(s.getSymbol(), s);
+                        }
+                    } else {
+                        double ew = 1.0 / stocks.size();
+                        for (ScreenResult.StockScore s : stocks) {
+                            targetWeights.put(s.getSymbol(), ew);
+                            stockScoreMap.put(s.getSymbol(), s);
+                        }
+                    }
+                }
+
+                Map<String, Double> oldPositions = new HashMap<>(positions);
+
+                // ── 预计算费用（复用 STRATEGY 模式的预算逻辑）──
+                double rawInvestedValue = 0, newBuyFee = 0;
+                for (Map.Entry<String, Double> entry : targetWeights.entrySet()) {
+                    if (oldPositions.containsKey(entry.getKey())) continue;
+                    MarketDailyBar bar = barMap.get(entry.getKey());
+                    if (bar == null) continue;
+                    if (suspendFilter && isSuspended(bar)) continue;
+                    if (limitFilter && isLimitUp(bar)) continue;
+                    double amount = portfolioValue * entry.getValue();
+                    rawInvestedValue += amount;
+                    newBuyFee += calcFee(amount, false, commission, stampTaxRate, minCommission, entry.getKey(), transferFeeRate);
+                }
+                double keptValue = 0;
+                for (String sym : oldPositions.keySet()) {
+                    if (!targetWeights.containsKey(sym)) continue;
+                    MarketDailyBar bar = barMap.get(sym);
+                    if (bar == null) continue;
+                    keptValue += oldPositions.get(sym) * bar.getClose().doubleValue();
+                }
+                double sellFee = 0;
+                for (String sym : oldPositions.keySet()) {
+                    if (targetWeights.containsKey(sym)) continue;
+                    MarketDailyBar bar = barMap.get(sym);
+                    if (bar == null) continue;
+                    if (suspendFilter && isSuspended(bar)) continue;
+                    if (limitFilter && isLimitDown(bar)) continue;
+                    double amount = oldPositions.get(sym) * bar.getClose().doubleValue();
+                    sellFee += calcFee(amount, true, commission, stampTaxRate, minCommission, sym, transferFeeRate);
+                }
+                double maxInvestable = portfolioValue - keptValue - sellFee - newBuyFee;
+                double buyScale = rawInvestedValue > 0 ? Math.max(0, Math.min(1.0, maxInvestable / rawInvestedValue)) : 0;
+
+                // ── 交易执行（复用 rebalance/recalcCash）──
+                List<Map<String, Object>> rebalanceTrades = rebalance(
+                        positions, targetWeights, barMap, portfolioValue, commission, slippage,
+                        today, null, slippageModel, stampTaxRate, minCommission,
+                        limitFilter, suspendFilter, transferFeeRate, orderType, tradingDates, di,
+                        nextDayBarMap, positionCosts, buyScale);
+                tradeLog.addAll(rebalanceTrades);
+                totalTrades += rebalanceTrades.size();
+
+                cash = recalcCash(positions, targetWeights, barMap, portfolioValue, commission, slippage,
+                        slippageModel, stampTaxRate, minCommission, limitFilter, suspendFilter,
+                        transferFeeRate, orderType, tradingDates, di, buyScale);
+
+                // ── 写入 rebalance_record ──
+                try {
+                    Map<String, Map<String, Object>> oldSnap = new HashMap<>();
+                    for (Map.Entry<String, Double> pos : oldPositions.entrySet()) {
+                        Map<String, Object> item = new HashMap<>();
+                        item.put("symbol", pos.getKey());
+                        item.put("shares", pos.getValue());
+                        oldSnap.put(pos.getKey(), item);
+                    }
+                    List<Map<String, Object>> oldList = new ArrayList<>(oldSnap.values());
+                    List<Map<String, Object>> newList = new ArrayList<>();
+                    List<Map<String, Object>> buyList = new ArrayList<>();
+                    List<Map<String, Object>> sellList = new ArrayList<>();
+                    for (Map<String, Object> t : rebalanceTrades) {
+                        if ("SELL".equals(t.get("action"))) sellList.add(t);
+                        else if ("BUY".equals(t.get("action"))) buyList.add(t);
+                    }
+                    for (Map.Entry<String, Double> entry : targetWeights.entrySet()) {
+                        Map<String, Object> item = new HashMap<>();
+                        item.put("symbol", entry.getKey());
+                        item.put("weight", entry.getValue());
+                        ScreenResult.StockScore ss = stockScoreMap.get(entry.getKey());
+                        item.put("score", ss != null ? ss.getCompositeScore() : 0);
+                        item.put("name", ss != null ? ss.getName() : entry.getKey());
+                        newList.add(item);
+                    }
+
+                    double nav = portfolioValue / initialCapital;
+                    RebalanceRecord rec = RebalanceRecord.builder()
+                            .taskId(task.getId())
+                            .rebalanceDate(today)
+                            .oldPositionsJson(objectMapper.writeValueAsString(oldList))
+                            .newPositionsJson(objectMapper.writeValueAsString(newList))
+                            .buysJson(objectMapper.writeValueAsString(buyList))
+                            .sellsJson(objectMapper.writeValueAsString(sellList))
+                            .cash(BigDecimal.valueOf(cash))
+                            .totalValue(BigDecimal.valueOf(portfolioValue))
+                            .nav(BigDecimal.valueOf(nav))
+                            .dailyReturn(BigDecimal.valueOf(prevNav > 0 ? (nav - prevNav) / prevNav : 0))
+                            .build();
+                    rebalanceRecordMapper.insert(rec);
+                    prevNav = nav;
+                } catch (Exception e) {
+                    log.warn("写入 rebalance_record 失败: {}", e.getMessage());
+                }
+
+                // ── 更新持仓 ──
+                Set<String> soldSymbols = new HashSet<>();
+                for (String sym : new HashSet<>(oldPositions.keySet())) {
+                    if (targetWeights.containsKey(sym)) continue;
+                    MarketDailyBar bar = barMap.get(sym);
+                    if (bar == null) { soldSymbols.add(sym); continue; }
+                    if (suspendFilter && isSuspended(bar)) continue;
+                    if (limitFilter && isLimitDown(bar)) continue;
+                    soldSymbols.add(sym);
+                }
+                positions = new HashMap<>();
+                for (String sym : oldPositions.keySet()) {
+                    if (!soldSymbols.contains(sym) && barMap.containsKey(sym)) {
+                        positions.put(sym, oldPositions.get(sym));
+                    }
+                }
+                final double scale = buyScale;
+                for (Map.Entry<String, Double> entry : targetWeights.entrySet()) {
+                    if (barMap.containsKey(entry.getKey())) {
+                        positions.put(entry.getKey(),
+                                (portfolioValue * entry.getValue() * scale) / barMap.get(entry.getKey()).getClose().doubleValue());
+                    }
+                }
+
+                // 调仓后重新计算 portfolioValue（持仓和现金已按当日价格更新），
+                // 确保 rebalance_record 的 NAV 与 equity_curve 一致
+                double newHoldingValue = 0;
+                for (Map.Entry<String, Double> pos : positions.entrySet()) {
+                    MarketDailyBar bar = barMap.get(pos.getKey());
+                    if (bar != null) {
+                        newHoldingValue += pos.getValue() * bar.getClose().doubleValue();
+                    }
+                }
+                portfolioValue = cash + newHoldingValue;
+
+                lastRebalanceDate = today;
+                Map<String, Object> posSnapshot = new HashMap<>();
+                posSnapshot.put("date", today.toString());
+                posSnapshot.put("positions", new HashMap<>(targetWeights));
+                positionHistory.add(posSnapshot);
+            }
+
+            // ── 净值曲线 ──
+            holdingValue = 0;
+            for (Map.Entry<String, Double> pos : positions.entrySet()) {
+                MarketDailyBar bar = barMap.get(pos.getKey());
+                if (bar != null) {
+                    double adj = adjFactors.getOrDefault(pos.getKey(), 1.0);
+                    holdingValue += pos.getValue() * bar.getClose().doubleValue() * adj;
+                }
+            }
+            portfolioValue = cash + holdingValue;
+
+            if (portfolioValue > peakValue) {
+                peakValue = portfolioValue;
+                drawdownDays = 0;
+            } else {
+                drawdownDays++;
+                maxDrawdownDuration = Math.max(maxDrawdownDuration, drawdownDays);
+            }
+            double drawdown = (peakValue - portfolioValue) / peakValue;
+            maxDrawdown = Math.max(maxDrawdown, drawdown);
+
+            Map<String, Object> ep = new HashMap<>();
+            ep.put("date", today.toString());
+            ep.put("value", round(portfolioValue / initialCapital, 6));
+            ep.put("drawdown", round(-drawdown, 6));
+            equityCurve.add(ep);
+
+            Double bmClose = benchmarkClose.get(today);
+            if (bmClose == null) bmClose = lastValidBmClose;
+            else lastValidBmClose = bmClose;
+            if (benchmarkBase > 0) {
+                Map<String, Object> bm = new HashMap<>();
+                bm.put("date", today.toString());
+                bm.put("value", round(bmClose / benchmarkBase, 6));
+                benchmarkCurve.add(bm);
+            }
+
+            String monthKey = today.getYear() + "-" + String.format("%02d", today.getMonthValue());
+            monthlyReturns.put(monthKey, Map.of("value", portfolioValue / initialCapital - 1));
+
+            int pct = (int) ((double) (di + 1) / total * 90);
+            if (pct != task.getProgress() && di % 10 == 0) {
+                task.setProgress(pct);
+                taskMapper.updateById(task);
+                double bmVal = benchmarkCurve.isEmpty() ? 1.0
+                        : ((Number) benchmarkCurve.get(benchmarkCurve.size() - 1).get("value")).doubleValue();
+                sendProgressWithCurve(task.getId(), pct, today.toString(),
+                        round(portfolioValue / initialCapital, 6), bmVal);
+            }
+
+            if (di + 2 < tradingDates.size()) {
+                LocalDate nextNextDate = tradingDates.get(di + 2);
+                List<MarketDailyBar> nextNextBars = marketDataService.getBarsAtDate(nextNextDate);
+                nextDayBarMap = nextNextBars.stream()
+                        .collect(Collectors.toMap(MarketDailyBar::getSymbol, b -> b));
+            } else {
+                nextDayBarMap = new HashMap<>();
+            }
+        }
+
+        // ── 写入逐日净值到 equity_curve 表 ──
+        writeEquityCurveToDB(task.getId(), equityCurve, initialCapital);
+
+        // 月度收益计算
+        List<Map<String, Object>> monthlyReturnsList = new ArrayList<>();
+        double prevValue = 1.0;
+        for (Map.Entry<String, Map<String, Double>> entry : monthlyReturns.entrySet()) {
+            double curValue = 1 + entry.getValue().get("value");
+            double monthRet = prevValue > 0 ? (curValue - prevValue) / prevValue : 0;
+            Map<String, Object> m = new HashMap<>();
+            m.put("month", entry.getKey());
+            m.put("return", round(monthRet, 6));
+            monthlyReturnsList.add(m);
+            prevValue = curValue;
+        }
+
+        double benchmarkTotalReturn = benchmarkCurve.isEmpty() ? 0.0
+                : ((Number) benchmarkCurve.get(benchmarkCurve.size() - 1).get("value")).doubleValue() - 1.0;
+
+        return new BacktestResult(
+                portfolioValue / initialCapital - 1,
+                portfolioValue, initialCapital,
+                maxDrawdown, maxDrawdownDuration,
+                totalTrades, tradeReturns,
+                equityCurve, benchmarkCurve, drawdownSeries, monthlyReturnsList,
+                positionHistory, tradeLog,
+                tradingDates.size(),
+                benchmarkTotalReturn
+        );
+    }
+
+    /**
+     * 构建选股请求（设置 screenDate 为指定日期）
+     */
+    private ScreenRequest buildScreenRequest(ScreenRequest base, LocalDate screenDate) {
+        ScreenRequest req = new ScreenRequest();
+        req.setScreenDate(screenDate);
+        req.setFactors(base.getFactors());
+        req.setDirection(base.getDirection());
+        req.setTopN(base.getTopN());
+        req.setExcludeSt(base.getExcludeSt());
+        return req;
+    }
+
+    /**
+     * 写入逐日净值到 equity_curve 表
+     */
+    private void writeEquityCurveToDB(Long taskId, List<Map<String, Object>> equityCurve, double initialCapital) {
+        if (equityCurveMapper == null || equityCurve == null || equityCurve.isEmpty()) return;
+        try {
+            // 先清理旧数据
+            try { equityCurveMapper.deleteByTaskId(taskId); } catch (Exception ignored) {}
+            double prevNav = 0;
+            for (Map<String, Object> point : equityCurve) {
+                LocalDate date = LocalDate.parse((String) point.get("date"));
+                double nav = ((Number) point.get("value")).doubleValue();
+                double portfolioValue = nav * initialCapital;
+                EquityCurve ec = EquityCurve.builder()
+                        .taskId(taskId)
+                        .tradeDate(date)
+                        .portfolioValue(BigDecimal.valueOf(portfolioValue))
+                        .nav(BigDecimal.valueOf(nav))
+                        .returnPct(BigDecimal.valueOf(prevNav > 0 ? (nav - prevNav) / prevNav : 0))
+                        .build();
+                prevNav = nav;
+                try {
+                    equityCurveMapper.insertOne(ec);
+                } catch (Exception e) {
+                    // 逐条插入容错
+                }
+            }
+        } catch (Exception e) {
+            log.warn("写入 equity_curve 失败: {}", e.getMessage());
+        }
     }
 
     /**

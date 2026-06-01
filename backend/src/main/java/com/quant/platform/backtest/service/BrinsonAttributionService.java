@@ -3,8 +3,6 @@ package com.quant.platform.backtest.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quant.platform.backtest.domain.BacktestTask;
-import com.quant.platform.backtest.domain.RollingScreenTask;
-import com.quant.platform.backtest.mapper.RollingScreenTaskMapper;
 import com.quant.platform.common.exception.BusinessException;
 import com.quant.platform.stock.entity.StockDaily;
 import com.quant.platform.stock.entity.StockInfo;
@@ -38,7 +36,6 @@ public class BrinsonAttributionService {
     private final StockInfoMapper stockInfoMapper;
     private final ClickHouseStockService clickHouseStockService;
     private final ObjectMapper objectMapper;
-    private final RollingScreenTaskMapper rollingScreenTaskMapper;
 
     /**
      * 需要排除的指数名称
@@ -341,34 +338,11 @@ public class BrinsonAttributionService {
         List<Map<String, Object>> cumulativeChart = buildCumulativeChart(periodResults);
         result.put("cumulativeChart", cumulativeChart);
 
-        // 查询关联的 RollingScreenTask 以获取策略配置（用于前端 Brinson 结论诊断）
-        // 注意：backtest_task 和 rolling_screen_task 是两个独立表的独立 ID，需按业务字段匹配
-        try {
-            LambdaQueryWrapper<RollingScreenTask> wrapper = new LambdaQueryWrapper<>();
-            wrapper.eq(RollingScreenTask::getBenchmarkCode, task.getBenchmarkCode())
-                   .eq(RollingScreenTask::getStatus, "COMPLETED")
-                   .le(RollingScreenTask::getStartDate, task.getEndDate())
-                   .ge(RollingScreenTask::getEndDate, task.getStartDate())
-                   .orderByDesc(RollingScreenTask::getCreatedAt)
-                   .last("LIMIT 1");
-            RollingScreenTask rsTask = rollingScreenTaskMapper.selectList(wrapper)
-                    .stream().findFirst().orElse(null);
-            if (rsTask != null && rsTask.getScreenConfigJson() != null) {
-                summary.put("screenConfigJson", rsTask.getScreenConfigJson());
-                summary.put("rebalanceFreq", rsTask.getRebalanceFreq());
-                summary.put("weightMode", rsTask.getWeightMode());
-                log.info("匹配到 RollingScreenTask id={}，已注入 screenConfigJson", rsTask.getId());
-            } else {
-                summary.put("screenConfigJson", null);
-                summary.put("rebalanceFreq", null);
-                summary.put("weightMode", null);
-            }
-        } catch (Exception e) {
-            log.debug("查找 RollingScreenTask 失败 (taskId={}): {}", taskId, e.getMessage());
-            summary.put("screenConfigJson", null);
-            summary.put("rebalanceFreq", null);
-            summary.put("weightMode", null);
-        }
+        // 从 BacktestTask 直接获取 SCREEN 模式策略配置（用于前端 Brinson 结论诊断）
+        // BacktestTask 已统一包含 screenConfigJson / rebalanceFreq / weightMode 字段
+        summary.put("screenConfigJson", task.getScreenConfigJson());
+        summary.put("rebalanceFreq", task.getRebalanceFreq());
+        summary.put("weightMode", task.getWeightMode());
 
         return result;
     }

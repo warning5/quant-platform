@@ -1,7 +1,7 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   Card, Spin, Typography, Button, Space, Alert, Descriptions, Tag, Divider,
-  Table, Row, Col, Statistic, Popconfirm, message, Progress, Empty, Tooltip, Select,
+  Table, Row, Col, Statistic, Popconfirm, message, Progress, Empty, Tooltip, Select, Popover,
 } from 'antd';
 import {
   ArrowLeftOutlined, ReloadOutlined, DeleteOutlined,
@@ -9,7 +9,7 @@ import {
 } from '@ant-design/icons';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import ReactECharts from 'echarts-for-react';
-import { rollingScreenApi } from '../../api';
+import { backtestApi } from '../../api';
 
 const { Title, Text } = Typography;
 
@@ -195,7 +195,7 @@ function ScreenConfigCard({ screenConfigJson }) {
                 rowKey="_key"
                 size="small"
                 pagination={false}
-                scroll={{ x: 700 }}
+                scroll={{ x: 500 }}
                 columns={[
                   {
                     title: '#', width: 45, align: 'center',
@@ -229,14 +229,7 @@ function ScreenConfigCard({ screenConfigJson }) {
                       );
                     },
                   },
-                  {
-                    title: '异常值处理', width: 100,
-                    render: (_, r) => r.outlierMethod || <Text type="secondary">默认</Text>,
-                  },
-                  {
-                    title: '归一化', width: 90,
-                    render: (_, r) => r.normalizeMethod || <Text type="secondary">默认</Text>,
-                  },
+                
                 ]}
               />
             ) : (
@@ -252,7 +245,7 @@ function ScreenConfigCard({ screenConfigJson }) {
 // ─────────────────────────────────────────────────────────
 //  报告详情组件
 // ─────────────────────────────────────────────────────────
-function ReportDetail({ taskId, onBack }) {
+export function ReportDetail({ taskId, onBack }) {
   const [task, setTask] = useState(null);
   const [records, setRecords] = useState([]);
   const [curveData, setCurveData] = useState(null);
@@ -261,13 +254,20 @@ function ReportDetail({ taskId, onBack }) {
 
   const fetchAll = useCallback(async () => {
     try {
-      const [t, r, c] = await Promise.all([
-        rollingScreenApi.getTask(taskId),
-        rollingScreenApi.getRecords(taskId).catch(() => ({ data: [] })),
-        rollingScreenApi.getCurve(taskId).catch(() => ({ data: null })),
+      const [t, rep, rec, c] = await Promise.all([
+        backtestApi.getTask(taskId),
+        backtestApi.getReport(taskId).catch(() => null),
+        backtestApi.getRecords(taskId).catch(() => ({ data: [] })),
+        backtestApi.getCurve(taskId).catch(() => ({ data: null })),
       ]);
-      setTask(t?.data ?? t);
-      setRecords(r?.data ?? r ?? []);
+      // 合并 task + report（report 含所有指标字段）
+      const taskData = t?.data ?? t;
+      const reportData = rep?.data ?? rep;
+      const merged = reportData ? { ...taskData, ...reportData } : taskData;
+      // 补算最终净值（report 没有 finalNav 字段）
+      if (merged.totalReturn != null) merged.finalNav = 1 + merged.totalReturn;
+      setTask(merged);
+      setRecords(rec?.data ?? rec ?? []);
       setCurveData(c?.data ?? c);
     } finally {
       setLoading(false);
@@ -283,7 +283,7 @@ function ReportDetail({ taskId, onBack }) {
     if (!task || task.status !== 'RUNNING') return;
     setPolling(true);
     const timer = setInterval(() => {
-      rollingScreenApi.getTask(taskId).then(res => {
+      backtestApi.getTask(taskId).then(res => {
         const t = res?.data ?? res;
         setTask(t);
         if (t?.status !== 'RUNNING') {
@@ -296,20 +296,45 @@ function ReportDetail({ taskId, onBack }) {
     return () => { clearInterval(timer); setPolling(false); };
   }, [task?.status, taskId, fetchAll]);
 
+  // 在最后一次调仓后追加"持仓观察期"摘要行（调仓后持仓随市场波动的区间）
+  const displayRecords = useMemo(() => {
+    const eq = curveData?.equityCurve ?? [];
+    if (records.length === 0 || eq.length === 0) return records;
+    const lastRebDate = records[records.length - 1]?.rebalanceDate;
+    if (!lastRebDate) return records;
+    const tailPoints = eq.filter(p => p.tradeDate > lastRebDate);
+    if (tailPoints.length === 0) return records;
+    const finalPoint = tailPoints[tailPoints.length - 1];
+    const lastNav = Number(records[records.length - 1].nav);
+    const finalNav = Number(finalPoint.nav);
+    const periodReturn = lastNav > 0 ? (finalNav - lastNav) / lastNav : 0;
+    return [...records, {
+      _key: 'observation',
+      rebalanceDate: `${tailPoints[0].tradeDate}~${finalPoint.tradeDate}`,
+      nav: finalNav,
+      dailyReturn: periodReturn,
+      totalValue: finalNav * 1000000,
+      newPositionsJson: records[records.length - 1].newPositionsJson,
+      buysJson: null,
+      sellsJson: null,
+      _isObservation: true,
+    }];
+  }, [records, curveData]);
+
   const handleDelete = async () => {
-    await rollingScreenApi.delete(taskId);
+    await backtestApi.delete(taskId);
     message.success('任务已删除');
     onBack();
   };
   const handleCancel = async () => {
-    await rollingScreenApi.cancel(taskId);
+    await backtestApi.cancel(taskId);
     message.success('任务已取消');
     fetchAll();
   };
 
   const handleRerun = async () => {
     try {
-      await rollingScreenApi.rerun(taskId);
+      await backtestApi.rerun(taskId);
       message.success('已重新提交，回测正在执行...');
       fetchAll();
     } catch {
@@ -397,7 +422,7 @@ function ReportDetail({ taskId, onBack }) {
   };
 
   return (
-    <div style={{ padding: '16px 24px' }}>
+    <div style={{ padding: '16px 12px' }}>
       {/* 头部操作栏 */}
       <Space style={{ marginBottom: 16 }} wrap>
         <Button icon={<ArrowLeftOutlined />} onClick={onBack}>返回列表</Button>
@@ -465,34 +490,34 @@ function ReportDetail({ taskId, onBack }) {
           <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
             {[
               {
-                title: '累计收益率',
+                title: '累计收益率', tooltip: (() => { if (task.totalReturn == null) return '回测期间总收益（期末净值/期初 - 1）'; const tr = task.totalReturn; return `回测期间总收益（期末净值/期初 - 1）。初始100万→${((1 + tr) * 100).toFixed(2)}万，赚了${(tr * 100).toFixed(2)}万`; })(),
                 value: task.totalReturn != null ? (task.totalReturn * 100).toFixed(2) : '-',
                 suffix: '%',
                 color: (task.totalReturn ?? 0) >= 0 ? '#cf1322' : '#3f8600',
               },
               {
-                title: '年化收益率',
+                title: '年化收益率', tooltip: '折算成年度收益 = (1+累计收益率)^(365/回测天数) - 1。短期回测时年化值波动较大，参考意义有限',
                 value: task.annualReturn != null ? (task.annualReturn * 100).toFixed(2) : '-',
                 suffix: '%',
                 color: (task.annualReturn ?? 0) >= 0 ? '#cf1322' : '#3f8600',
               },
               {
-                title: '最大回撤',
+                title: '最大回撤', tooltip: '净值从峰值到谷底的最大跌幅。反映策略在极端行情下的抗跌能力，越小越好。18.46% 意味着最高曾亏过这么多',
                 value: task.maxDrawdown != null ? (task.maxDrawdown * 100).toFixed(2) : '-',
                 suffix: '%',
                 color: '#fa8c16',
               },
-              { title: '夏普比率', value: task.sharpeRatio != null ? Number(task.sharpeRatio).toFixed(2) : '-', suffix: '' },
-              { title: '最终净值', value: task.finalNav != null ? Number(task.finalNav).toFixed(4) : '-', suffix: '' },
-              { title: '总交易笔数', value: task.totalTrades ?? '-', suffix: '' },
+              { title: '夏普比率', tooltip: '风险调整后收益 = (策略年化收益 - 无风险利率) / 年化波动率。每承担1单位风险换取的超额回报。>1 良好，>2 优秀', value: task.sharpeRatio != null ? Number(task.sharpeRatio).toFixed(2) : '-', suffix: '' },
+              { title: '最终净值', tooltip: (() => { if (task.finalNav == null) return '期末每单位初始资金的价值'; const fn = Number(task.finalNav); return `期末每单位初始资金的价值。${fn.toFixed(4)} 即 100 万变成 ${(fn * 100).toFixed(2)} 万，盈利 ${((fn - 1) * 100).toFixed(2)} 万`; })(), value: task.finalNav != null ? Number(task.finalNav).toFixed(4) : '-', suffix: '' },
+              { title: '总交易笔数', tooltip: '回测期间全部买卖操作的次数。月频调仓×5次×每仓约40只≈200笔。交易频繁会产生手续费，侵蚀收益', value: task.totalTrades ?? '-', suffix: '' },
               {
-                title: '胜率',
+                title: '胜率', tooltip: '单日盈亏为正的天数占比。胜率低但盈利日平均涨幅 > 亏损日平均跌幅时（赔率高），整体仍可盈利。典型的趋势跟踪策略特征',
                 value: task.winRate != null ? (task.winRate * 100).toFixed(1) : '-',
                 suffix: '%',
                 color: (task.winRate ?? 0) >= 0.5 ? '#cf1322' : '#3f8600',
               },
               {
-                title: '超额收益',
+                title: '超额收益', tooltip: '策略收益率 - 基准（沪深300）收益率。正值跑赢大盘，负值跑输。若沪深300 +3.7%、策略 +15.23%，则超额 +11.53%',
                 value: task.benchmarkReturn != null && task.totalReturn != null
                   ? ((task.totalReturn - task.benchmarkReturn) * 100).toFixed(2)
                   : (task.totalReturn != null ? '—' : '-'),
@@ -505,7 +530,13 @@ function ReportDetail({ taskId, onBack }) {
               <Col key={i} xs={12} sm={8} md={6} lg={6} xl={3}>
                 <Card size="small" styles={{ body: { padding: '12px 16px' } }}>
                   <Statistic
-                    title={<Text type="secondary" style={{ fontSize: 12 }}>{item.title}</Text>}
+                    title={
+                      <Tooltip title={item.tooltip}>
+                        <Text type="secondary" style={{ fontSize: 12, cursor: 'help', borderBottom: '1px dotted #999' }}>
+                          {item.title} <QuestionCircleOutlined style={{ color: '#bbb', fontSize: 11 }} />
+                        </Text>
+                      </Tooltip>
+                    }
                     value={item.value}
                     suffix={item.suffix}
                     valueStyle={{ fontSize: 18, color: item.color }}
@@ -529,11 +560,11 @@ function ReportDetail({ taskId, onBack }) {
           </Card>
 
           {/* 调仓记录 */}
-          <Card title={`调仓记录（共 ${records.length} 次）`} style={{ marginBottom: 16 }}>
-            {records.length > 0 ? (
+          <Card title={`调仓记录（共 ${records.length} 次${displayRecords.length > records.length ? ` + ${displayRecords.length - records.length} 日持仓观察` : ''}）`} style={{ marginBottom: 16 }}>
+            {displayRecords.length > 0 ? (
               <Table
-                dataSource={records}
-                rowKey={(r) => r.id ?? r.rebalanceDate}
+                dataSource={displayRecords}
+                rowKey={(r) => r._key ?? r.id ?? r.rebalanceDate}
                 size="small"
                 pagination={{
                   pageSizeOptions: ['10', '20', '50'],
@@ -542,9 +573,14 @@ function ReportDetail({ taskId, onBack }) {
                 }}
                 columns={[
                   {
-                    title: '调仓日期', dataIndex: 'rebalanceDate', width: 120, fixed: 'left',
+                    title: '日期', dataIndex: 'rebalanceDate', width: 140, fixed: 'left',
                     defaultSortOrder: 'ascend',
                     sorter: (a, b) => (a.rebalanceDate ?? '').localeCompare(b.rebalanceDate ?? ''),
+                    render: (v, r) => r._isObservation ? (
+                      <Text type="secondary" style={{ fontSize: 11 }}>
+                        {v} <Tag color="orange" style={{ fontSize: 10, marginLeft: 4 }}>持仓观察</Tag>
+                      </Text>
+                    ) : v,
                   },
                   {
                     title: '持仓数', width: 80, align: 'center',
@@ -561,9 +597,10 @@ function ReportDetail({ taskId, onBack }) {
                   },
                   {
                     title: '当日收益(%)', dataIndex: 'dailyReturn', width: 120, align: 'right',
-                    render: v => v != null ? (
+                    render: (v, r) => v != null ? (
                       <Text style={{ color: v >= 0 ? '#cf1322' : '#3f8600' }}>
                         {v >= 0 ? '+' : ''}{(Number(v) * 100).toFixed(2)}
+                        {r._isObservation ? <span style={{ fontSize: 10, color: '#999', marginLeft: 4 }}>区间</span> : null}
                       </Text>
                     ) : '-',
                   },
@@ -596,7 +633,35 @@ function ReportDetail({ taskId, onBack }) {
                                   </Link>
                                 );
                               })}
-                              {arr.length > 12 && <Tag>+{arr.length - 12}</Tag>}
+                              {arr.length > 12 && (
+                                <Popover
+                                  title={`剩余 ${arr.length - 12} 只持仓`}
+                                  content={
+                                    <Space size={[4, 8]} wrap style={{ maxWidth: 420 }}>
+                                      {arr.slice(12).map((p, j) => {
+                                        const rawCode = p.symbol || p.code || '';
+                                        const code = rawCode.replace('.SZ', '').replace('.SH', '').replace('.BJ', '');
+                                        const name = p.name || '';
+                                        return (
+                                          <Link
+                                            key={j}
+                                            to={`/stock-analysis?code=${encodeURIComponent(code)}`}
+                                            target="_blank"
+                                          >
+                                            <Tag color="blue" style={{ margin: 0, fontSize: 11, cursor: 'pointer' }}>
+                                              {name} {code}
+                                            </Tag>
+                                          </Link>
+                                        );
+                                      })}
+                                    </Space>
+                                  }
+                                >
+                                  <Tag style={{ cursor: 'pointer', background: '#e6f4ff', borderColor: '#91caff', color: '#1677ff' }}>
+                                    +{arr.length - 12}
+                                  </Tag>
+                                </Popover>
+                              )}
                             </Space>
                           );
                         }
@@ -604,8 +669,75 @@ function ReportDetail({ taskId, onBack }) {
                       return String(v).slice(0, 60);
                     },
                   },
+                  {
+                    title: '买入明细', width: 80, align: 'center',
+                    render: (_, r) => {
+                      if (r._isObservation) return <Text type="secondary" style={{ fontSize: 11 }}>-</Text>;
+                      try {
+                        const arr = JSON.parse(r.buysJson ?? '[]');
+                        if (!Array.isArray(arr) || arr.length === 0) return '-';
+                        const data = arr.map((b, i) => ({ ...b, key: i }));
+                        const cols = [
+                          { title: '股票', dataIndex: 'name', width: 120, render: (_, row) => row.name || String(row.symbol || '').replace('.SZ','').replace('.SH','').replace('.BJ','') || '-' },
+                          { title: '价格', dataIndex: 'price', width: 80, align: 'right', render: v => v != null ? Number(v).toFixed(2) : '-' },
+                          { title: '数量', dataIndex: 'shares', width: 80, align: 'right' },
+                          { title: '金额', dataIndex: 'amount', width: 100, align: 'right', render: v => v != null ? Number(v).toFixed(0) : '-' },
+                          { title: '手续费', dataIndex: 'fee', width: 80, align: 'right', render: v => v != null ? Number(v).toFixed(2) : '-' },
+                        ];
+                        return (
+                          <Popover
+                            title={`买入 ${arr.length} 只（${r.rebalanceDate}）`}
+                            content={
+                              <div style={{ maxHeight: '60vh', overflow: 'auto', width: 520 }}>
+                                <Table dataSource={data} columns={cols} size="small" pagination={false} />
+                              </div>
+                            }
+                            trigger="click"
+                            placement="left"
+                          >
+                            <Tag color="red" style={{ cursor: 'pointer', fontSize: 11 }}>买入 {arr.length}</Tag>
+                          </Popover>
+                        );
+                      } catch { return '-'; }
+                    },
+                  },
+                  {
+                    title: '卖出明细', width: 80, align: 'center',
+                    render: (_, r) => {
+                      if (r._isObservation) return <Text type="secondary" style={{ fontSize: 11 }}>-</Text>;
+                      try {
+                        const arr = JSON.parse(r.sellsJson ?? '[]');
+                        if (!Array.isArray(arr) || arr.length === 0) return '-';
+                        const data = arr.map((s, i) => ({ ...s, key: i }));
+                        const cols = [
+                          { title: '股票', dataIndex: 'name', width: 120, render: (_, row) => row.name || String(row.symbol || '').replace('.SZ','').replace('.SH','').replace('.BJ','') || '-' },
+                          { title: '价格', dataIndex: 'price', width: 80, align: 'right', render: v => v != null ? Number(v).toFixed(2) : '-' },
+                          { title: '数量', dataIndex: 'shares', width: 80, align: 'right' },
+                          { title: '盈亏', dataIndex: 'pnl', width: 100, align: 'right', render: v => v != null ? (
+                            <Text style={{ color: v >= 0 ? '#cf1322' : '#3f8600' }}>{v >= 0 ? '+' : ''}{Number(v).toFixed(0)}</Text>
+                          ) : '-' },
+                          { title: '手续费', dataIndex: 'fee', width: 80, align: 'right', render: v => v != null ? Number(v).toFixed(2) : '-' },
+                        ];
+                        return (
+                          <Popover
+                            title={`卖出 ${arr.length} 只（${r.rebalanceDate}）`}
+                            content={
+                              <div style={{ maxHeight: '60vh', overflow: 'auto', width: 520 }}>
+                                <Table dataSource={data} columns={cols} size="small" pagination={false} />
+                              </div>
+                            }
+                            trigger="click"
+                            placement="left"
+                          >
+                            <Tag color="green" style={{ cursor: 'pointer', fontSize: 11 }}>卖出 {arr.length}</Tag>
+                          </Popover>
+                        );
+                      } catch { return '-'; }
+                    },
+                  },
                 ]}
-                scroll={{ x: 800 }}
+                scroll={{ x: 1100 }}
+                onRow={(r) => r._isObservation ? { style: { background: '#fffbe6' } } : {}}
               />
             ) : (
               <Empty description="暂无调仓记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
@@ -637,7 +769,7 @@ function RollingBacktestList({ onSelect }) {
 
   const loadTasks = useCallback(() => {
     setLoading(true);
-    rollingScreenApi.listTasks({ page: 0, size: 50 })
+    backtestApi.list({ page: 0, size: 50, signalSource: 'SCREEN' })
       .then(res => {
         const data = res?.data ?? res;
         setTasks(data?.records ?? data?.content ?? data ?? []);
@@ -651,7 +783,7 @@ function RollingBacktestList({ onSelect }) {
   const handleDelete = async (taskId, e) => {
     e.stopPropagation();
     try {
-      await rollingScreenApi.delete(taskId);
+      await backtestApi.delete(taskId);
       message.success('已删除');
       loadTasks();
     } catch {
@@ -662,7 +794,7 @@ function RollingBacktestList({ onSelect }) {
   const handleRerunList = async (taskId, e) => {
     e.stopPropagation();
     try {
-      await rollingScreenApi.rerun(taskId);
+      await backtestApi.rerun(taskId);
       message.success('已重新提交，回测正在执行...');
       loadTasks();
     } catch {

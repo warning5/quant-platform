@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Link, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Link, useLocation, useParams } from 'react-router-dom';
 import { App as AntApp, Layout, Menu, Typography, Space, Badge, Button, Tooltip } from 'antd';
 import {
   FundOutlined, FundViewOutlined, ThunderboltOutlined,
@@ -30,7 +30,6 @@ import ParamOptimize from './pages/backtest/ParamOptimize';
 import FactorWeightOptimize from './pages/factors/FactorWeightOptimize';
 import FactorIcIrAnalysis from './pages/factors/FactorIcIrAnalysis';
 import StockScreen from './pages/screen/StockScreen';
-import RollingBacktestReport from './pages/screen/RollingBacktestReport';
 import ManualOverviewPage from './pages/manual/ManualOverviewPage';
 import ManualDataInfoPage from './pages/manual/ManualDataInfoPage';
 import ManualStockAnalysisPage from './pages/manual/ManualStockAnalysisPage';
@@ -45,6 +44,13 @@ import ResearchData from './pages/datadetail/ResearchData';
 import DataUpdate from './pages/dataupdate/DataUpdate';
 import ScheduledTasks from './pages/dataupdate/ScheduledTasks';
 import StockAnalysis from './pages/analysis/StockAnalysis';
+
+/** 滚动回测旧路由重定向到统一回测 */
+function OldRollingRedirect() {
+  const { id } = useParams();
+  if (id) return <Navigate to={`/backtests/${id}/report`} replace />;
+  return <Navigate to="/backtests" replace />;
+}
 import MarketThermometer from './pages/analysis/MarketThermometer';
 import SectorRanking from './pages/market/SectorRanking';
 
@@ -97,7 +103,6 @@ function AppLayout() {
       label: '选股工具',
       children: [
         { key: '/screen', label: <Link to="/screen">因子选股</Link> },
-        { key: '/screen/backtest', label: <Link to="/screen/backtest">滚动回测</Link> },
       ],
     },
     {
@@ -134,7 +139,7 @@ function AppLayout() {
     if (path.startsWith('/factor') || path === '/factor-weight-optimize') return ['factors'];
     if (path.startsWith('/strateg') || path === '/paper-trading' || path === '/backtests/param-optimize') return ['strategies'];
     if (path.startsWith('/backtest')) return ['backtests'];
-    if (path === '/screen' || path.startsWith('/screen/backtest')) return ['screen'];
+    if (path === '/screen') return ['screen'];
     if (path.startsWith('/data-detail')) return ['data-info'];
     if (path === '/data-update' || path === '/scheduled-tasks' || path === '/sector-ranking') return ['data-info'];
     if (path.startsWith('/manual/')) return ['manual'];
@@ -258,7 +263,8 @@ function AppLayout() {
             <Route path="/factor-weight-optimize" element={<FactorWeightOptimize defaultFactorCodes={[]} />} />
             <Route path="/factor-ic-ir" element={<FactorIcIrAnalysis />} />
             <Route path="/screen" element={<StockScreen />} />
-            <Route path="/screen/backtest/:id?" element={<RollingBacktestReport />} />
+            <Route path="/screen/backtest/:id" element={<OldRollingRedirect />} />
+            <Route path="/screen/backtest" element={<OldRollingRedirect />} />
             <Route path="/manual/overview" element={<ManualOverviewPage />} />
             <Route path="/manual/data-info" element={<ManualDataInfoPage />} />
             <Route path="/manual/stock-analysis" element={<ManualStockAnalysisPage />} />

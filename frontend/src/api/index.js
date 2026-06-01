@@ -191,6 +191,7 @@ export const backtestApi = {
   cancel: (taskId) => api.post(`/backtests/${taskId}/cancel`),
   rerun: (taskId) => api.post(`/backtests/${taskId}/rerun`),
   delete: (taskId) => api.delete(`/backtests/${taskId}`),
+  getRecords: (taskId) => api.get(`/backtests/${taskId}/records`),
   // P1: 多策略对比
   compare: (taskIds) => api.post('/backtests/compare', { taskIds }, { timeout: 60000 }),
   // P1: 蒙特卡洛模拟
@@ -204,18 +205,6 @@ export const backtestApi = {
     ? api.get('/backtests/param-optimize/list', { params: { strategyId } })
     : api.get('/backtests/param-optimize/list'),
   deleteParamOptimize: (jobId) => api.delete(`/backtests/param-optimize/${jobId}`),
-};
-
-// ===== 滚动选股回测 API =====
-export const rollingScreenApi = {
-  run: (data) => api.post('/rolling-screen/run', data),
-  listTasks: (params) => api.get('/rolling-screen/tasks', { params }),
-  getTask: (taskId) => api.get(`/rolling-screen/tasks/${taskId}`),
-  getRecords: (taskId) => api.get(`/rolling-screen/tasks/${taskId}/records`),
-  getCurve: (taskId) => api.get(`/rolling-screen/tasks/${taskId}/curve`),
-  cancel: (taskId) => api.put(`/rolling-screen/tasks/${taskId}/cancel`),
-  rerun: (taskId) => api.post(`/rolling-screen/tasks/${taskId}/rerun`),
-  delete: (taskId) => api.delete(`/rolling-screen/tasks/${taskId}`),
 };
 
 // ===== 行情 API =====

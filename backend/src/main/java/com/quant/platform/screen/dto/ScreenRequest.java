@@ -158,16 +158,5 @@ public class ScreenRequest {
          */
         private Double filterValue;
 
-        /**
-         * 该因子极值处理方法，null/空 = 使用全局配置
-         * NONE / MAD / SIGMA3 / PERCENTILE
-         */
-        private String outlierMethod;
-
-        /**
-         * 该因子标准化方法，null/空 = 使用全局配置
-         * NONE / ZSCORE / MINMAX / RANK
-         */
-        private String normalizeMethod;
     }
 }

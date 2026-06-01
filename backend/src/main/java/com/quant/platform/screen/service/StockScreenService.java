@@ -250,9 +250,8 @@ public class StockScreenService {
                         candidates.stream().limit(5).collect(Collectors.toList()));
             }
 
-            // 极值处理
-            String outlierMethod = fw.getOutlierMethod() != null && !fw.getOutlierMethod().isEmpty()
-                    ? fw.getOutlierMethod() : req.getGlobalOutlierMethod();
+            // 极值处理（全局配置）
+            String outlierMethod = req.getGlobalOutlierMethod() != null ? req.getGlobalOutlierMethod() : "MAD";
             List<Double> outlierProcessed = applyOutlierProcessing(
                     filtered.stream()
                             .map(FactorValue::getFactorVal)
@@ -261,9 +260,8 @@ public class StockScreenService {
                     outlierMethod
             );
 
-            // 标准化处理
-            String normalizeMethod = fw.getNormalizeMethod() != null && !fw.getNormalizeMethod().isEmpty()
-                    ? fw.getNormalizeMethod() : req.getGlobalNormalizeMethod();
+            // 标准化处理（全局配置）
+            String normalizeMethod = req.getGlobalNormalizeMethod() != null ? req.getGlobalNormalizeMethod() : "ZSCORE";
             List<Double> normalized = applyNormalization(outlierProcessed, normalizeMethod);
 
             // 重新组装 FactorValue（用标准化后的值替换 rankValue）
@@ -670,15 +668,14 @@ public class StockScreenService {
             // 稳定性过滤：CV 超阈值则剔除（阈值按因子数值特性动态选择）
             // 数据不足 10 个点时跳过 CV 过滤（样本太少时 CV 不可靠）
             //
-            // ⚠️ 特殊处理：REVERSAL 类短期反转因子的均值天然接近 0（多空对称），
-            //   导致 CV = std/|mean| 爆炸式偏大（如 mean=0.000017 → CV=2492），
-            //   此时 CV 不再反映"不稳定"，而是数学伪影。
-            //   改用绝对标准差阈值：std > 20% 则认为波动过大（日反转值超过 ±20% 属异常）
-            boolean isReversal = factorCode.startsWith("REVERSAL");
+            // ⚠️ 特殊处理：均值接近 0 的因子（REVERSAL / MACD 等零轴震荡指标），
+            //   CV = std/|mean| 会因 |mean|≈0 而爆炸式偏大（数学伪影，非真不稳定）。
+            //   改用绝对标准差阈值：std 过大才认为波动异常。
+            boolean isZeroMean = factorCode.startsWith("REVERSAL") || factorCode.equals("MACD");
             boolean unstable = false;
             if (values.size() >= 10) {
-                if (isReversal) {
-                    // 反转因子用绝对 std 阈值（值域通常在 ±10% 以内）
+                if (isZeroMean) {
+                    // 零轴因子用绝对 std 阈值
                     unstable = (stdDev > 0.20);
                 } else {
                     unstable = (cv > cvThreshold);
@@ -706,7 +703,7 @@ public class StockScreenService {
 
         log.info("[Screen] Multi-day (latest+stable) for {}: candidates={} -> stable={} filtered_by_CV={} (threshold={}, mode={})",
                 factorCode, totalSymbols, stableCount, filteredByCV, cvThreshold,
-                factorCode.startsWith("REVERSAL") ? "std_abs" : "cv_ratio");
+                factorCode.startsWith("REVERSAL") || factorCode.equals("MACD") ? "std_abs" : "cv_ratio");
         return result;
     }
 

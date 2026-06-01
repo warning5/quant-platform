@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Card, Form, Input, Select, InputNumber, DatePicker, Button, Space,
-  Typography, Divider, Row, Col, Switch, Tooltip, Alert, Tag
+  Typography, Divider, Row, Col, Switch, Tooltip, Alert, Tag, Radio
 } from 'antd';
 import { message } from '../../utils/messageUtil';
 import { ArrowLeftOutlined, PlayCircleOutlined, QuestionCircleOutlined, RocketOutlined, ThunderboltFilled } from '@ant-design/icons';
@@ -50,13 +50,17 @@ export default function BacktestCreate() {
   // 记录从参数优化自动填充的字段名集合，用于高亮标识
   const [highlightedFields, setHighlightedFields] = useState(new Set());
   
+  // 选股方式
+  const [signalSource, setSignalSource] = useState('STRATEGY');
+  const signalSourceFromWP = Form.useWatch('signalSource', form);
+  
   // 使用 useWatch 监听滑点模型变化
   const slippageModel = Form.useWatch('slippageModel', form);
 
   const presetStrategyId = searchParams.get('strategyId');
 
   useEffect(() => {
-    strategyApi.list({ page: 0, size: 100 }).then(res => {
+    strategyApi.list({ page: 0, size: 100, status: 'ACTIVE' }).then(res => {
       const list = res.records || [];
       setStrategies(list);
       if (presetStrategyId) {
@@ -100,9 +104,11 @@ export default function BacktestCreate() {
 
   const handleSubmit = () => {
     form.validateFields().then(values => {
+      const isScreen = values.signalSource === 'SCREEN';
       const [start, end] = values.dateRange;
       const payload = {
-        strategyId: values.strategyId,
+        signalSource: values.signalSource || 'STRATEGY',
+        strategyId: isScreen ? null : values.strategyId,
         taskName: values.taskName,
         startDate: start.format('YYYY-MM-DD'),
         endDate: end.format('YYYY-MM-DD'),
@@ -121,6 +127,10 @@ export default function BacktestCreate() {
         stopLossPct: values.stopLossPct || null,
         stopProfitPct: values.stopProfitPct || null,
         maxPositionCount: values.maxPositionCount || null,
+        // SCREEN 模式专属字段
+        rebalanceFreq: isScreen ? (values.rebalanceFreq || 'MONTHLY') : null,
+        weightMode: isScreen ? (values.weightMode || 'EQUAL') : null,
+        screenConfigJson: isScreen ? (values.screenConfigJson || null) : null,
       };
       setSubmitting(true);
       backtestApi.create(payload).then(res => {
@@ -160,6 +170,7 @@ export default function BacktestCreate() {
           form={form}
           layout="vertical"
           initialValues={{
+            signalSource: 'STRATEGY',
             dateRange: [dayjs('2025-01-01'), dayjs('2025-01-01').add(1, 'year').subtract(1, 'day')],
             initialCapital: 1000000,
             commissionRate: 0.0003,
@@ -176,8 +187,22 @@ export default function BacktestCreate() {
             stopLossPct: 0,
             stopProfitPct: 0,
             maxPositionCount: 0,
+            rebalanceFreq: 'MONTHLY',
+            weightMode: 'EQUAL',
           }}
         >
+          <Row gutter={24}>
+            <Col span={24}>
+              <Form.Item name="signalSource" label="选股方式">
+                <Radio.Group onChange={e => setSignalSource(e.target.value)}>
+                  <Radio.Button value="STRATEGY">策略因子（GroovyShell算分）</Radio.Button>
+                  <Radio.Button value="SCREEN">因子筛选（StockScreen多日CV过滤）</Radio.Button>
+                </Radio.Group>
+              </Form.Item>
+            </Col>
+          </Row>
+
+          {signalSource === 'STRATEGY' ? (
           <Row gutter={24}>
             <Col span={12}>
               <Form.Item name="strategyId" label="选择策略" rules={[{ required: true, message: '请选择策略' }]}>
@@ -204,6 +229,48 @@ export default function BacktestCreate() {
               </Form.Item>
             </Col>
           </Row>
+          ) : (
+          <>
+            <Alert
+              type="info"
+              message="因子筛选模式：请在下方输入因子配置 JSON（可从因子选股页面复制），选择调仓频率和权重分配方式。"
+              style={{ marginBottom: 16 }}
+              showIcon
+            />
+            <Row gutter={24}>
+              <Col span={8}>
+                <Form.Item name="rebalanceFreq" label="调仓频率">
+                  <Select>
+                    <Option value="WEEKLY">每周</Option>
+                    <Option value="BIWEEKLY">每两周</Option>
+                    <Option value="MONTHLY">每月</Option>
+                  </Select>
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item name="weightMode" label="权重分配">
+                  <Select>
+                    <Option value="EQUAL">等权</Option>
+                    <Option value="SCORE_PROPORTIONAL">按得分比例</Option>
+                  </Select>
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item name="taskName" label="回测任务名称">
+                  <Input placeholder="如：因子筛选月频回测" />
+                </Form.Item>
+              </Col>
+            </Row>
+            <Form.Item
+              name="screenConfigJson"
+              label="因子配置 JSON"
+              rules={[{ required: true, message: '请输入因子配置 JSON' }]}
+              tooltip="从因子选股页面配置因子后，点击「复制配置JSON」按钮即可获得"
+            >
+              <Input.TextArea rows={6} placeholder='{"factors":[{"factorCode":"MOM20","direction":1,"weight":0.5},...],"topN":30,"excludeSt":true}' />
+            </Form.Item>
+          </>
+          )}
 
           <Row gutter={24}>
             <Col span={12}>

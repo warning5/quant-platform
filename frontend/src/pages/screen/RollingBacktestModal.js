@@ -5,7 +5,7 @@ import {
 } from 'antd';
 import { PlayCircleOutlined, QuestionCircleOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import { rollingScreenApi } from '../../api';
+import { backtestApi } from '../../api';
 import { useNavigate } from 'react-router-dom';
 
 const { Text } = Typography;
@@ -57,8 +57,9 @@ export default function RollingBacktestModal({ visible, onClose, screenConfig, o
     form.validateFields().then(values => {
       const [start, end] = values.dateRange;
 
-      // 构建请求体：RollingScreenTask 实体字段
+      // 构建请求体：BacktestTask 实体字段（signalSource=SCREEN）
       const payload = {
+        signalSource: 'SCREEN',
         taskName: values.taskName,
         screenConfigJson: JSON.stringify(screenConfig || {}),
         startDate: start.format('YYYY-MM-DD'),
@@ -79,7 +80,7 @@ export default function RollingBacktestModal({ visible, onClose, screenConfig, o
       };
 
       setSubmitting(true);
-      rollingScreenApi.run(payload).then(res => {
+      backtestApi.create(payload).then(res => {
         const taskId = res?.id;
         message.success('滚动回测任务已提交，正在后台执行');
         onClose();

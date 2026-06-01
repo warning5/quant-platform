@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Table, Tag, Button, Space, Card, Typography, Popconfirm, Progress, Tooltip } from 'antd';
+import { Table, Tag, Button, Space, Card, Typography, Popconfirm, Progress, Tooltip, Select } from 'antd';
 import { message } from '../../utils/messageUtil';
 import { PlusOutlined, EyeOutlined, DeleteOutlined, ReloadOutlined, StopOutlined, LoadingOutlined, RedoOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
@@ -16,19 +16,27 @@ const STATUS_LABELS = {
   FAILED: '失败', CANCELLED: '已取消'
 };
 
+const SIGNAL_LABELS = {
+  STRATEGY: { color: 'blue', text: '策略因子' },
+  SCREEN: { color: 'purple', text: '因子筛选' },
+};
+
 export default function BacktestList() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState({ records: [], total: 0 });
   const [params, setParams] = useState({ page: 0, size: 15 });
   const [selectedRowKeys, setSelectedRowKeys] = useState([]);
+  const [signalFilter, setSignalFilter] = useState(null); // null=全部, 'STRATEGY', 'SCREEN'
 
   const fetchData = (p = params) => {
     setLoading(true);
-    backtestApi.list(p).then(res => setData(res)).finally(() => setLoading(false));
+    const query = { ...p };
+    if (signalFilter) query.signalSource = signalFilter;
+    backtestApi.list(query).then(res => setData(res)).finally(() => setLoading(false));
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, [signalFilter]);
 
   // 轮询刷新运行中的任务
   useEffect(() => {
@@ -68,10 +76,30 @@ export default function BacktestList() {
   const columns = [
     { title: 'ID', dataIndex: 'id', key: 'id', width: 70 },
     {
-      title: '任务名称', dataIndex: 'taskName', key: 'name', ellipsis: true,
-      render: (v, r) => v || `回测-${r.strategyCode}`
+      title: '任务名称', dataIndex: 'taskName', key: 'name', width: 200, ellipsis: true,
+      render: (v, r) => v || `回测-${r.strategyCode || '筛选'}`
     },
-    { title: '策略代码', dataIndex: 'strategyCode', key: 'code', width: 220, render: v => <Tag color="geekblue">{v}</Tag> },
+    {
+      title: '选股方式', dataIndex: 'signalSource', key: 'source', width: 100, align: 'center',
+      render: v => {
+        const info = SIGNAL_LABELS[v] || { color: 'default', text: v || '-' };
+        return <Tag color={info.color}>{info.text}</Tag>;
+      },
+    },
+    {
+      title: '策略/配置', key: 'config', width: 200, ellipsis: true,
+      render: (_, r) => {
+        if (r.signalSource === 'SCREEN') {
+          if (!r.screenConfigJson) return <Text type="secondary">-</Text>;
+          try {
+            const c = JSON.parse(r.screenConfigJson);
+            const factors = Array.isArray(c.factors) ? c.factors : [];
+            return <Text type="secondary">{factors.length}因子 · Top{c.topN ?? '-'}</Text>;
+          } catch { return <Text type="secondary">解析失败</Text>; }
+        }
+        return <Tag color="geekblue">{r.strategyCode || '-'}</Tag>;
+      },
+    },
     {
       title: '回测区间', key: 'range', width: 200,
       render: (_, r) => `${r.startDate} ~ ${r.endDate}`
@@ -134,6 +162,17 @@ export default function BacktestList() {
       <div className="page-header">
         <Title level={4} style={{ margin: 0 }}>回测列表</Title>
         <Space>
+          <Select
+            allowClear
+            placeholder="选股方式"
+            style={{ width: 130 }}
+            value={signalFilter}
+            onChange={v => setSignalFilter(v || null)}
+            options={[
+              { value: 'STRATEGY', label: '策略因子' },
+              { value: 'SCREEN', label: '因子筛选' },
+            ]}
+          />
           {selectedRowKeys.length > 0 && (
             <Button danger icon={<DeleteOutlined />} onClick={handleBatchDelete}>
               批量删除 ({selectedRowKeys.length})
@@ -152,7 +191,7 @@ export default function BacktestList() {
           columns={columns}
           rowKey="id"
           loading={loading}
-          scroll={{ x: 1000 }}
+          scroll={{ x: 1100 }}
           rowSelection={{
             selectedRowKeys,
             onChange: setSelectedRowKeys,

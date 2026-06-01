@@ -47,6 +47,12 @@ public class BacktestTask implements Serializable {
     private String strategyName;
 
     /**
+     * 选股来源: STRATEGY(策略因子GroovyShell算分) / SCREEN(StockScreenService筛选)
+     */
+    @TableField("signal_source")
+    private String signalSource;
+
+    /**
      * 任务名称
      */
     @TableField("task_name")
@@ -147,6 +153,18 @@ public class BacktestTask implements Serializable {
      */
     @TableField("stop_profit_pct")
     private BigDecimal stopProfitPct;
+
+    /**
+     * 调仓频率: WEEKLY / BIWEEKLY / MONTHLY（默认 MONTHLY）
+     */
+    @TableField("rebalance_freq")
+    private String rebalanceFreq;
+
+    /**
+     * 权重分配模式: EQUAL(等权) / SCORE_PROPORTIONAL(按得分比例)
+     */
+    @TableField("weight_mode")
+    private String weightMode;
 
     /**
      * 最大持仓数量（覆盖策略定义，null = 使用策略默认值）
