@@ -7,7 +7,7 @@ import {
 import {
   PlusOutlined, DeleteOutlined, PlayCircleOutlined, FilterOutlined,
   InfoCircleOutlined, ReloadOutlined, SwapOutlined, QuestionCircleOutlined,
-  SaveOutlined, CopyOutlined, StarOutlined, WarningOutlined,
+  StarOutlined, WarningOutlined, EditOutlined,
   SafetyCertificateOutlined, ArrowUpOutlined, ArrowDownOutlined,
   PlusSquareOutlined, MinusSquareOutlined, ThunderboltOutlined, LineChartOutlined, FundOutlined,
   MenuFoldOutlined, MenuUnfoldOutlined, RiseOutlined, StockOutlined,
@@ -15,7 +15,7 @@ import {
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import api, { factorApi } from '../../api';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { useMarketThermometer } from '../../hooks/useMarketThermometer';
 import RollingBacktestModal from './RollingBacktestModal';
 
@@ -410,12 +410,10 @@ export default function StockScreen() {
   const [availableFactors, setAvailableFactors] = useState([]);
   const [loadingFactors, setLoadingFactors] = useState(false);
 
-  /* ── 预设组合 ──────────────────────────────────────────────────── */
-  const [presets, setPresets] = useState([]);
-  const [selectedPresetId, setSelectedPresetId] = useState(null);
-  const pendingRestorePresetName = useRef(null);
-  const [saveModalVisible, setSaveModalVisible] = useState(false);
-  const [saveForm] = Form.useForm();
+  /* ── 策略组合 ──────────────────────────────────────────────────── */
+  const [strategies, setStrategies] = useState([]);
+  const [selectedStrategyId, setSelectedStrategyId] = useState(null);
+  const pendingRestoreStrategyName = useRef(null);
 
   /* ── 因子配置列表 ─────────────────────────────────────────────── */
   const [factors, setFactors] = useState([]);
@@ -461,8 +459,8 @@ export default function StockScreen() {
       .then(res => { if (res) setScreenDate(dayjs(res)); })
       .catch(() => { setScreenDate(dayjs('2024-12-31')); });
 
-    api.get('/screen/presets')
-      .then(res => setPresets(res || []))
+    api.get('/strategies', { params: { status: 'ACTIVE', size: 100 } })
+      .then(res => setStrategies(res?.records || []))
       .catch(() => {});
 
     // 检查是否有从权重优化页面传来的配置
@@ -494,6 +492,7 @@ export default function StockScreen() {
 
   /* ── 从回测报告页跳转回填配置 ─────────────────────────────────── */
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   useEffect(() => {
     const restoreParam = searchParams.get('__restore');
     console.log('[restore] __restore 参数:', restoreParam ? '有值(长度' + restoreParam.length + ')' : '无/空');
@@ -553,15 +552,15 @@ export default function StockScreen() {
         setMaAbove100(!!config.maPositionFilter.aboveMA100);
       }
 
-      // 回填策略组合名称（presets 可能还没加载完，先存到 ref，等 presets 就绪后再匹配）
-      if (config.presetName) {
-        console.log('[restore] 收到 presetName:', config.presetName, '当前presets数量:', presets.length);
-        pendingRestorePresetName.current = config.presetName;
-        // 立即尝试匹配一次（presets 已加载时）
-        const matched = presets.find(p => p.presetName === config.presetName);
+      // 回填策略组合名称（strategies 可能还没加载完，先存到 ref，等 strategies 就绪后再匹配）
+      if (config.presetName || config.strategyName) {
+        const name = config.strategyName || config.presetName;
+        pendingRestoreStrategyName.current = name;
+        // 立即尝试匹配一次（strategies 已加载时）
+        const matched = strategies.find(p => p.strategyName === name);
         if (matched) {
-          setSelectedPresetId(matched.id);
-          pendingRestorePresetName.current = null;
+          setSelectedStrategyId(matched.id);
+          pendingRestoreStrategyName.current = null;
         }
       }
 
@@ -574,33 +573,33 @@ export default function StockScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams.get('__restore')]);
 
-  /* ── presets 加载后延迟匹配策略组合回填 ───────────────────── */
+  /* ── strategies 加载后延迟匹配策略组合回填 ───────────────────── */
   useEffect(() => {
-    if (!pendingRestorePresetName.current || presets.length === 0) return;
-    const name = pendingRestorePresetName.current;
-    console.log('[restore-preset] 尝试匹配 presetName:', name, '当前presets:', presets.map(p => ({ id: p.id, name: p.presetName })));
-    const matched = presets.find(p => p.presetName === name);
-    console.log('[restore-preset] 匹配结果:', matched);
+    if (!pendingRestoreStrategyName.current || strategies.length === 0) return;
+    const name = pendingRestoreStrategyName.current;
+    const matched = strategies.find(p => p.strategyName === name);
     if (matched) {
-      setSelectedPresetId(matched.id);
-      pendingRestorePresetName.current = null;
+      setSelectedStrategyId(matched.id);
+      pendingRestoreStrategyName.current = null;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [presets]);
+  }, [strategies]);
 
-  /* ── 选择预设组合 ─────────────────────────────────────────────── */
-  const handlePresetSelect = useCallback((presetId) => {
-    setSelectedPresetId(presetId);
-    if (!presetId) {
+  /* ── 选择策略组合 ─────────────────────────────────────────────── */
+  const handleStrategySelect = useCallback((strategyId) => {
+    setSelectedStrategyId(strategyId);
+    if (!strategyId) {
       setFactors([]);
       return;
     }
-    const preset = presets.find(p => p.id === presetId);
-    if (!preset || !preset.factorConfig) return;
+    const strategy = strategies.find(s => s.id === strategyId);
+    if (!strategy || !strategy.factorConfigJson) return;
     try {
-      const config = JSON.parse(preset.factorConfig);
-      setFactors(config.map(c => ({
-        factorCode: c.factorCode,
+      const config = JSON.parse(strategy.factorConfigJson);
+      // 格式: {"factors": [{"code":"MOM20","weight":1.0,"direction":1,"filterOp":"NONE",...}, ...]}
+      const factorList = config.factors || [];
+      setFactors(factorList.map(c => ({
+        factorCode: c.code,
         direction: c.direction ?? 1,
         weight: c.weight ?? 1,
         filterOp: c.filterOp || 'NONE',
@@ -608,73 +607,11 @@ export default function StockScreen() {
         outlierMethod: null,
         normalizeMethod: null,
       })));
-      message.success(`已加载「${preset.presetName}」组合`);
+      message.success(`已加载「${strategy.strategyName}」策略`);
     } catch (e) {
-      message.error('预设组合解析失败，请检查数据格式');
+      message.error('策略因子配置解析失败，请检查数据格式');
     }
-  }, [presets]);
-
-  /* ── 复制预设为自定义 ─────────────────────────────────────────── */
-  const handleCopyPreset = useCallback(() => {
-    if (!selectedPresetId) { message.warning('请先选择一个预设组合'); return; }
-    const preset = presets.find(p => p.id === selectedPresetId);
-    if (!preset) return;
-    saveForm.setFieldsValue({
-      presetName: `${preset.presetName}（副本）`,
-      description: preset.description || '',
-    });
-    setSaveModalVisible(true);
-  }, [selectedPresetId, presets, saveForm]);
-
-  /* ── 保存自定义组合 ───────────────────────────────────────────── */
-  const handleSavePreset = useCallback(() => {
-    if (factors.length === 0) { message.warning('请至少添加一个因子'); return; }
-    saveForm.validateFields().then(values => {
-      const payload = {
-        presetName: values.presetName,
-        description: values.description || '',
-        factorConfig: JSON.stringify(factors.map(f => ({
-          factorCode: f.factorCode,
-          direction: f.direction,
-          weight: f.weight,
-          filterOp: f.filterOp,
-          filterValue: f.filterOp !== 'NONE' ? f.filterValue : null,
-        }))),
-      };
-      api.post('/screen/presets', payload)
-        .then(res => {
-          message.success('组合已保存');
-          setSaveModalVisible(false);
-          saveForm.resetFields();
-          // 刷新预设列表
-          return api.get('/screen/presets');
-        })
-        .then(res => { if (res) setPresets(res || []); })
-        .catch(() => {});
-    });
-  }, [factors, saveForm]);
-
-  /* ── 删除自定义组合 ───────────────────────────────────────────── */
-  const handleDeletePreset = useCallback((id) => {
-    Modal.confirm({
-      title: '确认删除',
-      content: '确定要删除这个自定义组合吗？',
-      okType: 'danger',
-      onOk: () => {
-        api.delete(`/screen/presets/${id}`)
-          .then(() => {
-            message.success('已删除');
-            if (selectedPresetId === id) {
-              setSelectedPresetId(null);
-              setFactors([]);
-            }
-            return api.get('/screen/presets');
-          })
-          .then(res => { if (res) setPresets(res || []); })
-          .catch(() => {});
-      },
-    });
-  }, [selectedPresetId]);
+  }, [strategies]);
 
   /* ── 因子增删改 ───────────────────────────────────────────────── */
   const addFactor = () => {
@@ -723,7 +660,7 @@ export default function StockScreen() {
       excludeSt,
       valuationWeight: valuationWeight / 100,
       customSqlWhere: customSqlWhere || null,
-      presetId: selectedPresetId || null,
+      strategyId: selectedStrategyId || null,
       maPositionFilter: (maAbove30 || maAbove60 || maAbove100) ? {
         aboveMA30:  maAbove30  || null,
         aboveMA60:  maAbove60  || null,
@@ -752,7 +689,7 @@ export default function StockScreen() {
         }
       })
       .finally(() => setRunning(false));
-  }, [factors, screenDate, screenDateRange, useMultiDayMode, topN, direction, excludeSt, globalOutlier, globalNormalize, orthogonalMethod, totalWeight, valuationWeight, selectedPresetId, customSqlWhere, maAbove30, maAbove60, maAbove100]);
+  }, [factors, screenDate, screenDateRange, useMultiDayMode, topN, direction, excludeSt, globalOutlier, globalNormalize, orthogonalMethod, totalWeight, valuationWeight, selectedStrategyId, customSqlWhere, maAbove30, maAbove60, maAbove100]);
 
   /* ── 构建当前选股配置（供回测弹窗使用） ──────────────────────── */
   const buildScreenRequest = useCallback(() => ({
@@ -770,9 +707,9 @@ export default function StockScreen() {
     excludeSt,
     valuationWeight: valuationWeight / 100,
     customSqlWhere: customSqlWhere || null,
-    presetId: selectedPresetId || null,
-    presetName: selectedPresetId
-      ? (presets.find(p => p.id === selectedPresetId)?.presetName || null)
+    strategyId: selectedStrategyId || null,
+    strategyName: selectedStrategyId
+      ? (strategies.find(p => p.id === selectedStrategyId)?.strategyName || null)
       : null,
     maPositionFilter: (maAbove30 || maAbove60 || maAbove100) ? {
       aboveMA30:  maAbove30  || null,
@@ -788,7 +725,7 @@ export default function StockScreen() {
       outlierMethod: f.outlierMethod || null,
       normalizeMethod: f.normalizeMethod || null,
     })),
-  }), [factors, screenDate, screenDateRange, useMultiDayMode, topN, direction, excludeSt, globalOutlier, globalNormalize, orthogonalMethod, totalWeight, valuationWeight, selectedPresetId, customSqlWhere, maAbove30, maAbove60, maAbove100]);
+  }), [factors, screenDate, screenDateRange, useMultiDayMode, topN, direction, excludeSt, globalOutlier, globalNormalize, orthogonalMethod, totalWeight, valuationWeight, selectedStrategyId, customSqlWhere, maAbove30, maAbove60, maAbove100]);
 
   /* ── 结果表格列 ───────────────────────────────────────────────── */
   const isMultiDay = !!(result?.screenStartDate && result?.screenEndDate);
@@ -979,10 +916,6 @@ export default function StockScreen() {
     ...factorColumns,
   ], [result, factorColumns]);
 
-  /* ── 内置/自定义预设分组 ─────────────────────────────────────── */
-  const builtinPresets = presets.filter(p => p.isBuiltin === 1);
-  const customPresets = presets.filter(p => p.isBuiltin !== 1);
-
   /* ── 大盘温度计提示 ──────────────────────── */
   const { data: thData, status: thStatus } = useMarketThermometer();
 
@@ -1035,73 +968,43 @@ export default function StockScreen() {
           transition: 'width 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.25s ease 0.15s',
           pointerEvents: collapsed ? 'none' : 'auto',
         }}>
-          {/* ── 预设组合选择 ─────────────────────────────────────── */}
+          {/* ── 策略组合选择 ─────────────────────────────────────── */}
           <Card
             title={<Space><StarOutlined /> 策略组合</Space>}
             style={{ marginBottom: 16 }}
-            styles={{ body: { padding: '12px 16px 4px' } }}
+            styles={{ body: { padding: '12px 16px 12px' } }}
           >
             <Row gutter={[12, 12]} align="middle">
               <Col flex="auto">
                 <Select
-                  value={selectedPresetId}
-                  onChange={handlePresetSelect}
+                  value={selectedStrategyId}
+                  onChange={handleStrategySelect}
                   style={{ width: '100%' }}
                   size="small"
-                  placeholder="选择一个预设组合快速开始"
+                  placeholder="选择策略加载因子配置"
                   allowClear
                   popupMatchSelectWidth={false}
+                  dropdownRender={(menu) => <div style={{ paddingBottom: 16 }}>{menu}</div>}
                 >
-                  {builtinPresets.length > 0 && (
-                    <Select.OptGroup label="内置组合">
-                      {builtinPresets.map(p => (
-                        <Option key={p.id} value={p.id}>
-                          <Space size={4}>
-                            <span>{p.presetName}</span>
-                            <Text type="secondary" style={{ fontSize: 11 }}>
-                              ({p.description || '—'})
-                            </Text>
-                            <PresetDescPopover presetName={p.presetName} />
-                          </Space>
-                        </Option>
-                      ))}
-                    </Select.OptGroup>
-                  )}
-                  {customPresets.length > 0 && (
-                    <Select.OptGroup label="我的组合">
-                      {customPresets.map(p => (
-                        <Option key={p.id} value={p.id}>
-                          <Space size={4}>
-                            <span>{p.presetName}</span>
-                            <Button
-                              type="text" size="small" danger
-                              icon={<DeleteOutlined />}
-                              onClick={(e) => { e.stopPropagation(); handleDeletePreset(p.id); }}
-                              style={{ fontSize: 10 }}
-                            />
-                          </Space>
-                        </Option>
-                      ))}
-                    </Select.OptGroup>
-                  )}
+                  {strategies.map(s => (
+                    <Option key={s.id} value={s.id}>
+                      <Space size={4}>
+                        <span>{s.strategyName}</span>
+                        <Text type="secondary" style={{ fontSize: 11 }}>
+                          ({s.description || '—'})
+                        </Text>
+                      </Space>
+                    </Option>
+                  ))}
                 </Select>
               </Col>
               <Col flex="none">
                 <div style={paramLabelStyle}> </div>
                 <Space size={4} style={{ height: 24, alignItems: 'center' }}>
-                  <Tooltip title="复制当前选中的预设组合，修改后另存为新组合">
+                  <Tooltip title="到策略管理页面编辑或创建策略">
                     <Button
-                      size="small" icon={<CopyOutlined />}
-                      onClick={handleCopyPreset}
-                      disabled={!selectedPresetId}
-                      style={{ height: 24 }}
-                    />
-                  </Tooltip>
-                  <Tooltip title="将当前因子配置保存为自定义组合">
-                    <Button
-                      size="small" icon={<SaveOutlined />}
-                      onClick={() => setSaveModalVisible(true)}
-                      disabled={factors.length === 0}
+                      size="small" icon={<EditOutlined />}
+                      onClick={() => navigate(selectedStrategyId ? `/strategies/${selectedStrategyId}/edit` : '/strategies')}
                       style={{ height: 24 }}
                     />
                   </Tooltip>
@@ -1128,7 +1031,7 @@ export default function StockScreen() {
             styles={{ body: { padding: '0 0 8px' } }}
           >
             {factors.length === 0 ? (
-              <Empty description='选择预设组合或点击"添加因子"开始配置' style={{ padding: '32px 0' }} />
+              <Empty description='选择策略组合或点击"添加因子"开始配置' style={{ padding: '32px 0' }} />
             ) : (
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                 <thead>
@@ -1635,31 +1538,6 @@ export default function StockScreen() {
           },
         ]}
       />
-
-      {/* ── 保存组合弹窗 ─────────────────────────────────────────── */}
-      <Modal
-        title="保存策略组合"
-        open={saveModalVisible}
-        forceRender
-        onOk={handleSavePreset}
-        onCancel={() => { setSaveModalVisible(false); saveForm.resetFields(); }}
-        okText="保存"
-        cancelText="取消"
-      >
-        <Form form={saveForm} layout="vertical" style={{ marginTop: 16 }}>
-          <Form.Item name="presetName" label="组合名称" rules={[{ required: true, message: '请输入组合名称' }]}>
-            <Input placeholder="如：我的成长组合" maxLength={100} />
-          </Form.Item>
-          <Form.Item name="description" label="组合描述">
-            <TextArea placeholder="简要描述这个组合的投资逻辑" rows={3} maxLength={500} />
-          </Form.Item>
-        </Form>
-        <Alert
-          type="info" showIcon
-          message={`当前包含 ${factors.length} 个因子，权重合计 ${totalWeight.toFixed(2)}`}
-          style={{ marginTop: 8 }}
-        />
-      </Modal>
 
       {/* ── 滚动选股回测弹窗 ─────────────────────────────────────── */}
       <RollingBacktestModal

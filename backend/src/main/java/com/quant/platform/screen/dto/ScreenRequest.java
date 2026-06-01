@@ -68,8 +68,14 @@ public class ScreenRequest {
     private String globalNormalizeMethod = "ZSCORE";
 
     /**
-     * 预设组合ID（使用预设时优先级高于 factors 列表）
+     * 策略定义ID（使用策略时优先级高于 factors 列表）
      */
+    private Long strategyId;
+
+    /**
+     * @deprecated 使用 strategyId 替代
+     */
+    @Deprecated
     private Long presetId;
 
     /**

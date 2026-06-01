@@ -25,7 +25,11 @@ export default function StrategyList() {
 
   const fetchData = (p = params) => {
     setLoading(true);
-    strategyApi.list(p).then(res => setData(res)).finally(() => setLoading(false));
+    // 清除 undefined 值，避免序列化为字符串 "undefined"
+    const cleaned = Object.fromEntries(
+      Object.entries(p).filter(([, v]) => v !== undefined && v !== '')
+    );
+    strategyApi.list(cleaned).then(res => setData(res)).finally(() => setLoading(false));
   };
 
   useEffect(() => { fetchData(); }, []);

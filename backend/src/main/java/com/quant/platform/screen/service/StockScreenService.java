@@ -8,9 +8,12 @@ import com.quant.platform.factor.mapper.FactorDefinitionMapper;
 import com.quant.platform.factor.service.ClickHouseFactorValueService;
 import com.quant.platform.market.domain.MarketDailyBar;
 import com.quant.platform.market.service.MarketDataService;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quant.platform.screen.dto.ScreenRequest;
 import com.quant.platform.screen.dto.ScreenResult;
-import com.quant.platform.screen.entity.ScreenPreset;
+import com.quant.platform.strategy.domain.StrategyDefinition;
+import com.quant.platform.strategy.mapper.StrategyDefinitionMapper;
 import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -38,7 +41,8 @@ public class StockScreenService {
     private final FactorDefinitionMapper factorDefMapper;
     private final MarketDataService marketDataService;
     private final PriceAdvisorService priceAdvisorService;
-    private final ScreenPresetService presetService;
+    private final StrategyDefinitionMapper strategyDefMapper;
+    private final ObjectMapper objectMapper;
 
     @Resource
     private DataSource dataSource;
@@ -59,25 +63,17 @@ public class StockScreenService {
      * 执行多因子选股
      */
     public ScreenResult screen(ScreenRequest req) {
-        // ── 0. 加载预设组合（如果指定了 presetId）────────────────────
-        if (req.getPresetId() != null && (req.getFactors() == null || req.getFactors().isEmpty())) {
-            ScreenPreset preset = presetService.getById(req.getPresetId());
-            if (preset != null) {
+        // ── 0. 加载策略定义因子配置（strategyId 优先，presetId 兼容）──────
+        Long sid = req.getStrategyId() != null ? req.getStrategyId() : req.getPresetId();
+        if (sid != null && (req.getFactors() == null || req.getFactors().isEmpty())) {
+            StrategyDefinition strategy = strategyDefMapper.selectById(sid);
+            if (strategy != null && strategy.getFactorConfigJson() != null) {
                 try {
-                    List<Map<String, Object>> config = presetService.parseFactorConfig(preset.getFactorConfig());
-                    List<ScreenRequest.FactorWeight> factors = config.stream().map(m -> {
-                        ScreenRequest.FactorWeight fw = new ScreenRequest.FactorWeight();
-                        fw.setFactorCode((String) m.get("factorCode"));
-                        fw.setDirection(m.get("direction") instanceof Number ? ((Number) m.get("direction")).intValue() : 1);
-                        fw.setWeight(m.get("weight") instanceof Number ? ((Number) m.get("weight")).doubleValue() : 1.0);
-                        fw.setFilterOp(m.get("filterOp") != null ? (String) m.get("filterOp") : "NONE");
-                        fw.setFilterValue(m.get("filterValue") instanceof Number ? ((Number) m.get("filterValue")).doubleValue() : null);
-                        return fw;
-                    }).collect(Collectors.toList());
+                    List<ScreenRequest.FactorWeight> factors = parseStrategyFactorConfig(strategy.getFactorConfigJson());
                     req.setFactors(factors);
-                    log.info("Loaded preset [{}] with {} factors", preset.getPresetName(), factors.size());
+                    log.info("Loaded strategy [{}] with {} factors", strategy.getStrategyName(), factors.size());
                 } catch (Exception e) {
-                    log.warn("Failed to load preset {}: {}", req.getPresetId(), e.getMessage());
+                    log.warn("Failed to load strategy {}: {}", sid, e.getMessage());
                 }
             }
         }
@@ -1054,5 +1050,34 @@ public class StockScreenService {
         double num = n * sumXY - sumX * sumY;
         double den = Math.sqrt((n * sumX2 - sumX * sumX) * (n * sumY2 - sumY * sumY));
         return den == 0 ? 0 : num / den;
+    }
+
+    /**
+     * 解析策略定义的 factor_config_json
+     * 格式: {"factors": [{"code":"MOM20","weight":1.0,"direction":1,"filterOp":"NONE",...}, ...]}
+     */
+    private List<ScreenRequest.FactorWeight> parseStrategyFactorConfig(String factorConfigJson) {
+        try {
+            Map<String, Object> root = objectMapper.readValue(factorConfigJson,
+                    new TypeReference<Map<String, Object>>() {});
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> factorList = (List<Map<String, Object>>) root.get("factors");
+            if (factorList == null) return Collections.emptyList();
+            return factorList.stream().map(m -> {
+                ScreenRequest.FactorWeight fw = new ScreenRequest.FactorWeight();
+                fw.setFactorCode((String) m.get("code"));
+                fw.setDirection(m.get("direction") instanceof Number
+                        ? ((Number) m.get("direction")).intValue() : 1);
+                fw.setWeight(m.get("weight") instanceof Number
+                        ? ((Number) m.get("weight")).doubleValue() : 1.0);
+                fw.setFilterOp(m.get("filterOp") != null ? (String) m.get("filterOp") : "NONE");
+                fw.setFilterValue(m.get("filterValue") instanceof Number
+                        ? ((Number) m.get("filterValue")).doubleValue() : null);
+                return fw;
+            }).collect(Collectors.toList());
+        } catch (Exception e) {
+            log.warn("Failed to parse strategy factor config: {}", factorConfigJson, e);
+            return Collections.emptyList();
+        }
     }
 }
