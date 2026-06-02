@@ -2603,263 +2603,262 @@ public class BuiltinFactors {
             if (sum20 == 0) return null;
             return BigDecimal.valueOf((sum5 / 5) / (sum20 / 20)).setScale(6, RoundingMode.HALF_UP);
         }
+    }
 
-        /**
-         * RSRS 阻力支撑相对强度 (RESIST_SUPP_RATIO)
-         * 对过去 N 天的 (最高价, 最低价) 做 OLS 线性回归，取斜率 beta
-         * 再用过去 M 天的 beta 做 Z-Score 标准化
-         * N=18, M=600（约2年）
-         * 正值 = 阻力位抬升速度快于支撑位，多头信号
-         */
-        public static class RsrsCalculator implements FactorCalculator {
-            private static final int REG_WIN = 18;   // 回归窗口
-            private static final int STD_WIN = 600;   // 标准化窗口（约2年）
+    /**
+     * RSRS 阻力支撑相对强度 (RESIST_SUPP_RATIO)
+     * 对过去 N 天的 (最高价, 最低价) 做 OLS 线性回归，取斜率 beta
+     * 再用过去 M 天的 beta 做 Z-Score 标准化
+     * N=18, M=600（约2年）
+     * 正值 = 阻力位抬升速度快于支撑位，多头信号
+     */
+    public static class RsrsCalculator implements FactorCalculator {
+        private static final int REG_WIN = 18;   // 回归窗口
+        private static final int STD_WIN = 600;   // 标准化窗口（约2年）
 
-            @Override
-            public String getFactorCode() {
-                return "RSRS";
+        @Override
+        public String getFactorCode() {
+            return "RSRS";
+        }
+
+        @Override
+        public BigDecimal calculate(String symbol, LocalDate calcDate,
+                                    List<MarketDailyBar> history, Map<String, Object> context) {
+            if (history.size() < REG_WIN + 1) return null;
+            int total = history.size();
+            int avail = Math.min(total, REG_WIN + STD_WIN);  // 最多用 REG_WIN+STD_WIN 根K线
+
+            // 1. 计算全量 beta 序列（至少 REG_WIN 根才出第一个值）
+            //    从第 REG_WIN 根开始算（0-indexed: index = REG_WIN-1）
+            int firstIdx = REG_WIN - 1;
+            if (total - 1 < firstIdx) return null;
+
+            // 收集足够历史 beta 用于标准化
+            // betaWindow[i] = 第 (REG_WIN-1 + i) 根K线对应的 beta
+            int maxBetas = total - firstIdx;  // 总共能算多少个 beta
+            if (maxBetas < 2) return null;
+
+            double[] betas = new double[maxBetas];
+            for (int i = 0; i < maxBetas; i++) {
+                int end = firstIdx + i;
+                double beta = calcBeta(history, end - REG_WIN + 1, end + 1);
+                if (Double.isNaN(beta)) {
+                    betas[i] = Double.NaN;
+                } else {
+                    betas[i] = beta;
+                }
             }
 
-            @Override
-            public BigDecimal calculate(String symbol, LocalDate calcDate,
-                                        List<MarketDailyBar> history, Map<String, Object> context) {
-                if (history.size() < REG_WIN + 1) return null;
-                int total = history.size();
-                int avail = Math.min(total, REG_WIN + STD_WIN);  // 最多用 REG_WIN+STD_WIN 根K线
+            // 2. 取最新一个 beta 做标准化
+            double latestBeta = betas[maxBetas - 1];
+            if (Double.isNaN(latestBeta)) return null;
 
-                // 1. 计算全量 beta 序列（至少 REG_WIN 根才出第一个值）
-                //    从第 REG_WIN 根开始算（0-indexed: index = REG_WIN-1）
-                int firstIdx = REG_WIN - 1;
-                if (total - 1 < firstIdx) return null;
-
-                // 收集足够历史 beta 用于标准化
-                // betaWindow[i] = 第 (REG_WIN-1 + i) 根K线对应的 beta
-                int maxBetas = total - firstIdx;  // 总共能算多少个 beta
-                if (maxBetas < 2) return null;
-
-                double[] betas = new double[maxBetas];
-                for (int i = 0; i < maxBetas; i++) {
-                    int end = firstIdx + i;
-                    double beta = calcBeta(history, end - REG_WIN + 1, end + 1);
-                    if (Double.isNaN(beta)) {
-                        betas[i] = Double.NaN;
-                    } else {
-                        betas[i] = beta;
-                    }
-                }
-
-                // 2. 取最新一个 beta 做标准化
-                double latestBeta = betas[maxBetas - 1];
-                if (Double.isNaN(latestBeta)) return null;
-
-                // 3. Z-Score 标准化（用过去 STD_WIN 个 beta，不含当前）
-                //    实际可用数量 = min(STD_WIN, maxBetas-1)
-                int stdCount = Math.min(STD_WIN, maxBetas - 1);
-                if (stdCount < 20) {
-                    // 数据不够，返回原始 beta
-                    return BigDecimal.valueOf(latestBeta).setScale(8, RoundingMode.HALF_UP);
-                }
-                double sum = 0;
-                int validCount = 0;
-                for (int i = maxBetas - 1 - stdCount; i < maxBetas - 1; i++) {
-                    if (!Double.isNaN(betas[i])) {
-                        sum += betas[i];
-                        validCount++;
-                    }
-                }
-                if (validCount < 20) {
-                    return BigDecimal.valueOf(latestBeta).setScale(8, RoundingMode.HALF_UP);
-                }
-                double mean = sum / validCount;
-
-                double varSum = 0;
-                for (int i = maxBetas - 1 - stdCount; i < maxBetas - 1; i++) {
-                    if (!Double.isNaN(betas[i])) {
-                        varSum += (betas[i] - mean) * (betas[i] - mean);
-                    }
-                }
-                double std = Math.sqrt(varSum / (validCount - 1));
-                if (std < 1e-8) {
-                    return BigDecimal.valueOf(latestBeta).setScale(8, RoundingMode.HALF_UP);
-                }
-                double z = (latestBeta - mean) / std;
-                return BigDecimal.valueOf(z).setScale(8, RoundingMode.HALF_UP);
+            // 3. Z-Score 标准化（用过去 STD_WIN 个 beta，不含当前）
+            //    实际可用数量 = min(STD_WIN, maxBetas-1)
+            int stdCount = Math.min(STD_WIN, maxBetas - 1);
+            if (stdCount < 20) {
+                // 数据不够，返回原始 beta
+                return BigDecimal.valueOf(latestBeta).setScale(8, RoundingMode.HALF_UP);
             }
-
-            /**
-             * 对 [start, end) 区间的K线做 OLS: high ~ low，返回斜率 beta
-             */
-            private double calcBeta(List<MarketDailyBar> history, int start, int end) {
-                int n = end - start;
-                if (n < REG_WIN) return Double.NaN;
-                // 简单线性回归: beta = Cov(low, high) / Var(low)
-                double sumL = 0, sumH = 0;
-                for (int i = start; i < end; i++) {
-                    double l = history.get(i).getLow().doubleValue();
-                    double h = history.get(i).getHigh().doubleValue();
-                    sumL += l;
-                    sumH += h;
+            double sum = 0;
+            int validCount = 0;
+            for (int i = maxBetas - 1 - stdCount; i < maxBetas - 1; i++) {
+                if (!Double.isNaN(betas[i])) {
+                    sum += betas[i];
+                    validCount++;
                 }
-                double meanL = sumL / n;
-                double meanH = sumH / n;
-
-                double cov = 0, varL = 0;
-                for (int i = start; i < end; i++) {
-                    double l = history.get(i).getLow().doubleValue() - meanL;
-                    double h = history.get(i).getHigh().doubleValue() - meanH;
-                    cov += l * h;
-                    varL += l * l;
-                }
-                if (varL < 1e-12) return Double.NaN;
-                return cov / varL;
             }
+            if (validCount < 20) {
+                return BigDecimal.valueOf(latestBeta).setScale(8, RoundingMode.HALF_UP);
+            }
+            double mean = sum / validCount;
+
+            double varSum = 0;
+            for (int i = maxBetas - 1 - stdCount; i < maxBetas - 1; i++) {
+                if (!Double.isNaN(betas[i])) {
+                    varSum += (betas[i] - mean) * (betas[i] - mean);
+                }
+            }
+            double std = Math.sqrt(varSum / (validCount - 1));
+            if (std < 1e-8) {
+                return BigDecimal.valueOf(latestBeta).setScale(8, RoundingMode.HALF_UP);
+            }
+            double z = (latestBeta - mean) / std;
+            return BigDecimal.valueOf(z).setScale(8, RoundingMode.HALF_UP);
         }
 
         /**
-         * AO 加速振荡器 (ACCEL_OSC)
-         * AO = SMMA(high+low)/2, 5) - SMMA(high+low)/2, 34)
-         * AC = SMA(AO, 5)
-         * 返回 AC 值（正=加速上涨，负=加速下跌）
-         * SMMA 用 Wilder 平滑: SMMA_t = SMMA_{t-1} * (N-1)/N + Price_t / N
+         * 对 [start, end) 区间的K线做 OLS: high ~ low，返回斜率 beta
          */
-        public static class AcOscillatorCalculator implements FactorCalculator {
-            private static final int SMMA_SHORT = 5;
-            private static final int SMMA_LONG = 34;
-            private static final int AO_SMA = 5;
-
-            @Override
-            public String getFactorCode() {
-                return "AO_AC";
+        private double calcBeta(List<MarketDailyBar> history, int start, int end) {
+            int n = end - start;
+            if (n < REG_WIN) return Double.NaN;
+            // 简单线性回归: beta = Cov(low, high) / Var(low)
+            double sumL = 0, sumH = 0;
+            for (int i = start; i < end; i++) {
+                double l = history.get(i).getLow().doubleValue();
+                double h = history.get(i).getHigh().doubleValue();
+                sumL += l;
+                sumH += h;
             }
+            double meanL = sumL / n;
+            double meanH = sumH / n;
 
-            @Override
-            public BigDecimal calculate(String symbol, LocalDate calcDate,
-                                        List<MarketDailyBar> history, Map<String, Object> context) {
-                int need = Math.max(SMMA_SHORT, SMMA_LONG) + AO_SMA;
-                if (history.size() < need + 2) return null;
-
-                // 1. 计算所有K线的 (H+L)/2
-                int n = history.size();
-                double[] mid = new double[n];
-                for (int i = 0; i < n; i++) {
-                    mid[i] = (history.get(i).getHigh().doubleValue()
-                            + history.get(i).getLow().doubleValue()) / 2.0;
-                }
-
-                // 2. 计算 SMMA_short 和 SMMA_long 序列
-                double[] smmaS = smma(mid, SMMA_SHORT);
-                double[] smmaL = smma(mid, SMMA_LONG);
-
-                // 3. AO = SMMA_short - SMMA_long
-                double[] ao = new double[n];
-                for (int i = 0; i < n; i++) {
-                    if (Double.isNaN(smmaS[i]) || Double.isNaN(smmaL[i])) {
-                        ao[i] = Double.NaN;
-                    } else {
-                        ao[i] = smmaS[i] - smmaL[i];
-                    }
-                }
-
-                // 4. AC = SMA(AO, AO_SMA)，取最新值
-                int last = n - 1;
-                int start = last - AO_SMA + 1;
-                if (start < 0) return null;
-                double sum = 0;
-                int cnt = 0;
-                for (int i = start; i <= last; i++) {
-                    if (!Double.isNaN(ao[i])) {
-                        sum += ao[i];
-                        cnt++;
-                    }
-                }
-                if (cnt < AO_SMA) return null;
-                return BigDecimal.valueOf(sum / cnt).setScale(8, RoundingMode.HALF_UP);
+            double cov = 0, varL = 0;
+            for (int i = start; i < end; i++) {
+                double l = history.get(i).getLow().doubleValue() - meanL;
+                double h = history.get(i).getHigh().doubleValue() - meanH;
+                cov += l * h;
+                varL += l * l;
             }
+            if (varL < 1e-12) return Double.NaN;
+            return cov / varL;
+        }
+    }
 
-            /**
-             * Wilder SMMA: 前N-1个用初始简单平均，之后递推
-             */
-            private double[] smma(double[] src, int period) {
-                double[] result = new double[src.length];
-                java.util.Arrays.fill(result, Double.NaN);
-                if (src.length < period) return result;
-                // 初始值 = 简单平均
-                double sum = 0;
-                for (int i = 0; i < period; i++) sum += src[i];
-                result[period - 1] = sum / period;
-                // 递推: SMMA_t = (SMMA_{t-1} * (N-1) + src[t]) / N
-                double alpha = 1.0 / period;
-                for (int i = period; i < src.length; i++) {
-                    result[i] = result[i - 1] * (1 - alpha) + src[i] * alpha;
-                }
-                return result;
-            }
+    /**
+     * AO 加速振荡器 (ACCEL_OSC)
+     * AO = SMMA(high+low)/2, 5) - SMMA(high+low)/2, 34)
+     * AC = SMA(AO, 5)
+     * 返回 AC 值（正=加速上涨，负=加速下跌）
+     * SMMA 用 Wilder 平滑: SMMA_t = SMMA_{t-1} * (N-1)/N + Price_t / N
+     */
+    public static class AcOscillatorCalculator implements FactorCalculator {
+        private static final int SMMA_SHORT = 5;
+        private static final int SMMA_LONG = 34;
+        private static final int AO_SMA = 5;
+
+        @Override
+        public String getFactorCode() {
+            return "AO_AC";
         }
 
-        /**
-         * 单向波动差 (UP_DN_VOL)
-         * 上行波动率 - 下行波动率
-         * 上行波动率: 正收益日的收益标准差 * sqrt(252)
-         * 下行波动率: 负收益日的收益标准差 * sqrt(252)
-         * 正值 = 上行波动主导（趋势性强），负值 = 下行波动主导（恐慌抛售）
-         */
-        public static class UpDnVolCalculator implements FactorCalculator {
-            private static final int WIN = 20;
+        @Override
+        public BigDecimal calculate(String symbol, LocalDate calcDate,
+                                    List<MarketDailyBar> history, Map<String, Object> context) {
+            int need = Math.max(SMMA_SHORT, SMMA_LONG) + AO_SMA;
+            if (history.size() < need + 2) return null;
 
-            @Override
-            public String getFactorCode() {
-                return "UP_DN_VOL";
+            // 1. 计算所有K线的 (H+L)/2
+            int n = history.size();
+            double[] mid = new double[n];
+            for (int i = 0; i < n; i++) {
+                mid[i] = (history.get(i).getHigh().doubleValue()
+                        + history.get(i).getLow().doubleValue()) / 2.0;
             }
 
-            @Override
-            public BigDecimal calculate(String symbol, LocalDate calcDate,
-                                        List<MarketDailyBar> history, Map<String, Object> context) {
-                if (history.size() < WIN + 2) return null;
-                int n = history.size();
-                int start = n - WIN - 1;  // 需要 WIN+1 根K线算 WIN 个收益率
-                int end = n - 1;
+            // 2. 计算 SMMA_short 和 SMMA_long 序列
+            double[] smmaS = smma(mid, SMMA_SHORT);
+            double[] smmaL = smma(mid, SMMA_LONG);
 
-                double[] ret = new double[WIN];
-                int cnt = 0;
-                for (int i = start + 1; i <= end; i++) {
-                    double prev = history.get(i - 1).getClose().doubleValue();
-                    double curr = history.get(i).getClose().doubleValue();
-                    if (prev > 0) {
-                        ret[cnt] = Math.log(curr / prev);
-                    } else {
-                        ret[cnt] = Double.NaN;
-                    }
+            // 3. AO = SMMA_short - SMMA_long
+            double[] ao = new double[n];
+            for (int i = 0; i < n; i++) {
+                if (Double.isNaN(smmaS[i]) || Double.isNaN(smmaL[i])) {
+                    ao[i] = Double.NaN;
+                } else {
+                    ao[i] = smmaS[i] - smmaL[i];
+                }
+            }
+
+            // 4. AC = SMA(AO, AO_SMA)，取最新值
+            int last = n - 1;
+            int start = last - AO_SMA + 1;
+            if (start < 0) return null;
+            double sum = 0;
+            int cnt = 0;
+            for (int i = start; i <= last; i++) {
+                if (!Double.isNaN(ao[i])) {
+                    sum += ao[i];
                     cnt++;
                 }
-
-                // 分上行/下行
-                double upSum = 0, upSq = 0;
-                int upCnt = 0;
-                double dnSum = 0, dnSq = 0;
-                int dnCnt = 0;
-                for (double r : ret) {
-                    if (Double.isNaN(r)) continue;
-                    if (r > 0) {
-                        upSum += r;
-                        upSq += r * r;
-                        upCnt++;
-                    } else if (r < 0) {
-                        dnSum += r;
-                        dnSq += r * r;
-                        dnCnt++;
-                    }
-                }
-                if (upCnt < 5 || dnCnt < 5) return null;
-
-                double upVar = (upSq - upSum * upSum / upCnt) / (upCnt - 1);
-                double dnVar = (dnSq - dnSum * dnSum / dnCnt) / (dnCnt - 1);
-                if (upVar < 0) upVar = 0;
-                if (dnVar < 0) dnVar = 0;
-                double upVol = Math.sqrt(upVar) * Math.sqrt(252);
-                double dnVol = Math.sqrt(dnVar) * Math.sqrt(252);
-                return BigDecimal.valueOf(upVol - dnVol).setScale(8, RoundingMode.HALF_UP);
             }
+            if (cnt < AO_SMA) return null;
+            return BigDecimal.valueOf(sum / cnt).setScale(8, RoundingMode.HALF_UP);
+        }
+
+        /**
+         * Wilder SMMA: 前N-1个用初始简单平均，之后递推
+         */
+        private double[] smma(double[] src, int period) {
+            double[] result = new double[src.length];
+            java.util.Arrays.fill(result, Double.NaN);
+            if (src.length < period) return result;
+            // 初始值 = 简单平均
+            double sum = 0;
+            for (int i = 0; i < period; i++) sum += src[i];
+            result[period - 1] = sum / period;
+            // 递推: SMMA_t = (SMMA_{t-1} * (N-1) + src[t]) / N
+            double alpha = 1.0 / period;
+            for (int i = period; i < src.length; i++) {
+                result[i] = result[i - 1] * (1 - alpha) + src[i] * alpha;
+            }
+            return result;
+        }
+    }
+
+    /**
+     * 单向波动差 (UP_DN_VOL)
+     * 上行波动率 - 下行波动率
+     * 上行波动率: 正收益日的收益标准差 * sqrt(252)
+     * 下行波动率: 负收益日的收益标准差 * sqrt(252)
+     * 正值 = 上行波动主导（趋势性强），负值 = 下行波动主导（恐慌抛售）
+     */
+    public static class UpDnVolCalculator implements FactorCalculator {
+        private static final int WIN = 20;
+
+        @Override
+        public String getFactorCode() {
+            return "UP_DN_VOL";
+        }
+
+        @Override
+        public BigDecimal calculate(String symbol, LocalDate calcDate,
+                                    List<MarketDailyBar> history, Map<String, Object> context) {
+            if (history.size() < WIN + 2) return null;
+            int n = history.size();
+            int start = n - WIN - 1;  // 需要 WIN+1 根K线算 WIN 个收益率
+            int end = n - 1;
+
+            double[] ret = new double[WIN];
+            int cnt = 0;
+            for (int i = start + 1; i <= end; i++) {
+                double prev = history.get(i - 1).getClose().doubleValue();
+                double curr = history.get(i).getClose().doubleValue();
+                if (prev > 0) {
+                    ret[cnt] = Math.log(curr / prev);
+                } else {
+                    ret[cnt] = Double.NaN;
+                }
+                cnt++;
+            }
+
+            // 分上行/下行
+            double upSum = 0, upSq = 0;
+            int upCnt = 0;
+            double dnSum = 0, dnSq = 0;
+            int dnCnt = 0;
+            for (double r : ret) {
+                if (Double.isNaN(r)) continue;
+                if (r > 0) {
+                    upSum += r;
+                    upSq += r * r;
+                    upCnt++;
+                } else if (r < 0) {
+                    dnSum += r;
+                    dnSq += r * r;
+                    dnCnt++;
+                }
+            }
+            if (upCnt < 5 || dnCnt < 5) return null;
+
+            double upVar = (upSq - upSum * upSum / upCnt) / (upCnt - 1);
+            double dnVar = (dnSq - dnSum * dnSum / dnCnt) / (dnCnt - 1);
+            if (upVar < 0) upVar = 0;
+            if (dnVar < 0) dnVar = 0;
+            double upVol = Math.sqrt(upVar) * Math.sqrt(252);
+            double dnVol = Math.sqrt(dnVar) * Math.sqrt(252);
+            return BigDecimal.valueOf(upVol - dnVol).setScale(8, RoundingMode.HALF_UP);
         }
     }
 }
-

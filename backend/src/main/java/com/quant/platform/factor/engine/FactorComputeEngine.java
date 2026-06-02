@@ -29,7 +29,6 @@ import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
@@ -51,22 +50,23 @@ public class FactorComputeEngine {
     private final SimpMessagingTemplate messagingTemplate;
     private final ObjectMapper objectMapper;
     private final StockFinancialIndicatorMapper financialIndicatorMapper;
-    @org.springframework.beans.factory.annotation.Autowired
-    private FinancialFactors financialFactorsBean;
-
     private final Map<String, FactorCalculator> builtinCalculators = new HashMap<>();
     private final Map<String, FinancialFactorCalculator> financialCalculators = new HashMap<>();
-
+    // 跟踪正在计算的因子代码（供前端查询当前运行状态）
+    private final java.util.Set<String> runningFactors =
+            java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
+    /**
+     * 写入阶段起始时间（用于计算速度）
+     */
+    private final java.util.concurrent.atomic.AtomicLong writeStartGlobal = new java.util.concurrent.atomic.AtomicLong();
+    @org.springframework.beans.factory.annotation.Autowired
+    private FinancialFactors financialFactorsBean;
     @Resource
     private ClickHouseConfig clickHouseConfig;
     // 自注入，用于内部调用时走代理（解决 @Transactional 自调用失效）
     @Lazy
     @Resource
     private FactorComputeEngine self;
-
-    // 跟踪正在计算的因子代码（供前端查询当前运行状态）
-    private final java.util.Set<String> runningFactors =
-            java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
 
     {
         // 注册内置因子
@@ -268,7 +268,7 @@ public class FactorComputeEngine {
      */
     @Async("backtestTaskExecutor")
     public void computeFactorWithBars(FactorDefinition factor, LocalDate startDate, LocalDate endDate,
-                                       List<String> symbols, Map<String, List<MarketDailyBar>> preloadedBars) {
+                                      List<String> symbols, Map<String, List<MarketDailyBar>> preloadedBars) {
         String code = factor.getFactorCode();
         runningFactors.add(code);
         try {
@@ -316,7 +316,7 @@ public class FactorComputeEngine {
      */
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
     public void doComputeFactorSync(FactorDefinition factor, LocalDate startDate, LocalDate endDate,
-                                     List<String> symbols, Map<String, List<MarketDailyBar>> allBarsData) {
+                                    List<String> symbols, Map<String, List<MarketDailyBar>> allBarsData) {
         try {
             if (isFinancialFactor(factor.getFactorCode())) {
                 computeFinancialFactorSync(factor.getFactorCode(), startDate, endDate, symbols);
@@ -496,7 +496,7 @@ public class FactorComputeEngine {
      */
     @Async("backtestTaskExecutor")
     public void computeFactorIncrementalWithBars(FactorDefinition factor, LocalDate startDate, LocalDate endDate,
-                                                  List<String> symbols, Map<String, List<MarketDailyBar>> preloadedBars) {
+                                                 List<String> symbols, Map<String, List<MarketDailyBar>> preloadedBars) {
         String code = factor.getFactorCode();
         runningFactors.add(code);
 
@@ -551,10 +551,10 @@ public class FactorComputeEngine {
     private Set<LocalDate> queryExistingDatesFromMySQL(String factorCode, List<LocalDate> tradingDates) {
         LambdaQueryWrapper<FactorValue> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(FactorValue::getFactorCode, factorCode)
-               .ge(FactorValue::getCalcDate, tradingDates.getFirst())
-               .le(FactorValue::getCalcDate, tradingDates.getLast())
-               .select(FactorValue::getCalcDate)
-               .groupBy(FactorValue::getCalcDate);
+                .ge(FactorValue::getCalcDate, tradingDates.getFirst())
+                .le(FactorValue::getCalcDate, tradingDates.getLast())
+                .select(FactorValue::getCalcDate)
+                .groupBy(FactorValue::getCalcDate);
         return new HashSet<>(factorValueMapper.selectList(wrapper).stream().map(FactorValue::getCalcDate).toList());
     }
 
@@ -563,7 +563,7 @@ public class FactorComputeEngine {
      * 负责并行计算每个交易日的因子值 + 流水线写入 + 归一化
      */
     private void doComputeIncremental(FactorDefinition factor, List<LocalDate> newDates, Set<LocalDate> existingDates,
-                                       List<String> symbols, Map<String, List<MarketDailyBar>> allBarsData) {
+                                      List<String> symbols, Map<String, List<MarketDailyBar>> allBarsData) {
         String code = factor.getFactorCode();
         int totalDates = newDates.size();
         int totalStocks = symbols.size();
@@ -693,10 +693,10 @@ public class FactorComputeEngine {
         // 获取所有财报报告期（end_date），按日期范围过滤
         LambdaQueryWrapper<StockFinancialIndicator> wrapper = new LambdaQueryWrapper<>();
         wrapper.ge(StockFinancialIndicator::getEndDate, startDate)
-               .le(StockFinancialIndicator::getEndDate, endDate)
-               .select(StockFinancialIndicator::getEndDate)
-               .groupBy(StockFinancialIndicator::getEndDate)
-               .orderByAsc(StockFinancialIndicator::getEndDate);
+                .le(StockFinancialIndicator::getEndDate, endDate)
+                .select(StockFinancialIndicator::getEndDate)
+                .groupBy(StockFinancialIndicator::getEndDate)
+                .orderByAsc(StockFinancialIndicator::getEndDate);
         List<LocalDate> reportDates = financialIndicatorMapper.selectList(wrapper)
                 .stream()
                 .map(StockFinancialIndicator::getEndDate)
@@ -870,7 +870,8 @@ public class FactorComputeEngine {
         return result;
     }
 
-    /**（基于财报报告期，而非交易日）
+    /**
+     * （基于财报报告期，而非交易日）
      */
     private void computeFinancialFactorSync(String factorCode, LocalDate startDate, LocalDate endDate, List<String> symbols) {
         FinancialFactorCalculator calculator = financialCalculators.get(factorCode);
@@ -882,10 +883,10 @@ public class FactorComputeEngine {
         // 获取所有财报报告期（end_date），按日期范围过滤
         LambdaQueryWrapper<StockFinancialIndicator> wrapper = new LambdaQueryWrapper<>();
         wrapper.ge(StockFinancialIndicator::getEndDate, startDate)
-               .le(StockFinancialIndicator::getEndDate, endDate)
-               .select(StockFinancialIndicator::getEndDate)
-               .groupBy(StockFinancialIndicator::getEndDate)
-               .orderByAsc(StockFinancialIndicator::getEndDate);
+                .le(StockFinancialIndicator::getEndDate, endDate)
+                .select(StockFinancialIndicator::getEndDate)
+                .groupBy(StockFinancialIndicator::getEndDate)
+                .orderByAsc(StockFinancialIndicator::getEndDate);
         List<LocalDate> reportDates = financialIndicatorMapper.selectList(wrapper)
                 .stream()
                 .map(StockFinancialIndicator::getEndDate)
@@ -999,7 +1000,10 @@ public class FactorComputeEngine {
         for (String symbol : symbols) {
             try {
                 List<MarketDailyBar> allBars = allBarsData.getOrDefault(symbol, List.of());
-                if (allBars.isEmpty()) { emptyCount++; continue; }
+                if (allBars.isEmpty()) {
+                    emptyCount++;
+                    continue;
+                }
 
                 // 二分查找：找到 tradeDate > date 的第一个位置（不创建新列表）
                 int lo = 0, hi = allBars.size();
@@ -1154,9 +1158,6 @@ public class FactorComputeEngine {
         sendProgress(factorCode, "COMPUTING", 90,
                 String.format("写入完成，%,d 行，耗时 %.1f 秒，速度 %.0f 行/s", values.size(), ms / 1000.0, speed), null);
     }
-
-    /** 写入阶段起始时间（用于计算速度） */
-    private final java.util.concurrent.atomic.AtomicLong writeStartGlobal = new java.util.concurrent.atomic.AtomicLong();
 
     /**
      * 计算单个因子值
