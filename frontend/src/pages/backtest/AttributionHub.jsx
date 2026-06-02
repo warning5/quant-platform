@@ -7,7 +7,8 @@ import {
   InfoCircleOutlined, RiseOutlined, FallOutlined, BarChartOutlined,
   PieChartOutlined, QuestionCircleOutlined, UpOutlined, DownOutlined,
   CheckCircleOutlined, CloseCircleOutlined, ExclamationCircleOutlined,
-  ClockCircleOutlined, DollarOutlined,
+  ClockCircleOutlined, DollarOutlined, FundOutlined,
+  LineChartOutlined, AlertOutlined, DashboardOutlined,
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import { backtestApi } from '../../api';
@@ -42,6 +43,9 @@ export default function AttributionHub({ taskId }) {
   const [error, setError] = useState(null);
   const [brinsonOpen, setBrinsonOpen] = useState(false);
   const [factorOpen, setFactorOpen] = useState(false);
+  const [ff3Open, setFF3Open] = useState(false);
+  const [alphaMonitorOpen, setAlphaMonitorOpen] = useState(false);
+  const [styleMonitorOpen, setStyleMonitorOpen] = useState(false);
 
   useEffect(() => {
     if (!taskId) return;
@@ -82,18 +86,70 @@ export default function AttributionHub({ taskId }) {
 
   return (
     <div>
-      {/* ── 1. 归因概要 ── */}
-      <StrategyOverview strategy={strategy} />
+      {/* ── 1. 综合归因结论（最外层，综合组合归因 + 交易诊断） ── */}
+      <GeneralConclusion strategy={strategy} recommendation={modelRecommendation} tradeAnalysis={tradeAnalysis} />
 
-      {/* ── 2. 模型对比 + 结论 ── */}
-      <ModelComparisonCard strategy={strategy} recommendation={modelRecommendation} tradeAnalysis={tradeAnalysis} />
+      {/* ── 2. 归因模型对比（仅 Brinson / Factor / FF3） ── */}
+      <ModelComparisonCard strategy={strategy} />
 
-      {/* ── 3. 持仓周期分析 ── */}
+      {/* ── 3. 详细归因分析（弹窗入口） ── */}
+      <Card size="small" title="详细归因分析" style={{ marginTop: 16 }}>
+        <Space wrap>
+          <Button type="primary" ghost icon={<PieChartOutlined />}
+            onClick={() => setBrinsonOpen(true)}
+            disabled={!strategy?.modelComparison?.BRINSON?.available}
+          >
+            Brinson 行业归因
+            {strategy?.modelComparison?.BRINSON?.available
+              ? ((strategy.modelComparison.BRINSON.explanationRatio ?? -1) >= 0
+                ? <Tag color="blue" style={{marginLeft:8,fontSize:10}}>解释力 {fmtPct(strategy.modelComparison.BRINSON.explanationRatio)}</Tag>
+                : <Tag color="warning" style={{marginLeft:8,fontSize:10}}>数据异常</Tag>)
+              : <Tag color="default" style={{marginLeft:8,fontSize:10}}>不可用</Tag>
+            }
+          </Button>
+          <Button type="primary" ghost icon={<BarChartOutlined />}
+            onClick={() => setFactorOpen(true)}
+            disabled={!strategy?.modelComparison?.FACTOR?.available}
+          >
+            因子风格归因
+            {strategy?.modelComparison?.FACTOR?.available
+              ? ((strategy.modelComparison.FACTOR.explanationRatio ?? -1) >= 0
+                ? <Tag color="green" style={{marginLeft:8,fontSize:10}}>解释力 {fmtPct(strategy.modelComparison.FACTOR.explanationRatio)}</Tag>
+                : <Tag color="warning" style={{marginLeft:8,fontSize:10}}>数据异常</Tag>)
+              : <Tag color="default" style={{marginLeft:8,fontSize:10}}>不可用</Tag>
+            }
+          </Button>
+          <Button type="primary" ghost icon={<FundOutlined />}
+            onClick={() => setFF3Open(true)}
+            disabled={!strategy?.modelComparison?.FF3?.available}
+          >
+            FF3 风格归因
+            {strategy?.modelComparison?.FF3?.available
+              ? ((strategy.modelComparison.FF3.explanationRatio ?? -1) >= 0
+                ? <Tag color="purple" style={{marginLeft:8,fontSize:10}}>解释力 {fmtPct(strategy.modelComparison.FF3.explanationRatio)}</Tag>
+                : <Tag color="warning" style={{marginLeft:8,fontSize:10}}>数据异常</Tag>)
+              : <Tag color="default" style={{marginLeft:8,fontSize:10}}>不可用</Tag>
+            }
+            <Tooltip overlayStyle={{maxWidth:400}} title="Fama-French 三因子模型：用市场(MKT)、规模(SMB)、价值(HML)三个标准因子回归组合超额收益，诊断策略风格暴露。">
+              <QuestionCircleOutlined style={{marginLeft:4,color:'#8c8c8c',cursor:'help'}} />
+            </Tooltip>
+          </Button>
+        </Space>
+      </Card>
+
+      {/* ════════════════════════════════════════════════════════════════
+          交易诊断（与上面的组合归因分开，单独一组）
+          ════════════════════════════════════════════════════════════════ */}
+      <Divider orientation="left" plain style={{ marginTop: 24, marginBottom: 12 }}>
+        <Text type="secondary" style={{ fontSize: 13 }}>交易诊断</Text>
+      </Divider>
+
+      {/* ── 4. 持仓周期分析 ── */}
       {tradeAnalysis?.holdingPeriods && tradeAnalysis.holdingPeriods.length > 0 && (
         <HoldingPeriodPanel periods={tradeAnalysis.holdingPeriods} totalTrades={tradeAnalysis.totalPairedTrades} />
       )}
 
-      {/* ── 4. 关键交易分析 ── */}
+      {/* ── 5. 关键交易分析 ── */}
       {tradeAnalysis?.tradeAttribution && tradeAnalysis.tradeAttribution.totalTrades > 0 && (
         <TradeAttributionPanel attr={tradeAnalysis.tradeAttribution} />
       )}
@@ -112,33 +168,35 @@ export default function AttributionHub({ taskId }) {
         </Card>
       )}
 
-      {/* ── 5. 归因详情（弹窗模式） ── */}
-      <Card size="small" title="详细归因分析" style={{ marginTop: 16 }}>
+      {/* ════════════════════════════════════════════════════════════════
+          策略监控
+          ════════════════════════════════════════════════════════════════ */}
+      <Divider orientation="left" plain style={{ marginTop: 24, marginBottom: 12 }}>
+        <Text type="secondary" style={{ fontSize: 13 }}>策略监控</Text>
+      </Divider>
+
+      <Card size="small" title={<><DashboardOutlined style={{marginRight:6}}/>Alpha 与风格监控</>}>
         <Space wrap>
-          <Button type="primary" ghost icon={<PieChartOutlined />}
-            onClick={() => setBrinsonOpen(true)}
-            disabled={!strategy?.modelComparison?.BRINSON?.available}
+          <Button icon={<LineChartOutlined />}
+            onClick={() => setAlphaMonitorOpen(true)}
           >
-            Brinson 行业归因
-            {strategy?.modelComparison?.BRINSON?.available
-              ? <Tag color="blue" style={{marginLeft:8,fontSize:10}}>解释力 {fmtPct(strategy.modelComparison.BRINSON.explanationRatio)}</Tag>
-              : <Tag color="default" style={{marginLeft:8,fontSize:10}}>不可用</Tag>
-            }
+            Alpha 滚动监控
+            <Tooltip overlayStyle={{maxWidth:400}} title="60/120/252天滚动窗口 Alpha 序列分析 + 衰减预警">
+              <QuestionCircleOutlined style={{marginLeft:4,color:'#8c8c8c',cursor:'help'}} />
+            </Tooltip>
           </Button>
-          <Button type="primary" ghost icon={<BarChartOutlined />}
-            onClick={() => setFactorOpen(true)}
-            disabled={!strategy?.modelComparison?.FACTOR?.available}
+          <Button icon={<AlertOutlined />}
+            onClick={() => setStyleMonitorOpen(true)}
           >
-            因子风格归因
-            {strategy?.modelComparison?.FACTOR?.available
-              ? <Tag color="green" style={{marginLeft:8,fontSize:10}}>解释力 {fmtPct(strategy.modelComparison.FACTOR.explanationRatio)}</Tag>
-              : <Tag color="default" style={{marginLeft:8,fontSize:10}}>不可用</Tag>
-            }
+            风格β 漂移监控
+            <Tooltip overlayStyle={{maxWidth:400}} title="FF3 滚动窗口 SMB/HML beta 序列分析 + 风格漂移预警">
+              <QuestionCircleOutlined style={{marginLeft:4,color:'#8c8c8c',cursor:'help'}} />
+            </Tooltip>
           </Button>
         </Space>
       </Card>
 
-      {/* Brinson 弹窗 */}
+      {/* ── 归因详情弹窗 ── */}
       <Modal title={<>
         <PieChartOutlined style={{marginRight:8}}/>Brinson 行业归因详情
         <Tooltip overlayStyle={{ maxWidth: 520 }} title={
@@ -193,6 +251,99 @@ export default function AttributionHub({ taskId }) {
         <FactorDetail taskId={taskId} />
       </Modal>
 
+      {/* FF3 风格归因 弹窗 */}
+      <Modal title={<>
+        <FundOutlined style={{marginRight:8}}/>FF3 三因子风格归因
+        <Tooltip overlayStyle={{ maxWidth: 560 }} title={
+          <div style={{maxWidth:560,lineHeight:1.8}}>
+            <p style={{margin:0,fontWeight:600}}>Fama-French 三因子模型</p>
+            <p style={{margin:'4px 0'}}><b>思路：</b>用市场(MKT)、规模(SMB)、价值(HML)三个标准因子回归组合超额收益，诊断"赚的是市场Beta还是规模/价值溢价"，评估风格暴露的合理性。</p>
+            <p style={{margin:'4px 0'}}><b>核心指标：</b></p>
+            <ul style={{margin:'2px 0',paddingLeft:16}}>
+              <li><b>MKT β</b>：市场因子暴露，衡量组合与大盘的联动程度</li>
+              <li><b>SMB β</b>：规模因子暴露，β&gt;0 = 偏向小盘股，β&lt;0 = 偏向大盘股</li>
+              <li><b>HML β</b>：价值因子暴露，β&gt;0 = 偏向价值股，β&lt;0 = 偏向成长股</li>
+              <li><b>α</b>：截距项，三因子无法解释的残差收益</li>
+            <li><b>R²</b>：三因子对超额收益的整体解释力</li>
+          </ul>
+          <p style={{margin:'8px 0 4px',fontWeight:600,color:'#fa8c16'}}>R² 解读标准：</p>
+          <table style={{width:'100%',borderCollapse:'collapse',fontSize:13,lineHeight:1.6}}>
+            <thead><tr style={{background:'#fafafa'}}>
+              <th style={{border:'1px solid #e8e8e8',padding:'4px 8px',textAlign:'left'}}>R² 范围</th>
+              <th style={{border:'1px solid #e8e8e8',padding:'4px 8px',textAlign:'left'}}>解读</th>
+            </tr></thead>
+            <tbody>
+              <tr>
+                <td style={{border:'1px solid #e8e8e8',padding:'4px 8px',color:'#ff4d4f',fontWeight:600}}>&lt; 30%</td>
+                <td style={{border:'1px solid #e8e8e8',padding:'4px 8px',color:'#ff4d4f'}}>三因子几乎无法解释该策略 — 赚钱逻辑不在市场/市值/估值框架内，风格标签无意义</td>
+              </tr>
+              <tr>
+                <td style={{border:'1px solid #e8e8e8',padding:'4px 8px',color:'#fa8c16',fontWeight:600}}>30% ~ 50%</td>
+                <td style={{border:'1px solid #e8e8e8',padding:'4px 8px',color:'#fa8c16'}}>解释力偏弱 — 风格诊断仅供参考，并非定论</td>
+              </tr>
+              <tr>
+                <td style={{border:'1px solid #e8e8e8',padding:'4px 8px',fontWeight:600}}>50% ~ 70%</td>
+                <td style={{border:'1px solid #e8e8e8',padding:'4px 8px'}}>解释力一般 — 风格诊断有参考价值</td>
+              </tr>
+              <tr>
+                <td style={{border:'1px solid #e8e8e8',padding:'4px 8px',color:'#52c41a',fontWeight:600}}>&ge; 70%</td>
+                <td style={{border:'1px solid #e8e8e8',padding:'4px 8px',color:'#52c41a'}}>解释力强 — 风格标签可信，特征明确</td>
+              </tr>
+            </tbody>
+          </table>
+          </div>
+        }>
+          <QuestionCircleOutlined style={{marginLeft:6,fontSize:14,color:'#8c8c8c',cursor:'help'}} />
+        </Tooltip>
+      </>}
+        open={ff3Open} onCancel={() => setFF3Open(false)}
+        width={1100} footer={null} destroyOnClose
+        style={{top:20}}
+        styles={{ body: { maxHeight: 'calc(90vh - 120px)', overflowY: 'auto', overflowX: 'hidden', paddingRight: 4 } }}
+      >
+        <FF3Detail taskId={taskId} />
+      </Modal>
+
+      {/* Alpha 滚动监控 弹窗 */}
+      <Modal title={<>
+        <LineChartOutlined style={{marginRight:8}}/>Alpha 滚动窗口监控
+        <Tooltip overlayStyle={{ maxWidth: 520 }} title={
+          <div style={{maxWidth:520,lineHeight:1.8}}>
+            <p style={{margin:0,fontWeight:600}}>Alpha 衰减预警</p>
+            <p style={{margin:'4px 0'}}>通过 60/120/252 天滚动窗口的 OLS 回归，追踪策略 Alpha 的时间序列变化。当近 25% 期 Alpha 均值较历史中位数下降超过 50% 时，触发衰减预警 — 提示策略可能正在失效。</p>
+          </div>
+        }>
+          <QuestionCircleOutlined style={{marginLeft:6,fontSize:14,color:'#8c8c8c',cursor:'help'}} />
+        </Tooltip>
+      </>}
+        open={alphaMonitorOpen} onCancel={() => setAlphaMonitorOpen(false)}
+        width={1100} footer={null} destroyOnClose
+        style={{top:20}}
+        styles={{ body: { maxHeight: 'calc(90vh - 120px)', overflowY: 'auto', overflowX: 'hidden', paddingRight: 4 } }}
+      >
+        <AlphaMonitorPanel taskId={taskId} />
+      </Modal>
+
+      {/* 风格β 漂移监控 弹窗 */}
+      <Modal title={<>
+        <AlertOutlined style={{marginRight:8}}/>风格β 漂移监控
+        <Tooltip overlayStyle={{ maxWidth: 520 }} title={
+          <div style={{maxWidth:520,lineHeight:1.8}}>
+            <p style={{margin:0,fontWeight:600}}>风格漂移预警</p>
+            <p style={{margin:'4px 0'}}>通过 60/120/252 天滚动 FF3 回归，监测 SMB（规模）/ HML（价值）beta 序列。当近期均值偏离历史均值超过 1 个标准差时，触发风格漂移预警 — 提示策略的选股偏好正在发生结构性变化。</p>
+          </div>
+        }>
+          <QuestionCircleOutlined style={{marginLeft:6,fontSize:14,color:'#8c8c8c',cursor:'help'}} />
+        </Tooltip>
+      </>}
+        open={styleMonitorOpen} onCancel={() => setStyleMonitorOpen(false)}
+        width={1100} footer={null} destroyOnClose
+        style={{top:20}}
+        styles={{ body: { maxHeight: 'calc(90vh - 120px)', overflowY: 'auto', overflowX: 'hidden', paddingRight: 4 } }}
+      >
+        <StyleMonitorPanel taskId={taskId} />
+      </Modal>
+
     </div>
   );
 }
@@ -200,76 +351,113 @@ export default function AttributionHub({ taskId }) {
 // ══════════════════════════════════════════════════════════════════════════════
 // 1. 策略概况
 // ══════════════════════════════════════════════════════════════════════════════
-function StrategyOverview({ strategy }) {
+// ══════════════════════════════════════════════════════════════════════════════
+// 1. 综合归因结论（最外层：组合归因 + 交易诊断 + 策略概要）
+// ══════════════════════════════════════════════════════════════════════════════
+function GeneralConclusion({ strategy, recommendation, tradeAnalysis }) {
   if (!strategy) return null;
 
+  const alertType = recommendation === 'UNCLEAR' ? 'warning' : 'info';
+  const mc = strategy.modelComparison || {};
+
+  // ── 解释力标签 ──
+  const quickTags = [];
+  const addTag = (label, er, colors) => {
+    if (er == null) { quickTags.push(<Tag key={label} color="default" style={{fontSize:11}}>{label} 不可用</Tag>); return; }
+    const color = er >= 0.5 ? colors[0] : er >= 0.15 ? colors[1] : 'default';
+    quickTags.push(<Tag key={label} color={color} style={{fontSize:11}}>{label} {fmtPct(er)}</Tag>);
+  };
+  addTag('Brinson', mc.BRINSON?.available ? mc.BRINSON?.explanationRatio : null, ['blue', 'geekblue']);
+  addTag('因子', mc.FACTOR?.available ? mc.FACTOR?.explanationRatio : null, ['green', 'lime']);
+  addTag('FF3', mc.FF3?.available ? mc.FF3?.explanationRatio : null, ['purple', 'gold']);
+
+  // ── 策略特征标签（轻量内联） ──
+  const metaTags = [];
+  if (strategy.avgDailyTurnover != null)
+    metaTags.push(<Tag key="turnover" style={{fontSize:11}}>换手 {fmtPct(strategy.avgDailyTurnover)}</Tag>);
+  if (strategy.avgHoldingDays != null)
+    metaTags.push(<Tag key="hold" style={{fontSize:11}}>持仓 {strategy.avgHoldingDays}天</Tag>);
+  if (strategy.industryConcentration != null)
+    metaTags.push(
+      <Tooltip key="hhi-tip"
+        overlayInnerStyle={{ maxWidth: 420 }}
+        title={
+          <div style={{ lineHeight: 1.8 }}>
+            <p style={{ margin: 0, fontWeight: 600 }}>HHI（赫芬达尔指数）</p>
+            <p style={{ margin: '4px 0' }}>各股持仓权重平方和，衡量组合的<b>行业/个股集中度</b>。</p>
+            <p style={{ margin: '4px 0' }}>
+              <b>范围：</b>0~1，越高越集中。<br/>
+              <b>等权1只</b> → 1.0 &nbsp;|&nbsp; <b>等权5只</b> → 0.2 &nbsp;|&nbsp; <b>等权10只</b> → 0.1 &nbsp;|&nbsp; <b>等权20只</b> → 0.05
+            </p>
+            <p style={{ margin: '4px 0', color: strategy.industryConcentration > 0.3 ? '#ff4d4f' : '#52c41a' }}>
+              当前 HHI={fmt(strategy.industryConcentration)}：{
+                strategy.industryConcentration > 0.3 ? '高度集中，收益过度依赖少数行业——行业配置是核心矛盾，Brinson 归因更有价值。'
+                : strategy.industryConcentration > 0.15 ? '适度集中，行业选择有一定影响但不过度依赖。'
+                : '高度分散，不会因押错一两个行业翻车，因子暴露才是收益主因。'
+              }
+            </p>
+          </div>
+        }
+      >
+        <Tag key="hhi" style={{fontSize:11, cursor:'help'}}>HHI {fmt(strategy.industryConcentration)}</Tag>
+      </Tooltip>
+    );
+
+  // ── 策略画像（综合换手+HHI+持仓天数） ──
+  const buildStrategyProfile = () => {
+    const t = strategy.avgDailyTurnover;
+    const hhi = strategy.industryConcentration;
+    const hold = strategy.avgHoldingDays;
+    if (t == null) return null;
+
+    const highTO = t > 0.5 || (hold != null && hold < 5);
+    const highConc = hhi != null && hhi > 0.3;
+
+    if (highTO && !highConc)
+      return `策略画像：${fmtPct(t)}换手 + 持仓约${hold}天 + HHI=${hhi != null ? fmt(hhi) : 'N/A'} =「高频分散型」——每次调仓大换血但从不重仓押注，典型量化因子轮动策略。收益不靠赌行业，全靠因子信号驱动。`;
+    if (highConc && !highTO)
+      return `策略画像：${fmtPct(t)}换手 + HHI=${fmt(hhi)} =「低频集中型」——持股集中且拿得久，收益高度依赖所选的少数行业/个股，适合用 Brinson 拆解行业贡献。`;
+    if (highTO && highConc)
+      return `策略画像：${fmtPct(t)}换手 + HHI=${fmt(hhi)} =「高频集中型」——换得快又押得重，策略激进，行业和因子两条归因都很关键，建议交叉验证。`;
+    return `策略画像：${fmtPct(t)}换手 + 持仓约${hold}天 + HHI=${hhi != null ? fmt(hhi) : 'N/A'} =「低频分散型」——持股均匀、换手温和，策略偏稳健，行业归因和因子归因均可适用。`;
+  };
+  const strategyProfile = buildStrategyProfile();
+  let tradeSummary = '';
+  if (tradeAnalysis?.holdingPeriods?.length > 0) {
+    const best = tradeAnalysis.holdingPeriods.reduce((a, b) =>
+      Math.abs(a.contributionPct) > Math.abs(b.contributionPct) ? a : b);
+    tradeSummary = `交易诊断：最优持仓周期「${best.bucket}」（贡献${fmtPct(Math.abs(best.contributionPct || 0)/100)}），`;
+    if (tradeAnalysis?.tradeAttribution?.top10Contribution != null) {
+      tradeSummary += `Top10交易贡献了${fmtPct(tradeAnalysis.tradeAttribution.top10Contribution)}的总收益。`;
+    }
+  }
+
   return (
-    <Card size="small" style={{ marginBottom: 16 }}>
-      <Row gutter={16}>
-        <Col span={8}>
-          <Statistic
-            title="平均换手率"
-            value={fmtPct(strategy.avgDailyTurnover)}
-            suffix={strategy.avgDailyTurnover > 0.5 ? <Tag color="orange">高频</Tag> : <Tag color="blue">正常</Tag>}
-          />
-        </Col>
-        <Col span={8}>
-          <Statistic
-            title="平均持仓天数"
-            value={strategy.avgHoldingDays}
-            suffix="天"
-          />
-        </Col>
-        <Col span={8}>
-          <Statistic
-            title={<>
-              行业集中度(HHI)
-              <Tooltip overlayInnerStyle={{ maxWidth: 520 }} title={
-                <div style={{ maxWidth: 520, lineHeight: 1.8 }}>
-                  <p style={{ margin: 0, fontWeight: 600 }}>HHI（赫芬达尔-赫希曼指数）</p>
-                  <p style={{ margin: '4px 0' }}><b>计算：</b>各行业持仓占比的平方和 × 100。取值范围 0~1，越高越集中。</p>
-                  <p style={{ margin: '4px 0' }}><b>解读：</b></p>
-                  <ul style={{ margin: '2px 0', paddingLeft: 16 }}>
-                    <li><b>&gt;0.25</b> 高度集中 — 收益过度依赖少数行业，风险敞口大</li>
-                    <li><b>0.15~0.25</b> 适度集中 — 有行业偏好但不极端</li>
-                    <li><b>&lt;0.15</b> 高度分散 — 行业风险充分分散</li>
-                  </ul>
-                  <p style={{ margin: '4px 0 0' }}><b>价值：</b>如果策略收益高度依赖1-2个行业，一旦行业轮动不利会大幅回撤。结合 Brinson 归因可判断超额收益是来<u>自选对行业</u>还是<u>选对个股</u>。</p>
-                </div>
-              }>
-                <QuestionCircleOutlined style={{ marginLeft: 4, fontSize: 13, color: '#8c8c8c', cursor: 'help' }} />
-              </Tooltip>
-            </>}
-            value={fmt(strategy.industryConcentration)}
-            suffix={strategy.industryConcentration > 0.3 ? <Tag color="orange">集中</Tag> : <Tag color="blue">分散</Tag>}
-          />
-        </Col>
-      </Row>
-    </Card>
+    <Alert type={alertType} showIcon
+      message={<span>综合归因结论 {quickTags} {metaTags.length > 0 && <span style={{color:'#8c8c8c', fontSize:11}}>{metaTags}</span>}</span>}
+      description={
+        <div style={{ whiteSpace: 'pre-line', fontSize: 13, lineHeight: 1.8 }}>
+          {strategy.reason}
+          {strategyProfile && <><br/><br/><Text strong style={{ color: '#1890ff' }}>{strategyProfile}</Text></>}
+          {tradeSummary && <><br/><br/><Text type="secondary">{tradeSummary}</Text></>}
+        </div>
+      }
+      style={{ marginBottom: 16 }}
+    />
   );
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// 2. 模型对比 + 结论
+// 2. 模型对比（仅组合归因三模型）
 // ══════════════════════════════════════════════════════════════════════════════
-function ModelComparisonCard({ strategy, recommendation, tradeAnalysis }) {
+function ModelComparisonCard({ strategy }) {
   if (!strategy) return null;
 
-  const alertType = recommendation === 'UNCLEAR' ? 'warning'
-    : recommendation === 'FACTOR' ? 'success' : 'info';
-
-  const alertTitle = recommendation === 'UNCLEAR' ? '归因结论：暂不明确'
-    : recommendation === 'FACTOR' ? '归因结论：推荐因子风格归因'
-    : '归因结论：推荐 Brinson 行业归因';
+  const mc = strategy.modelComparison || {};
 
   return (
     <Card size="small" style={{ marginBottom: 16 }}
-      title={<><InfoCircleOutlined style={{ marginRight: 6 }} />归因模型对比</>}>
-      <Alert type={alertType} showIcon message={alertTitle}
-        description={strategy.reason}
-        style={{ marginBottom: 12 }}
-      />
-
+      title={<><InfoCircleOutlined style={{ marginRight: 6 }} />归因模型对比（组合归因）</>}>
       <Table
         size="small"
         pagination={false}
@@ -277,46 +465,38 @@ function ModelComparisonCard({ strategy, recommendation, tradeAnalysis }) {
           {
             key: 'brinson',
             model: 'Brinson 行业归因',
-            explanation: strategy.modelComparison?.BRINSON?.explanationRatio,
-            available: strategy.modelComparison?.BRINSON?.available,
-            desc: '拆解行业配置 vs 行业内选股能力，适合低换手集中持仓策略',
+            explanation: mc.BRINSON?.explanationRatio,
+            available: mc.BRINSON?.available,
+            desc: '拆解行业配置 vs 行业内选股能力：回答「超额来自哪个行业」',
           },
           {
             key: 'factor',
             model: '因子风格归因',
-            explanation: strategy.modelComparison?.FACTOR?.explanationRatio,
-            available: strategy.modelComparison?.FACTOR?.available,
-            desc: '回归动量/波动率/市值/换手率因子，适合高换手量化选股策略',
+            explanation: mc.FACTOR?.explanationRatio,
+            available: mc.FACTOR?.available,
+            desc: '回归动量/市值/波动率等因子：回答「策略暴露了什么逻辑」',
           },
           {
-            key: 'holding',
-            model: '持仓周期分析',
-            explanation: tradeAnalysis?.holdingPeriods?.length > 0
-              ? Math.min(1, Math.max(...(tradeAnalysis.holdingPeriods.map(p => Math.abs(p.contributionPct) / 100 || 0)))) : null,
-            available: tradeAnalysis?.holdingPeriods?.length > 0,
-            desc: '分析不同持仓周期的收益/胜率分布，找出最优持有天数，弥补归因模型无法解释交易频率问题的短板',
-          },
-          {
-            key: 'trade',
-            model: '关键交易分析',
-            explanation: tradeAnalysis?.tradeAttribution?.totalTrades > 0
-              ? Math.min(1, (tradeAnalysis.tradeAttribution.top10Contribution || 0) / 100) : null,
-            available: tradeAnalysis?.tradeAttribution?.totalTrades > 0,
-            desc: '帕累托分析定位贡献大部分盈亏的关键交易，弥补归因模型无法解释交易集中度的短板',
+            key: 'ff3',
+            model: 'FF3 三因子归因',
+            explanation: mc.FF3?.explanationRatio,
+            available: mc.FF3?.available,
+            desc: '剥离 MKT/SMB/HML 被动收益：回答「比被动因子投资多赚多少」',
           },
         ]}
         columns={[
-          { title: '归因模型', dataIndex: 'model', width: 150, render: v => <b>{v}</b> },
+          { title: '归因模型', dataIndex: 'model', width: 140, render: v => <b>{v}</b> },
           {
-            title: '解释力', dataIndex: 'explanation', width: 100,
+            title: '解释力', dataIndex: 'explanation', width: 90,
             render: (v) => {
-              const ratio = v || 0;
-              const color = ratio > 0.5 ? '#52c41a' : ratio > 0.2 ? '#fa8c16' : '#ff4d4f';
-              return <Text strong style={{ color }}>{fmtPct(ratio)}</Text>;
+              if (v == null) return <Text type="secondary">-</Text>;
+              const ratio = v;
+              const color = ratio > 0.5 ? '#52c41a' : ratio > 0.2 ? '#fa8c16' : ratio < 0 ? '#8c8c8c' : '#ff4d4f';
+              return <Text strong style={{ color }}>{fmtPct(Math.max(0, ratio))}</Text>;
             },
           },
           {
-            title: '状态', dataIndex: 'available', width: 80,
+            title: '状态', dataIndex: 'available', width: 70,
             render: v => v ? <Badge status="success" text="可用" /> : <Badge status="default" text="不可用" />,
           },
           { title: '说明', dataIndex: 'desc', ellipsis: true },
@@ -327,7 +507,7 @@ function ModelComparisonCard({ strategy, recommendation, tradeAnalysis }) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// 3. 持仓周期分析
+// 交易诊断：持仓周期分析
 // ══════════════════════════════════════════════════════════════════════════════
 function HoldingPeriodPanel({ periods, totalTrades }) {
   const chartOption = useMemo(() => {
@@ -586,7 +766,7 @@ function HoldingPeriodPanel({ periods, totalTrades }) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// 4. 关键交易分析
+// 交易诊断：关键交易分析
 // ══════════════════════════════════════════════════════════════════════════════
 function TradeAttributionPanel({ attr }) {
   // 帕累托图：累计贡献曲线
@@ -1529,7 +1709,20 @@ function FactorDetail({ taskId }) {
           }},
           { title: '含义', dataIndex: 'description', width: 220, ellipsis: true,
             render: v => <Text type="secondary" style={{fontSize:11}}>{v}</Text> },
-          { title: 'β 暴露', dataIndex: 'beta', width: 85, align: 'right',
+          { title: (<Tooltip overlayStyle={{maxWidth:460}} title={
+                <div style={{lineHeight:1.9,fontSize:12}}>
+                  <p style={{margin:'0 0 6px',fontWeight:700}}>β 暴露（Beta Exposure）</p>
+                  <p style={{margin:'2px 0'}}><b>含义：</b>策略对单个因子的敏感度。β=0.5 表示该因子值每变化 1 个标准差，策略日超额收益平均变化 0.5 个标准差。</p>
+                  <p style={{margin:'2px 0'}}><b>价值：</b>β 回答了「策略到底暴露在什么逻辑上」。比如 MOM β 高 → 策略追涨杀跌；VOL β 负 → 策略避开高波动股。</p>
+                  <p style={{margin:'2px 0'}}><b>阈值：</b><br/>
+                    · |β| &lt; 0.1 = 几乎无暴露<br/>
+                    · 0.1~0.5 = 温和暴露<br/>
+                    · 0.5~1.5 = 明显暴露<br/>
+                    · &gt; 1.5 = 高度集中暴露（风险集中度高）</p>
+                  <p style={{margin:'2px 0'}}><b>解读：</b>β 为正 → 偏好高因子值股票（如 MOM 正=追涨）；β 为负 → 偏好低因子值股票（如 SIZE 负=大盘偏好）。</p>
+                  <p style={{margin:'2px 0'}}><b>⚠ 注意：</b>β 必须结合 t 值判断——|t|&lt;1.96 的 β 可能只是噪声，不代表真实暴露。</p>
+                </div>
+              }><span style={{cursor:'help'}}>β 暴露 <QuestionCircleOutlined style={{fontSize:10,color:'#8c8c8c'}}/></span></Tooltip>), dataIndex: 'beta', width: 85, align: 'right',
             render: v => <Text strong style={{color: (v||0)>=0?RED:GREEN}}>{fmt(v, 4)}</Text> },
           { title: 't 值', dataIndex: 'tStat', width: 70, align: 'right',
             render: v => <Text strong style={{color: Math.abs(v||0)>=1.96?'#fa8c16':undefined}}>{fmt(v, 2)}</Text> },
@@ -1762,16 +1955,21 @@ function FactorConclusionHeader({ betas, summary, regressionDetail }) {
             tip: (
               <div style={{maxWidth:560,lineHeight:1.9,fontSize:13}}>
                 <p style={{margin:'0 0 6px',fontWeight:700}}>年化 α（Annualized Alpha）</p>
-                <p style={{margin:'2px 0'}}><b>含义：</b>回归截距项 × 252，超额收益中无法被四因子解释的部分。</p>
-                <p style={{margin:'2px 0'}}><b>价值：</b>α 是策略「纯选股能力」的理论度量。正 α = 策略选股超越了其因子暴露应有的收益。</p>
-                <p style={{margin:'2px 0'}}><b>公式：</b>α = 截距项（OLS 回归）；年化 α = α × 252。</p>
-                <p style={{margin:'2px 0'}}><b>阈值：</b>|α| &lt; 2%/年 = 不显著（接近 0）；2%~10%/年 = 有选股能力；&gt; 10%/年 = 显著选股能力（需警惕是否来自未观测因子）。</p>
+                <p style={{margin:'2px 0'}}><b>含义：</b>回归截距项 × 252 = 超额收益中<b>四因子完全解释不了的部分</b>。通俗讲：扣掉市场涨跌、动量风格、市值偏好、换手率偏好之后，策略靠自己选股多赚（或少赚）的钱。</p>
+                <p style={{margin:'2px 0'}}><b>价值：</b>α 是策略「纯选股能力」的计量器。正 α = 策略选股超越了其因子暴露应有的收益——<b>这是主动管理最值钱的部分</b>。</p>
+                <p style={{margin:'2px 0'}}><b>公式：</b>日 α = 回归截距项（OLS）；年化 α = 日 α × 252。</p>
+                <p style={{margin:'2px 0'}}><b>阈值分级：</b><br/>
+                  · |α| &lt; 2%/年 → <b>α 不显著</b>：策略收益几乎全被因子解释，几乎没有独立选股能力<br/>
+                  · 2%~5%/年 → <b>温和正 α</b>：因子之外有额外选股加成，但幅度不大<br/>
+                  · 5%~10%/年 → <b>明显正 α</b>：策略有明显独立选股能力，值得深挖 α 来源<br/>
+                  · &gt; 10%/年 → <b>强 α</b>：需警惕——可能是未建模因子（质量/情绪/行业）带来的，不是纯 Alpha</p>
                 <p style={{margin:'2px 0'}}><b>当前：</b>{fmtSigned(alpha)}，属于 {
-                  Math.abs(alpha) < 0.02 ? '不显著 — α 接近零，策略收益主要由因子暴露解释' :
-                  Math.abs(alpha) < 0.1 ? (alpha > 0 ? '有正选股能力 — 策略超越其因子暴露的预期收益' : '有负选股能力 — 因子暴露后策略反而不如预期') :
-                  (alpha > 0 ? '显著正 α — 需确认来源是否可持续（是否遗漏因子？）' : '显著负 α — 因子暴露后策略严重跑输，需排查')
+                  Math.abs(alpha) < 0.02 ? 'α 不显著 — 策略收益几乎全被因子解释，几乎没有独立选股能力' :
+                  Math.abs(alpha) < 0.05 ? (alpha > 0 ? '温和正 α — 因子之外有额外选股加成，但幅度不大' : '温和负 α — 选股能力略低于因子预期') :
+                  Math.abs(alpha) < 0.1 ? (alpha > 0 ? '明显正 α — 策略有显著独立选股能力，建议用 FF3 进一步剥离风格因子确认' : '明显负 α — 选股拖累策略，因子暴露后的收益反而更低') :
+                  (alpha > 0 ? '强 α — 远超因子解释范围，建议检查是否遗漏了关键因子（如质量/情绪/行业）' : '强负 α — 策略严重跑输因子预期，需排查选股逻辑')
                 }。</p>
-                <p style={{margin:'2px 0'}}><b>判断：</b>正 α + 高 R² = 理想：因子驱动 + 选股加成。正 α + 低 R² = 收益来源不透明，建议扩展因子维度定位 α。</p>
+                <p style={{margin:'2px 0'}}><b>实战判断：</b>正 α + 高 R²（&gt;30%）= 最理想 — 因子驱动 + 选股加成，双重优势。正 α + 低 R² = 收益来源不透明，因子模型覆盖不足，建议用 FF3 扩展风格因子。负 α + 高 R² = 选股在拖后腿，因子暴露不错但选股太差。</p>
               </div>
             ) },
           { label: 'R²', val: rSquared * 100, fmt: v => v.toFixed(1) + '%',
@@ -2063,6 +2261,419 @@ function FactorConclusionBody({ betas, summary, regressionDetail, observationDay
       <Text type="secondary" style={{fontSize:11}}>
         因子归因模型：R = α + Σ(β_f × F_f) + ε。α = 无法被因子解释的残差年化值。
         因子收益 = 每日从 ClickHouse 读取 A股全市场各因子值，分 Top 20% / Bottom 20% 多空组合计算。
+      </Text>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// FF3 三因子风格归因详情
+// ══════════════════════════════════════════════════════════════════════════════
+function FF3Detail({ taskId }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (!taskId) return;
+    backtestApi.getFF3Attribution(taskId)
+      .then(setData)
+      .catch(err => setError(err.message || 'FF3 归因加载失败'))
+      .finally(() => setLoading(false));
+  }, [taskId]);
+
+  const styleContributions = data?.styleContributions || [];
+  const regressionDetail = data?.regressionDetail || {};
+  const summary = data?.summary || {};
+  const styleBias = data?.styleBias || '';
+  const alphaInterp = data?.alphaInterpretation || {};
+
+  // 风格β 柱状图
+  const betaChartOption = useMemo(() => {
+    if (!styleContributions.length) return {};
+    const names = styleContributions.map(s => s.styleName || s.factorName);
+    const betas = styleContributions.map(s => (s.beta || 0));
+    const tStats = styleContributions.map(s => Math.abs(s.tStat || 0));
+    const colors = betas.map(v => v >= 0 ? RED : GREEN);
+    const maxAbs = Math.max(...betas.map(Math.abs), 0.01);
+    return {
+      tooltip: {
+        trigger: 'axis',
+        formatter: function(params) {
+          const s = styleContributions[params[0].dataIndex];
+          return `<b>${s.styleName || s.factorCode}</b><br/>
+            ${s.description ? s.description + '<br/>' : ''}
+            β = ${fmt(s.beta, 4)}<br/>
+            t = ${fmt(s.tStat, 2)}<br/>
+            显著: ${Math.abs(s.tStat||0)>=1.96?'是 ★':'否'}<br/>
+            因子累计收益: ${fmtPct(s.totalFactorReturn)}<br/>
+            贡献: ${fmtPct(s.contribution)} (${fmt(s.contributionPct,1)}%)`;
+        },
+      },
+      grid: { left: 70, right: 30, top: 48, bottom: 32 },
+      xAxis: { type: 'category', data: names, axisLabel: { fontSize: 12 } },
+      yAxis: { type: 'value', name: 'β 系数', min: -maxAbs * 1.3, max: maxAbs * 1.3 },
+      series: [{
+        type: 'bar', data: betas, barMaxWidth: 60,
+        itemStyle: { color: function(p) { return colors[p.dataIndex]; } },
+        markLine: { silent: true, data: [{ yAxis: 0, lineStyle: { color: '#999', type: 'dashed' } }] },
+        label: { show: true, position: 'top', fontSize: 10,
+          formatter: p => tStats[p.dataIndex] >= 1.96 ? '★' : '',
+          color: '#fa8c16' },
+      }],
+    };
+  }, [styleContributions]);
+
+  // 贡献占比饼图
+  const contribPieOption = useMemo(() => {
+    if (!styleContributions.length) return {};
+    const pieData = styleContributions.map(s => ({
+      name: s.styleName || s.factorName,
+      value: Math.abs(s.contribution || 0),
+    }));
+    // 添加残差
+    if (summary.residual != null) {
+      pieData.push({ name: '残差(Alpha)', value: Math.abs(summary.residual || 0) });
+    }
+    return {
+      tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+      series: [{
+        type: 'pie', radius: ['40%', '70%'], data: pieData,
+        label: { formatter: '{b}\n{d}%' },
+        emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0,0,0,0.5)' } },
+      }],
+    };
+  }, [styleContributions, summary.residual]);
+
+  if (loading) return <div style={{textAlign:'center',padding:40}}><Spin tip="加载 FF3 归因..." /></div>;
+  if (error) return <Alert type="error" message={error} showIcon />;
+  if (!data) return <Alert type="info" message="暂无 FF3 归因数据" showIcon />;
+
+  return (
+    <div>
+      {/* 风格偏向结论 */}
+      {styleBias && (() => {
+        const r2 = regressionDetail.rSquared || 0;
+        let type = 'success', msg = '风格诊断';
+        if (r2 < 0.30) { type = 'error'; msg = '风格诊断（模型无法解释，结论不可信）'; }
+        else if (r2 < 0.50) { type = 'warning'; msg = '风格诊断（仅供参考）'; }
+        else if (r2 < 0.70) { type = 'info'; msg = '风格诊断'; }
+        return (
+          <Alert type={type} message={msg} description={styleBias}
+            showIcon style={{marginBottom:16}} />
+        );
+      })()}
+
+      {/* 关键指标 */}
+      <Row gutter={12} style={{marginBottom:12}}>
+        <Col span={6}>
+          <Card size="small"><Statistic title="R²" value={fmtPct(regressionDetail.rSquared || 0)} valueStyle={{fontSize:20}} suffix={
+            <Text style={{fontSize:11}} type="secondary">（解释力）</Text>
+          } /></Card>
+        </Col>
+        <Col span={6}>
+          <Card size="small"><Statistic title="日 Alpha" value={fmtPct(regressionDetail.alpha || 0)}
+            valueStyle={{fontSize:20, color: (regressionDetail.alpha||0)>=0?RED:GREEN}} /></Card>
+        </Col>
+        <Col span={6}>
+          <Card size="small"><Statistic title="年化 Alpha" value={fmtPct(regressionDetail.annualizedAlpha || 0)}
+            valueStyle={{fontSize:20, color: (regressionDetail.annualizedAlpha||0)>=0?RED:GREEN}} /></Card>
+        </Col>
+        <Col span={6}>
+          <Card size="small"><Statistic title="α t 值" value={fmt(regressionDetail.alphaTStat, 2)}
+            valueStyle={{fontSize:20, color: Math.abs(regressionDetail.alphaTStat||0)>=1.96?'#fa8c16':undefined}}
+            suffix={Math.abs(regressionDetail.alphaTStat||0)>=1.96 ? <Tag color="orange" style={{fontSize:10,padding:'0 4px',lineHeight:'16px'}}>显著</Tag> : ''} /></Card>
+        </Col>
+      </Row>
+
+      {/* Alpha 解读 (A1) */}
+      {alphaInterp.interpretation && (() => {
+        const r2 = regressionDetail.rSquared || 0;
+        let alertType = alphaInterp.alphaSignificant ? 'success' : 'info';
+        let alertMsg = alphaInterp.alphaSignificant ? 'Alpha 显著' : 'Alpha 不显著';
+        if (r2 < 0.30) { alertType = 'warning'; alertMsg = 'Alpha 解读（模型解释力弱）'; }
+        return (
+          <Alert type={alertType} message={alertMsg}
+            description={alphaInterp.interpretation}
+            showIcon style={{marginBottom:16}} />
+        );
+      })()}
+
+      {/* β 柱状图 */}
+      <ReactECharts option={betaChartOption} style={{ height: 220 }} />
+      <Text type="secondary" style={{ fontSize: 11, display: 'block', textAlign: 'center', marginTop: 4 }}>
+        ★ 表示 t ≥ 1.96（95% 置信显著）的因子
+      </Text>
+
+      {/* 贡献饼图 */}
+      <Row gutter={16} style={{marginTop:12}}>
+        <Col span={12}>
+          <ReactECharts option={contribPieOption} style={{ height: 260 }} />
+        </Col>
+        <Col span={12}>
+          <Table size="small" dataSource={styleContributions} pagination={false}
+            rowKey={r => r.factorCode}
+            columns={[
+              { title: '因子', dataIndex: 'factorCode', width: 60 },
+              { title: <Tooltip overlayStyle={{maxWidth:460}} title={
+                <div style={{lineHeight:1.9,fontSize:12}}>
+                  <p style={{margin:'0 0 6px',fontWeight:700}}>β（风格 Beta）</p>
+                  <p style={{margin:'2px 0'}}><b>含义：</b>策略对 MKT/SMB/HML 三个被动风格因子的暴露。β_MKT 衡量大盘联动，β_SMB 衡量大小盘偏好，β_HML 衡量价值/成长倾向。</p>
+                  <p style={{margin:'2px 0'}}><b>价值：</b>告诉你是靠大盘涨跌赚钱（β_MKT大），还是靠风格轮动（SMB/HML），还是真有独立选股能力（α）。</p>
+                  <p style={{margin:'2px 0'}}><b>阈值：</b><br/>
+                    · |β| &lt; 0.1 = 几乎无暴露<br/>
+                    · 0.1~0.5 = 温和暴露<br/>
+                    · 0.5~1.0 = 明显暴露<br/>
+                    · &gt; 1.0 = 高度暴露（风格押注大）</p>
+                  <p style={{margin:'2px 0'}}><b>解读：</b>MKT β 高=跟大盘走；SMB β 正=小盘偏好；HML β 正=价值股偏好（爱捡便宜货）；HML β 负=成长股偏好（愿付溢价）。</p>
+                  <p style={{margin:'2px 0'}}><b>⚠ 注意：</b>需结合 t 值看显著性和 R² 看整体解释力。单看 β 不看 t 值，可能被噪声误导。</p>
+                </div>
+              }><span style={{cursor:'help'}}>β <QuestionCircleOutlined style={{fontSize:10,color:'#8c8c8c'}}/></span></Tooltip>, dataIndex: 'beta', width: 60, align: 'right',
+                render: v => <Text strong style={{color:(v||0)>=0?RED:GREEN}}>{fmt(v,4)}</Text> },
+              { title: 't', dataIndex: 'tStat', width: 50, align: 'right',
+                render: v => <Text style={{color:Math.abs(v||0)>=1.96?'#fa8c8c':undefined}}>{fmt(v,2)}</Text> },
+              { title: '因子收益', dataIndex: 'annualizedFactorReturn', width: 80, align: 'right',
+                render: v => <Text>{fmtPct(v)}</Text> },
+              { title: '贡献', dataIndex: 'contribution', width: 80, align: 'right',
+                render: v => <Text strong style={{color:(v||0)>=0?RED:GREEN}}>{fmtPct(v)}</Text> },
+            ]}
+          />
+        </Col>
+      </Row>
+
+      {/* 总结 */}
+      <Divider style={{margin:'8px 0'}}/>
+      <Text type="secondary" style={{fontSize:11}}>
+        FF3 归因模型：R_excess = α + β_MKT×MKT + β_SMB×SMB + β_HML×HML + ε。
+        MKT = 全市场等权日收益，SMB = 小市值(底30%)−大市值(顶30%)，HML = 低PB(底30%)−高PB(顶30%)。
+      </Text>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Alpha 滚动窗口监控
+// ══════════════════════════════════════════════════════════════════════════════
+function AlphaMonitorPanel({ taskId }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (!taskId) return;
+    backtestApi.getAlphaRolling(taskId)
+      .then(setData)
+      .catch(err => setError(err.message || 'Alpha 监控加载失败'))
+      .finally(() => setLoading(false));
+  }, [taskId]);
+
+  // 合并多窗口数据为图表
+  const chartOption = useMemo(() => {
+    if (!data) return {};
+    const wn = { rolling60: '60天', rolling120: '120天', rolling252: '252天' };
+    const series = [];
+    const colors = { rolling60: '#91caff', rolling120: '#1677ff', rolling252: '#cf1322' };
+    let allDates = new Set();
+
+    Object.entries(wn).forEach(([key, name]) => {
+      const pts = data[key] || [];
+      if (!pts.length) return;
+      const dates = pts.map(p => p.date);
+      dates.forEach(d => allDates.add(d));
+      series.push({
+        name, type: 'line', data: pts.map(p => p.annualizedAlpha * 100),
+        smooth: true, symbol: 'none',
+        lineStyle: { color: colors[key], width: key === 'rolling252' ? 2.5 : 1.5 },
+        itemStyle: { color: colors[key] },
+      });
+    });
+    const sortedDates = [...allDates].sort();
+    series.forEach(s => {
+      // xAxis uses sortedDates, data aligned by index
+    });
+    return {
+      tooltip: { trigger: 'axis',
+        formatter: function(ps) { return ps.map(p => `${p.seriesName}: ${parseFloat(p.value).toFixed(2)}%`).join('<br/>'); }
+      },
+      legend: { data: series.map(s => s.name), bottom: 0 },
+      grid: { left: 60, right: 20, top: 48, bottom: 74 },
+      xAxis: { type: 'category', data: sortedDates, axisLabel: { fontSize: 10, rotate: 30 } },
+      yAxis: { type: 'value', name: '年化 Alpha (%)',
+        axisLabel: { formatter: v => v.toFixed(2) + '%' } },
+      series: series.map(s => {
+        const pts = data[s.name === '60天' ? 'rolling60' : s.name === '120天' ? 'rolling120' : 'rolling252'] || [];
+        const dateMap = new Map(pts.map(p => [p.date, p.annualizedAlpha * 100]));
+        return { ...s, data: sortedDates.map(d => dateMap.get(d) ?? null) };
+      }),
+    };
+  }, [data]);
+
+  if (loading) return <div style={{textAlign:'center',padding:40}}><Spin tip="加载 Alpha 监控..." /></div>;
+  if (error) return <Alert type="error" message={error} showIcon />;
+  if (!data) return <Alert type="info" message="暂无 Alpha 监控数据" showIcon />;
+
+  return (
+    <div>
+      {/* 衰减预警 */}
+      {data.decayAlert ? (
+        <Alert type="error" showIcon message="⚠ Alpha 衰减预警" description={data.decayWarning} style={{marginBottom:16}} />
+      ) : (
+        data.decayWarning && <Alert type="info" showIcon message="Alpha 状态" description={data.decayWarning} style={{marginBottom:16}} />
+      )}
+
+      {/* 关键指标 */}
+      <Row gutter={12} style={{marginBottom:12}}>
+        <Col span={8}>
+          <Card size="small"><Statistic title="历史 Alpha 均值" value={fmtPct(data.historicalMean || 0)}
+            valueStyle={{fontSize:20, color: (data.historicalMean||0)>=0?RED:GREEN}} /></Card>
+        </Col>
+        <Col span={8}>
+          <Card size="small"><Statistic title="近期 Alpha 均值" value={fmtPct(data.recentMean || 0)}
+            valueStyle={{fontSize:20, color: (data.recentMean||0)>=0?RED:GREEN}} /></Card>
+        </Col>
+        <Col span={8}>
+          <Card size="small"><Statistic title="衰减幅度" value={fmtPct(data.decayRatio || 0)}
+            valueStyle={{fontSize:20, color: (data.decayRatio||0)<-0.5?RED:GREEN}} /></Card>
+        </Col>
+      </Row>
+
+      {/* Alpha 曲线 */}
+      <ReactECharts option={chartOption} style={{ height: 350 }} />
+
+      <Divider style={{margin:'8px 0'}}/>
+      <Text type="secondary" style={{fontSize:11}}>
+        Alpha 滚动窗口计算：每个窗口内对超额收益 ~ 策略因子做 OLS 回归，截距项即为窗口 Alpha。
+        衰减阈值：近25%期 Alpha 均值较历史中位数下降超过 50%。
+      </Text>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 风格β 漂移监控
+// ══════════════════════════════════════════════════════════════════════════════
+function StyleMonitorPanel({ taskId }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (!taskId) return;
+    backtestApi.getStyleRolling(taskId)
+      .then(setData)
+      .catch(err => setError(err.message || '风格监控加载失败'))
+      .finally(() => setLoading(false));
+  }, [taskId]);
+
+  // SMB beta 曲线
+  const smbChartOption = useMemo(() => {
+    if (!data) return {};
+    const wn = { rolling60: '60天', rolling120: '120天', rolling252: '252天' };
+    const colors = { rolling60: '#91caff', rolling120: '#1677ff', rolling252: '#cf1322' };
+    let allDates = new Set();
+    const series = Object.entries(wn).map(([key, name]) => {
+      const pts = data[key] || [];
+      pts.forEach(p => allDates.add(p.date));
+      return { name, key, pts };
+    });
+    const sortedDates = [...allDates].sort();
+    return {
+      tooltip: { trigger: 'axis',
+        formatter: ps => ps.map(p => `${p.seriesName}: SMB β=${parseFloat(p.value).toFixed(4)}`).join('<br/>')
+      },
+      legend: { data: series.map(s => s.name), bottom: 0 },
+      grid: { left: 60, right: 20, top: 20, bottom: 74 },
+      xAxis: { type: 'category', data: sortedDates, axisLabel: { fontSize: 10, rotate: 30 } },
+      yAxis: { type: 'value', name: 'SMB β', axisLabel: { formatter: v => v.toFixed(3) } },
+      series: series.map(s => ({
+        name: s.name, type: 'line', smooth: true, symbol: 'none',
+        lineStyle: { color: colors[s.key], width: s.key==='rolling252'?2.5:1.5 },
+        itemStyle: { color: colors[s.key] },
+        data: (() => { const m = new Map(s.pts.map(p => [p.date, p.smbBeta])); return sortedDates.map(d => m.get(d)??null); })(),
+        markLine: s.key === 'rolling252' ? { silent: true, data: [{ yAxis: 0, lineStyle: { color: '#999', type: 'dashed' } }] } : undefined,
+      })),
+    };
+  }, [data]);
+
+  // HML beta 曲线
+  const hmlChartOption = useMemo(() => {
+    if (!data) return {};
+    const wn = { rolling60: '60天', rolling120: '120天', rolling252: '252天' };
+    const colors = { rolling60: '#91caff', rolling120: '#1677ff', rolling252: '#3f8600' };
+    let allDates = new Set();
+    const series = Object.entries(wn).map(([key, name]) => {
+      const pts = data[key] || [];
+      pts.forEach(p => allDates.add(p.date));
+      return { name, key, pts };
+    });
+    const sortedDates = [...allDates].sort();
+    return {
+      tooltip: { trigger: 'axis',
+        formatter: ps => ps.map(p => `${p.seriesName}: HML β=${parseFloat(p.value).toFixed(4)}`).join('<br/>')
+      },
+      legend: { data: series.map(s => s.name), bottom: 0 },
+      grid: { left: 60, right: 20, top: 20, bottom: 74 },
+      xAxis: { type: 'category', data: sortedDates, axisLabel: { fontSize: 10, rotate: 30 } },
+      yAxis: { type: 'value', name: 'HML β', axisLabel: { formatter: v => v.toFixed(3) } },
+      series: series.map(s => ({
+        name: s.name, type: 'line', smooth: true, symbol: 'none',
+        lineStyle: { color: colors[s.key], width: s.key==='rolling252'?2.5:1.5 },
+        itemStyle: { color: colors[s.key] },
+        data: (() => { const m = new Map(s.pts.map(p => [p.date, p.hmlBeta])); return sortedDates.map(d => m.get(d)??null); })(),
+        markLine: s.key === 'rolling252' ? { silent: true, data: [{ yAxis: 0, lineStyle: { color: '#999', type: 'dashed' } }] } : undefined,
+      })),
+    };
+  }, [data]);
+
+  if (loading) return <div style={{textAlign:'center',padding:40}}><Spin tip="加载风格监控..." /></div>;
+  if (error) return <Alert type="error" message={error} showIcon />;
+  if (!data) return <Alert type="info" message="暂无风格监控数据" showIcon />;
+
+  const drift = data.smbDrift || data.hmlDrift;
+
+  return (
+    <div>
+      {/* 漂移预警 */}
+      {drift ? (
+        <Alert type="error" showIcon message="⚠ 风格漂移预警" description={data.driftWarning} style={{marginBottom:16}} />
+      ) : (
+        <Alert type="success" showIcon message="风格稳定" description={data.driftWarning || '未检测到显著风格漂移'} style={{marginBottom:16}} />
+      )}
+
+      {/* 关键指标 */}
+      <Row gutter={12} style={{marginBottom:12}}>
+        <Col span={6}>
+          <Card size="small"><Statistic title="SMB 历史均值" value={fmt(data.smbHistoricalMean, 4)}
+            valueStyle={{fontSize:18, color: (data.smbHistoricalMean||0)>=0?RED:GREEN}} /></Card>
+        </Col>
+        <Col span={6}>
+          <Card size="small"><Statistic title="SMB 近期均值" value={fmt(data.smbRecentMean, 4)}
+            valueStyle={{fontSize:18, color: (data.smbRecentMean||0)>=0?RED:GREEN}} /></Card>
+        </Col>
+        <Col span={6}>
+          <Card size="small"><Statistic title="HML 历史均值" value={fmt(data.hmlHistoricalMean, 4)}
+            valueStyle={{fontSize:18, color: (data.hmlHistoricalMean||0)>=0?RED:GREEN}} /></Card>
+        </Col>
+        <Col span={6}>
+          <Card size="small"><Statistic title="HML 近期均值" value={fmt(data.hmlRecentMean, 4)}
+            valueStyle={{fontSize:18, color: (data.hmlRecentMean||0)>=0?RED:GREEN}} /></Card>
+        </Col>
+      </Row>
+
+      {/* SMB 曲线 */}
+      <Card size="small" title="SMB（规模因子）β 滚动序列" style={{marginBottom:12}}>
+        <ReactECharts option={smbChartOption} style={{ height: 250 }} />
+      </Card>
+
+      {/* HML 曲线 */}
+      <Card size="small" title="HML（价值因子）β 滚动序列">
+        <ReactECharts option={hmlChartOption} style={{ height: 250 }} />
+      </Card>
+
+      <Divider style={{margin:'8px 0'}}/>
+      <Text type="secondary" style={{fontSize:11}}>
+        FF3 滚动回归：每个窗口内 R_excess = α + β_MKT×MKT + β_SMB×SMB + β_HML×HML + ε。
+        漂移阈值：近期均值偏离历史均值超过 1 个标准差。
       </Text>
     </div>
   );

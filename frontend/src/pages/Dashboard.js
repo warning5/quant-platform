@@ -41,7 +41,7 @@ export default function Dashboard() {
 
   const backtestColumns = [
     { title: '任务ID', dataIndex: 'id', key: 'id', width: 80 },
-    { title: '策略代码', dataIndex: 'strategyCode', key: 'code', render: v => <Text code>{v}</Text> },
+    { title: '任务名称', dataIndex: 'taskName', key: 'name', render: v => v || '-' },
     { title: '回测区间', key: 'range', render: (_, r) => `${r.startDate} ~ ${r.endDate}` },
     { title: '状态', dataIndex: 'status', key: 'st', width: 100, render: v => <Tag color={statusColors[v]}>{v}</Tag> },
   ];

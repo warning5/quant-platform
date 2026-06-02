@@ -28,6 +28,16 @@ const FREQ_LABEL = {
   MONTHLY: '每月',
 };
 
+// 权重分配中文映射
+const WEIGHT_MODE_LABEL = {
+  EQUAL: '等权',
+  SCORE_PROPORTIONAL: '按得分比例',
+};
+const WEIGHT_MODE_TOOLTIP = {
+  EQUAL: '每只入选股票分配相同权重，不区分因子得分高低',
+  SCORE_PROPORTIONAL: '因子得分越高的股票获得越多仓位。权重 = 该股得分 ÷ 所有入选股得分之和',
+};
+
 // 成交价模式中文映射
 const ORDER_TYPE_LABEL = {
   CLOSE: '收盘价',
@@ -461,7 +471,12 @@ export function ReportDetail({ taskId, onBack }) {
         <Descriptions column={{ xxl: 4, xl: 3, lg: 2, md: 2, sm: 1 }} size="small" bordered>
           <Descriptions.Item label="回测区间">{task.startDate} ~ {task.endDate}</Descriptions.Item>
           <Descriptions.Item label="调仓频率">{FREQ_LABEL[task.rebalanceFreq] ?? task.rebalanceFreq}</Descriptions.Item>
-          <Descriptions.Item label="权重模式">{task.weightMode}</Descriptions.Item>
+          <Descriptions.Item label="权重模式">
+            {WEIGHT_MODE_LABEL[task.weightMode] ?? task.weightMode}
+            <Tooltip title={WEIGHT_MODE_TOOLTIP[task.weightMode] || `${task.weightMode} 模式`}>
+              <QuestionCircleOutlined style={{ marginLeft: 4, color: '#999', fontSize: 12 }} />
+            </Tooltip>
+          </Descriptions.Item>
           <Descriptions.Item label="初始资金">¥{task.initialCapital ? (Number(task.initialCapital) / 10000).toFixed(1) + '万' : '-'}</Descriptions.Item>
           <Descriptions.Item label="基准指数">{task.benchmarkCode || '-'}</Descriptions.Item>
           <Descriptions.Item label="佣金率">{task.commissionRate ? (task.commissionRate * 1000).toFixed(1) + '‰' : '-'}</Descriptions.Item>

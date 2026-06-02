@@ -322,7 +322,7 @@ public class BrinsonAttributionService {
         // 解释力 = 1 - |残差| / |超额收益|（残差越小，解释力越高）
         summary.put("explanationRatio",
             Math.abs(totalExcess) > 1e-8
-                ? round4(1 - Math.abs(residual) / Math.abs(totalExcess)) : 0);
+                ? round4(Math.max(0, 1 - Math.abs(residual) / Math.abs(totalExcess))) : 0);
         // 估算交易成本：累计单向换手率 × 单边费率 0.1%（回测环境默认值）
         double estimatedTransactionCost = totalTurnover * 0.001;
         summary.put("totalTurnover", round4(totalTurnover));

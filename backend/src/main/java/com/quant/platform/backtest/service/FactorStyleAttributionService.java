@@ -59,6 +59,18 @@ public class FactorStyleAttributionService {
     private static final int QUINTILE = 5;          // 分5组，Top 20% vs Bottom 20%
     private static final double MIN_DATA_RATIO = 0.3; // 单日最少数据比例才计算因子收益
 
+    /** FF3 标准三因子 */
+    static final List<FactorDef> FF3_FACTORS = List.of(
+            new FactorDef("MKT", "市场因子", "全市场等权日收益 — 系统风险溢价"),
+            new FactorDef("SMB", "规模因子", "小市值(底30%) − 大市值(顶30%) — 小盘股溢价"),
+            new FactorDef("HML", "价值因子", "高BP(底30%) − 低BP(顶30%) — 价值股溢价")
+    );
+
+    // ──── 监控相关常量 ────
+    private static final int[] ROLLING_WINDOWS = {60, 120, 252};  // 滚动窗口大小
+    private static final double ALPHA_DECAY_THRESHOLD = -0.5;     // Alpha衰减阈值 (近N期 vs 历史均值降幅50%)
+    private static final double STYLE_DRIFT_STD = 1.0;            // 风格漂移阈值 (偏离历史均值 N 个标准差)
+
     /**
      * 因子定义
      */
@@ -224,7 +236,7 @@ public class FactorStyleAttributionService {
         // 残差 = 总超额 - Σ(因子贡献)
         double residual = totalExcess - totalFactorReturn;
         double explanationRatio = Math.abs(totalExcess) > 1e-8
-                ? 1 - Math.abs(residual) / Math.abs(totalExcess) : 0;
+                ? Math.max(0, 1 - Math.abs(residual) / Math.abs(totalExcess)) : 0;
 
         // 9. 分期间归因（按 rebalance 期间分解）
         List<Map<String, Object>> periodContributions = computePeriodContributions(
@@ -264,6 +276,8 @@ public class FactorStyleAttributionService {
         regressionDetail.put("rSquared", round4(regResult.rSquared));
         regressionDetail.put("adjRSquared", round4(regResult.adjRSquared));
         regressionDetail.put("fStatistic", round4(regResult.fStatistic));
+        regressionDetail.put("alphaTStat", round4(regResult.alphaTStat));
+        regressionDetail.put("alphaPValue", round4(regResult.alphaPValue));
         result.put("regressionDetail", regressionDetail);
 
         // 汇总
@@ -277,8 +291,13 @@ public class FactorStyleAttributionService {
         // 按期间归因
         result.put("periodContributions", periodContributions);
 
-        log.info("因子风格归因完成: taskId={}, 因子数={}, R²={}, 解释力={}, α/d={}",
-                task.getId(), factors.size(), round4(regResult.rSquared), round4(explanationRatio), round4(regResult.alpha));
+        // A1: Alpha 解读增强
+        result.put("alphaInterpretation", buildAlphaInterpretation(regResult, n));
+
+        log.info("因子风格归因完成: taskId={}, 因子数={}, R²={}, 解释力={}, α/d={}," +
+                        " α_t={}, α_p={}",
+                task.getId(), factors.size(), round4(regResult.rSquared), round4(explanationRatio),
+                round4(regResult.alpha), round4(regResult.alphaTStat), round4(regResult.alphaPValue));
 
         return result;
     }
@@ -646,7 +665,70 @@ public class FactorStyleAttributionService {
         }
         double fStatistic = sse > 1e-10 ? (ssr / k) / (sse / (n - k - 1)) : 0;
 
-        return new RegressionResult(alpha, betaOnly, tStats, rSquared, adjRSquared, fStatistic);
+        // A2: Alpha 显著性 — t-stat & p-value (双尾)
+        double alphaSe = Math.sqrt(Math.abs(covarBeta[0][0]));
+        double alphaTStat = alphaSe > 1e-10 ? alpha / alphaSe : 0;
+        double alphaPValue = computePValue(alphaTStat, n - k - 1);
+
+        return new RegressionResult(alpha, betaOnly, tStats, rSquared, adjRSquared,
+                fStatistic, alphaTStat, alphaPValue);
+    }
+
+    /**
+     * 通过 t 分布近似计算双尾 p 值 (A2)
+     * 使用 Abramowitz & Stegun 近似 (误差 < 0.002 for df >= 1)
+     */
+    private double computePValue(double t, int df) {
+        if (df <= 0) return 1.0;
+        double x = df / (df + t * t);
+        // 不完全 Beta 函数近似
+        double ibeta = regularizedIncompleteBeta(x, df / 2.0, 0.5);
+        return ibeta;
+    }
+
+    /** 正则化不完全 Beta 函数 I_x(a,b) 的近似算法 */
+    private double regularizedIncompleteBeta(double x, double a, double b) {
+        if (x <= 0) return 0;
+        if (x >= 1) return 1;
+        // 用连分数近似
+        double front = Math.exp(logGamma(a + b) - logGamma(a) - logGamma(b)
+                + a * Math.log(x) + b * Math.log(1 - x)) / a;
+        double f = 1.0, c = 1.0, d = 1.0 - (a + b) * x / (a + 1);
+        if (Math.abs(d) < 1e-30) d = 1e-30;
+        d = 1.0 / d;
+        double h = d;
+        for (int m = 1; m <= 100; m++) {
+            int m2 = 2 * m;
+            double aa = m * (b - m) * x / ((a + m2 - 1) * (a + m2));
+            d = 1.0 + aa * d;
+            if (Math.abs(d) < 1e-30) d = 1e-30;
+            c = 1.0 + aa / c;
+            if (Math.abs(c) < 1e-30) c = 1e-30;
+            d = 1.0 / d;
+            h *= d * c;
+            aa = -(a + m) * (a + b + m) * x / ((a + m2) * (a + m2 + 1));
+            d = 1.0 + aa * d;
+            if (Math.abs(d) < 1e-30) d = 1e-30;
+            c = 1.0 + aa / c;
+            if (Math.abs(c) < 1e-30) c = 1e-30;
+            d = 1.0 / d;
+            double del = d * c;
+            h *= del;
+            if (Math.abs(del - 1.0) < 1e-10) break;
+        }
+        return front * h;
+    }
+
+    /** log Gamma 函数 (Stirling 近似, 足够精确用于 Beta 函数) */
+    private double logGamma(double x) {
+        double[] coef = {76.18009172947146, -86.50532032941677,
+                24.01409824083091, -1.231739572450155,
+                0.1208650973866179e-2, -0.5395239384953e-5};
+        double y = x, tmp = x + 5.5;
+        tmp -= (x + 0.5) * Math.log(tmp);
+        double ser = 1.000000000190015;
+        for (int j = 0; j < 6; j++) ser += coef[j] / ++y;
+        return -tmp + Math.log(2.5066282746310005 * ser / x);
     }
 
     /**
@@ -760,6 +842,761 @@ public class FactorStyleAttributionService {
             double[] tStats,
             double rSquared,
             double adjRSquared,
-            double fStatistic
+            double fStatistic,
+            double alphaTStat,     // Alpha 的 t 统计量 (A2)
+            double alphaPValue     // Alpha 的 p 值 (A2, 双尾)
     ) {}
+
+    private record FF3AttributionResult(
+            double marketBeta, double marketTStat, boolean marketSig,
+            double sizeBeta, double sizeTStat, boolean sizeSig,
+            double valueBeta, double valueTStat, boolean valueSig,
+            double alpha, double alphaTStat, double alphaPValue,
+            double rSquared, double adjRSquared, double fStatistic,
+            double totalExcess, double totalFactorContrib, double residual,
+            double explanationRatio
+    ) {}
+
+    // ──── 监控相关记录 ────
+
+    /** Alpha 滚动窗口单点 */
+    private record AlphaWindowPoint(LocalDate date, double alpha, double annualizedAlpha,
+                                     double rSquared, int windowDays) {}
+
+    /** Alpha 监控完整结果 */
+    public record AlphaMonitorResult(
+            List<AlphaWindowPoint> rolling60, List<AlphaWindowPoint> rolling120,
+            List<AlphaWindowPoint> rolling252, boolean decayAlert,
+            String decayWarning, double historicalMean, double recentMean,
+            double decayRatio
+    ) {}
+
+    /** 风格β滚动窗口单点 */
+    private record StyleBetaPoint(LocalDate date, double smbBeta, double hmlBeta,
+                                   double marketBeta, double rSquared, int windowDays) {}
+
+    /** 风格β监控完整结果 */
+    public record StyleMonitorResult(
+            List<StyleBetaPoint> rolling60, List<StyleBetaPoint> rolling120,
+            List<StyleBetaPoint> rolling252, boolean smbDrift, boolean hmlDrift,
+            String driftWarning, double smbHistoricalMean, double smbRecentMean,
+            double hmlHistoricalMean, double hmlRecentMean
+    ) {}
+
+    // ════════════════════════════════════════════════════════════════
+    // A4+A5: FF3 归因模式 + 风格暴露报告
+    // ════════════════════════════════════════════════════════════════
+
+    /**
+     * FF3 三因子归因：用标准 MKT/SMB/HML 回归组合超额收益，输出风格暴露报告。
+     * <p>
+     * 复用 compute() 的净值解析和超额收益计算逻辑，因子集切换为 FF3_FACTORS。
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> computeFF3(BacktestTask task,
+                                          String positionHistoryJson,
+                                          String equityCurveJson,
+                                          String benchmarkCurveJson) {
+        // 1. 解析净值数据（复用现有逻辑）
+        List<Map<String, Object>> equityCurve, benchmarkCurve;
+        try {
+            equityCurve = objectMapper.readValue(equityCurveJson != null ? equityCurveJson : "[]", List.class);
+            benchmarkCurve = objectMapper.readValue(benchmarkCurveJson != null ? benchmarkCurveJson : "[]", List.class);
+        } catch (Exception e) {
+            throw new BusinessException("FF3 数据解析失败: " + e.getMessage());
+        }
+
+        Map<LocalDate, Double> stratNav = buildNavMap(equityCurve);
+        Map<LocalDate, Double> benchNav = buildNavMap(benchmarkCurve);
+        if (stratNav.isEmpty()) throw new BusinessException("净值曲线数据为空");
+
+        List<LocalDate> sortedDates = new ArrayList<>(stratNav.keySet());
+        sortedDates.sort(Comparator.naturalOrder());
+
+        List<DailyExcess> dailyExcessList = new ArrayList<>();
+        for (int i = 1; i < sortedDates.size(); i++) {
+            LocalDate d = sortedDates.get(i), prev = sortedDates.get(i - 1);
+            double stratRet = stratNav.get(d) / stratNav.get(prev) - 1;
+            Double bNav = benchNav.get(d), bNavPrev = benchNav.get(prev);
+            double benchRet = (bNav != null && bNavPrev != null && bNavPrev > 0)
+                    ? bNav / bNavPrev - 1 : 0;
+            dailyExcessList.add(new DailyExcess(d, stratRet - benchRet));
+        }
+
+        // 2. 计算 FF3 因子日收益
+        LocalDate minDate = sortedDates.getFirst(), maxDate = sortedDates.getLast();
+        Map<LocalDate, Map<String, Double>> factorDailyReturns
+                = computeFF3FactorReturns(minDate, maxDate);
+
+        // 3. 对齐日期并回归
+        List<DailyExcess> alignedExcess = new ArrayList<>();
+        List<double[]> alignedFactors = new ArrayList<>();
+        for (DailyExcess de : dailyExcessList) {
+            Map<String, Double> fr = factorDailyReturns.get(de.date);
+            if (fr == null) continue;
+            double[] row = new double[3];
+            boolean allPresent = true;
+            for (int f = 0; f < 3; f++) {
+                Double v = fr.get(FF3_FACTORS.get(f).code);
+                if (v == null || Double.isNaN(v)) { allPresent = false; break; }
+                row[f] = v;
+            }
+            if (!allPresent) continue;
+            alignedExcess.add(de);
+            alignedFactors.add(row);
+        }
+
+        int n = alignedExcess.size();
+        if (n < 10) throw new BusinessException("FF3 有效数据点不足: " + n + "天");
+        RegressionResult reg = runOLS(alignedExcess, alignedFactors, n, 3);
+
+        // 4. 计算各因子贡献
+        List<Map<String, Object>> styleContributions = new ArrayList<>();
+        String[] styleNames = {"市场(MKT)", "规模(SMB)", "价值(HML)"};
+        double totalFactorContrib = 0;
+
+        for (int f = 0; f < 3; f++) {
+            double cumFactorRet = 0;
+            for (double[] row : alignedFactors) cumFactorRet += row[f];
+            double contribution = reg.betas[f] * cumFactorRet;
+            totalFactorContrib += contribution;
+
+            Map<String, Object> sc = new LinkedHashMap<>();
+            sc.put("factorCode", FF3_FACTORS.get(f).code);
+            sc.put("factorName", FF3_FACTORS.get(f).name);
+            sc.put("styleName", styleNames[f]);
+            sc.put("description", FF3_FACTORS.get(f).description);
+            sc.put("beta", round4(reg.betas[f]));
+            sc.put("tStat", round4(reg.tStats[f]));
+            sc.put("significant", Math.abs(reg.tStats[f]) >= 1.96);
+            sc.put("totalFactorReturn", round4(cumFactorRet));
+            sc.put("annualizedFactorReturn", round4(cumFactorRet / n * 252));
+            sc.put("contribution", round4(contribution));
+            sc.put("contributionPct", round4(Math.abs(contribution / (Math.abs(totalFactorContrib) + 1e-8)) * 100));
+            styleContributions.add(sc);
+        }
+
+        // 按贡献绝对值排序
+        styleContributions.sort((a, b) ->
+                Double.compare(Math.abs(((Number) b.get("contribution")).doubleValue()),
+                               Math.abs(((Number) a.get("contribution")).doubleValue())));
+
+        double totalExcess = alignedExcess.stream().mapToDouble(de -> de.excess).sum();
+        double residual = totalExcess - totalFactorContrib;
+
+        // FF3 的解释力直接使用回归 R²，而非自定义公式（自定义公式在超额很小时异常）
+        double explanationRatio = reg.rSquared;
+
+        // 5. 风格偏向解读
+        String styleBias = buildStyleBiasDescription(reg);
+
+        // 6. 组装结果
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("taskId", task.getId());
+        result.put("model", "FF3");
+        result.put("modelDescription", "Fama-French 三因子风格归因");
+        result.put("observationDays", n);
+
+        result.put("styleContributions", styleContributions);
+        result.put("styleBias", styleBias);
+
+        Map<String, Object> regDetail = new LinkedHashMap<>();
+        regDetail.put("alpha", round4(reg.alpha));
+        regDetail.put("annualizedAlpha", round4(reg.alpha * 252));
+        regDetail.put("alphaTStat", round4(reg.alphaTStat));
+        regDetail.put("alphaPValue", round4(reg.alphaPValue));
+        regDetail.put("alphaSignificant", Math.abs(reg.alphaTStat) >= 1.96);
+        regDetail.put("rSquared", round4(reg.rSquared));
+        regDetail.put("adjRSquared", round4(reg.adjRSquared));
+        regDetail.put("fStatistic", round4(reg.fStatistic));
+        result.put("regressionDetail", regDetail);
+
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("totalExcessReturn", round4(totalExcess));
+        summary.put("totalFactorContribution", round4(totalFactorContrib));
+        summary.put("residual", round4(residual));
+        summary.put("explanationRatio", round4(explanationRatio));
+        result.put("summary", summary);
+
+        // Alpha 解读 (A1)
+        result.put("alphaInterpretation", buildAlphaInterpretation(reg, n));
+
+        log.info("FF3 归因完成: taskId={}, R²={}, MKTB={}, SMBB={}, HMLB={}, α/d={}",
+                task.getId(), round4(reg.rSquared), round4(reg.betas[0]),
+                round4(reg.betas[1]), round4(reg.betas[2]), round4(reg.alpha));
+
+        return result;
+    }
+
+    /** 构建风格偏向解读（白话版，R² 感知） */
+    private String buildStyleBiasDescription(RegressionResult reg) {
+        double mktT = reg.tStats[0], smbT = reg.tStats[1], hmlT = reg.tStats[2];
+        double mktBeta = reg.betas[0];
+        double smbBeta = reg.betas[1], hmlBeta = reg.betas[2];
+        double r2 = reg.rSquared;
+        int r2Pct = (int) Math.round(r2 * 100);
+
+        StringBuilder sb = new StringBuilder();
+
+        // ── R² 分级前置说明 ──
+        boolean lowConfidence = false;
+        if (r2 < 0.30) {
+            sb.append(String.format(
+                "三因子模型无法解释该策略（R²=%d%%）——策略收益中仅%d%%与市场/市值/估值相关，" +
+                "剩余%d%%来自其他因素。这不代表策略差，而是说明它的赚钱逻辑不在传统风格框架内" +
+                "（可能来自因子选股、行业轮动或择时能力），风格标签对这类策略没有意义。",
+                r2Pct, r2Pct, 100 - r2Pct));
+            return sb.toString();
+        } else if (r2 < 0.50) {
+            lowConfidence = true;
+            sb.append(String.format("三因子模型解释力偏弱（R²=%d%%），以下风格诊断仅供参考，并非定论。", r2Pct));
+        } else if (r2 >= 0.70) {
+            sb.append(String.format("三因子模型能很好地解释策略收益（R²=%d%%），风格特征明确。", r2Pct));
+        }
+
+        // ── 风格诊断 ──
+        String prefix = lowConfidence ? "仅看有限的可解释部分，策略是个" : "策略是个";
+        sb.append(prefix);
+        // 市场β
+        if (Math.abs(mktT) >= 1.96) {
+            if (mktBeta > 0)
+                sb.append("「跟涨型」选手——大盘涨1%你就跟着涨").append(String.format("%.1f", mktBeta * 100)).append("%，");
+            else
+                sb.append("「逆向型」选手——大盘涨你反而容易跌，");
+        } else {
+            sb.append("「独立派」——牛市未必涨、熊市未必跌，跟大盘没什么关系。");
+        }
+        // 市值风格
+        if (Math.abs(smbT) >= 1.96) {
+            sb.append(smbBeta > 0 ? "偏爱小盘股（SMB=" : "偏爱大蓝筹（SMB=")
+              .append(String.format("%.2f", smbBeta)).append("），");
+        } else {
+            sb.append("选股不挑大小公司（大小票一视同仁），");
+        }
+        // 估值风格
+        if (Math.abs(hmlT) >= 1.96) {
+            sb.append(hmlBeta > 0 ? "偏好捡便宜货（低PE/PB）。" : "愿意为成长付溢价（高估值）。");
+        } else {
+            sb.append("不看股票贵贱（估值高低都能接受）。");
+        }
+
+        return sb.toString();
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // A3: FF3 因子日收益计算（MKT/SMB/HML）
+    // ════════════════════════════════════════════════════════════════
+
+    /**
+     * 计算 FF3 标准三因子的每日多空收益，结果存入 factor_premium 表。
+     */
+    Map<LocalDate, Map<String, Double>> computeFF3FactorReturns(
+            LocalDate startDate, LocalDate endDate) {
+
+        if (!clickHouseConfig.isEnabled())
+            throw new BusinessException("ClickHouse 不可用");
+
+        // 1. 从 CH 加载 stock_daily 日收益
+        String sql = String.format("""
+                SELECT code, trade_date, close_price / pre_close - 1 AS daily_ret
+                FROM stock.stock_daily FINAL
+                WHERE trade_date >= '%s' AND trade_date <= '%s'
+                  AND pre_close > 0 AND close_price > 0
+                ORDER BY trade_date
+                """, startDate, endDate);
+
+        Map<LocalDate, Map<String, Double>> dailyRetsByDate = new LinkedHashMap<>();
+        try (Connection conn = DriverManager.getConnection(clickHouseConfig.getJdbcUrl());
+             Statement stmt = conn.createStatement()) {
+            stmt.setFetchSize(50000);
+            try (ResultSet rs = stmt.executeQuery(sql)) {
+                while (rs.next()) {
+                    String code = rs.getString("code");
+                    if (code.startsWith("8") || code.startsWith("4") || code.startsWith("2")) continue; // 排除北交所/B股
+                    LocalDate d = rs.getDate("trade_date").toLocalDate();
+                    double ret = rs.getDouble("daily_ret");
+                    if (rs.wasNull() || Double.isNaN(ret)) continue;
+                    dailyRetsByDate.computeIfAbsent(d, k -> new HashMap<>()).put(code, ret);
+                }
+            }
+        } catch (Exception e) {
+            log.error("CH stock_daily 查询失败: {}", e.getMessage(), e);
+            throw new BusinessException("CH 行情查询失败: " + e.getMessage());
+        }
+
+        // 2. 从 MySQL stock_info 加载市值和 PB
+        Map<String, double[]> stockInfoMap = new HashMap<>(); // code -> [total_market_cap, pb]
+        try {
+            jdbcTemplate.query(
+                    "SELECT code, total_market_cap, pb FROM stock_info WHERE total_market_cap IS NOT NULL",
+                    (rs) -> {
+                        String code = rs.getString("code");
+                        double mcap = rs.getDouble("total_market_cap");
+                        double pb = rs.getDouble("pb");
+                        if (!rs.wasNull() && mcap > 0) {
+                            stockInfoMap.put(code, new double[]{mcap, rs.wasNull() ? 0 : pb});
+                        }
+                    });
+        } catch (Exception e) {
+            log.warn("MySQL stock_info 查询失败: {}", e.getMessage());
+        }
+
+        log.info("FF3 因子计算: CH daily数据 {}天, MySQL stock_info {}只",
+                dailyRetsByDate.size(), stockInfoMap.size());
+
+        // 3. 逐日计算三个因子
+        Map<LocalDate, Map<String, Double>> result = new LinkedHashMap<>();
+        List<Map<String, Object>> premiumRows = new ArrayList<>();
+        int minStocks = 200;
+
+        for (Map.Entry<LocalDate, Map<String, Double>> entry : dailyRetsByDate.entrySet()) {
+            LocalDate date = entry.getKey();
+            Map<String, Double> dayRets = entry.getValue();
+
+            // 过滤：仅保留 stock_info 中有市值数据的股票
+            List<StockDayData> dayData = new ArrayList<>();
+            for (Map.Entry<String, Double> e : dayRets.entrySet()) {
+                double[] info = stockInfoMap.get(e.getKey());
+                if (info == null) continue;
+                dayData.add(new StockDayData(e.getKey(), e.getValue(), info[0], info[1]));
+            }
+            if (dayData.size() < minStocks) continue;
+
+            // MKT: 全市场等权收益
+            double mkt = dayData.stream().mapToDouble(d -> d.dailyRet).average().orElse(0);
+
+            // SMB: 按市值排序，底30% vs 顶30%
+            dayData.sort(Comparator.comparingDouble(a -> a.marketCap));
+            int n = dayData.size(), q = n / 3; // 30%
+            if (q < 10) continue;
+            double smbTop = 0, smbBot = 0;
+            for (int i = 0; i < q; i++) smbBot += dayData.get(i).dailyRet;
+            for (int i = n - q; i < n; i++) smbTop += dayData.get(i).dailyRet;
+            double smb = smbBot / q - smbTop / q;
+
+            // HML: 按 PB 排序（PB 越小=越价值），底30%(低PB/价值) vs 顶30%(高PB/成长)
+            // PB <= 0 的排到最末尾（视为不可比）
+            dayData.sort((a, b) -> {
+                if (a.pb <= 0 && b.pb <= 0) return 0;
+                if (a.pb <= 0) return 1;
+                if (b.pb <= 0) return -1;
+                return Double.compare(a.pb, b.pb);
+            });
+            int validN = (int) dayData.stream().filter(d -> d.pb > 0).count();
+            if (validN < q * 2) continue;
+
+            double hmlLow = 0, hmlHigh = 0;
+            for (int i = 0; i < q; i++) hmlLow += dayData.get(i).dailyRet;
+            for (int i = Math.max(validN - q, 0); i < validN; i++) hmlHigh += dayData.get(i).dailyRet;
+            double hml = hmlLow / q - hmlHigh / q;
+
+            Map<String, Double> dayResult = new LinkedHashMap<>();
+            dayResult.put("MKT", round4(mkt));
+            dayResult.put("SMB", round4(smb));
+            dayResult.put("HML", round4(hml));
+            result.put(date, dayResult);
+
+            // 保存到 premium 行
+            premiumRows.add(makePremiumRow("MKT", date, mkt, n, mkt, 0));
+            premiumRows.add(makePremiumRow("SMB", date, smb, n, smbBot / q, smbTop / q));
+            premiumRows.add(makePremiumRow("HML", date, hml, n, hmlLow / q, hmlHigh / q));
+        }
+
+        // 4. 持久化 (M5)
+        saveFactorPremiums(premiumRows);
+
+        log.info("FF3 因子计算完成: {} 个交易日 ({} ~ {})",
+                result.size(), startDate, endDate);
+        return result;
+    }
+
+    /** 股票日数据辅助类 */
+    private record StockDayData(String code, double dailyRet, double marketCap, double pb) {}
+
+    /** 构建 factor_premium 表写入行 */
+    private Map<String, Object> makePremiumRow(String factorCode, LocalDate date,
+                                                double factorReturn, int stockCount,
+                                                double topRet, double bottomRet) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("factor_code", factorCode);
+        row.put("calc_date", date);
+        row.put("factor_return", factorReturn);
+        row.put("stock_count", stockCount);
+        row.put("top_return", topRet);
+        row.put("bottom_return", bottomRet);
+        row.put("update_time", java.time.LocalDateTime.now().withNano(0).toString().replace('T', ' '));
+        return row;
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // M5: factor_premium 表持久化
+    // ════════════════════════════════════════════════════════════════
+
+    /**
+     * 将因子日收益批量写入 ClickHouse factor_premium 表。
+     * 使用 ReplacingMergeTree 的 INSERT 覆盖（幂等写入）。
+     */
+    private void saveFactorPremiums(List<Map<String, Object>> rows) {
+        if (rows == null || rows.isEmpty()) return;
+        try (Connection conn = DriverManager.getConnection(clickHouseConfig.getJdbcUrl());
+             Statement stmt = conn.createStatement()) {
+
+            // 构建批量 INSERT VALUES
+            StringBuilder sb = new StringBuilder("INSERT INTO stock.factor_premium VALUES ");
+            for (int i = 0; i < rows.size(); i++) {
+                if (i > 0) sb.append(", ");
+                Map<String, Object> r = rows.get(i);
+                sb.append(String.format("('%s', '%s', %s, %s, %s, %s, '%s')",
+                        r.get("factor_code"), r.get("calc_date"),
+                        r.get("factor_return"), r.get("stock_count"),
+                        r.get("top_return"), r.get("bottom_return"),
+                        r.get("update_time").toString().replace('T', ' ')));
+            }
+            stmt.execute(sb.toString());
+            log.info("factor_premium 写入完成: {} 行", rows.size());
+        } catch (Exception e) {
+            log.error("factor_premium 写入失败: {}", e.getMessage(), e);
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // M1+M2: Alpha 滚动窗口 + 衰减预警
+    // ════════════════════════════════════════════════════════════════
+
+    /**
+     * 计算 Alpha 滚动窗口（基于策略因子集）
+     * <p>
+     * 对每个滚动窗口：超额收益 ~ 策略因子 OLS 回归 → 窗口 Alpha。
+     * 三个窗口 (60/120/252天) 的 Alpha 序列联合分析衰减趋势。
+     */
+    @SuppressWarnings("unchecked")
+    public AlphaMonitorResult computeRollingAlpha(BacktestTask task,
+                                                   String equityCurveJson,
+                                                   String benchmarkCurveJson) {
+        List<Map<String, Object>> equityCurve, benchmarkCurve;
+        try {
+            equityCurve = objectMapper.readValue(equityCurveJson != null ? equityCurveJson : "[]", List.class);
+            benchmarkCurve = objectMapper.readValue(benchmarkCurveJson != null ? benchmarkCurveJson : "[]", List.class);
+        } catch (Exception e) {
+            throw new BusinessException("数据解析失败: " + e.getMessage());
+        }
+
+        Map<LocalDate, Double> stratNav = buildNavMap(equityCurve);
+        Map<LocalDate, Double> benchNav = buildNavMap(benchmarkCurve);
+        if (stratNav.isEmpty()) throw new BusinessException("净值数据为空");
+
+        List<LocalDate> sortedDates = new ArrayList<>(stratNav.keySet());
+        sortedDates.sort(Comparator.naturalOrder());
+
+        // 计算每日超额收益
+        List<DailyExcess> dailyExcessList = new ArrayList<>();
+        for (int i = 1; i < sortedDates.size(); i++) {
+            LocalDate d = sortedDates.get(i), prev = sortedDates.get(i - 1);
+            double stratRet = stratNav.get(d) / stratNav.get(prev) - 1;
+            Double bNav = benchNav.get(d), bNavPrev = benchNav.get(prev);
+            double benchRet = (bNav != null && bNavPrev != null && bNavPrev > 0)
+                    ? bNav / bNavPrev - 1 : 0;
+            dailyExcessList.add(new DailyExcess(d, stratRet - benchRet));
+        }
+
+        if (dailyExcessList.size() < 60)
+            throw new BusinessException("数据不足: " + dailyExcessList.size() + "天 (需要≥60天)");
+
+        // 加载策略因子日收益
+        List<FactorDef> factors = loadStrategyFactors(task.getStrategyId());
+        LocalDate minDate = sortedDates.getFirst(), maxDate = sortedDates.getLast();
+        Map<LocalDate, Map<String, Double>> factorDailyReturns
+                = computeFactorDailyReturns(minDate, maxDate, factors);
+
+        // 对齐因子数据
+        Map<LocalDate, double[]> alignedFactorMap = new HashMap<>();
+        for (DailyExcess de : dailyExcessList) {
+            Map<String, Double> fr = factorDailyReturns.get(de.date);
+            if (fr == null) continue;
+            double[] row = new double[factors.size()];
+            boolean allPresent = true;
+            for (int f = 0; f < factors.size(); f++) {
+                Double v = fr.get(factors.get(f).code);
+                if (v == null || Double.isNaN(v)) { allPresent = false; break; }
+                row[f] = v;
+            }
+            if (!allPresent) continue;
+            alignedFactorMap.put(de.date, row);
+        }
+
+        // 对每个窗口大小计算滚动 Alpha
+        AlphaMonitorResult result = computeRollingAlphaForWindows(
+                dailyExcessList, alignedFactorMap, factors.size(), ROLLING_WINDOWS);
+
+        log.info("Alpha 滚动监控完成: taskId={}, decayAlert={}", task.getId(), result.decayAlert);
+        return result;
+    }
+
+    private AlphaMonitorResult computeRollingAlphaForWindows(
+            List<DailyExcess> excesses, Map<LocalDate, double[]> factorMap,
+            int factorCount, int[] windows) {
+
+        List<AlphaWindowPoint>[] results = new List[windows.length];
+        for (int w = 0; w < windows.length; w++) {
+            results[w] = new ArrayList<>();
+            int win = windows[w];
+
+            for (int start = 0; start + win <= excesses.size(); start++) {
+                int end = start + win;
+                List<DailyExcess> winExcess = new ArrayList<>();
+                List<double[]> winFactors = new ArrayList<>();
+
+                for (int i = start; i < end; i++) {
+                    DailyExcess de = excesses.get(i);
+                    double[] frow = factorMap.get(de.date);
+                    if (frow == null) break;
+                    winExcess.add(de);
+                    winFactors.add(frow);
+                }
+                if (winExcess.size() < Math.max(20, win / 2)) continue; // 数据充足度检查
+
+                RegressionResult reg = runOLS(winExcess, winFactors, winExcess.size(), factorCount);
+                results[w].add(new AlphaWindowPoint(
+                        excesses.get(end - 1).date, round4(reg.alpha),
+                        round4(reg.alpha * 252), round4(reg.rSquared), win));
+            }
+        }
+
+        // 衰减检测 (基于252天窗口，若数据不足则退而求其次)
+        List<AlphaWindowPoint> primaryWindow = results[2].size() >= 10 ? results[2]
+                : results[1].size() >= 10 ? results[1] : results[0];
+        return detectAlphaDecay(primaryWindow, results[0], results[1], results[2]);
+    }
+
+    /** 检测 Alpha 衰减 */
+    private AlphaMonitorResult detectAlphaDecay(
+            List<AlphaWindowPoint> primary, List<AlphaWindowPoint> r60,
+            List<AlphaWindowPoint> r120, List<AlphaWindowPoint> r252) {
+
+        boolean decayAlert = false;
+        String decayWarning = "Alpha 稳定，未检测到显著衰减";
+        double historicalMean = 0, recentMean = 0, decayRatio = 0;
+
+        if (primary.size() >= 10) {
+            // 历史均值 = 全部数据分布中位数，更鲁棒
+            List<Double> alphas = primary.stream().map(p -> p.alpha).sorted().collect(Collectors.toList());
+            int mid = alphas.size() / 2;
+            historicalMean = alphas.size() % 2 == 0
+                    ? (alphas.get(mid - 1) + alphas.get(mid)) / 2 : alphas.get(mid);
+
+            // 近25%期均值 = 最近 quarter 的平均
+            int recentN = Math.max(3, primary.size() / 4);
+            recentMean = primary.subList(primary.size() - recentN, primary.size())
+                    .stream().mapToDouble(p -> p.alpha).average().orElse(0);
+
+            decayRatio = Math.abs(historicalMean) > 1e-8
+                    ? (recentMean - historicalMean) / Math.abs(historicalMean) : 0;
+
+            if (decayRatio < ALPHA_DECAY_THRESHOLD) {
+                decayAlert = true;
+                decayWarning = String.format(
+                        "⚠ Alpha 显著衰减：近 %d 期均值 %.4f vs 历史均值 %.4f (降幅 %.1f%%)。建议排查策略有效性。",
+                        recentN, recentMean, historicalMean, Math.abs(decayRatio) * 100);
+            } else if (decayRatio < -0.2) {
+                decayWarning = String.format(
+                        "Alpha 轻微走弱：近期均值 %.4f vs 历史均值 %.4f (降幅 %.1f%%)，需持续观察。",
+                        recentMean, historicalMean, Math.abs(decayRatio) * 100);
+            }
+        }
+
+        return new AlphaMonitorResult(r60, r120, r252, decayAlert, decayWarning,
+                round4(historicalMean), round4(recentMean), round4(decayRatio));
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // M3+M4: FF3 风格β滚动窗口 + 漂移预警
+    // ════════════════════════════════════════════════════════════════
+
+    /**
+     * FF3 风格β滚动监控：对每个窗口做 FF3 回归，输出 SMB/HML beta 序列，检测风格漂移。
+     */
+    @SuppressWarnings("unchecked")
+    public StyleMonitorResult computeRollingStyleBeta(BacktestTask task,
+                                                       String equityCurveJson,
+                                                       String benchmarkCurveJson) {
+        List<Map<String, Object>> equityCurve, benchmarkCurve;
+        try {
+            equityCurve = objectMapper.readValue(equityCurveJson != null ? equityCurveJson : "[]", List.class);
+            benchmarkCurve = objectMapper.readValue(benchmarkCurveJson != null ? benchmarkCurveJson : "[]", List.class);
+        } catch (Exception e) {
+            throw new BusinessException("数据解析失败: " + e.getMessage());
+        }
+
+        Map<LocalDate, Double> stratNav = buildNavMap(equityCurve);
+        Map<LocalDate, Double> benchNav = buildNavMap(benchmarkCurve);
+        if (stratNav.isEmpty()) throw new BusinessException("净值数据为空");
+
+        List<LocalDate> sortedDates = new ArrayList<>(stratNav.keySet());
+        sortedDates.sort(Comparator.naturalOrder());
+
+        List<DailyExcess> dailyExcessList = new ArrayList<>();
+        for (int i = 1; i < sortedDates.size(); i++) {
+            LocalDate d = sortedDates.get(i), prev = sortedDates.get(i - 1);
+            double stratRet = stratNav.get(d) / stratNav.get(prev) - 1;
+            Double bNav = benchNav.get(d), bNavPrev = benchNav.get(prev);
+            double benchRet = (bNav != null && bNavPrev != null && bNavPrev > 0)
+                    ? bNav / bNavPrev - 1 : 0;
+            dailyExcessList.add(new DailyExcess(d, stratRet - benchRet));
+        }
+        if (dailyExcessList.size() < 60)
+            throw new BusinessException("数据不足: " + dailyExcessList.size() + "天 (需要≥60天)");
+
+        // 计算 FF3 因子
+        LocalDate minDate = sortedDates.getFirst(), maxDate = sortedDates.getLast();
+        Map<LocalDate, Map<String, Double>> ff3Returns = computeFF3FactorReturns(minDate, maxDate);
+
+        // 对齐
+        Map<LocalDate, double[]> alignedFF3 = new HashMap<>();
+        for (DailyExcess de : dailyExcessList) {
+            Map<String, Double> fr = ff3Returns.get(de.date);
+            if (fr == null) continue;
+            Double mkt = fr.get("MKT"), smb = fr.get("SMB"), hml = fr.get("HML");
+            if (mkt == null || smb == null || hml == null) continue;
+            alignedFF3.put(de.date, new double[]{mkt, smb, hml});
+        }
+
+        // 滚动窗口
+        List<StyleBetaPoint>[] results = new List[3];
+        for (int w = 0; w < 3; w++) {
+            results[w] = new ArrayList<>();
+            int win = ROLLING_WINDOWS[w];
+            for (int start = 0; start + win <= dailyExcessList.size(); start++) {
+                int end = start + win;
+                List<DailyExcess> winExcess = new ArrayList<>();
+                List<double[]> winFactors = new ArrayList<>();
+                for (int i = start; i < end; i++) {
+                    DailyExcess de = dailyExcessList.get(i);
+                    double[] frow = alignedFF3.get(de.date);
+                    if (frow == null) break;
+                    winExcess.add(de);
+                    winFactors.add(frow);
+                }
+                if (winExcess.size() < Math.max(20, win / 2)) continue;
+                RegressionResult reg = runOLS(winExcess, winFactors, winExcess.size(), 3);
+                results[w].add(new StyleBetaPoint(
+                        dailyExcessList.get(end - 1).date,
+                        round4(reg.betas[1]), round4(reg.betas[2]),
+                        round4(reg.betas[0]), round4(reg.rSquared), win));
+            }
+        }
+
+        // 漂移检测
+        return detectStyleDrift(results[0], results[1], results[2]);
+    }
+
+    /** 检测风格漂移 */
+    private StyleMonitorResult detectStyleDrift(
+            List<StyleBetaPoint> r60, List<StyleBetaPoint> r120, List<StyleBetaPoint> r252) {
+
+        List<StyleBetaPoint> primary = r252.size() >= 10 ? r252 : r120.size() >= 10 ? r120 : r60;
+
+        boolean smbDrift = false, hmlDrift = false;
+        double smbHistMean = 0, smbRecentMean = 0, hmlHistMean = 0, hmlRecentMean = 0;
+        String driftWarning = "风格暴露稳定，未检测到显著漂移";
+
+        if (primary.size() >= 10) {
+            // SMB
+            double[] smbSeries = primary.stream().mapToDouble(p -> p.smbBeta).toArray();
+            final double smbMean = Arrays.stream(smbSeries).average().orElse(0);
+            smbHistMean = smbMean;
+            double smbStd = Math.sqrt(Arrays.stream(smbSeries)
+                    .map(x -> (x - smbMean) * (x - smbMean)).average().orElse(0));
+
+            int sN = Math.max(3, primary.size() / 4);
+            smbRecentMean = Arrays.stream(smbSeries, smbSeries.length - sN, smbSeries.length)
+                    .average().orElse(0);
+
+            if (smbStd > 1e-8 && Math.abs(smbRecentMean - smbMean) > STYLE_DRIFT_STD * smbStd) {
+                smbDrift = true;
+            }
+
+            // HML
+            double[] hmlSeries = primary.stream().mapToDouble(p -> p.hmlBeta).toArray();
+            final double hmlMean = Arrays.stream(hmlSeries).average().orElse(0);
+            hmlHistMean = hmlMean;
+            double hmlStd = Math.sqrt(Arrays.stream(hmlSeries)
+                    .map(x -> (x - hmlMean) * (x - hmlMean)).average().orElse(0));
+
+            int hN = Math.max(3, primary.size() / 4);
+            hmlRecentMean = Arrays.stream(hmlSeries, hmlSeries.length - hN, hmlSeries.length)
+                    .average().orElse(0);
+
+            if (hmlStd > 1e-8 && Math.abs(hmlRecentMean - hmlHistMean) > STYLE_DRIFT_STD * hmlStd) {
+                hmlDrift = true;
+            }
+
+            if (smbDrift || hmlDrift) {
+                StringBuilder sb = new StringBuilder("⚠ 风格漂移预警：");
+                if (smbDrift)
+                    sb.append(String.format("规模暴露偏移 (%.2f→%.2f)", smbHistMean, smbRecentMean));
+                if (smbDrift && hmlDrift) sb.append("; ");
+                if (hmlDrift)
+                    sb.append(String.format("价值暴露偏移 (%.2f→%.2f)", hmlHistMean, hmlRecentMean));
+                sb.append("。请检查策略是否出现风格切换。");
+                driftWarning = sb.toString();
+            }
+        }
+
+        return new StyleMonitorResult(r60, r120, r252, smbDrift, hmlDrift,
+                driftWarning, round4(smbHistMean), round4(smbRecentMean),
+                round4(hmlHistMean), round4(hmlRecentMean));
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // A1+A2: Alpha 解读增强 + 显著性检验
+    // ════════════════════════════════════════════════════════════════
+
+    /**
+     * 构建 Alpha 解读摘要 (A1)
+     */
+    private Map<String, Object> buildAlphaInterpretation(RegressionResult reg, int observationDays) {
+        Map<String, Object> interp = new LinkedHashMap<>();
+        interp.put("alphaPerDay", round4(reg.alpha));
+        interp.put("annualizedAlpha", round4(reg.alpha * 252));
+        interp.put("alphaTStat", round4(reg.alphaTStat));
+        interp.put("alphaPValue", round4(reg.alphaPValue));
+        interp.put("alphaSignificant", Math.abs(reg.alphaTStat) >= 1.96);
+
+        double pct = reg.alpha * observationDays * 100; // 全期 Alpha 贡献百分比
+        interp.put("totalAlphaPct", round4(pct));
+
+        // 解读文案（R² 感知）
+        String interpretation;
+        double r2 = reg.rSquared;
+        int r2Pct = (int) Math.round(r2 * 100);
+
+        if (r2 < 0.30) {
+            interpretation = String.format(
+                    "模型解释力弱（R²=%d%%），因子模型覆盖不足，无论 Alpha 是否显著，" +
+                    "超额收益来源无法通过当前因子框架判断——%d%% 的收益变动来自其他因素。",
+                    r2Pct, 100 - r2Pct);
+        } else if (Math.abs(reg.alphaTStat) >= 2.58) {
+            interpretation = String.format(
+                    "Alpha 高度显著 (t=%.2f, p=%.4f)，日均 Alpha=%.4f%%，年化 %.2f%%。" +
+                    "超额收益中有显著部分来自策略本身的选股/择时能力，非运气所致。",
+                    reg.alphaTStat, reg.alphaPValue, reg.alpha * 100, reg.alpha * 252 * 100);
+        } else if (Math.abs(reg.alphaTStat) >= 1.96) {
+            interpretation = String.format(
+                    "Alpha 显著 (t=%.2f, p=%.4f)，日均 Alpha=%.4f%%。" +
+                    "策略有一定超额选股能力，但须结合样本外验证确认。",
+                    reg.alphaTStat, reg.alphaPValue, reg.alpha * 100);
+        } else {
+            interpretation = String.format(
+                    "Alpha 不显著 (t=%.2f, p=%.4f)，超额收益主要由因子暴露驱动。" +
+                    "策略无证据表明存在独立选股能力，表现归因于风格/因子倾斜。",
+                    reg.alphaTStat, reg.alphaPValue);
+        }
+        interp.put("interpretation", interpretation);
+
+        // 残差分解
+        double totalAlphaContrib = reg.alpha * observationDays;
+        interp.put("totalAlphaContribution", round4(totalAlphaContrib));
+
+        return interp;
+    }
 }

@@ -63,8 +63,8 @@ public class StockScreenService {
      * 执行多因子选股
      */
     public ScreenResult screen(ScreenRequest req) {
-        // ── 0. 加载策略定义因子配置（strategyId 优先，presetId 兼容）──────
-        Long sid = req.getStrategyId() != null ? req.getStrategyId() : req.getPresetId();
+        // ── 0. 加载策略定义因子配置 ─────────────────────────────────────────
+        Long sid = req.getStrategyId();
         if (sid != null && (req.getFactors() == null || req.getFactors().isEmpty())) {
             StrategyDefinition strategy = strategyDefMapper.selectById(sid);
             if (strategy != null && strategy.getFactorConfigJson() != null) {

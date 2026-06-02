@@ -53,9 +53,36 @@ function MetricBar({ report }) {
     { label: '年化收益', value: report.annualReturn, fmt: fmtPct, good: v => v > 0,
       tip: '将总收益按复利折算为年化收益率：(1 + 总收益)^(252/交易日数) − 1' },
     { label: 'Alpha', value: report.alpha, fmt: v => fmt(v, 2), good: v => v > 0,
-      tip: '策略独立于大盘的超额收益能力。>0 表示策略有真正的选股/择时价值' },
+      tip: (
+        <div style={{ maxWidth: 520, lineHeight: 1.9, fontSize: 13 }}>
+          <p style={{ margin: '0 0 6px', fontWeight: 700 }}>Alpha（阿尔法）</p>
+          <p style={{ margin: '2px 0' }}><b>含义：</b>策略收益中<u>独立于大盘涨跌的超额部分</u>。通俗讲：扣掉市场本身的涨跌后，靠自己选股/择时多赚（或少赚）的钱。</p>
+          <p style={{ margin: '2px 0' }}><b>公式：</b>Alpha = 策略收益 − β × 基准收益。比如大盘涨10%、β=0.8、策略涨15% → Alpha = 15% − 8% = <b>7%</b>（真本事多赚的）。</p>
+          <p style={{ margin: '2px 0' }}><b>阈值分级：</b><br/>
+            · &gt; 0.5 = <b>强 Alpha</b>：远超市场水平，策略有显著的独立选股能力<br/>
+            · 0.2~0.5 = <b>有 Alpha</b>：有独立超额收益，不是纯跟大盘走<br/>
+            · 0~0.2 = <b>微弱 Alpha</b>：有超额但不多，大部分跟大盘<br/>
+            · -0.2~0 = <b>无 Alpha</b>：收益完全可由大盘解释，没有独立价值<br/>
+            · &lt; -0.2 = <b>负 Alpha</b>：不仅没选股能力，还系统性跑输</p>
+          <p style={{ margin: '2px 0' }}><b>价值：</b>Alpha 是主动管理最核心的考核指标。正的、稳定的、持续的 Alpha，才是策略真正的护城河。</p>
+        </div>
+      ) },
     { label: 'Beta', value: report.beta, fmt: v => fmt(v, 2),
-      tip: '策略相对基准的系统性风险暴露。β=1 跟随大盘，>1 更激进，<1 更保守' },
+      tip: (
+        <div style={{ maxWidth: 520, lineHeight: 1.9, fontSize: 13 }}>
+          <p style={{ margin: '0 0 6px', fontWeight: 700 }}>Beta（贝塔）</p>
+          <p style={{ margin: '2px 0' }}><b>含义：</b>策略对<u>市场基准波动的敏感度</u>。通俗讲：<b>大盘涨 1%，你的策略涨多少</b>。</p>
+          <p style={{ margin: '2px 0' }}><b>公式：</b>Beta = 策略日收益率与基准日收益率的协方差 / 基准日收益率方差。</p>
+          <p style={{ margin: '2px 0' }}><b>阈值分级：</b><br/>
+            · β = 1 → <b>完全跟随大盘</b>，买指数基金就这效果<br/>
+            · β &gt; 1 → <b>激进型</b>，大盘涨跌时<u>放大波动</u>；β=1.5 意味着大盘涨1%你涨1.5%，但跌也跌更狠<br/>
+            · 0.5~1 → <b>温和型</b>，部分跟随大盘，有一定独立判断<br/>
+            · 0~0.5 → <b>防御型</b>，与大盘联动低，跌的时候抗跌<br/>
+            · β &lt; 0 → <b>反向型</b>，大盘涨你反而跌（做空策略常见）</p>
+          <p style={{ margin: '2px 0' }}><b>价值：</b>Beta 衡量的是「运气成分」——高 Beta 赚的钱可能是大盘赏的；只有高 Alpha 低 Beta，才是策略的真本事。做归因分析时，Beta 是第一个要被剥掉的东西。</p>
+          <p style={{ margin: '2px 0' }}><b>⚠ 注意：</b>Beta 来自历史回归，不能线性外推。当前市场环境变了，历史 Beta 未必有效。</p>
+        </div>
+      ) },
     { label: 'Sharpe', value: report.sharpeRatio, fmt: v => fmt(v, 2), good: v => v > 1,
       tip: '每承担1单位总风险获得的超额收益（无风险利率3%）。>1 优秀，>0.5 尚可' },
     { label: 'Sortino', value: report.sortinoRatio, fmt: v => fmt(v, 2), good: v => v > 1,
@@ -84,7 +111,7 @@ function MetricBar({ report }) {
           const isGood = m.good ? (val != null && m.good(+val)) : val != null;
           return (
             <Col key={i} style={{ textAlign: 'center', padding: '4px 8px', borderRight: i < metrics.length - 1 ? '1px solid #e8e8e8' : 'none' }}>
-              <AntTooltip title={m.tip} placement="top">
+              <AntTooltip title={m.tip} placement="top" styles={{ root: { maxWidth: 560 } }}>
                 <div style={{ fontSize: 12, color: '#888', cursor: 'default' }}>
                   {m.label}
                   {m.tip && <span style={{ marginLeft: 2, color: '#bbb', fontSize: 10 }}>ⓘ</span>}

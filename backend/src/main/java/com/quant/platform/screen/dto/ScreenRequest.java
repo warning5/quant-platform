@@ -73,12 +73,6 @@ public class ScreenRequest {
     private Long strategyId;
 
     /**
-     * @deprecated 使用 strategyId 替代
-     */
-    @Deprecated
-    private Long presetId;
-
-    /**
      * 估值面权重（买入价计算），默认 0.4
      */
     private Double valuationWeight = 0.4;
