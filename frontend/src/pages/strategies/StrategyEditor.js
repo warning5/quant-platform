@@ -34,6 +34,9 @@ export default function StrategyEditor() {
         key: i + 1,
         code: f.code || '',
         weight: f.weight || 0,
+        direction: f.direction ?? 1,
+        filterOp: f.filterOp || 'NONE',
+        filterValue: f.filterValue ?? '',
       }));
     } catch {
       return [];
@@ -43,10 +46,15 @@ export default function StrategyEditor() {
   const factorList = parseFactorConfig(factorConfig);
 
   const serializeFactors = useCallback((list) => {
-    const factors = list.map(f => ({
-      code: f.code,
-      weight: f.weight,
-    }));
+    const factors = list.map(f => {
+      const entry = { code: f.code, weight: f.weight };
+      if (f.direction !== undefined && f.direction !== 1) entry.direction = f.direction;
+      if (f.filterOp && f.filterOp !== 'NONE') {
+        entry.filterOp = f.filterOp;
+        if (f.filterValue !== undefined && f.filterValue !== '') entry.filterValue = f.filterValue;
+      }
+      return entry;
+    });
     return JSON.stringify({ factors }, null, 2);
   }, []);
 
@@ -113,6 +121,9 @@ export default function StrategyEditor() {
       key: Date.now(),
       code: available ? available.factorCode : 'RSI14',
       weight: 0.1,
+      direction: 1,
+      filterOp: 'NONE',
+      filterValue: '',
     });
     setFactorConfig(serializeFactors(list));
   };
@@ -200,14 +211,14 @@ export default function StrategyEditor() {
     },
     {
       title: '方向',
-      dataIndex: 'weight',
-      width: 70,
+      dataIndex: 'direction',
+      width: 90,
       align: 'center',
-      render: (weight, _, idx) => {
-        const dir = weight >= 0 ? 1 : -1;
+      render: (direction, _, idx) => {
+        const dir = direction ?? 1;
         return (
           <Tag color={dir > 0 ? 'red' : 'green'} style={{ cursor: 'pointer', userSelect: 'none' }}
-            onClick={() => updateFactor(idx, 'weight', -weight)}>
+            onClick={() => updateFactor(idx, 'direction', dir > 0 ? -1 : 1)}>
             {dir > 0 ? '正向 ↑' : '反向 ↓'}
           </Tag>
         );
@@ -216,16 +227,52 @@ export default function StrategyEditor() {
     {
       title: '权重',
       dataIndex: 'weight',
-      width: 100,
-      render: (weight, _, idx) => (
+      width: 90,
+      render: (weight, record, idx) => (
         <AntInputNumber
-          value={Math.abs(weight)}
+          value={Math.abs(weight || 0)}
           size="small"
           min={0}
           max={1}
           step={0.05}
           style={{ width: '100%' }}
-          onChange={v => updateFactor(idx, 'weight', v >= 0 ? v : -v)}
+          onChange={v => updateFactor(idx, 'weight', v * (record.direction ?? 1))}
+        />
+      ),
+    },
+    {
+      title: '过滤',
+      dataIndex: 'filterOp',
+      width: 95,
+      align: 'center',
+      render: (filterOp, _, idx) => (
+        <Select
+          value={filterOp || 'NONE'}
+          size="small"
+          style={{ width: '100%' }}
+          onChange={v => updateFactor(idx, 'filterOp', v)}
+        >
+          <Option value="NONE">无</Option>
+          <Option value="GT">＞ 大于</Option>
+          <Option value="GTE">≥ 大于等于</Option>
+          <Option value="LT">＜ 小于</Option>
+          <Option value="LTE">≤ 小于等于</Option>
+          <Option value="EQ">＝ 等于</Option>
+        </Select>
+      ),
+    },
+    {
+      title: '阈值',
+      dataIndex: 'filterValue',
+      width: 90,
+      render: (filterValue, _, idx) => (
+        <AntInputNumber
+          value={filterValue === undefined || filterValue === '' ? undefined : +filterValue}
+          size="small"
+          step={0.1}
+          placeholder="无"
+          style={{ width: '100%' }}
+          onChange={v => updateFactor(idx, 'filterValue', v ?? '')}
         />
       ),
     },

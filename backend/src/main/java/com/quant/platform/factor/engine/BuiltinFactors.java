@@ -19,6 +19,76 @@ import java.util.Map;
 public class BuiltinFactors {
 
     /**
+     * Wilder 平滑 EMA
+     * alpha = 2 / (period + 1)，与 Wilder 平滑等价
+     */
+    private static double wilderEma(double prevSmoothed, double value, int period) {
+        double alpha = 2.0 / (period + 1);
+        return prevSmoothed * (1 - alpha) + value * alpha;
+    }
+
+    /**
+     * DMI/ADX 核心算法（供多个计算器复用）
+     *
+     * @return [trSmooth, dmPlusSmooth, dmMinusSmooth]，全为 double
+     */
+    private static double[] computeDmiSmoothed(List<MarketDailyBar> bars, int n) {
+        int len = bars.size();
+        double[] trArr = new double[len];
+        double[] dmPlus = new double[len];
+        double[] dmMinus = new double[len];
+
+        for (int i = 0; i < len; i++) {
+            MarketDailyBar curr = bars.get(i);
+            double h = curr.getHigh().doubleValue();
+            double l = curr.getLow().doubleValue();
+
+            if (i == 0) {
+                trArr[i] = h - l;
+                dmPlus[i] = 0;
+                dmMinus[i] = 0;
+            } else {
+                MarketDailyBar prev = bars.get(i - 1);
+                double pc = prev.getClose().doubleValue();
+
+                trArr[i] = Math.max(h - l, Math.max(Math.abs(h - pc), Math.abs(l - pc)));
+
+                double upMove = h - prev.getHigh().doubleValue();
+                double downMove = prev.getLow().doubleValue() - l;
+
+                if (upMove > downMove && upMove > 0) {
+                    dmPlus[i] = upMove;
+                    dmMinus[i] = 0;
+                } else if (downMove > upMove && downMove > 0) {
+                    dmPlus[i] = 0;
+                    dmMinus[i] = downMove;
+                } else {
+                    dmPlus[i] = 0;
+                    dmMinus[i] = 0;
+                }
+            }
+        }
+
+        // Wilder 初始值 = 第一个周期的简单和
+        double trSmooth = 0, dmPSmooth = 0, dmMSmooth = 0;
+        for (int i = 0; i < n && i < len; i++) {
+            trSmooth += trArr[i];
+            dmPSmooth += dmPlus[i];
+            dmMSmooth += dmMinus[i];
+        }
+        if (trSmooth == 0) return new double[]{0, 0, 0};
+
+        // 后续用 Wilder EMA 递推
+        for (int i = n; i < len; i++) {
+            trSmooth = wilderEma(trSmooth, trArr[i], n);
+            dmPSmooth = wilderEma(dmPSmooth, dmPlus[i], n);
+            dmMSmooth = wilderEma(dmMSmooth, dmMinus[i], n);
+        }
+
+        return new double[]{trSmooth, dmPSmooth, dmMSmooth};
+    }
+
+    /**
      * 20日动量因子 (MOM20)
      */
     public static class Momentum20Calculator implements FactorCalculator {
@@ -133,6 +203,8 @@ public class BuiltinFactors {
         }
     }
 
+    // ======================== 新增动量/反转因子 ========================
+
     /**
      * 5日相对强弱指数 (RSI5)
      */
@@ -190,8 +262,6 @@ public class BuiltinFactors {
         }
     }
 
-    // ======================== 新增动量/反转因子 ========================
-
     /**
      * 5日动量因子 (MOM5)
      */
@@ -212,6 +282,8 @@ public class BuiltinFactors {
                     .divide(past.getClose(), 8, RoundingMode.HALF_UP);
         }
     }
+
+    // ======================== 新增波动率因子 ========================
 
     /**
      * 120日动量因子 (MOM120)
@@ -255,8 +327,6 @@ public class BuiltinFactors {
         }
     }
 
-    // ======================== 新增波动率因子 ========================
-
     /**
      * 5日历史波动率 (VOL5)
      */
@@ -288,6 +358,8 @@ public class BuiltinFactors {
             return BigDecimal.valueOf(vol).setScale(8, RoundingMode.HALF_UP);
         }
     }
+
+    // ======================== 新增流动性因子 ========================
 
     /**
      * 60日历史波动率 (VOL60)
@@ -366,8 +438,6 @@ public class BuiltinFactors {
         }
     }
 
-    // ======================== 新增流动性因子 ========================
-
     /**
      * Amihud非流动性因子 (AMIHUD) - 日均|收益|/成交额，值越大流动性越差
      */
@@ -400,6 +470,8 @@ public class BuiltinFactors {
             return BigDecimal.valueOf(Math.log(avgIlliq)).setScale(8, RoundingMode.HALF_UP);
         }
     }
+
+    // ======================== 新增技术因子 ========================
 
     /**
      * 换手率变化因子 (TURNOVER_CHANGE) - 近5日均换手率/前20日均换手率
@@ -464,8 +536,6 @@ public class BuiltinFactors {
             return BigDecimal.valueOf(recentAvg / pastAvg).setScale(8, RoundingMode.HALF_UP);
         }
     }
-
-    // ======================== 新增技术因子 ========================
 
     /**
      * 14日RSI (RSI14)
@@ -586,6 +656,10 @@ public class BuiltinFactors {
         }
     }
 
+    // ======================== 原有因子 ========================
+
+    // ======================== 新增：经典技术指标因子 ========================
+
     /**
      * 上影线比率 (UPPER_SHADOW) - (最高-收盘)/(最高-最低)
      */
@@ -634,10 +708,6 @@ public class BuiltinFactors {
             return BigDecimal.valueOf(mom5 - mom20).setScale(8, RoundingMode.HALF_UP);
         }
     }
-
-    // ======================== 原有因子 ========================
-
-    // ======================== 新增：经典技术指标因子 ========================
 
     /**
      * 心理线 (PSY12) - 12日内上涨天数占比×100
@@ -1130,6 +1200,8 @@ public class BuiltinFactors {
         }
     }
 
+    // ======================== 原有量价因子 ========================
+
     /**
      * 6日动量指标 (MTM6) - 当前价 - 6日前价
      */
@@ -1148,6 +1220,8 @@ public class BuiltinFactors {
             return BigDecimal.valueOf(curr - past).setScale(8, RoundingMode.HALF_UP);
         }
     }
+
+    // ======================== 新增26个技术因子 (2026-04-16) ========================
 
     /**
      * 成交量震荡 (VOSC) - (成交量MA12 - 成交量MA26) / 成交量MA26 × 100
@@ -1170,8 +1244,6 @@ public class BuiltinFactors {
             return BigDecimal.valueOf((vma12 - vma26) / vma26 * 100).setScale(8, RoundingMode.HALF_UP);
         }
     }
-
-    // ======================== 原有量价因子 ========================
 
     /**
      * 成交量价格相关性 (VPCORR20) - 量价背离因子
@@ -1211,8 +1283,6 @@ public class BuiltinFactors {
             return den == 0 ? 0 : num / den;
         }
     }
-
-    // ======================== 新增26个技术因子 (2026-04-16) ========================
 
     /**
      * ARBR 人气意愿指标 - AR = (最高价-开盘价)/(开盘价-最低价) 累计26日
@@ -1881,6 +1951,8 @@ public class BuiltinFactors {
         }
     }
 
+    // ======================== 情绪因子 (SENTIMENT) ========================
+
     /**
      * MTM_MTM 动量百分比 - MTM6 / 6日前价格
      */
@@ -1929,8 +2001,6 @@ public class BuiltinFactors {
         }
     }
 
-    // ======================== 情绪因子 (SENTIMENT) ========================
-
     /**
      * 近20日涨停次数 - pctChg >= 9.8% 视为涨停（覆盖9.8%~10%的近似涨停）
      */
@@ -1952,6 +2022,8 @@ public class BuiltinFactors {
             return BigDecimal.valueOf(count).setScale(8, RoundingMode.HALF_UP);
         }
     }
+
+    // ===== DMI / ADX 系列 =====
 
     /**
      * 换手率异常度 - 近5日均换手率 / 60日均换手率，值越大说明关注度突然升高
@@ -2029,78 +2101,6 @@ public class BuiltinFactors {
             if (ratio <= 0) return null;
             return BigDecimal.valueOf(Math.log(ratio)).setScale(8, RoundingMode.HALF_UP);
         }
-    }
-
-    // ===== DMI / ADX 系列 =====
-
-    /**
-     * Wilder 平滑 EMA
-     * alpha = 2 / (period + 1)，与 Wilder 平滑等价
-     */
-    private static double wilderEma(double prevSmoothed, double value, int period) {
-        double alpha = 2.0 / (period + 1);
-        return prevSmoothed * (1 - alpha) + value * alpha;
-    }
-
-    /**
-     * DMI/ADX 核心算法（供多个计算器复用）
-     * @return [trSmooth, dmPlusSmooth, dmMinusSmooth]，全为 double
-     */
-    private static double[] computeDmiSmoothed(List<MarketDailyBar> bars, int n) {
-        int len = bars.size();
-        double[] trArr = new double[len];
-        double[] dmPlus = new double[len];
-        double[] dmMinus = new double[len];
-
-        for (int i = 0; i < len; i++) {
-            MarketDailyBar curr = bars.get(i);
-            double h = curr.getHigh().doubleValue();
-            double l = curr.getLow().doubleValue();
-            double c = curr.getClose().doubleValue();
-
-            if (i == 0) {
-                trArr[i] = h - l;
-                dmPlus[i] = 0;
-                dmMinus[i] = 0;
-            } else {
-                MarketDailyBar prev = bars.get(i - 1);
-                double pc = prev.getClose().doubleValue();
-
-                trArr[i] = Math.max(h - l, Math.max(Math.abs(h - pc), Math.abs(l - pc)));
-
-                double upMove = h - prev.getHigh().doubleValue();
-                double downMove = prev.getLow().doubleValue() - l;
-
-                if (upMove > downMove && upMove > 0) {
-                    dmPlus[i] = upMove;
-                    dmMinus[i] = 0;
-                } else if (downMove > upMove && downMove > 0) {
-                    dmPlus[i] = 0;
-                    dmMinus[i] = downMove;
-                } else {
-                    dmPlus[i] = 0;
-                    dmMinus[i] = 0;
-                }
-            }
-        }
-
-        // Wilder 初始值 = 第一个周期的简单和
-        double trSmooth = 0, dmPSmooth = 0, dmMSmooth = 0;
-        for (int i = 0; i < n && i < len; i++) {
-            trSmooth += trArr[i];
-            dmPSmooth += dmPlus[i];
-            dmMSmooth += dmMinus[i];
-        }
-        if (trSmooth == 0) return new double[]{0, 0, 0};
-
-        // 后续用 Wilder EMA 递推
-        for (int i = n; i < len; i++) {
-            trSmooth = wilderEma(trSmooth, trArr[i], n);
-            dmPSmooth = wilderEma(dmPSmooth, dmPlus[i], n);
-            dmMSmooth = wilderEma(dmMSmooth, dmMinus[i], n);
-        }
-
-        return new double[]{trSmooth, dmPSmooth, dmMSmooth};
     }
 
     /**
@@ -2602,6 +2602,263 @@ public class BuiltinFactors {
             }
             if (sum20 == 0) return null;
             return BigDecimal.valueOf((sum5 / 5) / (sum20 / 20)).setScale(6, RoundingMode.HALF_UP);
+        }
+
+        /**
+         * RSRS 阻力支撑相对强度 (RESIST_SUPP_RATIO)
+         * 对过去 N 天的 (最高价, 最低价) 做 OLS 线性回归，取斜率 beta
+         * 再用过去 M 天的 beta 做 Z-Score 标准化
+         * N=18, M=600（约2年）
+         * 正值 = 阻力位抬升速度快于支撑位，多头信号
+         */
+        public static class RsrsCalculator implements FactorCalculator {
+            private static final int REG_WIN = 18;   // 回归窗口
+            private static final int STD_WIN = 600;   // 标准化窗口（约2年）
+
+            @Override
+            public String getFactorCode() {
+                return "RSRS";
+            }
+
+            @Override
+            public BigDecimal calculate(String symbol, LocalDate calcDate,
+                                        List<MarketDailyBar> history, Map<String, Object> context) {
+                if (history.size() < REG_WIN + 1) return null;
+                int total = history.size();
+                int avail = Math.min(total, REG_WIN + STD_WIN);  // 最多用 REG_WIN+STD_WIN 根K线
+
+                // 1. 计算全量 beta 序列（至少 REG_WIN 根才出第一个值）
+                //    从第 REG_WIN 根开始算（0-indexed: index = REG_WIN-1）
+                int firstIdx = REG_WIN - 1;
+                if (total - 1 < firstIdx) return null;
+
+                // 收集足够历史 beta 用于标准化
+                // betaWindow[i] = 第 (REG_WIN-1 + i) 根K线对应的 beta
+                int maxBetas = total - firstIdx;  // 总共能算多少个 beta
+                if (maxBetas < 2) return null;
+
+                double[] betas = new double[maxBetas];
+                for (int i = 0; i < maxBetas; i++) {
+                    int end = firstIdx + i;
+                    double beta = calcBeta(history, end - REG_WIN + 1, end + 1);
+                    if (Double.isNaN(beta)) {
+                        betas[i] = Double.NaN;
+                    } else {
+                        betas[i] = beta;
+                    }
+                }
+
+                // 2. 取最新一个 beta 做标准化
+                double latestBeta = betas[maxBetas - 1];
+                if (Double.isNaN(latestBeta)) return null;
+
+                // 3. Z-Score 标准化（用过去 STD_WIN 个 beta，不含当前）
+                //    实际可用数量 = min(STD_WIN, maxBetas-1)
+                int stdCount = Math.min(STD_WIN, maxBetas - 1);
+                if (stdCount < 20) {
+                    // 数据不够，返回原始 beta
+                    return BigDecimal.valueOf(latestBeta).setScale(8, RoundingMode.HALF_UP);
+                }
+                double sum = 0;
+                int validCount = 0;
+                for (int i = maxBetas - 1 - stdCount; i < maxBetas - 1; i++) {
+                    if (!Double.isNaN(betas[i])) {
+                        sum += betas[i];
+                        validCount++;
+                    }
+                }
+                if (validCount < 20) {
+                    return BigDecimal.valueOf(latestBeta).setScale(8, RoundingMode.HALF_UP);
+                }
+                double mean = sum / validCount;
+
+                double varSum = 0;
+                for (int i = maxBetas - 1 - stdCount; i < maxBetas - 1; i++) {
+                    if (!Double.isNaN(betas[i])) {
+                        varSum += (betas[i] - mean) * (betas[i] - mean);
+                    }
+                }
+                double std = Math.sqrt(varSum / (validCount - 1));
+                if (std < 1e-8) {
+                    return BigDecimal.valueOf(latestBeta).setScale(8, RoundingMode.HALF_UP);
+                }
+                double z = (latestBeta - mean) / std;
+                return BigDecimal.valueOf(z).setScale(8, RoundingMode.HALF_UP);
+            }
+
+            /**
+             * 对 [start, end) 区间的K线做 OLS: high ~ low，返回斜率 beta
+             */
+            private double calcBeta(List<MarketDailyBar> history, int start, int end) {
+                int n = end - start;
+                if (n < REG_WIN) return Double.NaN;
+                // 简单线性回归: beta = Cov(low, high) / Var(low)
+                double sumL = 0, sumH = 0;
+                for (int i = start; i < end; i++) {
+                    double l = history.get(i).getLow().doubleValue();
+                    double h = history.get(i).getHigh().doubleValue();
+                    sumL += l;
+                    sumH += h;
+                }
+                double meanL = sumL / n;
+                double meanH = sumH / n;
+
+                double cov = 0, varL = 0;
+                for (int i = start; i < end; i++) {
+                    double l = history.get(i).getLow().doubleValue() - meanL;
+                    double h = history.get(i).getHigh().doubleValue() - meanH;
+                    cov += l * h;
+                    varL += l * l;
+                }
+                if (varL < 1e-12) return Double.NaN;
+                return cov / varL;
+            }
+        }
+
+        /**
+         * AO 加速振荡器 (ACCEL_OSC)
+         * AO = SMMA(high+low)/2, 5) - SMMA(high+low)/2, 34)
+         * AC = SMA(AO, 5)
+         * 返回 AC 值（正=加速上涨，负=加速下跌）
+         * SMMA 用 Wilder 平滑: SMMA_t = SMMA_{t-1} * (N-1)/N + Price_t / N
+         */
+        public static class AcOscillatorCalculator implements FactorCalculator {
+            private static final int SMMA_SHORT = 5;
+            private static final int SMMA_LONG = 34;
+            private static final int AO_SMA = 5;
+
+            @Override
+            public String getFactorCode() {
+                return "AO_AC";
+            }
+
+            @Override
+            public BigDecimal calculate(String symbol, LocalDate calcDate,
+                                        List<MarketDailyBar> history, Map<String, Object> context) {
+                int need = Math.max(SMMA_SHORT, SMMA_LONG) + AO_SMA;
+                if (history.size() < need + 2) return null;
+
+                // 1. 计算所有K线的 (H+L)/2
+                int n = history.size();
+                double[] mid = new double[n];
+                for (int i = 0; i < n; i++) {
+                    mid[i] = (history.get(i).getHigh().doubleValue()
+                            + history.get(i).getLow().doubleValue()) / 2.0;
+                }
+
+                // 2. 计算 SMMA_short 和 SMMA_long 序列
+                double[] smmaS = smma(mid, SMMA_SHORT);
+                double[] smmaL = smma(mid, SMMA_LONG);
+
+                // 3. AO = SMMA_short - SMMA_long
+                double[] ao = new double[n];
+                for (int i = 0; i < n; i++) {
+                    if (Double.isNaN(smmaS[i]) || Double.isNaN(smmaL[i])) {
+                        ao[i] = Double.NaN;
+                    } else {
+                        ao[i] = smmaS[i] - smmaL[i];
+                    }
+                }
+
+                // 4. AC = SMA(AO, AO_SMA)，取最新值
+                int last = n - 1;
+                int start = last - AO_SMA + 1;
+                if (start < 0) return null;
+                double sum = 0;
+                int cnt = 0;
+                for (int i = start; i <= last; i++) {
+                    if (!Double.isNaN(ao[i])) {
+                        sum += ao[i];
+                        cnt++;
+                    }
+                }
+                if (cnt < AO_SMA) return null;
+                return BigDecimal.valueOf(sum / cnt).setScale(8, RoundingMode.HALF_UP);
+            }
+
+            /**
+             * Wilder SMMA: 前N-1个用初始简单平均，之后递推
+             */
+            private double[] smma(double[] src, int period) {
+                double[] result = new double[src.length];
+                java.util.Arrays.fill(result, Double.NaN);
+                if (src.length < period) return result;
+                // 初始值 = 简单平均
+                double sum = 0;
+                for (int i = 0; i < period; i++) sum += src[i];
+                result[period - 1] = sum / period;
+                // 递推: SMMA_t = (SMMA_{t-1} * (N-1) + src[t]) / N
+                double alpha = 1.0 / period;
+                for (int i = period; i < src.length; i++) {
+                    result[i] = result[i - 1] * (1 - alpha) + src[i] * alpha;
+                }
+                return result;
+            }
+        }
+
+        /**
+         * 单向波动差 (UP_DN_VOL)
+         * 上行波动率 - 下行波动率
+         * 上行波动率: 正收益日的收益标准差 * sqrt(252)
+         * 下行波动率: 负收益日的收益标准差 * sqrt(252)
+         * 正值 = 上行波动主导（趋势性强），负值 = 下行波动主导（恐慌抛售）
+         */
+        public static class UpDnVolCalculator implements FactorCalculator {
+            private static final int WIN = 20;
+
+            @Override
+            public String getFactorCode() {
+                return "UP_DN_VOL";
+            }
+
+            @Override
+            public BigDecimal calculate(String symbol, LocalDate calcDate,
+                                        List<MarketDailyBar> history, Map<String, Object> context) {
+                if (history.size() < WIN + 2) return null;
+                int n = history.size();
+                int start = n - WIN - 1;  // 需要 WIN+1 根K线算 WIN 个收益率
+                int end = n - 1;
+
+                double[] ret = new double[WIN];
+                int cnt = 0;
+                for (int i = start + 1; i <= end; i++) {
+                    double prev = history.get(i - 1).getClose().doubleValue();
+                    double curr = history.get(i).getClose().doubleValue();
+                    if (prev > 0) {
+                        ret[cnt] = Math.log(curr / prev);
+                    } else {
+                        ret[cnt] = Double.NaN;
+                    }
+                    cnt++;
+                }
+
+                // 分上行/下行
+                double upSum = 0, upSq = 0;
+                int upCnt = 0;
+                double dnSum = 0, dnSq = 0;
+                int dnCnt = 0;
+                for (double r : ret) {
+                    if (Double.isNaN(r)) continue;
+                    if (r > 0) {
+                        upSum += r;
+                        upSq += r * r;
+                        upCnt++;
+                    } else if (r < 0) {
+                        dnSum += r;
+                        dnSq += r * r;
+                        dnCnt++;
+                    }
+                }
+                if (upCnt < 5 || dnCnt < 5) return null;
+
+                double upVar = (upSq - upSum * upSum / upCnt) / (upCnt - 1);
+                double dnVar = (dnSq - dnSum * dnSum / dnCnt) / (dnCnt - 1);
+                if (upVar < 0) upVar = 0;
+                if (dnVar < 0) dnVar = 0;
+                double upVol = Math.sqrt(upVar) * Math.sqrt(252);
+                double dnVol = Math.sqrt(dnVar) * Math.sqrt(252);
+                return BigDecimal.valueOf(upVol - dnVol).setScale(8, RoundingMode.HALF_UP);
+            }
         }
     }
 }

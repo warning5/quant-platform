@@ -22,6 +22,7 @@ import com.quant.platform.strategy.domain.StrategyDefinition;
 import com.quant.platform.strategy.service.StrategyService;
 import groovy.lang.Binding;
 import groovy.lang.GroovyShell;
+import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,8 +30,12 @@ import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
+import javax.sql.DataSource;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
@@ -68,6 +73,9 @@ public class BacktestEngine {
 
     @Autowired(required = false)
     private SimpMessagingTemplate messagingTemplate;
+
+    @Resource
+    private DataSource dataSource;
 
     private final ObjectMapper objectMapper;
 
@@ -455,7 +463,7 @@ public class BacktestEngine {
                 }
 
                 // 计算每只股票的综合评分
-                Map<String, Double> scores = computeScores(bars, factorWeights, factorValueMap, task, strategy);
+                Map<String, Double> scores = computeScores(bars, factorWeights, factorValueMap, task, strategy, today);
 
                 int maxPositions = task.getMaxPositionCount() != null
                         ? task.getMaxPositionCount()
@@ -1155,13 +1163,14 @@ public class BacktestEngine {
                                               List<FactorWeight> factorWeights,
                                               Map<String, Map<String, FactorValue>> factorValueMap,
                                               BacktestTask task,
-                                              StrategyDefinition strategy) {
+                                              StrategyDefinition strategy,
+                                              LocalDate rebalanceDate) {
         Map<String, Double> scores = new HashMap<>();
 
         // 如果是自定义脚本策略，使用Groovy脚本执行
         if (strategy.getStrategyType() == StrategyDefinition.StrategyType.CUSTOM
                 && strategy.getScriptCode() != null && !strategy.getScriptCode().isBlank()) {
-            return computeScoresWithScript(bars, factorValueMap, task, strategy);
+            return computeScoresWithScript(bars, factorValueMap, task, strategy, rebalanceDate);
         }
 
         // 检查每个因子是否有 rank_value，如果没有则需要实时计算截面 z-score
@@ -1243,18 +1252,40 @@ public class BacktestEngine {
     private Map<String, Double> computeScoresWithScript(List<MarketDailyBar> bars,
                                                         Map<String, Map<String, FactorValue>> factorValueMap,
                                                         BacktestTask task,
-                                                        StrategyDefinition strategy) {
+                                                        StrategyDefinition strategy,
+                                                        LocalDate rebalanceDate) {
         Map<String, Double> scores = new HashMap<>();
 
         try {
             Binding binding = new Binding();
             binding.setVariable("marketBars", bars);
             binding.setVariable("factorValues", factorValueMap);
+            binding.setVariable("rebalanceDate", rebalanceDate.toString());
             // 优先用任务级持仓数，没有则用策略定义，都没有则默认20
             int maxPositions = task.getMaxPositionCount() != null
                     ? task.getMaxPositionCount()
                     : (strategy.getMaxPositionCount() != null ? strategy.getMaxPositionCount() : 20);
             binding.setVariable("maxPositions", maxPositions);
+
+            // ── 新增绑定变量（供策略脚本使用）──
+            // indexBars: 沪深300指数K线（供RSRS择时等策略使用）
+            List<MarketDailyBar> indexBars = marketDataService.getBarsInRange(
+                    "000300.SH", rebalanceDate.minusDays(1200), rebalanceDate);
+            binding.setVariable("indexBars", indexBars);
+
+            // industryMap: 股票代码 → 行业名称（从 stock_info）
+            Map<String, String> industryMap = loadIndustryMap(bars);
+            binding.setVariable("industryMap", industryMap);
+
+            // stockInfoMap: 股票代码 → 上市日期等信息
+            Map<String, Map<String, Object>> stockInfoMap = loadStockInfoMap(bars);
+            binding.setVariable("stockInfoMap", stockInfoMap);
+
+            // historicalFactors: 多期因子历史值（用于RSRS等需要序列的策略）
+            // 格式: { factorCode -> { symbol -> [FactorValue...] } }
+            Map<String, Map<String, List<FactorValue>>> historicalFactors = loadHistoricalFactors(
+                    factorValueMap.keySet(), rebalanceDate, 120);
+            binding.setVariable("historicalFactors", historicalFactors);
 
             GroovyShell shell = new GroovyShell(binding);
             Object result = shell.evaluate(strategy.getScriptCode());
@@ -1286,6 +1317,101 @@ public class BacktestEngine {
                         Map.Entry::getKey,
                         entry -> 1.0 / Math.min(topN, scores.size())
                 ));
+    }
+
+    // ======================== Groovy 绑定变量辅助方法 ========================
+
+    /**
+     * 加载候选股票的行业映射（code → industry）
+     * 从 stock_info 表批量查询
+     */
+    private Map<String, String> loadIndustryMap(List<MarketDailyBar> bars) {
+        List<String> codes = bars.stream().map(b -> {
+            String sym = b.getSymbol();
+            int dot = sym.lastIndexOf('.');
+            return dot > 0 ? sym.substring(0, dot) : sym;
+        }).distinct().toList();
+
+        if (codes.isEmpty()) return Map.of();
+
+        Map<String, String> result = new HashMap<>();
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT code, industry FROM stock_info WHERE code IN (" +
+                             codes.stream().map(c -> "?").collect(Collectors.joining(",")) + ")")) {
+            for (int i = 0; i < codes.size(); i++) {
+                ps.setString(i + 1, codes.get(i));
+            }
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    result.put(rs.getString("code"), rs.getString("industry"));
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to load industry map: {}", e.getMessage());
+        }
+        return result;
+    }
+
+    /**
+     * 加载候选股票的基本信息映射（code → {listDate, totalShare, name}）
+     */
+    private Map<String, Map<String, Object>> loadStockInfoMap(List<MarketDailyBar> bars) {
+        List<String> codes = bars.stream().map(b -> {
+            String sym = b.getSymbol();
+            int dot = sym.lastIndexOf('.');
+            return dot > 0 ? sym.substring(0, dot) : sym;
+        }).distinct().toList();
+
+        if (codes.isEmpty()) return Map.of();
+
+        Map<String, Map<String, Object>> result = new HashMap<>();
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT code, name, list_date, total_share, total_market_cap FROM stock_info WHERE code IN (" +
+                             codes.stream().map(c -> "?").collect(Collectors.joining(",")) + ")")) {
+            for (int i = 0; i < codes.size(); i++) {
+                ps.setString(i + 1, codes.get(i));
+            }
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    Map<String, Object> info = new HashMap<>();
+                    info.put("name", rs.getString("name"));
+                    info.put("listDate", rs.getDate("list_date") != null ? rs.getDate("list_date").toLocalDate() : null);
+                    info.put("totalShare", rs.getBigDecimal("total_share"));
+                    info.put("totalMarketCap", rs.getBigDecimal("total_market_cap"));
+                    result.put(rs.getString("code"), info);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to load stock info map: {}", e.getMessage());
+        }
+        return result;
+    }
+
+    /**
+     * 加载指定因子在最近 N 天内的历史值
+     * 格式: { factorCode -> { symbol -> [FactorValue...] } }
+     */
+    private Map<String, Map<String, List<FactorValue>>> loadHistoricalFactors(
+            Set<String> factorCodes, LocalDate endDate, int lookbackDays) {
+        Map<String, Map<String, List<FactorValue>>> result = new HashMap<>();
+        LocalDate startDate = endDate.minusDays(lookbackDays);
+
+        for (String factorCode : factorCodes) {
+            try {
+                List<FactorValue> fvs = clickHouseFactorValueService.findByFactorCodeAndDateRange(
+                        factorCode, startDate, endDate);
+                if (fvs == null || fvs.isEmpty()) continue;
+
+                Map<String, List<FactorValue>> symbolMap = fvs.stream()
+                        .collect(Collectors.groupingBy(FactorValue::getSymbol));
+                result.put(factorCode, symbolMap);
+            } catch (Exception e) {
+                log.debug("Failed to load historical factors for {}: {}", factorCode, e.getMessage());
+            }
+        }
+        return result;
     }
 
     /**

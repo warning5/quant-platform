@@ -7,6 +7,10 @@ import com.quant.platform.financial.entity.StockIncome;
 import com.quant.platform.financial.mapper.StockBalanceMapper;
 import com.quant.platform.financial.mapper.StockCashflowMapper;
 import com.quant.platform.financial.mapper.StockIncomeMapper;
+import com.quant.platform.stock.entity.StockDividend;
+import com.quant.platform.stock.entity.StockInfo;
+import com.quant.platform.stock.mapper.StockDividendMapper;
+import com.quant.platform.stock.mapper.StockInfoMapper;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,6 +19,7 @@ import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.util.List;
 
 /**
  * 财务因子实现集合
@@ -36,6 +41,12 @@ public class FinancialFactors {
 
     @Autowired
     private StockCashflowMapper stockCashflowMapper;
+
+    @Autowired
+    private StockInfoMapper stockInfoMapper;
+
+    @Autowired
+    private StockDividendMapper stockDividendMapper;
 
     // ======================== 盈利能力因子 ========================
 
@@ -800,5 +811,254 @@ public class FinancialFactors {
             return netOperateCf.divide(totalLiabilities, SCALE, RoundingMode.HALF_UP)
                     .multiply(BigDecimal.valueOf(100));
         }
+    }
+
+    // ======================== 估值因子 (VALUE - 需联表市值/分红数据) ========================
+
+    /**
+     * 市盈率TTM = 总市值 / TTM净利润（最近4季度归属母公司净利润之和）
+     * 正值=正常估值，负值=亏损（返回null排除）
+     */
+    public class PeTtmCalc implements FinancialFactorCalculator {
+        @Override
+        public String getFactorCode() {
+            return "VAL_PE_TTM";
+        }
+
+        @Override
+        public BigDecimal calculate(String code, StockFinancialIndicator ind) {
+            if (ind == null || ind.getEndDate() == null) return null;
+            StockInfo info = stockInfoMapper.selectOne(
+                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<StockInfo>()
+                            .eq(StockInfo::getCode, code).last("LIMIT 1"));
+            if (info == null || info.getTotalMarketCap() == null || info.getTotalMarketCap().doubleValue() <= 0) return null;
+
+            BigDecimal ttmProfit = computeTtmNetProfit(code, ind.getEndDate());
+            if (ttmProfit == null || ttmProfit.doubleValue() <= 0) return null;
+
+            return info.getTotalMarketCap().divide(ttmProfit, SCALE, RoundingMode.HALF_UP);
+        }
+    }
+
+    /**
+     * 市销率TTM = 总市值 / TTM营收（最近4季度营业总收入之和）
+     */
+    public class PsTtmCalc implements FinancialFactorCalculator {
+        @Override
+        public String getFactorCode() {
+            return "VAL_PS_TTM";
+        }
+
+        @Override
+        public BigDecimal calculate(String code, StockFinancialIndicator ind) {
+            if (ind == null || ind.getEndDate() == null) return null;
+            StockInfo info = stockInfoMapper.selectOne(
+                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<StockInfo>()
+                            .eq(StockInfo::getCode, code).last("LIMIT 1"));
+            if (info == null || info.getTotalMarketCap() == null || info.getTotalMarketCap().doubleValue() <= 0) return null;
+
+            BigDecimal ttmRevenue = computeTtmRevenue(code, ind.getEndDate());
+            if (ttmRevenue == null || ttmRevenue.doubleValue() <= 0) return null;
+
+            return info.getTotalMarketCap().divide(ttmRevenue, SCALE, RoundingMode.HALF_UP);
+        }
+    }
+
+    /**
+     * 市净率 = 总市值 / 净资产（BPS × 总股本）
+     */
+    public class PbCalc implements FinancialFactorCalculator {
+        @Override
+        public String getFactorCode() {
+            return "VAL_PB";
+        }
+
+        @Override
+        public BigDecimal calculate(String code, StockFinancialIndicator ind) {
+            if (ind == null) return null;
+            if (ind.getBps() == null || ind.getBps().doubleValue() <= 0) return null;
+
+            StockInfo info = stockInfoMapper.selectOne(
+                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<StockInfo>()
+                            .eq(StockInfo::getCode, code).last("LIMIT 1"));
+            if (info == null || info.getTotalMarketCap() == null || info.getTotalMarketCap().doubleValue() <= 0) return null;
+            if (info.getTotalShare() == null || info.getTotalShare().doubleValue() <= 0) return null;
+
+            // 净资产 = BPS × 总股本
+            BigDecimal totalEquity = ind.getBps().multiply(info.getTotalShare());
+            if (totalEquity.doubleValue() <= 0) return null;
+
+            return info.getTotalMarketCap().divide(totalEquity, SCALE, RoundingMode.HALF_UP);
+        }
+    }
+
+    /**
+     * 股息率 = 最近12个月每股派息总和 / 当前股价 × 100
+     * 当前股价用 总市值/总股本 近似
+     */
+    public class DividendYieldCalc implements FinancialFactorCalculator {
+        @Override
+        public String getFactorCode() {
+            return "VAL_DIVIDEND_YIELD";
+        }
+
+        @Override
+        public BigDecimal calculate(String code, StockFinancialIndicator ind) {
+            if (ind == null || ind.getEndDate() == null) return null;
+
+            StockInfo info = stockInfoMapper.selectOne(
+                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<StockInfo>()
+                            .eq(StockInfo::getCode, code).last("LIMIT 1"));
+            if (info == null || info.getTotalMarketCap() == null || info.getTotalMarketCap().doubleValue() <= 0) return null;
+            if (info.getTotalShare() == null || info.getTotalShare().doubleValue() <= 0) return null;
+
+            // 查最近12个月的分红记录
+            LocalDate startDate = ind.getEndDate().minusYears(1);
+            LocalDate endDate = ind.getEndDate();
+            List<StockDividend> dividends = stockDividendMapper.findByCodeAndDateRange(code, startDate, endDate);
+            if (dividends == null || dividends.isEmpty()) return null;
+
+            // 汇总每股派息
+            BigDecimal totalDivPerShare = BigDecimal.ZERO;
+            for (StockDividend d : dividends) {
+                if (d.getCashDividend() != null && d.getCashDividend().doubleValue() > 0) {
+                    totalDivPerShare = totalDivPerShare.add(d.getCashDividend());
+                }
+            }
+            if (totalDivPerShare.doubleValue() <= 0) return null;
+
+            // 当前股价 = 总市值 / 总股本
+            BigDecimal pricePerShare = info.getTotalMarketCap().divide(info.getTotalShare(), SCALE, RoundingMode.HALF_UP);
+            if (pricePerShare.doubleValue() <= 0) return null;
+
+            // 股息率 = 每股派息 / 股价 × 100
+            return totalDivPerShare.divide(pricePerShare, SCALE, RoundingMode.HALF_UP)
+                    .multiply(BigDecimal.valueOf(100));
+        }
+    }
+
+    // ======================== 估值因子辅助方法 ========================
+
+    /**
+     * 计算 TTM 净利润（最近4季度归属母公司净利润之和）
+     * A股财报规则：Q1(3月)累计3月，中报(6月)累计6月，Q3(9月)累计9月，年报(12月)累计12月
+     * TTM = 最近一期年报净利润，或 最近一期累计 + 上年互补期
+     */
+    private BigDecimal computeTtmNetProfit(String code, LocalDate asOfDate) {
+        // 查最近4期的利润表（覆盖当前累计+上年）
+        List<StockIncome> incomes = stockIncomeMapper.selectList(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<StockIncome>()
+                        .eq(StockIncome::getCode, code)
+                        .le(StockIncome::getEndDate, asOfDate)
+                        .orderByDesc(StockIncome::getEndDate)
+                        .last("LIMIT 8"));
+
+        if (incomes == null || incomes.isEmpty()) return null;
+
+        // 按自然年分组，取每年最新一期
+        java.util.TreeMap<Integer, StockIncome> byYear = new java.util.TreeMap<>(java.util.Collections.reverseOrder());
+        for (StockIncome inc : incomes) {
+            int year = inc.getEndDate().getYear();
+            byYear.putIfAbsent(year, inc);
+        }
+
+        if (byYear.isEmpty()) return null;
+
+        // 最新一期的累计净利润
+        java.util.Map.Entry<Integer, StockIncome> latest = byYear.firstEntry();
+        StockIncome latestInc = latest.getValue();
+        BigDecimal latestNp = latestInc.getNpParentCompanyOwners();
+        if (latestNp == null) latestNp = latestInc.getNetProfit();
+        if (latestNp == null) return null;
+
+        int latestMonth = latestInc.getEndDate().getMonthValue();
+
+        if (latestMonth == 12) {
+            // 年报：直接使用年报净利润（已是TTM）
+            return latestNp;
+        }
+
+        // 非年报：当前累计 + 上年互补期
+        // 互补期 = 上年全年 - 上年同期累计
+        java.util.Map.Entry<Integer, StockIncome> prevYearEntry = byYear.lowerEntry(latest.getKey());
+        if (prevYearEntry == null) return null;
+
+        StockIncome prevYearInc = prevYearEntry.getValue();
+        BigDecimal prevYearFull = prevYearInc.getNpParentCompanyOwners();
+        if (prevYearFull == null) prevYearFull = prevYearInc.getNetProfit();
+        if (prevYearFull == null) return null;
+
+        // 上年同期：需找到上一年同一截止月份的报告
+        // 上市公司的报告月份通常是 3/6/9/12
+        int targetMonth = latestMonth;
+        BigDecimal prevSamePeriod = null;
+        for (StockIncome inc : incomes) {
+            if (inc.getEndDate().getYear() == latest.getKey() - 1 && inc.getEndDate().getMonthValue() == targetMonth) {
+                prevSamePeriod = inc.getNpParentCompanyOwners();
+                if (prevSamePeriod == null) prevSamePeriod = inc.getNetProfit();
+                break;
+            }
+        }
+
+        if (prevSamePeriod == null) return null;
+
+        // TTM = 当前累计 + (上年全年 - 上年同期)
+        BigDecimal complement = prevYearFull.subtract(prevSamePeriod);
+        return latestNp.add(complement);
+    }
+
+    /**
+     * 计算 TTM 营收（最近4季度营业总收入之和）
+     * 逻辑同 computeTtmNetProfit
+     */
+    private BigDecimal computeTtmRevenue(String code, LocalDate asOfDate) {
+        List<StockIncome> incomes = stockIncomeMapper.selectList(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<StockIncome>()
+                        .eq(StockIncome::getCode, code)
+                        .le(StockIncome::getEndDate, asOfDate)
+                        .orderByDesc(StockIncome::getEndDate)
+                        .last("LIMIT 8"));
+
+        if (incomes == null || incomes.isEmpty()) return null;
+
+        java.util.TreeMap<Integer, StockIncome> byYear = new java.util.TreeMap<>(java.util.Collections.reverseOrder());
+        for (StockIncome inc : incomes) {
+            int year = inc.getEndDate().getYear();
+            byYear.putIfAbsent(year, inc);
+        }
+
+        if (byYear.isEmpty()) return null;
+
+        java.util.Map.Entry<Integer, StockIncome> latest = byYear.firstEntry();
+        StockIncome latestInc = latest.getValue();
+        BigDecimal latestRevenue = latestInc.getTotalRevenue();
+        if (latestRevenue == null) return null;
+
+        int latestMonth = latestInc.getEndDate().getMonthValue();
+
+        if (latestMonth == 12) {
+            return latestRevenue;
+        }
+
+        java.util.Map.Entry<Integer, StockIncome> prevYearEntry = byYear.lowerEntry(latest.getKey());
+        if (prevYearEntry == null) return null;
+
+        StockIncome prevYearInc = prevYearEntry.getValue();
+        BigDecimal prevYearFull = prevYearInc.getTotalRevenue();
+        if (prevYearFull == null) return null;
+
+        int targetMonth = latestMonth;
+        BigDecimal prevSamePeriod = null;
+        for (StockIncome inc : incomes) {
+            if (inc.getEndDate().getYear() == latest.getKey() - 1 && inc.getEndDate().getMonthValue() == targetMonth) {
+                prevSamePeriod = inc.getTotalRevenue();
+                break;
+            }
+        }
+
+        if (prevSamePeriod == null) return null;
+
+        BigDecimal complement = prevYearFull.subtract(prevSamePeriod);
+        return latestRevenue.add(complement);
     }
 }

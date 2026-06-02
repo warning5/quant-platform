@@ -63,17 +63,30 @@ public class StockScreenService {
      * 执行多因子选股
      */
     public ScreenResult screen(ScreenRequest req) {
-        // ── 0. 加载策略定义因子配置 ─────────────────────────────────────────
+        // ── 0. 加载策略定义因子配置 + 过滤条件 ──────────────────────────
         Long sid = req.getStrategyId();
+        Map<String, Object> filterConfig = null;
         if (sid != null && (req.getFactors() == null || req.getFactors().isEmpty())) {
             StrategyDefinition strategy = strategyDefMapper.selectById(sid);
-            if (strategy != null && strategy.getFactorConfigJson() != null) {
-                try {
-                    List<ScreenRequest.FactorWeight> factors = parseStrategyFactorConfig(strategy.getFactorConfigJson());
-                    req.setFactors(factors);
-                    log.info("Loaded strategy [{}] with {} factors", strategy.getStrategyName(), factors.size());
-                } catch (Exception e) {
-                    log.warn("Failed to load strategy {}: {}", sid, e.getMessage());
+            if (strategy != null) {
+                if (strategy.getFactorConfigJson() != null) {
+                    try {
+                        List<ScreenRequest.FactorWeight> factors = parseStrategyFactorConfig(strategy.getFactorConfigJson());
+                        req.setFactors(factors);
+                        log.info("Loaded strategy [{}] with {} factors", strategy.getStrategyName(), factors.size());
+                    } catch (Exception e) {
+                        log.warn("Failed to load strategy {}: {}", sid, e.getMessage());
+                    }
+                }
+                // 解析 filterConfigJson（行业排除、最少上市天数、自定义因子过滤）
+                if (strategy.getFilterConfigJson() != null && !strategy.getFilterConfigJson().isBlank()) {
+                    try {
+                        filterConfig = objectMapper.readValue(strategy.getFilterConfigJson(),
+                                new TypeReference<Map<String, Object>>() {});
+                        log.info("Loaded filter config for strategy [{}]: {}", strategy.getStrategyName(), filterConfig.keySet());
+                    } catch (Exception e) {
+                        log.warn("Failed to parse filterConfigJson for strategy {}: {}", sid, e.getMessage());
+                    }
                 }
             }
         }
@@ -132,7 +145,7 @@ public class StockScreenService {
         }
 
         // 候选股票池（若 excludeSt，则剔除名称含"ST"的）
-        Set<String> candidates = barMapByCode.keySet().stream()
+        Set<String> candidatesRaw = barMapByCode.keySet().stream()
                 .filter(sym -> {
                     if (Boolean.TRUE.equals(req.getExcludeSt())) {
                         MarketDailyBar b = barMapByCode.get(sym);
@@ -143,7 +156,16 @@ public class StockScreenService {
                 })
                 .collect(Collectors.toSet());
 
-        log.info("Candidate stocks after ST filter: {}", candidates.size());
+        log.info("Candidate stocks after ST filter: {}", candidatesRaw.size());
+
+        // ── 2.1 filterConfigJson 过滤（行业排除、上市天数、自定义因子条件）──
+        Set<String> candidates;
+        if (filterConfig != null) {
+            candidates = applyFilterConfig(candidatesRaw, barMapByCode, filterConfig, screenDate);
+            log.info("After filterConfig: {} stocks remain", candidates.size());
+        } else {
+            candidates = candidatesRaw;
+        }
 
         // ── 2.5 自定义 SQL WHERE 条件过滤（高级模式）──────────────────
         if (req.getCustomSqlWhere() != null && !req.getCustomSqlWhere().isBlank()) {
@@ -1075,6 +1097,168 @@ public class StockScreenService {
         } catch (Exception e) {
             log.warn("Failed to parse strategy factor config: {}", factorConfigJson, e);
             return Collections.emptyList();
+        }
+    }
+
+    /**
+     * 应用 filterConfigJson 中的过滤条件到候选股票池
+     * 支持：
+     *   - excludeIndustries: List<String> 排除的行业代码列表（申万行业）
+     *   - minListingDays: int 最少上市天数
+     *   - customFilters: List<Map> 自定义因子过滤 [{factor, op, value}]
+     */
+    @SuppressWarnings("unchecked")
+    private Set<String> applyFilterConfig(Set<String> candidates,
+                                           Map<String, MarketDailyBar> barMapByCode,
+                                           Map<String, Object> filterConfig,
+                                           LocalDate screenDate) {
+        Set<String> result = new HashSet<>(candidates);
+
+        // 1. 行业排除
+        Object excludeIndustries = filterConfig.get("excludeIndustries");
+        if (excludeIndustries instanceof List) {
+            Set<String> excludeSet = new HashSet<>((List<String>) excludeIndustries);
+            if (!excludeSet.isEmpty()) {
+                // 批量查询候选股票的行业信息
+                Map<String, String> codeIndustryMap = batchLoadIndustryInfo(new ArrayList<>(result));
+                result.removeIf(code -> excludeSet.contains(codeIndustryMap.get(code)));
+                log.info("[FilterConfig] Industry exclude: removed industries={}, remaining={}",
+                        excludeSet.size(), result.size());
+            }
+        }
+
+        // 2. 最少上市天数
+        Object minDays = filterConfig.get("minListingDays");
+        if (minDays instanceof Number) {
+            int minListingDays = ((Number) minDays).intValue();
+            if (minListingDays > 0) {
+                Map<String, LocalDate> codeListDateMap = batchLoadListDates(new ArrayList<>(result));
+                LocalDate cutoff = screenDate.minusDays(minListingDays);
+                int before = result.size();
+                result.removeIf(code -> {
+                    LocalDate listDate = codeListDateMap.get(code);
+                    return listDate == null || listDate.isAfter(cutoff);
+                });
+                log.info("[FilterConfig] MinListingDays={}: removed {} stocks, remaining={}",
+                        minListingDays, before - result.size(), result.size());
+            }
+        }
+
+        // 3. 自定义因子过滤（单因子条件，GT/GTE/LT/LTE/EQ）
+        Object customFilters = filterConfig.get("customFilters");
+        if (customFilters instanceof List) {
+            List<Map<String, Object>> filters = (List<Map<String, Object>>) customFilters;
+            for (Map<String, Object> cf : filters) {
+                String factorCode = (String) cf.get("factor");
+                String op = (String) cf.getOrDefault("op", "GT");
+                double value = cf.get("value") instanceof Number ? ((Number) cf.get("value")).doubleValue() : 0;
+                if (factorCode == null) continue;
+
+                // 查询因子截面值
+                Map<String, Double> factorVals = batchLoadFactorValues(factorCode, screenDate, new ArrayList<>(result));
+                if (factorVals.isEmpty()) continue;
+
+                int before = result.size();
+                result.removeIf(code -> {
+                    Double fv = factorVals.get(code);
+                    if (fv == null) return true; // 无因子值，剔除
+                    return !compareFactorValue(fv, op, value);
+                });
+                log.info("[FilterConfig] customFilter: {} {} {}, removed {}, remaining={}",
+                        factorCode, op, value, before - result.size(), result.size());
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * 因子值比较
+     */
+    private boolean compareFactorValue(double actual, String op, double threshold) {
+        return switch (op.toUpperCase()) {
+            case "GT" -> actual > threshold;
+            case "GTE" -> actual >= threshold;
+            case "LT" -> actual < threshold;
+            case "LTE" -> actual <= threshold;
+            case "EQ" -> Math.abs(actual - threshold) < 1e-8;
+            default -> true; // UNKNOWN op 不过滤
+        };
+    }
+
+    /**
+     * 批量查询股票行业信息（从 stock_info.industry 字段）
+     */
+    private Map<String, String> batchLoadIndustryInfo(List<String> codes) {
+        Map<String, String> result = new HashMap<>();
+        final int BATCH = 500;
+        for (int i = 0; i < codes.size(); i += BATCH) {
+            List<String> batch = codes.subList(i, Math.min(i + BATCH, codes.size()));
+            try (Connection conn = dataSource.getConnection();
+                 PreparedStatement ps = conn.prepareStatement(
+                         "SELECT code, industry FROM stock_info WHERE code IN (" +
+                                 batch.stream().map(c -> "?").collect(Collectors.joining(",")) + ")")) {
+                for (int j = 0; j < batch.size(); j++) {
+                    ps.setString(j + 1, batch.get(j));
+                }
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        result.put(rs.getString("code"), rs.getString("industry"));
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("Failed to batch load industry info: {}", e.getMessage());
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 批量查询股票上市日期
+     */
+    private Map<String, LocalDate> batchLoadListDates(List<String> codes) {
+        Map<String, LocalDate> result = new HashMap<>();
+        final int BATCH = 500;
+        for (int i = 0; i < codes.size(); i += BATCH) {
+            List<String> batch = codes.subList(i, Math.min(i + BATCH, codes.size()));
+            try (Connection conn = dataSource.getConnection();
+                 PreparedStatement ps = conn.prepareStatement(
+                         "SELECT code, list_date FROM stock_info WHERE code IN (" +
+                                 batch.stream().map(c -> "?").collect(Collectors.joining(",")) + ")")) {
+                for (int j = 0; j < batch.size(); j++) {
+                    ps.setString(j + 1, batch.get(j));
+                }
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        result.put(rs.getString("code"), rs.getDate("list_date").toLocalDate());
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("Failed to batch load list dates: {}", e.getMessage());
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 批量查询指定因子在指定日期的截面值
+     */
+    private Map<String, Double> batchLoadFactorValues(String factorCode, LocalDate date, List<String> codes) {
+        if (codes.isEmpty()) return Map.of();
+        try {
+            // 查询该因子在该日期的全量截面数据，然后在内存中过滤候选股票
+            List<FactorValue> fvs = clickHouseFactorValueService.findByFactorCodeAndDate(factorCode, date);
+            Set<String> codeSet = new HashSet<>(codes);
+            Map<String, Double> result = new HashMap<>();
+            for (FactorValue fv : fvs) {
+                if (fv.getFactorVal() != null && codeSet.contains(fv.getSymbol())) {
+                    result.put(fv.getSymbol(), fv.getFactorVal().doubleValue());
+                }
+            }
+            return result;
+        } catch (Exception e) {
+            log.warn("Failed to load factor values for {}: {}", factorCode, e.getMessage());
+            return Map.of();
         }
     }
 }

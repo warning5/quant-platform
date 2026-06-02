@@ -181,7 +181,35 @@ export default function AttributionHub({ taskId }) {
             onClick={() => setAlphaMonitorOpen(true)}
           >
             Alpha 滚动监控
-            <Tooltip overlayStyle={{maxWidth:400}} title="60/120/252天滚动窗口 Alpha 序列分析 + 衰减预警">
+            <Tooltip overlayStyle={{maxWidth:680}} title={
+              <div style={{maxWidth:680,maxHeight:520,overflowY:'auto',lineHeight:1.7,fontSize:13}}>
+                <p style={{margin:0,fontWeight:600,fontSize:14}}>Alpha 滚动窗口监控</p>
+                <p style={{margin:'6px 0'}}><b>用途：</b>追踪策略「选股能力」是否随时间退化。当因子被市场发现、风格切换或过拟合失效时，Alpha 会从高位持续下滑——滚动监控能最早发现这一趋势。</p>
+                <p style={{margin:'8px 0 4px',fontWeight:600,color:'#1677ff'}}>为什么多窗口能预警衰减？</p>
+                <p style={{margin:'2px 0'}}>短期窗口反应快但噪声大，长期窗口最稳定但迟钝。当三条线出现"分叉"——短期线大幅低于长期线——说明策略 Alpha 正在衰减：</p>
+                <table style={{width:'100%',borderCollapse:'collapse',fontSize:12,lineHeight:1.5,marginTop:6}}>
+                  <thead><tr style={{background:'#fafafa'}}>
+                    <th style={{border:'1px solid #e8e8e8',padding:'4px 8px',textAlign:'left'}}>窗口</th>
+                    <th style={{border:'1px solid #e8e8e8',padding:'4px 8px',textAlign:'left'}}>特性</th>
+                    <th style={{border:'1px solid #e8e8e8',padding:'4px 8px',textAlign:'left'}}>预警角色</th>
+                  </tr></thead>
+                  <tbody>
+                    <tr><td style={{border:'1px solid #e8e8e8',padding:'4px 8px',color:'#91caff',fontWeight:600}}>60天</td>
+                      <td style={{border:'1px solid #e8e8e8',padding:'4px 8px'}}>反应最快，噪声最大</td>
+                      <td style={{border:'1px solid #e8e8e8',padding:'4px 8px',color:'#ff4d4f'}}>最早发现异常（先锋）</td></tr>
+                    <tr><td style={{border:'1px solid #e8e8e8',padding:'4px 8px',color:'#1677ff',fontWeight:600}}>120天</td>
+                      <td style={{border:'1px solid #e8e8e8',padding:'4px 8px'}}>平衡，兼顾灵敏度与稳定性</td>
+                      <td style={{border:'1px solid #e8e8e8',padding:'4px 8px',color:'#fa8c16'}}>确认趋势（中军）</td></tr>
+                    <tr><td style={{border:'1px solid #e8e8e8',padding:'4px 8px',color:'#cf1322',fontWeight:600}}>252天</td>
+                      <td style={{border:'1px solid #e8e8e8',padding:'4px 8px'}}>最稳定，历史数据稀释新变化</td>
+                      <td style={{border:'1px solid #e8e8e8',padding:'4px 8px'}}>长期基准（参考线）</td></tr>
+                  </tbody>
+                </table>
+                <p style={{margin:'8px 0 4px',fontWeight:600,color:'#fa8c16'}}>计算方式</p>
+                <p style={{margin:'2px 0'}}>每个窗口内对「策略超额收益 ~ 策略自身因子」做 OLS 回归，截距项即为该窗口 Alpha。每天向前推一天，形成滚动序列。衰减预警：近 25% 期 Alpha 均值较历史中位数下降超 50%。</p>
+                <p style={{margin:'8px 0 0',color:'#8c8c8c',fontStyle:'italic'}}>注意：当前回测仅约 80~90 个交易日，只有 60 天线有效。120 天和 252 天线需 ≥1 年数据才能启动完整对比。</p>
+              </div>
+            }>
               <QuestionCircleOutlined style={{marginLeft:4,color:'#8c8c8c',cursor:'help'}} />
             </Tooltip>
           </Button>
@@ -254,8 +282,8 @@ export default function AttributionHub({ taskId }) {
       {/* FF3 风格归因 弹窗 */}
       <Modal title={<>
         <FundOutlined style={{marginRight:8}}/>FF3 三因子风格归因
-        <Tooltip overlayStyle={{ maxWidth: 560 }} title={
-          <div style={{maxWidth:560,lineHeight:1.8}}>
+        <Tooltip overlayStyle={{ maxWidth: 680 }} title={
+          <div style={{maxWidth:680,lineHeight:1.8}}>
             <p style={{margin:0,fontWeight:600}}>Fama-French 三因子模型</p>
             <p style={{margin:'4px 0'}}><b>思路：</b>用市场(MKT)、规模(SMB)、价值(HML)三个标准因子回归组合超额收益，诊断"赚的是市场Beta还是规模/价值溢价"，评估风格暴露的合理性。</p>
             <p style={{margin:'4px 0'}}><b>核心指标：</b></p>
@@ -291,6 +319,14 @@ export default function AttributionHub({ taskId }) {
               </tr>
             </tbody>
           </table>
+          <p style={{margin:'10px 0 4px',fontWeight:600,color:'#52c41a'}}>MKT / SMB / HML 如何计算</p>
+          <p style={{margin:'2px 0'}}>不是外部下载，而是每天从全市场 5000+ 只 A 股 <b>实时计算</b>：</p>
+          <ul style={{margin:'2px 0',paddingLeft:16}}>
+            <li><b>MKT</b> = 所有股票日收益的<b>等权平均</b>（数据：ClickHouse stock_daily）</li>
+            <li><b>SMB</b> = 按市值排序，底30%小盘股平均收益 − 顶30%大盘股平均收益（数据：stock_info.total_market_cap）</li>
+            <li><b>HML</b> = 按 PB 排序，底30%低估值平均收益 − 顶30%高估值平均收益（数据：stock_info.pb）</li>
+          </ul>
+          <p style={{margin:'4px 0 0',fontSize:12,color:'#8c8c8c'}}>因子口径与策略数据完全一致，无外部数据偏差。</p>
           </div>
         }>
           <QuestionCircleOutlined style={{marginLeft:6,fontSize:14,color:'#8c8c8c',cursor:'help'}} />
@@ -307,10 +343,40 @@ export default function AttributionHub({ taskId }) {
       {/* Alpha 滚动监控 弹窗 */}
       <Modal title={<>
         <LineChartOutlined style={{marginRight:8}}/>Alpha 滚动窗口监控
-        <Tooltip overlayStyle={{ maxWidth: 520 }} title={
-          <div style={{maxWidth:520,lineHeight:1.8}}>
-            <p style={{margin:0,fontWeight:600}}>Alpha 衰减预警</p>
-            <p style={{margin:'4px 0'}}>通过 60/120/252 天滚动窗口的 OLS 回归，追踪策略 Alpha 的时间序列变化。当近 25% 期 Alpha 均值较历史中位数下降超过 50% 时，触发衰减预警 — 提示策略可能正在失效。</p>
+        <Tooltip overlayStyle={{ maxWidth: 680 }} title={
+          <div style={{maxWidth:680,maxHeight:500,overflowY:'auto',lineHeight:1.7,fontSize:13}}>
+            <p style={{margin:0,fontWeight:600,fontSize:14}}>Alpha 滚动窗口监控</p>
+            <p style={{margin:'6px 0'}}><b>用途：</b>追踪策略「选股能力」是否随时间退化。因子被市场发现、风格切换或过拟合失效时，Alpha 会从高位下滑——多窗口对比能最早发现。</p>
+            <p style={{margin:'8px 0 4px',fontWeight:600,color:'#1677ff'}}>多窗口预警原理</p>
+            <p style={{margin:'2px 0'}}>每个窗口对「策略超额收益 ~ 策略自身因子」做 OLS 回归，截距即为 Alpha。短期窗口反应快，长期窗口迟钝——三条线"分叉"越大，衰减越确定：</p>
+            <table style={{width:'100%',borderCollapse:'collapse',fontSize:12,lineHeight:1.5,marginTop:6}}>
+              <thead><tr style={{background:'#fafafa'}}>
+                <th style={{border:'1px solid #e8e8e8',padding:'4px 8px',textAlign:'left'}}>窗口</th>
+                <th style={{border:'1px solid #e8e8e8',padding:'4px 8px',textAlign:'left'}}>特性</th>
+                <th style={{border:'1px solid #e8e8e8',padding:'4px 8px',textAlign:'left'}}>预警角色</th>
+              </tr></thead>
+              <tbody>
+                <tr><td style={{border:'1px solid #e8e8e8',padding:'4px 8px',color:'#91caff',fontWeight:600}}>60天</td>
+                  <td style={{border:'1px solid #e8e8e8',padding:'4px 8px'}}>反应最快，噪声最大</td>
+                  <td style={{border:'1px solid #e8e8e8',padding:'4px 8px',color:'#ff4d4f'}}>最早发现异常（先锋）</td></tr>
+                <tr><td style={{border:'1px solid #e8e8e8',padding:'4px 8px',color:'#1677ff',fontWeight:600}}>120天</td>
+                  <td style={{border:'1px solid #e8e8e8',padding:'4px 8px'}}>平衡，兼顾灵敏度与稳定性</td>
+                  <td style={{border:'1px solid #e8e8e8',padding:'4px 8px',color:'#fa8c16'}}>确认趋势（中军）</td></tr>
+                <tr><td style={{border:'1px solid #e8e8e8',padding:'4px 8px',color:'#cf1322',fontWeight:600}}>252天</td>
+                  <td style={{border:'1px solid #e8e8e8',padding:'4px 8px'}}>最稳定，历史数据稀释新变化</td>
+                  <td style={{border:'1px solid #e8e8e8',padding:'4px 8px'}}>长期基准（参考线）</td></tr>
+              </tbody>
+            </table>
+            <p style={{margin:'8px 0 4px',fontWeight:600,color:'#fa8c16'}}>Alpha 如何计算</p>
+            <p style={{margin:'2px 0'}}>每个窗口内 OLS 回归：<code>策略超额收益 = α + 各因子β × 因子值</code>，α（截距）就是该窗口的 Alpha。它表示"扣除所有因子暴露后，策略还能赚到的纯α"。每天向前推一天重复回归，形成滚动序列。</p>
+            <p style={{margin:'8px 0 4px',fontWeight:600,color:'#52c41a'}}>MKT / SMB / HML 从哪里来</p>
+            <p style={{margin:'2px 0'}}>不是外部下载，而是<b>每天从全市场 5000+ 只 A 股实时计算</b>：</p>
+            <ul style={{margin:'2px 0',paddingLeft:16}}>
+              <li><b>MKT</b> = 全市场所有股票日收益的<b>等权平均</b>（数据：ClickHouse stock_daily）</li>
+              <li><b>SMB</b> = 市值<b>底30%</b>小票平均收益 − <b>顶30%</b>大票平均收益（数据：stock_info.total_market_cap）</li>
+              <li><b>HML</b> = PB<b>底30%</b>低估值平均收益 − <b>顶30%</b>高估值平均收益（数据：stock_info.pb）</li>
+            </ul>
+            <p style={{margin:'8px 0 0',color:'#8c8c8c',fontStyle:'italic'}}>注意：当前回测数据不足 120 天，只有 60 天线有效。120 天和 252 天线需 ≥1 年数据才能启动完整多窗口对比。</p>
           </div>
         }>
           <QuestionCircleOutlined style={{marginLeft:6,fontSize:14,color:'#8c8c8c',cursor:'help'}} />
@@ -327,14 +393,6 @@ export default function AttributionHub({ taskId }) {
       {/* 风格β 漂移监控 弹窗 */}
       <Modal title={<>
         <AlertOutlined style={{marginRight:8}}/>风格β 漂移监控
-        <Tooltip overlayStyle={{ maxWidth: 520 }} title={
-          <div style={{maxWidth:520,lineHeight:1.8}}>
-            <p style={{margin:0,fontWeight:600}}>风格漂移预警</p>
-            <p style={{margin:'4px 0'}}>通过 60/120/252 天滚动 FF3 回归，监测 SMB（规模）/ HML（价值）beta 序列。当近期均值偏离历史均值超过 1 个标准差时，触发风格漂移预警 — 提示策略的选股偏好正在发生结构性变化。</p>
-          </div>
-        }>
-          <QuestionCircleOutlined style={{marginLeft:6,fontSize:14,color:'#8c8c8c',cursor:'help'}} />
-        </Tooltip>
       </>}
         open={styleMonitorOpen} onCancel={() => setStyleMonitorOpen(false)}
         width={1100} footer={null} destroyOnClose
@@ -2515,35 +2573,41 @@ function AlphaMonitorPanel({ taskId }) {
   return (
     <div>
       {/* 衰减预警 */}
-      {data.decayAlert ? (
+      {data.decayWarning && data.decayWarning.includes('数据不足') ? (
+        <Alert type="warning" showIcon message="Alpha 监控提示" description={data.decayWarning} style={{marginBottom:16}} />
+      ) : data.decayAlert ? (
         <Alert type="error" showIcon message="⚠ Alpha 衰减预警" description={data.decayWarning} style={{marginBottom:16}} />
       ) : (
-        data.decayWarning && <Alert type="info" showIcon message="Alpha 状态" description={data.decayWarning} style={{marginBottom:16}} />
+        data.decayWarning && <Alert type="success" showIcon message="Alpha 状态" description={data.decayWarning} style={{marginBottom:16}} />
       )}
 
       {/* 关键指标 */}
       <Row gutter={12} style={{marginBottom:12}}>
         <Col span={8}>
           <Card size="small"><Statistic title="历史 Alpha 均值" value={fmtPct(data.historicalMean || 0)}
-            valueStyle={{fontSize:20, color: (data.historicalMean||0)>=0?RED:GREEN}} /></Card>
+            valueStyle={{fontSize:20, color: (data.historicalMean||0)>=0?'#52c41a':'#ff4d4f'}} /></Card>
         </Col>
         <Col span={8}>
           <Card size="small"><Statistic title="近期 Alpha 均值" value={fmtPct(data.recentMean || 0)}
-            valueStyle={{fontSize:20, color: (data.recentMean||0)>=0?RED:GREEN}} /></Card>
+            valueStyle={{fontSize:20, color: (data.recentMean||0)>=0?'#52c41a':'#ff4d4f'}} /></Card>
         </Col>
+        {!data.decayWarning?.includes('数据不足') && (
         <Col span={8}>
-          <Card size="small"><Statistic title="衰减幅度" value={fmtPct(data.decayRatio || 0)}
-            valueStyle={{fontSize:20, color: (data.decayRatio||0)<-0.5?RED:GREEN}} /></Card>
+          <Card size="small"><Statistic title="近期趋势" value={data.slope != null ? data.slope.toFixed(6) : '-'}
+            valueStyle={{fontSize:20, color: (data.slope||0)<0?'#fa8c16':'#52c41a'}} suffix="斜率" /></Card>
         </Col>
+        )}
       </Row>
 
       {/* Alpha 曲线 */}
       <ReactECharts option={chartOption} style={{ height: 350 }} />
 
       <Divider style={{margin:'8px 0'}}/>
-      <Text type="secondary" style={{fontSize:11}}>
-        Alpha 滚动窗口计算：每个窗口内对超额收益 ~ 策略因子做 OLS 回归，截距项即为窗口 Alpha。
-        衰减阈值：近25%期 Alpha 均值较历史中位数下降超过 50%。
+      <Text type="secondary" style={{fontSize:11,lineHeight:1.7}}>
+        每个窗口内对「策略超额收益 ~ 策略自身因子」做 OLS 回归，截距项即为窗口 Alpha，年化 Alpha = α × 252。<br/>
+        历史均值 = 全部窗口 Alpha 的平均值；近期均值 = 最后 25% 期窗口 Alpha 的平均值。<br/>
+        趋势判断：计算最近 5 个点的斜率，斜率 &lt; 0 且近期均值 &lt; 历史均值 → Alpha 有下行趋势。<br/>
+        <span style={{color:'#fa8c16'}}>注意：需 ≥20 个滚动窗口才启动趋势分析。当前数据不足时仅展示曲线。</span>
       </Text>
     </div>
   );
@@ -2631,8 +2695,110 @@ function StyleMonitorPanel({ taskId }) {
 
   const drift = data.smbDrift || data.hmlDrift;
 
+  // 动态 Tooltip：风格漂移监控说明
+  const driftTooltipContent = (() => {
+    const smbDelta = Math.abs((data.smbRecentMean||0) - (data.smbHistoricalMean||0));
+    const hmlDelta = Math.abs((data.hmlRecentMean||0) - (data.hmlHistoricalMean||0));
+
+    // 推算主窗口（从标准差 + 历史/近期均值反推）
+    const primaryWindow = Object.entries({
+      '252天': { sv: (data.rolling252 || []).length, smb: data.smbHistoricalMean, hml: data.hmlHistoricalMean },
+      '120天': { sv: (data.rolling120 || []).length, smb: data.smbHistoricalMean, hml: data.hmlHistoricalMean },
+      '60天':  { sv: (data.rolling60 || []).length,  smb: data.smbHistoricalMean, hml: data.hmlHistoricalMean },
+    }).find(([_, v]) => v.sv >= 10);
+    const winLabel = primaryWindow ? primaryWindow[0] : '未知';
+
+    const smbStdDeviations = (data.smbStd > 1e-8) ? (smbDelta / data.smbStd) : 0;
+    const hmlStdDeviations = (data.hmlStd > 1e-8) ? (hmlDelta / data.hmlStd) : 0;
+
+    return (
+      <div style={{maxWidth:680,lineHeight:1.9,fontSize:13}}>
+        <p style={{margin:0,fontWeight:700,fontSize:14}}>风格β 漂移监控</p>
+
+        <p style={{margin:'8px 0 4px',fontWeight:600}}>一、作用</p>
+        <p style={{margin:'0 0 8px'}}>监控策略的选股偏好是否发生结构性变化。当 SMB（规模）或 HML（价值）beta 显著偏离历史水平时预警——说明策略选股风格正在从一种模式切换到另一种。</p>
+
+        <p style={{margin:'8px 0 4px',fontWeight:600}}>二、判定逻辑</p>
+        <p style={{margin:0}}>1. 通过 {winLabel} 滚动窗口做 FF3 回归，得到每个窗口的 SMB/HML beta</p>
+        <p style={{margin:0}}>2. 计算 <b>历史均值</b> = 所有窗口 beta 的平均</p>
+        <p style={{margin:0}}>3. 计算 <b>近期均值</b> = 最后 25% 窗口的 beta 平均</p>
+        <p style={{margin:0}}>4. 计算 <b>历史标准差</b>（衡量 beta 的正常波动范围）</p>
+        <p style={{margin:'0 0 8px'}}>5. 若 <b>|近期均值 − 历史均值| > 1.0 × 标准差</b> → 触发预警</p>
+
+        <p style={{margin:'8px 0 4px',fontWeight:600}}>三、预警原因（基于当前数据）</p>
+        <div style={{background:'#fafafa',padding:'6px 10px',borderRadius:4,marginBottom:4}}>
+          <table style={{width:'100%',borderCollapse:'collapse'}}>
+            <thead>
+              <tr style={{borderBottom:'1px solid #d9d9d9'}}>
+                <th style={{padding:'4px 6px',textAlign:'left'}}></th>
+                <th style={{padding:'4px 6px',textAlign:'right'}}>SMB（规模）</th>
+                <th style={{padding:'4px 6px',textAlign:'right'}}>HML（价值）</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr style={{borderBottom:'1px solid #f0f0f0'}}>
+                <td style={{padding:'3px 6px'}}>历史均值</td>
+                <td style={{padding:'3px 6px',textAlign:'right',fontFamily:'monospace'}}>{data.smbHistoricalMean.toFixed(4)}</td>
+                <td style={{padding:'3px 6px',textAlign:'right',fontFamily:'monospace'}}>{data.hmlHistoricalMean.toFixed(4)}</td>
+              </tr>
+              <tr style={{borderBottom:'1px solid #f0f0f0'}}>
+                <td style={{padding:'3px 6px'}}>近期均值</td>
+                <td style={{padding:'3px 6px',textAlign:'right',fontFamily:'monospace',color:data.smbDrift?'#ff4d4f':undefined}}>{data.smbRecentMean.toFixed(4)}</td>
+                <td style={{padding:'3px 6px',textAlign:'right',fontFamily:'monospace',color:data.hmlDrift?'#ff4d4f':undefined}}>{data.hmlRecentMean.toFixed(4)}</td>
+              </tr>
+              <tr style={{borderBottom:'1px solid #f0f0f0'}}>
+                <td style={{padding:'3px 6px'}}>历史波动(Std)</td>
+                <td style={{padding:'3px 6px',textAlign:'right',fontFamily:'monospace'}}>{(data.smbStd ?? 0).toFixed(4)}</td>
+                <td style={{padding:'3px 6px',textAlign:'right',fontFamily:'monospace'}}>{(data.hmlStd ?? 0).toFixed(4)}</td>
+              </tr>
+              <tr style={{borderBottom:'1px solid #d9d9d9'}}>
+                <td style={{padding:'3px 6px'}}>|近期−历史| 偏移</td>
+                <td style={{padding:'3px 6px',textAlign:'right',fontFamily:'monospace'}}>{smbDelta.toFixed(4)}</td>
+                <td style={{padding:'3px 6px',textAlign:'right',fontFamily:'monospace'}}>{hmlDelta.toFixed(4)}</td>
+              </tr>
+              <tr>
+                <td style={{padding:'3px 6px',fontWeight:600}}>偏离 标准差倍数</td>
+                <td style={{padding:'3px 6px',textAlign:'right',fontFamily:'monospace',fontWeight:700,color:smbStdDeviations>1?'#ff4d4f':'#52c41a'}}>{smbStdDeviations.toFixed(3)}σ {(smbStdDeviations>1?'⚠ 超标':'正常')}</td>
+                <td style={{padding:'3px 6px',textAlign:'right',fontFamily:'monospace',fontWeight:700,color:hmlStdDeviations>1?'#ff4d4f':'#52c41a'}}>{hmlStdDeviations.toFixed(3)}σ {(hmlStdDeviations>1?'⚠ 超标':'正常')}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        {drift ? (
+          <p style={{margin:0,color:'#ff4d4f'}}>
+            <b>触发预警原因：</b>
+            {data.smbDrift &&
+              <>SMB 近期均值 {((data.smbRecentMean||0)).toFixed(2)} 偏离历史 {((data.smbHistoricalMean||0)).toFixed(2)}，
+                偏移 {smbDelta.toFixed(3)}{(data.smbStd != null) ? <>（标准差 {(data.smbStd).toFixed(3)}）=
+                {(smbDelta/(data.smbStd||1)).toFixed(1)}σ > 1.0σ 阈值</> : '（后端未返回标准差，请重启后端）'}</>
+            }
+            {data.smbDrift && data.hmlDrift && '；'}
+            {data.hmlDrift &&
+              <>HML 近期均值 {((data.hmlRecentMean||0)).toFixed(2)} 偏离历史 {((data.hmlHistoricalMean||0)).toFixed(2)}，
+                  偏移 {hmlDelta.toFixed(3)}{(data.hmlStd != null) ? <>（标准差 {(data.hmlStd).toFixed(3)}）=
+                {(hmlDelta/(data.hmlStd||1)).toFixed(1)}σ > 1.0σ 阈值</> : '（后端未返回标准差，请重启后端）'}</>
+            }
+          </p>
+        ) : (
+          <p style={{margin:0,color:'#52c41a'}}>
+            当前 SMB/HML 偏移均未超过 1.0σ 阈值，策略风格稳定。
+          </p>
+        )}
+      </div>
+    );
+  })();
+
   return (
     <div>
+      {/* 说明 Tooltip */}
+      <div style={{marginBottom:12,display:'flex',alignItems:'center',justifyContent:'flex-end'}}>
+        <Tooltip overlayStyle={{ maxWidth: 700 }} title={driftTooltipContent}>
+          <Button size="small" type="text" icon={<QuestionCircleOutlined style={{fontSize:14,color:'#8c8c8c'}}/>}>
+            监控原理 &amp; 判定逻辑
+          </Button>
+        </Tooltip>
+      </div>
+
       {/* 漂移预警 */}
       {drift ? (
         <Alert type="error" showIcon message="⚠ 风格漂移预警" description={data.driftWarning} style={{marginBottom:16}} />

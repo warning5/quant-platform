@@ -167,6 +167,10 @@ public class FactorComputeEngine {
         registerBuiltin(new BuiltinFactors.NearResistanceCalculator());
         registerBuiltin(new BuiltinFactors.NearSupportCalculator());
         registerBuiltin(new BuiltinFactors.VolumeRatioCalculator2());
+        // 新增 Phase5 因子 (2026-06-03)
+        registerBuiltin(new BuiltinFactors.RsrsCalculator());
+        registerBuiltin(new BuiltinFactors.AcOscillatorCalculator());
+        registerBuiltin(new BuiltinFactors.UpDnVolCalculator());
 
         // 注册缠论因子 (2026-04-29)
         registerBuiltin(new ChanTheoryFactors.PenDirectionCalculator());
@@ -224,6 +228,11 @@ public class FactorComputeEngine {
         registerFinancial(financialFactorsBean.new RoicCalc());
         registerFinancial(financialFactorsBean.new InterestCoverageCalc());
         registerFinancial(financialFactorsBean.new OperatingCfToDebtCalc());
+        // 估值因子 (2026-06-02)
+        registerFinancial(financialFactorsBean.new PeTtmCalc());
+        registerFinancial(financialFactorsBean.new PsTtmCalc());
+        registerFinancial(financialFactorsBean.new PbCalc());
+        registerFinancial(financialFactorsBean.new DividendYieldCalc());
         log.info("Registered {} financial factor calculators (total, after deferred)", financialCalculators.size());
     }
 

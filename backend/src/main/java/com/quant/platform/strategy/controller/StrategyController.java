@@ -63,11 +63,4 @@ public class StrategyController {
                                                         @RequestParam String status) {
         return ApiResponse.success(strategyService.changeStatus(id, StrategyDefinition.StrategyStatus.valueOf(status)));
     }
-
-    @PostMapping("/init-demo")
-    @Operation(summary = "初始化演示策略数据")
-    public ApiResponse<String> initDemoStrategies() {
-        strategyService.initDemoStrategies();
-        return ApiResponse.success("演示策略初始化完成");
-    }
 }

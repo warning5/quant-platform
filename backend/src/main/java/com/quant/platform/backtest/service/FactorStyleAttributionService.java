@@ -868,7 +868,7 @@ public class FactorStyleAttributionService {
             List<AlphaWindowPoint> rolling60, List<AlphaWindowPoint> rolling120,
             List<AlphaWindowPoint> rolling252, boolean decayAlert,
             String decayWarning, double historicalMean, double recentMean,
-            double decayRatio
+            double slope, double decayRatio
     ) {}
 
     /** 风格β滚动窗口单点 */
@@ -880,7 +880,8 @@ public class FactorStyleAttributionService {
             List<StyleBetaPoint> rolling60, List<StyleBetaPoint> rolling120,
             List<StyleBetaPoint> rolling252, boolean smbDrift, boolean hmlDrift,
             String driftWarning, double smbHistoricalMean, double smbRecentMean,
-            double hmlHistoricalMean, double hmlRecentMean
+            double hmlHistoricalMean, double hmlRecentMean,
+            double smbStd, double hmlStd
     ) {}
 
     // ════════════════════════════════════════════════════════════════
@@ -1146,7 +1147,6 @@ public class FactorStyleAttributionService {
 
         // 3. 逐日计算三个因子
         Map<LocalDate, Map<String, Double>> result = new LinkedHashMap<>();
-        List<Map<String, Object>> premiumRows = new ArrayList<>();
         int minStocks = 200;
 
         for (Map.Entry<LocalDate, Map<String, Double>> entry : dailyRetsByDate.entrySet()) {
@@ -1195,15 +1195,7 @@ public class FactorStyleAttributionService {
             dayResult.put("SMB", round4(smb));
             dayResult.put("HML", round4(hml));
             result.put(date, dayResult);
-
-            // 保存到 premium 行
-            premiumRows.add(makePremiumRow("MKT", date, mkt, n, mkt, 0));
-            premiumRows.add(makePremiumRow("SMB", date, smb, n, smbBot / q, smbTop / q));
-            premiumRows.add(makePremiumRow("HML", date, hml, n, hmlLow / q, hmlHigh / q));
         }
-
-        // 4. 持久化 (M5)
-        saveFactorPremiums(premiumRows);
 
         log.info("FF3 因子计算完成: {} 个交易日 ({} ~ {})",
                 result.size(), startDate, endDate);
@@ -1212,52 +1204,6 @@ public class FactorStyleAttributionService {
 
     /** 股票日数据辅助类 */
     private record StockDayData(String code, double dailyRet, double marketCap, double pb) {}
-
-    /** 构建 factor_premium 表写入行 */
-    private Map<String, Object> makePremiumRow(String factorCode, LocalDate date,
-                                                double factorReturn, int stockCount,
-                                                double topRet, double bottomRet) {
-        Map<String, Object> row = new LinkedHashMap<>();
-        row.put("factor_code", factorCode);
-        row.put("calc_date", date);
-        row.put("factor_return", factorReturn);
-        row.put("stock_count", stockCount);
-        row.put("top_return", topRet);
-        row.put("bottom_return", bottomRet);
-        row.put("update_time", java.time.LocalDateTime.now().withNano(0).toString().replace('T', ' '));
-        return row;
-    }
-
-    // ════════════════════════════════════════════════════════════════
-    // M5: factor_premium 表持久化
-    // ════════════════════════════════════════════════════════════════
-
-    /**
-     * 将因子日收益批量写入 ClickHouse factor_premium 表。
-     * 使用 ReplacingMergeTree 的 INSERT 覆盖（幂等写入）。
-     */
-    private void saveFactorPremiums(List<Map<String, Object>> rows) {
-        if (rows == null || rows.isEmpty()) return;
-        try (Connection conn = DriverManager.getConnection(clickHouseConfig.getJdbcUrl());
-             Statement stmt = conn.createStatement()) {
-
-            // 构建批量 INSERT VALUES
-            StringBuilder sb = new StringBuilder("INSERT INTO stock.factor_premium VALUES ");
-            for (int i = 0; i < rows.size(); i++) {
-                if (i > 0) sb.append(", ");
-                Map<String, Object> r = rows.get(i);
-                sb.append(String.format("('%s', '%s', %s, %s, %s, %s, '%s')",
-                        r.get("factor_code"), r.get("calc_date"),
-                        r.get("factor_return"), r.get("stock_count"),
-                        r.get("top_return"), r.get("bottom_return"),
-                        r.get("update_time").toString().replace('T', ' ')));
-            }
-            stmt.execute(sb.toString());
-            log.info("factor_premium 写入完成: {} 行", rows.size());
-        } catch (Exception e) {
-            log.error("factor_premium 写入失败: {}", e.getMessage(), e);
-        }
-    }
 
     // ════════════════════════════════════════════════════════════════
     // M1+M2: Alpha 滚动窗口 + 衰减预警
@@ -1368,44 +1314,67 @@ public class FactorStyleAttributionService {
         return detectAlphaDecay(primaryWindow, results[0], results[1], results[2]);
     }
 
-    /** 检测 Alpha 衰减 */
+    /** 检测 Alpha 衰减 —— 统一口径 + 趋势方向 */
     private AlphaMonitorResult detectAlphaDecay(
             List<AlphaWindowPoint> primary, List<AlphaWindowPoint> r60,
             List<AlphaWindowPoint> r120, List<AlphaWindowPoint> r252) {
 
-        boolean decayAlert = false;
-        String decayWarning = "Alpha 稳定，未检测到显著衰减";
-        double historicalMean = 0, recentMean = 0, decayRatio = 0;
-
-        if (primary.size() >= 10) {
-            // 历史均值 = 全部数据分布中位数，更鲁棒
-            List<Double> alphas = primary.stream().map(p -> p.alpha).sorted().collect(Collectors.toList());
-            int mid = alphas.size() / 2;
-            historicalMean = alphas.size() % 2 == 0
-                    ? (alphas.get(mid - 1) + alphas.get(mid)) / 2 : alphas.get(mid);
-
-            // 近25%期均值 = 最近 quarter 的平均
-            int recentN = Math.max(3, primary.size() / 4);
-            recentMean = primary.subList(primary.size() - recentN, primary.size())
-                    .stream().mapToDouble(p -> p.alpha).average().orElse(0);
-
-            decayRatio = Math.abs(historicalMean) > 1e-8
-                    ? (recentMean - historicalMean) / Math.abs(historicalMean) : 0;
-
-            if (decayRatio < ALPHA_DECAY_THRESHOLD) {
-                decayAlert = true;
-                decayWarning = String.format(
-                        "⚠ Alpha 显著衰减：近 %d 期均值 %.4f vs 历史均值 %.4f (降幅 %.1f%%)。建议排查策略有效性。",
-                        recentN, recentMean, historicalMean, Math.abs(decayRatio) * 100);
-            } else if (decayRatio < -0.2) {
-                decayWarning = String.format(
-                        "Alpha 轻微走弱：近期均值 %.4f vs 历史均值 %.4f (降幅 %.1f%%)，需持续观察。",
-                        recentMean, historicalMean, Math.abs(decayRatio) * 100);
-            }
+        // 数据不足：不计算衰减
+        if (primary.size() < 20) {
+            return new AlphaMonitorResult(r60, r120, r252,
+                    false,
+                    "数据不足（需 ≥20 个滚动窗口才能启动衰减分析）",
+                    0, 0, 0, 0);
         }
 
+        // 统一口径：都用平均值
+        double historicalMean = primary.stream().mapToDouble(p -> p.alpha).average().orElse(0);
+        int recentN = Math.max(5, primary.size() / 4);
+        double recentMean = primary.subList(primary.size() - recentN, primary.size())
+                .stream().mapToDouble(p -> p.alpha).average().orElse(0);
+
+        // 计算近期斜率（最近5个点，简单线性回归）
+        int slopeN = Math.min(5, primary.size());
+        double slope = computeSlope(primary, slopeN);
+
+        // 趋势判断
+        boolean decayAlert = (slope < 0 && recentMean < historicalMean);
+        String decayWarning;
+        if (decayAlert) {
+            decayWarning = String.format(
+                    "⚠ Alpha 有下行趋势：近 %d 期均值 %.4f%% 低于历史均值 %.4f%%（近期斜率 %.6f），建议排查策略有效性。",
+                    recentN, recentMean * 100, historicalMean * 100, slope);
+        } else if (slope < 0) {
+            decayWarning = String.format(
+                    "Alpha 近期斜率 %.6f 为负，但均值尚未明显低于历史水平，需持续观察。",
+                    slope);
+        } else {
+            decayWarning = "Alpha 保持稳定，未检测到显著衰减趋势。";
+        }
+
+        double decayRatio = Math.abs(historicalMean) > 1e-8
+                ? (recentMean - historicalMean) / Math.abs(historicalMean) : 0;
+
         return new AlphaMonitorResult(r60, r120, r252, decayAlert, decayWarning,
-                round4(historicalMean), round4(recentMean), round4(decayRatio));
+                round4(historicalMean), round4(recentMean), round4(slope), round4(decayRatio));
+    }
+
+    /** 计算最近 N 个点的斜率（简单线性回归） */
+    private double computeSlope(List<AlphaWindowPoint> points, int n) {
+        List<AlphaWindowPoint> tail = points.subList(points.size() - n, points.size());
+        int size = tail.size();
+        // x = 0,1,2,...,n-1
+        double sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+        for (int i = 0; i < size; i++) {
+            double x = i;
+            double y = tail.get(i).alpha;
+            sumX += x;
+            sumY += y;
+            sumXY += x * y;
+            sumX2 += x * x;
+        }
+        double denom = size * sumX2 - sumX * sumX;
+        return Math.abs(denom) > 1e-12 ? (size * sumXY - sumX * sumY) / denom : 0;
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -1497,6 +1466,7 @@ public class FactorStyleAttributionService {
 
         boolean smbDrift = false, hmlDrift = false;
         double smbHistMean = 0, smbRecentMean = 0, hmlHistMean = 0, hmlRecentMean = 0;
+        double smbStd = 0, hmlStd = 0;
         String driftWarning = "风格暴露稳定，未检测到显著漂移";
 
         if (primary.size() >= 10) {
@@ -1504,7 +1474,7 @@ public class FactorStyleAttributionService {
             double[] smbSeries = primary.stream().mapToDouble(p -> p.smbBeta).toArray();
             final double smbMean = Arrays.stream(smbSeries).average().orElse(0);
             smbHistMean = smbMean;
-            double smbStd = Math.sqrt(Arrays.stream(smbSeries)
+            smbStd = Math.sqrt(Arrays.stream(smbSeries)
                     .map(x -> (x - smbMean) * (x - smbMean)).average().orElse(0));
 
             int sN = Math.max(3, primary.size() / 4);
@@ -1519,7 +1489,7 @@ public class FactorStyleAttributionService {
             double[] hmlSeries = primary.stream().mapToDouble(p -> p.hmlBeta).toArray();
             final double hmlMean = Arrays.stream(hmlSeries).average().orElse(0);
             hmlHistMean = hmlMean;
-            double hmlStd = Math.sqrt(Arrays.stream(hmlSeries)
+            hmlStd = Math.sqrt(Arrays.stream(hmlSeries)
                     .map(x -> (x - hmlMean) * (x - hmlMean)).average().orElse(0));
 
             int hN = Math.max(3, primary.size() / 4);
@@ -1544,7 +1514,8 @@ public class FactorStyleAttributionService {
 
         return new StyleMonitorResult(r60, r120, r252, smbDrift, hmlDrift,
                 driftWarning, round4(smbHistMean), round4(smbRecentMean),
-                round4(hmlHistMean), round4(hmlRecentMean));
+                round4(hmlHistMean), round4(hmlRecentMean),
+                round4(smbStd), round4(hmlStd));
     }
 
     // ════════════════════════════════════════════════════════════════

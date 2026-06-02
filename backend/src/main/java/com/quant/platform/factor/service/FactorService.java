@@ -185,7 +185,12 @@ public class FactorService {
                 new String[]{"BOLL_WIDTH", "布林带宽度", "(上轨-下轨)/中轨×100，衡量波动率", "TECHNICAL"},
                 new String[]{"MA_ALIGNMENT", "均线多头排列", "5/10/20/60日均线向上排列程度，0-100打分", "TECHNICAL"},
                 new String[]{"NEAR_RESISTANCE", "近阻力位幅度", "价格距离上方最近高点的距离比率", "TECHNICAL"},
-                new String[]{"NEAR_SUPPORT", "近支撑位幅度", "价格距离下方最近低点的距离比率", "TECHNICAL"}
+                new String[]{"NEAR_SUPPORT", "近支撑位幅度", "价格距离下方最近低点的距离比率", "TECHNICAL"},
+                // 新增估值因子 (2026-06-02)
+                new String[]{"VAL_PE_TTM", "市盈率TTM", "总市值/最近4季度净利润（TTM），越低估值越便宜", "VALUE"},
+                new String[]{"VAL_PS_TTM", "市销率TTM", "总市值/最近4季度营收（TTM），越低估值越便宜", "VALUE"},
+                new String[]{"VAL_PB", "市净率", "总市值/净资产，越低估值越便宜", "VALUE"},
+                new String[]{"VAL_DIVIDEND_YIELD", "股息率", "最近12个月每股派息总和/当前股价×100，越高分红回报越好", "VALUE"}
         );
 
         for (String[] b : builtins) {

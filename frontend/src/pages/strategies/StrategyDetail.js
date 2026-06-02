@@ -180,6 +180,13 @@ export default function StrategyDetail() {
                     </pre>
                   </Descriptions.Item>
                 )}
+                {strategy.filterConfigJson && (
+                  <Descriptions.Item label="过滤配置" span={2}>
+                    <pre style={{ background: '#f6f8fa', padding: 8, borderRadius: 4, fontSize: 12, margin: 0 }}>
+                      {formatJson(strategy.filterConfigJson)}
+                    </pre>
+                  </Descriptions.Item>
+                )}
                 {strategy.scriptCode && (
                   <Descriptions.Item label="策略脚本" span={2}>
                     <pre style={{
