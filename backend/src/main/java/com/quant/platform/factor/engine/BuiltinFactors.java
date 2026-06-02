@@ -2,6 +2,7 @@ package com.quant.platform.factor.engine;
 
 import com.quant.platform.market.domain.MarketDailyBar;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.math3.stat.regression.SimpleRegression;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -2687,33 +2688,24 @@ public class BuiltinFactors {
             return BigDecimal.valueOf(z).setScale(8, RoundingMode.HALF_UP);
         }
 
-        /**
-         * 对 [start, end) 区间的K线做 OLS: high ~ low，返回斜率 beta
-         */
-        private double calcBeta(List<MarketDailyBar> history, int start, int end) {
-            int n = end - start;
-            if (n < REG_WIN) return Double.NaN;
-            // 简单线性回归: beta = Cov(low, high) / Var(low)
-            double sumL = 0, sumH = 0;
-            for (int i = start; i < end; i++) {
-                double l = history.get(i).getLow().doubleValue();
-                double h = history.get(i).getHigh().doubleValue();
-                sumL += l;
-                sumH += h;
+            /**
+             * 对 [start, end) 区间的K线做 OLS: high ~ low，返回斜率 beta
+             * 使用 SimpleRegression 提高数值稳定性
+             */
+            private double calcBeta(List<MarketDailyBar> history, int start, int end) {
+                int n = end - start;
+                if (n < REG_WIN) return Double.NaN;
+                SimpleRegression reg = new SimpleRegression(false); // 不强制截距
+                for (int i = start; i < end; i++) {
+                    double low = history.get(i).getLow().doubleValue();
+                    double high = history.get(i).getHigh().doubleValue();
+                    if (low > 0 && high > 0) {
+                        reg.addData(low, high);
+                    }
+                }
+                if (reg.getN() < REG_WIN * 0.8) return Double.NaN;
+                return reg.getSlope();
             }
-            double meanL = sumL / n;
-            double meanH = sumH / n;
-
-            double cov = 0, varL = 0;
-            for (int i = start; i < end; i++) {
-                double l = history.get(i).getLow().doubleValue() - meanL;
-                double h = history.get(i).getHigh().doubleValue() - meanH;
-                cov += l * h;
-                varL += l * l;
-            }
-            if (varL < 1e-12) return Double.NaN;
-            return cov / varL;
-        }
     }
 
     /**
@@ -2730,7 +2722,7 @@ public class BuiltinFactors {
 
         @Override
         public String getFactorCode() {
-            return "AO_AC";
+            return "AC";
         }
 
         @Override
