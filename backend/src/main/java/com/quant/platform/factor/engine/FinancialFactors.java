@@ -955,8 +955,8 @@ public class FinancialFactors {
 
         if (incomes == null || incomes.isEmpty()) return null;
 
-        // 按自然年分组，取每年最新一期
-        java.util.TreeMap<Integer, StockIncome> byYear = new java.util.TreeMap<>(java.util.Collections.reverseOrder());
+        // 按自然年分组，取每年最新一期（正向 TreeMap）
+        java.util.TreeMap<Integer, StockIncome> byYear = new java.util.TreeMap<>();
         for (StockIncome inc : incomes) {
             int year = inc.getEndDate().getYear();
             byYear.putIfAbsent(year, inc);
@@ -964,8 +964,8 @@ public class FinancialFactors {
 
         if (byYear.isEmpty()) return null;
 
-        // 最新一期的累计净利润
-        java.util.Map.Entry<Integer, StockIncome> latest = byYear.firstEntry();
+        // 最新一期的累计净利润（正向 TreeMap 的 lastEntry = 最大年份）
+        java.util.Map.Entry<Integer, StockIncome> latest = byYear.lastEntry();
         StockIncome latestInc = latest.getValue();
         BigDecimal latestNp = latestInc.getNpParentCompanyOwners();
         if (latestNp == null) latestNp = latestInc.getNetProfit();
@@ -1021,7 +1021,7 @@ public class FinancialFactors {
 
         if (incomes == null || incomes.isEmpty()) return null;
 
-        java.util.TreeMap<Integer, StockIncome> byYear = new java.util.TreeMap<>(java.util.Collections.reverseOrder());
+        java.util.TreeMap<Integer, StockIncome> byYear = new java.util.TreeMap<>();
         for (StockIncome inc : incomes) {
             int year = inc.getEndDate().getYear();
             byYear.putIfAbsent(year, inc);
@@ -1029,7 +1029,7 @@ public class FinancialFactors {
 
         if (byYear.isEmpty()) return null;
 
-        java.util.Map.Entry<Integer, StockIncome> latest = byYear.firstEntry();
+        java.util.Map.Entry<Integer, StockIncome> latest = byYear.lastEntry();
         StockIncome latestInc = latest.getValue();
         BigDecimal latestRevenue = latestInc.getTotalRevenue();
         if (latestRevenue == null) return null;

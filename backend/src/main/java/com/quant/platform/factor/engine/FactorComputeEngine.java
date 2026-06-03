@@ -785,13 +785,15 @@ public class FactorComputeEngine {
     private List<FactorValue> computeOneDateFinancialForReportDate(String factorCode, LocalDate reportDate, List<String> symbols, FinancialFactorCalculator calculator) {
         List<FactorValue> results = new ArrayList<>(symbols.size());
         LocalDateTime now = LocalDateTime.now();
+        java.util.concurrent.atomic.AtomicInteger failCount = new java.util.concurrent.atomic.AtomicInteger(0);
+        final boolean[] logged = {false};
 
         // 批量预加载：一次查询所有股票 end_date <= reportDate 的最新一期财报
         Map<String, StockFinancialIndicator> indicatorMap = batchLoadLatestFinancials(symbols, reportDate);
 
         for (String symbol : symbols) {
+            String code = symbol.contains(".") ? symbol.substring(0, symbol.indexOf('.')) : symbol;
             try {
-                String code = symbol.contains(".") ? symbol.substring(0, symbol.indexOf('.')) : symbol;
                 StockFinancialIndicator indicator = indicatorMap.get(code);
                 if (indicator == null) continue;
 
@@ -807,8 +809,15 @@ public class FactorComputeEngine {
                     results.add(fv);
                 }
             } catch (Exception e) {
-                // 单只股票失败不影响整体
+                failCount.incrementAndGet();
+                if (!logged[0]) {
+                    logged[0] = true;
+                    log.warn("[{}] computeOneDateFinancial {} {}: 首个异常 code={}, ex={}, msg={}", factorCode, reportDate, e.getClass().getSimpleName(), code, e.getMessage());
+                }
             }
+        }
+        if (failCount.get() > 0) {
+            log.info("[{}] computeOneDateFinancial {} 完成: 成功={}, 失败={}", factorCode, reportDate, results.size(), failCount.get());
         }
         return results;
     }
@@ -833,23 +842,8 @@ public class FactorComputeEngine {
             List<String> batch = codes.subList(i, Math.min(i + BATCH, codes.size()));
             String inClause = batch.stream().map(c -> "'" + c + "'").collect(Collectors.joining(","));
 
-            // 子查询获取每个 code 的最新 end_date，再联查完整记录
-            String sql = "SELECT fi.* FROM stock_financial_indicator fi " +
-                    "INNER JOIN (SELECT code, MAX(end_date) AS max_ed FROM stock_financial_indicator " +
-                    "WHERE code IN (" + inClause + ") AND end_date <= '" + beforeDate + "' " +
-                    "GROUP BY code) latest ON fi.code = latest.code AND fi.end_date = latest.max_ed";
-
-            // 使用 MyBatis 原生 SQL 执行
-            List<StockFinancialIndicator> indicators = financialIndicatorMapper.selectList(
-                    new LambdaQueryWrapper<StockFinancialIndicator>()
-                            .in(StockFinancialIndicator::getCode, batch)
-                            .le(StockFinancialIndicator::getEndDate, beforeDate)
-                            .groupBy(StockFinancialIndicator::getCode)  // 触发 GROUP BY
-                            .select(StockFinancialIndicator::getCode, StockFinancialIndicator::getEndDate));
-
-            // MyBatis-Plus 不支持复杂的 GROUP BY + JOIN，回退到逐条但用代码优化：
-            // 用 Java 8 groupingBy + maxBy 一次性处理
-            // 先批量查出所有符合条件的数据
+            // 批量查出所有符合条件的数据，Java 端 groupBy 取最新一条
+            // （避免 GROUP BY + SELECT 非聚合字段触发 only_full_group_by 报错）
             List<StockFinancialIndicator> allIndicators = financialIndicatorMapper.selectList(
                     new LambdaQueryWrapper<StockFinancialIndicator>()
                             .in(StockFinancialIndicator::getCode, batch)

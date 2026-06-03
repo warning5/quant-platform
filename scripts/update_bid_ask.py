@@ -419,13 +419,29 @@ def main():
     global CHECK_MODE
     CHECK_MODE = args.check
 
-    trade_date = datetime.now().date()
+    def _latest_trading_day():
+        """返回最近交易日：当前<15:00或周末返回上一交易日，>=15:00返回今天。"""
+        today = datetime.now().date()
+        now = datetime.now()
+        wd = today.weekday()
+        if wd == 5:          # Saturday
+            return today - __import__('datetime').timedelta(days=1)
+        if wd == 6:          # Sunday
+            return today - __import__('datetime').timedelta(days=2)
+        if now.hour < 15:    # 收市前 → 昨天（或上周五）
+            if wd == 0:      # Monday <15:00
+                return today - __import__('datetime').timedelta(days=3)
+            return today - __import__('datetime').timedelta(days=1)
+        return today         # >=15:00 当天数据已可获取
+
     if args.date:
         try:
             trade_date = datetime.strptime(args.date, '%Y-%m-%d').date()
         except ValueError:
             print(f"[ERROR] 日期格式错误: {args.date}，应为 YYYY-MM-DD")
             sys.exit(1)
+    else:
+        trade_date = _latest_trading_day()
 
     print(f"=== 内外盘比数据采集 ===")
     print(f"  目标日期: {trade_date}")

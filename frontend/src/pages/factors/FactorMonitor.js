@@ -49,8 +49,8 @@ const TARGET_DAYS = 310;
 const TARGET_STOCKS = 5280;
 // 财务因子目标报告期数：每年4个季报窗口 × 3年覆盖 = 12个报告期
 const TARGET_REPORT_PERIODS = 12;
-// 财务因子分类识别
-const FINANCIAL_CATEGORIES = ['FINANCIAL'];
+// 财务/估值因子分类识别（VALUE类估值因子也按报告期计算，非日频）
+const FINANCIAL_CATEGORIES = ['FINANCIAL', 'VALUE'];
 
 function FactorMonitor() {
   const [factors, setFactors] = useState([]);
