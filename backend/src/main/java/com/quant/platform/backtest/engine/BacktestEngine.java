@@ -563,11 +563,14 @@ public class BacktestEngine {
                     }
                 }
                 // 加入新买入的持仓（应用缩放）
+                // 注意：已保留的旧持仓（soldSymbols 不包含且 barMap 存在）在上方已写入 positions，
+                // 这里只处理真正的新买入标的，避免 buyScale=0 时覆盖旧持仓的正确股数。
                 final double scale = buyScale;
                 for (Map.Entry<String, Double> entry : effectiveTargets.entrySet()) {
-                    if (barMap.containsKey(entry.getKey())) {
-                        positions.put(entry.getKey(),
-                                (currentPortfolioValue * entry.getValue() * scale) / barMap.get(entry.getKey()).getClose().doubleValue());
+                    String sym = entry.getKey();
+                    if (barMap.containsKey(sym) && !positions.containsKey(sym)) {
+                        positions.put(sym,
+                                (currentPortfolioValue * entry.getValue() * scale) / barMap.get(sym).getClose().doubleValue());
                     }
                 }
 
@@ -996,9 +999,10 @@ public class BacktestEngine {
                 }
                 final double scale = buyScale;
                 for (Map.Entry<String, Double> entry : targetWeights.entrySet()) {
-                    if (barMap.containsKey(entry.getKey())) {
-                        positions.put(entry.getKey(),
-                                (portfolioValue * entry.getValue() * scale) / barMap.get(entry.getKey()).getClose().doubleValue());
+                    String sym = entry.getKey();
+                    if (barMap.containsKey(sym) && !positions.containsKey(sym)) {
+                        positions.put(sym,
+                                (portfolioValue * entry.getValue() * scale) / barMap.get(sym).getClose().doubleValue());
                     }
                 }
 

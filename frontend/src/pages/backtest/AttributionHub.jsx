@@ -554,7 +554,7 @@ function ModelComparisonCard({ strategy }) {
             },
           },
           {
-            title: '状态', dataIndex: 'available', width: 70,
+            title: '状态', dataIndex: 'available', width: 85,
             render: v => v ? <Badge status="success" text="可用" /> : <Badge status="default" text="不可用" />,
           },
           { title: '说明', dataIndex: 'desc', ellipsis: true },
@@ -622,7 +622,7 @@ function HoldingPeriodPanel({ periods, totalTrades }) {
   const columns = [
     { title: '持仓周期', dataIndex: 'bucket', width: 90, render: v => <b>{v}</b> },
     { title: '交易笔数', dataIndex: 'tradeCount', width: 75, align: 'right' },
-    { title: '占比', width: 65, align: 'right',
+    { title: '占比', width: 85, align: 'right',
       render: (_, r) => fmtPct(r.tradeCount / totalTrades) },
     { title: '等权均收益', width: 95, align: 'right',
       render: (_, r) => {

@@ -410,21 +410,23 @@ public class ClickHouseFactorValueService {
             String factorCode, java.time.LocalDate calcDate) {
         // 使用 <= date + argMax 取最新值，同时兼容日频因子（exact match）和财务因子（latest report）
         // CH JDBC v0.6.3 对 PreparedStatement 参数绑定处理有问题，改为字符串拼接
+        // CH v26.5.1 bug: GROUP BY 别名不能跟 WHERE 子句中的列同名，否则报 ILLEGAL_AGGREGATION
+        // 解决：所有 SELECT 别名加 fv_ 前缀，避免与表列名(factor_code, calc_date 等)冲突
         String sql = String.format("""
                 SELECT 
-                    argMax(id, calc_date) as id,
-                    factor_code,
+                    any(id) as fv_id,
+                    '%s' as fv_code,
                     symbol,
-                    argMax(calc_date, calc_date) as calc_date,
-                    argMax(factor_val, calc_date) as factor_val,
-                    argMax(rank_value, calc_date) as rank_value,
-                    argMax(z_score, calc_date) as z_score,
-                    now() as created_at
-                FROM stock.factor_value FINAL
+                    argMax(calc_date, calc_date) as fv_calc_date,
+                    argMax(factor_val, calc_date) as fv_val,
+                    argMax(rank_value, calc_date) as fv_rank,
+                    argMax(z_score, calc_date) as fv_zscore,
+                    now() as fv_created
+                FROM stock.factor_value
                 WHERE factor_code = '%s' AND calc_date <= '%s'
-                GROUP BY factor_code, symbol
+                GROUP BY symbol
                 ORDER BY symbol
-                """, factorCode.replace("'", "''"), calcDate);
+                """, factorCode.replace("'", "''"), factorCode.replace("'", "''"), calcDate);
 
         java.util.List<com.quant.platform.factor.domain.FactorValue> result = new ArrayList<>();
         try (java.sql.Connection conn = getConnection();
@@ -432,7 +434,7 @@ public class ClickHouseFactorValueService {
              java.sql.ResultSet rs = stmt.executeQuery(sql)) {
 
             while (rs.next()) {
-                result.add(convertResultSet(rs));
+                result.add(convertGroupedResultSet(rs));
             }
         } catch (Exception e) {
             log.warn("[ClickHouse] findByFactorCodeAndDate 查询失败: {}", e.getMessage());
@@ -830,6 +832,33 @@ public class ClickHouseFactorValueService {
         fv.setZScore(rs.wasNull() ? null : java.math.BigDecimal.valueOf(zScore));
 
         Timestamp createdAt = rs.getTimestamp("created_at");
+        fv.setCreatedAt(createdAt != null ? createdAt.toLocalDateTime() : null);
+
+        return fv;
+    }
+
+    /**
+     * 转换 GROUP BY 聚合查询结果（列名带 fv_ 前缀，避免 CH ILLEGAL_AGGREGATION bug）
+     */
+    private com.quant.platform.factor.domain.FactorValue convertGroupedResultSet(ResultSet rs) throws SQLException {
+        com.quant.platform.factor.domain.FactorValue fv = new com.quant.platform.factor.domain.FactorValue();
+        fv.setId(rs.getLong("fv_id"));
+        fv.setFactorCode(rs.getString("fv_code"));
+        fv.setSymbol(rs.getString("symbol"));
+
+        java.sql.Date date = rs.getDate("fv_calc_date");
+        fv.setCalcDate(date != null ? date.toLocalDate() : null);
+
+        double factorVal = rs.getDouble("fv_val");
+        fv.setFactorVal(rs.wasNull() ? null : java.math.BigDecimal.valueOf(factorVal));
+
+        double rankValue = rs.getDouble("fv_rank");
+        fv.setRankValue(rs.wasNull() ? null : java.math.BigDecimal.valueOf(rankValue));
+
+        double zScore = rs.getDouble("fv_zscore");
+        fv.setZScore(rs.wasNull() ? null : java.math.BigDecimal.valueOf(zScore));
+
+        Timestamp createdAt = rs.getTimestamp("fv_created");
         fv.setCreatedAt(createdAt != null ? createdAt.toLocalDateTime() : null);
 
         return fv;
