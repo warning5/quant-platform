@@ -408,11 +408,21 @@ public class ClickHouseFactorValueService {
 
     private java.util.List<com.quant.platform.factor.domain.FactorValue> queryByFactorCodeAndDateFromCH(
             String factorCode, java.time.LocalDate calcDate) {
+        // 使用 <= date + argMax 取最新值，同时兼容日频因子（exact match）和财务因子（latest report）
         // CH JDBC v0.6.3 对 PreparedStatement 参数绑定处理有问题，改为字符串拼接
         String sql = String.format("""
-                SELECT id, factor_code, symbol, calc_date, factor_val, rank_value, z_score, created_at
+                SELECT 
+                    argMax(id, calc_date) as id,
+                    factor_code,
+                    symbol,
+                    argMax(calc_date, calc_date) as calc_date,
+                    argMax(factor_val, calc_date) as factor_val,
+                    argMax(rank_value, calc_date) as rank_value,
+                    argMax(z_score, calc_date) as z_score,
+                    now() as created_at
                 FROM stock.factor_value FINAL
-                WHERE factor_code = '%s' AND calc_date = '%s'
+                WHERE factor_code = '%s' AND calc_date <= '%s'
+                GROUP BY factor_code, symbol
                 ORDER BY symbol
                 """, factorCode.replace("'", "''"), calcDate);
 

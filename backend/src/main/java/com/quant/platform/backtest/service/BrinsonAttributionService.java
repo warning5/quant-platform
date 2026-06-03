@@ -47,11 +47,9 @@ public class BrinsonAttributionService {
     /**
      * 核心 Brinson 归因计算
      *
-     * @param taskId              回测任务ID
      * @param positionHistoryJson 持仓历史 JSON
      * @param equityCurveJson     净值曲线 JSON
      * @param benchmarkCurveJson  基准曲线 JSON
-     * @param benchmarkCode       基准指数代码
      * @return 归因结果
      */
     @SuppressWarnings("unchecked")
@@ -186,7 +184,7 @@ public class BrinsonAttributionService {
                 String reason = getDateReason(midDate);
                 log.warn("无法获取 {} 全市场行业数据（{}），尝试回溯到最近交易日", midDate, reason);
                 // 回溯：向前查找最近的交易日，最多尝试5天（覆盖最长假期）
-                LocalDate adjusted = null;
+                LocalDate adjusted;
                 for (int back = 1; back <= 5; back++) {
                     adjusted = midDate.minusDays(back);
                     benchmarkIndustryWeight.clear();

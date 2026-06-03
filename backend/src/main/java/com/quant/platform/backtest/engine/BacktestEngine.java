@@ -54,30 +54,30 @@ public class BacktestEngine {
     private final BacktestReportMapper reportMapper;
     private final MarketDataService marketDataService;
     private final FactorValueMapper factorValueMapper;
-    @Autowired(required = false)
-    private ClickHouseFactorValueService clickHouseFactorValueService;
     private final StrategyService strategyService;
     private final DividendService dividendService;
-
-    /** SCREEN 模式选股服务 */
+    private final ObjectMapper objectMapper;
+    @Autowired(required = false)
+    private ClickHouseFactorValueService clickHouseFactorValueService;
+    /**
+     * SCREEN 模式选股服务
+     */
     @Autowired(required = false)
     private StockScreenService stockScreenService;
-
-    /** 调仓记录写入（统一后两种模式都写） */
+    /**
+     * 调仓记录写入（统一后两种模式都写）
+     */
     @Autowired(required = false)
     private RebalanceRecordMapper rebalanceRecordMapper;
-
-    /** 逐日净值写入 */
+    /**
+     * 逐日净值写入
+     */
     @Autowired(required = false)
     private EquityCurveMapper equityCurveMapper;
-
     @Autowired(required = false)
     private SimpMessagingTemplate messagingTemplate;
-
     @Resource
     private DataSource dataSource;
-
-    private final ObjectMapper objectMapper;
 
     /**
      * 异步运行回测
@@ -386,14 +386,12 @@ public class BacktestEngine {
 
                     // 止损：亏损超过阈值
                     if (stopLossPct > 0 && returnPct <= -stopLossPct) {
-                        log.debug("[{}] {} 触发止损: 收益率={:.2%}, 阈值={:.2%}",
-                                today, symbol, returnPct, -stopLossPct);
+                        log.debug("[{}] {} 触发止损: 收益率={}, 阈值={}", today, symbol, returnPct, -stopLossPct);
                         toSell.add(symbol);
                     }
                     // 止盈：盈利超过阈值
                     else if (stopProfitPct > 0 && returnPct >= stopProfitPct) {
-                        log.debug("[{}] {} 触发止盈: 收益率={:.2%}, 阈值={:.2%}",
-                                today, symbol, returnPct, stopProfitPct);
+                        log.debug("[{}] {} 触发止盈: 收益率={}, 阈值={}", today, symbol, returnPct, stopProfitPct);
                         toSell.add(symbol);
                     }
                 }
@@ -982,7 +980,10 @@ public class BacktestEngine {
                 for (String sym : new HashSet<>(oldPositions.keySet())) {
                     if (targetWeights.containsKey(sym)) continue;
                     MarketDailyBar bar = barMap.get(sym);
-                    if (bar == null) { soldSymbols.add(sym); continue; }
+                    if (bar == null) {
+                        soldSymbols.add(sym);
+                        continue;
+                    }
                     if (suspendFilter && isSuspended(bar)) continue;
                     if (limitFilter && isLimitDown(bar)) continue;
                     soldSymbols.add(sym);
@@ -1130,7 +1131,10 @@ public class BacktestEngine {
         if (equityCurveMapper == null || equityCurve == null || equityCurve.isEmpty()) return;
         try {
             // 先清理旧数据
-            try { equityCurveMapper.deleteByTaskId(taskId); } catch (Exception ignored) {}
+            try {
+                equityCurveMapper.deleteByTaskId(taskId);
+            } catch (Exception ignored) {
+            }
             double prevNav = 0;
             for (Map<String, Object> point : equityCurve) {
                 LocalDate date = LocalDate.parse((String) point.get("date"));
@@ -2154,6 +2158,14 @@ public class BacktestEngine {
         }
     }
 
+    /**
+     * 计算收益率百分比
+     */
+    private double returnPct(double currentValue, double cost) {
+        if (cost <= 0) return 0;
+        return (currentValue - cost) / cost;
+    }
+
     record FactorWeight(String factorCode, double weight) {
     }
 
@@ -2174,13 +2186,5 @@ public class BacktestEngine {
             int tradingDays,
             double benchmarkTotalReturn
     ) {
-    }
-
-    /**
-     * 计算收益率百分比
-     */
-    private double returnPct(double currentValue, double cost) {
-        if (cost <= 0) return 0;
-        return (currentValue - cost) / cost;
     }
 }
