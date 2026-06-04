@@ -21,6 +21,12 @@ public interface StrategyDefinitionMapper extends BaseMapper<StrategyDefinition>
     boolean existsByStrategyCode(@Param("strategyCode") String strategyCode);
 
     /**
+     * 检查策略代码是否被其他策略使用（排除指定ID）
+     */
+    @Select("SELECT COUNT(*) > 0 FROM strategy_definition WHERE strategy_code = #{strategyCode} AND id != #{excludeId}")
+    boolean existsByStrategyCodeExcluding(@Param("strategyCode") String strategyCode, @Param("excludeId") Long excludeId);
+
+    /**
      * 搜索策略（支持分页）
      */
     default List<StrategyDefinition> search(String keyword, StrategyDefinition.StrategyType type,

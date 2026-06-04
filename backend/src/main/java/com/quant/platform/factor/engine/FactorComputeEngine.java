@@ -206,7 +206,7 @@ public class FactorComputeEngine {
         registerFinancial(new FinancialFactors.OperatingCfToRevenueCalc());
         registerFinancial(new FinancialFactors.BpsCalc());
         registerFinancial(new FinancialFactors.RoeStabilityCalc());
-        registerFinancial(new FinancialFactors.EarningsQualityCalc());
+        registerFinancial(new FinancialFactors.EarningsQualitySimpleCalc());
         registerFinancial(new FinancialFactors.GrossMarginQualityCalc());
         registerFinancial(new FinancialFactors.OperatingLeverageCalc());
         registerFinancial(new FinancialFactors.CashFlowQualityCalc());
@@ -233,6 +233,10 @@ public class FactorComputeEngine {
         registerFinancial(financialFactorsBean.new PsTtmCalc());
         registerFinancial(financialFactorsBean.new PbCalc());
         registerFinancial(financialFactorsBean.new DividendYieldCalc());
+        // 质量因子 (Phase 2.3)
+        registerFinancial(financialFactorsBean.new EarningsQualityCalc());
+        registerFinancial(financialFactorsBean.new FinancialHealthCalc());
+        registerFinancial(financialFactorsBean.new RevenueStabilityCalc());
         log.info("Registered {} financial factor calculators (total, after deferred)", financialCalculators.size());
     }
 

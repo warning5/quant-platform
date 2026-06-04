@@ -28,6 +28,7 @@ import BacktestRunning from './pages/backtest/BacktestRunning';
 import BacktestCompare from './pages/backtest/BacktestCompare';
 import ParamOptimize from './pages/backtest/ParamOptimize';
 import FactorWeightOptimize from './pages/factors/FactorWeightOptimize';
+import RecommendationList from './pages/recommendation/RecommendationList';
 import FactorIcIrAnalysis from './pages/factors/FactorIcIrAnalysis';
 import StockScreen from './pages/screen/StockScreen';
 import ManualOverviewPage from './pages/manual/ManualOverviewPage';
@@ -103,6 +104,7 @@ function AppLayout() {
       label: '选股工具',
       children: [
         { key: '/screen', label: <Link to="/screen">因子选股</Link> },
+        { key: '/recommendation', label: <Link to="/recommendation">智能推荐</Link> },
       ],
     },
     {
@@ -263,6 +265,7 @@ function AppLayout() {
             <Route path="/factor-weight-optimize" element={<FactorWeightOptimize defaultFactorCodes={[]} />} />
             <Route path="/factor-ic-ir" element={<FactorIcIrAnalysis />} />
             <Route path="/screen" element={<StockScreen />} />
+            <Route path="/recommendation" element={<RecommendationList />} />
             <Route path="/screen/backtest/:id" element={<OldRollingRedirect />} />
             <Route path="/screen/backtest" element={<OldRollingRedirect />} />
             <Route path="/manual/overview" element={<ManualOverviewPage />} />

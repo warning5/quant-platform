@@ -331,4 +331,16 @@ export const stockAnalysisApi = {
   getShareholderStructure: (code, config) => api.get('/analysis/shareholder-structure', { ...config, params: { code } }),
 };
 
+// ===== 智能推荐 API =====
+export const recommendationApi = {
+  /** 生成推荐列表（手动触发） */
+  generate: (date, topN) => api.post('/recommendations/generate', { date, topN }),
+  /** 获取最新推荐列表 */
+  getLatest: () => api.get('/recommendations/latest'),
+  /** 获取指定批次推荐 */
+  getByBatch: (batchId) => api.get(`/recommendations/batch/${batchId}`),
+  /** 获取批次列表 */
+  getBatches: (limit = 20) => api.get('/recommendations/batches', { params: { limit } }),
+};
+
 export default api;

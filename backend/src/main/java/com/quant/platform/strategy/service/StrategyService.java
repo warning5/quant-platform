@@ -70,6 +70,14 @@ public class StrategyService {
     @Transactional
     public StrategyDefinition updateStrategy(Long id, StrategyDefinition update) {
         StrategyDefinition existing = getById(id);
+        // 支持修改策略代码，需校验唯一性
+        String newCode = update.getStrategyCode();
+        if (newCode != null && !newCode.equals(existing.getStrategyCode())) {
+            if (strategyMapper.existsByStrategyCodeExcluding(newCode, id)) {
+                throw new BusinessException("策略代码已存在: " + newCode);
+            }
+            existing.setStrategyCode(newCode);
+        }
         existing.setStrategyName(update.getStrategyName());
         existing.setDescription(update.getDescription());
         existing.setStrategyType(update.getStrategyType());

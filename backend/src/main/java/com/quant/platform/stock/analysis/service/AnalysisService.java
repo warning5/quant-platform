@@ -373,7 +373,8 @@ public class AnalysisService {
      */
     private String buildConclusion(AnalysisOverview o, TradingSignal signal) {
         StringBuilder sb = new StringBuilder();
-        sb.append("【").append(o.getName()).append("(").append(o.getCode()).append(")】");
+        String displayName = o.getName() != null ? o.getName() : o.getCode();
+        sb.append("【").append(displayName).append("(").append(o.getCode()).append(")】");
 
         // 操作建议
         sb.append("综合评分").append(signal.getTotalScore()).append("分，");

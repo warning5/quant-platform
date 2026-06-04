@@ -507,7 +507,7 @@ public class FinancialFactors {
     /**
      * 盈利质量 - 经营现金流/净利润比率，接近1说明利润含金量高
      */
-    public static class EarningsQualityCalc implements FinancialFactorCalculator {
+    public static class EarningsQualitySimpleCalc implements FinancialFactorCalculator {
         @Override
         public String getFactorCode() {
             return "FIN_EARNINGS_QUALITY";
@@ -1060,5 +1060,160 @@ public class FinancialFactors {
 
         BigDecimal complement = prevYearFull.subtract(prevSamePeriod);
         return latestRevenue.add(complement);
+    }
+
+    // ======================== 质量因子 (Phase 2.3) ========================
+
+    /**
+     * 盈利质量 = 营业现金流TTM / 净利润TTM
+     *
+     * 含义：经营活动产生的现金流与净利润的比值，衡量利润的现金含量。
+     * > 1.0 说明利润有充足的现金支撑（质量好），< 0.7 说明可能存在应收账款过多。
+     * 返回值就是比值本身（非百分位），后续由 CH 归一化。
+     */
+    public class EarningsQualityCalc implements FinancialFactorCalculator {
+        @Override
+        public String getFactorCode() {
+            return "QUAL_EARNINGS";
+        }
+
+        @Override
+        public BigDecimal calculate(String code, StockFinancialIndicator ind) {
+            if (ind == null || ind.getEndDate() == null) return null;
+
+            // TTM 净利润
+            BigDecimal ttmProfit = computeTtmNetProfit(code, ind.getEndDate());
+            if (ttmProfit == null || ttmProfit.doubleValue() == 0) return null;
+
+            // TTM 营业现金流：取最近4个季度的 netOperateCf 之和
+            List<StockCashflow> cashflows = stockCashflowMapper.selectList(
+                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<StockCashflow>()
+                            .eq(StockCashflow::getCode, code)
+                            .le(StockCashflow::getReportDate, ind.getEndDate())
+                            .orderByDesc(StockCashflow::getReportDate)
+                            .last("LIMIT 4")
+            );
+            if (cashflows.isEmpty()) return null;
+
+            BigDecimal totalCf = BigDecimal.ZERO;
+            for (StockCashflow cf : cashflows) {
+                if (cf.getNetOperateCf() != null) {
+                    totalCf = totalCf.add(cf.getNetOperateCf());
+                }
+            }
+            if (totalCf.doubleValue() == 0) return null;
+
+            return totalCf.divide(ttmProfit, SCALE, RoundingMode.HALF_UP);
+        }
+    }
+
+    /**
+     * 简化 Altman-Z（财务健康度）
+     *
+     * 原始 Z = 1.2X1 + 1.4X2 + 3.3X3 + 0.6X4 + 1.0X5
+     * 简化版（适配可用数据）:
+     *   X1 = (流动资产 - 流动负债) / 总资产  → Working Capital / Total Assets
+     *   X3 = 息税前利润(≈营业利润) / 总资产  → Operating Profit / Total Assets
+     *   X4 = 净资产 / 总资产  → Equity / Total Assets
+     *
+     * 返回 Z-Score，越高越安全。阈值: > 2.9 安全, 1.8~2.9 灰色, < 1.8 危险
+     */
+    public class FinancialHealthCalc implements FinancialFactorCalculator {
+        @Override
+        public String getFactorCode() {
+            return "QUAL_HEALTH";
+        }
+
+        @Override
+        public BigDecimal calculate(String code, StockFinancialIndicator ind) {
+            if (ind == null || ind.getEndDate() == null) return null;
+
+            // 资产负债表（最新一期）
+            StockBalance balance = queryBalance(code, ind.getEndDate());
+            if (balance == null) return null;
+
+            BigDecimal totalAssets = balance.getTotalAssets();
+            if (totalAssets == null || totalAssets.doubleValue() <= 0) return null;
+
+            // 利润表（最新一期）
+            StockIncome income = queryIncome(code, ind.getEndDate());
+            BigDecimal operatingProfit = income != null ? income.getOperatingProfit() : null;
+
+            // X1: 流动比率贡献 (流动资产 - 流动负债) / 总资产
+            BigDecimal currentAssets = balance.getTotalCurrentAssets();
+            BigDecimal totalLiab = balance.getTotalLiabilities();
+            double x1 = 0;
+            if (currentAssets != null && totalLiab != null) {
+                x1 = (currentAssets.doubleValue() - totalLiab.doubleValue()) / totalAssets.doubleValue();
+            }
+
+            // X3: 营业利润 / 总资产
+            double x3 = 0;
+            if (operatingProfit != null) {
+                x3 = operatingProfit.doubleValue() / totalAssets.doubleValue();
+            }
+
+            // X4: 净资产 / 总资产
+            BigDecimal equity = balance.getTotalEquity();
+            double x4 = 0;
+            if (equity != null) {
+                x4 = equity.doubleValue() / totalAssets.doubleValue();
+            }
+
+            // 简化 Z = 1.2*X1 + 3.3*X3 + 1.0*X4
+            double z = 1.2 * x1 + 3.3 * x3 + 1.0 * x4;
+            return BigDecimal.valueOf(z).setScale(SCALE, RoundingMode.HALF_UP);
+        }
+    }
+
+    /**
+     * 营收稳定性 = 最近4个季度营收的标准差 / 平均营收的反比
+     *
+     * 标准差小且均值为正 → 稳定增长 → 得分高
+     * 返回值 = 平均营收 / (标准差 + 1)，值越大越稳定
+     */
+    public class RevenueStabilityCalc implements FinancialFactorCalculator {
+        @Override
+        public String getFactorCode() {
+            return "QUAL_REVENUE_STABILITY";
+        }
+
+        @Override
+        public BigDecimal calculate(String code, StockFinancialIndicator ind) {
+            if (ind == null || ind.getEndDate() == null) return null;
+
+            List<StockIncome> incomes = stockIncomeMapper.selectList(
+                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<StockIncome>()
+                            .eq(StockIncome::getCode, code)
+                            .le(StockIncome::getEndDate, ind.getEndDate())
+                            .orderByDesc(StockIncome::getEndDate)
+                            .last("LIMIT 4")
+            );
+            if (incomes.size() < 2) return null;
+
+            double sum = 0;
+            int count = 0;
+            for (StockIncome inc : incomes) {
+                if (inc.getTotalRevenue() != null) {
+                    sum += inc.getTotalRevenue().doubleValue();
+                    count++;
+                }
+            }
+            if (count < 2) return null;
+
+            double mean = sum / count;
+            double sumSq = 0;
+            for (StockIncome inc : incomes) {
+                if (inc.getTotalRevenue() != null) {
+                    double diff = inc.getTotalRevenue().doubleValue() - mean;
+                    sumSq += diff * diff;
+                }
+            }
+            double stdDev = Math.sqrt(sumSq / count);
+
+            // 平均营收 / (标准差 + 1)，值越大越稳定
+            double stability = mean / (stdDev + 1);
+            return BigDecimal.valueOf(stability).setScale(SCALE, RoundingMode.HALF_UP);
+        }
     }
 }
