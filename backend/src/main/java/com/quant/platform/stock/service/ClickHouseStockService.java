@@ -13,6 +13,7 @@ import java.sql.*;
 import java.sql.Date;
 import java.time.LocalDate;
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * ClickHouse 股票数据服务
@@ -63,6 +64,54 @@ public class ClickHouseStockService {
                 .le(StockDaily::getTradeDate, endDate)
                 .orderByAsc(StockDaily::getTradeDate);
         return stockDailyMapper.selectList(wrapper);
+    }
+
+    /**
+     * 批量查询多个指数的日线数据（使用 Statement 避免 PreparedStatement 参数绑定问题）
+     *
+     * @param codes     指数代码集合（如 ["801010", "801030", ...]）
+     * @param startDate 开始日期
+     * @param endDate   结束日期
+     * @return code → bars 映射（按 trade_date ASC 排序）
+     */
+    public Map<String, List<StockDaily>> getIndexDailyBatch(Set<String> codes, LocalDate startDate, LocalDate endDate) {
+        Map<String, List<StockDaily>> result = new LinkedHashMap<>();
+        if (codes == null || codes.isEmpty()) return result;
+
+        if (!clickHouseConfig.isEnabled()) {
+            // MySQL 回退：逐个查询
+            for (String code : codes) {
+                List<StockDaily> bars = getIndexDailyFromMySQL(code, startDate, endDate);
+                if (!bars.isEmpty()) result.put(code, bars);
+            }
+            return result;
+        }
+
+        // ClickHouse: 用字符串拼接 SQL，避免 PreparedStatement 参数绑定返回空
+        String codesStr = codes.stream()
+                .map(c -> "'" + c + "'")
+                .collect(Collectors.joining(","));
+        String sql = String.format(
+                "SELECT code, trade_date, name, open_price, close_price, high_price, low_price, " +
+                "pre_close, volume, amount, change_percent, change_amount, " +
+                "turnover_rate, pe_ttm, pb " +
+                "FROM index_daily FINAL " +
+                "WHERE code IN (%s) AND trade_date >= '%s' AND trade_date <= '%s' " +
+                "ORDER BY code, trade_date",
+                codesStr, startDate, endDate);
+
+        try (Connection conn = getConnection();
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+            while (rs.next()) {
+                StockDaily daily = convertResultSet(rs);
+                result.computeIfAbsent(daily.getCode(), k -> new ArrayList<>()).add(daily);
+            }
+        } catch (Exception e) {
+            log.warn("[ClickHouse] 批量指数查询失败: {}", e.getMessage());
+            // 不回退 MySQL，静默返回空
+        }
+        return result;
     }
 
     // ==================== 基础按 code+日期范围查询 ====================
@@ -1030,6 +1079,45 @@ public class ClickHouseStockService {
         }
     }
 
+    /**
+     * 通用查询（Statement 模式，避免 PreparedStatement 空结果问题）
+     * 返回每行为 Map<String, Object> 的列表，key 为列名小写
+     * 异常时静默返回空列表，与 Spring JdbcTemplate 行为一致
+     */
+    public List<Map<String, Object>> queryForList(String sql) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        try (Connection conn = getConnection();
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+            java.sql.ResultSetMetaData meta = rs.getMetaData();
+            int colCount = meta.getColumnCount();
+            while (rs.next()) {
+                Map<String, Object> row = new LinkedHashMap<>();
+                for (int i = 1; i <= colCount; i++) {
+                    row.put(meta.getColumnLabel(i).toLowerCase(), rs.getObject(i));
+                }
+                result.add(row);
+            }
+        } catch (Exception e) {
+            log.warn("[ClickHouse] queryForList 失败: {}", e.getMessage());
+        }
+        return result;
+    }
+
+    /**
+     * 通用标量查询（Statement 模式），返回单行单列，异常时返回 null
+     */
+    public String queryForString(String sql) {
+        try (Connection conn = getConnection();
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+            if (rs.next()) return rs.getString(1);
+        } catch (Exception e) {
+            log.warn("[ClickHouse] queryForString 失败: {}", e.getMessage());
+        }
+        return null;
+    }
+
     // ==================== 写入方法 ====================
 
     /**
@@ -1145,22 +1233,22 @@ public class ClickHouseStockService {
             return null;
         }
         String chCode = normalizeCodeForCH(code);
-        // CH SQL: 用 neighbor 窗口函数取前一交易日收盘价，计算日收益率，再年化
-        String sql = """
+        // CH SQL: 用 lagInFrame 窗口函数取前一交易日收盘价，计算日收益率，再年化
+        // ⚠️ neighbor() 在 CH v26+ 已被移除，改用 lagInFrame()
+        String sql = String.format("""
                 WITH daily_ret AS (
                     SELECT
-                        close / nullIf(neighbor(close, -1) OVER (ORDER BY trade_date), 0) - 1 AS ret
+                        close_price / nullIf(lagInFrame(close_price, 1) OVER (ORDER BY trade_date), 0) - 1 AS ret
                     FROM stock_daily
-                    WHERE code = ? AND trade_date >= today() - 400
+                    WHERE code = '%s' AND trade_date >= today() - 400
                 )
                 SELECT stddevPop(ret) * sqrt(252) AS annual_vol
                 FROM daily_ret
                 WHERE ret IS NOT NULL AND abs(ret) < 0.25
-                """;
+                """, chCode);
         try (Connection conn = this.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
-            stmt.setString(1, chCode);
-            try (ResultSet rs = stmt.executeQuery()) {
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
                 if (rs.next()) {
                     double vol = rs.getDouble(1);
                     if (!rs.wasNull()) {
@@ -1168,7 +1256,6 @@ public class ClickHouseStockService {
                         return vol;
                     }
                 }
-            }
         } catch (Exception e) {
             log.warn("[ClickHouse] 波动率计算失败({}): {}", code, e.getMessage());
         }

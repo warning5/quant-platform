@@ -1442,26 +1442,26 @@ public class AnalysisService {
         Map<String, Object> result = new LinkedHashMap<>();
 
         // 1. 行业排行（纯 CH 查询：stock_info + stock_daily 都在 CH）
+        // ⚠️ Spring JdbcTemplate 内部走 PreparedStatement，CH JDBC 返回空 → 改用 clickHouseStockService（Statement）
         List<Map<String, Object>> industryList = Collections.emptyList();
         String latestTradeDate = null;
         try {
-            // 先查最新交易日（避免子查询）
-            latestTradeDate = clickHouseJdbcTemplate.queryForObject(
-                "SELECT MAX(trade_date) FROM stock.stock_daily FINAL", String.class);
+            latestTradeDate = clickHouseStockService.queryForString(
+                    "SELECT MAX(trade_date) FROM stock.stock_daily FINAL");
         } catch (Exception e) {
             log.error("获取最新交易日失败: {}", e.getMessage());
         }
 
         if (latestTradeDate != null) {
             try {
-                String industrySql = String.format("""
+                String sql = String.format("""
                     SELECT
                         si.industry,
                         COUNT(*) as stockCount,
                         AVG(sd.change_percent) as avgChangePct,
                         median(sd.pe_ttm) as medianPe,
                         median(sd.pb) as medianPb
-                    FROM stock_info si
+                    FROM stock.stock_info si
                       INNER JOIN (
                         SELECT code, change_percent, pe_ttm, pb FROM stock.stock_daily FINAL
                         WHERE trade_date = '%s'
@@ -1472,22 +1472,23 @@ public class AnalysisService {
                     ORDER BY avgChangePct DESC
                     LIMIT 30
                     """, latestTradeDate);
-            industryList = clickHouseJdbcTemplate.query(industrySql,
-                (rs, rowNum) -> {
+                List<Map<String, Object>> rows = clickHouseStockService.queryForList(sql);
+                industryList = new ArrayList<>();
+                for (Map<String, Object> row : rows) {
                     Map<String, Object> m = new LinkedHashMap<>();
-                    m.put("industry", rs.getString("industry"));
-                    m.put("stockCount", rs.getLong("stockCount"));
-                    Object avgChg = rs.getObject("avgChangePct");
+                    m.put("industry", row.get("industry"));
+                    m.put("stockCount", row.get("stockcount"));
+                    Object avgChg = row.get("avgchangepct");
                     m.put("avgChangePct", avgChg instanceof Number ?
                             BigDecimal.valueOf(((Number) avgChg).doubleValue()).setScale(2, RoundingMode.HALF_UP) : null);
-                    Object medPe = rs.getObject("medianPe");
+                    Object medPe = row.get("medianpe");
                     m.put("medianPe", medPe instanceof Number ?
                             BigDecimal.valueOf(((Number) medPe).doubleValue()).setScale(1, RoundingMode.HALF_UP) : null);
-                    Object medPb = rs.getObject("medianPb");
+                    Object medPb = row.get("medianpb");
                     m.put("medianPb", medPb instanceof Number ?
                             BigDecimal.valueOf(((Number) medPb).doubleValue()).setScale(2, RoundingMode.HALF_UP) : null);
-                    return m;
-                });
+                    industryList.add(m);
+                }
             } catch (Exception e) {
                 log.error("查询行业排行失败: error={}", e.getMessage(), e);
             }

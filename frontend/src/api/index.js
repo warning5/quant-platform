@@ -333,8 +333,12 @@ export const stockAnalysisApi = {
 
 // ===== 智能推荐 API =====
 export const recommendationApi = {
-  /** 生成推荐列表（手动触发） */
-  generate: (date, topN) => api.post('/recommendations/generate', { date, topN }),
+  /** 生成推荐列表（手动触发）
+   * @param {string} date - 推荐日期
+   * @param {number} topN - 推荐数量
+   * @param {string} factorProfile - 因子组合: EXISTING/NORMAL/NEW_QUALITY/HOT/COMPREHENSIVE
+   */
+  generate: (date, topN, factorProfile) => api.post('/recommendations/generate', { date, topN, factorProfile }),
   /** 获取最新推荐列表 */
   getLatest: () => api.get('/recommendations/latest'),
   /** 获取指定批次推荐 */

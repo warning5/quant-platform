@@ -704,36 +704,39 @@ export default function StockScreen() {
   return (
     <div style={{ width: '100%' }}>
       {/* 页头 */}
-      <div className="page-header">
-        <Title level={4} style={{ margin: 0 }}>因子策略</Title>
-        <Space>
-          <Badge
-            color={totalWeight > 0 ? (Math.abs(totalWeight - 1) < 0.01 ? 'green' : 'orange') : 'red'}
-            text={`权重合计: ${totalWeight.toFixed(2)}`}
-          />
-          {thData && thStatus && (
-            <Tooltip title={`大盘${thStatus.label}（${thData.fearGreedIndex?.toFixed(0)}°），${thStatus.action}`}>
-              <Tag color={thStatus.label === '极度贪婪' ? 'red' : thStatus.label === '极度恐慌' ? 'green' : 'blue'}>
-                <Link to="/market-thermometer" style={{ color: 'inherit' }}>{thStatus.label} {thData.fearGreedIndex?.toFixed(0)}°</Link>
-              </Tag>
-            </Tooltip>
-          )}
-          <Button
-            type="primary"
-            icon={<PlayCircleOutlined />}
-            size="small"
-            loading={running}
-            onClick={handleRun}
-            disabled={factors.length === 0}
-          >
-            {running ? '选股中' : '执行选股'}
-          </Button>
-        </Space>
+      <div style={{ marginBottom: 4 }}>
+        <Title level={4} style={{ margin: '0 0 8px' }}>因子选股</Title>
       </div>
-
       <Tabs
         defaultActiveKey="multifactor"
         size="small"
+        tabBarExtraContent={{
+          right: (
+              <Space size="small">
+                <Badge
+                  color={totalWeight > 0 ? (Math.abs(totalWeight - 1) < 0.01 ? 'green' : 'orange') : 'red'}
+                  text={`权重合计: ${totalWeight.toFixed(2)}`}
+                />
+                {thData && thStatus && (
+                  <Tooltip title={`大盘${thStatus.label}（${thData.fearGreedIndex?.toFixed(0)}°），${thStatus.action}`}>
+                    <Tag color={thStatus.label === '极度贪婪' ? 'red' : thStatus.label === '极度恐慌' ? 'green' : 'blue'}>
+                      <Link to="/market-thermometer" style={{ color: 'inherit' }}>{thStatus.label} {thData.fearGreedIndex?.toFixed(0)}°</Link>
+                    </Tag>
+                  </Tooltip>
+                )}
+                <Button
+                  type="primary"
+                  icon={<PlayCircleOutlined />}
+                  size="small"
+                  loading={running}
+                  onClick={handleRun}
+                  disabled={factors.length === 0}
+                >
+                  {running ? '选股中' : '执行选股'}
+                </Button>
+              </Space>
+            ),
+          }}
         items={[
           {
             key: 'multifactor',
@@ -769,12 +772,18 @@ export default function StockScreen() {
                 >
                   {strategies.map(s => (
                     <Option key={s.id} value={s.id}>
-                      <Space size={4}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center' }}>
                         <span>{s.strategyName}</span>
-                        <Text type="secondary" style={{ fontSize: 11 }}>
-                          ({s.description || '—'})
-                        </Text>
-                      </Space>
+                        {s.description && (
+                          <Tooltip title={s.description}>
+                            <QuestionCircleOutlined
+                              style={{ color: '#91caff', fontSize: 13, marginLeft: 6 }}
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          </Tooltip>
+                        )}
+                      </span>
                     </Option>
                   ))}
                 </Select>

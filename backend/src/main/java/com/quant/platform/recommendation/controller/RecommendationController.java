@@ -40,8 +40,9 @@ public class RecommendationController {
         try {
             LocalDate date = req != null ? req.getDate() : null;
             Integer topN = req != null ? req.getTopN() : null;
+            String factorProfile = req != null ? req.getFactorProfile() : null;
 
-            List<StockRecommendation> recommendations = recommendationService.generateRecommendations(date, topN);
+            List<StockRecommendation> recommendations = recommendationService.generateRecommendations(date, topN, factorProfile);
 
             Map<String, Object> result = new HashMap<>();
             result.put("batchId", recommendations.isEmpty() ? null : recommendations.get(0).getBatchId());
@@ -146,5 +147,7 @@ public class RecommendationController {
         private LocalDate date;
         /** 最终推荐数量，默认20 */
         private Integer topN;
+        /** 因子组合配置: EXISTING/NORMAL/NEW_QUALITY/HOT/COMPREHENSIVE */
+        private String factorProfile;
     }
 }

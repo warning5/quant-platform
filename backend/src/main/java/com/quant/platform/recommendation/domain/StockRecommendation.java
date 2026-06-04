@@ -72,8 +72,17 @@ public class StockRecommendation {
     /** 当日收盘价 */
     private Double closePrice;
 
+    /** 推荐买入价格（基于MA20支撑位，若无法获取则=close×0.95） */
+    private Double suggestedBuyPrice;
+
     /** 当日涨跌幅% */
     private Double changePercent;
+
+    /** 行业相对强度(Phase A+C: z-score, 越大越强势) */
+    private Double industryMomentum;
+
+    /** 行业Regime(Phase A): BULL/BEAR/SIDEWAYS */
+    private String industryRegime;
 
     /** 技术面得分 */
     private Integer technicalScore;

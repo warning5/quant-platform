@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { Card, Table, Button, Tag, Select, Space, Statistic, Row, Col, Typography, Tooltip, Spin, message, Progress } from 'antd';
+import { Card, Table, Button, Tag, Select, Space, Statistic, Row, Col, Typography, Tooltip, Spin, message, Progress, DatePicker } from 'antd';
+import dayjs from 'dayjs';
 import { ThunderboltOutlined, ReloadOutlined, LineChartOutlined, StockOutlined, RiseOutlined, FallOutlined, MinusOutlined, QuestionCircleOutlined } from '@ant-design/icons';
 import { recommendationApi } from '../../api';
 
@@ -33,20 +34,76 @@ function formatMarketCap(val) {
 export default function RecommendationList() {
   const [recommendations, setRecommendations] = useState([]);
   const [batchId, setBatchId] = useState(null);
-  const [batchList, setBatchList] = useState([]);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [regime, setRegime] = useState(null);
   const [indexInfo, setIndexInfo] = useState(null);
   const [weightInfo, setWeightInfo] = useState(null); // Phase 2: 动态权重
+  const [factorProfile, setFactorProfile] = useState('NORMAL');
+  const [screenDate, setScreenDate] = useState(null);
 
-  // 加载批次列表
-  const loadBatches = useCallback(async () => {
-    try {
-      const batches = await recommendationApi.getBatches(30);
-      setBatchList(Array.isArray(batches) ? batches : []);
-    } catch { /* ignore */ }
-  }, []);
+  // 各因子组合包含的因子列表
+  const PROFILE_FACTOR_CONFIG = {
+    EXISTING: {
+      label: '现有持仓增强',
+      factors: ['MOM20', 'VOL20', 'VAL_PE_TTM', 'VAL_PB', 'RSI14', 'MACD', 'TURN20', 'FIN_EARNINGS_QUALITY', 'FIN_DEBT_TO_ASSET'],
+    },
+    NORMAL: {
+      label: '均衡配置',
+      factors: ['MOM20', 'VOL20', 'VAL_PE_TTM', 'VAL_PB', 'VAL_DIVIDEND_YIELD', 'RSI14', 'MACD', 'TURN20', 'FIN_EARNINGS_QUALITY', 'FIN_DEBT_TO_ASSET', 'FIN_REVENUE_QUALITY', 'FIN_NET_PROFIT_YOY'],
+    },
+    NEW_QUALITY: {
+      label: '新质生产力',
+      factors: ['MOM20', 'VOL20', 'VAL_PE_TTM', 'RSI14', 'MACD', 'TURN20', 'FIN_EARNINGS_QUALITY', 'FIN_DEBT_TO_ASSET', 'FIN_REVENUE_QUALITY', 'FIN_NET_PROFIT_YOY'],
+    },
+    HOT: {
+      label: '热点追踪',
+      factors: ['MOM20', 'VOL20', 'RSI14', 'MACD', 'TURN20'],
+    },
+    COMPREHENSIVE: {
+      label: '全因子综合',
+      factors: ['MOM20', 'VOL20', 'VAL_PE_TTM', 'VAL_PB', 'VAL_DIVIDEND_YIELD', 'RSI14', 'MACD', 'TURN20', 'FIN_EARNINGS_QUALITY', 'FIN_DEBT_TO_ASSET', 'FIN_REVENUE_QUALITY', 'FIN_NET_PROFIT_YOY'],
+    },
+  };
+
+  const renderFactorTable = (profileKey) => {
+    const cfg = PROFILE_FACTOR_CONFIG[profileKey];
+    if (!cfg) return null;
+    const factorMeta = {
+      MOM20: { cat: '动量', dir: '+', desc: '20日涨幅' },
+      VOL20: { cat: '波动', dir: '-', desc: '年化波动率（低波优先）' },
+      VAL_PE_TTM: { cat: '价值', dir: '-', desc: '市盈率TTM' },
+      VAL_PB: { cat: '价值', dir: '-', desc: '市净率' },
+      VAL_DIVIDEND_YIELD: { cat: '价值', dir: '+', desc: '股息率' },
+      RSI14: { cat: '技术', dir: '+', desc: '14日RSI' },
+      MACD: { cat: '技术', dir: '+', desc: 'MACD离差值' },
+      TURN20: { cat: '流动性', dir: '-', desc: '20日换手率（低换手优先）' },
+      FIN_EARNINGS_QUALITY: { cat: '财务', dir: '+', desc: '盈利质量（经营现金流/净利润）' },
+      FIN_DEBT_TO_ASSET: { cat: '财务', dir: '-', desc: '财务健康（资产负债率，越低越好）' },
+      FIN_REVENUE_QUALITY: { cat: '财务', dir: '+', desc: '营收质量' },
+      FIN_NET_PROFIT_YOY: { cat: '成长', dir: '+', desc: '净利润同比增长率' },
+    };
+    return (
+      <div style={{ fontSize: 12, lineHeight: '20px' }}>
+        <div style={{ fontWeight: 'bold', marginBottom: 6, fontSize: 13 }}>{cfg.label} 包含因子</div>
+        <table style={{ borderCollapse: 'collapse', fontSize: 11 }}>
+          <tbody>
+            {cfg.factors.map(code => {
+              const meta = factorMeta[code];
+              return (
+                <tr key={code}>
+                  <td style={{ padding: '1px 6px 1px 0', color: '#8c8c8c' }}>{meta?.cat || ''}</td>
+                  <td style={{ padding: '1px 6px', fontFamily: 'monospace', fontWeight: 500 }}>{code}</td>
+                  <td style={{ padding: '1px 6px', color: meta?.dir === '+' ? '#cf1322' : '#3f8600' }}>{meta?.dir === '+' ? '正向' : '反向'}</td>
+                  <td style={{ padding: '1px 0', color: '#595959' }}>{meta?.desc || ''}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
 
   // 加载推荐数据
   const loadRecommendations = useCallback(async (bid) => {
@@ -81,17 +138,16 @@ export default function RecommendationList() {
   }, []);
 
   useEffect(() => {
-    loadBatches();
     loadRecommendations(null);
-  }, [loadBatches, loadRecommendations]);
+  }, [loadRecommendations]);
 
   // 生成推荐
   const handleGenerate = async () => {
     setGenerating(true);
     try {
-      const result = await recommendationApi.generate(null, 20);
+      const dateStr = screenDate ? dayjs(screenDate).format('YYYY-MM-DD') : null;
+      const result = await recommendationApi.generate(dateStr, 20, factorProfile);
       message.success(`推荐列表生成成功: ${result.count} 只`);
-      await loadBatches();
       await loadRecommendations(null);
     } catch (e) {
       message.error('生成失败: ' + (e.message || '未知错误'));
@@ -117,7 +173,7 @@ export default function RecommendationList() {
     {
       title: '代码',
       dataIndex: 'stockCode',
-      width: 80,
+      width: 95,
       fixed: 'left',
       render: (v) => <Link to={`/stock-analysis?code=${v}`}>{v}</Link>,
     },
@@ -131,7 +187,7 @@ export default function RecommendationList() {
     {
       title: '综合得分',
       dataIndex: 'finalScore',
-      width: 85,
+      width: 95,
       sorter: (a, b) => a.finalScore - b.finalScore,
       defaultSortOrder: 'descend',
       render: (v) => {
@@ -194,11 +250,80 @@ export default function RecommendationList() {
       },
     },
     {
-      title: '行业',
+      title: (
+        <Tooltip
+          overlayStyle={{ maxWidth: 360 }}
+          title={
+            <div style={{ fontSize: 12, lineHeight: '20px' }}>
+              <div style={{ fontWeight: 'bold', marginBottom: 6, fontSize: 13 }}>行业 Regime 图标说明</div>
+              <div style={{ marginBottom: 4 }}>📈 牛市（BULL）：行业指数 MA20 &gt; MA60，趋势向上</div>
+              <div style={{ marginBottom: 4 }}>📉 熊市（BEAR）：行业指数 MA20 &lt; MA60，趋势向下</div>
+              <div style={{ marginBottom: 4 }}>↔ 震荡（SIDEWAYS）：MA20 与 MA60 接近，无明确趋势</div>
+              <div style={{ marginTop: 8, fontWeight: 'bold', fontSize: 13 }}>行业动量标签说明</div>
+              <div style={{ marginBottom: 4 }}>🔥 强势行业（z-score &gt; 0.3）：当日平均涨幅显著跑赢大盘，选股上限放宽至 6 只</div>
+              <div style={{ marginBottom: 4 }}>❄️ 弱势行业（z-score &lt; -0.3）：当日平均涨幅显著跑输大盘，选股上限收紧至 1 只</div>
+              <div style={{ marginBottom: 4 }}>无标签：中等强度（-0.3 ~ 0.3），选股上限默认 3 只</div>
+              <div style={{ marginTop: 8, color: '#8c8c8c' }}>行业分散化限制：强势行业最多 6 只，中等 3 只，弱势 1 只</div>
+            </div>
+          }
+        >
+          <span>行业 <QuestionCircleOutlined style={{ color: '#91caff', fontSize: 12 }} /></span>
+        </Tooltip>
+      ),
       dataIndex: 'industry',
       width: 80,
       ellipsis: true,
-      render: (v) => v || '-',
+      render: (v, rec) => {
+        if (!v) return '-';
+        const regime = rec.industryRegime;
+        const momentum = rec.industryMomentum;
+        let icon = null;
+        let tag = null;
+        if (regime === 'BULL') icon = '📈';
+        else if (regime === 'BEAR') icon = '📉';
+        else if (regime === 'SIDEWAYS') icon = '↔';
+        if (momentum != null) {
+          if (momentum > 0.3) tag = '🔥';
+          else if (momentum < -0.3) tag = '❄️';
+        }
+        return (
+          <Tooltip title={`${v}${icon ? ' ' + icon : ''}${tag ? ' ' + tag : ''}`}>
+            <span>{icon}{tag}{v}</span>
+          </Tooltip>
+        );
+      },
+    },
+    {
+      title: (
+        <Tooltip
+          overlayStyle={{ maxWidth: 380 }}
+          title={
+            <div style={{ fontSize: 12, lineHeight: '20px' }}>
+              <div style={{ fontWeight: 'bold', marginBottom: 6, fontSize: 13 }}>行业强度说明</div>
+              <div style={{ marginBottom: 6 }}>行业强度 = (行业当日平均涨跌幅 - 全市场行业均值) / 标准差，即 z-score。</div>
+              <div style={{ marginBottom: 4 }}><b>数值含义：</b></div>
+              <div style={{ marginBottom: 4 }}>• &gt; 0.3（红色）：强势行业，当日涨幅显著跑赢市场平均，选股上限放宽至 6 只</div>
+              <div style={{ marginBottom: 4 }}>• -0.3 ~ 0.3（灰色）：中等强度，选股上限默认 3 只</div>
+              <div style={{ marginBottom: 4 }}>• &lt; -0.3（绿色）：弱势行业，当日涨幅显著跑输市场平均，选股上限收紧至 1 只</div>
+              <div style={{ marginTop: 8, fontWeight: 'bold' }}>作用机制：</div>
+              <div style={{ marginBottom: 4 }}>1. 行业分散化：根据强度动态调整同行业入选数量上限（强势≤6，中等≤3，弱势≤1）</div>
+              <div style={{ marginBottom: 4 }}>2. 因子融合加分：强势行业个股最终得分 +0.06，弱势行业 -0.06</div>
+              <div style={{ marginBottom: 4 }}>3. 行业轮动参考：结合 📈/📉/↔ Regime 图标判断行业趋势方向</div>
+            </div>
+          }
+        >
+          <span>行业强度 <QuestionCircleOutlined style={{ color: '#91caff', fontSize: 12 }} /></span>
+        </Tooltip>
+      ),
+      dataIndex: 'industryMomentum',
+      width: 95,
+      render: (v) => {
+        if (v == null) return '-';
+        let color = '#8c8c8c';
+        if (v > 0.3) color = '#cf1322';
+        else if (v < -0.3) color = '#3f8600';
+        return <Text style={{ color, fontSize: 12 }}>{v > 0 ? '+' : ''}{v.toFixed(2)}</Text>;
+      },
     },
     {
       title: '市值',
@@ -275,43 +400,17 @@ export default function RecommendationList() {
           <Title level={4} style={{ margin: 0 }}>
             <ThunderboltOutlined /> 智能推荐
             <Tooltip
-              overlayStyle={{ maxWidth: 380 }}
+              overlayStyle={{ maxWidth: 480 }}
               title={
                 <div style={{ fontSize: 12, lineHeight: '20px' }}>
                   <div style={{ fontWeight: 'bold', marginBottom: 6, fontSize: 13 }}>推荐生成流程</div>
                   <div style={{ fontFamily: 'monospace', marginBottom: 8 }}>
                     全市场 ~5000只 A股<br />
-                    &nbsp;→ <b>多因子筛选</b>（12因子综合排名，取Top 50）<br />
+                    &nbsp;→ <b>多因子筛选</b>（按选定因子组合筛选）<br />
                     &nbsp;&nbsp;→ <b>个股深度分析</b>（四维度：技术/资金/事件/基本面）<br />
                     &nbsp;&nbsp;&nbsp;→ <b>Regime-Adaptive融合</b>（市场环境自适应权重）<br />
                     &nbsp;&nbsp;&nbsp;&nbsp;→ <b>行业分散化</b>（同行业≤3只）
                   </div>
-                  <div style={{ fontWeight: 'bold', marginBottom: 4, fontSize: 13 }}>12个筛选因子</div>
-                  <table style={{ borderCollapse: 'collapse', fontSize: 11 }}>
-                    <tbody>
-                      {[
-                        ['动量', 'MOM20', '+', '20日涨幅'],
-                        ['波动', 'VOL20', '-', '年化波动率（低波优先）'],
-                        ['价值', 'VAL_PE_TTM', '-', '市盈率TTM'],
-                        ['价值', 'VAL_PB', '-', '市净率'],
-                        ['价值', 'VAL_DIVIDEND_YIELD', '+', '股息率'],
-                        ['技术', 'RSI14', '+', '14日RSI'],
-                        ['技术', 'MACD', '+', 'MACD离差值'],
-                        ['流动性', 'TURN20', '-', '20日换手率（低换手优先）'],
-                        ['财务', 'FIN_EARNINGS_QUALITY', '+', '盈利质量（经营现金流/净利润）'],
-                        ['财务', 'FIN_DEBT_TO_ASSET', '-', '财务健康（资产负债率，越低越好）'],
-                        ['财务', 'FIN_REVENUE_QUALITY', '+', '营收质量'],
-                        ['成长', 'FIN_NET_PROFIT_YOY', '+', '净利润同比增长率'],
-                      ].map(([cat, code, dir, desc]) => (
-                        <tr key={code}>
-                          <td style={{ padding: '1px 6px 1px 0', color: '#8c8c8c' }}>{cat}</td>
-                          <td style={{ padding: '1px 6px', fontFamily: 'monospace', fontWeight: 500 }}>{code}</td>
-                          <td style={{ padding: '1px 6px', color: dir === '+' ? '#cf1322' : '#3f8600' }}>{dir === '+' ? '正向' : '反向'}</td>
-                          <td style={{ padding: '1px 0', color: '#595959' }}>{desc}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
                 </div>
               }
             >
@@ -325,12 +424,41 @@ export default function RecommendationList() {
           )}
         </Space>
         <Space>
+          <DatePicker
+            value={screenDate ? dayjs(screenDate) : null}
+            onChange={date => setScreenDate(date ? date.format('YYYY-MM-DD') : null)}
+            placeholder="选择日期"
+            style={{ width: 170 }}
+            disabledDate={(current) => current && current.isAfter(dayjs().endOf('day'))}
+          />
           <Select
-            value={batchId || ''}
-            onChange={handleBatchChange}
-            style={{ width: 160 }}
-            placeholder="选择批次"
-            options={batchList.map(b => ({ label: b, value: b }))}
+            value={factorProfile}
+            onChange={value => setFactorProfile(value)}
+            style={{ width: 170 }}
+            options={[
+              { value: 'EXISTING', label: '现有持仓增强' },
+              { value: 'NORMAL', label: '均衡配置' },
+              { value: 'NEW_QUALITY', label: '新质生产力' },
+              { value: 'HOT', label: '热点追踪' },
+              { value: 'COMPREHENSIVE', label: '全因子综合' },
+            ].map(opt => ({
+              value: opt.value,
+              label: (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>{opt.label}</span>
+                  <Tooltip
+                    overlayStyle={{ maxWidth: 420 }}
+                    title={renderFactorTable(opt.value)}
+                  >
+                    <QuestionCircleOutlined
+                      style={{ color: '#91caff', fontSize: 13, marginLeft: 4 }}
+                      onMouseDown={e => e.stopPropagation()}
+                      onClick={e => e.stopPropagation()}
+                    />
+                  </Tooltip>
+                </div>
+              ),
+            }))}
           />
           <Button
             type="primary"
