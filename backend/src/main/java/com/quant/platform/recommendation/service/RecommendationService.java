@@ -59,7 +59,7 @@ public class RecommendationService {
     /** ATR 历史分位数回溯天数 */
     private static final int ATR_LOOKBACK_DAYS = 250;
 
-    /** 默认因子配置（Phase 2: 含质量因子） */
+    /** 默认因子配置（12个，全部来自 factor_definition 表已有因子） */
     private static final List<ScreenRequest.FactorWeight> DEFAULT_FACTORS = List.of(
             newFactor("MOM20", 1, 1.0),
             newFactor("VOL20", -1, 0.8),
@@ -67,10 +67,12 @@ public class RecommendationService {
             newFactor("VAL_PB", -1, 0.6),
             newFactor("VAL_DIVIDEND_YIELD", 1, 0.5),
             newFactor("RSI14", 1, 0.4),
-            newFactor("MACD_DIF", 1, 0.3),
-            newFactor("QUAL_EARNINGS", 1, 0.6),       // Phase 2.3: 盈利质量
-            newFactor("QUAL_HEALTH", 1, 0.5),          // Phase 2.3: 财务健康
-            newFactor("QUAL_REVENUE_STABILITY", 1, 0.4) // Phase 2.3: 营收稳定
+            newFactor("MACD", 1, 0.3),
+            newFactor("TURN20", -1, 0.5),                  // 流动性
+            newFactor("FIN_EARNINGS_QUALITY", 1, 0.6),     // 盈利质量（经营现金流/净利润）
+            newFactor("FIN_DEBT_TO_ASSET", -1, 0.5),       // 财务健康（资产负债率，越低越健康）
+            newFactor("FIN_REVENUE_QUALITY", 1, 0.4),      // 营收质量
+            newFactor("FIN_NET_PROFIT_YOY", 1, 0.5)        // 成长: 净利润同比增长率
     );
 
     /** 沪深300指数代码 */
@@ -157,8 +159,9 @@ public class RecommendationService {
             recommendations.get(i).setRankNum(i + 1);
         }
 
-        // Step 6: 写入数据库
+        // Step 6: 写入数据库（先生成 batchId，再删旧写新，避免唯一键冲突）
         String batchId = actualDate.format(DateTimeFormatter.ISO_LOCAL_DATE);
+        recommendationMapper.deleteByBatchId(batchId);
         for (StockRecommendation rec : recommendations) {
             rec.setBatchId(batchId);
             try {
@@ -209,6 +212,30 @@ public class RecommendationService {
             if (rec.getBuyReason() != null && rec.getBuyReason().contains("null(")) {
                 String name = rec.getStockName() != null ? rec.getStockName() : rec.getStockCode();
                 rec.setBuyReason(rec.getBuyReason().replace("null", name));
+            }
+            // 修复旧数据的 eventScore: 旧代码维度名写错未捕获 → 回算
+            // 分析总分 = technical + capital + event + fundamental，反推即可
+            if (rec.getEventScore() == null
+                    && rec.getTechnicalScore() != null
+                    && rec.getCapitalScore() != null
+                    && rec.getFundamentalScore() != null
+                    && rec.getAnalysisScore() != null) {
+                int eventScore = rec.getAnalysisScore()
+                        - rec.getTechnicalScore()
+                        - rec.getCapitalScore()
+                        - rec.getFundamentalScore();
+                rec.setEventScore(Math.max(0, eventScore));
+            }
+            // 修复旧数据的因子权重: 旧批次 Phase 2 动态权重未实现 → 根据 regime 回填
+            if (rec.getFactorWeight() == null && rec.getRegime() != null) {
+                double wFactor, wAnalysis;
+                switch (rec.getRegime()) {
+                    case "BULL" -> { wFactor = 0.6; wAnalysis = 0.4; }
+                    case "BEAR" -> { wFactor = 0.4; wAnalysis = 0.6; }
+                    default ->    { wFactor = 0.5; wAnalysis = 0.5; }
+                }
+                rec.setFactorWeight(wFactor);
+                rec.setAnalysisWeight(wAnalysis);
             }
         }
         return recs;

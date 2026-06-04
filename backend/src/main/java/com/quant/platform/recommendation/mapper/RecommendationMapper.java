@@ -2,6 +2,7 @@ package com.quant.platform.recommendation.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.quant.platform.recommendation.domain.StockRecommendation;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -37,4 +38,10 @@ public interface RecommendationMapper extends BaseMapper<StockRecommendation> {
      */
     @Select("SELECT COUNT(*) FROM stock_recommendation WHERE batch_id = #{batchId}")
     int countByBatchId(@Param("batchId") String batchId);
+
+    /**
+     * 删除指定批次的所有推荐（生成前清理旧数据，避免唯一键冲突）
+     */
+    @Delete("DELETE FROM stock_recommendation WHERE batch_id = #{batchId}")
+    int deleteByBatchId(@Param("batchId") String batchId);
 }

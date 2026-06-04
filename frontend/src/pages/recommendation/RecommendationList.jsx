@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { Card, Table, Button, Tag, Select, Space, Statistic, Row, Col, Typography, Tooltip, Spin, message, Progress } from 'antd';
-import { ThunderboltOutlined, ReloadOutlined, LineChartOutlined, StockOutlined, RiseOutlined, FallOutlined, MinusOutlined } from '@ant-design/icons';
+import { ThunderboltOutlined, ReloadOutlined, LineChartOutlined, StockOutlined, RiseOutlined, FallOutlined, MinusOutlined, QuestionCircleOutlined } from '@ant-design/icons';
 import { recommendationApi } from '../../api';
 
 const { Title, Text } = Typography;
@@ -118,7 +119,7 @@ export default function RecommendationList() {
       dataIndex: 'stockCode',
       width: 80,
       fixed: 'left',
-      render: (v) => <a href={`#/stock-analysis?code=${v}`} target="_blank" rel="noreferrer">{v}</a>,
+      render: (v) => <Link to={`/stock-analysis?code=${v}`}>{v}</Link>,
     },
     {
       title: '名称',
@@ -273,6 +274,49 @@ export default function RecommendationList() {
         <Space>
           <Title level={4} style={{ margin: 0 }}>
             <ThunderboltOutlined /> 智能推荐
+            <Tooltip
+              overlayStyle={{ maxWidth: 380 }}
+              title={
+                <div style={{ fontSize: 12, lineHeight: '20px' }}>
+                  <div style={{ fontWeight: 'bold', marginBottom: 6, fontSize: 13 }}>推荐生成流程</div>
+                  <div style={{ fontFamily: 'monospace', marginBottom: 8 }}>
+                    全市场 ~5000只 A股<br />
+                    &nbsp;→ <b>多因子筛选</b>（12因子综合排名，取Top 50）<br />
+                    &nbsp;&nbsp;→ <b>个股深度分析</b>（四维度：技术/资金/事件/基本面）<br />
+                    &nbsp;&nbsp;&nbsp;→ <b>Regime-Adaptive融合</b>（市场环境自适应权重）<br />
+                    &nbsp;&nbsp;&nbsp;&nbsp;→ <b>行业分散化</b>（同行业≤3只）
+                  </div>
+                  <div style={{ fontWeight: 'bold', marginBottom: 4, fontSize: 13 }}>12个筛选因子</div>
+                  <table style={{ borderCollapse: 'collapse', fontSize: 11 }}>
+                    <tbody>
+                      {[
+                        ['动量', 'MOM20', '+', '20日涨幅'],
+                        ['波动', 'VOL20', '-', '年化波动率（低波优先）'],
+                        ['价值', 'VAL_PE_TTM', '-', '市盈率TTM'],
+                        ['价值', 'VAL_PB', '-', '市净率'],
+                        ['价值', 'VAL_DIVIDEND_YIELD', '+', '股息率'],
+                        ['技术', 'RSI14', '+', '14日RSI'],
+                        ['技术', 'MACD', '+', 'MACD离差值'],
+                        ['流动性', 'TURN20', '-', '20日换手率（低换手优先）'],
+                        ['财务', 'FIN_EARNINGS_QUALITY', '+', '盈利质量（经营现金流/净利润）'],
+                        ['财务', 'FIN_DEBT_TO_ASSET', '-', '财务健康（资产负债率，越低越好）'],
+                        ['财务', 'FIN_REVENUE_QUALITY', '+', '营收质量'],
+                        ['成长', 'FIN_NET_PROFIT_YOY', '+', '净利润同比增长率'],
+                      ].map(([cat, code, dir, desc]) => (
+                        <tr key={code}>
+                          <td style={{ padding: '1px 6px 1px 0', color: '#8c8c8c' }}>{cat}</td>
+                          <td style={{ padding: '1px 6px', fontFamily: 'monospace', fontWeight: 500 }}>{code}</td>
+                          <td style={{ padding: '1px 6px', color: dir === '+' ? '#cf1322' : '#3f8600' }}>{dir === '+' ? '正向' : '反向'}</td>
+                          <td style={{ padding: '1px 0', color: '#595959' }}>{desc}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              }
+            >
+              <QuestionCircleOutlined style={{ color: '#8c8c8c', fontSize: 14, marginLeft: 6, cursor: 'help' }} />
+            </Tooltip>
           </Title>
           {rc && (
             <Tag icon={rc.icon} color={rc.color} style={{ fontSize: 13 }}>
@@ -325,7 +369,7 @@ export default function RecommendationList() {
           <Col span={4}>
             <Card size="small" bodyStyle={{ padding: '12px 16px' }}>
               <Statistic
-                title="MA20"
+                title={<span>MA20 <Tooltip title="沪深300指数过去20个交易日的移动平均收盘价。指数收盘 > MA20 意味着中期趋势偏强，部分策略（如大盘择时）会以此判断是否适合做多。这里显示的数值为你参考趋势强弱用"><QuestionCircleOutlined style={{ color: '#8c8c8c', fontSize: 12, marginLeft: 2 }} /></Tooltip></span>}
                 value={indexInfo?.ma20?.toFixed(2) || '-'}
                 valueStyle={{ fontSize: 20 }}
               />
@@ -334,7 +378,7 @@ export default function RecommendationList() {
           <Col span={4}>
             <Card size="small" bodyStyle={{ padding: '12px 16px' }}>
               <Statistic
-                title="MA60"
+                title={<span>MA60 <Tooltip title="沪深300指数过去60个交易日的移动平均收盘价，代表长期趋势。指数收盘 > MA60 通常被视为中长期牛市信号。MA20 和 MA60 的相对位置（金叉/死叉）也是市场环境判断的重要参考"><QuestionCircleOutlined style={{ color: '#8c8c8c', fontSize: 12, marginLeft: 2 }} /></Tooltip></span>}
                 value={indexInfo?.ma60?.toFixed(2) || '-'}
                 valueStyle={{ fontSize: 20 }}
               />
@@ -342,11 +386,50 @@ export default function RecommendationList() {
           </Col>
           <Col span={4}>
             <Card size="small" bodyStyle={{ padding: '12px 16px' }}>
-              <Tooltip title={weightInfo?.factorWeight != null
-                ? `Regime-Adaptive 动态权重：${REGIME_CONFIG[regime]?.text || regime} 环境下因子与分析得分的融合比例`
-                : '旧批次未记录权重信息，重新生成推荐后可显示'}>
+              <Tooltip
+                overlayStyle={{ maxWidth: 300 }}
+                title={weightInfo?.factorWeight != null
+                  ? (
+                    <div style={{ fontSize: 12, lineHeight: '18px' }}>
+                      <div style={{ fontWeight: 'bold', marginBottom: 4 }}>各市场环境权重分配</div>
+                      <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+                        <thead>
+                          <tr style={{ borderBottom: '1px solid #434343' }}>
+                            <th style={{ padding: '2px 8px', textAlign: 'left' }}>环境</th>
+                            <th style={{ padding: '2px 8px', textAlign: 'center' }}>因子</th>
+                            <th style={{ padding: '2px 8px', textAlign: 'center' }}>分析</th>
+                            <th style={{ padding: '2px 8px', textAlign: 'left' }}>策略</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr style={{ color: '#cf1322' }}>
+                            <td style={{ padding: '2px 8px' }}>牛市</td>
+                            <td style={{ padding: '2px 8px', textAlign: 'center' }}>60%</td>
+                            <td style={{ padding: '2px 8px', textAlign: 'center' }}>40%</td>
+                            <td style={{ padding: '2px 8px' }}>动量因子占优</td>
+                          </tr>
+                          <tr style={{ color: '#597ef7' }}>
+                            <td style={{ padding: '2px 8px' }}>震荡</td>
+                            <td style={{ padding: '2px 8px', textAlign: 'center' }}>50%</td>
+                            <td style={{ padding: '2px 8px', textAlign: 'center' }}>50%</td>
+                            <td style={{ padding: '2px 8px' }}>攻守均衡</td>
+                          </tr>
+                          <tr style={{ color: '#3f8600' }}>
+                            <td style={{ padding: '2px 8px' }}>熊市</td>
+                            <td style={{ padding: '2px 8px', textAlign: 'center' }}>40%</td>
+                            <td style={{ padding: '2px 8px', textAlign: 'center' }}>60%</td>
+                            <td style={{ padding: '2px 8px' }}>偏防守反弹</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                      <div style={{ marginTop: 6, color: '#8c8c8c' }}>
+                        综合得分 = 因子得分 × {weightInfo.factorWeight != null ? (weightInfo.factorWeight * 100).toFixed(0) : '?'}% + 分析得分 × {weightInfo.analysisWeight != null ? (weightInfo.analysisWeight * 100).toFixed(0) : '?'}%
+                      </div>
+                    </div>
+                  )
+                  : '旧批次未记录权重信息，重新生成推荐后可显示'}>
                 <Statistic
-                  title="因子权重"
+                  title={<span>因子权重 <QuestionCircleOutlined style={{ color: '#8c8c8c', fontSize: 12, marginLeft: 2 }} /></span>}
                   value={weightInfo?.factorWeight != null ? `${(weightInfo.factorWeight * 100).toFixed(0)}%` : '未设置'}
                   valueStyle={{ fontSize: 20 }}
                   suffix={weightInfo?.analysisWeight != null ? `/ ${(weightInfo.analysisWeight * 100).toFixed(0)}%分析` : ''}
@@ -358,7 +441,7 @@ export default function RecommendationList() {
           <Col span={4}>
             <Card size="small" bodyStyle={{ padding: '12px 16px' }}>
               <Statistic
-                title="选股范围"
+                title={<span>选股范围 <Tooltip title="从全市场约5000+只A股中，先用12个多因子（动量/波动/估值/技术/流动性/财务质量/成长）筛选出Top50候选，再对其中N只做深度四维度分析，最终经行业分散化后输出推荐结果"><QuestionCircleOutlined style={{ color: '#8c8c8c', fontSize: 12, marginLeft: 2 }} /></Tooltip></span>}
                 value={recommendations.length}
                 suffix="只"
                 prefix={<ThunderboltOutlined />}
@@ -390,7 +473,7 @@ export default function RecommendationList() {
       {/* 底部说明 */}
       <div style={{ marginTop: 12, display: 'flex', justifyContent: 'space-between' }}>
         <Text type="secondary" style={{ fontSize: 12 }}>
-          <StockOutlined /> 综合得分 = Regime-Adaptive 动态权重融合 | 牛市因子60%+分析40%，熊市因子40%+分析60%，震荡均衡50:50 | 因子: MOM20/VOL20/PE_TTM/PB/股息率/RSI14/MACD
+          <StockOutlined /> 综合得分 = Regime-Adaptive 动态权重融合 | 牛市因子60%+分析40%，熊市因子40%+分析60%，震荡均衡50:50 | 12因子: 动量/波动/价值×3/技术×2/换手率/质量×3/成长
         </Text>
         <Text type="secondary" style={{ fontSize: 12 }}>
           {batchId && `批次: ${batchId} | ${recommendations.length} 只`}
