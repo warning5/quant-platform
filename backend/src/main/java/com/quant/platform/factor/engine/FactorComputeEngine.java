@@ -237,6 +237,10 @@ public class FactorComputeEngine {
         registerFinancial(financialFactorsBean.new EarningsQualityCalc());
         registerFinancial(financialFactorsBean.new FinancialHealthCalc());
         registerFinancial(financialFactorsBean.new RevenueStabilityCalc());
+        // TTM 扩展因子 (2026-06-07)
+        registerFinancial(new FinancialFactors.RoeTtmCalc());
+        registerFinancial(new FinancialFactors.RevenueTtmYoyCalc());
+        registerFinancial(new FinancialFactors.NetProfitTtmYoyCalc());
         log.info("Registered {} financial factor calculators (total, after deferred)", financialCalculators.size());
     }
 

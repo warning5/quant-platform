@@ -95,6 +95,16 @@ public class StockFinancialIndicator implements Serializable {
     @TableField("net_operate_cf")
     private BigDecimal netOperateCf;
 
+    // TTM 扩展指标
+    @TableField("roe_ttm")
+    private BigDecimal roeTtm;
+
+    @TableField("revenue_ttm_yoy")
+    private BigDecimal revenueTtmYoy;
+
+    @TableField("net_profit_ttm_yoy")
+    private BigDecimal netProfitTtmYoy;
+
     @TableField(value = "create_time", fill = FieldFill.INSERT)
     private LocalDateTime createTime;
 

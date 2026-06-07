@@ -693,6 +693,54 @@ public class FinancialFactors {
         }
     }
 
+    /**
+     * ROE(TTM) = 来自 stock_financial_indicator.roe_ttm（已预计算）
+     */
+    public static class RoeTtmCalc implements FinancialFactorCalculator {
+        @Override
+        public String getFactorCode() {
+            return "FIN_ROE_TTM";
+        }
+
+        @Override
+        public BigDecimal calculate(String code, StockFinancialIndicator ind) {
+            if (ind == null || ind.getRoeTtm() == null) return null;
+            return ind.getRoeTtm().setScale(SCALE, RoundingMode.HALF_UP);
+        }
+    }
+
+    /**
+     * 营收同比(TTM) = 来自 stock_financial_indicator.revenue_ttm_yoy（已预计算）
+     */
+    public static class RevenueTtmYoyCalc implements FinancialFactorCalculator {
+        @Override
+        public String getFactorCode() {
+            return "FIN_REVENUE_TTM_YOY";
+        }
+
+        @Override
+        public BigDecimal calculate(String code, StockFinancialIndicator ind) {
+            if (ind == null || ind.getRevenueTtmYoy() == null) return null;
+            return ind.getRevenueTtmYoy().setScale(SCALE, RoundingMode.HALF_UP);
+        }
+    }
+
+    /**
+     * 净利同比(TTM) = 来自 stock_financial_indicator.net_profit_ttm_yoy（已预计算）
+     */
+    public static class NetProfitTtmYoyCalc implements FinancialFactorCalculator {
+        @Override
+        public String getFactorCode() {
+            return "FIN_NET_PROFIT_TTM_YOY";
+        }
+
+        @Override
+        public BigDecimal calculate(String code, StockFinancialIndicator ind) {
+            if (ind == null || ind.getNetProfitTtmYoy() == null) return null;
+            return ind.getNetProfitTtmYoy().setScale(SCALE, RoundingMode.HALF_UP);
+        }
+    }
+
     // ======================== 联查辅助方法 ========================
 
     /**
