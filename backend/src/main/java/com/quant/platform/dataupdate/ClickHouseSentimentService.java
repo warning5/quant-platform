@@ -154,13 +154,12 @@ public class ClickHouseSentimentService {
             }
         }
 
-        // 追加：基金持仓、股东人数、新闻（MySQL-only 表，但同属数据采集管线）
+        // 追加：基金持仓、股东人数、新闻、国债收益率（MySQL-only 表）
         for (String[] extra : new String[][]{
                 {"stock_fund_holder", "基金持仓", "report_date"},
                 {"stock_shareholder", "股东人数", "report_date"},
                 {"stock_news", "新闻", "publish_date"},
-                {"macro_bond_yield", "国债收益率", "trade_date"},
-                {"index_daily", "申万行业指数", "trade_date"}
+                {"macro_bond_yield", "国债收益率", "trade_date"}
         }) {
             String table = extra[0];
             String name = extra[1];
@@ -193,6 +192,48 @@ public class ClickHouseSentimentService {
                 tableStat.put("maxDate", null);
                 tableStats.add(tableStat);
             }
+        }
+
+        // 追加：申万行业指数（ClickHouse 表）
+        try {
+            String chTable = "index_daily";
+            Long count = 0L;
+            try (Connection conn = getConnection();
+                 PreparedStatement stmt = conn.prepareStatement("SELECT COUNT(*) as cnt FROM " + chTable);
+                 ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    count = rs.getLong("cnt");
+                }
+            }
+            totalRecords += count;
+
+            String minDate = null;
+            String maxDate = null;
+            try (Connection conn = getConnection();
+                 PreparedStatement stmt = conn.prepareStatement("SELECT MIN(trade_date) as min_date, MAX(trade_date) as max_date FROM " + chTable);
+                 ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    minDate = rs.getString("min_date");
+                    maxDate = rs.getString("max_date");
+                }
+            }
+
+            Map<String, Object> tableStat = new LinkedHashMap<>();
+            tableStat.put("table", chTable);
+            tableStat.put("name", "申万行业指数");
+            tableStat.put("recordCount", count);
+            tableStat.put("minDate", minDate);
+            tableStat.put("maxDate", maxDate);
+            tableStats.add(tableStat);
+        } catch (Exception e) {
+            log.warn("查询ClickHouse表 index_daily 失败: {}", e.getMessage());
+            Map<String, Object> tableStat = new LinkedHashMap<>();
+            tableStat.put("table", "index_daily");
+            tableStat.put("name", "申万行业指数");
+            tableStat.put("recordCount", 0);
+            tableStat.put("minDate", null);
+            tableStat.put("maxDate", null);
+            tableStats.add(tableStat);
         }
 
         result.put("tableCount", tableStats.size());

@@ -349,10 +349,54 @@ public class DataUpdateService {
                 task.setCurrentStep("情绪数据");
                 broadcastStatus(task);
                 boolean senOk = runSingleScript(taskId, task, cmd, "情绪数据");
+
+                // 串行执行国债收益率脚本
+                if (senOk && request.isFetchBondYield() && !"CANCELLED".equals(task.getStatus())) {
+                    List<String> bondCmd = new ArrayList<>();
+                    bondCmd.add(pythonPath);
+                    bondCmd.add("-u");
+                    bondCmd.add("update_bond_yield.py");
+                    if (request.isForce()) bondCmd.add("--force");
+                    task.setCurrentStep("情绪数据 · 国债收益率");
+                    broadcastStatus(task);
+                    boolean bondOk = runSingleScript(taskId, task, bondCmd, "国债收益率");
+                    if (!bondOk) {
+                        broadcastLog(taskId, "[WARN] 国债收益率采集失败，继续执行后续任务...");
+                        senOk = false; // 标记部分失败
+                    }
+                }
+
+                // 串行执行申万行业指数脚本
+                if (request.isFetchShenwanIndex() && !"CANCELLED".equals(task.getStatus())) {
+                    List<String> swCmd = new ArrayList<>();
+                    swCmd.add(pythonPath);
+                    swCmd.add("-u");
+                    swCmd.add("update_shenwan_index.py");
+                    // 传递日期范围
+                    String startDate = request.getStartDate();
+                    String endDate = request.getEndDate();
+                    if (startDate != null && !startDate.isEmpty()) {
+                        swCmd.add("--start-date");
+                        swCmd.add(startDate);
+                    }
+                    if (endDate != null && !endDate.isEmpty()) {
+                        swCmd.add("--end-date");
+                        swCmd.add(endDate);
+                    }
+                    if (request.isForce()) swCmd.add("--force");
+                    task.setCurrentStep("情绪数据 · 申万行业指数");
+                    broadcastStatus(task);
+                    boolean swOk = runSingleScript(taskId, task, swCmd, "申万行业指数");
+                    if (!swOk) {
+                        broadcastLog(taskId, "[WARN] 申万行业指数采集失败");
+                        senOk = false; // 标记部分失败
+                    }
+                }
+
                 if (!"CANCELLED".equals(task.getStatus())) {
                     task.setStatus(senOk ? "SUCCESS" : "FAILED");
                     task.setProgress(100);
-                    task.setCurrentStep(senOk ? "采集完成" : "采集失败");
+                    task.setCurrentStep(senOk ? "采集完成" : "部分采集失败");
                 }
             } else if ("BIDASK".equals(updateType)) {
                 // 内外盘数据：执行 update_stock_data.py --bidask-only
@@ -897,8 +941,8 @@ public class DataUpdateService {
             if (request.isFetchFundHolder()) cmd.add("--fund-holder");
             if (request.isFetchShareholder()) cmd.add("--shareholder");
             if (request.isFetchNews()) cmd.add("--news");
-            if (request.isFetchBondYield()) cmd.add("--bond-yield");
-            if (request.isFetchShenwanIndex()) cmd.add("--shenwan-index");
+            // 注意：--bond-yield 和 --shenwan-index 不是 update_sentiment_data.py 的参数，
+            // 这两个脚本在 executeTask 中作为独立任务串行执行
             if (request.isForce()) cmd.add("--force");
             return cmd;
         }
