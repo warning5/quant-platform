@@ -6,6 +6,7 @@ import com.quant.platform.factor.domain.FactorDefinition.FactorCategory;
 import com.quant.platform.factor.domain.FactorValue;
 import com.quant.platform.factor.mapper.FactorDefinitionMapper;
 import com.quant.platform.factor.service.ClickHouseFactorValueService;
+import com.quant.platform.factor.ic.service.FactorIcService;
 import com.quant.platform.market.domain.MarketDailyBar;
 import com.quant.platform.market.service.MarketDataService;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -43,6 +44,7 @@ public class StockScreenService {
     private final PriceAdvisorService priceAdvisorService;
     private final StrategyDefinitionMapper strategyDefMapper;
     private final ObjectMapper objectMapper;
+    private final FactorIcService factorIcService;
 
     @Resource
     private DataSource dataSource;
@@ -233,11 +235,39 @@ public class StockScreenService {
         Map<String, Integer> coverage = new LinkedHashMap<>();
         long factorLoadStart = System.currentTimeMillis();
 
+        // 3.0 预加载行业信息和市值信息（用于中性化）
+        Map<String, String> industryMap = new HashMap<>();
+        Map<String, Double> marketCapMap = new HashMap<>();
+        String neutralizationMethod = req.getNeutralizationMethod();
+        boolean needIndustry = neutralizationMethod != null && 
+            (neutralizationMethod.contains("INDUSTRY") || "BOTH".equalsIgnoreCase(neutralizationMethod));
+        boolean needMarketCap = neutralizationMethod != null && 
+            (neutralizationMethod.contains("MARKET_CAP") || "BOTH".equalsIgnoreCase(neutralizationMethod));
+        
+        if (needIndustry || needMarketCap) {
+            long neutStart = System.currentTimeMillis();
+            List<String> candidateList = new ArrayList<>(candidates);
+            if (needIndustry) {
+                industryMap = batchLoadIndustryInfo(candidateList);
+            }
+            if (needMarketCap) {
+                marketCapMap = batchLoadMarketCap(candidateList, screenDate);
+            }
+            log.info("[Screen] Neutralization pre-load: industry={}, marketCap={}, took {} ms", 
+                industryMap.size(), marketCapMap.size(), System.currentTimeMillis() - neutStart);
+        }
+
         for (ScreenRequest.FactorWeight fw : req.getFactors()) {
             String code = fw.getFactorCode();
             long fStart = System.currentTimeMillis();
 
             List<FactorValue> crossSection;
+
+            // P1-5: 提前查询因子定义，供后续 P1-5/P1-6 使用
+            FactorDefinition factorDef = factorDefMapper.selectOne(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<FactorDefinition>()
+                    .eq(FactorDefinition::getFactorCode, code)
+                    .last("LIMIT 1"));
 
             if (useMultiDayMode) {
                 // ── 多日平均模式：查询日期范围，按 symbol 聚合取均值 ──
@@ -245,10 +275,21 @@ public class StockScreenService {
                 log.info("[Screen] Multi-day factor {} avg: {} stocks, range={} ~ {}",
                         code, crossSection.size(), screenStartDate, screenEndDate);
             } else {
-                // ── 单日模式：日频因子回退 5 日，财务因子(FIN_*)回退 400 日(财报按季发布) ──
+                // ── 单日模式：日频因子回退 5 日，财务因子回退 120 日(P1-5优化) ──
                 crossSection = Collections.emptyList();
                 LocalDate searchDate = screenDate;
-                int maxLookback = code.startsWith("FIN_") ? 400 : 5;
+                // P1-5: 根据因子频率决定回退策略
+                boolean isQuarterly = factorDef != null && "QUARTERLY".equalsIgnoreCase(factorDef.getDataFrequency());
+                int maxLookback;
+                if (isQuarterly) {
+                    // 季度因子：回退120天（约一个季度），而非400天
+                    maxLookback = 120;
+                } else if (code.startsWith("FIN_")) {
+                    // 兼容：无 data_frequency 配置的 FIN_ 前缀因子
+                    maxLookback = 120;
+                } else {
+                    maxLookback = 5;
+                }
                 for (int i = 0; i <= maxLookback; i++) {
                     crossSection = clickHouseFactorValueService.findByFactorCodeAndDate(code, searchDate);
                     if (!crossSection.isEmpty()) break;
@@ -272,8 +313,11 @@ public class StockScreenService {
                         candidates.stream().limit(5).collect(Collectors.toList()));
             }
 
-            // 极值处理（全局配置）
+            // 极值处理（P1-6: 优先使用因子配置的方法，回退到全局配置）
             String outlierMethod = req.getGlobalOutlierMethod() != null ? req.getGlobalOutlierMethod() : "MAD";
+            if (factorDef != null && factorDef.getOutlierMethod() != null) {
+                outlierMethod = factorDef.getOutlierMethod();
+            }
             List<Double> outlierProcessed = applyOutlierProcessing(
                     filtered.stream()
                             .map(FactorValue::getFactorVal)
@@ -282,9 +326,27 @@ public class StockScreenService {
                     outlierMethod
             );
 
-            // 标准化处理（全局配置）
+            // 中性化处理（在标准化之前）
+            if (neutralizationMethod != null && !"NONE".equalsIgnoreCase(neutralizationMethod)) {
+                outlierProcessed = applyNeutralization(
+                    filtered, outlierProcessed, industryMap, marketCapMap, neutralizationMethod
+                );
+            }
+
+            // 标准化处理（P1-6: 优先使用因子配置的方法，回退到全局配置）
             String normalizeMethod = req.getGlobalNormalizeMethod() != null ? req.getGlobalNormalizeMethod() : "ZSCORE";
+            if (factorDef != null && factorDef.getNormalizeMethod() != null) {
+                normalizeMethod = factorDef.getNormalizeMethod();
+            }
             List<Double> normalized = applyNormalization(outlierProcessed, normalizeMethod);
+
+            // P1-6: 因子分布诊断（标准化后检查偏度）
+            if (normalized.size() > 10) {
+                double skewness = calcSkewness(normalized);
+                if (Math.abs(skewness) > 2.0) {
+                    log.warn("[Screen] Factor {} 标准化后偏度={:.2f}，分布严重偏斜，建议检查因子值", code, skewness);
+                }
+            }
 
             // 重新组装 FactorValue（用标准化后的值替换 rankValue）
             // key 使用归一化后的纯代码 symbol（与 candidates 格式一致）
@@ -392,6 +454,24 @@ public class StockScreenService {
         }
 
         // 第三遍：计算综合得分 + 构建 result
+        // 根据 weightMode 获取动态权重
+        Map<String, Double> dynamicWeights = null;
+        if (!"EQUAL".equalsIgnoreCase(req.getWeightMode())) {
+            dynamicWeights = getDynamicWeights(req.getFactors(), req.getWeightMode(), screenDate);
+            // 动态权重调整后，重新计算 totalAbsWeight
+            totalAbsWeight = 0;
+            for (ScreenRequest.FactorWeight fw : req.getFactors()) {
+                String fc = fw.getFactorCode();
+                double baseWeight = fw.getWeight();
+                if (dynamicWeights != null && dynamicWeights.containsKey(fc)) {
+                    baseWeight = baseWeight * dynamicWeights.get(fc);
+                }
+                totalAbsWeight += Math.abs(baseWeight);
+            }
+            if (totalAbsWeight == 0) totalAbsWeight = 1.0;
+            log.info("[Screen] Dynamic weight adjusted, new totalAbsWeight={}", totalAbsWeight);
+        }
+
         List<ScreenResult.StockScore> scores = new ArrayList<>();
         for (String sym : passedSymbols) {
             Map<String, Double> rankMap = new LinkedHashMap<>();
@@ -410,8 +490,12 @@ public class StockScreenService {
 
                 rankMap.put(fc, normalized);
 
-                // 权重 * 方向 * 标准化值
-                double normalizedWeight = fw.getWeight() / totalAbsWeight;
+                // 根据 weightMode 计算动态权重
+                double baseWeight = fw.getWeight();
+                if (dynamicWeights != null && dynamicWeights.containsKey(fc)) {
+                    baseWeight = baseWeight * dynamicWeights.get(fc);
+                }
+                double normalizedWeight = baseWeight / totalAbsWeight;
                 // direction: 1=正向（越高越好），-1=反向（越低越好）
                 double factorScore = fw.getDirection() >= 0 ? normalized : (1.0 - normalized);
                 compositeScore += normalizedWeight * factorScore;
@@ -816,6 +900,19 @@ public class StockScreenService {
         return values.stream()
                 .map(v -> Math.max(lower, Math.min(upper, v)))
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * 计算偏度（P1-6 因子分布诊断）
+     */
+    private double calcSkewness(List<Double> values) {
+        if (values == null || values.size() < 3) return 0;
+        double mean = values.stream().mapToDouble(Double::doubleValue).average().orElse(0);
+        double variance = values.stream().mapToDouble(v -> Math.pow(v - mean, 2)).average().orElse(0);
+        double std = Math.sqrt(variance);
+        if (std == 0) return 0;
+        double n = values.size();
+        return values.stream().mapToDouble(v -> Math.pow((v - mean) / std, 3)).average().orElse(0) * n / (n - 1) / (n - 2);
     }
 
     /**
@@ -1260,5 +1357,208 @@ public class StockScreenService {
             log.warn("Failed to load factor values for {}: {}", factorCode, e.getMessage());
             return Map.of();
         }
+    }
+
+    /**
+     * 批量查询股票市值（从 stock_daily 表获取当日总市值）
+     */
+    private Map<String, Double> batchLoadMarketCap(List<String> codes, LocalDate date) {
+        Map<String, Double> result = new HashMap<>();
+        if (codes.isEmpty()) return result;
+        final int BATCH = 500;
+        for (int i = 0; i < codes.size(); i += BATCH) {
+            List<String> batch = codes.subList(i, Math.min(i + BATCH, codes.size()));
+            try (Connection conn = dataSource.getConnection();
+                 PreparedStatement ps = conn.prepareStatement(
+                         "SELECT code, total_market_cap FROM stock_daily WHERE trade_date = ? AND code IN (" +
+                                 batch.stream().map(c -> "?").collect(Collectors.joining(",")) + ")")) {
+                ps.setString(1, date.toString());
+                for (int j = 0; j < batch.size(); j++) {
+                    ps.setString(j + 2, batch.get(j));
+                }
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        double cap = rs.getDouble("total_market_cap");
+                        if (cap > 0) {
+                            result.put(rs.getString("code"), cap);
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("Failed to batch load market cap: {}", e.getMessage());
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 中性化处理
+     * 
+     * 在行业或市值分组内，将因子值减去组内均值，消除行业/市值偏差
+     * 
+     * @param filtered 原始因子值列表（与outlierProcessed一一对应）
+     * @param values 极值处理后的因子值
+     * @param industryMap 行业映射
+     * @param marketCapMap 市值映射
+     * @param method 中性化方法：INDUSTRY / MARKET_CAP / BOTH
+     * @return 中性化后的因子值
+     */
+    private List<Double> applyNeutralization(
+            List<FactorValue> filtered,
+            List<Double> values,
+            Map<String, String> industryMap,
+            Map<String, Double> marketCapMap,
+            String method) {
+        
+        if (values == null || values.isEmpty()) return values;
+        
+        // 构建 symbol -> 索引映射
+        Map<String, Integer> symbolIndex = new HashMap<>();
+        for (int i = 0; i < filtered.size(); i++) {
+            symbolIndex.put(normalizeFactorSymbol(filtered.get(i).getSymbol()), i);
+        }
+        
+        List<Double> result = new ArrayList<>(values);
+        
+        // 1. 行业中性化
+        if (method.contains("INDUSTRY") || "BOTH".equalsIgnoreCase(method)) {
+            // 按行业分组
+            Map<String, List<Integer>> industryGroups = new HashMap<>();
+            for (Map.Entry<String, Integer> entry : symbolIndex.entrySet()) {
+                String industry = industryMap.get(entry.getKey());
+                if (industry == null) industry = "UNKNOWN";
+                industryGroups.computeIfAbsent(industry, k -> new ArrayList<>()).add(entry.getValue());
+            }
+            
+            // 在每个行业内做均值归一
+            for (List<Integer> indices : industryGroups.values()) {
+                if (indices.size() < 3) continue; // 行业内股票太少，跳过
+                
+                double sum = 0;
+                for (int idx : indices) {
+                    sum += values.get(idx);
+                }
+                double mean = sum / indices.size();
+                
+                for (int idx : indices) {
+                    result.set(idx, result.get(idx) - mean);
+                }
+            }
+            
+            log.debug("[Neutralization] Industry groups: {}, stocks processed: {}", 
+                industryGroups.size(), symbolIndex.size());
+        }
+        
+        // 2. 市值中性化
+        if (method.contains("MARKET_CAP") || "BOTH".equalsIgnoreCase(method)) {
+            // 按市值分5组
+            List<Map.Entry<String, Double>> capEntries = new ArrayList<>();
+            for (String sym : symbolIndex.keySet()) {
+                Double cap = marketCapMap.get(sym);
+                if (cap != null && cap > 0) {
+                    capEntries.add(new AbstractMap.SimpleEntry<>(sym, cap));
+                }
+            }
+            
+            if (capEntries.size() >= 10) {
+                // 按市值排序
+                capEntries.sort(Map.Entry.comparingByValue());
+                
+                // 分5组
+                int groupSize = Math.max(1, capEntries.size() / 5);
+                Map<String, Integer> capGroup = new HashMap<>();
+                for (int i = 0; i < capEntries.size(); i++) {
+                    int group = Math.min(i / groupSize, 4);
+                    capGroup.put(capEntries.get(i).getKey(), group);
+                }
+                
+                // 在每个市值组内做均值归一
+                for (int g = 0; g < 5; g++) {
+                    final int groupId = g;
+                    List<Integer> indices = capGroup.entrySet().stream()
+                        .filter(e -> e.getValue() == groupId)
+                        .map(e -> symbolIndex.get(e.getKey()))
+                        .filter(Objects::nonNull)
+                        .collect(Collectors.toList());
+                    
+                    if (indices.size() < 3) continue;
+                    
+                    double sum = 0;
+                    for (int idx : indices) {
+                        sum += values.get(idx);
+                    }
+                    double mean = sum / indices.size();
+                    
+                    for (int idx : indices) {
+                        result.set(idx, result.get(idx) - mean);
+                    }
+                }
+                
+                log.debug("[Neutralization] Market cap groups: 5, stocks with cap data: {}", capEntries.size());
+            }
+        }
+        
+        return result;
+    }
+
+    /**
+     * 获取动态权重（基于IC/IR）
+     *
+     * @param factors 因子配置列表
+     * @param weightMode 权重模式：IC / IR
+     * @param screenDate 选股日期
+     * @return factorCode -> 动态权重系数
+     */
+    private Map<String, Double> getDynamicWeights(List<ScreenRequest.FactorWeight> factors, String weightMode, LocalDate screenDate) {
+        Map<String, Double> dynamicWeights = new HashMap<>();
+        Map<String, Double> rawScores = new HashMap<>();
+
+        // 1. 获取每个因子的IC/IR值
+        for (ScreenRequest.FactorWeight fw : factors) {
+            String fc = fw.getFactorCode();
+            try {
+                // 从 factor_ic_record 表获取最近60天的IC序列
+                List<Double> icValues = factorIcService.getIcHistory(fc, screenDate, 60);
+                if (icValues == null || icValues.isEmpty()) {
+                    log.warn("[DynamicWeight] 因子 {} 无IC历史数据，使用默认权重1.0", fc);
+                    rawScores.put(fc, 1.0);
+                    continue;
+                }
+
+                double score;
+                if ("IR".equalsIgnoreCase(weightMode)) {
+                    // IR = IC均值 / IC标准差
+                    double avg = icValues.stream().mapToDouble(Double::doubleValue).average().orElse(0);
+                    double std = Math.sqrt(icValues.stream().mapToDouble(v -> Math.pow(v - avg, 2)).average().orElse(0));
+                    score = std > 0 ? Math.abs(avg) / std : 0;
+                } else {
+                    // IC模式：使用IC绝对值的均值
+                    score = icValues.stream().mapToDouble(Math::abs).average().orElse(0);
+                }
+                rawScores.put(fc, score);
+            } catch (Exception e) {
+                log.warn("[DynamicWeight] 获取因子 {} IC数据失败: {}", fc, e.getMessage());
+                rawScores.put(fc, 1.0);
+            }
+        }
+
+        // 2. 归一化：确保所有权重的平均值为1.0（保持用户原始权重的相对比例）
+        double avgScore = rawScores.values().stream().mapToDouble(Double::doubleValue).average().orElse(1.0);
+        if (avgScore > 0) {
+            for (Map.Entry<String, Double> entry : rawScores.entrySet()) {
+                double normalized = entry.getValue() / avgScore;
+                // 限制范围：最低0.3，最高3.0，避免极端值
+                normalized = Math.max(0.3, Math.min(3.0, normalized));
+                dynamicWeights.put(entry.getKey(), normalized);
+            }
+        } else {
+            // 所有IC都为0，使用等权
+            for (String fc : rawScores.keySet()) {
+                dynamicWeights.put(fc, 1.0);
+            }
+        }
+
+        log.info("[DynamicWeight] mode={} date={} weights={}", weightMode, screenDate, dynamicWeights);
+        return dynamicWeights;
     }
 }

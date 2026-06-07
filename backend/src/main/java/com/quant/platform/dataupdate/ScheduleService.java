@@ -9,6 +9,8 @@ import org.springframework.scheduling.config.ScheduledTaskRegistrar;
 import org.springframework.scheduling.support.CronTrigger;
 import org.springframework.stereotype.Service;
 
+import com.quant.platform.recommendation.service.RecommendationService;
+
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -29,6 +31,7 @@ public class ScheduleService implements SchedulingConfigurer {
     private final JdbcTemplate jdbcTemplate;
     private final DataUpdateService dataUpdateService;
     private final TaskScheduler taskScheduler;
+    private final RecommendationService recommendationService;
 
     // taskKey → ScheduledFuture（用于动态取消）
     private final Map<String, ScheduledFuture<?>> scheduledTasks = new ConcurrentHashMap<>();
@@ -147,6 +150,13 @@ public class ScheduleService implements SchedulingConfigurer {
      */
     private void executeTask(String taskKey) {
         try {
+            // P1-4: 推荐追踪任务（每个交易日15:30自动执行）
+            if ("RECOMMENDATION_TRACK".equals(taskKey)) {
+                int updated = recommendationService.trackRecommendationPerformance();
+                log.info("[ScheduleService] 推荐追踪完成: 更新{}条", updated);
+                return;
+            }
+
             // 读取任务的 extra_config
             Map<String, Object> configRow = null;
             try {
@@ -281,6 +291,7 @@ public class ScheduleService implements SchedulingConfigurer {
                 yield req;
             }
             case "RESEARCH"      -> { req.setUpdateType("RESEARCH");      yield req; }
+            case "RECOMMENDATION_TRACK" -> { /* P1-4: 已在executeTask中特殊处理 */ yield null; }
             default -> throw new IllegalArgumentException("未知任务类型: " + taskKey);
         };
     }

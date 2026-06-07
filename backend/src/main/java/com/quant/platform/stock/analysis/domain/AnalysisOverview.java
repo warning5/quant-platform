@@ -196,4 +196,31 @@ public class AnalysisOverview {
      * 多空辩论结论文本
      */
     private String bullBearConclusion;
+
+    // ========== P1-2 风险/流动性评分字段 ==========
+
+    /**
+     * 最大回撤(%)
+     */
+    private Double maxDrawdown;
+
+    /**
+     * 20日波动率(%)
+     */
+    private Double volatility20d;
+
+    /**
+     * ATR（平均真实波幅）
+     */
+    private Double atr;
+
+    /**
+     * 20日均成交额(元)
+     */
+    private Double avgAmount20d;
+
+    /**
+     * 20日换手率(%)
+     */
+    private Double turnoverRate20d;
 }

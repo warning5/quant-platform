@@ -100,6 +100,32 @@ public class FactorDefinition implements Serializable {
     private Double cvThreshold;
 
     /**
+     * 数据频率
+     * DAILY = 日频因子
+     * QUARTERLY = 季度财务因子
+     */
+    @TableField("data_frequency")
+    private String dataFrequency;
+
+    /**
+     * 推荐的极值处理方法（P1-6）
+     * MAD = 中位数绝对偏差（默认）
+     * THREE_SIGMA = 3倍标准差
+     * PERCENTILE = 百分位截断（1%/99%）
+     */
+    @TableField("outlier_method")
+    private String outlierMethod;
+
+    /**
+     * 推荐的标准化方法（P1-6）
+     * ZSCORE = Z-Score标准化（默认）
+     * MINMAX = 最小最大归一化
+     * RANK = 排名百分位
+     */
+    @TableField("normalize_method")
+    private String normalizeMethod;
+
+    /**
      * 创建时间
      */
     @TableField(value = "created_at", fill = FieldFill.INSERT)

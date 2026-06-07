@@ -336,9 +336,9 @@ export const recommendationApi = {
   /** 生成推荐列表（手动触发）
    * @param {string} date - 推荐日期
    * @param {number} topN - 推荐数量
-   * @param {string} factorProfile - 因子组合: EXISTING/NORMAL/NEW_QUALITY/HOT/COMPREHENSIVE
+   * @param {number} strategyId - 策略ID（从策略列表选择）
    */
-  generate: (date, topN, factorProfile) => api.post('/recommendations/generate', { date, topN, factorProfile }),
+  generate: (date, topN, strategyId) => api.post('/recommendations/generate', { date, topN, strategyId }),
   /** 获取最新推荐列表 */
   getLatest: () => api.get('/recommendations/latest'),
   /** 获取指定批次推荐 */

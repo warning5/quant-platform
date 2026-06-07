@@ -7,11 +7,13 @@ import com.quant.platform.backtest.domain.BacktestTask;
 import com.quant.platform.backtest.domain.EquityCurve;
 import com.quant.platform.backtest.domain.ParamOptimizeReport;
 import com.quant.platform.backtest.domain.RebalanceRecord;
+import com.quant.platform.backtest.domain.WalkForwardResult;
 import com.quant.platform.backtest.mapper.EquityCurveMapper;
 import com.quant.platform.backtest.mapper.ParamOptimizeReportMapper;
 import com.quant.platform.backtest.mapper.RebalanceRecordMapper;
 import com.quant.platform.backtest.service.*;
 import com.quant.platform.common.dto.ApiResponse;
+import com.quant.platform.screen.dto.ScreenRequest;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -19,6 +21,7 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
 import java.util.*;
 
 /**
@@ -42,6 +45,7 @@ public class BacktestController {
     private final EquityCurveMapper equityCurveMapper;
     private final RebalanceRecordMapper rebalanceRecordMapper;
     private final ObjectMapper objectMapper;
+    private final WalkForwardService walkForwardService;
 
     @PostMapping
     @Operation(summary = "创建并启动回测任务")
@@ -770,5 +774,59 @@ public class BacktestController {
     public ApiResponse<Void> deleteParamOptimizeJob(@PathVariable String jobId) {
         paramOptimizeReportMapper.deleteByJobId(jobId);
         return ApiResponse.success(null);
+    }
+
+    // ═══════════════════════ P2-3 Walk-Forward 验证 ═══════════════════════════════════
+
+    /**
+     * Walk-Forward 滚动窗口验证
+     * POST /backtests/walk-forward
+     * Body: {
+     *   "factors": [{"factorCode":"MOM20","direction":1,"weight":1.0}, ...],
+     *   "endDate": "2026-06-05",
+     *   "trainDays": 60,
+     *   "validateDays": 20,
+     *   "stepDays": 10,
+     *   "maxRounds": 10
+     * }
+     */
+    @PostMapping("/walk-forward")
+    @Operation(summary = "Walk-Forward 滚动窗口验证")
+    public ApiResponse<Map<String, Object>> runWalkForward(@RequestBody Map<String, Object> params) {
+        try {
+            // 解析因子配置
+            List<Map<String, Object>> factorMaps = (List<Map<String, Object>>) params.get("factors");
+            List<ScreenRequest.FactorWeight> factors = new ArrayList<>();
+            if (factorMaps != null) {
+                for (Map<String, Object> fm : factorMaps) {
+                    ScreenRequest.FactorWeight fw = new ScreenRequest.FactorWeight();
+                    fw.setFactorCode((String) fm.get("factorCode"));
+                    fw.setDirection(fm.get("direction") != null ? ((Number) fm.get("direction")).intValue() : 1);
+                    fw.setWeight(fm.get("weight") != null ? ((Number) fm.get("weight")).doubleValue() : 1.0);
+                    factors.add(fw);
+                }
+            }
+
+            LocalDate endDate = LocalDate.now();
+            if (params.containsKey("endDate")) {
+                endDate = LocalDate.parse((String) params.get("endDate"));
+            }
+            int trainDays = params.containsKey("trainDays") ? ((Number) params.get("trainDays")).intValue() : 60;
+            int validateDays = params.containsKey("validateDays") ? ((Number) params.get("validateDays")).intValue() : 20;
+            int stepDays = params.containsKey("stepDays") ? ((Number) params.get("stepDays")).intValue() : 10;
+            int maxRounds = params.containsKey("maxRounds") ? ((Number) params.get("maxRounds")).intValue() : 10;
+
+            List<WalkForwardResult> results = walkForwardService.runWalkForward(
+                    factors, endDate, trainDays, validateDays, stepDays, maxRounds);
+            Map<String, Object> summary = walkForwardService.summarize(results);
+
+            Map<String, Object> response = new LinkedHashMap<>();
+            response.put("summary", summary);
+            response.put("rounds", results);
+            return ApiResponse.success("Walk-Forward验证完成", response);
+        } catch (Exception e) {
+            log.error("[WalkForward] 验证失败: {}", e.getMessage(), e);
+            return ApiResponse.error("Walk-Forward验证失败: " + e.getMessage());
+        }
     }
 }

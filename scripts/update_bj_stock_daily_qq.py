@@ -390,23 +390,28 @@ def main():
         # ─── ClickHouse OPTIMIZE（去重合并）─────────────────────
         if db.backend == "clickhouse":
             import clickhouse_connect, time as _t
-            try:
-                from db_config import CLICKHOUSE_CONFIG
-                ch = clickhouse_connect.get_client(
-                    host=CLICKHOUSE_CONFIG["host"], port=CLICKHOUSE_CONFIG["port"],
-                    username=CLICKHOUSE_CONFIG["username"], password=CLICKHOUSE_CONFIG["password"],
-                    database=CLICKHOUSE_CONFIG["database"],
-                )
-                print(f"\n  ClickHouse OPTIMIZE TABLE FINAL（去重合并）...")
-                t0 = _t.time()
-                ch.command("OPTIMIZE TABLE stock.stock_daily FINAL")
-                elapsed = _t.time() - t0
-                r = ch.query("SELECT count() AS total, countDistinct(code, trade_date) AS distinct_rows FROM stock.stock_daily")
-                total_cnt, distinct_cnt = r.result_rows[0]
-                dups = total_cnt - distinct_cnt
-                print(f"  完成 (耗时 {elapsed:.1f}s): 总行 {total_cnt:,}, 去重后 {distinct_cnt:,}, 重复 {dups:,}")
-            except Exception as e:
-                print(f"  [WARN] ClickHouse OPTIMIZE 失败: {e}")
+            _optimize_ok = False
+            for _retry in range(3):
+                try:
+                    from db_config import CLICKHOUSE_CONFIG
+                    ch = clickhouse_connect.get_client(**CLICKHOUSE_CONFIG)
+                    print(f"\n  ClickHouse OPTIMIZE TABLE FINAL（去重合并）...")
+                    t0 = _t.time()
+                    ch.command("OPTIMIZE TABLE stock.stock_daily FINAL")
+                    elapsed = _t.time() - t0
+                    r = ch.query("SELECT count() AS total, countDistinct(code, trade_date) AS distinct_rows FROM stock.stock_daily")
+                    total_cnt, distinct_cnt = r.result_rows[0]
+                    dups = total_cnt - distinct_cnt
+                    print(f"  完成 (耗时 {elapsed:.1f}s): 总行 {total_cnt:,}, 去重后 {distinct_cnt:,}, 重复 {dups:,}")
+                    _optimize_ok = True
+                    break
+                except Exception as e:
+                    if _retry < 2:
+                        print(f"  [WARN] ClickHouse OPTIMIZE 失败 (第{_retry+1}次): {e}，2s 后重试...")
+                        _t.sleep(2)
+                    else:
+                        print(f"  [WARN] ClickHouse OPTIMIZE 失败（已重试3次）: {e}")
+                        print(f"  [INFO] OPTIMIZE 失败不影响数据正确性，ReplacingMergeTree 查询时自动去重")
 
         return 0 if total_failed == 0 else 1
 

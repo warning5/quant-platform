@@ -897,6 +897,8 @@ public class DataUpdateService {
             if (request.isFetchFundHolder()) cmd.add("--fund-holder");
             if (request.isFetchShareholder()) cmd.add("--shareholder");
             if (request.isFetchNews()) cmd.add("--news");
+            if (request.isFetchBondYield()) cmd.add("--bond-yield");
+            if (request.isFetchShenwanIndex()) cmd.add("--shenwan-index");
             if (request.isForce()) cmd.add("--force");
             return cmd;
         }

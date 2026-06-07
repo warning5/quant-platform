@@ -70,6 +70,8 @@ INFO_SCRIPT     = os.path.join(SCRIPT_DIR, "update_stock_info_daily.py")
 INDEX_SCRIPT    = os.path.join(SCRIPT_DIR, "update_index_daily_baostock.py")
 SENTIMENT_SCRIPT = os.path.join(SCRIPT_DIR, "update_sentiment_data.py")
 BIDASK_SCRIPT   = os.path.join(SCRIPT_DIR, "update_bid_ask.py")
+BOND_YIELD_SCRIPT = os.path.join(SCRIPT_DIR, "update_bond_yield.py")
+SHENWAN_SCRIPT  = os.path.join(SCRIPT_DIR, "update_shenwan_index.py")
 
 
 def resolve_date(date_str):
@@ -142,25 +144,42 @@ def run_cmd(cmd, description):
         return False
 
 
-def run_baostock(market, start_date, end_date, extra_args):
-    """调用 Baostock 脚本更新 SH/SZ 日线，失败时自动切换到 akshare"""
+def run_baostock(market, start_date, end_date, extra_args, max_retries=3, retry_wait=10):
+    """调用 Baostock 脚本更新 SH/SZ 日线，超时/失败时先重试，重试耗尽才切换 akshare。
+    
+    重试策略：
+    - 第 1 次失败：等 retry_wait 秒后重跑，带 --resume 跳过已写入的股票
+    - 第 2 次失败：再等 retry_wait*2 秒后重跑
+    - max_retries 次都失败：切换到 akshare 备用数据源
+    """
     if not os.path.exists(BAOSTOCK_SCRIPT):
         print(f"[ERROR] 找不到脚本: {BAOSTOCK_SCRIPT}")
         return False
 
-    cmd = [sys.executable, BAOSTOCK_SCRIPT, "--market", market, "--start-date", start_date]
+    base_cmd = [sys.executable, BAOSTOCK_SCRIPT, "--market", market, "--start-date", start_date]
     if end_date:
-        cmd += ["--end-date", end_date]
-    cmd += extra_args
+        base_cmd += ["--end-date", end_date]
 
-    ok = run_cmd(cmd, f"{market} 日线数据 (Baostock)")
-    
-    # Baostock 失败时自动切换到 akshare
-    if not ok:
-        print(f"\n[WARN] Baostock 更新失败，尝试使用 akshare 作为备用数据源...")
-        return run_akshare(market, start_date, end_date, extra_args)
-    
-    return ok
+    for attempt in range(1, max_retries + 1):
+        # 第 2 次起带 --resume，跳过已写入的股票，避免重复写入
+        args_this_run = list(extra_args)
+        if attempt > 1 and "--resume" not in args_this_run:
+            args_this_run.append("--resume")
+
+        cmd = base_cmd + args_this_run
+        ok = run_cmd(cmd, f"{market} 日线数据 (Baostock 第{attempt}/{max_retries}次)")
+
+        if ok:
+            return True
+
+        if attempt < max_retries:
+            wait = retry_wait * attempt
+            print(f"\n[WARN] Baostock 第{attempt}次失败，{wait}s 后重试（将使用 --resume 断点续传）...")
+            time.sleep(wait)
+        else:
+            print(f"\n[WARN] Baostock 重试 {max_retries} 次均失败，切换到 akshare 备用数据源...")
+
+    return run_akshare(market, start_date, end_date, extra_args)
 
 
 def run_akshare(market, start_date, end_date, extra_args):
@@ -231,6 +250,30 @@ def run_sentiment(date_str=None):
         cmd += ["--date", date_str.replace("-", "")]
 
     return run_cmd(cmd, "市场情绪数据 (涨跌停/龙虎榜/融资融券等)")
+
+
+def run_bond_yield():
+    """调用国债收益率采集脚本"""
+    if not os.path.exists(BOND_YIELD_SCRIPT):
+        print(f"[ERROR] 找不到脚本: {BOND_YIELD_SCRIPT}")
+        return False
+    cmd = [sys.executable, BOND_YIELD_SCRIPT]
+    return run_cmd(cmd, "国债收益率数据")
+
+
+def run_shenwan_index(start_date=None, end_date=None, force=False):
+    """调用申万行业指数采集脚本"""
+    if not os.path.exists(SHENWAN_SCRIPT):
+        print(f"[ERROR] 找不到脚本: {SHENWAN_SCRIPT}")
+        return False
+    cmd = [sys.executable, SHENWAN_SCRIPT]
+    if start_date:
+        cmd += ["--start-date", start_date]
+    if end_date:
+        cmd += ["--end-date", end_date]
+    if force:
+        cmd += ["--force"]
+    return run_cmd(cmd, "申万行业指数数据")
 
 
 def run_bidask(date_str=None, code=None, limit=0, all_mode=False):
@@ -343,7 +386,7 @@ def main():
   %(prog)s --resume                           # 断点续传
   %(prog)s --limit 10                         # 限制数量（测试）
   %(prog)s --summary                          # 只看数据概况，不更新
-  %(prog)s --sentiment-only                   # 只采集市场情绪数据
+  %(prog)s --sentiment-only                   # 只采集市场情绪数据（含国债收益率/申万指数）
 
 日期参数支持:
   YYYY-MM-DD     标准日期格式
@@ -382,7 +425,7 @@ def main():
     )
     parser.add_argument(
         "--sentiment-only", action="store_true",
-        help="只采集市场情绪数据（涨跌停/龙虎榜/融资融券等），不更新日线和info"
+        help="只采集市场情绪数据（涨跌停/龙虎榜/融资融券/国债收益率/申万指数等），不更新日线和info"
     )
     parser.add_argument(
         "--bidask-only", action="store_true",
@@ -471,7 +514,7 @@ def main():
     elif args.index_only:
         print(f"  更新模式:   仅指数日线")
     elif args.sentiment_only:
-        print(f"  更新模式:   仅市场情绪数据（涨跌停/龙虎榜/融资融券等）")
+        print(f"  更新模式:   仅市场情绪数据（涨跌停/龙虎榜/融资融券/国债收益率/申万指数等）")
     elif args.bidask_only:
         print(f"  更新模式:   仅内外盘数据")
     else:
@@ -523,6 +566,12 @@ def main():
         # 全量模式：最后跑情绪数据
         ok = run_sentiment(end_date)
         results.append(("市场情绪", ok))
+        # 国债收益率
+        ok = run_bond_yield()
+        results.append(("国债收益率", ok))
+        # 申万行业指数
+        ok = run_shenwan_index(start_date, end_date, force=args.force)
+        results.append(("申万行业指数", ok))
 
     # ─── Part 2.6: 内外盘数据 ───
     if args.bidask_only or (not args.info_only and not args.daily_only and not args.index_only and not args.sentiment_only):
@@ -530,7 +579,7 @@ def main():
         results.append(("内外盘数据", ok))
 
     # ─── Part 3: 自动补全缺失字段 ───
-    do_fix = not args.info_only and not args.sentiment_only and not args.bidask_only  # info-only / sentiment-only 模式不补全日线字段
+    do_fix = not args.info_only and not args.sentiment_only and not args.bidask_only  # info-only / sentiment-only / bond-yield / shenwan 模式不补全日线字段
     if do_fix:
         try:
             from db_helper import StockDailyDB
@@ -553,24 +602,30 @@ def main():
         try:
             import clickhouse_connect
             from db_config import CLICKHOUSE_CONFIG
-            ch = clickhouse_connect.get_client(
-                host=CLICKHOUSE_CONFIG["host"], port=CLICKHOUSE_CONFIG["port"],
-                username=CLICKHOUSE_CONFIG["username"], password=CLICKHOUSE_CONFIG["password"],
-                database=CLICKHOUSE_CONFIG["database"],
-            )
-            print(f"\n{'=' * 70}")
-            print(f"  ClickHouse OPTIMIZE TABLE FINAL（去重合并）")
-            print(f"{'=' * 70}")
-            t0 = time.time()
-            ch.command("OPTIMIZE TABLE stock.stock_daily FINAL")
-            elapsed = time.time() - t0
-            r = ch.query("SELECT count() AS total, countDistinct(code, trade_date) AS distinct_rows FROM stock.stock_daily")
-            total, distinct = r.result_rows[0]
-            dups = total - distinct
-            print(f"  完成 (耗时 {elapsed:.1f}s): 总行 {total:,}, 去重后 {distinct:,}, 重复 {dups:,}")
-            print(f"{'=' * 70}")
-        except Exception as e:
-            print(f"\n[WARN] ClickHouse OPTIMIZE 失败: {e}")
+            for _retry in range(3):
+                try:
+                    ch = clickhouse_connect.get_client(**CLICKHOUSE_CONFIG)
+                    print(f"\n{'=' * 70}")
+                    print(f"  ClickHouse OPTIMIZE TABLE FINAL（去重合并）")
+                    print(f"{'=' * 70}")
+                    t0 = time.time()
+                    ch.command("OPTIMIZE TABLE stock.stock_daily FINAL")
+                    elapsed = time.time() - t0
+                    r = ch.query("SELECT count() AS total, countDistinct(code, trade_date) AS distinct_rows FROM stock.stock_daily")
+                    total, distinct = r.result_rows[0]
+                    dups = total - distinct
+                    print(f"  完成 (耗时 {elapsed:.1f}s): 总行 {total:,}, 去重后 {distinct:,}, 重复 {dups:,}")
+                    print(f"{'=' * 70}")
+                    break
+                except Exception as e:
+                    if _retry < 2:
+                        print(f"  [WARN] ClickHouse OPTIMIZE 失败 (第{_retry+1}次): {e}，2s 后重试...")
+                        time.sleep(2)
+                    else:
+                        print(f"  [WARN] ClickHouse OPTIMIZE 失败（已重试3次）: {e}")
+                        print(f"  [INFO] OPTIMIZE 失败不影响数据正确性，ReplacingMergeTree 查询时自动去重")
+        except ImportError:
+            print(f"\n[WARN] clickhouse_connect 未安装，跳过 OPTIMIZE")
 
     # ─── 汇总 ───
     total_elapsed = time.time() - total_start

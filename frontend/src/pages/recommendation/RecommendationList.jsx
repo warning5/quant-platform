@@ -4,6 +4,7 @@ import { Card, Table, Button, Tag, Select, Space, Statistic, Row, Col, Typograph
 import dayjs from 'dayjs';
 import { ThunderboltOutlined, ReloadOutlined, LineChartOutlined, StockOutlined, RiseOutlined, FallOutlined, MinusOutlined, QuestionCircleOutlined } from '@ant-design/icons';
 import { recommendationApi } from '../../api';
+import api from '../../api';
 
 const { Title, Text } = Typography;
 
@@ -39,63 +40,66 @@ export default function RecommendationList() {
   const [regime, setRegime] = useState(null);
   const [indexInfo, setIndexInfo] = useState(null);
   const [weightInfo, setWeightInfo] = useState(null); // Phase 2: 动态权重
-  const [factorProfile, setFactorProfile] = useState('NORMAL');
+  const [strategies, setStrategies] = useState([]);
+  const [selectedStrategyId, setSelectedStrategyId] = useState(null);
   const [screenDate, setScreenDate] = useState(null);
 
-  // 各因子组合包含的因子列表
-  const PROFILE_FACTOR_CONFIG = {
-    EXISTING: {
-      label: '现有持仓增强',
-      factors: ['MOM20', 'VOL20', 'VAL_PE_TTM', 'VAL_PB', 'RSI14', 'MACD', 'TURN20', 'FIN_EARNINGS_QUALITY', 'FIN_DEBT_TO_ASSET'],
-    },
-    NORMAL: {
-      label: '均衡配置',
-      factors: ['MOM20', 'VOL20', 'VAL_PE_TTM', 'VAL_PB', 'VAL_DIVIDEND_YIELD', 'RSI14', 'MACD', 'TURN20', 'FIN_EARNINGS_QUALITY', 'FIN_DEBT_TO_ASSET', 'FIN_REVENUE_QUALITY', 'FIN_NET_PROFIT_YOY'],
-    },
-    NEW_QUALITY: {
-      label: '新质生产力',
-      factors: ['MOM20', 'VOL20', 'VAL_PE_TTM', 'RSI14', 'MACD', 'TURN20', 'FIN_EARNINGS_QUALITY', 'FIN_DEBT_TO_ASSET', 'FIN_REVENUE_QUALITY', 'FIN_NET_PROFIT_YOY'],
-    },
-    HOT: {
-      label: '热点追踪',
-      factors: ['MOM20', 'VOL20', 'RSI14', 'MACD', 'TURN20'],
-    },
-    COMPREHENSIVE: {
-      label: '全因子综合',
-      factors: ['MOM20', 'VOL20', 'VAL_PE_TTM', 'VAL_PB', 'VAL_DIVIDEND_YIELD', 'RSI14', 'MACD', 'TURN20', 'FIN_EARNINGS_QUALITY', 'FIN_DEBT_TO_ASSET', 'FIN_REVENUE_QUALITY', 'FIN_NET_PROFIT_YOY'],
-    },
-  };
+  // 加载策略列表
+  useEffect(() => {
+    api.get('/strategies', { params: { status: 'ACTIVE', size: 100 } })
+      .then(res => {
+        const list = res?.records || [];
+        setStrategies(list);
+        if (list.length > 0 && !selectedStrategyId) {
+          setSelectedStrategyId(list[0].id);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
-  const renderFactorTable = (profileKey) => {
-    const cfg = PROFILE_FACTOR_CONFIG[profileKey];
-    if (!cfg) return null;
+  const renderFactorTable = (strategy) => {
+    if (!strategy || !strategy.factorConfigJson) return null;
+    let factors = [];
+    try {
+      const parsed = JSON.parse(strategy.factorConfigJson);
+      factors = Array.isArray(parsed) ? parsed : (parsed.factors || []);
+    } catch { return null; }
+    if (factors.length === 0) return null;
+
     const factorMeta = {
       MOM20: { cat: '动量', dir: '+', desc: '20日涨幅' },
+      MOM5: { cat: '动量', dir: '+', desc: '5日涨幅' },
+      MTM6: { cat: '动量', dir: '+', desc: '6日动量' },
       VOL20: { cat: '波动', dir: '-', desc: '年化波动率（低波优先）' },
       VAL_PE_TTM: { cat: '价值', dir: '-', desc: '市盈率TTM' },
       VAL_PB: { cat: '价值', dir: '-', desc: '市净率' },
+      VAL_PS_TTM: { cat: '价值', dir: '-', desc: '市销率TTM' },
       VAL_DIVIDEND_YIELD: { cat: '价值', dir: '+', desc: '股息率' },
       RSI14: { cat: '技术', dir: '+', desc: '14日RSI' },
       MACD: { cat: '技术', dir: '+', desc: 'MACD离差值' },
       TURN20: { cat: '流动性', dir: '-', desc: '20日换手率（低换手优先）' },
-      FIN_EARNINGS_QUALITY: { cat: '财务', dir: '+', desc: '盈利质量（经营现金流/净利润）' },
-      FIN_DEBT_TO_ASSET: { cat: '财务', dir: '-', desc: '财务健康（资产负债率，越低越好）' },
+      FIN_EARNINGS_QUALITY: { cat: '财务', dir: '+', desc: '盈利质量' },
+      FIN_DEBT_TO_ASSET: { cat: '财务', dir: '-', desc: '资产负债率' },
       FIN_REVENUE_QUALITY: { cat: '财务', dir: '+', desc: '营收质量' },
       FIN_NET_PROFIT_YOY: { cat: '成长', dir: '+', desc: '净利润同比增长率' },
+      FIN_REVENUE_TTM_YOY: { cat: '成长', dir: '+', desc: '营收同比增长率' },
     };
     return (
       <div style={{ fontSize: 12, lineHeight: '20px' }}>
-        <div style={{ fontWeight: 'bold', marginBottom: 6, fontSize: 13 }}>{cfg.label} 包含因子</div>
+        <div style={{ fontWeight: 'bold', marginBottom: 6, fontSize: 13 }}>{strategy.strategyName} 包含因子</div>
         <table style={{ borderCollapse: 'collapse', fontSize: 11 }}>
           <tbody>
-            {cfg.factors.map(code => {
+            {factors.map((f, idx) => {
+              const code = f.factorCode || f.code || '';
               const meta = factorMeta[code];
+              const dir = f.direction ?? f.dir ?? 1;
               return (
-                <tr key={code}>
+                <tr key={idx}>
                   <td style={{ padding: '1px 6px 1px 0', color: '#8c8c8c' }}>{meta?.cat || ''}</td>
                   <td style={{ padding: '1px 6px', fontFamily: 'monospace', fontWeight: 500 }}>{code}</td>
-                  <td style={{ padding: '1px 6px', color: meta?.dir === '+' ? '#cf1322' : '#3f8600' }}>{meta?.dir === '+' ? '正向' : '反向'}</td>
-                  <td style={{ padding: '1px 0', color: '#595959' }}>{meta?.desc || ''}</td>
+                  <td style={{ padding: '1px 6px', color: dir > 0 ? '#cf1322' : '#3f8600' }}>{dir > 0 ? '正向' : '反向'}</td>
+                  <td style={{ padding: '1px 0', color: '#595959' }}>权重{(f.weight ?? 1).toFixed(1)}</td>
+                  <td style={{ padding: '1px 0 1px 6px', color: '#8c8c8c' }}>{meta?.desc || ''}</td>
                 </tr>
               );
             })}
@@ -143,10 +147,14 @@ export default function RecommendationList() {
 
   // 生成推荐
   const handleGenerate = async () => {
+    if (!selectedStrategyId) {
+      message.warning('请先选择策略');
+      return;
+    }
     setGenerating(true);
     try {
       const dateStr = screenDate ? dayjs(screenDate).format('YYYY-MM-DD') : null;
-      const result = await recommendationApi.generate(dateStr, 20, factorProfile);
+      const result = await recommendationApi.generate(dateStr, 20, selectedStrategyId);
       message.success(`推荐列表生成成功: ${result.count} 只`);
       await loadRecommendations(null);
     } catch (e) {
@@ -432,23 +440,22 @@ export default function RecommendationList() {
             disabledDate={(current) => current && current.isAfter(dayjs().endOf('day'))}
           />
           <Select
-            value={factorProfile}
-            onChange={value => setFactorProfile(value)}
-            style={{ width: 170 }}
-            options={[
-              { value: 'EXISTING', label: '现有持仓增强' },
-              { value: 'NORMAL', label: '均衡配置' },
-              { value: 'NEW_QUALITY', label: '新质生产力' },
-              { value: 'HOT', label: '热点追踪' },
-              { value: 'COMPREHENSIVE', label: '全因子综合' },
-            ].map(opt => ({
-              value: opt.value,
+            value={selectedStrategyId}
+            onChange={value => setSelectedStrategyId(value)}
+            style={{ width: 200 }}
+            placeholder="选择策略"
+            showSearch
+            filterOption={(input, option) =>
+              (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+            }
+            options={strategies.map(s => ({
+              value: s.id,
               label: (
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span>{opt.label}</span>
+                  <span>{s.strategyName}</span>
                   <Tooltip
                     overlayStyle={{ maxWidth: 420 }}
-                    title={renderFactorTable(opt.value)}
+                    title={renderFactorTable(s)}
                   >
                     <QuestionCircleOutlined
                       style={{ color: '#91caff', fontSize: 13, marginLeft: 4 }}

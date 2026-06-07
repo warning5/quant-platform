@@ -15,9 +15,16 @@ import com.quant.platform.stock.entity.StockInfo;
 import com.quant.platform.stock.entity.StockDaily;
 import com.quant.platform.stock.mapper.StockInfoMapper;
 import com.quant.platform.stock.service.ClickHouseStockService;
+import com.quant.platform.strategy.domain.StrategyDefinition;
+import com.quant.platform.strategy.mapper.StrategyDefinitionMapper;
+import com.quant.platform.factor.ic.service.FactorIcService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -47,7 +54,10 @@ public class RecommendationService {
     private final ClickHouseStockService clickHouseStockService;
     private final StockInfoMapper stockInfoMapper;
     private final RecommendationMapper recommendationMapper;
+    private final StrategyDefinitionMapper strategyDefinitionMapper;
     private final ObjectMapper objectMapper;
+    private final FactorIcService factorIcService;
+    private final javax.sql.DataSource dataSource;
 
     /** 因子选股取 Top N（广筛） */
     private static final int SCREEN_TOP_N = 50;
@@ -227,14 +237,20 @@ public class RecommendationService {
                                  ClickHouseStockService clickHouseStockService,
                                  StockInfoMapper stockInfoMapper,
                                  RecommendationMapper recommendationMapper,
-                                 ObjectMapper objectMapper) {
+                                 StrategyDefinitionMapper strategyDefinitionMapper,
+                                 ObjectMapper objectMapper,
+                                 FactorIcService factorIcService,
+                                 javax.sql.DataSource dataSource) {
         this.stockScreenService = stockScreenService;
         this.analysisService = analysisService;
         this.marketDataService = marketDataService;
         this.clickHouseStockService = clickHouseStockService;
         this.stockInfoMapper = stockInfoMapper;
         this.recommendationMapper = recommendationMapper;
+        this.strategyDefinitionMapper = strategyDefinitionMapper;
         this.objectMapper = objectMapper;
+        this.factorIcService = factorIcService;
+        this.dataSource = dataSource;
     }
 
     /**
@@ -244,26 +260,38 @@ public class RecommendationService {
      * @param topN  最终推荐数量（默认20）
      * @return 推荐结果列表
      */
-    public List<StockRecommendation> generateRecommendations(LocalDate date, Integer topN, String factorProfile) {
+    public List<StockRecommendation> generateRecommendations(LocalDate date, Integer topN, String factorProfile, Long strategyId) {
         // date=null 时 StockScreenService.screen() 会自动取最新日期
         if (topN == null || topN <= 0) {
             topN = ANALYSIS_TOP_N;
         }
 
-        log.info("[Recommendation] 开始生成推荐列表: date={}, topN={}, factorProfile={}", date, topN, factorProfile);
+        log.info("[Recommendation] 开始生成推荐列表: date={}, topN={}, factorProfile={}, strategyId={}", date, topN, factorProfile, strategyId);
+
+        // P1-4: 检查上期推荐命中率，动态调整 topN
+        String prevBatchId = recommendationMapper.findLatestBatchId();
+        if (prevBatchId != null && topN > 10) {
+            Map<String, Object> hitStats = getHitRate(prevBatchId);
+            Double hitRate = (Double) hitStats.get("hitRate");
+            if (hitRate != null && hitRate < 0.4) {
+                int originalTopN = topN;
+                topN = Math.max(10, topN - 5);
+                log.info("[Recommendation] 上期命中率{:.0f}%偏低({}), 缩减topN: {} -> {}",
+                    hitRate * 100, prevBatchId, originalTopN, topN);
+            }
+        }
 
         // Step 1: 多因子选股（广筛 Top 50）
         // date=null 时 StockScreenService.screen() 内部自动 resolveLatestDate()
-        ScreenResult screenResult = screenStocks(date, factorProfile);
+        ScreenResult screenResult = screenStocks(date, factorProfile, strategyId);
         List<ScreenResult.StockScore> candidates = screenResult.getStocks();
         if (candidates == null || candidates.isEmpty()) {
             log.warn("[Recommendation] 因子选股结果为空，无法生成推荐");
             return List.of();
         }
 
-        // Step 1.5: 行业排除过滤（根据组合配置）
-        List<String> excludeIndustries = PROFILE_EXCLUDE_INDUSTRY_MAP.getOrDefault(
-                factorProfile != null ? factorProfile : "EXISTING", List.of());
+        // Step 1.5: 行业排除过滤（根据组合配置或策略 filterConfigJson）
+        List<String> excludeIndustries = getExcludeIndustries(factorProfile, strategyId);
         if (!excludeIndustries.isEmpty()) {
             Set<String> excludeSet = new HashSet<>(excludeIndustries);
             List<String> candidateCodes = candidates.stream()
@@ -624,14 +652,128 @@ public class RecommendationService {
             info.regime = "SIDEWAYS";
         }
 
-        log.info("[Recommendation] Regime详情: regime={} trend={} vol={}({:.0f}%) breadth={}({:.0f}%) ATR={:.2f}",
+        // ── 维度4: 大小盘风格 (P1-1) ──
+        // 用沪深300(大盘) vs 中证1000(小盘) 近20日涨幅差判断
+        String zz1000Code = "000852"; // 中证1000
+        List<MarketDailyBar> zz1000Bars = marketDataService.getBarsInRange(zz1000Code,
+                date.minusDays(30), date);
+        if (zz1000Bars != null && zz1000Bars.size() >= 20) {
+            double zz1000Return = calcRecentReturn(zz1000Bars, 20);
+            double hs300Return = calcRecentReturn(bars, 20);
+            info.sizeSpread = hs300Return - zz1000Return;
+            info.sizeRegime = info.sizeSpread > 0.02 ? "LARGE"
+                    : info.sizeSpread < -0.02 ? "SMALL" : "NEUTRAL";
+        }
+
+        // ── 维度5: 价值/成长风格 (P1-1) ──
+        // 用国证价值(399371) vs 国证成长(399370) 近20日涨幅差判断
+        String valueIdx = "399371", growthIdx = "399370";
+        List<MarketDailyBar> valueBars = marketDataService.getBarsInRange(valueIdx,
+                date.minusDays(30), date);
+        List<MarketDailyBar> growthBars = marketDataService.getBarsInRange(growthIdx,
+                date.minusDays(30), date);
+        if (valueBars != null && growthBars != null
+                && valueBars.size() >= 20 && growthBars.size() >= 20) {
+            double valueReturn = calcRecentReturn(valueBars, 20);
+            double growthReturn = calcRecentReturn(growthBars, 20);
+            info.valueGrowthSpread = valueReturn - growthReturn;
+            info.styleRegime = info.valueGrowthSpread > 0.02 ? "VALUE"
+                    : info.valueGrowthSpread < -0.02 ? "GROWTH" : "NEUTRAL";
+        }
+
+        // ── 维度6: 利率/流动性环境 (P2-2) ──
+        try {
+            List<Double> bondYields = loadBondYield10y(date, 25);
+            if (bondYields != null && bondYields.size() >= 20) {
+                double currentYield = bondYields.get(bondYields.size() - 1);
+                double yieldMa20 = bondYields.stream()
+                    .mapToDouble(Double::doubleValue)
+                    .limit(Math.max(1, bondYields.size() - 1))
+                    .average().orElse(currentYield);
+                info.bondYield10y = currentYield;
+                info.bondYieldMa20 = yieldMa20;
+                // 利率趋势：当前值 vs MA20
+                double yieldDiff = currentYield - yieldMa20;
+                info.rateRegime = yieldDiff > 0.05 ? "UP"
+                        : yieldDiff < -0.05 ? "DOWN" : "NEUTRAL";
+            }
+            // 利差（10年-2年）
+            Double spread = loadYieldCurveSpread(date);
+            if (spread != null) {
+                info.yieldCurveSpread = spread;
+            }
+        } catch (Exception e) {
+            log.warn("[Recommendation] 利率环境检测失败: {}", e.getMessage());
+        }
+
+        log.info("[Recommendation] Regime详情: regime={} trend={} vol={}({:.0f}%) breadth={}({:.0f}%) ATR={:.2f} style={} size={} rate={}",
                 info.regime,
                 bullishTrend ? "BULL_TREND" : bearishTrend ? "BEAR_TREND" : "MIXED",
                 info.volatilityRegime, info.atrPercentile != null ? info.atrPercentile * 100 : 0,
                 info.breadthQuality, info.breadthRatio != null ? info.breadthRatio * 100 : 0,
-                info.atrValue);
+                info.atrValue,
+                info.styleRegime, info.sizeRegime, info.rateRegime);
 
         return info;
+    }
+
+    /**
+     * 计算最近N日的收益率
+     */
+    private double calcRecentReturn(List<MarketDailyBar> bars, int days) {
+        if (bars.size() < days + 1) return 0;
+        double latest = bars.get(bars.size() - 1).getClose().doubleValue();
+        double past = bars.get(bars.size() - 1 - days).getClose().doubleValue();
+        return past > 0 ? (latest - past) / past : 0;
+    }
+
+    /**
+     * 加载10年期国债收益率历史序列（P2-2）
+     */
+    private List<Double> loadBondYield10y(LocalDate date, int days) {
+        try {
+            LocalDate startDate = date.minusDays(days + 10);
+            List<Double> yields = new ArrayList<>();
+            try (Connection conn = dataSource.getConnection();
+                 PreparedStatement ps = conn.prepareStatement(
+                         "SELECT yield_10y FROM macro_bond_yield WHERE trade_date <= ? AND trade_date >= ? ORDER BY trade_date")) {
+                ps.setString(1, date.toString());
+                ps.setString(2, startDate.toString());
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        double y = rs.getDouble("yield_10y");
+                        if (y > 0) yields.add(y);
+                    }
+                }
+            }
+            return yields;
+        } catch (Exception e) {
+            log.debug("[Recommendation] 加载国债收益率失败: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 加载最新利差（10年-2年）（P2-2）
+     */
+    private Double loadYieldCurveSpread(LocalDate date) {
+        try {
+            try (Connection conn = dataSource.getConnection();
+                 PreparedStatement ps = conn.prepareStatement(
+                         "SELECT yield_spread FROM macro_bond_yield WHERE trade_date <= ? ORDER BY trade_date DESC LIMIT 1")) {
+                ps.setString(1, date.toString());
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        double spread = rs.getDouble("yield_spread");
+                        return spread != 0 ? spread : null;
+                    }
+                }
+            }
+            return null;
+        } catch (Exception e) {
+            log.debug("[Recommendation] 加载利差失败: {}", e.getMessage());
+            return null;
+        }
     }
 
     /**
@@ -701,6 +843,19 @@ public class RecommendationService {
             default -> analysisPart = 0.30 * techPct + 0.25 * moneyPct + 0.15 * eventPct + 0.30 * fundPct;
         }
 
+        // P1-1: 风格维度调整分析部分权重
+        if ("GROWTH".equals(regime.styleRegime)) {
+            // 成长风格占优 → 提高技术面/资金面权重，降低基本面
+            analysisPart = analysisPart * 0.9 + techPct * 0.05 + moneyPct * 0.05;
+        } else if ("VALUE".equals(regime.styleRegime)) {
+            // 价值风格占优 → 提高基本面权重
+            analysisPart = analysisPart * 0.9 + fundPct * 0.10;
+        }
+
+        // P1-2: 风险和流动性评分归一化
+        double riskPct = safeDiv(rec.getRiskScore(), 15.0);       // 风险满分15
+        double liqPct = safeDiv(rec.getLiquidityScore(), 10.0);   // 流动性满分10
+
         // Regime-Adaptive 总权重
         double wFactor, wAnalysis;
         switch (regime.regime) {
@@ -709,13 +864,50 @@ public class RecommendationService {
             default -> { wFactor = 0.5; wAnalysis = 0.5; }
         }
 
-        double finalScore = wFactor * factorPart + wAnalysis * analysisPart;
+        // P1-1: 小盘风格占优时，微调因子得分权重
+        if ("SMALL".equals(regime.sizeRegime)) {
+            wFactor = Math.min(0.7, wFactor + 0.05);
+            wAnalysis = 1.0 - wFactor;
+        }
+
+        // P1-2: 融合风险和流动性评分到最终得分
+        // 分析总分从 109 分制调整为 134 分制（+风险15+流动性10）
+        double adjustedAnalysisPart;
+        switch (regime.regime) {
+            case "BULL" -> adjustedAnalysisPart = 0.30 * techPct + 0.25 * moneyPct
+                    + 0.10 * eventPct + 0.15 * fundPct
+                    + 0.10 * riskPct + 0.10 * liqPct;
+            case "BEAR" -> adjustedAnalysisPart = 0.15 * techPct + 0.10 * moneyPct
+                    + 0.10 * eventPct + 0.35 * fundPct
+                    + 0.20 * riskPct + 0.10 * liqPct;
+            default -> adjustedAnalysisPart = 0.25 * techPct + 0.20 * moneyPct
+                    + 0.10 * eventPct + 0.20 * fundPct
+                    + 0.15 * riskPct + 0.10 * liqPct;
+        }
+
+        // P2-2: 利率环境影响权重
+        if ("DOWN".equals(regime.rateRegime)) {
+            // 利率下行 → 成长风格友好 → 提高技术面/资金面权重
+            adjustedAnalysisPart = adjustedAnalysisPart * 0.92 + techPct * 0.04 + moneyPct * 0.04;
+        } else if ("UP".equals(regime.rateRegime)) {
+            // 利率上行 → 价值风格友好 → 提高基本面权重，提高风险权重
+            adjustedAnalysisPart = adjustedAnalysisPart * 0.92 + fundPct * 0.05 + riskPct * 0.03;
+        }
+
+        double finalScore = wFactor * factorPart + wAnalysis * adjustedAnalysisPart;
 
         // Phase C: 行业轮动信号加分/扣分
-        if (im != null) {
-            finalScore += im.fusionBonus;
-            rec.setIndustryMomentum(im.relativeStrength);
+    if (im != null) {
+        // P2-1: 动量增强 - fusionBonus 结合动量趋势调整
+        double bonus = im.fusionBonus;
+        if ("ACCELERATING".equals(im.momentumTrend)) {
+            bonus *= 1.5; // 动量加速时，行业信号加成放大
+        } else if ("DECELERATING".equals(im.momentumTrend)) {
+            bonus *= 0.5; // 动量减速时，行业信号加成缩小
         }
+        finalScore += bonus;
+        rec.setIndustryMomentum(im.relativeStrength);
+    }
 
         rec.setFactorWeight(wFactor);
         rec.setAnalysisWeight(wAnalysis);
@@ -777,24 +969,51 @@ public class RecommendationService {
     }
 
     /**
-     * 行业分散化 (Phase 2.4, Phase A+C 升级)
+     * 高相关行业分组（组内股票走势相关系数 > 0.7）
+     * 同组内的行业共享分散化名额
+     */
+    private static final List<List<String>> INDUSTRY_CORR_GROUPS = List.of(
+            List.of("银行", "非银金融"),           // 金融板块
+            List.of("房地产开发", "房地产服务", "建筑装饰", "建筑材料"),  // 地产链
+            List.of("煤炭", "石油石化", "电力设备"),  // 能源链
+            List.of("食品饮料", "农林牧渔", "纺织服饰"),  // 消费链
+            List.of("计算机", "通信", "传媒"),       // TMT
+            List.of("汽车", "机械设备"),           // 制造链
+            List.of("医药生物", "公用事业"),        // 防御板块
+            List.of("电子", "国防军工")            // 科技制造
+    );
+
+    /**
+     * 根据行业名查找所属相关组
+     */
+    private String getCorrGroup(String industry) {
+        for (List<String> group : INDUSTRY_CORR_GROUPS) {
+            if (group.contains(industry)) return group.get(0); // 用组内第一个行业作为组key
+        }
+        return industry; // 不在任何组中，独立计算
+    }
+
+    /**
+     * 行业分散化 (Phase 2.4, Phase A+C 升级 + P1-3)
      *
      * 对排序后的推荐列表做行业去重:
      * 1. 根据行业动量动态调整同类上限(强势行业放宽,弱势行业收紧)
-     * 2. 超出部分延后处理（保留但降权标记）
-     * 3. 重新排名
+     * 2. 引入行业相关性分组，高相关行业共享分散化名额
+     * 3. 超出部分延后处理（保留但降权标记）
+     * 4. 重新排名
      *
      * @param industryMomentumMap 行业动量映射(用于动态上限)
      */
     private List<StockRecommendation> diversify(List<StockRecommendation> recommendations,
                                                   Map<String, IndustryMomentum> industryMomentumMap) {
-        Map<String, Integer> industryCount = new LinkedHashMap<>();
+        Map<String, Integer> groupCount = new LinkedHashMap<>();  // P1-3: 按相关组计数
         List<StockRecommendation> diversified = new ArrayList<>();
         List<StockRecommendation> excess = new ArrayList<>();
 
         for (StockRecommendation rec : recommendations) {
             String industry = rec.getIndustry() != null ? rec.getIndustry() : "UNKNOWN";
-            int count = industryCount.getOrDefault(industry, 0);
+            String group = getCorrGroup(industry);  // P1-3: 获取所属相关组
+            int count = groupCount.getOrDefault(group, 0);
 
             // 动态上限: 优先使用行业动量中的限制, 回退到默认3
             int limit = MAX_SAME_INDUSTRY;
@@ -807,7 +1026,7 @@ public class RecommendationService {
 
             if (count < limit) {
                 diversified.add(rec);
-                industryCount.put(industry, count + 1);
+                groupCount.put(group, count + 1);  // P1-3: 按组计数
             } else {
                 excess.add(rec);
             }
@@ -823,20 +1042,27 @@ public class RecommendationService {
 
         int removed = excess.size();
         if (removed > 0) {
-            log.info("[Recommendation] 行业分散化(动态): 移动{}只超额股票到末尾", removed);
-            // 打印各行业限制
+            log.info("[Recommendation] 行业分散化(动态+相关性分组): 移动{}只超额股票到末尾", removed);
+            // 打印各组限制
             Map<String, Integer> finalCnt = new LinkedHashMap<>();
             for (StockRecommendation r : diversified) {
                 String ind = r.getIndustry() != null ? r.getIndustry() : "UNKNOWN";
-                finalCnt.merge(ind, 1, Integer::sum);
+                String group = getCorrGroup(ind);
+                finalCnt.merge(group, 1, Integer::sum);
             }
-            finalCnt.forEach((ind, cnt) -> {
-                IndustryMomentum im = industryMomentumMap != null ? industryMomentumMap.get(ind) : null;
+            finalCnt.forEach((grp, cnt) -> {
+                // 找到该组的代表行业
+                String repIndustry = grp;
+                for (List<String> g : INDUSTRY_CORR_GROUPS) {
+                    if (g.get(0).equals(grp)) {
+                        repIndustry = String.join(",", g);
+                        break;
+                    }
+                }
+                IndustryMomentum im = industryMomentumMap != null ? industryMomentumMap.get(grp) : null;
                 int limit = im != null ? im.industryDiversifyLimit : MAX_SAME_INDUSTRY;
-                log.info("  行业[{}]: 入选{}只, 上限={}, 强度={}, Regime={}",
-                        ind, cnt, limit,
-                        im != null ? String.format("%.2f", im.relativeStrength) : "N/A",
-                        im != null ? im.industryRegime : "N/A");
+                log.info("  组[{}]: 入选{}只, 上限={}, 代表行业={}",
+                        grp, cnt, limit, repIndustry);
             });
         }
 
@@ -875,13 +1101,15 @@ public class RecommendationService {
             }
 
             // Step 1: 从 ClickHouse 获取当日所有股票的涨跌幅
+            // P2-1: 同时获取近20日涨跌幅用于行业动量计算
+            LocalDate lookbackStart = date.minusDays(25);
             String sql = String.format("""
-                    SELECT code, change_percent
+                    SELECT code, change_percent, trade_date
                     FROM stock.stock_daily FINAL
-                    WHERE trade_date = '%s'
-                    """, targetDate);
+                    WHERE trade_date >= '%s' AND trade_date <= '%s'
+                    """, lookbackStart.toString(), targetDate);
             List<Map<String, Object>> rows = clickHouseStockService.queryForList(sql);
-            log.info("[Recommendation] 行业动量: CH stock_daily 返回 {} 行", rows != null ? rows.size() : -1);
+            log.info("[Recommendation] 行业动量: CH stock_daily 返回 {} 行(含20日回溯)", rows != null ? rows.size() : -1);
             if (rows == null || rows.isEmpty()) {
                 log.warn("[Recommendation] 行业排行数据为空");
                 return result;
@@ -1008,6 +1236,73 @@ public class RecommendationService {
                 sb.append(String.format("%s=%.2f%%(limit=%d) ", im.industry, im.avgChangePct, im.industryDiversifyLimit));
             }
             log.info("[Recommendation] {}", sb.toString());
+
+            // ── P2-1: 行业20日动量增强 ──
+            // 用已获取的20日数据计算每个行业的累计动量和动量趋势
+            Map<String, List<Double>> industryDailyAvg = new LinkedHashMap<>();
+            Map<String, Object> dateObj2 = rows.stream().findFirst().orElse(null);
+            if (dateObj2 != null && dateObj2.containsKey("trade_date")) {
+                // 按日期×行业汇总平均涨跌幅
+                Map<String, Map<String, List<Double>>> dateIndustryChanges = new LinkedHashMap<>();
+                for (Map<String, Object> row : rows) {
+                    String code = (String) row.get("code");
+                    Object chgObj = row.get("change_percent");
+                    Object tdObj = row.get("trade_date");
+                    if (code == null || chgObj == null || tdObj == null) continue;
+                    String industry = codeToIndustry.get(code);
+                    if (industry == null) continue;
+                    String td = tdObj.toString();
+                    double chg = chgObj instanceof Number ? ((Number) chgObj).doubleValue() : 0;
+                    dateIndustryChanges
+                        .computeIfAbsent(td, k -> new LinkedHashMap<>())
+                        .computeIfAbsent(industry, k -> new ArrayList<>())
+                        .add(chg);
+                }
+                // 计算每个行业每天的均值
+                for (Map.Entry<String, Map<String, List<Double>>> dateEntry : dateIndustryChanges.entrySet()) {
+                    for (Map.Entry<String, List<Double>> indEntry : dateEntry.getValue().entrySet()) {
+                        double dailyAvg = indEntry.getValue().stream().mapToDouble(Double::doubleValue).average().orElse(0);
+                        industryDailyAvg
+                            .computeIfAbsent(indEntry.getKey(), k -> new ArrayList<>())
+                            .add(dailyAvg);
+                    }
+                }
+            }
+
+            // 计算动量评分和趋势
+            for (Map.Entry<String, IndustryMomentum> entry : result.entrySet()) {
+                String industry = entry.getKey();
+                IndustryMomentum im = entry.getValue();
+                List<Double> dailyAvgs = industryDailyAvg.get(industry);
+
+                if (dailyAvgs != null && dailyAvgs.size() >= 5) {
+                    // 20日动量：累计涨跌幅
+                    double cumReturn = 1.0;
+                    for (double d : dailyAvgs) {
+                        cumReturn *= (1 + d / 100.0);
+                    }
+                    im.momentum20d = (cumReturn - 1.0) * 100.0;
+
+                    // 动量趋势：比较前10日和后10日
+                    int half = dailyAvgs.size() / 2;
+                    double firstHalf = dailyAvgs.subList(0, half).stream().mapToDouble(Double::doubleValue).average().orElse(0);
+                    double secondHalf = dailyAvgs.subList(half, dailyAvgs.size()).stream().mapToDouble(Double::doubleValue).average().orElse(0);
+                    double diff = secondHalf - firstHalf;
+                    im.momentumTrend = diff > 0.1 ? "ACCELERATING"
+                            : diff < -0.1 ? "DECELERATING" : "FLAT";
+
+                    // 动量综合评分（0~1）：结合当日z-score和20日动量
+                    double zScoreNorm = (im.relativeStrength + 3.0) / 6.0; // 归一化到0~1
+                    double momentumNorm = Math.max(0, Math.min(1, (im.momentum20d + 10) / 20.0)); // 归一化
+                    im.momentumScore = 0.4 * zScoreNorm + 0.6 * momentumNorm;
+                } else {
+                    im.momentum20d = im.avgChangePct;
+                    im.momentumTrend = "FLAT";
+                    im.momentumScore = (im.relativeStrength + 3.0) / 6.0;
+                }
+            }
+
+            log.info("[Recommendation] P2-1 行业动量增强完成");
 
         } catch (Exception e) {
             log.error("[Recommendation] 行业动量计算异常: {}", e.getMessage(), e);
@@ -1182,12 +1477,16 @@ public class RecommendationService {
 
     /**
      * 多因子选股
-     * @param factorProfile 因子组合配置名称
+     * @param factorProfile 因子组合配置名称（旧版）
+     * @param strategyId    策略ID（优先）
      */
-    private ScreenResult screenStocks(LocalDate date, String factorProfile) {
-        // 根据因子组合配置选择因子
-        List<ScreenRequest.FactorWeight> factors = getFactorConfig(factorProfile);
-        
+    private ScreenResult screenStocks(LocalDate date, String factorProfile, Long strategyId) {
+        // 根据因子组合配置或策略选择因子
+        List<ScreenRequest.FactorWeight> factors = getFactorConfig(factorProfile, strategyId);
+
+        // 动态调整因子权重（基于IC）
+        factors = applyDynamicFactorWeights(factors, date);
+
         ScreenRequest req = new ScreenRequest();
         req.setScreenDate(date);
         req.setFactors(factors);
@@ -1196,18 +1495,188 @@ public class RecommendationService {
         req.setExcludeSt(true);
         req.setGlobalOutlierMethod("MAD");
         req.setGlobalNormalizeMethod("ZSCORE");
+        // 智能推荐默认使用IC加权
+        req.setWeightMode("IC");
         return stockScreenService.screen(req);
     }
-    
+
     /**
-     * 根据因子组合名称获取对应的因子配置
+     * 动态调整因子权重（基于IC历史表现）
+     *
+     * 规则：
+     * - 获取每个因子最近60天的IC序列
+     * - IC均值高的因子提升权重，IC均值低的因子降低权重
+     * - IC为负的因子自动反转方向
+     * - 权重调整范围：原始权重的0.5~2.0倍
+     *
+     * @param factors 原始因子配置
+     * @param date 选股日期
+     * @return 调整后的因子配置
      */
-    private List<ScreenRequest.FactorWeight> getFactorConfig(String factorProfile) {
-        if (factorProfile == null || factorProfile.isEmpty()) {
-            return EXISTING_FACTORS;  // 默认使用现有配置
+    private List<ScreenRequest.FactorWeight> applyDynamicFactorWeights(List<ScreenRequest.FactorWeight> factors, LocalDate date) {
+        if (factors == null || factors.isEmpty()) return factors;
+
+        List<ScreenRequest.FactorWeight> adjusted = new ArrayList<>();
+        Map<String, Double> icScores = new HashMap<>();
+
+        // 1. 获取每个因子的IC历史
+        for (ScreenRequest.FactorWeight fw : factors) {
+            String fc = fw.getFactorCode();
+            try {
+                List<Double> icValues = factorIcService.getIcHistory(fc, date, 60);
+                if (icValues == null || icValues.isEmpty()) {
+                    log.warn("[DynamicWeight] 因子 {} 无IC历史数据，保持原始权重", fc);
+                    icScores.put(fc, 0.0); // 0表示使用默认权重
+                    continue;
+                }
+
+                // 计算IC均值
+                double avgIc = icValues.stream().mapToDouble(Double::doubleValue).average().orElse(0);
+                icScores.put(fc, avgIc);
+
+                log.debug("[DynamicWeight] 因子 {} 近60日IC均值={:.4f}", fc, avgIc);
+            } catch (Exception e) {
+                log.warn("[DynamicWeight] 获取因子 {} IC数据失败: {}", fc, e.getMessage());
+                icScores.put(fc, 0.0);
+            }
         }
-        
+
+        // 2. 计算IC绝对值的均值（用于归一化）
+        double avgAbsIc = icScores.values().stream()
+            .mapToDouble(Math::abs)
+            .filter(v -> v > 0)
+            .average()
+            .orElse(0);
+
+        if (avgAbsIc <= 0) {
+            log.info("[DynamicWeight] 无有效IC数据，保持原始权重");
+            return factors;
+        }
+
+        // 3. 调整权重
+        for (ScreenRequest.FactorWeight fw : factors) {
+            String fc = fw.getFactorCode();
+            double avgIc = icScores.getOrDefault(fc, 0.0);
+            double originalWeight = fw.getWeight();
+            int originalDirection = fw.getDirection();
+
+            ScreenRequest.FactorWeight adjustedFw = new ScreenRequest.FactorWeight();
+            adjustedFw.setFactorCode(fc);
+            adjustedFw.setFilterOp(fw.getFilterOp());
+            adjustedFw.setFilterValue(fw.getFilterValue());
+
+            if (Math.abs(avgIc) < 0.001) {
+                // 无IC数据，保持原始配置
+                adjustedFw.setWeight(originalWeight);
+                adjustedFw.setDirection(originalDirection);
+            } else {
+                // 根据IC调整权重
+                double weightMultiplier = Math.abs(avgIc) / avgAbsIc;
+                // 限制范围：0.5 ~ 2.0
+                weightMultiplier = Math.max(0.5, Math.min(2.0, weightMultiplier));
+                adjustedFw.setWeight(originalWeight * weightMultiplier);
+
+                // IC为负时反转方向
+                if (avgIc < 0) {
+                    adjustedFw.setDirection(-originalDirection);
+                    log.info("[DynamicWeight] 因子 {} IC为负({:.4f})，反转方向: {} -> {}",
+                        fc, avgIc, originalDirection, adjustedFw.getDirection());
+                } else {
+                    adjustedFw.setDirection(originalDirection);
+                }
+
+                log.info("[DynamicWeight] 因子 {} IC={:.4f} 权重: {} -> {} (x{:.2f})",
+                    fc, avgIc, originalWeight, adjustedFw.getWeight(), weightMultiplier);
+            }
+
+            adjusted.add(adjustedFw);
+        }
+
+        return adjusted;
+    }
+
+    /**
+     * 根据因子组合名称或策略ID获取对应的因子配置
+     */
+    private List<ScreenRequest.FactorWeight> getFactorConfig(String factorProfile, Long strategyId) {
+        // 优先从策略读取
+        if (strategyId != null) {
+            StrategyDefinition strategy = strategyDefinitionMapper.selectById(strategyId);
+            if (strategy != null && strategy.getFactorConfigJson() != null && !strategy.getFactorConfigJson().isEmpty()) {
+                try {
+                    Object raw = objectMapper.readValue(strategy.getFactorConfigJson(), Object.class);
+                    List<Map<String, Object>> factorConfigs;
+                    if (raw instanceof List) {
+                        @SuppressWarnings("unchecked")
+                        List<Map<String, Object>> list = (List<Map<String, Object>>) raw;
+                        factorConfigs = list;
+                    } else if (raw instanceof Map) {
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> map = (Map<String, Object>) raw;
+                        @SuppressWarnings("unchecked")
+                        List<Map<String, Object>> factors = (List<Map<String, Object>>) map.get("factors");
+                        factorConfigs = factors != null ? factors : List.of();
+                    } else {
+                        factorConfigs = List.of();
+                    }
+
+                    List<ScreenRequest.FactorWeight> result = new ArrayList<>();
+                    for (Map<String, Object> cfg : factorConfigs) {
+                        ScreenRequest.FactorWeight fw = new ScreenRequest.FactorWeight();
+                        Object code = cfg.get("factorCode");
+                        if (code == null) code = cfg.get("code");
+                        fw.setFactorCode(code != null ? code.toString() : null);
+                        Object dir = cfg.get("direction");
+                        if (dir == null) dir = cfg.get("dir");
+                        fw.setDirection(dir instanceof Number ? ((Number) dir).intValue() : 1);
+                        Object weight = cfg.get("weight");
+                        fw.setWeight(weight instanceof Number ? ((Number) weight).doubleValue() : 1.0);
+                        Object filterOp = cfg.get("filterOp");
+                        if (filterOp != null) fw.setFilterOp(filterOp.toString());
+                        Object filterValue = cfg.get("filterValue");
+                        if (filterValue != null) fw.setFilterValue(((Number) filterValue).doubleValue());
+                        result.add(fw);
+                    }
+                    log.info("[Recommendation] 从策略[{}]加载因子配置: {}个因子", strategy.getStrategyName(), result.size());
+                    return result;
+                } catch (Exception e) {
+                    log.warn("[Recommendation] 策略因子配置解析失败 strategyId={}, 回退到默认配置", strategyId, e);
+                }
+            }
+        }
+
+        // 回退到旧版 factorProfile
+        if (factorProfile == null || factorProfile.isEmpty()) {
+            return EXISTING_FACTORS;
+        }
         return PROFILE_FACTORS_MAP.getOrDefault(factorProfile.toUpperCase(), EXISTING_FACTORS);
+    }
+
+    /**
+     * 获取行业排除列表（优先从策略 filterConfigJson 读取）
+     */
+    @SuppressWarnings("unchecked")
+    private List<String> getExcludeIndustries(String factorProfile, Long strategyId) {
+        if (strategyId != null) {
+            StrategyDefinition strategy = strategyDefinitionMapper.selectById(strategyId);
+            if (strategy != null && strategy.getFilterConfigJson() != null && !strategy.getFilterConfigJson().isEmpty()) {
+                try {
+                    Map<String, Object> filterConfig = objectMapper.readValue(strategy.getFilterConfigJson(), Map.class);
+                    Object exclude = filterConfig.get("excludeIndustries");
+                    if (exclude instanceof List) {
+                        List<String> list = ((List<?>) exclude).stream()
+                                .map(Object::toString)
+                                .collect(Collectors.toList());
+                        log.info("[Recommendation] 从策略[{}]加载行业排除: {}", strategy.getStrategyName(), list);
+                        return list;
+                    }
+                } catch (Exception e) {
+                    log.warn("[Recommendation] 策略过滤配置解析失败 strategyId={}", strategyId, e);
+                }
+            }
+        }
+        return PROFILE_EXCLUDE_INDUSTRY_MAP.getOrDefault(
+                factorProfile != null ? factorProfile : "EXISTING", List.of());
     }
 
     /**
@@ -1284,6 +1753,9 @@ public class RecommendationService {
             rec.setAnalysisScorePct(0.0);
         }
 
+        // P1-2: 计算风险和流动性评分
+        calculateRiskAndLiquidityScore(rec, overview, stock.getCurrentPrice());
+
         // 融合评分 (Regime-Adaptive + 行业轮动)
         rec.setFinalScore(fuseScore(rec, regime, im));
 
@@ -1293,6 +1765,80 @@ public class RecommendationService {
         }
 
         return rec;
+    }
+
+    /**
+     * 计算风险和流动性评分 (P1-2)
+     *
+     * 风险评分（0-15分）：
+     * - 最大回撤（0-5分）
+     * - 20日波动率（0-5分）
+     * - ATR/价格比（0-5分）
+     *
+     * 流动性评分（0-10分）：
+     * - 20日均成交额（0-5分）
+     * - 换手率适中度（0-5分）
+     */
+    private void calculateRiskAndLiquidityScore(StockRecommendation rec, AnalysisOverview overview, BigDecimal currentPrice) {
+        if (overview == null) return;
+
+        // ── 风险评分（0-15分）──
+        int riskScore = 0;
+
+        // a) 最大回撤扣分（0-5分）
+        if (overview.getMaxDrawdown() != null) {
+            double dd = overview.getMaxDrawdown().doubleValue();
+            if (dd < -0.10) riskScore += 0;      // 回撤>10%，0分
+            else if (dd < -0.05) riskScore += 2;  // 回撤5-10%，2分
+            else if (dd < -0.02) riskScore += 4;  // 回撤2-5%，4分
+            else riskScore += 5;                   // 回撤<2%，满分
+        }
+
+        // b) 波动率扣分（0-5分）
+        if (overview.getVolatility20d() != null) {
+            double vol = overview.getVolatility20d().doubleValue();
+            if (vol > 0.40) riskScore += 0;       // 波动率>40%，0分
+            else if (vol > 0.30) riskScore += 2;   // 波动率30-40%，2分
+            else if (vol > 0.20) riskScore += 4;   // 波动率20-30%，4分
+            else riskScore += 5;                    // 波动率<20%，满分
+        }
+
+        // c) ATR/价格比扣分（0-5分，低波动=高分）
+        if (overview.getAtr() != null && currentPrice != null && currentPrice.doubleValue() > 0) {
+            double atrPct = overview.getAtr().doubleValue() / currentPrice.doubleValue();
+            if (atrPct > 0.04) riskScore += 0;      // ATR/价格>4%，0分
+            else if (atrPct > 0.03) riskScore += 2;  // 3-4%，2分
+            else if (atrPct > 0.02) riskScore += 4;  // 2-3%，4分
+            else riskScore += 5;                      // <2%，满分
+        }
+
+        rec.setRiskScore(riskScore);
+
+        // ── 流动性评分（0-10分）──
+        int liquidityScore = 0;
+
+        // a) 日均成交额（0-5分）
+        if (overview.getAvgAmount20d() != null) {
+            double avgAmt = overview.getAvgAmount20d().doubleValue();
+            if (avgAmt > 5e9) liquidityScore += 5;       // >50亿，5分
+            else if (avgAmt > 1e9) liquidityScore += 4;   // >10亿，4分
+            else if (avgAmt > 3e8) liquidityScore += 3;   // >3亿，3分
+            else if (avgAmt > 1e8) liquidityScore += 2;   // >1亿，2分
+            else liquidityScore += 1;                      // <1亿，1分
+        }
+
+        // b) 换手率适中度（0-5分，过高过低都扣分）
+        if (overview.getTurnoverRate20d() != null) {
+            double turn = overview.getTurnoverRate20d().doubleValue();
+            if (turn >= 1.0 && turn <= 5.0) liquidityScore += 5;  // 适中，5分
+            else if (turn >= 0.5 && turn <= 8.0) liquidityScore += 3; // 略偏，3分
+            else liquidityScore += 1;                              // 过低或过高，1分
+        }
+
+        rec.setLiquidityScore(liquidityScore);
+
+        log.debug("[RiskLiquidity] code={} riskScore={}/15 liquidityScore={}/10",
+            rec.getStockCode(), riskScore, liquidityScore);
     }
 
     /**
@@ -1349,7 +1895,19 @@ public class RecommendationService {
         Long fallCount;
         Double breadthRatio;    // 0~1
         String breadthQuality;  // GOOD, NEUTRAL, POOR
-    }
+
+        // 风格维度 (P1-1)
+    String styleRegime;      // GROWTH, VALUE, NEUTRAL
+    String sizeRegime;       // LARGE, SMALL, NEUTRAL
+    Double sizeSpread;       // 大盘-小盘相对强度
+    Double valueGrowthSpread; // 价值-成长相对强度
+
+    // 利率/流动性环境 (P2-2)
+    String rateRegime;       // UP, DOWN, NEUTRAL
+    Double bondYield10y;     // 10年期国债收益率(%)
+    Double bondYieldMa20;     // 10年国债20日均线(%)
+    Double yieldCurveSpread;  // 10年-2年利差(%)
+}
 
     /**
      * 行业动量信息 (Phase A+C)
@@ -1365,5 +1923,10 @@ public class RecommendationService {
         int industryDiversifyLimit; // 该行业分散化上限(根据强度动态调整: 1~6)
         double fusionBonus;        // 因子融合加分(-0.06~+0.06)
         String industryRegime;     // 分行业Regime: BULL/BEAR/SIDEWAYS (Phase A 完整版)
+
+        // P2-1: 行业动量增强
+        double momentum20d;        // 行业近20日动量（累计涨跌幅%）
+        double momentumScore;      // 动量综合评分（0~1）
+        String momentumTrend;      // 动量趋势: ACCELERATING / DECELERATING / FLAT
     }
 }

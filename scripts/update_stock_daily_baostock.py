@@ -17,9 +17,23 @@ import sys
 import time
 import argparse
 import threading
+import os
 from datetime import datetime, timedelta
+from contextlib import contextmanager
 
 import baostock as bs
+
+
+@contextmanager
+def suppress_stdout():
+    """临时屏蔽 stdout（用于屏蔽 baostock 的 login/logout 输出）"""
+    original_stdout = sys.stdout
+    sys.stdout = open(os.devnull, 'w')
+    try:
+        yield
+    finally:
+        sys.stdout.close()
+        sys.stdout = original_stdout
 
 # ─── 数据库操作封装 ──────────────────────────────────────────────
 from db_config import get_backend_label
@@ -35,13 +49,14 @@ def get_baostock_code(code, market):
     return None
 
 
-def fetch_stock_history(code, name, market, start_date, end_date, max_retries=2, timeout=5):
+def fetch_stock_history(code, name, market, start_date, end_date, max_retries=2, timeout=30):
     """
     使用 Baostock 获取单只股票的历史行情
     返回: DataFrame 或 None
     
     参数:
-        timeout: 单次请求超时秒数，超时直接跳过该股票
+        timeout: 单次请求超时秒数（默认30s，增量更新足够；历史回填可通过命令行 --timeout 调大）
+                 超时时抛出 TimeoutError，上层捕获后 sys.exit(1)，外层 run_baostock 会重试
     """
     import pandas as pd
 
@@ -60,7 +75,7 @@ def fetch_stock_history(code, name, market, start_date, end_date, max_retries=2,
             start_date=start_str,
             end_date=end_str,
             frequency="d",
-            adjustflag="3",  # 3: 不复权
+            adjustflag="2",  # 2: 前复权（1=后复权,3=不复权；前复权保证close与实时行情一致）
         )
         data_list = []
         while (rs.error_code == '0') & rs.next():
@@ -84,8 +99,8 @@ def fetch_stock_history(code, name, market, start_date, end_date, max_retries=2,
             t.join(timeout=timeout)
 
             if t.is_alive():
-                print(f"[TIMEOUT] {code} 超时({timeout}s), 跳过")
-                return None
+                print(f"[TIMEOUT] {code} 超时({timeout}s), 终止脚本")
+                raise TimeoutError(f"{code} 请求超时({timeout}s)")
 
             if error_holder[0]:
                 raise error_holder[0]
@@ -100,6 +115,8 @@ def fetch_stock_history(code, name, market, start_date, end_date, max_retries=2,
             df = df[df['tradestatus'] == '1']
             return df
 
+        except TimeoutError:
+            raise  # 向上传播，由 main() 的 except TimeoutError 捕获后 sys.exit(1)
         except Exception as e:
             err_msg = str(e)
             # 编码/压缩错误直接跳过不重试
@@ -111,12 +128,15 @@ def fetch_stock_history(code, name, market, start_date, end_date, max_retries=2,
                 print(f"[WARN] {code} 连接断开, {wait}秒后重连 ({attempt+1}/{max_retries})...")
                 time.sleep(wait)
                 try:
-                    bs.logout()
+                    with suppress_stdout():
+                        bs.logout()
                     time.sleep(1)
-                    lg = bs.login()
+                    with suppress_stdout():
+                        lg = bs.login()
                     if lg.error_code != '0':
                         time.sleep(2)
-                        lg = bs.login()
+                        with suppress_stdout():
+                            lg = bs.login()
                 except:
                     time.sleep(2)
                 continue
@@ -236,7 +256,8 @@ def main():
 
     # 登录 Baostock
     print("\n正在登录 Baostock...")
-    lg = bs.login()
+    with suppress_stdout():
+        lg = bs.login()
     if lg.error_code != '0':
         print(f"[ERROR] Baostock 登录失败: {lg.error_msg}")
         sys.exit(1)
@@ -310,13 +331,16 @@ def main():
                 # 每50只重新登录 Baostock
                 if i > 1 and (i - 1) % 50 == 0:
                     try:
-                        bs.logout()
+                        with suppress_stdout():
+                            bs.logout()
                         time.sleep(1)
-                        lg = bs.login()
+                        with suppress_stdout():
+                            lg = bs.login()
                         if lg.error_code != '0':
                             print(f"[WARN] Baostock 重登失败: {lg.error_msg}, 3秒后重试...")
                             time.sleep(3)
-                            lg = bs.login()
+                            with suppress_stdout():
+                                lg = bs.login()
                             if lg.error_code != '0':
                                 print(f"[ERROR] Baostock 重登彻底失败，退出")
                                 break
@@ -349,9 +373,13 @@ def main():
                     total_no_data += 1
 
                 if i % args.batch_size == 0 and i < len(stocks):
-                    print(f"[累计] 写入记录: {total_success:,} 条")
+                    if total_success > 0:
+                        print(f"[累计] 写入记录: {total_success:,} 条")
                     time.sleep(args.delay)
 
+            except TimeoutError:
+                print(f"[FATAL] 发生超时，脚本终止")
+                sys.exit(1)
             except Exception as e:
                 print(f"[ERROR] {code} 处理异常: {e}")
                 total_failed += 1
@@ -388,29 +416,33 @@ def main():
         # 在 return 前执行（访问 main() 局部变量），finally 中只关闭连接
         if db.backend == "clickhouse":
             import clickhouse_connect, time as _t
-            try:
-                from db_config import CLICKHOUSE_CONFIG
-                ch = clickhouse_connect.get_client(
-                    host=CLICKHOUSE_CONFIG["host"], port=CLICKHOUSE_CONFIG["port"],
-                    username=CLICKHOUSE_CONFIG["username"], password=CLICKHOUSE_CONFIG["password"],
-                    database=CLICKHOUSE_CONFIG["database"],
-                )
-                print(f"\n  ClickHouse OPTIMIZE TABLE FINAL（去重合并）...")
-                t0 = _t.time()
-                ch.command("OPTIMIZE TABLE stock.stock_daily FINAL")
-                elapsed = _t.time() - t0
-                r = ch.query("SELECT count() AS total, countDistinct(code, trade_date) AS distinct_rows FROM stock.stock_daily")
-                total_cnt, distinct_cnt = r.result_rows[0]
-                dups = total_cnt - distinct_cnt
-                print(f"  完成 (耗时 {elapsed:.1f}s): 总行 {total_cnt:,}, 去重后 {distinct_cnt:,}, 重复 {dups:,}")
-            except Exception as e:
-                print(f"  [WARN] ClickHouse OPTIMIZE 失败: {e}")
+            for _retry in range(3):
+                try:
+                    from db_config import CLICKHOUSE_CONFIG
+                    ch = clickhouse_connect.get_client(**CLICKHOUSE_CONFIG)
+                    print(f"\n  ClickHouse OPTIMIZE TABLE FINAL（去重合并）...")
+                    t0 = _t.time()
+                    ch.command("OPTIMIZE TABLE stock.stock_daily FINAL")
+                    elapsed = _t.time() - t0
+                    r = ch.query("SELECT count() AS total, countDistinct(code, trade_date) AS distinct_rows FROM stock.stock_daily")
+                    total_cnt, distinct_cnt = r.result_rows[0]
+                    dups = total_cnt - distinct_cnt
+                    print(f"  完成 (耗时 {elapsed:.1f}s): 总行 {total_cnt:,}, 去重后 {distinct_cnt:,}, 重复 {dups:,}")
+                    break
+                except Exception as e:
+                    if _retry < 2:
+                        print(f"  [WARN] ClickHouse OPTIMIZE 失败 (第{_retry+1}次): {e}，2s 后重试...")
+                        _t.sleep(2)
+                    else:
+                        print(f"  [WARN] ClickHouse OPTIMIZE 失败（已重试3次）: {e}")
+                        print(f"  [INFO] OPTIMIZE 失败不影响数据正确性，ReplacingMergeTree 查询时自动去重")
 
         return 0 if total_failed == 0 else 1
 
     finally:
         db.close()
-        bs.logout()
+        with suppress_stdout():
+            bs.logout()
         print("Baostock 登出成功")
 
 

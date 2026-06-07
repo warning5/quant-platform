@@ -85,6 +85,23 @@ public class ScreenRequest {
     private String orthogonalizationMethod = "NONE";
 
     /**
+     * 权重模式
+     * EQUAL = 等权（默认，使用用户设置的权重）
+     * IC = IC均值加权（根据因子近60日IC均值动态调整权重）
+     * IR = IR加权（根据因子近60日IR动态调整权重）
+     */
+    private String weightMode = "EQUAL";
+
+    /**
+     * 中性化方法
+     * NONE = 不中性化（默认）
+     * INDUSTRY = 行业中性化（在每个行业内做标准化）
+     * MARKET_CAP = 市值中性化（在每个市值分位内做标准化）
+     * BOTH = 行业+市值双重中性化
+     */
+    private String neutralizationMethod = "NONE";
+
+    /**
      * 自定义 SQL WHERE 条件（高级模式）
      * 将直接拼接到选股查询的 WHERE 子句中，用于进阶用户做精确筛选
      * 例如: "close > 10 AND volume > 1000000"

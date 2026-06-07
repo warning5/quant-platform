@@ -114,6 +114,12 @@ public class StockRecommendation {
     /** 追踪更新时间 */
     private LocalDateTime trackingUpdatedAt;
 
+    /** 风险评分（0-15分） */
+    private Integer riskScore;
+
+    /** 流动性评分（0-10分） */
+    private Integer liquidityScore;
+
     /** 各因子百分位排名 JSON */
     private String factorRanksJson;
 

@@ -948,6 +948,8 @@ function DataUpdate() {
             fetchFundHolder: values.fetchFundHolder !== false,
             fetchShareholder: values.fetchShareholder !== false,
             fetchNews: values.fetchNews !== false,
+            fetchBondYield: values.fetchBondYield !== false,
+            fetchShenwanIndex: values.fetchShenwanIndex !== false,
           } : {
             // westock 模式：显式关闭其他模块，防止 Java 默认值 true 导致误执行
             fetchLhb: false,
@@ -961,6 +963,8 @@ function DataUpdate() {
             fetchFundHolder: false,
             fetchShareholder: false,
             fetchNews: false,
+            fetchBondYield: false,
+            fetchShenwanIndex: false,
           }),
           moneyflowSource: sentimentMoneyflowSource,
           sentimentCodes: (values.sentimentCodes || '').trim() || null,
@@ -1760,7 +1764,7 @@ function DataUpdate() {
             <Col span={7}>
               <Statistic
                 title="数据表"
-                formatter={() => <Text style={{ fontSize: 12, whiteSpace: 'nowrap' }}>涨跌停/龙虎榜/融资融券/机构调研/大宗交易/市场活跃度/资金流向/公告</Text>}
+                formatter={() => <Text style={{ fontSize: 12, whiteSpace: 'nowrap' }}>涨跌停/龙虎榜/融资融券/机构调研/大宗交易/市场活跃度/资金流向/公告/国债收益率/申万行业指数</Text>}
                 valueStyle={{ fontSize: 12 }}
               />
             </Col>
@@ -1813,6 +1817,8 @@ function DataUpdate() {
             fetchFundHolder: true,
             fetchShareholder: true,
             fetchNews: true,
+            fetchBondYield: true,
+            fetchShenwanIndex: true,
             force: false,
             moneyflowSource: 'AKSHARE',
           }}>
@@ -1847,6 +1853,8 @@ function DataUpdate() {
                         fetchFundHolder: false,
                         fetchShareholder: false,
                         fetchNews: false,
+                        fetchBondYield: false,
+                        fetchShenwanIndex: false,
                         force: false,
                       });
                     } else {
@@ -1864,6 +1872,8 @@ function DataUpdate() {
                         fetchFundHolder: true,
                         fetchShareholder: true,
                         fetchNews: true,
+                        fetchBondYield: true,
+                        fetchShenwanIndex: true,
                         force: false,
                       });
                     }
@@ -1897,6 +1907,7 @@ function DataUpdate() {
                         fetchBlockTrade: true, fetchActivity: true, fetchZtPool: true,
                         fetchMoneyflow: true, fetchNotice: true, fetchFundHolder: true,
                         fetchShareholder: true, fetchNews: true,
+                        fetchBondYield: true, fetchShenwanIndex: true,
                       })}>
                       全选
                     </Button>
@@ -1910,6 +1921,7 @@ function DataUpdate() {
                           fetchMoneyflow: !vals.fetchMoneyflow, fetchNotice: !vals.fetchNotice,
                           fetchFundHolder: !vals.fetchFundHolder,
                           fetchShareholder: !vals.fetchShareholder, fetchNews: !vals.fetchNews,
+                          fetchBondYield: !vals.fetchBondYield, fetchShenwanIndex: !vals.fetchShenwanIndex,
                         });
                       }}>
                       反选
@@ -1948,6 +1960,12 @@ function DataUpdate() {
                     </Form.Item>
                     <Form.Item name="fetchNews" valuePropName="checked" style={{ marginBottom: 0 }}>
                       <Checkbox>新闻</Checkbox>
+                    </Form.Item>
+                    <Form.Item name="fetchBondYield" valuePropName="checked" style={{ marginBottom: 0 }}>
+                      <Checkbox>国债收益率</Checkbox>
+                    </Form.Item>
+                    <Form.Item name="fetchShenwanIndex" valuePropName="checked" style={{ marginBottom: 0 }}>
+                      <Checkbox>申万行业指数</Checkbox>
                     </Form.Item>
                   </div>
                 </div>
@@ -2015,6 +2033,8 @@ function DataUpdate() {
                   {sentimentTask.configFetchFundHolder && <Tag size="small">基金持仓</Tag>}
                   {sentimentTask.configFetchShareholder && <Tag size="small">股东人数</Tag>}
                   {sentimentTask.configFetchNews && <Tag size="small">新闻</Tag>}
+                  {sentimentTask.configFetchBondYield && <Tag size="small">国债收益率</Tag>}
+                  {sentimentTask.configFetchShenwanIndex && <Tag size="small">申万行业指数</Tag>}
                 </Text>
               )}
             </Space>

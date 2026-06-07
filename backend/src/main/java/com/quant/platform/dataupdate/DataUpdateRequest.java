@@ -146,6 +146,16 @@ public class DataUpdateRequest {
     private boolean fetchNews = true;
 
     /**
+     * 情绪数据：采集国债收益率（默认 true）
+     */
+    private boolean fetchBondYield = true;
+
+    /**
+     * 情绪数据：采集申万行业指数（默认 true）
+     */
+    private boolean fetchShenwanIndex = true;
+
+    /**
      * 情绪数据：资金流向数据源
      * AKSHARE = akshare（默认，与原行为一致）
      * WESTOCK = westock-data（更快，推荐）

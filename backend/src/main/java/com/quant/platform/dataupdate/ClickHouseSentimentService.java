@@ -158,7 +158,9 @@ public class ClickHouseSentimentService {
         for (String[] extra : new String[][]{
                 {"stock_fund_holder", "基金持仓", "report_date"},
                 {"stock_shareholder", "股东人数", "report_date"},
-                {"stock_news", "新闻", "publish_date"}
+                {"stock_news", "新闻", "publish_date"},
+                {"macro_bond_yield", "国债收益率", "trade_date"},
+                {"index_daily", "申万行业指数", "trade_date"}
         }) {
             String table = extra[0];
             String name = extra[1];

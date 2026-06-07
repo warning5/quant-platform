@@ -120,6 +120,18 @@ public class FactorIcService {
         return icRecordMapper.findAllLatest();
     }
 
+    /**
+     * 获取因子最近N天的IC历史序列
+     *
+     * @param factorCode 因子代码
+     * @param endDate 结束日期
+     * @param days 天数
+     * @return IC值列表（按日期倒序）
+     */
+    public List<Double> getIcHistory(String factorCode, LocalDate endDate, int days) {
+        return icRecordMapper.findRecentIcValues(factorCode, endDate, days);
+    }
+
     // ── 私有方法 ──
 
     /**
