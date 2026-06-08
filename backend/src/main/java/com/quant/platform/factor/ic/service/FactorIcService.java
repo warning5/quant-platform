@@ -1,6 +1,5 @@
 package com.quant.platform.factor.ic.service;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.quant.platform.factor.ic.domain.FactorIcRecord;
 import com.quant.platform.factor.ic.mapper.FactorIcRecordMapper;
 import com.quant.platform.stock.service.ClickHouseStockService;
@@ -12,10 +11,8 @@ import java.util.*;
 
 /**
  * 因子 IC/IR 计算服务 (Phase 3.1)
- *
  * IC (Information Coefficient) = 因子值与未来N日收益率的 Spearman Rank 相关系数
  * IR (Information Ratio) = IC序列均值 / IC序列标准差
- *
  * 用途：
  * 1. 评估因子有效性（IC绝对值越大越好）
  * 2. 评估因子稳定性（IR越大越好）
@@ -150,13 +147,11 @@ public class FactorIcService {
 
     /**
      * 获取因子自适应权重（基于IC历史）
-     *
      * 规则：
      * - IR_20d > 0.5: 权重 1.2 (因子表现好，加仓)
      * - IR_20d > 0.2: 权重 1.0 (正常)
      * - IR_20d > -0.2: 权重 0.8 (表现一般，减仓)
      * - IR_20d <= -0.2: 权重 0.5 (因子失效，大幅降权)
-     *
      * 自动从 factor_ic_record 表获取所有已有 IC 记录的因子
      *
      * @return factorCode → adaptiveWeight
@@ -199,6 +194,31 @@ public class FactorIcService {
         return icRecordMapper.findRecentIcValues(factorCode, endDate, days);
     }
 
+    /**
+     * 获取指定因子列表中，所有因子都有IC数据的最新日期（取最新日期的交集）
+     * 用于IC加权时自动回退：推荐日太新时，使用此日期查询IC历史
+     * 无IC数据的因子会被跳过，仅在所有因子均无IC数据时返回 null
+     *
+     * @param factorCodes 要查询的因子代码列表
+     * @return 所有因子共有IC数据的最新日期，若所有因子均无数据返回 null
+     */
+    public LocalDate getLatestCommonIcDate(List<String> factorCodes) {
+        if (factorCodes == null || factorCodes.isEmpty()) return null;
+        LocalDate earliest = null;
+        int validCount = 0;
+        for (String fc : factorCodes) {
+            FactorIcRecord record = icRecordMapper.findLatest(fc);
+            if (record == null || record.getTradeDate() == null) {
+                continue; // 跳过无IC数据的因子
+            }
+            validCount++;
+            if (earliest == null || record.getTradeDate().isBefore(earliest)) {
+                earliest = record.getTradeDate();
+            }
+        }
+        return validCount > 0 ? earliest : null;
+    }
+
     // ── 私有方法 ──
 
     /**
@@ -225,7 +245,6 @@ public class FactorIcService {
 
     /**
      * 计算单个因子的 IC (Spearman Rank Correlation)
-     *
      * 通过 CH 查询: 因子值排名 vs 未来N日收益率排名的相关系数
      */
     private FactorIcRecord computeSingleFactorIc(String factorCode, LocalDate date, LocalDate forwardDate) {
@@ -293,7 +312,7 @@ public class FactorIcService {
 
         // 20日滚动
         List<Double> ic20 = icRecordMapper.findRecentIcValues(record.getFactorCode(), record.getTradeDate(), 19);
-        ic20.add(0, record.getIcValue()); // 加上当天
+        ic20.addFirst(record.getIcValue()); // 加上当天
 
         if (ic20.size() >= 10) {
             double avg20 = avg(ic20);
@@ -304,7 +323,7 @@ public class FactorIcService {
 
         // 60日滚动
         List<Double> ic60 = icRecordMapper.findRecentIcValues(record.getFactorCode(), record.getTradeDate(), 59);
-        ic60.add(0, record.getIcValue());
+        ic60.addFirst(record.getIcValue());
 
         if (ic60.size() >= 30) {
             double avg60 = avg(ic60);

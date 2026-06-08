@@ -51,11 +51,36 @@ const ORTHOGONAL_OPTIONS = [
   { value: 'NONE', label: '不正交化' },
   { value: 'SCHMIDT', label: '施密特正交化 (Gram-Schmidt)' },
 ];
+const NEUTRALIZATION_OPTIONS = [
+  { value: 'NONE', label: '不中性化' },
+  { value: 'INDUSTRY', label: '行业中性化' },
+  { value: 'MARKET_CAP', label: '市值中性化' },
+  { value: 'BOTH', label: '行业+市值双重中性化' },
+];
 const WEIGHT_MODE_OPTIONS = [
   { value: 'EQUAL', label: '等权（使用配置权重）' },
   { value: 'IC', label: 'IC动态加权（近60日均值）' },
   { value: 'IR', label: 'IR动态加权（信噪比）' },
 ];
+
+/** 根据因子类型组合，给出中性化方式推荐 */
+function recommendNeutralization(factors, availableFactors) {
+  if (!factors || factors.length === 0) return null;
+  const codeSet = new Set(factors.map(f => f.factorCode));
+  const cats = new Set();
+  availableFactors.forEach(af => {
+    if (codeSet.has(af.factorCode) && af.category) cats.add(af.category);
+  });
+  // 需要行业中性化的类型
+  const needIndustry = ['FINANCIAL', 'VALUE', 'QUALITY'].some(c => cats.has(c));
+  // 需要市值中性化的类型
+  const needMarketCap = ['LIQUIDITY', 'VOLATILITY', 'VOLUME_PRICE'].some(c => cats.has(c));
+  // 技术/动量/情绪类可以不做
+  if (needIndustry && needMarketCap) return { method: 'BOTH', reason: '财务/估值/质量 + 流动性/波动率/量价，双重中性化' };
+  if (needIndustry) return { method: 'INDUSTRY', reason: '含财务/估值/质量因子，行业中性化（避免行业结构偏差）' };
+  if (needMarketCap) return { method: 'MARKET_CAP', reason: '含流动性/波动率/量价因子，市值中性化（避免大小盘偏差）' };
+  return { method: 'NONE', reason: '动量/技术/情绪类因子，无需中性化（方向性信号跨组可比）' };
+}
 const FILTER_OP_OPTIONS = [
   { value: 'NONE', label: '无' },
   { value: 'GT', label: '大于 (>)' },
@@ -210,7 +235,21 @@ export default function StockScreen() {
   const [globalOutlier, setGlobalOutlier] = useState('MAD');
   const [globalNormalize, setGlobalNormalize] = useState('ZSCORE');
   const [orthogonalMethod, setOrthogonalMethod] = useState('NONE');
+  const [neutralizationMethod, setNeutralizationMethod] = useState('NONE');
   const [weightMode, setWeightMode] = useState('EQUAL');
+
+  // 中性化智能推荐
+  const neutralizationRecommendation = useMemo(
+    () => recommendNeutralization(factors, availableFactors),
+    [factors, availableFactors]
+  );
+
+  // 因子变化时自动跟随智能推荐切换中性化方式
+  useEffect(() => {
+    if (neutralizationRecommendation && neutralizationRecommendation.method) {
+      setNeutralizationMethod(neutralizationRecommendation.method);
+    }
+  }, [factors]); // 仅因子列表变化时触发，用户手动改下拉不会覆盖
 
   /* ── 选股参数 ─────────────────────────────────────────────────── */
   const [screenDate, setScreenDate] = useState(null);
@@ -386,22 +425,26 @@ export default function StockScreen() {
     if (!strategy || !strategy.factorConfigJson) return;
     try {
       const config = JSON.parse(strategy.factorConfigJson);
-      // 格式: {"factors": [{"code":"MOM20","weight":1.0,"direction":1,"filterOp":"NONE",...}, ...]}
-      const factorList = config.factors || [];
-      setFactors(factorList.map(c => ({
-        factorCode: c.code,
+      // 兼容两种格式：
+      // 旧格式: [{"factorCode":"MOM20","direction":1,"weight":1.0}, ...]
+      // 新格式: {"factors": [{"code":"MOM20","weight":1.0,"direction":1,"filterOp":"NONE",...}, ...]}
+      const factorList = Array.isArray(config) ? config : (config.factors || []);
+      const loadedFactors = factorList.map(c => ({
+        factorCode: c.code || c.factorCode,
         direction: c.direction ?? 1,
         weight: c.weight ?? 1,
         filterOp: c.filterOp || 'NONE',
         filterValue: c.filterValue ?? null,
         outlierMethod: null,
         normalizeMethod: null,
-      })));
+      }));
+      setFactors(loadedFactors);
+      // 中性化方式由 useEffect 根据因子变化自动切换
       message.success(`已加载「${strategy.strategyName}」策略`);
     } catch (e) {
       message.error('策略因子配置解析失败，请检查数据格式');
     }
-  }, [strategies]);
+  }, [strategies, availableFactors]);
 
   /* ── 因子增删改 ───────────────────────────────────────────────── */
   const addFactor = () => {
@@ -445,6 +488,7 @@ export default function StockScreen() {
       globalOutlierMethod: globalOutlier,
       globalNormalizeMethod: globalNormalize,
       orthogonalizationMethod: orthogonalMethod,
+      neutralizationMethod,
       weightMode,
       topN,
       direction,
@@ -480,7 +524,7 @@ export default function StockScreen() {
         }
       })
       .finally(() => setRunning(false));
-  }, [factors, screenDate, screenDateRange, useMultiDayMode, topN, direction, excludeSt, globalOutlier, globalNormalize, orthogonalMethod, weightMode, totalWeight, valuationWeight, selectedStrategyId, customSqlWhere, maAbove30, maAbove60, maAbove100]);
+  }, [factors, screenDate, screenDateRange, useMultiDayMode, topN, direction, excludeSt, globalOutlier, globalNormalize, orthogonalMethod, neutralizationMethod, weightMode, totalWeight, valuationWeight, selectedStrategyId, customSqlWhere, maAbove30, maAbove60, maAbove100]);
 
   /* ── 构建当前选股配置（供回测弹窗使用） ──────────────────────── */
   const buildScreenRequest = useCallback(() => ({
@@ -493,6 +537,7 @@ export default function StockScreen() {
     globalOutlierMethod: globalOutlier,
     globalNormalizeMethod: globalNormalize,
     orthogonalizationMethod: orthogonalMethod,
+    neutralizationMethod,
     weightMode,
     topN,
     direction,
@@ -515,7 +560,7 @@ export default function StockScreen() {
       filterOp: f.filterOp,
       filterValue: f.filterOp !== 'NONE' ? f.filterValue : null,
     })),
-  }), [factors, screenDate, screenDateRange, useMultiDayMode, topN, direction, excludeSt, globalOutlier, globalNormalize, orthogonalMethod, weightMode, totalWeight, valuationWeight, selectedStrategyId, customSqlWhere, maAbove30, maAbove60, maAbove100]);
+  }), [factors, screenDate, screenDateRange, useMultiDayMode, topN, direction, excludeSt, globalOutlier, globalNormalize, orthogonalMethod, neutralizationMethod, weightMode, totalWeight, valuationWeight, selectedStrategyId, customSqlWhere, maAbove30, maAbove60, maAbove100]);
 
   /* ── 结果表格列 ───────────────────────────────────────────────── */
   const isMultiDay = !!(result?.screenStartDate && result?.screenEndDate);
@@ -1104,7 +1149,38 @@ export default function StockScreen() {
                 </Select>
               </Col>
 
-              {/* 因子权重模式 */}
+              {/* 第五行：中性化方式 | 权重模式 */}
+              <Col span={12}>
+                <div style={paramLabelStyle}>
+                  <SafetyCertificateOutlined style={{ color: '#1677ff' }} /> 中性化方式
+                  <Tooltip title="行业中性化：在每个申万一级行业内减均值，避免估值/财务因子被行业结构主导；市值中性化：按市值分5组减均值，避免流动性/波动率因子被大小盘主导；双重中性化：先行业后市值，因子最纯净">
+                    <QuestionCircleOutlined style={{ color: '#bbb', marginLeft: 4 }} />
+                  </Tooltip>
+                  {neutralizationRecommendation && neutralizationRecommendation.method !== neutralizationMethod && (
+                    <Tag
+                      color="orange"
+                      style={{ marginLeft: 4, fontSize: 10, cursor: 'pointer', lineHeight: '16px' }}
+                      onClick={() => setNeutralizationMethod(neutralizationRecommendation.method)}
+                    >
+                      推荐: {NEUTRALIZATION_OPTIONS.find(o => o.value === neutralizationRecommendation.method)?.label}
+                    </Tag>
+                  )}
+                </div>
+                <Select
+                  value={neutralizationMethod}
+                  onChange={setNeutralizationMethod}
+                  style={{ width: '100%' }}
+                  size="small"
+                >
+                  {NEUTRALIZATION_OPTIONS.map(o => (
+                    <Option key={o.value} value={o.value}>
+                      {o.label === '不中性化' && neutralizationRecommendation && neutralizationRecommendation.method !== 'NONE' ? (
+                        <span>{o.label} <Text type="secondary" style={{ fontSize: 11 }}>（不推荐）</Text></span>
+                      ) : o.label}
+                    </Option>
+                  ))}
+                </Select>
+              </Col>
               <Col span={12}>
                 <div style={paramLabelStyle}>
                   <ThunderboltOutlined /> 权重模式

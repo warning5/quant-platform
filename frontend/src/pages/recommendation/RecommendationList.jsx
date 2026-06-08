@@ -74,6 +74,7 @@ export default function RecommendationList() {
   const [factorDiagnostics, setFactorDiagnostics] = useState(null); // IC加权诊断
   const [diagExpanded, setDiagExpanded] = useState(false); // 已剔除/异常面板默认收起
   const [weightMode, setWeightMode] = useState('STATIC'); // 权重模式: STATIC(固定) / IC(动态IC)
+  const [icDataDate, setIcDataDate] = useState(null); // IC数据可用日期
 
   // 加载策略列表
   useEffect(() => {
@@ -170,6 +171,7 @@ export default function RecommendationList() {
       const result = await recommendationApi.generate(dateStr, 20, selectedStrategyId, weightMode);
       message.success(`推荐列表生成成功: ${result.count} 只`);
       setFactorDiagnostics(weightMode === 'IC' ? (result.factorDiagnostics || null) : null);
+      setIcDataDate(weightMode === 'IC' ? (result.icDataDate || null) : null);
       await loadRecommendations(null);
     } catch (e) {
       message.error('生成失败: ' + (e.message || '未知错误'));
@@ -656,6 +658,16 @@ export default function RecommendationList() {
             }
           >
             <div style={{ fontSize: 13 }}>
+              {/* IC数据日期提示 */}
+              {icDataDate && (
+                <div style={{
+                  background: '#e6f7ff', border: '1px solid #91d5ff',
+                  borderRadius: 4, padding: '6px 12px', marginBottom: 12,
+                  fontSize: 12, color: '#0050b3',
+                }}>
+                  📅 IC 数据截止日期: <b>{icDataDate}</b>（近5个交易日因缺少前瞻价格数据，IC不可用，已自动回退至最近可用IC日期）
+                </div>
+              )}
               {/* 参与加权的因子 */}
               {kept.length > 0 && (
                 <div style={{ marginBottom: abnormalCount > 0 ? 16 : 0 }}>

@@ -1,6 +1,7 @@
 package com.quant.platform.recommendation.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.quant.platform.factor.ic.service.FactorIcService;
 import com.quant.platform.market.domain.MarketDailyBar;
 import com.quant.platform.market.service.MarketDataService;
 import com.quant.platform.recommendation.domain.StockRecommendation;
@@ -11,13 +12,12 @@ import com.quant.platform.screen.service.StockScreenService;
 import com.quant.platform.stock.analysis.domain.AnalysisOverview;
 import com.quant.platform.stock.analysis.domain.ScoreDetail;
 import com.quant.platform.stock.analysis.service.AnalysisService;
-import com.quant.platform.stock.entity.StockInfo;
 import com.quant.platform.stock.entity.StockDaily;
+import com.quant.platform.stock.entity.StockInfo;
 import com.quant.platform.stock.mapper.StockInfoMapper;
 import com.quant.platform.stock.service.ClickHouseStockService;
 import com.quant.platform.strategy.domain.StrategyDefinition;
 import com.quant.platform.strategy.mapper.StrategyDefinitionMapper;
-import com.quant.platform.factor.ic.service.FactorIcService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -32,10 +32,8 @@ import java.util.stream.Collectors;
 
 /**
  * 智能推荐服务
- *
  * Phase 1: 因子选股 → 个股深度分析 → 等权融合 → 排序输出
  * Phase 2: 多维市场环境识别 → Regime-Adaptive 动态权重 → 行业分散化
- *
  * 管线流程:
  * 1. Market Regime Detection (指数趋势 + ATR波动率 + 市场宽度 → BULL/BEAR/SIDEWAYS)
  * 2. Multi-Factor Screening (StockScreenService, Top 50)
@@ -91,33 +89,8 @@ public class RecommendationService {
     /** ATR 历史分位数回溯天数 */
     private static final int ATR_LOOKBACK_DAYS = 250;
 
-    /** 默认因子配置（12个，全部来自 factor_definition 表已有因子） */
-    private static final List<ScreenRequest.FactorWeight> DEFAULT_FACTORS = List.of(
-            newFactor("MOM20", 1, 1.0),
-            newFactor("VOL20", -1, 0.8),
-            newFactor("VAL_PE_TTM", -1, 0.7),
-            newFactor("VAL_PB", -1, 0.6),
-            newFactor("VAL_DIVIDEND_YIELD", 1, 0.5),
-            newFactor("RSI14", 1, 0.4),
-            newFactor("MACD", 1, 0.3),
-            newFactor("TURN20", -1, 0.5),                  // 流动性
-            newFactor("FIN_EARNINGS_QUALITY", 1, 0.6),     // 盈利质量（经营现金流/净利润）
-            newFactor("FIN_DEBT_TO_ASSET", -1, 0.5),       // 财务健康（资产负债率，越低越健康）
-            newFactor("FIN_REVENUE_QUALITY", 1, 0.4),      // 营收质量
-            newFactor("FIN_NET_PROFIT_YOY", 1, 0.5)        // 成长: 净利润同比增长率
-    );
-
     /** 沪深300指数代码 */
     private static final String SSE300_CODE = "000300";
-    
-    /** 因子组合配置枚举 */
-    public enum FactorProfile {
-        EXISTING,     // 现有：偏价值+低波动
-        NORMAL,        // 常规：平衡
-        NEW_QUALITY,   // 新质生产力：高成长+高盈利质量
-        HOT,           // 热点：高动量+高波动
-        COMPREHENSIVE  // 综合：均衡
-    }
     
     /** 现有因子配置（12个，偏价值和低波动） */
     private static final List<ScreenRequest.FactorWeight> EXISTING_FACTORS = List.of(
@@ -560,12 +533,10 @@ public class RecommendationService {
 
     /**
      * 多维市场环境识别 (Phase 2)
-     *
      * 三个维度综合判断:
      * 1. 指数趋势: 沪深300 MA20/MA60 排列
      * 2. 波动率体制: ATR20 分位数 (高波动=Risk-off, 低波动=Risk-on)
      * 3. 市场宽度: 涨跌家数比 (扩散好=Risk-on, 极端分化=Risk-off)
-     *
      * 综合打分:
      *   BULL:   trend=BULL 且 (波动率低 或 宽度好) → 动量/成长友好
      *   BEAR:   trend=BEAR 且 (波动率高 或 宽度差) → 防御/价值优先
@@ -1542,11 +1513,22 @@ public class RecommendationService {
         List<ScreenRequest.FactorWeight> adjusted = new ArrayList<>();
         Map<String, Double> icScores = new HashMap<>();
 
+        // 0. 获取所有因子共有IC数据的最新日期，自动回退（解决近5天无IC的问题）
+        List<String> factorCodes = factors.stream().map(ScreenRequest.FactorWeight::getFactorCode).collect(Collectors.toList());
+        LocalDate effectiveIcDate = factorIcService.getLatestCommonIcDate(factorCodes);
+        if (effectiveIcDate == null) {
+            effectiveIcDate = date; // 无数据时回退到推荐日期
+        } else if (date != null && effectiveIcDate.isAfter(date)) {
+            effectiveIcDate = date; // 不超前于推荐日期
+        }
+        String icDateLabel = effectiveIcDate != null ? effectiveIcDate.toString() : "无";
+
         // 1. 获取每个因子的IC历史
         for (ScreenRequest.FactorWeight fw : factors) {
             String fc = fw.getFactorCode();
             try {
-                List<Double> icValues = factorIcService.getIcHistory(fc, date, 60);
+                // 使用回退后的IC日期查询，而非推荐日期
+                List<Double> icValues = factorIcService.getIcHistory(fc, effectiveIcDate, 60);
                 if (icValues == null || icValues.isEmpty()) {
                     log.warn("[DynamicWeight] 因子 {} 无IC历史数据，保持原始权重", fc);
                     icScores.put(fc, null); // null 表示无数据
@@ -1557,7 +1539,7 @@ public class RecommendationService {
                 double avgIc = icValues.stream().mapToDouble(Double::doubleValue).average().orElse(0);
                 icScores.put(fc, avgIc);
 
-                log.debug("[DynamicWeight] 因子 {} 近60日IC均值={:.4f}", fc, avgIc);
+                log.debug("[DynamicWeight] 因子 {} 近60日IC均值={:.4f} (IC数据日期={})", fc, avgIc, icDateLabel);
             } catch (Exception e) {
                 log.warn("[DynamicWeight] 获取因子 {} IC数据失败: {}", fc, e.getMessage());
                 icScores.put(fc, null);

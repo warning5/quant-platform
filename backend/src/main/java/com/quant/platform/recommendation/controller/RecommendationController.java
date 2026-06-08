@@ -50,10 +50,22 @@ public class RecommendationController {
             List<StockRecommendation> recommendations = recommendationService.generateRecommendations(date, topN, factorProfile, strategyId, weightMode, diagnostics);
 
             Map<String, Object> result = new HashMap<>();
-            result.put("batchId", recommendations.isEmpty() ? null : recommendations.get(0).getBatchId());
+            result.put("batchId", recommendations.isEmpty() ? null : recommendations.getFirst().getBatchId());
             result.put("count", recommendations.size());
             result.put("recommendations", recommendations);
             result.put("factorDiagnostics", diagnostics);
+
+            // 计算并返回IC数据可用日期（IC加权时显示提醒）
+            if (!diagnostics.isEmpty()) {
+                List<String> fcList = diagnostics.stream()
+                        .map(d -> d.factorCode)
+                        .distinct()
+                        .collect(java.util.stream.Collectors.toList());
+                java.time.LocalDate icDate = factorIcService.getLatestCommonIcDate(fcList);
+                if (icDate != null) {
+                    result.put("icDataDate", icDate.toString());
+                }
+            }
 
             return ApiResponse.success("推荐列表生成成功", result);
         } catch (Exception e) {
@@ -100,7 +112,7 @@ public class RecommendationController {
             if (factorCodes == null || factorCodes.isEmpty()) {
                 return ApiResponse.error("请指定要计算IC的因子代码（factorCodes）");
             }
-            LocalDate date = params != null && params.get("date") != null
+            LocalDate date = params.get("date") != null
                     ? LocalDate.parse(params.get("date").toString()) : null;
             Map<String, FactorIcRecord> results = factorIcService.computeAndSaveIc(date, factorCodes);
             return ApiResponse.success("IC计算完成", results);
