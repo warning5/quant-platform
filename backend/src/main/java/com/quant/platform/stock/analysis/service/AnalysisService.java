@@ -160,6 +160,33 @@ public class AnalysisService {
                     : supportPrice;  // 缠论支撑更近
             stopLossPriceStr = stopLoss.setScale(2, RoundingMode.HALF_UP).toString();
         }
+        // 介入价格：基于MA20支撑位（与推荐列表逻辑一致）
+        String entryPriceStr = null;
+        if (currentPrice != null) {
+            BigDecimal ma20 = null;
+            if (techBars != null && !techBars.isEmpty()) {
+                int ma20Count = Math.min(20, techBars.size());
+                double ma20Sum = 0;
+                int validCount = 0;
+                for (int i = techBars.size() - ma20Count; i < techBars.size(); i++) {
+                    BigDecimal cp = techBars.get(i).getClosePrice();
+                    if (cp != null) {
+                        ma20Sum += cp.doubleValue();
+                        validCount++;
+                    }
+                }
+                if (validCount > 0) {
+                    ma20 = BigDecimal.valueOf(ma20Sum / validCount);
+                }
+            }
+            // 若MA20可获取且 < closePrice，买入价=MA20（回踩支撑买入）
+            // 若MA20可获取且 >= closePrice 或无法获取，买入价=closePrice×0.95
+            if (ma20 != null && ma20.compareTo(currentPrice) < 0) {
+                entryPriceStr = ma20.setScale(2, RoundingMode.HALF_UP).toString();
+            } else {
+                entryPriceStr = currentPrice.multiply(new BigDecimal("0.95")).setScale(2, RoundingMode.HALF_UP).toString();
+            }
+        }
         
         // 3. 资金面信号（从CH计算量比/换手率）
         MoneyFlowSignal moneySignal = calcMoneyFlowSignal(code);
@@ -322,8 +349,9 @@ public class AnalysisService {
         // 7.2 标记是否大盘蓝筹（供前端切换展示）
         overview.setBlueChip(isBlueChip);
 
-        // 7.3 决策卡片：目标价 / 止损价 / 信心水平
+        // 7.3 决策卡片：目标价 / 介入价 / 止损价 / 信心水平
         overview.setTargetPrice(targetPriceStr);
+        overview.setEntryPrice(entryPriceStr);
         overview.setStopLossPrice(stopLossPriceStr);
         overview.setConfidenceLevel(calcConfidenceLevel(fundamentalSignal, researchSignal));
 
@@ -651,6 +679,20 @@ public class AnalysisService {
             for (int i = n - 20; i < n;      i++) sum20 += volumes[i];
             double vr = sum20 > 0 ? (sum5 / 5.0) / (sum20 / 20.0) : 0;
             tech.setVolumeRatio(BigDecimal.valueOf(vr).setScale(2, RoundingMode.HALF_UP));
+        }
+
+        // ── 趋势状态兜底：当 CHAN_TREND 因子缺失时，用 MA20/MA60 判定 ──
+        if (tech.getTrend() == null && n >= 60) {
+            double ma20 = avg(closes, n - 20, n);
+            double ma60 = avg(closes, n - 60, n);
+            double lastClose = closes[n - 1];
+            if (lastClose > ma20 && ma20 > ma60) {
+                tech.setTrend("BULLISH");
+            } else if (lastClose < ma20 && ma20 < ma60) {
+                tech.setTrend("BEARISH");
+            } else {
+                tech.setTrend("SIDEWAYS");
+            }
         }
 
         // ── SAR 抛物线转向（Parabolic SAR）───────────────────────

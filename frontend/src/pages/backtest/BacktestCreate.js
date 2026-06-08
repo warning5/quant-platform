@@ -130,6 +130,7 @@ export default function BacktestCreate() {
         // SCREEN 模式专属字段
         rebalanceFreq: isScreen ? (values.rebalanceFreq || 'MONTHLY') : null,
         weightMode: isScreen ? (values.weightMode || 'EQUAL') : null,
+        factorWeightMode: isScreen ? (values.factorWeightMode || 'STATIC') : null,
         screenConfigJson: isScreen ? (values.screenConfigJson || null) : null,
       };
       setSubmitting(true);
@@ -189,6 +190,7 @@ export default function BacktestCreate() {
             maxPositionCount: 0,
             rebalanceFreq: 'MONTHLY',
             weightMode: 'EQUAL',
+            factorWeightMode: 'STATIC',
           }}
         >
           <Row gutter={24}>
@@ -248,10 +250,22 @@ export default function BacktestCreate() {
                 </Form.Item>
               </Col>
               <Col span={8}>
-                <Form.Item name="weightMode" label="权重分配">
+                <Form.Item name="weightMode" label="仓位权重分配">
                   <Select>
                     <Option value="EQUAL">等权</Option>
                     <Option value="SCORE_PROPORTIONAL">按得分比例</Option>
+                  </Select>
+                </Form.Item>
+              </Col>
+            </Row>
+            <Row gutter={24}>
+              <Col span={8}>
+                <Form.Item name="factorWeightMode" label="因子权重计算"
+                  tooltip="静态：使用策略配置中的固定因子权重；IC动态：每个调仓期根据近60日IC均值自动调整；IR动态：根据近60日IR（信噪比）调整">
+                  <Select>
+                    <Option value="STATIC">静态（配置权重）</Option>
+                    <Option value="IC">IC动态加权</Option>
+                    <Option value="IR">IR动态加权</Option>
                   </Select>
                 </Form.Item>
               </Col>

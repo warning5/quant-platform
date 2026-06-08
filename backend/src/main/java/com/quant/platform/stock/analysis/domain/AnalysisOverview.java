@@ -111,6 +111,11 @@ public class AnalysisOverview {
     private String targetPrice;
 
     /**
+     * 介入价格（基于MA20支撑位计算的建议买入价）
+     */
+    private String entryPrice;
+
+    /**
      * 止损价
      */
     private String stopLossPrice;

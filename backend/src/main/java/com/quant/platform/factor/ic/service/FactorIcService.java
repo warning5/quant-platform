@@ -31,24 +31,22 @@ public class FactorIcService {
     /** IC 计算用的未来收益天数 */
     private static final int FORWARD_RETURN_DAYS = 5;
 
-    /** 需要跟踪 IC 的因子列表 */
-    private static final List<String> TRACKED_FACTORS = List.of(
-            "MOM20", "VOL20", "RSI14", "MACD_DIF",
-            "VAL_PE_TTM", "VAL_PB", "VAL_DIVIDEND_YIELD",
-            "QUAL_EARNINGS", "QUAL_HEALTH", "QUAL_REVENUE_STABILITY"
-    );
-
     public FactorIcService(FactorIcRecordMapper icRecordMapper, ClickHouseStockService clickHouseStockService) {
         this.icRecordMapper = icRecordMapper;
         this.clickHouseStockService = clickHouseStockService;
     }
 
     /**
-     * 计算并保存所有跟踪因子的 IC/IR
+     * 计算并保存指定因子的 IC/IR
      *
-     * @param date 截面日期（null 则使用最新交易日）
+     * @param date        截面日期（null 则使用最新交易日）
+     * @param factorCodes 要计算的因子代码列表（null 或 空 则无操作）
      */
-    public Map<String, FactorIcRecord> computeAndSaveIc(LocalDate date) {
+    public Map<String, FactorIcRecord> computeAndSaveIc(LocalDate date, List<String> factorCodes) {
+        if (factorCodes == null || factorCodes.isEmpty()) {
+            log.warn("[FactorIC] 未指定因子，跳过计算");
+            return Collections.emptyMap();
+        }
         if (date == null) {
             date = clickHouseStockService.getLatestTradeDate();
         }
@@ -57,32 +55,97 @@ public class FactorIcService {
             return Collections.emptyMap();
         }
 
+        // 获取实际的前瞻交易日（第N个交易日，而非N个日历日）
+        // 近期日期可能没有足够的前瞻数据，属于正常情况
+        LocalDate forwardDate = findForwardTradingDate(date, FORWARD_RETURN_DAYS);
+        if (forwardDate == null) {
+            log.debug("[FactorIC] 前瞻交易日不足: date={} forwardDays={}", date, FORWARD_RETURN_DAYS);
+            return Collections.emptyMap();
+        }
+
         // 需要获取: 截面日期的因子值 + 未来N天收益率
         // 通过 CH 直接计算 Spearman Rank Correlation
 
         Map<String, FactorIcRecord> results = new LinkedHashMap<>();
-        LocalDate forwardDate = date.plusDays(FORWARD_RETURN_DAYS);
 
-        for (String factorCode : TRACKED_FACTORS) {
+        for (String factorCode : factorCodes) {
             try {
                 FactorIcRecord record = computeSingleFactorIc(factorCode, date, forwardDate);
                 if (record != null) {
                     // 计算滚动均值/IR
                     computeRollingStats(record);
                     // 保存
-                    icRecordMapper.insert(record);
+                    icRecordMapper.upsert(record);
                     results.put(factorCode, record);
                     log.debug("[FactorIC] {} date={} IC={} IR_20d={}",
                             factorCode, date, String.format("%.4f", record.getIcValue()),
                             record.getIr20d() != null ? String.format("%.3f", record.getIr20d()) : "N/A");
+                } else {
+                    log.debug("[FactorIC] 无IC数据: factor={} date={} forwardDate={}", factorCode, date, forwardDate);
                 }
             } catch (Exception e) {
-                log.warn("[FactorIC] 计算失败: factor={} date={} error={}", factorCode, date, e.getMessage());
+                log.warn("[FactorIC] 计算异常: factor={} date={} error={}", factorCode, date, e.getMessage());
             }
         }
 
         log.info("[FactorIC] 完成: date={} factors={}", date, results.size());
         return results;
+    }
+
+    /**
+     * 批量计算并保存 IC/IR（按日期范围，仅遍历实际交易日）
+     *
+     * @param startDate   开始日期
+     * @param endDate     结束日期
+     * @param factorCodes 要计算的因子代码列表
+     * @return 每个日期的计算结果
+     */
+    public Map<LocalDate, Map<String, FactorIcRecord>> computeAndSaveIcBatch(LocalDate startDate, LocalDate endDate, List<String> factorCodes) {
+        Map<LocalDate, Map<String, FactorIcRecord>> allResults = new LinkedHashMap<>();
+        int totalRecords = 0;
+
+        // 获取范围内的实际交易日，避免遍历周末和非交易日
+        List<LocalDate> tradingDates = clickHouseStockService.getTradingDates(startDate, endDate);
+        if (tradingDates.isEmpty()) {
+            log.warn("[FactorIC] 日期范围内无交易日: range=[{}, {}]", startDate, endDate);
+            return allResults;
+        }
+
+        log.info("[FactorIC] 批量计算开始: range=[{}, {}] tradingDays={} factors={}",
+                startDate, endDate, tradingDates.size(), factorCodes.size());
+
+        int skipped = 0;
+        for (LocalDate current : tradingDates) {
+            try {
+                Map<String, FactorIcRecord> dayResults = computeAndSaveIc(current, factorCodes);
+                if (!dayResults.isEmpty()) {
+                    allResults.put(current, dayResults);
+                    totalRecords += dayResults.size();
+                } else {
+                    skipped++;
+                }
+            } catch (Exception e) {
+                log.warn("[FactorIC] 批量计算异常: date={} error={}", current, e.getMessage());
+                skipped++;
+            }
+        }
+
+        // 计算可计算的最新日期（需要有前瞻交易日数据）
+        LocalDate latestAvailable = null;
+        if (!tradingDates.isEmpty()) {
+            for (int i = tradingDates.size() - 1; i >= 0; i--) {
+                if (findForwardTradingDate(tradingDates.get(i), FORWARD_RETURN_DAYS) != null) {
+                    latestAvailable = tradingDates.get(i);
+                    break;
+                }
+            }
+        }
+
+        log.info("[FactorIC] 批量计算完成: range=[{}, {}] tradingDays={} calculated={} skipped={} totalRecords={}{}",
+                startDate, endDate, tradingDates.size(), allResults.size(), skipped, totalRecords,
+                latestAvailable != null ? String.format(" (最近可计算日期=%s, 需往前%d交易日才有前瞻数据)", latestAvailable, FORWARD_RETURN_DAYS)
+                        : " (数据不足，无法计算任何日期的IC)");
+        return allResults;
     }
 
     /**
@@ -94,14 +157,18 @@ public class FactorIcService {
      * - IR_20d > -0.2: 权重 0.8 (表现一般，减仓)
      * - IR_20d <= -0.2: 权重 0.5 (因子失效，大幅降权)
      *
+     * 自动从 factor_ic_record 表获取所有已有 IC 记录的因子
+     *
      * @return factorCode → adaptiveWeight
      */
     public Map<String, Double> getAdaptiveWeights() {
         Map<String, Double> weights = new HashMap<>();
-        for (String factorCode : TRACKED_FACTORS) {
-            FactorIcRecord latest = icRecordMapper.findLatest(factorCode);
+        // 从 DB 查询所有已有 IC 记录的因子（不再硬编码）
+        List<FactorIcRecord> allLatest = icRecordMapper.findAllLatest();
+        for (FactorIcRecord latest : allLatest) {
+            String factorCode = latest.getFactorCode();
             double weight = 1.0;
-            if (latest != null && latest.getIr20d() != null) {
+            if (latest.getIr20d() != null) {
                 double ir = latest.getIr20d();
                 if (ir > 0.5) weight = 1.2;
                 else if (ir > 0.2) weight = 1.0;
@@ -135,6 +202,28 @@ public class FactorIcService {
     // ── 私有方法 ──
 
     /**
+     * 查找前瞻交易日（第N个交易日，而非N个日历日）
+     *
+     * @param date        基准日期
+     * @param forwardDays 前瞻交易日数
+     * @return 第N个交易日，如果没有足够数据则返回 null
+     */
+    private LocalDate findForwardTradingDate(LocalDate date, int forwardDays) {
+        // 向后查询足够多的交易日（forwardDays * 2 作为缓冲应对周末和假期）
+        List<LocalDate> tradingDates = clickHouseStockService.getTradingDates(
+                date, date.plusDays(forwardDays * 2L));
+        if (tradingDates.size() <= forwardDays) {
+            // 扩大范围重试
+            tradingDates = clickHouseStockService.getTradingDates(
+                    date, date.plusDays(forwardDays * 5L));
+        }
+        if (tradingDates.size() > forwardDays) {
+            return tradingDates.get(forwardDays);
+        }
+        return null;
+    }
+
+    /**
      * 计算单个因子的 IC (Spearman Rank Correlation)
      *
      * 通过 CH 查询: 因子值排名 vs 未来N日收益率排名的相关系数
@@ -142,35 +231,45 @@ public class FactorIcService {
     private FactorIcRecord computeSingleFactorIc(String factorCode, LocalDate date, LocalDate forwardDate) {
         // CH SQL: 获取截面日期的因子值排名和未来收益率排名，计算相关系数
         // 使用 Spearman = Pearson(rank_x, rank_y)
-
-        String sql = String.format("""
-            SELECT corr(rankFactor, rankReturn) as ic_value, count() as stock_count FROM (
-                SELECT
-                    symbol,
-                    rankRowNumber(factor_value) as rankFactor,
-                    rankRowNumber(fwd_return) as rankReturn
-                FROM (
-                    SELECT
-                        f.symbol,
-                        f.factor_value,
-                        (d2.close_price - d1.close_price) / d1.close_price * 100 as fwd_return
-                    FROM stock_db.factor_value f
-                    INNER JOIN stock_db.stock_daily d1 ON f.symbol = d1.code AND d1.trade_date = '%s'
-                    INNER JOIN stock_db.stock_daily d2 ON f.symbol = d2.code AND d2.trade_date = '%s'
-                    WHERE f.factor_code = '%s'
-                      AND f.trade_date = '%s'
-                      AND d1.close_price > 0
-                      AND d2.close_price > 0
-                )
-            )
-            """, date, forwardDate, factorCode, date);
-
-        // 注意: CH 的 corr 函数是 Pearson，用在排名上就是 Spearman
-        // rankRowNumber 是 CH 窗口函数
+        // 注意：factor_value.symbol 可能带市场后缀（如 600519.SH），
+        // stock_daily.code 不带后缀，需要用 replaceRegexpOne 去掉后缀后再 JOIN
 
         try {
+            // row_number() OVER (ORDER BY ...) 得到排序位置，corr(Pearson) 作用于排名 = Spearman
+            String sql = String.format("""
+                WITH base AS (
+                    SELECT
+                        f.symbol,
+                        f.factor_val,
+                        (d2.close_price - d1.close_price) / d1.close_price * 100 as fwd_return
+                    FROM stock.factor_value f FINAL
+                    INNER JOIN stock.stock_daily d1 FINAL
+                        ON replaceRegexpOne(f.symbol, '\\.[A-Z]+$', '') = d1.code
+                        AND d1.trade_date = '%s'
+                    INNER JOIN stock.stock_daily d2 FINAL
+                        ON replaceRegexpOne(f.symbol, '\\.[A-Z]+$', '') = d2.code
+                        AND d2.trade_date = '%s'
+                    WHERE f.factor_code = '%s'
+                      AND f.calc_date = '%s'
+                      AND f.factor_val IS NOT NULL
+                      AND d1.close_price > 0
+                      AND d2.close_price > 0
+            ),
+            ranked AS (
+                SELECT
+                    symbol,
+                    row_number() OVER (ORDER BY factor_val) as rankFactor,
+                    row_number() OVER (ORDER BY fwd_return) as rankReturn
+                FROM base
+            )
+            SELECT corr(rankFactor, rankReturn) as ic_value, count() as stock_count FROM ranked
+            """, date, forwardDate, factorCode, date);
+
             Map<String, Object> row = clickHouseStockService.queryForList(sql).stream().findFirst().orElse(null);
-            if (row == null || row.get("ic_value") == null) return null;
+            if (row == null || row.get("ic_value") == null) {
+                log.debug("[FactorIC] CH查询无结果: factor={} date={} forwardDate={}", factorCode, date, forwardDate);
+                return null;
+            }
 
             FactorIcRecord record = new FactorIcRecord();
             record.setFactorCode(factorCode);
@@ -179,9 +278,11 @@ public class FactorIcService {
             record.setStockCount(toInt(row.get("stock_count")));
             return record;
         } catch (Exception e) {
-            log.debug("[FactorIC] CH查询失败: factor={} error={}", factorCode, e.getMessage());
+            log.warn("[FactorIC] CH查询异常: factor={} date={} forwardDate={} type={} error={}",
+                    factorCode, date, forwardDate, e.getClass().getSimpleName(), e.getMessage());
             return null;
         }
+
     }
 
     /**

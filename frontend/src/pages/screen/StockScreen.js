@@ -51,6 +51,11 @@ const ORTHOGONAL_OPTIONS = [
   { value: 'NONE', label: '不正交化' },
   { value: 'SCHMIDT', label: '施密特正交化 (Gram-Schmidt)' },
 ];
+const WEIGHT_MODE_OPTIONS = [
+  { value: 'EQUAL', label: '等权（使用配置权重）' },
+  { value: 'IC', label: 'IC动态加权（近60日均值）' },
+  { value: 'IR', label: 'IR动态加权（信噪比）' },
+];
 const FILTER_OP_OPTIONS = [
   { value: 'NONE', label: '无' },
   { value: 'GT', label: '大于 (>)' },
@@ -205,6 +210,7 @@ export default function StockScreen() {
   const [globalOutlier, setGlobalOutlier] = useState('MAD');
   const [globalNormalize, setGlobalNormalize] = useState('ZSCORE');
   const [orthogonalMethod, setOrthogonalMethod] = useState('NONE');
+  const [weightMode, setWeightMode] = useState('EQUAL');
 
   /* ── 选股参数 ─────────────────────────────────────────────────── */
   const [screenDate, setScreenDate] = useState(null);
@@ -316,6 +322,7 @@ export default function StockScreen() {
       if (config.globalOutlierMethod) setGlobalOutlier(config.globalOutlierMethod);
       if (config.globalNormalizeMethod) setGlobalNormalize(config.globalNormalizeMethod);
       if (config.orthogonalizationMethod) setOrthogonalMethod(config.orthogonalizationMethod);
+      if (config.weightMode) setWeightMode(config.weightMode);
       if (config.valuationWeight != null) setValuationWeight(Math.round(config.valuationWeight * 100));
       if (config.customSqlWhere) setCustomSqlWhere(config.customSqlWhere);
 
@@ -438,6 +445,7 @@ export default function StockScreen() {
       globalOutlierMethod: globalOutlier,
       globalNormalizeMethod: globalNormalize,
       orthogonalizationMethod: orthogonalMethod,
+      weightMode,
       topN,
       direction,
       excludeSt,
@@ -472,7 +480,7 @@ export default function StockScreen() {
         }
       })
       .finally(() => setRunning(false));
-  }, [factors, screenDate, screenDateRange, useMultiDayMode, topN, direction, excludeSt, globalOutlier, globalNormalize, orthogonalMethod, totalWeight, valuationWeight, selectedStrategyId, customSqlWhere, maAbove30, maAbove60, maAbove100]);
+  }, [factors, screenDate, screenDateRange, useMultiDayMode, topN, direction, excludeSt, globalOutlier, globalNormalize, orthogonalMethod, weightMode, totalWeight, valuationWeight, selectedStrategyId, customSqlWhere, maAbove30, maAbove60, maAbove100]);
 
   /* ── 构建当前选股配置（供回测弹窗使用） ──────────────────────── */
   const buildScreenRequest = useCallback(() => ({
@@ -485,6 +493,7 @@ export default function StockScreen() {
     globalOutlierMethod: globalOutlier,
     globalNormalizeMethod: globalNormalize,
     orthogonalizationMethod: orthogonalMethod,
+    weightMode,
     topN,
     direction,
     excludeSt,
@@ -506,7 +515,7 @@ export default function StockScreen() {
       filterOp: f.filterOp,
       filterValue: f.filterOp !== 'NONE' ? f.filterValue : null,
     })),
-  }), [factors, screenDate, screenDateRange, useMultiDayMode, topN, direction, excludeSt, globalOutlier, globalNormalize, orthogonalMethod, totalWeight, valuationWeight, selectedStrategyId, customSqlWhere, maAbove30, maAbove60, maAbove100]);
+  }), [factors, screenDate, screenDateRange, useMultiDayMode, topN, direction, excludeSt, globalOutlier, globalNormalize, orthogonalMethod, weightMode, totalWeight, valuationWeight, selectedStrategyId, customSqlWhere, maAbove30, maAbove60, maAbove100]);
 
   /* ── 结果表格列 ───────────────────────────────────────────────── */
   const isMultiDay = !!(result?.screenStartDate && result?.screenEndDate);
@@ -1095,6 +1104,19 @@ export default function StockScreen() {
                 </Select>
               </Col>
 
+              {/* 因子权重模式 */}
+              <Col span={12}>
+                <div style={paramLabelStyle}>
+                  <ThunderboltOutlined /> 权重模式
+                  <Tooltip title="等权：使用下方配置的静态权重；IC动态加权：根据每个因子近60日IC均值自动调整权重；IR动态加权：根据近60日IR（信噪比）自动调整权重。IC<0的因子会被置零或反转方向">
+                    <QuestionCircleOutlined style={{ color: '#bbb', marginLeft: 4 }} />
+                  </Tooltip>
+                </div>
+                <Select value={weightMode} onChange={setWeightMode} style={{ width: '100%' }} size="small">
+                  {WEIGHT_MODE_OPTIONS.map(o => <Option key={o.value} value={o.value}>{o.label}</Option>)}
+                </Select>
+              </Col>
+
               {/* 自定义 SQL 条件（高级模式） */}
               <Col span={24}>
                 <div style={paramLabelStyle}>
@@ -1285,6 +1307,9 @@ export default function StockScreen() {
                     <Tag color="cyan">{NORMALIZE_OPTIONS.find(o => o.value === globalNormalize)?.label}</Tag>
                     {orthogonalMethod !== 'NONE' && (
                       <Tag color="magenta">{ORTHOGONAL_OPTIONS.find(o => o.value === orthogonalMethod)?.label}</Tag>
+                    )}
+                    {weightMode !== 'EQUAL' && (
+                      <Tag color="volcano">{WEIGHT_MODE_OPTIONS.find(o => o.value === weightMode)?.label}</Tag>
                     )}
                   </div>
                 }

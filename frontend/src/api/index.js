@@ -338,13 +338,21 @@ export const recommendationApi = {
    * @param {number} topN - 推荐数量
    * @param {number} strategyId - 策略ID（从策略列表选择）
    */
-  generate: (date, topN, strategyId) => api.post('/recommendations/generate', { date, topN, strategyId }),
+  generate: (date, topN, strategyId, weightMode) => api.post('/recommendations/generate', { date, topN, strategyId, weightMode }),
   /** 获取最新推荐列表 */
   getLatest: () => api.get('/recommendations/latest'),
   /** 获取指定批次推荐 */
   getByBatch: (batchId) => api.get(`/recommendations/batch/${batchId}`),
   /** 获取批次列表 */
   getBatches: (limit = 20) => api.get('/recommendations/batches', { params: { limit } }),
+  /** 计算并存储因子IC值（需先计算IC，再使用动态IC加权生成推荐）
+   * @param {string[]} factorCodes - 要计算的因子代码列表 */
+  computeIc: (date, factorCodes) => api.post('/recommendations/ic/compute', { date, factorCodes }),
+  /** 批量计算IC（按日期范围 + 因子列表），结果持久化到 factor_ic_record 表
+   * @param {string[]} factorCodes - 要计算的因子代码列表 */
+  computeIcBatch: (startDate, endDate, factorCodes) => api.post('/recommendations/ic/compute-batch', { startDate, endDate, factorCodes }, { timeout: 600000 }),
+  /** 获取IC最新摘要 */
+  getIcSummary: () => api.get('/recommendations/ic/summary'),
 };
 
 export default api;

@@ -76,6 +76,7 @@ function AppLayout() {
         { key: '/factor-monitor', label: <Link to="/factor-monitor">因子计算</Link> },
         { key: '/factor-correlation', label: <Link to="/factor-correlation">因子相关性</Link> },
         { key: '/factor-weight-optimize', label: <Link to="/factor-weight-optimize">权重优化</Link> },
+        { key: '/factor-ic-ir', label: <Link to="/factor-ic-ir">IC管理</Link> },
       ],
     },
     {
@@ -95,7 +96,6 @@ function AppLayout() {
       children: [
         { key: '/backtests', label: <Link to="/backtests">回测列表</Link> },
         { key: '/backtests/compare', label: <Link to="/backtests/compare">策略对比</Link> },
-        { key: '/factor-ic-ir', label: <Link to="/factor-ic-ir">IC/IR 分析</Link> },
       ],
     },
     {
@@ -140,7 +140,7 @@ function AppLayout() {
     const path = window.location.pathname;
     if (path.startsWith('/factor') || path === '/factor-weight-optimize') return ['factors'];
     if (path.startsWith('/strateg') || path === '/paper-trading' || path === '/backtests/param-optimize') return ['strategies'];
-    if (path.startsWith('/backtest')) return ['backtests'];
+    if (path.startsWith('/backtest') && !path.startsWith('/backtests/param-optimize')) return ['backtests'];
     if (path === '/screen') return ['screen'];
     if (path.startsWith('/data-detail')) return ['data-info'];
     if (path === '/data-update' || path === '/scheduled-tasks' || path === '/sector-ranking') return ['data-info'];

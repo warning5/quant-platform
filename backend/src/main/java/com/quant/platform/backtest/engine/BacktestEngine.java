@@ -10,6 +10,7 @@ import com.quant.platform.backtest.mapper.BacktestTaskMapper;
 import com.quant.platform.backtest.mapper.EquityCurveMapper;
 import com.quant.platform.backtest.mapper.RebalanceRecordMapper;
 import com.quant.platform.factor.domain.FactorValue;
+import com.quant.platform.factor.ic.service.FactorIcService;
 import com.quant.platform.factor.mapper.FactorValueMapper;
 import com.quant.platform.factor.service.ClickHouseFactorValueService;
 import com.quant.platform.market.domain.MarketDailyBar;
@@ -59,6 +60,8 @@ public class BacktestEngine {
     private final ObjectMapper objectMapper;
     @Autowired(required = false)
     private ClickHouseFactorValueService clickHouseFactorValueService;
+    @Autowired(required = false)
+    private FactorIcService factorIcService;
     /**
      * SCREEN 模式选股服务
      */
@@ -229,6 +232,9 @@ public class BacktestEngine {
         String freq = strategy.getRebalanceFrequency() != null ? strategy.getRebalanceFrequency() : "MONTHLY";
         // 解析因子配置
         List<FactorWeight> factorWeights = parseFactorConfig(strategy.getFactorConfigJson());
+        // 因子权重计算模式：STATIC（默认）/ IC / IR
+        String factorWeightMode = task.getFactorWeightMode() != null ? task.getFactorWeightMode() : "STATIC";
+        boolean useDynamicFactorWeights = "IC".equalsIgnoreCase(factorWeightMode) || "IR".equalsIgnoreCase(factorWeightMode);
 
         // 解析止损止盈参数（参数优化使用）
         double stopLossPct = task.getStopLossPct() != null ? task.getStopLossPct().doubleValue() : 0.0;
@@ -460,8 +466,14 @@ public class BacktestEngine {
                     factorValueMap.put(fw.factorCode, fvMap);
                 }
 
+                // 计算动态因子权重（基于近期IC/IR）
+                Map<String, Double> dynamicFactorWeights = null;
+                if (useDynamicFactorWeights && factorIcService != null) {
+                    dynamicFactorWeights = computeDynamicFactorWeights(factorWeights, factorWeightMode, today);
+                }
+
                 // 计算每只股票的综合评分
-                Map<String, Double> scores = computeScores(bars, factorWeights, factorValueMap, task, strategy, today);
+                Map<String, Double> scores = computeScores(bars, factorWeights, factorValueMap, task, strategy, today, dynamicFactorWeights);
 
                 int maxPositions = task.getMaxPositionCount() != null
                         ? task.getMaxPositionCount()
@@ -1172,7 +1184,8 @@ public class BacktestEngine {
                                               Map<String, Map<String, FactorValue>> factorValueMap,
                                               BacktestTask task,
                                               StrategyDefinition strategy,
-                                              LocalDate rebalanceDate) {
+                                              LocalDate rebalanceDate,
+                                              Map<String, Double> dynamicFactorWeights) {
         Map<String, Double> scores = new HashMap<>();
 
         // 如果是自定义脚本策略，使用Groovy脚本执行
@@ -1208,7 +1221,7 @@ public class BacktestEngine {
             }
         }
 
-        // 综合评分
+        // 综合评分：使用动态权重（如果有）或静态权重
         for (MarketDailyBar bar : bars) {
             double score = 0;
             boolean hasAnyFactor = false;
@@ -1217,7 +1230,11 @@ public class BacktestEngine {
                 if (scoreMap == null) continue;
                 Double val = scoreMap.get(bar.getSymbol());
                 if (val == null) continue;
-                score += val * fw.weight;
+                // 优先使用动态权重，回退到静态配置权重
+                double effectiveWeight = (dynamicFactorWeights != null && dynamicFactorWeights.containsKey(fw.factorCode))
+                        ? dynamicFactorWeights.get(fw.factorCode)
+                        : fw.weight;
+                score += val * effectiveWeight;
                 hasAnyFactor = true;
             }
             if (hasAnyFactor) {
@@ -2168,6 +2185,75 @@ public class BacktestEngine {
     private double returnPct(double currentValue, double cost) {
         if (cost <= 0) return 0;
         return (currentValue - cost) / cost;
+    }
+
+    /**
+     * 基于近期IC/IR计算动态因子权重（与StockScreenService.getDynamicWeights逻辑对齐）
+     *
+     * @param factorWeights 因子列表（含静态配置权重）
+     * @param weightMode    权重模式：IC / IR
+     * @param rebalanceDate 调仓日期
+     * @return factorCode -> 动态权重系数（已与静态权重乘算）
+     */
+    private Map<String, Double> computeDynamicFactorWeights(List<FactorWeight> factorWeights,
+                                                             String weightMode,
+                                                             LocalDate rebalanceDate) {
+        Map<String, Double> dynamicWeights = new LinkedHashMap<>();
+        Map<String, Double> icScores = new LinkedHashMap<>();
+
+        // 1. 获取每个因子的IC/IR值
+        for (FactorWeight fw : factorWeights) {
+            String fc = fw.factorCode;
+            try {
+                List<Double> icValues = factorIcService.getIcHistory(fc, rebalanceDate, 60);
+                if (icValues == null || icValues.isEmpty()) {
+                    log.debug("[BacktestEngine DynamicWeight] 因子 {} 在 {} 无IC历史数据，使用静态权重", fc, rebalanceDate);
+                    icScores.put(fc, 1.0);
+                    continue;
+                }
+
+                double score;
+                if ("IR".equalsIgnoreCase(weightMode)) {
+                    double avg = icValues.stream().mapToDouble(Double::doubleValue).average().orElse(0);
+                    double std = Math.sqrt(icValues.stream().mapToDouble(v -> Math.pow(v - avg, 2)).average().orElse(0));
+                    score = std > 0 ? Math.abs(avg) / std : 0;
+                } else {
+                    score = icValues.stream().mapToDouble(Double::doubleValue).average().orElse(0);
+                }
+                icScores.put(fc, score);
+            } catch (Exception e) {
+                log.debug("[BacktestEngine DynamicWeight] 获取因子 {} IC失败: {}", fc, e.getMessage());
+                icScores.put(fc, 1.0);
+            }
+        }
+
+        // 2. 计算IC>0的因子IC之和
+        double sumPositiveIc = icScores.values().stream()
+                .filter(v -> v > 0)
+                .mapToDouble(Double::doubleValue)
+                .sum();
+
+        if (sumPositiveIc > 0) {
+            for (FactorWeight fw : factorWeights) {
+                String fc = fw.factorCode;
+                double ic = icScores.getOrDefault(fc, 1.0);
+                if (ic > 0) {
+                    double normalized = ic / sumPositiveIc;
+                    normalized = Math.max(0.1, Math.min(5.0, normalized));
+                    dynamicWeights.put(fc, normalized * fw.weight);
+                } else {
+                    dynamicWeights.put(fc, 0.0);
+                }
+            }
+        } else {
+            // 所有IC均<=0，回退到静态权重
+            log.debug("[BacktestEngine DynamicWeight] {} 所有因子IC均<=0，回退静态权重", rebalanceDate);
+            for (FactorWeight fw : factorWeights) {
+                dynamicWeights.put(fw.factorCode, fw.weight);
+            }
+        }
+
+        return dynamicWeights;
     }
 
     record FactorWeight(String factorCode, double weight) {

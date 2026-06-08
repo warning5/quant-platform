@@ -2,6 +2,7 @@ package com.quant.platform.factor.ic.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.quant.platform.factor.ic.domain.FactorIcRecord;
+import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -11,6 +12,14 @@ import java.util.List;
 
 @Mapper
 public interface FactorIcRecordMapper extends BaseMapper<FactorIcRecord> {
+
+    /** 覆盖写入（存在则更新，不存在则插入），支持重复计算 */
+    @Insert("INSERT INTO factor_ic_record (factor_code, trade_date, ic_value, ic20d_avg, ic60d_avg, ir20d, ir60d, stock_count) "
+            + "VALUES (#{factorCode}, #{tradeDate}, #{icValue}, #{ic20dAvg}, #{ic60dAvg}, #{ir20d}, #{ir60d}, #{stockCount}) "
+            + "ON DUPLICATE KEY UPDATE ic_value = VALUES(ic_value), ic20d_avg = VALUES(ic20d_avg), "
+            + "ic60d_avg = VALUES(ic60d_avg), ir20d = VALUES(ir20d), ir60d = VALUES(ir60d), "
+            + "stock_count = VALUES(stock_count)")
+    int upsert(FactorIcRecord record);
 
     /** 获取因子最近N天的IC序列 */
     @Select("SELECT ic_value FROM factor_ic_record WHERE factor_code = #{factorCode} AND trade_date <= #{date} ORDER BY trade_date DESC LIMIT #{limit}")

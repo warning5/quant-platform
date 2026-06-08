@@ -683,11 +683,11 @@ export default function StockAnalysis() {
               </Col>
             </Row>
 
-            {/* 决策卡片：当前价 / 第一目标价 / 第二目标价 / 止损价 / 极端目标价 / 仓位 */}
+            {/* 决策卡片：当前价 / 介入价 / 第一目标价 / 第二目标价 / 止损价 / 极端目标价 / 仓位 */}
             {(overview.targetPrice || overview.stopLossPrice || overview.targetPrice2 || overview.extremeTargetPrice) && (
               <div style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(6, 1fr)',
+                gridTemplateColumns: 'repeat(7, 1fr)',
                 gap: 0,
                 border: '1px solid #f0f0f0',
                 borderRadius: 8,
@@ -697,6 +697,7 @@ export default function StockAnalysis() {
               }}>
                 {[
                   { label: '当前价', value: overview.price || '-', sub: '', color: changePct >= 0 ? '#f5222d' : '#52c41a' },
+                  { label: '介入价', value: overview.entryPrice || '-', sub: 'MA20支撑位', color: overview.entryPrice && overview.price && parseFloat(overview.entryPrice) < parseFloat(overview.price) ? '#f5222d' : '#333' },
                   { label: '第一目标价', value: overview.targetPrice || '-', sub: '阻力×1.05', color: '#1890ff' },
                   { label: '第二目标价', value: overview.targetPrice2 || '-', sub: 'PE均值回归', color: '#722ed1' },
                   { label: '止损价', value: overview.stopLossPrice || '-', sub: overview.targetPrice ? `距${((1 - parseFloat(overview.stopLossPrice || 0) / parseFloat(overview.price || 1)) * 100).toFixed(1)}%` : 'ATR×1.5', color: '#f5222d' },
@@ -706,7 +707,7 @@ export default function StockAnalysis() {
                   <div key={idx} style={{
                     textAlign: 'center',
                     padding: '10px 8px',
-                    borderRight: idx < 5 ? '1px solid #f0f0f0' : 'none',
+                    borderRight: idx < 6 ? '1px solid #f0f0f0' : 'none',
                   }}>
                     <div style={{ fontSize: 11, color: '#999', marginBottom: 2 }}>{item.label}</div>
                     <div style={{ fontSize: 22, fontWeight: 600, color: item.color, lineHeight: 1 }}>{item.value}</div>

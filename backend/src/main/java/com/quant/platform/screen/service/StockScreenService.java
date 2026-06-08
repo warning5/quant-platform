@@ -1502,7 +1502,15 @@ public class StockScreenService {
     }
 
     /**
-     * 获取动态权重（基于IC/IR）
+     * 获取动态权重（基于IC/IR）—— IC加权综合得分（P0需求）
+     *
+     * 规则：
+     * - 获取每个因子最近60天的IC序列，计算IC均值（保留正负号）
+     * - 只取IC均值 > 0的因子参与加权（有正向预测能力的因子）
+     * - 归一化：dynamicWeight = factorIC / sum(all positive ICs)
+     * - IC <= 0的因子：权重置零
+     * - IC < 0的因子：自动反转direction
+     * - 所有IC均<=0时回退到等权，但IC<0的仍反转direction
      *
      * @param factors 因子配置列表
      * @param weightMode 权重模式：IC / IR
@@ -1511,7 +1519,7 @@ public class StockScreenService {
      */
     private Map<String, Double> getDynamicWeights(List<ScreenRequest.FactorWeight> factors, String weightMode, LocalDate screenDate) {
         Map<String, Double> dynamicWeights = new HashMap<>();
-        Map<String, Double> rawScores = new HashMap<>();
+        Map<String, Double> icScores = new HashMap<>();
 
         // 1. 获取每个因子的IC/IR值
         for (ScreenRequest.FactorWeight fw : factors) {
@@ -1521,40 +1529,73 @@ public class StockScreenService {
                 List<Double> icValues = factorIcService.getIcHistory(fc, screenDate, 60);
                 if (icValues == null || icValues.isEmpty()) {
                     log.warn("[DynamicWeight] 因子 {} 无IC历史数据，使用默认权重1.0", fc);
-                    rawScores.put(fc, 1.0);
+                    icScores.put(fc, 1.0);
                     continue;
                 }
 
                 double score;
                 if ("IR".equalsIgnoreCase(weightMode)) {
-                    // IR = IC均值 / IC标准差
+                    // IR = IC均值 / IC标准差（IR始终非负）
                     double avg = icValues.stream().mapToDouble(Double::doubleValue).average().orElse(0);
                     double std = Math.sqrt(icValues.stream().mapToDouble(v -> Math.pow(v - avg, 2)).average().orElse(0));
                     score = std > 0 ? Math.abs(avg) / std : 0;
                 } else {
-                    // IC模式：使用IC绝对值的均值
-                    score = icValues.stream().mapToDouble(Math::abs).average().orElse(0);
+                    // IC模式：使用IC均值（保留正负号，用于判断方向）
+                    score = icValues.stream().mapToDouble(Double::doubleValue).average().orElse(0);
                 }
-                rawScores.put(fc, score);
+                icScores.put(fc, score);
             } catch (Exception e) {
                 log.warn("[DynamicWeight] 获取因子 {} IC数据失败: {}", fc, e.getMessage());
-                rawScores.put(fc, 1.0);
+                icScores.put(fc, 1.0);
             }
         }
 
-        // 2. 归一化：确保所有权重的平均值为1.0（保持用户原始权重的相对比例）
-        double avgScore = rawScores.values().stream().mapToDouble(Double::doubleValue).average().orElse(1.0);
-        if (avgScore > 0) {
-            for (Map.Entry<String, Double> entry : rawScores.entrySet()) {
-                double normalized = entry.getValue() / avgScore;
-                // 限制范围：最低0.3，最高3.0，避免极端值
-                normalized = Math.max(0.3, Math.min(3.0, normalized));
-                dynamicWeights.put(entry.getKey(), normalized);
+        // 2. 计算IC>0的因子的IC之和
+        double sumPositiveIc = icScores.values().stream()
+            .filter(v -> v > 0)
+            .mapToDouble(Double::doubleValue)
+            .sum();
+
+        if (sumPositiveIc > 0) {
+            for (Map.Entry<String, Double> entry : icScores.entrySet()) {
+                String fc = entry.getKey();
+                double ic = entry.getValue();
+                if (ic > 0) {
+                    double normalized = ic / sumPositiveIc;
+                    // 限制范围避免极端值
+                    normalized = Math.max(0.1, Math.min(5.0, normalized));
+                    dynamicWeights.put(fc, normalized);
+                } else {
+                    dynamicWeights.put(fc, 0.0);
+                }
+                // IC<0时反转direction
+                if (ic < 0) {
+                    for (ScreenRequest.FactorWeight fw : factors) {
+                        if (fw.getFactorCode().equals(fc)) {
+                            int oldDir = fw.getDirection();
+                            fw.setDirection(-oldDir);
+                            log.info("[DynamicWeight] 因子 {} IC为负({:.4f})，反转方向: {} -> {}",
+                                fc, ic, oldDir, fw.getDirection());
+                            break;
+                        }
+                    }
+                }
             }
         } else {
-            // 所有IC都为0，使用等权
-            for (String fc : rawScores.keySet()) {
+            // 所有IC均<=0，回退到等权
+            log.warn("[DynamicWeight] 所有因子IC均<=0，回退到等权，IC为负的因子反转方向");
+            for (Map.Entry<String, Double> entry : icScores.entrySet()) {
+                String fc = entry.getKey();
+                double ic = entry.getValue();
                 dynamicWeights.put(fc, 1.0);
+                if (ic < 0) {
+                    for (ScreenRequest.FactorWeight fw : factors) {
+                        if (fw.getFactorCode().equals(fc)) {
+                            fw.setDirection(-fw.getDirection());
+                            break;
+                        }
+                    }
+                }
             }
         }
 

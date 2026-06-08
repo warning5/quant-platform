@@ -161,10 +161,16 @@ public class BacktestTask implements Serializable {
     private String rebalanceFreq;
 
     /**
-     * 权重分配模式: EQUAL(等权) / SCORE_PROPORTIONAL(按得分比例)
+     * 持仓权重分配模式: EQUAL(等权) / SCORE_PROPORTIONAL(按得分比例)
      */
     @TableField("weight_mode")
     private String weightMode;
+
+    /**
+     * 因子权重计算模式: STATIC(静态，使用策略配置权重) / IC(IC均值动态加权) / IR(IR动态加权)
+     */
+    @TableField("factor_weight_mode")
+    private String factorWeightMode;
 
     /**
      * 最大持仓数量（覆盖策略定义，null = 使用策略默认值）

@@ -11,9 +11,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Map;
 
 /**
@@ -42,13 +43,17 @@ public class RecommendationController {
             Integer topN = req != null ? req.getTopN() : null;
             String factorProfile = req != null ? req.getFactorProfile() : null;
             Long strategyId = req != null ? req.getStrategyId() : null;
+            String weightMode = req != null ? req.getWeightMode() : null;
 
-            List<StockRecommendation> recommendations = recommendationService.generateRecommendations(date, topN, factorProfile, strategyId);
+            List<RecommendationService.FactorDiagnostic> diagnostics = new ArrayList<>();
+
+            List<StockRecommendation> recommendations = recommendationService.generateRecommendations(date, topN, factorProfile, strategyId, weightMode, diagnostics);
 
             Map<String, Object> result = new HashMap<>();
             result.put("batchId", recommendations.isEmpty() ? null : recommendations.get(0).getBatchId());
             result.put("count", recommendations.size());
             result.put("recommendations", recommendations);
+            result.put("factorDiagnostics", diagnostics);
 
             return ApiResponse.success("推荐列表生成成功", result);
         } catch (Exception e) {
@@ -90,11 +95,59 @@ public class RecommendationController {
     @PostMapping("/ic/compute")
     public ApiResponse<Map<String, FactorIcRecord>> computeIc(@RequestBody(required = false) Map<String, Object> params) {
         try {
-            Map<String, FactorIcRecord> results = factorIcService.computeAndSaveIc(null);
+            @SuppressWarnings("unchecked")
+            List<String> factorCodes = params != null ? (List<String>) params.get("factorCodes") : null;
+            if (factorCodes == null || factorCodes.isEmpty()) {
+                return ApiResponse.error("请指定要计算IC的因子代码（factorCodes）");
+            }
+            LocalDate date = params != null && params.get("date") != null
+                    ? LocalDate.parse(params.get("date").toString()) : null;
+            Map<String, FactorIcRecord> results = factorIcService.computeAndSaveIc(date, factorCodes);
             return ApiResponse.success("IC计算完成", results);
         } catch (Exception e) {
             log.error("[Recommendation] IC计算失败", e);
             return ApiResponse.error("IC计算失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 批量计算因子 IC/IR（按日期范围）
+     */
+    @PostMapping("/ic/compute-batch")
+    public ApiResponse<Map<String, Object>> computeIcBatch(@RequestBody Map<String, Object> params) {
+        try {
+            LocalDate startDate = LocalDate.parse(params.get("startDate").toString());
+            LocalDate endDate = LocalDate.parse(params.get("endDate").toString());
+
+            @SuppressWarnings("unchecked")
+            List<String> factorCodes = (List<String>) params.get("factorCodes");
+            if (factorCodes == null || factorCodes.isEmpty()) {
+                return ApiResponse.error("请指定要计算IC的因子代码（factorCodes）");
+            }
+
+            Map<LocalDate, Map<String, FactorIcRecord>> results = factorIcService.computeAndSaveIcBatch(startDate, endDate, factorCodes);
+
+            int totalDays = results.size();
+            int totalRecords = results.values().stream().mapToInt(Map::size).sum();
+
+            // 将 LocalDate key 转为 String，确保前端 JSON 解析正确
+            Map<String, Map<String, FactorIcRecord>> stringKeyResults = new LinkedHashMap<>();
+            for (java.util.Map.Entry<LocalDate, Map<String, FactorIcRecord>> entry : results.entrySet()) {
+                stringKeyResults.put(entry.getKey().toString(), entry.getValue());
+            }
+
+            Map<String, Object> summary = new HashMap<>();
+            summary.put("startDate", startDate.toString());
+            summary.put("endDate", endDate.toString());
+            summary.put("totalDays", totalDays);
+            summary.put("totalRecords", totalRecords);
+            summary.put("factorCount", factorCodes.size());
+            summary.put("results", stringKeyResults);
+
+            return ApiResponse.success(String.format("批量IC计算完成: %d因子 × %d天 = %d条记录", factorCodes.size(), totalDays, totalRecords), summary);
+        } catch (Exception e) {
+            log.error("[Recommendation] 批量IC计算失败", e);
+            return ApiResponse.error("批量IC计算失败: " + e.getMessage());
         }
     }
 
@@ -152,5 +205,7 @@ public class RecommendationController {
         private String factorProfile;
         /** 策略ID，从策略列表选择，优先于 factorProfile */
         private Long strategyId;
+        /** 权重模式: STATIC(固定权重) / IC(动态IC加权) */
+        private String weightMode;
     }
 }

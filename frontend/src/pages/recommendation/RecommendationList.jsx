@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { Card, Table, Button, Tag, Select, Space, Statistic, Row, Col, Typography, Tooltip, Spin, message, Progress, DatePicker } from 'antd';
+import { Card, Table, Button, Tag, Select, Space, Statistic, Row, Col, Typography, Tooltip, Spin, message, Progress, DatePicker, Divider } from 'antd';
 import dayjs from 'dayjs';
 import { ThunderboltOutlined, ReloadOutlined, LineChartOutlined, StockOutlined, RiseOutlined, FallOutlined, MinusOutlined, QuestionCircleOutlined } from '@ant-design/icons';
 import { recommendationApi } from '../../api';
@@ -32,6 +32,34 @@ function formatMarketCap(val) {
   return val.toFixed(0);
 }
 
+// ── 因子元信息 ──
+const factorMeta = {
+  MOM20: { cat: '动量', desc: '20日涨幅' },
+  MOM5: { cat: '动量', desc: '5日涨幅' },
+  MTM6: { cat: '动量', desc: '6日动量' },
+  VOL20: { cat: '波动', desc: '年化波动率' },
+  VAL_PE_TTM: { cat: '价值', desc: '市盈率TTM' },
+  VAL_PB: { cat: '价值', desc: '市净率' },
+  VAL_PS_TTM: { cat: '价值', desc: '市销率TTM' },
+  VAL_DIVIDEND_YIELD: { cat: '价值', desc: '股息率' },
+  RSI14: { cat: '技术', desc: '14日RSI' },
+  MACD: { cat: '技术', desc: 'MACD离差值' },
+  TURN20: { cat: '流动性', desc: '20日换手率' },
+  FIN_EARNINGS_QUALITY: { cat: '财务', desc: '盈利质量' },
+  FIN_DEBT_TO_ASSET: { cat: '财务', desc: '资产负债率' },
+  FIN_REVENUE_QUALITY: { cat: '财务', desc: '营收质量' },
+  FIN_NET_PROFIT_YOY: { cat: '成长', desc: '净利润同比增长率' },
+  FIN_REVENUE_TTM_YOY: { cat: '成长', desc: '营收同比增长率' },
+};
+
+// ── IC 诊断动作配色 ──
+const DIAG_CONFIG = {
+  KEPT:    { color: '#52c41a', text: '参与加权', bg: '#f6ffed' },
+  DROPPED: { color: '#ff4d4f', text: '已剔除',   bg: '#fff1f0' },
+  REVERSED:{ color: '#fa8c16', text: '方向反转', bg: '#fff7e6' },
+  NO_DATA: { color: '#d9d9d9', text: '无数据',   bg: '#fafafa' },
+};
+
 export default function RecommendationList() {
   const [recommendations, setRecommendations] = useState([]);
   const [batchId, setBatchId] = useState(null);
@@ -43,6 +71,9 @@ export default function RecommendationList() {
   const [strategies, setStrategies] = useState([]);
   const [selectedStrategyId, setSelectedStrategyId] = useState(null);
   const [screenDate, setScreenDate] = useState(null);
+  const [factorDiagnostics, setFactorDiagnostics] = useState(null); // IC加权诊断
+  const [diagExpanded, setDiagExpanded] = useState(false); // 已剔除/异常面板默认收起
+  const [weightMode, setWeightMode] = useState('STATIC'); // 权重模式: STATIC(固定) / IC(动态IC)
 
   // 加载策略列表
   useEffect(() => {
@@ -66,24 +97,6 @@ export default function RecommendationList() {
     } catch { return null; }
     if (factors.length === 0) return null;
 
-    const factorMeta = {
-      MOM20: { cat: '动量', dir: '+', desc: '20日涨幅' },
-      MOM5: { cat: '动量', dir: '+', desc: '5日涨幅' },
-      MTM6: { cat: '动量', dir: '+', desc: '6日动量' },
-      VOL20: { cat: '波动', dir: '-', desc: '年化波动率（低波优先）' },
-      VAL_PE_TTM: { cat: '价值', dir: '-', desc: '市盈率TTM' },
-      VAL_PB: { cat: '价值', dir: '-', desc: '市净率' },
-      VAL_PS_TTM: { cat: '价值', dir: '-', desc: '市销率TTM' },
-      VAL_DIVIDEND_YIELD: { cat: '价值', dir: '+', desc: '股息率' },
-      RSI14: { cat: '技术', dir: '+', desc: '14日RSI' },
-      MACD: { cat: '技术', dir: '+', desc: 'MACD离差值' },
-      TURN20: { cat: '流动性', dir: '-', desc: '20日换手率（低换手优先）' },
-      FIN_EARNINGS_QUALITY: { cat: '财务', dir: '+', desc: '盈利质量' },
-      FIN_DEBT_TO_ASSET: { cat: '财务', dir: '-', desc: '资产负债率' },
-      FIN_REVENUE_QUALITY: { cat: '财务', dir: '+', desc: '营收质量' },
-      FIN_NET_PROFIT_YOY: { cat: '成长', dir: '+', desc: '净利润同比增长率' },
-      FIN_REVENUE_TTM_YOY: { cat: '成长', dir: '+', desc: '营收同比增长率' },
-    };
     return (
       <div style={{ fontSize: 12, lineHeight: '20px' }}>
         <div style={{ fontWeight: 'bold', marginBottom: 6, fontSize: 13 }}>{strategy.strategyName} 包含因子</div>
@@ -154,8 +167,9 @@ export default function RecommendationList() {
     setGenerating(true);
     try {
       const dateStr = screenDate ? dayjs(screenDate).format('YYYY-MM-DD') : null;
-      const result = await recommendationApi.generate(dateStr, 20, selectedStrategyId);
+      const result = await recommendationApi.generate(dateStr, 20, selectedStrategyId, weightMode);
       message.success(`推荐列表生成成功: ${result.count} 只`);
+      setFactorDiagnostics(weightMode === 'IC' ? (result.factorDiagnostics || null) : null);
       await loadRecommendations(null);
     } catch (e) {
       message.error('生成失败: ' + (e.message || '未知错误'));
@@ -219,34 +233,26 @@ export default function RecommendationList() {
       render: (v) => v != null ? <Text type="secondary">{(v * 100).toFixed(1)}</Text> : '-',
     },
     {
-      title: <Tooltip title="个股四维度综合得分（满分109）">分析得分</Tooltip>,
+      title: <Tooltip title={
+        <div style={{ fontSize: 12, lineHeight: '20px' }}>
+          <div style={{ fontWeight: 'bold', marginBottom: 6, fontSize: 13 }}>个股四维度综合得分（满分109）</div>
+          <div style={{ marginBottom: 4 }}>技术（满分30）：缠论信号+MACD+RSI+均线</div>
+          <div style={{ marginBottom: 4 }}>资金（满分25）：主力净流入+换手率+资金流向</div>
+          <div style={{ marginBottom: 4 }}>事件（满分25）：涨停炸板率+龙虎榜+舆情</div>
+          <div style={{ marginBottom: 4 }}>基本面（满分29）：PE/PB估值+盈利质量+财务健康</div>
+        </div>
+      }>分析得分</Tooltip>,
       dataIndex: 'analysisScore',
       width: 75,
-      render: (v) => v != null ? <Text>{v}/109</Text> : '-',
-    },
-    {
-      title: <Tooltip title="技术面得分（满分30）：缠论信号+MACD+RSI+均线">技术</Tooltip>,
-      dataIndex: 'technicalScore',
-      width: 55,
-      render: (v) => v != null ? <Text type="secondary">{v}</Text> : '-',
-    },
-    {
-      title: <Tooltip title="资金面得分（满分25）：主力净流入+换手率+资金流向">资金</Tooltip>,
-      dataIndex: 'capitalScore',
-      width: 55,
-      render: (v) => v != null ? <Text type="secondary">{v}</Text> : '-',
-    },
-    {
-      title: <Tooltip title="事件面得分（满分25）：涨停炸板率+龙虎榜+舆情">事件</Tooltip>,
-      dataIndex: 'eventScore',
-      width: 55,
-      render: (v) => v != null ? <Text type="secondary">{v}</Text> : '-',
-    },
-    {
-      title: <Tooltip title="基本面得分（满分29）：PE/PB估值+盈利质量+财务健康">基本面</Tooltip>,
-      dataIndex: 'fundamentalScore',
-      width: 60,
-      render: (v) => v != null ? <Text type="secondary">{v}</Text> : '-',
+      render: (v, rec) => {
+        if (v == null) return '-';
+        const detail = `技术:${rec.technicalScore ?? '-'} 资金:${rec.capitalScore ?? '-'} 事件:${rec.eventScore ?? '-'} 基本面:${rec.fundamentalScore ?? '-'}`;
+        return (
+          <Tooltip title={detail}>
+            <Text>{v}/109</Text>
+          </Tooltip>
+        );
+      },
     },
     {
       title: '建议',
@@ -279,7 +285,7 @@ export default function RecommendationList() {
         </Tooltip>
       ),
       dataIndex: 'industry',
-      width: 80,
+      width: 100,
       ellipsis: true,
       render: (v, rec) => {
         if (!v) return '-';
@@ -344,6 +350,20 @@ export default function RecommendationList() {
       dataIndex: 'closePrice',
       width: 70,
       render: (v) => v != null ? v.toFixed(2) : '-',
+    },
+    {
+      title: (
+        <Tooltip title="推荐买入价格：优先取MA20支撑位，若无法获取则取现价×0.95作为保守买入价">
+          买入价 <QuestionCircleOutlined style={{ color: '#8c8c8c', fontSize: 12, marginLeft: 2 }} />
+        </Tooltip>
+      ),
+      dataIndex: 'suggestedBuyPrice',
+      width: 80,
+      render: (v, rec) => {
+        if (v == null) return '-';
+        const isBelowClose = rec.closePrice != null && v < rec.closePrice;
+        return <Text type={isBelowClose ? 'danger' : 'secondary'}>{v.toFixed(2)}</Text>;
+      },
     },
     {
       title: '买入理由',
@@ -467,6 +487,15 @@ export default function RecommendationList() {
               ),
             }))}
           />
+          <Select
+            value={weightMode}
+            onChange={setWeightMode}
+            style={{ width: 120 }}
+            size="middle"
+          >
+            <Select.Option value="STATIC">固定权重</Select.Option>
+            <Select.Option value="IC">动态IC加权</Select.Option>
+          </Select>
           <Button
             type="primary"
             icon={<ReloadOutlined spin={generating} />}
@@ -586,6 +615,116 @@ export default function RecommendationList() {
           </Col>
         </Row>
       )}
+
+      {/* IC 加权因子诊断 */}
+      {factorDiagnostics && factorDiagnostics.length > 0 && (() => {
+        const kept = factorDiagnostics.filter(d => d.action === 'KEPT');
+        const dropped = factorDiagnostics.filter(d => d.action === 'DROPPED');
+        const reversed = factorDiagnostics.filter(d => d.action === 'REVERSED');
+        const noData = factorDiagnostics.filter(d => d.action === 'NO_DATA');
+        const abnormalCount = dropped.length + reversed.length + noData.length;
+
+        return (
+          <Card
+            size="small"
+            style={{ marginBottom: 16 }}
+            title={
+              <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0 8px' }}>
+                <span>
+                  <ThunderboltOutlined style={{ marginRight: 6 }} />
+                  IC 加权因子诊断
+                  <Tooltip title="基于各因子近60日IC均值，自动判断是否参与本次选股。IC>0的因子按IC占比分配权重，IC≤0的因子被自动剔除。">
+                    <QuestionCircleOutlined style={{ color: '#91caff', fontSize: 13, marginLeft: 6 }} />
+                  </Tooltip>
+                </span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                  <Tag color="success" style={{ fontSize: 11, marginRight: 0, lineHeight: '18px' }}>参与加权 {kept.length}</Tag>
+                  {dropped.length > 0 && <Tag color="error" style={{ fontSize: 11, marginRight: 0, lineHeight: '18px' }}>已剔除 {dropped.length}</Tag>}
+                  {reversed.length > 0 && <Tag color="warning" style={{ fontSize: 11, marginRight: 0, lineHeight: '18px' }}>方向反转 {reversed.length}</Tag>}
+                  {noData.length > 0 && <Tag style={{ fontSize: 11, marginRight: 0, lineHeight: '18px' }}>无数据 {noData.length}</Tag>}
+                  {abnormalCount > 0 && (
+                    <span
+                      onClick={(e) => { e.stopPropagation(); setDiagExpanded(v => !v); }}
+                      style={{ cursor: 'pointer', color: '#ff4d4f', fontSize: 12, display: 'flex', alignItems: 'center', gap: 4, marginLeft: 4 }}
+                    >
+                      <span style={{ display: 'inline-block', transform: diagExpanded ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>▶</span>
+                      已剔除/异常 ({abnormalCount}个)
+                    </span>
+                  )}
+                </span>
+              </div>
+            }
+          >
+            <div style={{ fontSize: 13 }}>
+              {/* 参与加权的因子 */}
+              {kept.length > 0 && (
+                <div style={{ marginBottom: abnormalCount > 0 ? 16 : 0 }}>
+                  <div style={{ fontWeight: 600, marginBottom: 8, color: '#52c41a' }}>
+                    参与加权 ({kept.length}个)
+                  </div>
+                  <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12 }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid #f0f0f0', color: '#8c8c8c' }}>
+                        <th style={{ textAlign: 'left', padding: '4px 8px', width: 100 }}>因子代码</th>
+                        <th style={{ textAlign: 'left', padding: '4px 8px', width: 70 }}>分类</th>
+                        <th style={{ textAlign: 'right', padding: '4px 8px', width: 80 }}>IC均值</th>
+                        <th style={{ textAlign: 'right', padding: '4px 8px', width: 80 }}>原始权重</th>
+                        <th style={{ textAlign: 'right', padding: '4px 8px', width: 80 }}>调整后权重</th>
+                        <th style={{ textAlign: 'left', padding: '4px 8px' }}>说明</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {kept.map((d, i) => (
+                        <tr key={i} style={{ borderBottom: '1px solid #fafafa' }}>
+                          <td style={{ padding: '4px 8px', fontFamily: 'monospace' }}>{d.factorCode}</td>
+                          <td style={{ padding: '4px 8px' }}>{factorMeta[d.factorCode]?.cat || '-'}</td>
+                          <td style={{ padding: '4px 8px', textAlign: 'right', color: '#52c41a' }}>{(d.icMean).toFixed(4)}</td>
+                          <td style={{ padding: '4px 8px', textAlign: 'right' }}>{d.originalWeight.toFixed(2)}</td>
+                          <td style={{ padding: '4px 8px', textAlign: 'right', fontWeight: 600, color: '#1890ff' }}>{d.adjustedWeight.toFixed(4)}</td>
+                          <td style={{ padding: '4px 8px', color: '#595959' }}>{d.reason}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* 已剔除/异常详情 */}
+              {diagExpanded && abnormalCount > 0 && (
+                <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid #f0f0f0', color: '#8c8c8c' }}>
+                      <th style={{ textAlign: 'left', padding: '4px 8px', width: 100 }}>因子代码</th>
+                      <th style={{ textAlign: 'left', padding: '4px 8px', width: 70 }}>分类</th>
+                      <th style={{ textAlign: 'right', padding: '4px 8px', width: 80 }}>IC均值</th>
+                      <th style={{ textAlign: 'right', padding: '4px 8px', width: 80 }}>原始权重</th>
+                      <th style={{ textAlign: 'left', padding: '4px 8px', width: 90 }}>状态</th>
+                      <th style={{ textAlign: 'left', padding: '4px 8px' }}>原因</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...dropped, ...reversed, ...noData].map((d, i) => {
+                      const cfg = DIAG_CONFIG[d.action] || {};
+                      return (
+                        <tr key={i} style={{ borderBottom: '1px solid #fafafa' }}>
+                          <td style={{ padding: '4px 8px', fontFamily: 'monospace' }}>{d.factorCode}</td>
+                          <td style={{ padding: '4px 8px' }}>{factorMeta[d.factorCode]?.cat || '-'}</td>
+                          <td style={{ padding: '4px 8px', textAlign: 'right', color: (d.icMean || 0) < 0 ? '#ff4d4f' : '#8c8c8c' }}>{(d.icMean || 0).toFixed(4)}</td>
+                          <td style={{ padding: '4px 8px', textAlign: 'right' }}>{(d.originalWeight || 0).toFixed(2)}</td>
+                          <td style={{ padding: '4px 8px' }}>
+                            <Tag color={cfg.color}>{cfg.text}</Tag>
+                          </td>
+                          <td style={{ padding: '4px 8px', color: '#595959' }}>{d.reason}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </Card>
+        );
+      })()}
 
       {/* 推荐列表 */}
       <Card size="small" bodyStyle={{ padding: 0 }}>
