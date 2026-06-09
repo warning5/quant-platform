@@ -2,9 +2,10 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { Card, Table, Button, Tag, Select, Space, Statistic, Row, Col, Typography, Tooltip, Spin, message, Progress, DatePicker, Divider } from 'antd';
 import dayjs from 'dayjs';
-import { ThunderboltOutlined, ReloadOutlined, LineChartOutlined, StockOutlined, RiseOutlined, FallOutlined, MinusOutlined, QuestionCircleOutlined } from '@ant-design/icons';
+import { ThunderboltOutlined, ReloadOutlined, LineChartOutlined, StockOutlined, RiseOutlined, FallOutlined, MinusOutlined, QuestionCircleOutlined, RadarChartOutlined } from '@ant-design/icons';
 import { recommendationApi } from '../../api';
 import api from '../../api';
+import ReactEcharts from 'echarts-for-react';
 
 const { Title, Text } = Typography;
 
@@ -21,6 +22,28 @@ const ACTION_CONFIG = {
   BUY:  { color: 'red',    text: '买入' },
   HOLD: { color: 'blue',   text: '持有' },
   SELL: { color: 'green',  text: '卖出' },
+};
+
+// ── 高相关行业分组（与后端 RecommendationService.INDUSTRY_CORR_GROUPS 一致） ──
+const INDUSTRY_CORR_GROUPS = [
+  ['银行', '非银金融'],
+  ['房地产开发', '房地产服务', '建筑装饰', '建筑材料'],
+  ['煤炭', '石油石化', '电力设备'],
+  ['食品饮料', '农林牧渔', '纺织服饰'],
+  ['计算机', '通信', '传媒'],
+  ['汽车', '机械设备'],
+  ['医药生物', '公用事业'],
+  ['电子', '国防军工'],
+];
+const CORR_GROUP_LABEL = {
+  '银行': '金融板块',
+  '房地产开发': '地产链',
+  '煤炭': '能源链',
+  '食品饮料': '消费链',
+  '计算机': 'TMT',
+  '汽车': '制造链',
+  '医药生物': '防御板块',
+  '电子': '科技制造',
 };
 
 // ── 市值格式化 ──
@@ -75,6 +98,10 @@ export default function RecommendationList() {
   const [diagExpanded, setDiagExpanded] = useState(false); // 已剔除/异常面板默认收起
   const [weightMode, setWeightMode] = useState('STATIC'); // 权重模式: STATIC(固定) / IC(动态IC)
   const [icDataDate, setIcDataDate] = useState(null); // IC数据可用日期
+  const [batchHistory, setBatchHistory] = useState(null); // 历史批次表现汇总
+  const [topBottom, setTopBottom] = useState(null); // 当前批次最佳/最差
+  const [trackingLoading, setTrackingLoading] = useState(false); // 追踪触发中
+  const [qualityTag, setQualityTag] = useState(null); // 当前批次质量标签
 
   // 加载策略列表
   useEffect(() => {
@@ -134,6 +161,7 @@ export default function RecommendationList() {
         data = await recommendationApi.getLatest();
       }
       const list = Array.isArray(data) ? data : [];
+      list.sort((a, b) => (b.finalScore || 0) - (a.finalScore || 0));
       setRecommendations(list);
       if (list.length > 0) {
         setBatchId(list[0].batchId);
@@ -184,6 +212,69 @@ export default function RecommendationList() {
     loadRecommendations(value);
   };
 
+  // 加载批次历史表现和当前批次复盘
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const hist = await recommendationApi.getBatchHistory(20);
+        setBatchHistory(hist);
+      } catch { /* ignore */ }
+    };
+    load();
+  }, [batchId]);
+
+  // 当 batchId 变化时加载当批次的最佳/最差，并从 batchHistory 取近5期滚动平均质量标签
+  useEffect(() => {
+    if (!batchId) { setTopBottom(null); setQualityTag(null); return; }
+    const load = async () => {
+      try {
+        const tb = await recommendationApi.getBatchTopBottom(batchId);
+        setTopBottom(tb);
+      } catch { setTopBottom(null); }
+      // 质量标签：优先从 batchHistory（后端已计算近5期滚动平均）取
+      if (batchHistory && batchHistory.length > 0) {
+        const entry = batchHistory.find(b => b.batchId === batchId);
+        if (entry && entry.qualityTag) {
+          setQualityTag(entry.qualityTag);
+        } else {
+          setQualityTag(null);
+        }
+      } else {
+        setQualityTag(null);
+      }
+    };
+    load();
+  }, [batchId, batchHistory]);
+
+  // 手动触发表现追踪
+  const handleTrack = async () => {
+    setTrackingLoading(true);
+    try {
+      const res = await recommendationApi.trackPerformance();
+      message.success(`表现追踪完成，更新 ${res.updated} 条记录`);
+      // 刷新推荐列表
+      if (batchId) {
+        loadRecommendations(batchId);
+      } else {
+        loadRecommendations(null);
+      }
+      // 刷新历史命中率趋势图、质量标签、复盘数据
+      try {
+        const hist = await recommendationApi.getBatchHistory(20);
+        setBatchHistory(hist);
+      } catch { /* ignore */ }
+      if (batchId) {
+        try {
+          const tb = await recommendationApi.getBatchTopBottom(batchId);
+          setTopBottom(tb);
+        } catch { /* ignore */ }
+      }
+    } catch (e) {
+      message.error('追踪失败: ' + (e.message || '未知错误'));
+    }
+    setTrackingLoading(false);
+  };
+
   const rc = regime ? REGIME_CONFIG[regime] : null;
 
   const columns = [
@@ -199,7 +290,10 @@ export default function RecommendationList() {
       dataIndex: 'stockCode',
       width: 95,
       fixed: 'left',
-      render: (v) => <Link to={`/stock-analysis?code=${v}`}>{v}</Link>,
+      render: (v) => {
+        const pureCode = v ? v.replace(/\.(SH|SZ)$/i, '') : v;
+        return <Link to={`/stock-analysis?code=${pureCode}`}>{pureCode}</Link>;
+      },
     },
     {
       title: '名称',
@@ -235,23 +329,34 @@ export default function RecommendationList() {
       render: (v) => v != null ? <Text type="secondary">{(v * 100).toFixed(1)}</Text> : '-',
     },
     {
-      title: <Tooltip title={
+      title: <Tooltip overlayStyle={{ maxWidth: 360 }} title={
         <div style={{ fontSize: 12, lineHeight: '20px' }}>
-          <div style={{ fontWeight: 'bold', marginBottom: 6, fontSize: 13 }}>个股四维度综合得分（满分109）</div>
+          <div style={{ fontWeight: 'bold', marginBottom: 6, fontSize: 13 }}>个股六维度综合得分（满分134）</div>
           <div style={{ marginBottom: 4 }}>技术（满分30）：缠论信号+MACD+RSI+均线</div>
           <div style={{ marginBottom: 4 }}>资金（满分25）：主力净流入+换手率+资金流向</div>
           <div style={{ marginBottom: 4 }}>事件（满分25）：涨停炸板率+龙虎榜+舆情</div>
           <div style={{ marginBottom: 4 }}>基本面（满分29）：PE/PB估值+盈利质量+财务健康</div>
+          <div style={{ marginBottom: 4 }}>风险（满分15）：最大回撤+波动率+ATR/价格比</div>
+          <div style={{ marginBottom: 4 }}>流动性（满分10）：20日均成交额+换手率适中度</div>
         </div>
       }>分析得分</Tooltip>,
       dataIndex: 'analysisScore',
       width: 75,
       render: (v, rec) => {
-        if (v == null) return '-';
-        const detail = `技术:${rec.technicalScore ?? '-'} 资金:${rec.capitalScore ?? '-'} 事件:${rec.eventScore ?? '-'} 基本面:${rec.fundamentalScore ?? '-'}`;
+        if (v == null && rec.technicalScore == null) return '-';
+        const detail = (
+          <div style={{ fontSize: 12, lineHeight: '20px' }}>
+            <div>技术: {rec.technicalScore ?? '-'}/30</div>
+            <div>资金: {rec.capitalScore ?? '-'}/25</div>
+            <div>事件: {rec.eventScore ?? '-'}/25</div>
+            <div>基本面: {rec.fundamentalScore ?? '-'}/29</div>
+            <div style={{ borderTop: '1px solid #434343', marginTop: 2, paddingTop: 2 }}>风险: {rec.riskScore ?? '-'}/15</div>
+            <div>流动性: {rec.liquidityScore ?? '-'}/10</div>
+          </div>
+        );
         return (
-          <Tooltip title={detail}>
-            <Text>{v}/109</Text>
+          <Tooltip overlayStyle={{ maxWidth: 360 }} title={detail}>
+            <Text>{v != null ? v : '-'}</Text>
           </Tooltip>
         );
       },
@@ -276,10 +381,15 @@ export default function RecommendationList() {
               <div style={{ marginBottom: 4 }}>📉 熊市（BEAR）：行业指数 MA20 &lt; MA60，趋势向下</div>
               <div style={{ marginBottom: 4 }}>↔ 震荡（SIDEWAYS）：MA20 与 MA60 接近，无明确趋势</div>
               <div style={{ marginTop: 8, fontWeight: 'bold', fontSize: 13 }}>行业动量标签说明</div>
-              <div style={{ marginBottom: 4 }}>🔥 强势行业（z-score &gt; 0.3）：当日平均涨幅显著跑赢大盘，选股上限放宽至 6 只</div>
-              <div style={{ marginBottom: 4 }}>❄️ 弱势行业（z-score &lt; -0.3）：当日平均涨幅显著跑输大盘，选股上限收紧至 1 只</div>
+              <div style={{ marginBottom: 4 }}>🔥 强势行业（近5日 z-score &gt; 0.3）：近5日平均涨幅显著跑赢大盘，选股上限放宽至 6 只</div>
+              <div style={{ marginBottom: 4 }}>❄️ 弱势行业（近5日 z-score &lt; -0.3）：近5日平均涨幅显著跑输大盘，选股上限收紧至 1 只</div>
               <div style={{ marginBottom: 4 }}>无标签：中等强度（-0.3 ~ 0.3），选股上限默认 3 只</div>
-              <div style={{ marginTop: 8, color: '#8c8c8c' }}>行业分散化限制：强势行业最多 6 只，中等 3 只，弱势 1 只</div>
+              <div style={{ marginTop: 8, color: '#8c8c8c' }}>行业分散化限制：强势行业最多 6 只，中等 3 只，弱势 1 只（基于近5日平滑均值，避免单日极端值）</div>
+              <div style={{ marginTop: 8, fontWeight: 'bold', fontSize: 13, color: '#b37feb' }}>高相关行业分组说明</div>
+              <div style={{ marginBottom: 4 }}>🏷 紫色标签 = 该股票所属高相关组（组内各行业走势相关系数 &gt; 0.7）</div>
+              <div style={{ marginBottom: 4 }}>📦 同组内行业<b>共享</b>分散化名额，避免"伪分散"（如银行+非银金融实际一跌全跌）</div>
+              <div style={{ marginBottom: 4 }}>⚠ <Tag color="orange" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>降权</Tag> = 该股票因同组名额已满被移至推荐列表末尾</div>
+              <div style={{ marginTop: 4, color: '#8c8c8c' }}>分组：金融板块 · 地产链 · 能源链 · 消费链 · TMT · 制造链 · 防御板块 · 科技制造</div>
             </div>
           }
         >
@@ -287,12 +397,14 @@ export default function RecommendationList() {
         </Tooltip>
       ),
       dataIndex: 'industry',
-      width: 100,
+      width: 130,
       ellipsis: true,
       render: (v, rec) => {
         if (!v) return '-';
         const regime = rec.industryRegime;
         const momentum = rec.industryMomentum;
+        const gKey = rec.corrGroup;
+        const gLabel = gKey ? CORR_GROUP_LABEL[gKey] : null;
         let icon = null;
         let tag = null;
         if (regime === 'BULL') icon = '📈';
@@ -302,9 +414,17 @@ export default function RecommendationList() {
           if (momentum > 0.3) tag = '🔥';
           else if (momentum < -0.3) tag = '❄️';
         }
+        const groupTooltip = gLabel ? `${gLabel}: ${(INDUSTRY_CORR_GROUPS.find(g => g[0] === gKey) || []).join('、')} 走势高相关，共享分散化名额` : '';
+        const demotedTag = rec.diversificationDemoted
+          ? <Tag color="orange" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px', marginLeft: 4 }}>降权</Tag>
+          : null;
         return (
-          <Tooltip title={`${v}${icon ? ' ' + icon : ''}${tag ? ' ' + tag : ''}`}>
-            <span>{icon}{tag}{v}</span>
+          <Tooltip title={`${v}${icon ? ' ' + icon : ''}${tag ? ' ' + tag : ''}${groupTooltip ? '\n' + groupTooltip : ''}${rec.diversificationDemoted ? '\n⚠ 因行业分散化限额被降权至末尾' : ''}`}>
+            <span style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
+              {gLabel && <Tag color="purple" style={{ fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>{gLabel}</Tag>}
+              <span>{icon}{tag}{v}</span>
+              {demotedTag}
+            </span>
           </Tooltip>
         );
       },
@@ -316,11 +436,11 @@ export default function RecommendationList() {
           title={
             <div style={{ fontSize: 12, lineHeight: '20px' }}>
               <div style={{ fontWeight: 'bold', marginBottom: 6, fontSize: 13 }}>行业强度说明</div>
-              <div style={{ marginBottom: 6 }}>行业强度 = (行业当日平均涨跌幅 - 全市场行业均值) / 标准差，即 z-score。</div>
+              <div style={{ marginBottom: 6 }}>行业强度 = (行业近5日平均涨跌幅 - 全市场行业均值) / 标准差，即 z-score（基于近5日平滑均值，避免单日极端值导致排名跳变）。</div>
               <div style={{ marginBottom: 4 }}><b>数值含义：</b></div>
-              <div style={{ marginBottom: 4 }}>• &gt; 0.3（红色）：强势行业，当日涨幅显著跑赢市场平均，选股上限放宽至 6 只</div>
+              <div style={{ marginBottom: 4 }}>• &gt; 0.3（红色）：强势行业，近5日涨幅显著跑赢市场平均，选股上限放宽至 6 只</div>
               <div style={{ marginBottom: 4 }}>• -0.3 ~ 0.3（灰色）：中等强度，选股上限默认 3 只</div>
-              <div style={{ marginBottom: 4 }}>• &lt; -0.3（绿色）：弱势行业，当日涨幅显著跑输市场平均，选股上限收紧至 1 只</div>
+              <div style={{ marginBottom: 4 }}>• &lt; -0.3（绿色）：弱势行业，近5日涨幅显著跑输市场平均，选股上限收紧至 1 只</div>
               <div style={{ marginTop: 8, fontWeight: 'bold' }}>作用机制：</div>
               <div style={{ marginBottom: 4 }}>1. 行业分散化：根据强度动态调整同行业入选数量上限（强势≤6，中等≤3，弱势≤1）</div>
               <div style={{ marginBottom: 4 }}>2. 因子融合加分：强势行业个股最终得分 +0.06，弱势行业 -0.06</div>
@@ -430,16 +550,47 @@ export default function RecommendationList() {
           <Title level={4} style={{ margin: 0 }}>
             <ThunderboltOutlined /> 智能推荐
             <Tooltip
-              overlayStyle={{ maxWidth: 480 }}
+              overlayStyle={{ maxWidth: 520 }}
               title={
                 <div style={{ fontSize: 12, lineHeight: '20px' }}>
                   <div style={{ fontWeight: 'bold', marginBottom: 6, fontSize: 13 }}>推荐生成流程</div>
                   <div style={{ fontFamily: 'monospace', marginBottom: 8 }}>
                     全市场 ~5000只 A股<br />
                     &nbsp;→ <b>多因子筛选</b>（按选定因子组合筛选）<br />
-                    &nbsp;&nbsp;→ <b>个股深度分析</b>（四维度：技术/资金/事件/基本面）<br />
+                    &nbsp;&nbsp;→ <b>个股深度分析</b>（六维度：技术/资金/事件/基本面/风险/流动性）<br />
                     &nbsp;&nbsp;&nbsp;→ <b>Regime-Adaptive融合</b>（市场环境自适应权重）<br />
                     &nbsp;&nbsp;&nbsp;&nbsp;→ <b>行业分散化</b>（同行业≤3只）
+                  </div>
+                  <div style={{ fontWeight: 'bold', marginBottom: 4, fontSize: 13, borderTop: '1px solid #444', paddingTop: 6 }}>综合得分计算过程</div>
+                  <div style={{ marginBottom: 4 }}>
+                    <b>finalScore = wFactor × 因子得分 + wAnalysis × 分析得分 + 行业加分</b>
+                  </div>
+                  <div style={{ marginBottom: 4 }}>
+                    <b>① 因子得分</b>：用户选定因子组合的 Z-score 标准化加权综合得分（0~1）
+                  </div>
+                  <div style={{ marginBottom: 4 }}>
+                    <b>② 分析得分</b>（134分制，归一化到 0~1）：六维度加权求和
+                  </div>
+                  <div style={{ marginLeft: 8, marginBottom: 2 }}>• 技术面（满分30）：RSI、MACD、MTM6 等</div>
+                  <div style={{ marginLeft: 8, marginBottom: 2 }}>• 资金面（满分25）：主力净流入、换手率</div>
+                  <div style={{ marginLeft: 8, marginBottom: 2 }}>• 事件面（满分25）：利好事件驱动</div>
+                  <div style={{ marginLeft: 8, marginBottom: 2 }}>• 基本面（满分29）：盈利增速、估值、分红</div>
+                  <div style={{ marginLeft: 8, marginBottom: 2 }}>• 风险（满分15）：最大回撤、波动率、ATR</div>
+                  <div style={{ marginLeft: 8, marginBottom: 4 }}>• 流动性（满分10）：成交额、换手率适中度</div>
+                  <div style={{ marginBottom: 4 }}>
+                    <b>③ 市场环境权重</b>（wFactor / wAnalysis）：根据 Regime 动态分配
+                  </div>
+                  <div style={{ marginLeft: 8, marginBottom: 2 }}>• 📈 牛市（BULL）：因子60% / 分析40%</div>
+                  <div style={{ marginLeft: 8, marginBottom: 2 }}>• 📉 熊市（BEAR）：因子40% / 分析60%</div>
+                  <div style={{ marginLeft: 8, marginBottom: 4 }}>• ↔️ 震荡（SIDEWAYS）：因子50% / 分析50%</div>
+                  <div style={{ marginBottom: 4 }}>
+                    <b>④ 行业轮动加分</b>：基于近5日行业动量校准值（非固定值），加速期 ×1.5，减速期 ×0.5
+                  </div>
+                  <div style={{ marginBottom: 4 }}>
+                    <b>⑤ 利率环境影响</b>：利率下行加技术面/资金面权重，利率上行加基本面/风险权重
+                  </div>
+                  <div style={{ marginBottom: 2 }}>
+                    <b>⑥ 市值风格</b>：小盘风格时，因子权重再 +0.05（偏向量化因子选股）
                   </div>
                 </div>
               }
@@ -591,6 +742,51 @@ export default function RecommendationList() {
                       <div style={{ marginTop: 6, color: '#8c8c8c' }}>
                         综合得分 = 因子得分 × {weightInfo.factorWeight != null ? (weightInfo.factorWeight * 100).toFixed(0) : '?'}% + 分析得分 × {weightInfo.analysisWeight != null ? (weightInfo.analysisWeight * 100).toFixed(0) : '?'}%
                       </div>
+
+                      <div style={{ fontWeight: 'bold', marginTop: 10, marginBottom: 4, borderTop: '1px solid #555', paddingTop: 8 }}>分析得分六维度权重分配</div>
+                      <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 11 }}>
+                        <thead>
+                          <tr style={{ borderBottom: '1px solid #434343' }}>
+                            <th style={{ padding: '2px 4px', textAlign: 'left' }}>环境</th>
+                            <th style={{ padding: '2px 4px', textAlign: 'center' }}>技术面</th>
+                            <th style={{ padding: '2px 4px', textAlign: 'center' }}>资金面</th>
+                            <th style={{ padding: '2px 4px', textAlign: 'center' }}>事件面</th>
+                            <th style={{ padding: '2px 4px', textAlign: 'center' }}>基本面</th>
+                            <th style={{ padding: '2px 4px', textAlign: 'center' }}>风险</th>
+                            <th style={{ padding: '2px 4px', textAlign: 'center' }}>流动性</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr style={{ color: '#cf1322' }}>
+                            <td style={{ padding: '2px 4px' }}>牛市</td>
+                            <td style={{ padding: '2px 4px', textAlign: 'center' }}>30%</td>
+                            <td style={{ padding: '2px 4px', textAlign: 'center' }}>25%</td>
+                            <td style={{ padding: '2px 4px', textAlign: 'center' }}>10%</td>
+                            <td style={{ padding: '2px 4px', textAlign: 'center' }}>15%</td>
+                            <td style={{ padding: '2px 4px', textAlign: 'center' }}>10%</td>
+                            <td style={{ padding: '2px 4px', textAlign: 'center' }}>10%</td>
+                          </tr>
+                          <tr style={{ color: '#3f8600' }}>
+                            <td style={{ padding: '2px 4px' }}>熊市</td>
+                            <td style={{ padding: '2px 4px', textAlign: 'center' }}>15%</td>
+                            <td style={{ padding: '2px 4px', textAlign: 'center' }}>10%</td>
+                            <td style={{ padding: '2px 4px', textAlign: 'center' }}>10%</td>
+                            <td style={{ padding: '2px 4px', textAlign: 'center' }}>35%</td>
+                            <td style={{ padding: '2px 4px', textAlign: 'center' }}>20%</td>
+                            <td style={{ padding: '2px 4px', textAlign: 'center' }}>10%</td>
+                          </tr>
+                          <tr style={{ color: '#597ef7' }}>
+                            <td style={{ padding: '2px 4px' }}>震荡</td>
+                            <td style={{ padding: '2px 4px', textAlign: 'center' }}>25%</td>
+                            <td style={{ padding: '2px 4px', textAlign: 'center' }}>20%</td>
+                            <td style={{ padding: '2px 4px', textAlign: 'center' }}>10%</td>
+                            <td style={{ padding: '2px 4px', textAlign: 'center' }}>20%</td>
+                            <td style={{ padding: '2px 4px', textAlign: 'center' }}>15%</td>
+                            <td style={{ padding: '2px 4px', textAlign: 'center' }}>10%</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                      <div style={{ marginTop: 4, color: '#8c8c8c' }}>注：风险在熊市权重提升至20%，基本面也同步提升至35%</div>
                     </div>
                   )
                   : '旧批次未记录权重信息，重新生成推荐后可显示'}>
@@ -607,7 +803,7 @@ export default function RecommendationList() {
           <Col span={4}>
             <Card size="small" bodyStyle={{ padding: '12px 16px' }}>
               <Statistic
-                title={<span>选股范围 <Tooltip title="从全市场约5000+只A股中，先用12个多因子（动量/波动/估值/技术/流动性/财务质量/成长）筛选出Top50候选，再对其中N只做深度四维度分析，最终经行业分散化后输出推荐结果"><QuestionCircleOutlined style={{ color: '#8c8c8c', fontSize: 12, marginLeft: 2 }} /></Tooltip></span>}
+                title={<span>选股范围 <Tooltip title="从全市场约5000+只A股中，先用12个多因子（动量/波动/估值/技术/流动性/财务质量/成长）筛选出Top50候选，再对其中N只做深度六维度分析（技术/资金/事件/基本面/风险/流动性），最终经行业分散化后输出推荐结果"><QuestionCircleOutlined style={{ color: '#8c8c8c', fontSize: 12, marginLeft: 2 }} /></Tooltip></span>}
                 value={recommendations.length}
                 suffix="只"
                 prefix={<ThunderboltOutlined />}
@@ -748,6 +944,85 @@ export default function RecommendationList() {
             size="small"
             scroll={{ x: 1400 }}
             pagination={false}
+            expandable={{
+              expandedRowRender: (rec) => {
+                const dims = [
+                  { name: '技术', val: rec.technicalScore || 0, max: 30 },
+                  { name: '资金', val: rec.capitalScore || 0, max: 25 },
+                  { name: '事件', val: rec.eventScore || 0, max: 25 },
+                  { name: '基本面', val: rec.fundamentalScore || 0, max: 29 },
+                  { name: '风险', val: rec.riskScore || 0, max: 15 },
+                  { name: '流动性', val: rec.liquidityScore || 0, max: 10 },
+                ];
+                const radarOption = {
+                  radar: {
+                    indicator: dims.map(d => ({ name: `${d.name}\n(${d.max}分)`, max: d.max })),
+                    shape: 'circle',
+                    center: ['50%', '55%'],
+                    radius: '65%',
+                    axisName: { color: '#666', fontSize: 11 },
+                    splitArea: { areaStyle: { color: ['rgba(114,46,209,0.02)', 'rgba(114,46,209,0.02)', 'rgba(114,46,209,0.04)', 'rgba(114,46,209,0.04)', 'rgba(114,46,209,0.06)', 'rgba(114,46,209,0.06)'] } },
+                  },
+                  series: [{
+                    type: 'radar',
+                    symbol: 'circle',
+                    symbolSize: 4,
+                    data: [{
+                      value: dims.map(d => d.val),
+                      name: rec.stockName,
+                      areaStyle: { color: 'rgba(114,46,209,0.15)' },
+                      lineStyle: { color: '#722ed1', width: 2 },
+                      itemStyle: { color: '#722ed1' },
+                    }],
+                  }],
+                };
+                const total6d = dims.reduce((s, d) => s + d.val, 0);
+                return (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 24, padding: '8px 16px', background: '#fafafa' }}>
+                    <ReactEcharts option={radarOption} style={{ width: 280, height: 220 }} />
+                    <div style={{ flex: 1, fontSize: 13 }}>
+                      <div style={{ fontWeight: 600, marginBottom: 12, fontSize: 14 }}>📊 {rec.stockName}（{rec.stockCode}）六维度评分详情</div>
+                      <Row gutter={[16, 8]}>
+                        {dims.map((d) => {
+                          const pct = d.max > 0 ? Math.round(d.val / d.max * 100) : 0;
+                          let color = '#52c41a';
+                          if (pct < 40) color = '#ff4d4f';
+                          else if (pct < 70) color = '#fa8c16';
+                          return (
+                            <Col span={12} key={d.name}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <Text style={{ width: 50, textAlign: 'right', fontSize: 12 }}>{d.name}</Text>
+                                <Progress percent={pct} size="small" style={{ flex: 1, margin: 0 }} strokeColor={color} />
+                                <Text strong style={{ width: 55, fontSize: 12 }}>{d.val}/{d.max}</Text>
+                              </div>
+                            </Col>
+                          );
+                        })}
+                      </Row>
+                      <div style={{ marginTop: 12, padding: '6px 12px', background: '#fff', borderRadius: 4, border: '1px solid #f0f0f0' }}>
+                        <Text type="secondary" style={{ fontSize: 12 }}>
+                          六维度总分: <Text strong>{total6d}</Text>/134
+                          {rec.riskScore > 0 && <span style={{ marginLeft: 12 }}>🔻 风险: {rec.riskScore}/15（回撤/波动率/ATR）</span>}
+                          {rec.liquidityScore > 0 && <span style={{ marginLeft: 12 }}>💧 流动性: {rec.liquidityScore}/10（成交额/换手率）</span>}
+                        </Text>
+                      </div>
+                    </div>
+                  </div>
+                );
+              },
+              rowExpandable: (rec) => rec.technicalScore != null || rec.riskScore != null,
+              expandIcon: ({ expanded, onExpand, record }) => {
+                if (record.technicalScore == null && record.riskScore == null) return null;
+                return (
+                  <span
+                    onClick={e => onExpand(record, e)}
+                    style={{ cursor: 'pointer', color: '#722ed1', fontSize: 16 }}
+                  >
+                    <RadarChartOutlined rotate={expanded ? 90 : 0} />
+                  </span>
+                );
+              },
+            }}
             locale={{ emptyText: recommendations.length === 0 && !loading
               ? '暂无推荐数据，点击「生成推荐」开始'
               : '加载中...'
@@ -756,8 +1031,358 @@ export default function RecommendationList() {
         </Spin>
       </Card>
 
+      {/* 表现追踪面板 */}
+      {batchHistory && batchHistory.length > 0 && (() => {
+        const trackedBatches = batchHistory.filter(b => b.tracked > 0);
+        const latest = batchHistory[0];
+        const avgHitRate = trackedBatches.length > 0
+          ? trackedBatches.reduce((s, b) => s + (b.hitRate || 0), 0) / trackedBatches.length
+          : 0;
+        const avgDayRet = trackedBatches.length > 0
+          ? trackedBatches.reduce((s, b) => s + (b.avgDayReturn || 0), 0) / trackedBatches.length
+          : 0;
+
+        // 命中率趋势图
+        const trendOption = {
+          grid: { top: 30, right: 20, bottom: 30, left: 50 },
+          tooltip: {
+            trigger: 'axis',
+            formatter: params => {
+              if (!params || params.length === 0) return '';
+              const p = params[0];
+              const batch = batchHistory.find(b => b.batchId === p.axisValue);
+              if (!batch) return '';
+              return `<b>${p.axisValue}</b><br/>
+                次日命中率: ${(batch.hitRate * 100).toFixed(0)}%<br/>
+                次日均收益: ${batch.avgDayReturn != null ? (batch.avgDayReturn > 0 ? '+' : '') + batch.avgDayReturn.toFixed(2) + '%' : '-'}<br/>
+                一周均收益: ${batch.avgWeekReturn != null ? (batch.avgWeekReturn > 0 ? '+' : '') + batch.avgWeekReturn.toFixed(2) + '%' : '-'}<br/>
+                一月均收益: ${batch.avgMonthReturn != null ? (batch.avgMonthReturn > 0 ? '+' : '') + batch.avgMonthReturn.toFixed(2) + '%' : '-'}`;
+            },
+          },
+          xAxis: {
+            type: 'category',
+            data: [...batchHistory].reverse().map(b => b.batchId),
+            axisLabel: { fontSize: 10, rotate: 30 },
+          },
+          yAxis: [
+            {
+              type: 'value',
+              name: '命中率',
+              position: 'left',
+              axisLabel: { formatter: v => (v * 100).toFixed(0) + '%' },
+              splitLine: { lineStyle: { color: '#f0f0f0', type: 'dashed' } },
+            },
+            {
+              type: 'value',
+              name: '次日均收益',
+              position: 'right',
+              axisLabel: { formatter: v => v.toFixed(1) + '%' },
+              splitLine: { show: false },
+            },
+          ],
+          visualMap: {
+            show: false,
+            pieces: [
+              { lt: 0.4, color: '#ff4d4f' },
+              { gte: 0.4, lt: 0.6, color: '#fa8c16' },
+              { gte: 0.6, color: '#52c41a' },
+            ],
+            dimension: 1,
+          },
+          series: [
+            {
+              name: '命中率',
+              type: 'bar',
+              data: [...batchHistory].reverse().map(b => b.hitRate != null ? +(b.hitRate).toFixed(3) : null),
+              barWidth: '40%',
+              label: { show: true, position: 'top', fontSize: 10, formatter: p => p.value != null ? (p.value * 100).toFixed(0) + '%' : '-' },
+              itemStyle: { borderRadius: [4, 4, 0, 0] },
+            },
+            {
+              name: '次日均收益',
+              type: 'line',
+              yAxisIndex: 1,
+              data: [...batchHistory].reverse().map(b => b.avgDayReturn != null ? +(b.avgDayReturn).toFixed(2) : null),
+              lineStyle: { color: '#1890ff', width: 2 },
+              symbol: 'circle',
+              symbolSize: 6,
+              itemStyle: { color: '#1890ff' },
+            },
+          ],
+        };
+
+        const qConfig = {
+          HIGH_QUALITY: { color: '#52c41a', bg: '#f6ffed', text: '高质量', desc: '近5期平均命中率 ≥ 60%' },
+          NORMAL: { color: '#1890ff', bg: '#e6f7ff', text: '正常', desc: '近5期平均命中率 40%-60%' },
+          LOW_QUALITY: { color: '#ff4d4f', bg: '#fff1f0', text: '低质量', desc: '近5期平均命中率 < 40%' },
+          UNTRAINED: { color: '#8c8c8c', bg: '#fafafa', text: '未追踪', desc: '尚无追踪数据' },
+        };
+
+        return (
+          <>
+            <Row gutter={12} style={{ marginTop: 16, marginBottom: 16 }}>
+              <Col span={4}>
+                <Card size="small" bodyStyle={{ padding: '12px 16px' }}>
+                  <Statistic
+                    title={<span>平均命中率 <Tooltip title="所有已追踪批次的次日上涨比例均值。> 60% 为高质量，40%-60% 为正常，< 40% 建议审视策略"><QuestionCircleOutlined style={{ color: '#8c8c8c', fontSize: 12, marginLeft: 2 }} /></Tooltip></span>}
+                    value={(avgHitRate * 100).toFixed(0)}
+                    suffix="%"
+                    valueStyle={{ color: avgHitRate >= 0.6 ? '#52c41a' : avgHitRate >= 0.4 ? '#1890ff' : '#ff4d4f', fontSize: 20 }}
+                  />
+                </Card>
+              </Col>
+              <Col span={4}>
+                <Card size="small" bodyStyle={{ padding: '12px 16px' }}>
+                  <Statistic
+                    title={<span>次日均收益 <Tooltip title="所有已追踪批次的次日平均涨跌幅"><QuestionCircleOutlined style={{ color: '#8c8c8c', fontSize: 12, marginLeft: 2 }} /></Tooltip></span>}
+                    value={avgDayRet > 0 ? '+' + avgDayRet.toFixed(2) : avgDayRet.toFixed(2)}
+                    suffix="%"
+                    valueStyle={{ color: avgDayRet > 0 ? '#cf1322' : avgDayRet < 0 ? '#3f8600' : undefined, fontSize: 20 }}
+                  />
+                </Card>
+              </Col>
+              <Col span={4}>
+                <Card size="small" bodyStyle={{ padding: '12px 16px' }}>
+                  <Statistic
+                    title={<span>已追踪批次 <Tooltip title="已完成次日收益计算的批次数"><QuestionCircleOutlined style={{ color: '#8c8c8c', fontSize: 12, marginLeft: 2 }} /></Tooltip></span>}
+                    value={trackedBatches.length}
+                    suffix={`/ ${batchHistory.length}`}
+                    valueStyle={{ fontSize: 20 }}
+                  />
+                </Card>
+              </Col>
+              <Col span={4}>
+                <Card size="small" bodyStyle={{ padding: '12px 16px' }}>
+                  <Statistic
+                    title={<span>当前批次质量 <Tooltip title="基于近5期滚动平均命中率判定，比单期更稳定"><QuestionCircleOutlined style={{ color: '#8c8c8c', fontSize: 12, marginLeft: 2 }} /></Tooltip></span>}
+                    value={qualityTag ? qConfig[qualityTag]?.text || '-' : '-'}
+                    valueStyle={{ color: qualityTag ? qConfig[qualityTag]?.color : '#8c8c8c', fontSize: 20 }}
+                    prefix={qualityTag ? <Tag color={qConfig[qualityTag]?.color} style={{ marginRight: 4 }}>{qConfig[qualityTag]?.desc}</Tag> : null}
+                  />
+                  {(() => {
+                    const entry = batchHistory?.find(b => b.batchId === batchId);
+                    return entry?.rollingAvgHitRate != null ? (
+                      <div style={{ fontSize: 11, color: '#8c8c8c', marginTop: 4 }}>
+                        近5期均值: {(entry.rollingAvgHitRate * 100).toFixed(0)}%
+                      </div>
+                    ) : null;
+                  })()}
+                </Card>
+              </Col>
+              <Col span={4}>
+                <Card size="small" bodyStyle={{ padding: '12px 16px' }}>
+                  <Statistic
+                    title={<span>最近批次命中反馈 <Tooltip title="上期命中率低（< 40%）时自动缩减推荐数量（20→15），减少噪音推荐"><QuestionCircleOutlined style={{ color: '#8c8c8c', fontSize: 12, marginLeft: 2 }} /></Tooltip></span>}
+                    value={latest && latest.tracked > 0 ? (latest.hitRate < 0.4 ? '⚠ 已缩减' : latest.hitRate >= 0.6 ? '✅ 正常' : '↗ 观察中') : '等待数据'}
+                    valueStyle={{ color: latest && latest.tracked > 0 ? (latest.hitRate < 0.4 ? '#ff4d4f' : latest.hitRate >= 0.6 ? '#52c41a' : '#fa8c16') : '#8c8c8c', fontSize: 18 }}
+                  />
+                </Card>
+              </Col>
+              <Col span={4}>
+                <Card size="small" bodyStyle={{ padding: '12px 16px', display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+                  <Button
+                    icon={<ReloadOutlined spin={trackingLoading} />}
+                    loading={trackingLoading}
+                    onClick={handleTrack}
+                    size="small"
+                  >
+                    手动追踪
+                  </Button>
+                </Card>
+              </Col>
+            </Row>
+
+            {/* 命中率趋势图 */}
+            {trackedBatches.length >= 2 && (
+              <Card size="small" title={<span><LineChartOutlined /> 命中率 & 次日均收益趋势</span>} style={{ marginBottom: 16 }}>
+                <ReactEcharts option={trendOption} style={{ height: 260 }} />
+              </Card>
+            )}
+
+            {/* 推荐复盘：最佳/最差 */}
+            {topBottom && ((topBottom.best3 && topBottom.best3.length > 0) || (topBottom.worst3 && topBottom.worst3.length > 0)) && (
+              <Card
+                size="small"
+                style={{ marginBottom: 16 }}
+                title={<span><RiseOutlined /> 本期推荐复盘 — 次日表现最佳/最差</span>}
+              >
+                <Row gutter={16}>
+                  <Col span={12}>
+                    <div style={{ fontWeight: 600, marginBottom: 8, color: '#cf1322', fontSize: 13 }}>
+                      ✅ 最佳 3 只（次日涨幅最高）
+                    </div>
+                    {topBottom.best3 && topBottom.best3.length > 0 ? (
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                        <thead>
+                          <tr style={{ borderBottom: '1px solid #f0f0f0', color: '#8c8c8c' }}>
+                            <th style={{ textAlign: 'left', padding: '4px 8px' }}>股票</th>
+                            <th style={{ textAlign: 'left', padding: '4px 8px' }}>行业</th>
+                            <th style={{ textAlign: 'right', padding: '4px 8px' }}>次日收益</th>
+                            <th style={{ textAlign: 'right', padding: '4px 8px' }}>一周收益</th>
+                            <th style={{ textAlign: 'right', padding: '4px 8px' }}>一月收益</th>
+                            <th style={{ textAlign: 'right', padding: '4px 8px' }}>分析得分</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {topBottom.best3.map((r, i) => (
+                            <tr key={i} style={{ borderBottom: '1px solid #fafafa' }}>
+                              <td style={{ padding: '4px 8px' }}>
+                                <Text strong>{r.stockName}</Text>
+                                <Text type="secondary" style={{ marginLeft: 4, fontSize: 11 }}>{r.stockCode}</Text>
+                              </td>
+                              <td style={{ padding: '4px 8px', color: '#595959' }}>{r.industry || '-'}</td>
+                              <td style={{ padding: '4px 8px', textAlign: 'right', color: '#cf1322', fontWeight: 600 }}>
+                                +{r.nextDayReturn.toFixed(2)}%
+                              </td>
+                              <td style={{ padding: '4px 8px', textAlign: 'right', color: (r.nextWeekReturn || 0) > 0 ? '#cf1322' : r.nextWeekReturn != null ? '#3f8600' : '#8c8c8c' }}>
+                                {r.nextWeekReturn != null ? (r.nextWeekReturn > 0 ? '+' : '') + r.nextWeekReturn.toFixed(2) + '%' : '-'}
+                              </td>
+                              <td style={{ padding: '4px 8px', textAlign: 'right', color: (r.nextMonthReturn || 0) > 0 ? '#cf1322' : r.nextMonthReturn != null ? '#3f8600' : '#8c8c8c' }}>
+                                {r.nextMonthReturn != null ? (r.nextMonthReturn > 0 ? '+' : '') + r.nextMonthReturn.toFixed(2) + '%' : '-'}
+                              </td>
+                              <td style={{ padding: '4px 8px', textAlign: 'right' }}>
+                                {r.analysisScorePct != null ? (r.analysisScorePct * 100).toFixed(0) + '%' : '-'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    ) : <Text type="secondary">暂无追踪数据</Text>}
+                  </Col>
+                  <Col span={12}>
+                    <div style={{ fontWeight: 600, marginBottom: 8, color: '#3f8600', fontSize: 13 }}>
+                      ❌ 最差 3 只（次日跌幅最大）
+                    </div>
+                    {topBottom.worst3 && topBottom.worst3.length > 0 ? (
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                        <thead>
+                          <tr style={{ borderBottom: '1px solid #f0f0f0', color: '#8c8c8c' }}>
+                            <th style={{ textAlign: 'left', padding: '4px 8px' }}>股票</th>
+                            <th style={{ textAlign: 'left', padding: '4px 8px' }}>行业</th>
+                            <th style={{ textAlign: 'right', padding: '4px 8px' }}>次日收益</th>
+                            <th style={{ textAlign: 'right', padding: '4px 8px' }}>一周收益</th>
+                            <th style={{ textAlign: 'right', padding: '4px 8px' }}>一月收益</th>
+                            <th style={{ textAlign: 'right', padding: '4px 8px' }}>分析得分</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {topBottom.worst3.map((r, i) => (
+                            <tr key={i} style={{ borderBottom: '1px solid #fafafa' }}>
+                              <td style={{ padding: '4px 8px' }}>
+                                <Text strong>{r.stockName}</Text>
+                                <Text type="secondary" style={{ marginLeft: 4, fontSize: 11 }}>{r.stockCode}</Text>
+                              </td>
+                              <td style={{ padding: '4px 8px', color: '#595959' }}>{r.industry || '-'}</td>
+                              <td style={{ padding: '4px 8px', textAlign: 'right', color: '#3f8600', fontWeight: 600 }}>
+                                {r.nextDayReturn.toFixed(2)}%
+                              </td>
+                              <td style={{ padding: '4px 8px', textAlign: 'right', color: (r.nextWeekReturn || 0) > 0 ? '#cf1322' : r.nextWeekReturn != null ? '#3f8600' : '#8c8c8c' }}>
+                                {r.nextWeekReturn != null ? (r.nextWeekReturn > 0 ? '+' : '') + r.nextWeekReturn.toFixed(2) + '%' : '-'}
+                              </td>
+                              <td style={{ padding: '4px 8px', textAlign: 'right', color: (r.nextMonthReturn || 0) > 0 ? '#cf1322' : r.nextMonthReturn != null ? '#3f8600' : '#8c8c8c' }}>
+                                {r.nextMonthReturn != null ? (r.nextMonthReturn > 0 ? '+' : '') + r.nextMonthReturn.toFixed(2) + '%' : '-'}
+                              </td>
+                              <td style={{ padding: '4px 8px', textAlign: 'right' }}>
+                                {r.analysisScorePct != null ? (r.analysisScorePct * 100).toFixed(0) + '%' : '-'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    ) : <Text type="secondary">暂无追踪数据</Text>}
+                  </Col>
+                </Row>
+
+                {/* 深度归因分析 */}
+                {topBottom.analysis && (
+                  <div style={{ marginTop: 16, padding: '12px 16px', background: '#fafafa', borderRadius: 4, border: '1px solid #f0f0f0' }}>
+                    <div style={{ fontWeight: 600, marginBottom: 10, fontSize: 13 }}>
+                      🔍 深度归因分析 — 最佳 vs 最差差异来源
+                    </div>
+                    <Row gutter={[16, 12]}>
+                      {/* 行业分布对比 */}
+                      {topBottom.analysis.industryDiff && (() => {
+                        const id = topBottom.analysis.industryDiff;
+                        const bestList = Object.entries(id.bestIndustries || {});
+                        const worstList = Object.entries(id.worstIndustries || {});
+                        const worstOnly = id.worstOnlyIndustries || [];
+                        return (
+                          <Col span={8}>
+                            <div style={{ fontWeight: 500, marginBottom: 6, fontSize: 12, color: '#595959' }}>🏭 行业分布对比</div>
+                            <div style={{ fontSize: 12, lineHeight: '20px' }}>
+                              <div style={{ color: '#cf1322' }}>最佳: {bestList.length > 0 ? bestList.map(([k,v]) => `${k}(${v})`).join('、') : '-'}</div>
+                              <div style={{ color: '#3f8600' }}>最差: {worstList.length > 0 ? worstList.map(([k,v]) => `${k}(${v})`).join('、') : '-'}</div>
+                              {worstOnly.length > 0 && (
+                                <div style={{ color: '#fa8c16', marginTop: 4 }}>
+                                  ⚠ 仅最差组出现: {worstOnly.join('、')}（弱势行业拖累）
+                                </div>
+                              )}
+                            </div>
+                          </Col>
+                        );
+                      })()}
+
+                      {/* 市值中位数对比 */}
+                      {topBottom.analysis.marketCapDiff && (() => {
+                        const md = topBottom.analysis.marketCapDiff;
+                        const fmt = (v) => {
+                          if (v == null) return '-';
+                          if (v >= 1e12) return (v / 1e12).toFixed(1) + '万亿';
+                          if (v >= 1e8) return (v / 1e8).toFixed(1) + '亿';
+                          return (v / 1e4).toFixed(0) + '万';
+                        };
+                        return (
+                          <Col span={8}>
+                            <div style={{ fontWeight: 500, marginBottom: 6, fontSize: 12, color: '#595959' }}>💰 市值中位数对比</div>
+                            <div style={{ fontSize: 12, lineHeight: '20px' }}>
+                              <div>最佳组: <Text strong>{fmt(md.bestMedianCap)}</Text></div>
+                              <div>最差组: <Text strong>{fmt(md.worstMedianCap)}</Text></div>
+                              {md.hint && <div style={{ color: '#1890ff', marginTop: 4 }}>💡 {md.hint}</div>}
+                            </div>
+                          </Col>
+                        );
+                      })()}
+
+                      {/* 得分差距分析 */}
+                      {topBottom.analysis.scoreDiff && (() => {
+                        const sd = topBottom.analysis.scoreDiff;
+                        return (
+                          <Col span={8}>
+                            <div style={{ fontWeight: 500, marginBottom: 6, fontSize: 12, color: '#595959' }}>
+                              📊 得分差距分析
+                              {sd.dominantGap && <Tag color={sd.dominantGap === 'FACTOR' ? 'purple' : 'blue'} style={{ fontSize: 10, lineHeight: '16px', marginLeft: 6 }}>
+                                {sd.dominantGap === 'FACTOR' ? '因子主导' : '分析主导'}
+                              </Tag>}
+                            </div>
+                            <div style={{ fontSize: 12, lineHeight: '20px' }}>
+                              <div>因子得分: 最佳 {(sd.bestAvgFactorScore * 100).toFixed(1)} vs 最差 {(sd.worstAvgFactorScore * 100).toFixed(1)}</div>
+                              <div>分析得分: 最佳 {(sd.bestAvgAnalysisPct * 100).toFixed(1)}% vs 最差 {(sd.worstAvgAnalysisPct * 100).toFixed(1)}%</div>
+                              {sd.hint && <div style={{ color: '#1890ff', marginTop: 4 }}>💡 {sd.hint}</div>}
+                            </div>
+                          </Col>
+                        );
+                      })()}
+                    </Row>
+
+                    {/* 失败模式识别 */}
+                    {topBottom.analysis.failurePatterns && topBottom.analysis.failurePatterns.length > 0 && (
+                      <div style={{ marginTop: 12, padding: '8px 12px', background: '#fff7e6', borderRadius: 4, border: '1px solid #ffe58f' }}>
+                        <div style={{ fontWeight: 500, marginBottom: 4, fontSize: 12, color: '#d48806' }}>⚠ 失败模式识别</div>
+                        {topBottom.analysis.failurePatterns.map((p, i) => (
+                          <div key={i} style={{ fontSize: 12, lineHeight: '18px', color: '#8c8c8c' }}>• {p}</div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </Card>
+            )}
+          </>
+        );
+      })()}
+
       {/* 底部说明 */}
-      <div style={{ marginTop: 12, display: 'flex', justifyContent: 'space-between' }}>
+      <div style={{ marginTop: 12, display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
         <Text type="secondary" style={{ fontSize: 12 }}>
           <StockOutlined /> 综合得分 = Regime-Adaptive 动态权重融合 | 牛市因子60%+分析40%，熊市因子40%+分析60%，震荡均衡50:50 | 12因子: 动量/波动/价值×3/技术×2/换手率/质量×3/成长
         </Text>

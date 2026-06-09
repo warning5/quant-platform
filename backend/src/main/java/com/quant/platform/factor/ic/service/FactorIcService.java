@@ -204,7 +204,8 @@ public class FactorIcService {
      */
     public LocalDate getLatestCommonIcDate(List<String> factorCodes) {
         if (factorCodes == null || factorCodes.isEmpty()) return null;
-        LocalDate earliest = null;
+        // 修复：取各因子最新IC日期的交集中最新的那个，而非最早的
+        LocalDate latestCommon = null;
         int validCount = 0;
         for (String fc : factorCodes) {
             FactorIcRecord record = icRecordMapper.findLatest(fc);
@@ -212,11 +213,11 @@ public class FactorIcService {
                 continue; // 跳过无IC数据的因子
             }
             validCount++;
-            if (earliest == null || record.getTradeDate().isBefore(earliest)) {
-                earliest = record.getTradeDate();
+            if (latestCommon == null || record.getTradeDate().isAfter(latestCommon)) {
+                latestCommon = record.getTradeDate();
             }
         }
-        return validCount > 0 ? earliest : null;
+        return validCount > 0 ? latestCommon : null;
     }
 
     // ── 私有方法 ──

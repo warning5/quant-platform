@@ -353,6 +353,14 @@ export const recommendationApi = {
   computeIcBatch: (startDate, endDate, factorCodes) => api.post('/recommendations/ic/compute-batch', { startDate, endDate, factorCodes }, { timeout: 600000 }),
   /** 获取IC最新摘要 */
   getIcSummary: () => api.get('/recommendations/ic/summary'),
+  /** 获取批次命中率 */
+  getHitRate: (batchId) => api.get(`/recommendations/hit-rate/${batchId}`),
+  /** 获取批次历史表现汇总（含质量标签） */
+  getBatchHistory: (limit = 20) => api.get('/recommendations/batch-history', { params: { limit } }),
+  /** 触发表现追踪 */
+  trackPerformance: () => api.post('/recommendations/track'),
+  /** 获取批次最佳/最差股票 */
+  getBatchTopBottom: (batchId) => api.get(`/recommendations/batch/${batchId}/top-bottom`),
 };
 
 export default api;

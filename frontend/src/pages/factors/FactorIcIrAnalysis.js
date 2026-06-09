@@ -681,11 +681,11 @@ export default function FactorIcIrAnalysis() {
                     </tr>
                   </tbody>
                 </table>
-                <p style={{ margin: '0 0 4px', fontSize: 11, color: '#888', whiteSpace: 'normal' }}>1.96 不是凭空的 — 来自标准正态分布 97.5 分位数（α=0.05, 双侧）。含义：如果因子真无效(IC=0)，随机产生 |t|>1.96 的概率不到 5%，因此认定为真实规律。</p>
+                <p style={{ margin: '0 0 4px', fontSize: 11, color: '#888', whiteSpace: 'normal' }}>1.96 不是凭空的 — 来自标准正态分布 97.5 分位数（α=0.05, 双侧）。含义：如果因子真无效(IC=0)，随机产生 |t|{'>'}{1.96} 的概率不到 5%，因此认定为真实规律。</p>
                 <p style={{ margin: '0 0 6px' }}><b>IR 和 t 统计量什么关系？</b></p>
                 <p style={{ margin: '0 0 4px', whiteSpace: 'normal' }}>两者本质相同，只是尺度不同：<b>t = IR × sqrt(n)</b>（n = 观察期数/交易天数）。</p>
                 <p style={{ margin: '0 0 4px', whiteSpace: 'normal' }}>IR 是"每期"的信噪比，t 是累积到 n 期后的总信噪比。比如 IR=0.1，观察 400 天：t = 0.1 × 20 = 2.0，刚好跨过 1.96。</p>
-                <p style={{ margin: '0 0 6px', whiteSpace: 'normal', fontSize: 11, color: '#888' }}>反过来算：要 |t|>1.96，需要的 IR_min = 1.96/sqrt(n)。n=100 → IR≥0.20，n=400 → IR≥0.10。</p>
+                <p style={{ margin: '0 0 6px', whiteSpace: 'normal', fontSize: 11, color: '#888' }}>反过来算：要 |t|{'>'}{1.96}，需要的 IR_min = 1.96/sqrt(n)。n=100 → IR≥0.20，n=400 → IR≥0.10。</p>
 
                 <p style={{ margin: '0 0 6px' }}><b>评估标准：</b></p>
                 <p style={{ margin: '0 0 4px' }}>有效因子：IC均值 ≥ 0.05 且 IR ≥ 0.5</p>

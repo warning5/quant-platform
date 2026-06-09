@@ -204,6 +204,23 @@ public class RecommendationController {
     }
 
     /**
+     * 获取批次历史表现汇总（含质量标签）
+     * 用于前端表现追踪面板：命中趋势图 + 平均收益率统计
+     */
+    @GetMapping("/batch-history")
+    public ApiResponse<List<Map<String, Object>>> getBatchHistory(@RequestParam(defaultValue = "20") int limit) {
+        return ApiResponse.success(recommendationService.getBatchHistory(limit));
+    }
+
+    /**
+     * 获取指定批次的最佳/最差股票（推荐复盘）
+     */
+    @GetMapping("/batch/{batchId}/top-bottom")
+    public ApiResponse<Map<String, Object>> getBatchTopBottom(@PathVariable String batchId) {
+        return ApiResponse.success(recommendationService.getBatchTopBottom(batchId));
+    }
+
+    /**
      * 生成请求体
      */
     @Data

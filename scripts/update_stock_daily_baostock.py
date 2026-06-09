@@ -123,6 +123,10 @@ def fetch_stock_history(code, name, market, start_date, end_date, max_retries=2,
             if "codec can't decode" in err_msg or "decompressing data" in err_msg:
                 print(f"[SKIP] {code} Baostock 返回数据编码异常，跳过: {err_msg[:80]}")
                 return None
+            # NoneType 错误（Baostock 返回 None，通常是日期无效或服务端问题），不重试
+            if "NoneType" in err_msg or "has no attribute" in err_msg:
+                print(f"[WARN] {code} Baostock 查询失败({attempt+1}次): {err_msg[:100]}")
+                return None
             if attempt < max_retries - 1 and ('10054' in err_msg or '10060' in err_msg or '10053' in err_msg):
                 wait = (attempt + 1) * 3
                 print(f"[WARN] {code} 连接断开, {wait}秒后重连 ({attempt+1}/{max_retries})...")
@@ -342,8 +346,8 @@ def main():
                             with suppress_stdout():
                                 lg = bs.login()
                             if lg.error_code != '0':
-                                print(f"[ERROR] Baostock 重登彻底失败，退出")
-                                break
+                                print(f"[ERROR] Baostock 重登彻底失败: {lg.error_msg}，终止脚本")
+                                sys.exit(1)
                     except Exception as e:
                         print(f"[WARN] 重登异常: {e}")
 

@@ -106,6 +106,10 @@ public class MarketThermometerService {
         result.put("tradeDate", pePb.getOrDefault("actualTradeDate", today.toString()).toString());
         result.put("updateTime", java.time.LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
 
+        // 8. 风格/大小盘 regime (P1-1)
+        Map<String, Object> styleSize = calcStyleSizeRegime(today);
+        result.putAll(styleSize);
+
         // 缓存结果（带上版本号，前端或重启后可强制刷新）
         result.put("_cacheVersion", THERM_CACHE_VERSION);
         cachedThermometer = result;
@@ -539,6 +543,83 @@ except Exception as e:
             log.warn("QVIX Python 子进程调用失败: {}", e.getMessage());
         }
         return result;
+    }
+
+    // ─── 风格/大小盘 regime 计算 (P1-1) ────────────────────────────
+
+    /**
+     * 计算价值/成长风格和大小盘风格
+     * 价值/成长：国证价值(399371) vs 国证成长(399370) 近20日涨幅差
+     * 大小盘：沪深300(000300) vs 中证1000(000852) 近20日涨幅差
+     */
+    private Map<String, Object> calcStyleSizeRegime(LocalDate date) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("styleRegime", null);
+        result.put("sizeRegime", null);
+        result.put("sizeSpread", null);
+        result.put("valueGrowthSpread", null);
+
+        if (chJdbc == null) return result;
+
+        try {
+            // 先找最近交易日
+            String tradeDate = null;
+            try {
+                tradeDate = chJdbc.queryForObject(
+                    "SELECT MAX(trade_date) FROM stock.index_daily FINAL WHERE code = '000300' AND trade_date <= '" + date + "'",
+                    String.class);
+            } catch (Exception ignored) {}
+            if (tradeDate == null) return result;
+
+            // 大小盘：沪深300 vs 中证1000
+            double hs300Ret = calcIndexCloseReturn("000300", tradeDate, 20);
+            double zz1000Ret = calcIndexCloseReturn("000852", tradeDate, 20);
+            if (!Double.isNaN(hs300Ret) && !Double.isNaN(zz1000Ret)) {
+                double sizeSpread = hs300Ret - zz1000Ret;
+                result.put("sizeSpread", Math.round(sizeSpread * 10000) / 100.0); // 转为百分比
+                result.put("sizeRegime", sizeSpread > 0.02 ? "LARGE"
+                    : sizeSpread < -0.02 ? "SMALL" : "NEUTRAL");
+            }
+
+            // 价值/成长：国证价值 vs 国证成长
+            double valueRet = calcIndexCloseReturn("399371", tradeDate, 20);
+            double growthRet = calcIndexCloseReturn("399370", tradeDate, 20);
+            if (!Double.isNaN(valueRet) && !Double.isNaN(growthRet)) {
+                double vgSpread = valueRet - growthRet;
+                result.put("valueGrowthSpread", Math.round(vgSpread * 10000) / 100.0); // 转为百分比
+                result.put("styleRegime", vgSpread > 0.02 ? "VALUE"
+                    : vgSpread < -0.02 ? "GROWTH" : "NEUTRAL");
+            }
+
+            log.info("风格判断: styleRegime={}, sizeRegime={}, vgSpread={}, sizeSpread={}",
+                result.get("styleRegime"), result.get("sizeRegime"),
+                result.get("valueGrowthSpread"), result.get("sizeSpread"));
+
+        } catch (Exception e) {
+            log.warn("风格/大小盘 regime 计算失败: {}", e.getMessage());
+        }
+        return result;
+    }
+
+    /** 计算指定指数近N日收盘价涨跌幅（绝对差值，非百分比差） */
+    private double calcIndexCloseReturn(String indexCode, String tradeDate, int days) {
+        try {
+            String sql = String.format("""
+                SELECT close_price
+                FROM stock.index_daily FINAL
+                WHERE code = '%s' AND trade_date <= '%s'
+                ORDER BY trade_date DESC
+                LIMIT %d
+                """, indexCode, tradeDate, days);
+            List<Map<String, Object>> rows = chJdbc.queryForList(sql);
+            if (rows == null || rows.size() < 2) return Double.NaN;
+            double last = ((Number) rows.get(0).get("close_price")).doubleValue();
+            double first = ((Number) rows.get(rows.size() - 1).get("close_price")).doubleValue();
+            return first > 0 ? (last - first) / first : Double.NaN;
+        } catch (Exception e) {
+            log.debug("计算指数{}近{}日涨跌失败: {}", indexCode, days, e.getMessage());
+            return Double.NaN;
+        }
     }
 
     /** 手动解析 JSON: {"key": value}，value 可能是数字或字符串 */

@@ -554,22 +554,20 @@ public class DataUpdateService {
             marketScripts.add(new String[]{"北交所", "update_bj_stock_daily_qq.py"});
         }
 
+        // 所有市场顺序执行
         for (String[] ms : marketScripts) {
             if ("CANCELLED".equals(task.getStatus())) break;
             task.setCurrentStep(ms[0]);
-            // 每个市场开始时重置进度，totalStocks 由脚本日志动态更新
             task.setProcessedStocks(0);
             task.setTotalStocks(0);
             task.setProgress(0);
             broadcastStatus(task);
             broadcastLog(taskId, "\n========== " + ms[0] + " ==========");
 
-            // 尝试主数据源
             List<String> scriptCmd = new ArrayList<>();
             scriptCmd.add(pythonPath);
-            scriptCmd.add("-u");  // 强制 unbuffered stdout
-            scriptCmd.add(ms[1]);  // 主脚本 (Baostock)
-            // 找到 --market 参数的位置
+            scriptCmd.add("-u");
+            scriptCmd.add(ms[1]);
             int marketArgIndex = -1;
             for (int i = 2; i < ms.length; i++) {
                 if ("--market".equals(ms[i])) {
@@ -578,22 +576,21 @@ public class DataUpdateService {
                 }
             }
             if (marketArgIndex > 0) {
-                scriptCmd.add(ms[marketArgIndex]);      // --market
-                scriptCmd.add(ms[marketArgIndex + 1]);  // SH/SZ
+                scriptCmd.add(ms[marketArgIndex]);
+                scriptCmd.add(ms[marketArgIndex + 1]);
             }
             addCommonArgs(scriptCmd, request);
             boolean ok = runSingleScript(taskId, task, scriptCmd, ms[0]);
 
-            // 主数据源失败且存在备用数据源时，尝试备用
             if (!ok && ms.length > 2 && ms[2].endsWith("akshare.py")) {
                 broadcastLog(taskId, "\n[WARN] Baostock 更新失败，尝试使用 akshare 作为备用数据源...");
                 List<String> backupCmd = new ArrayList<>();
                 backupCmd.add(pythonPath);
                 backupCmd.add("-u");
-                backupCmd.add(ms[2]);  // 备用脚本 (akshare)
+                backupCmd.add(ms[2]);
                 if (marketArgIndex > 0) {
-                    backupCmd.add(ms[marketArgIndex]);      // --market
-                    backupCmd.add(ms[marketArgIndex + 1]);  // SH/SZ
+                    backupCmd.add(ms[marketArgIndex]);
+                    backupCmd.add(ms[marketArgIndex + 1]);
                 }
                 addCommonArgs(backupCmd, request);
                 ok = runSingleScript(taskId, task, backupCmd, ms[0] + " (备用)");
@@ -651,11 +648,9 @@ public class DataUpdateService {
      */
     private boolean runSingleScript(String taskId, DataUpdateTask task, List<String> cmd, String marketLabel) throws IOException, InterruptedException {
         // 立即推送启动信息，让用户看到反馈
-        broadcastLog(taskId, "[CMD] " + String.join(" ", cmd));
-        broadcastLog(taskId, "[启动中] 正在初始化脚本，请稍候...");
-
-        // 使用传入的市场名称或当前 currentStep 作为市场前缀
         String prefix = marketLabel != null ? marketLabel : task.getCurrentStep();
+        broadcastLog(taskId, "[" + prefix + "] [CMD] " + String.join(" ", cmd));
+        broadcastLog(taskId, "[" + prefix + "] 正在初始化脚本，请稍候...");
         if (prefix != null && !prefix.isEmpty()) {
             task.setCurrentStep(prefix + " · 启动中...");
             broadcastStatus(task);
@@ -1221,6 +1216,8 @@ public class DataUpdateService {
                 msg.put("fetchFundHolder", req.isFetchFundHolder());
                 msg.put("fetchShareholder", req.isFetchShareholder());
                 msg.put("fetchNews", req.isFetchNews());
+                msg.put("fetchBondYield", req.isFetchBondYield());
+                msg.put("fetchShenwanIndex", req.isFetchShenwanIndex());
                 msg.put("moneyflowSource", req.getMoneyflowSource());
                 msg.put("emMoneyflowMode", req.getEmMoneyflowMode());
             }

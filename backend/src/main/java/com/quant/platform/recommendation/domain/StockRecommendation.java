@@ -1,6 +1,7 @@
 package com.quant.platform.recommendation.domain;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
@@ -119,6 +120,18 @@ public class StockRecommendation {
 
     /** 流动性评分（0-10分） */
     private Integer liquidityScore;
+
+    /** 高相关行业分组名（瞬态，不持久化） */
+    @TableField(exist = false)
+    private String corrGroup;
+
+    /** 是否因行业分散化限制被降权（瞬态，不持久化） */
+    @TableField(exist = false)
+    private Boolean diversificationDemoted;
+
+    /** 该批次推荐质量标签: HIGH_QUALITY / NORMAL / LOW_QUALITY（瞬态，不持久化） */
+    @TableField(exist = false)
+    private String qualityTag;
 
     /** 各因子百分位排名 JSON */
     private String factorRanksJson;

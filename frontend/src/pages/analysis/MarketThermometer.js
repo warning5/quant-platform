@@ -5,6 +5,7 @@ import {
   DollarOutlined, FundOutlined, BankOutlined, InsuranceOutlined,
   ThunderboltOutlined,
   QuestionCircleOutlined,
+  TrophyOutlined, BuildOutlined,
 } from '@ant-design/icons';
 import ReactEcharts from 'echarts-for-react';
 import { stockAnalysisApi } from '../../api';
@@ -102,6 +103,22 @@ export default function MarketThermometer() {
                 <div style={{ marginTop: 8 }}><strong>综合指数计算公式（5维，v3）：</strong></div>
                 <div>PE分位×25% + PB分位×15% + 均线温度×25% + 股债得分×20% + 波动率指数×15%</div>
                 <div style={{ marginTop: 4, color: '#888' }}>波动率指数（QVIX）：akshare index_option_300etf_qvix()，归一化分位得分</div>
+
+                <div style={{ marginTop: 10, borderTop: '1px solid #eee', paddingTop: 8 }}>
+                  <div style={{ fontWeight: 600, marginBottom: 4 }}>🎨 风格/大小盘判断</div>
+                  <div>根据价值/成长指数、大盘/小盘指数近20日涨幅差，自动判断当前市场风格。</div>
+                  <div style={{ marginTop: 4 }}><strong>意义：</strong>帮你判断当前市场应该用什么策略、选什么类型的股票。</div>
+                  <table style={{ fontSize: 11, marginTop: 4, borderCollapse: 'collapse', width: '100%' }}>
+                    <thead><tr><th style={{ textAlign: 'left', padding: '2px 4px', borderBottom: '1px solid #ddd' }}>判断</th><th style={{ textAlign: 'left', padding: '2px 4px', borderBottom: '1px solid #ddd' }}>含义</th><th style={{ textAlign: 'left', padding: '2px 4px', borderBottom: '1px solid #ddd' }}>怎么做</th></tr></thead>
+                    <tbody>
+                      <tr><td style={{ padding: '2px 4px', fontWeight: 600 }}>成长占优</td><td style={{ padding: '2px 4px' }}>市场偏爱高增长故事股</td><td style={{ padding: '2px 4px' }}>优先技术/资金因子（动量、波动率），看中小盘</td></tr>
+                      <tr><td style={{ padding: '2px 4px', fontWeight: 600 }}>价值占优</td><td style={{ padding: '2px 4px' }}>市场回归基本面</td><td style={{ padding: '2px 4px' }}>优先估值/质量因子（PE、ROE），看红利/银行</td></tr>
+                      <tr><td style={{ padding: '2px 4px', fontWeight: 600 }}>小盘强势</td><td style={{ padding: '2px 4px' }}>资金炒小票</td><td style={{ padding: '2px 4px' }}>优选中小市值，注意流动性，控制单票仓位</td></tr>
+                      <tr><td style={{ padding: '2px 4px', fontWeight: 600 }}>大盘强势</td><td style={{ padding: '2px 4px' }}>资金抱团蓝筹</td><td style={{ padding: '2px 4px' }}>优选沪深300成分股，加大单票仓位</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+
                 <div style={{ marginTop: 8, color: '#aaa' }}>仅供参考，不构成投资建议。历史业绩不代表未来表现。</div>
               </div>
             }
@@ -401,6 +418,90 @@ export default function MarketThermometer() {
           </Col>
         </Row>
       </Card>
+
+      {/* 风格/大小盘 regime (P1-1) */}
+      {(() => {
+        const styleRegime = data?.styleRegime;
+        const sizeRegime = data?.sizeRegime;
+        if (!styleRegime && !sizeRegime) return null;
+
+        const styleLabel = styleRegime === 'GROWTH' ? '成长占优' : styleRegime === 'VALUE' ? '价值占优' : '风格均衡';
+        const styleColor = styleRegime === 'GROWTH' ? '#722ed1' : styleRegime === 'VALUE' ? '#1677ff' : '#999';
+        const styleBg = styleRegime === 'GROWTH' ? '#f9f0ff' : styleRegime === 'VALUE' ? '#e6f4ff' : '#fafafa';
+
+        const sizeLabel = sizeRegime === 'SMALL' ? '小盘强势' : sizeRegime === 'LARGE' ? '大盘强势' : '大小均衡';
+        const sizeColor = sizeRegime === 'SMALL' ? '#fa8c16' : sizeRegime === 'LARGE' ? '#cf1322' : '#999';
+        const sizeBg = sizeRegime === 'SMALL' ? '#fff7e6' : sizeRegime === 'LARGE' ? '#fff2f0' : '#fafafa';
+
+        return (
+          <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+            <Col xs={24} md={12}>
+              <Card size="small" style={{ background: styleBg, border: `1px solid ${styleColor}20` }}>
+                <Space>
+                  <TrophyOutlined style={{ fontSize: 20, color: styleColor }} />
+                  <div>
+                    <Text type="secondary" style={{ fontSize: 12 }}>风格判断</Text>
+                    <div>
+                      <Text strong style={{ fontSize: 18, color: styleColor }}>{styleLabel}</Text>
+                      {data?.valueGrowthSpread != null && (
+                        <Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>
+                          价成差 {data.valueGrowthSpread > 0 ? '+' : ''}{data.valueGrowthSpread}%
+                        </Text>
+                      )}
+                    </div>
+                  </div>
+                  <Tooltip
+                    title={
+                      <div style={{ fontSize: 12, lineHeight: 1.8, maxWidth: 280 }}>
+                        <div style={{ fontWeight: 600, marginBottom: 4 }}>价值/成长风格</div>
+                        <div>国证价值（399371）vs 国证成长（399370）近20日涨幅差：</div>
+                        <div>{'>'}2% → 价值占优 | {'<'}-2% → 成长占优 | -2%~+2% → 风格均衡</div>
+                        <div style={{ marginTop: 6, color: '#aaa', fontSize: 11 }}>
+                          参考指标：因子选股中，成长占优时优先技术/资金因子，价值占优时优先基本面因子。
+                        </div>
+                      </div>
+                    }
+                  >
+                    <QuestionCircleOutlined style={{ color: '#bbb', cursor: 'pointer', fontSize: 12 }} />
+                  </Tooltip>
+                </Space>
+              </Card>
+            </Col>
+            <Col xs={24} md={12}>
+              <Card size="small" style={{ background: sizeBg, border: `1px solid ${sizeColor}20` }}>
+                <Space>
+                  <BuildOutlined style={{ fontSize: 20, color: sizeColor }} />
+                  <div>
+                    <Text type="secondary" style={{ fontSize: 12 }}>大小盘风格</Text>
+                    <div>
+                      <Text strong style={{ fontSize: 18, color: sizeColor }}>{sizeLabel}</Text>
+                      {data?.sizeSpread != null && (
+                        <Text type="secondary" style={{ fontSize: 11, marginLeft: 8 }}>
+                          大盘-小盘 {data.sizeSpread > 0 ? '+' : ''}{data.sizeSpread}%
+                        </Text>
+                      )}
+                    </div>
+                  </div>
+                  <Tooltip
+                    title={
+                      <div style={{ fontSize: 12, lineHeight: 1.8, maxWidth: 280 }}>
+                        <div style={{ fontWeight: 600, marginBottom: 4 }}>大小盘风格</div>
+                        <div>沪深300（大盘）vs 中证1000（小盘）近20日涨幅差：</div>
+                        <div>{'>'}2% → 大盘强势 | {'<'}-2% → 小盘强势 | -2%~+2% → 大小均衡</div>
+                        <div style={{ marginTop: 6, color: '#aaa', fontSize: 11 }}>
+                          参考指标：小盘强势时优先中小市值策略，大盘强势时优先大盘蓝筹策略。
+                        </div>
+                      </div>
+                    }
+                  >
+                    <QuestionCircleOutlined style={{ color: '#bbb', cursor: 'pointer', fontSize: 12 }} />
+                  </Tooltip>
+                </Space>
+              </Card>
+            </Col>
+          </Row>
+        );
+      })()}
 
       {/* 分项指标卡片 */}
       <Row gutter={[16, 16]}>

@@ -770,8 +770,8 @@ function buildBrinsonTip(label, val, excessVal, residualVal, ratioVal) {
         <div style={{ marginBottom: 6, borderTop: '1px solid #f0f0f0', paddingTop: 4 }}>
           <b>阈值参考：</b>
         </div>
-        <div>· > 归因超额 × 80%&nbsp;&nbsp;交易成本较低，策略执行效率高</div>
-        <div>· > 0&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;扣除成本后仍有正超额</div>
+        <div>{'· > 归因超额 × 80%\u00a0\u00a0交易成本较低，策略执行效率高'}</div>
+        <div>{'· > 0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0扣除成本后仍有正超额'}</div>
         <div>· ≤ 0&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;交易成本吃掉全部超额，需优化</div>
         <div style={{ marginTop: 6, borderTop: '1px solid #f0f0f0', paddingTop: 4, color: v > 0 ? '#52c41a' : '#cf1322' }}>
           <b>解读：</b>净超额={fmtV(v)}，{v > 0 ? '扣除交易成本后策略仍保持正超额，执行效率良好' : '交易成本已完全侵蚀归因超额，建议关注换手率控制或降低交易频率'}。

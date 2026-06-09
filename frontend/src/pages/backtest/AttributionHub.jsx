@@ -2723,7 +2723,7 @@ function StyleMonitorPanel({ taskId }) {
         <p style={{margin:0}}>2. 计算 <b>历史均值</b> = 所有窗口 beta 的平均</p>
         <p style={{margin:0}}>3. 计算 <b>近期均值</b> = 最后 25% 窗口的 beta 平均</p>
         <p style={{margin:0}}>4. 计算 <b>历史标准差</b>（衡量 beta 的正常波动范围）</p>
-        <p style={{margin:'0 0 8px'}}>5. 若 <b>|近期均值 − 历史均值| > 1.0 × 标准差</b> → 触发预警</p>
+        <p style={{margin:'0 0 8px'}}>5. 若 <b>|近期均值 − 历史均值| {'>'} 1.0 × 标准差</b> → 触发预警</p>
 
         <p style={{margin:'8px 0 4px',fontWeight:600}}>三、预警原因（基于当前数据）</p>
         <div style={{background:'#fafafa',padding:'6px 10px',borderRadius:4,marginBottom:4}}>
@@ -2770,13 +2770,13 @@ function StyleMonitorPanel({ taskId }) {
             {data.smbDrift &&
               <>SMB 近期均值 {((data.smbRecentMean||0)).toFixed(2)} 偏离历史 {((data.smbHistoricalMean||0)).toFixed(2)}，
                 偏移 {smbDelta.toFixed(3)}{(data.smbStd != null) ? <>（标准差 {(data.smbStd).toFixed(3)}）=
-                {(smbDelta/(data.smbStd||1)).toFixed(1)}σ > 1.0σ 阈值</> : '（后端未返回标准差，请重启后端）'}</>
+                {(smbDelta/(data.smbStd||1)).toFixed(1)}σ {'>'} 1.0σ 阈值</> : '（后端未返回标准差，请重启后端）'}</>
             }
             {data.smbDrift && data.hmlDrift && '；'}
             {data.hmlDrift &&
               <>HML 近期均值 {((data.hmlRecentMean||0)).toFixed(2)} 偏离历史 {((data.hmlHistoricalMean||0)).toFixed(2)}，
                   偏移 {hmlDelta.toFixed(3)}{(data.hmlStd != null) ? <>（标准差 {(data.hmlStd).toFixed(3)}）=
-                {(hmlDelta/(data.hmlStd||1)).toFixed(1)}σ > 1.0σ 阈值</> : '（后端未返回标准差，请重启后端）'}</>
+                {(hmlDelta/(data.hmlStd||1)).toFixed(1)}σ {'>'} 1.0σ 阈值</> : '（后端未返回标准差，请重启后端）'}</>
             }
           </p>
         ) : (

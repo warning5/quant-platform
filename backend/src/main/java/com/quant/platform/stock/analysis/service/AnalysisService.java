@@ -137,6 +137,74 @@ public class AnalysisService {
             atr = BigDecimal.valueOf(sum / 13.0);
         }
 
+        // ── P1-2: 计算风险/流动性基础指标（供 RecommendationService 使用）──
+        if (techBars != null && techBars.size() >= 20) {
+            List<DailyBarRow> recent20 = techBars.subList(techBars.size() - 20, techBars.size());
+
+            // a) 最大回撤（近20日）
+            double maxDd = 0.0;
+            double peak = Double.NEGATIVE_INFINITY;
+            for (DailyBarRow bar : recent20) {
+                if (bar.getClosePrice() != null) {
+                    double cp = bar.getClosePrice().doubleValue();
+                    if (cp > peak) peak = cp;
+                    if (peak > 0) {
+                        double dd = (cp - peak) / peak;
+                        if (dd < maxDd) maxDd = dd;
+                    }
+                }
+            }
+            overview.setMaxDrawdown(maxDd < 0 ? maxDd : 0.0);
+
+            // b) 20日波动率（收益率标准差，年化前原始值）
+            List<Double> rets = new java.util.ArrayList<>();
+            for (int i = 1; i < recent20.size(); i++) {
+                if (recent20.get(i).getClosePrice() != null && recent20.get(i - 1).getClosePrice() != null) {
+                    double prev = recent20.get(i - 1).getClosePrice().doubleValue();
+                    double curr = recent20.get(i).getClosePrice().doubleValue();
+                    if (prev > 0) rets.add((curr - prev) / prev);
+                }
+            }
+            if (!rets.isEmpty()) {
+                double mean = rets.stream().mapToDouble(Double::doubleValue).average().orElse(0);
+                double variance = rets.stream().mapToDouble(r -> (r - mean) * (r - mean)).average().orElse(0);
+                overview.setVolatility20d(Math.sqrt(variance));
+            }
+
+            // c) 20日均成交额
+            double amtSum = 0;
+            int amtCnt = 0;
+            for (DailyBarRow bar : recent20) {
+                if (bar.getAmount() != null) {
+                    amtSum += bar.getAmount().doubleValue();
+                    amtCnt++;
+                }
+            }
+            if (amtCnt > 0) {
+                overview.setAvgAmount20d(amtSum / amtCnt);
+            }
+
+            // d) 20日平均换手率
+            double turnSum = 0;
+            int turnCnt = 0;
+            for (DailyBarRow bar : recent20) {
+                if (bar.getTurnoverRate() != null) {
+                    turnSum += bar.getTurnoverRate().doubleValue();
+                    turnCnt++;
+                }
+            }
+            if (turnCnt > 0) {
+                overview.setTurnoverRate20d(turnSum / turnCnt);
+            }
+        }
+        // 回填 ATR
+        if (atr != null) {
+            overview.setAtr(atr.doubleValue());
+        }
+        log.debug("[RiskLiquidityBase] code={} maxDd={} vol20d={} avgAmt={} avgTurn={} atr={}",
+            code, overview.getMaxDrawdown(), overview.getVolatility20d(),
+            overview.getAvgAmount20d(), overview.getTurnoverRate20d(), overview.getAtr());
+
         // 计算目标价/止损价（依赖 chPrice 中的当前价）
         BigDecimal currentPrice = null;
         if (chPrice != null && chPrice.get("close_price") != null) {
@@ -388,10 +456,18 @@ public class AnalysisService {
         // 7.8 催化剂追踪矩阵
         overview.setCatalysts(buildCatalysts(code, fundamentalSignal, sentimentSignal, researchSignal));
 
-        log.info("个股分析完成: code={}, totalScore={}, action={}, tailRisks={}, catalysts={}",
-                code, overview.getTotalScore(), overview.getAction(),
+        log.info("个股分析完成: code={}, totalScore={}, action={}, isBlueChip={}, tailRisks={}, catalysts={}",
+                code, overview.getTotalScore(), overview.getAction(), isBlueChip,
                 overview.getTailRisks() != null ? overview.getTailRisks().size() : 0,
                 overview.getCatalysts() != null ? overview.getCatalysts().size() : 0);
+        // 诊断：打印各维度得分明细
+        if (overview.getScoreDetails() != null) {
+            for (ScoreDetail d : overview.getScoreDetails()) {
+                log.info("[Analysis] code={} dim={} score={}/{} items={}",
+                        code, d.getDimension(), d.getScore(), d.getMaxScore(),
+                        d.getItems() != null ? d.getItems().size() : 0);
+            }
+        }
 
         return overview;
     }

@@ -132,6 +132,8 @@ const renderTaskConfig = (task, updateType) => {
     if (task.configFetchFundHolder !== false) tags.push(<Tag key="fund" color="gold">基金持仓</Tag>);
     if (task.configFetchShareholder !== false) tags.push(<Tag key="shareholder" color="lime">股东人数</Tag>);
     if (task.configFetchNews !== false) tags.push(<Tag key="news" color="cyan">新闻</Tag>);
+    if (task.configFetchBondYield !== false) tags.push(<Tag key="bond" color="gold">国债收益率</Tag>);
+    if (task.configFetchShenwanIndex !== false) tags.push(<Tag key="shenwan" color="geekblue">申万行业指数</Tag>);
     if (task.configForce) tags.push(<Tag key="force" color="red">全量重刷</Tag>);
   } else if (updateType === 'RESEARCH') {
     if (task.configForce) tags.push(<Tag key="force" color="red">强制重新采集</Tag>);
@@ -577,6 +579,8 @@ function DataUpdate() {
               if (msg.fetchFundHolder !== undefined) t.configFetchFundHolder = msg.fetchFundHolder;
               if (msg.fetchShareholder !== undefined) t.configFetchShareholder = msg.fetchShareholder;
               if (msg.fetchNews !== undefined) t.configFetchNews = msg.fetchNews;
+              if (msg.fetchBondYield !== undefined) t.configFetchBondYield = msg.fetchBondYield;
+              if (msg.fetchShenwanIndex !== undefined) t.configFetchShenwanIndex = msg.fetchShenwanIndex;
               if (msg.moneyflowSource !== undefined) t.configMoneyflowSource = msg.moneyflowSource;
               if (msg.emMoneyflowMode !== undefined) t.configEmMoneyflowMode = msg.emMoneyflowMode;
               if (msg.singleCode !== undefined) t.configSingleCode = msg.singleCode;
@@ -2033,8 +2037,8 @@ function DataUpdate() {
                   {sentimentTask.configFetchFundHolder && <Tag size="small">基金持仓</Tag>}
                   {sentimentTask.configFetchShareholder && <Tag size="small">股东人数</Tag>}
                   {sentimentTask.configFetchNews && <Tag size="small">新闻</Tag>}
-                  {sentimentTask.configFetchBondYield && <Tag size="small">国债收益率</Tag>}
-                  {sentimentTask.configFetchShenwanIndex && <Tag size="small">申万行业指数</Tag>}
+                  {sentimentTask.configFetchBondYield !== false && <Tag size="small">国债收益率</Tag>}
+                  {sentimentTask.configFetchShenwanIndex !== false && <Tag size="small">申万行业指数</Tag>}
                 </Text>
               )}
             </Space>

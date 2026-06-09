@@ -186,6 +186,11 @@ def fix_valuation_by_qq(db, codes=None, batch_size=200, delay=0.1, max_workers=3
                         print(f"    [SKIP] {code} Baostock 返回数据编码异常，跳过: {last_error[:60]}")
                         raw_rows = []
                         break
+                    # NoneType 错误（Baostock 返回 None，服务端问题），不重试
+                    if "NoneType" in last_error or "has no attribute" in last_error:
+                        print(f"    [WARN] {code} Baostock 查询失败({attempt+1}次): {last_error[:60]}")
+                        raw_rows = []
+                        break
                     attempt += 1
                     if attempt >= 3:
                         print(f"    [WARN] {code} Baostock 查询失败({attempt}次): {last_error[:60]}")

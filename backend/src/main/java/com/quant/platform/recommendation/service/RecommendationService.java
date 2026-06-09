@@ -16,6 +16,7 @@ import com.quant.platform.stock.entity.StockDaily;
 import com.quant.platform.stock.entity.StockInfo;
 import com.quant.platform.stock.mapper.StockInfoMapper;
 import com.quant.platform.stock.service.ClickHouseStockService;
+import com.quant.platform.stock.service.DividendService;
 import com.quant.platform.strategy.domain.StrategyDefinition;
 import com.quant.platform.strategy.mapper.StrategyDefinitionMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -55,6 +56,7 @@ public class RecommendationService {
     private final StrategyDefinitionMapper strategyDefinitionMapper;
     private final ObjectMapper objectMapper;
     private final FactorIcService factorIcService;
+    private final DividendService dividendService;
     private final javax.sql.DataSource dataSource;
 
     /** 因子选股取 Top N（广筛） */
@@ -82,6 +84,40 @@ public class RecommendationService {
             Map.entry("银行", "801780"),     Map.entry("非银金融", "801790"),
             Map.entry("煤炭", "801950"),     Map.entry("石油石化", "801960"),
             Map.entry("环保", "801970"),     Map.entry("美容护理", "801980")
+    );
+    /** 二级行业名称 → 归约到一级行业的映射（解决 IND_CORR_GROUPS 含二级行业的问题） */
+    private static final Map<String, String> SW2_TO_SW1 = Map.ofEntries(
+            Map.entry("房地产开发", "房地产"),
+            Map.entry("房地产服务", "房地产"),
+            Map.entry("建筑材料", "建筑材料"),
+            Map.entry("建筑装饰", "建筑装饰"),
+            Map.entry("证券", "非银金融"),
+            Map.entry("保险", "非银金融"),
+            Map.entry("信托", "非银金融"),
+            Map.entry("期货", "非银金融"),
+            Map.entry("银行", "银行"),
+            Map.entry("煤炭", "煤炭"),
+            Map.entry("石油石化", "石油石化"),
+            Map.entry("电力设备", "电力设备"),
+            Map.entry("食品饮料", "食品饮料"),
+            Map.entry("农林牧渔", "农林牧渔"),
+            Map.entry("纺织服饰", "纺织服饰"),
+            Map.entry("计算机", "计算机"),
+            Map.entry("通信", "通信"),
+            Map.entry("传媒", "传媒"),
+            Map.entry("汽车", "汽车"),
+            Map.entry("机械设备", "机械设备"),
+            Map.entry("医药生物", "医药生物"),
+            Map.entry("公用事业", "公用事业"),
+            Map.entry("国防军工", "国防军工"),
+            Map.entry("电子", "电子")
+    );
+
+    /** 新质生产力需排除的一级行业（申万一级行业名称，作为排除兜底） */
+    private static final Set<String> NEW_QUALITY_EXCLUDE_SW1 = Set.of(
+            "银行", "非银金融", "房地产", "钢铁", "煤炭", "石油石化",
+            "公用事业", "交通运输", "社会服务", "纺织服饰", "建筑材料",
+            "建筑装饰", "农林牧渔", "美容护理"
     );
 
     /** ATR 计算周期 */
@@ -192,7 +228,8 @@ public class RecommendationService {
                     "房地产开发", "房地产服务",
                     "电力", "燃气", "水务", "供热",
                     "钢铁", "煤炭开采", "焦炭", "石油石化", "油气开采",
-                    "港口", "航运", "高速公路", "铁路公路", "机场",
+                    "港口", "港口航运", "航运", "高速公路", "铁路公路", "机场",
+                    "旅游", "酒店", "旅游及酒店", "餐饮", "景点",
                     "造纸", "纺织制造", "服装家纺",
                     "基础建设", "房屋建设",
                     "种植业", "渔业", "畜牧业",
@@ -213,6 +250,7 @@ public class RecommendationService {
                                  StrategyDefinitionMapper strategyDefinitionMapper,
                                  ObjectMapper objectMapper,
                                  FactorIcService factorIcService,
+                                 DividendService dividendService,
                                  javax.sql.DataSource dataSource) {
         this.stockScreenService = stockScreenService;
         this.analysisService = analysisService;
@@ -223,6 +261,7 @@ public class RecommendationService {
         this.strategyDefinitionMapper = strategyDefinitionMapper;
         this.objectMapper = objectMapper;
         this.factorIcService = factorIcService;
+        this.dividendService = dividendService;
         this.dataSource = dataSource;
     }
 
@@ -243,6 +282,16 @@ public class RecommendationService {
         boolean useDynamicIc = "IC".equalsIgnoreCase(weightMode);
 
         log.info("[Recommendation] 开始生成推荐列表: date={}, topN={}, factorProfile={}, strategyId={}, weightMode={}", date, topN, factorProfile, strategyId, weightMode);
+
+        // 诊断：加载策略详情
+        if (strategyId != null) {
+            StrategyDefinition dbStrategy = strategyDefinitionMapper.selectById(strategyId);
+            log.info("[Recommendation] 策略详情: id={}, strategyCode={}, strategyName={}, filterConfigJson={}",
+                    dbStrategy != null ? dbStrategy.getId() : null,
+                    dbStrategy != null ? dbStrategy.getStrategyCode() : "null",
+                    dbStrategy != null ? dbStrategy.getStrategyName() : "null",
+                    dbStrategy != null && dbStrategy.getFilterConfigJson() != null ? "present" : "null");
+        }
 
         // P1-4: 检查上期推荐命中率，动态调整 topN
         String prevBatchId = recommendationMapper.findLatestBatchId();
@@ -268,24 +317,85 @@ public class RecommendationService {
 
         // Step 1.5: 行业排除过滤（根据组合配置或策略 filterConfigJson）
         List<String> excludeIndustries = getExcludeIndustries(factorProfile, strategyId);
-        if (!excludeIndustries.isEmpty()) {
+        // 判断是否为新质生产力风格
+        String effectiveProfile = resolveEffectiveProfile(factorProfile, strategyId);
+        boolean isNewQuality = "NEW_QUALITY".equals(effectiveProfile);
+        if (!excludeIndustries.isEmpty() || isNewQuality) {
             Set<String> excludeSet = new HashSet<>(excludeIndustries);
+            // 新质生产力额外排除申万一级行业 + 无行业信息股票
+            Set<String> excludeSw1 = isNewQuality ? NEW_QUALITY_EXCLUDE_SW1 : Set.of();
             List<String> candidateCodes = candidates.stream()
                     .map(s -> stripSuffix(s.getSymbol()))
                     .collect(Collectors.toList());
             List<StockInfo> infos = stockInfoMapper.selectList(
                     new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<StockInfo>()
                             .in(StockInfo::getCode, candidateCodes)
-                            .select(StockInfo::getCode, StockInfo::getIndustry));
-            Map<String, String> codeIndustryMap = infos.stream()
+                            .select(StockInfo::getCode, StockInfo::getIndustry, StockInfo::getName));
+            Map<String, StockInfo> codeInfoMap = infos.stream()
                     .filter(i -> i.getCode() != null)
-                    .collect(Collectors.toMap(StockInfo::getCode, i -> i.getIndustry() != null ? i.getIndustry() : "", (a, b) -> a));
+                    .collect(Collectors.toMap(StockInfo::getCode, i -> i, (a, b) -> a));
+            
+            // 收集被排除的股票及其行业（用于日志诊断）
+            List<String> excludedStocks = new ArrayList<>();
             int before = candidates.size();
             candidates = candidates.stream()
-                    .filter(s -> !excludeSet.contains(codeIndustryMap.getOrDefault(stripSuffix(s.getSymbol()), "")))
+                    .filter(s -> {
+                        String pureCode = stripSuffix(s.getSymbol());
+                        StockInfo info = codeInfoMap.get(pureCode);
+                        String ind = info != null && info.getIndustry() != null ? info.getIndustry() : "";
+                        String name = info != null && info.getName() != null ? info.getName() : s.getName();
+                        
+                        // 检查是否应排除
+                        boolean excluded = false;
+                        String reason = "";
+                        
+                        // 1. 无行业信息且为新质生产力 → 排除（安全起见）
+                        if (isNewQuality && ind.isEmpty()) {
+                            excluded = true;
+                            reason = "无行业信息";
+                        }
+                        // 2. 行业关键词匹配
+                        if (!excluded) {
+                            excluded = excludeSet.stream().anyMatch(ind::contains);
+                            if (excluded) reason = "匹配排除关键词";
+                        }
+                        // 3. 申万一级行业匹配
+                        if (!excluded) {
+                            excluded = excludeSw1.stream().anyMatch(ind::contains);
+                            if (excluded) reason = "匹配排除一级行业";
+                        }
+                        
+                        if (excluded) {
+                            excludedStocks.add(name + "(" + pureCode + ")[" + ind + "]-" + reason);
+                        }
+                        return !excluded;
+                    })
                     .collect(Collectors.toList());
-            log.info("[Recommendation] 行业排除过滤 [{}]: 排除行业={}, 过滤前={}, 过滤后={}",
-                    factorProfile, excludeSet, before, candidates.size());
+            
+            // 输出所有通过过滤的股票及其行业（用于诊断）
+            List<String> keptSamples = candidates.stream()
+                    .limit(10)
+                    .map(s -> {
+                        StockInfo info = codeInfoMap.get(stripSuffix(s.getSymbol()));
+                        String ind = info != null && info.getIndustry() != null ? info.getIndustry() : "无行业";
+                        String name = info != null && info.getName() != null ? info.getName() : s.getName();
+                        return name + "(" + ind + ")";
+                    })
+                    .collect(Collectors.toList());
+            
+            // 调试用：输出问题股票的实际 industry 值
+            for (String debugCode : List.of("002033", "601000", "600258", "601008")) {
+                StockInfo dinfo = codeInfoMap.get(debugCode);
+                if (dinfo != null) {
+                    log.info("[Recommendation] 调试-行业值: code={}, name={}, industry='{}'",
+                            debugCode, dinfo.getName(), dinfo.getIndustry());
+                }
+            }
+            
+            log.info("[Recommendation] 行业排除过滤 [profile={}, effective={}, isNewQuality={}]: 排除关键词数={}, 排除一级行业数={}, 过滤前={}, 过滤后={}",
+                    factorProfile, effectiveProfile, isNewQuality, excludeSet.size(), excludeSw1.size(), before, candidates.size());
+            log.info("[Recommendation] 被排除股票: {}", excludedStocks);
+            log.info("[Recommendation] 通过过滤的股票样本(前10): {}", keptSamples);
             if (candidates.isEmpty()) {
                 log.warn("[Recommendation] 行业排除后候选池为空，跳过生成");
                 return List.of();
@@ -320,11 +430,13 @@ public class RecommendationService {
             try {
                 StockRecommendation rec = analyzeAndFuse(stock, regime, actualDate, im);
                 recommendations.add(rec);
-                log.info("[Recommendation] 分析进度: {}/{} code={} name={} factorScore={} analysisScore={} finalScore={}",
+                log.info("[Recommendation] 分析进度: {}/{} code={} name={} factorScore={} analysisScore={} finalScore={} tech={} money={} senti={} fund={} risk={} liq={}",
                         i + 1, analysisCount, rec.getStockCode(), rec.getStockName(),
                         String.format("%.4f", rec.getFactorScore()),
                         rec.getAnalysisScore(),
-                        String.format("%.4f", rec.getFinalScore()));
+                        String.format("%.4f", rec.getFinalScore()),
+                        rec.getTechnicalScore(), rec.getCapitalScore(), rec.getEventScore(), rec.getFundamentalScore(),
+                        rec.getRiskScore(), rec.getLiquidityScore());
             } catch (Exception e) {
                 log.warn("[Recommendation] 个股分析失败: code={} error={}", stock.getSymbol(), e.getMessage());
             }
@@ -454,22 +566,31 @@ public class RecommendationService {
                 try {
                     boolean updated = false;
 
-                    // 次日收益率
-                    if (rec.getNextDayReturn() == null && daysSince >= 1) {
-                        rec.setNextDayReturn(calcForwardReturn(rec.getStockCode(), recDate, 1));
-                        updated = true;
+                    // 次日收益率（总是重新计算，覆盖旧值，以支持除权修正/数据修正）
+                    if (daysSince >= 1) {
+                        Double val = calcForwardReturn(rec.getStockCode(), recDate, 1);
+                        if (val != null) {
+                            rec.setNextDayReturn(val);
+                            updated = true;
+                        }
                     }
 
                     // 一周收益率
-                    if (rec.getNextWeekReturn() == null && daysSince >= 5) {
-                        rec.setNextWeekReturn(calcForwardReturn(rec.getStockCode(), recDate, 5));
-                        updated = true;
+                    if (daysSince >= 5) {
+                        Double val = calcForwardReturn(rec.getStockCode(), recDate, 5);
+                        if (val != null) {
+                            rec.setNextWeekReturn(val);
+                            updated = true;
+                        }
                     }
 
                     // 一月收益率
-                    if (rec.getNextMonthReturn() == null && daysSince >= 22) {
-                        rec.setNextMonthReturn(calcForwardReturn(rec.getStockCode(), recDate, 22));
-                        updated = true;
+                    if (daysSince >= 22) {
+                        Double val = calcForwardReturn(rec.getStockCode(), recDate, 22);
+                        if (val != null) {
+                            rec.setNextMonthReturn(val);
+                            updated = true;
+                        }
                     }
 
                     if (updated) {
@@ -529,6 +650,242 @@ public class RecommendationService {
         return recommendationMapper.findRecentBatchIds(limit);
     }
 
+    /**
+     * 获取批次历史表现汇总（含质量标签）
+     * 用于前端表现追踪面板：命中趋势图 + 质量标签展示
+     *
+     * @param limit 返回最近N个批次
+     * @return [{ batchId, recommendDate, total, hitRate, avgDayReturn, avgWeekReturn, avgMonthReturn, qualityTag, tracked }]
+     */
+    public List<Map<String, Object>> getBatchHistory(int limit) {
+        List<String> batchIds = recommendationMapper.findRecentBatchIds(limit);
+        List<Map<String, Object>> history = new ArrayList<>();
+
+        // 先收集所有批次的 hitRate，用于滚动5期均值计算
+        List<Double> hitRates = new ArrayList<>();
+        List<Long> trackedCounts = new ArrayList<>();
+        List<Map<String, Object>> rawEntries = new ArrayList<>();
+
+        for (String batchId : batchIds) {
+            Map<String, Object> stats = getHitRate(batchId);
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("batchId", batchId);
+            entry.put("total", stats.get("total"));
+            entry.put("tracked", stats.get("tracked"));
+
+            // 获取推荐日期
+            List<StockRecommendation> recs = recommendationMapper.findByBatchId(batchId);
+            if (!recs.isEmpty()) {
+                entry.put("recommendDate", recs.get(0).getRecommendDate().toString());
+            }
+
+            Double hitRate = (Double) stats.get("hitRate");
+            Double avgDayReturn = (Double) stats.get("avgReturn");
+            entry.put("hitRate", hitRate);
+            entry.put("avgDayReturn", avgDayReturn);
+
+            // 计算一周/一月平均收益
+            double sumWeek = 0, sumMonth = 0;
+            long weekTracked = 0, monthTracked = 0;
+            for (StockRecommendation rec : recs) {
+                if (rec.getNextWeekReturn() != null) { sumWeek += rec.getNextWeekReturn(); weekTracked++; }
+                if (rec.getNextMonthReturn() != null) { sumMonth += rec.getNextMonthReturn(); monthTracked++; }
+            }
+            entry.put("avgWeekReturn", weekTracked > 0 ? sumWeek / weekTracked : null);
+            entry.put("avgMonthReturn", monthTracked > 0 ? sumMonth / monthTracked : null);
+
+            hitRates.add(hitRate);
+            trackedCounts.add((Long) stats.get("tracked"));
+            rawEntries.add(entry);
+        }
+
+        // 质量标签: 基于近5期滚动平均命中率判定
+        for (int i = 0; i < rawEntries.size(); i++) {
+            Map<String, Object> entry = rawEntries.get(i);
+            // 计算当前批次及之前的近5期（含当前批次）滚动均值
+            double rollingSum = 0;
+            long rollingTracked = 0;
+            for (int j = i; j >= 0 && j > i - 5; j--) {
+                if (trackedCounts.get(j) > 0) {
+                    rollingSum += hitRates.get(j) != null ? hitRates.get(j) : 0;
+                    rollingTracked++;
+                }
+            }
+            double rollingAvg = rollingTracked > 0 ? rollingSum / rollingTracked : 0;
+
+            String qualityTag;
+            if (rollingTracked == 0) {
+                qualityTag = "UNTRAINED";
+            } else if (rollingAvg >= 0.6) {
+                qualityTag = "HIGH_QUALITY";
+            } else if (rollingAvg >= 0.4) {
+                qualityTag = "NORMAL";
+            } else {
+                qualityTag = "LOW_QUALITY";
+            }
+            entry.put("qualityTag", qualityTag);
+            entry.put("rollingAvgHitRate", rollingTracked > 0 ? rollingAvg : null);
+
+            history.add(entry);
+        }
+        return history;
+    }
+
+    /**
+     * 获取指定批次的最佳/最差股票（用于推荐复盘）
+     * 按次日收益率排序，分别取 top3 / bottom3
+     * 含深度归因分析：行业分布对比、市值中位数对比、因子/分析得分对比
+     *
+     * @return { best3: [...], worst3: [...], analysis: { industryDiff, marketCapDiff, scoreDiff, failurePatterns } }
+     */
+    public Map<String, Object> getBatchTopBottom(String batchId) {
+        List<StockRecommendation> recs = recommendationMapper.findByBatchId(batchId);
+        Map<String, Object> result = new HashMap<>();
+
+        // 只取有次日收益的
+        List<StockRecommendation> tracked = recs.stream()
+                .filter(r -> r.getNextDayReturn() != null)
+                .collect(java.util.stream.Collectors.toList());
+
+        // 最佳3只（次日收益最高）
+        List<StockRecommendation> best3 = tracked.stream()
+                .sorted(java.util.Comparator.comparingDouble(StockRecommendation::getNextDayReturn).reversed())
+                .limit(3)
+                .collect(java.util.stream.Collectors.toList());
+
+        // 最差3只（次日收益最低）
+        List<StockRecommendation> worst3 = tracked.stream()
+                .sorted(java.util.Comparator.comparingDouble(StockRecommendation::getNextDayReturn))
+                .limit(3)
+                .collect(java.util.stream.Collectors.toList());
+
+        result.put("best3", best3);
+        result.put("worst3", worst3);
+
+        // ── 深度归因分析 ──
+        Map<String, Object> analysis = new LinkedHashMap<>();
+
+        // 1) 行业分布对比
+        Map<String, Object> industryDiff = new LinkedHashMap<>();
+        Map<String, Long> bestIndustries = best3.stream()
+                .filter(r -> r.getIndustry() != null)
+                .collect(java.util.stream.Collectors.groupingBy(StockRecommendation::getIndustry, java.util.stream.Collectors.counting()));
+        Map<String, Long> worstIndustries = worst3.stream()
+                .filter(r -> r.getIndustry() != null)
+                .collect(java.util.stream.Collectors.groupingBy(StockRecommendation::getIndustry, java.util.stream.Collectors.counting()));
+        industryDiff.put("bestIndustries", bestIndustries);
+        industryDiff.put("worstIndustries", worstIndustries);
+        // 找出仅在 worst 中出现的行业（可能为弱势行业）
+        Set<String> worstOnlyIndustries = new java.util.LinkedHashSet<>(worstIndustries.keySet());
+        worstOnlyIndustries.removeAll(bestIndustries.keySet());
+        industryDiff.put("worstOnlyIndustries", worstOnlyIndustries);
+        analysis.put("industryDiff", industryDiff);
+
+        // 2) 市值中位数对比
+        Map<String, Object> marketCapDiff = new LinkedHashMap<>();
+        Double bestMedianCap = median(best3.stream()
+                .filter(r -> r.getMarketCap() != null)
+                .map(StockRecommendation::getMarketCap)
+                .collect(java.util.stream.Collectors.toList()));
+        Double worstMedianCap = median(worst3.stream()
+                .filter(r -> r.getMarketCap() != null)
+                .map(StockRecommendation::getMarketCap)
+                .collect(java.util.stream.Collectors.toList()));
+        marketCapDiff.put("bestMedianCap", bestMedianCap);
+        marketCapDiff.put("worstMedianCap", worstMedianCap);
+        marketCapDiff.put("hint", bestMedianCap != null && worstMedianCap != null
+                ? (bestMedianCap > worstMedianCap ? "大盘股表现优于小盘股" : "小盘股表现优于大盘股")
+                : null);
+        analysis.put("marketCapDiff", marketCapDiff);
+
+        // 3) 因子得分 vs 分析得分对比
+        Map<String, Object> scoreDiff = new LinkedHashMap<>();
+        double bestAvgFactor = best3.stream()
+                .filter(r -> r.getFactorScore() != null)
+                .mapToDouble(r -> r.getFactorScore()).average().orElse(0);
+        double worstAvgFactor = worst3.stream()
+                .filter(r -> r.getFactorScore() != null)
+                .mapToDouble(r -> r.getFactorScore()).average().orElse(0);
+        double bestAvgAnalysis = best3.stream()
+                .filter(r -> r.getAnalysisScorePct() != null)
+                .mapToDouble(r -> r.getAnalysisScorePct()).average().orElse(0);
+        double worstAvgAnalysis = worst3.stream()
+                .filter(r -> r.getAnalysisScorePct() != null)
+                .mapToDouble(r -> r.getAnalysisScorePct()).average().orElse(0);
+        scoreDiff.put("bestAvgFactorScore", bestAvgFactor);
+        scoreDiff.put("worstAvgFactorScore", worstAvgFactor);
+        scoreDiff.put("bestAvgAnalysisPct", bestAvgAnalysis);
+        scoreDiff.put("worstAvgAnalysisPct", worstAvgAnalysis);
+        // 分析差距来源
+        double factorGap = bestAvgFactor - worstAvgFactor;
+        double analysisGap = bestAvgAnalysis - worstAvgAnalysis;
+        if (Math.abs(factorGap) > Math.abs(analysisGap)) {
+            scoreDiff.put("dominantGap", "FACTOR");
+            scoreDiff.put("hint", factorGap > 0
+                    ? "因子得分差距更大，因子筛选效果显著"
+                    : "因子得分差距更大，但方向反转，需检查因子有效性");
+        } else {
+            scoreDiff.put("dominantGap", "ANALYSIS");
+            scoreDiff.put("hint", analysisGap > 0
+                    ? "分析得分差距更大，深度分析筛选效果好"
+                    : "分析得分差距更大，但方向反转，需检查分析模型");
+        }
+        analysis.put("scoreDiff", scoreDiff);
+
+        // 4) 失败模式识别
+        List<String> failurePatterns = new java.util.ArrayList<>();
+        if (!worst3.isEmpty()) {
+            // 检查是否集中在弱势行业
+            long weakMomentumCount = worst3.stream()
+                    .filter(r -> r.getIndustryMomentum() != null && r.getIndustryMomentum() < -0.3)
+                    .count();
+            if (weakMomentumCount > 0) {
+                failurePatterns.add(String.format("弱势行业占比 %d/%d（行业动量 < -0.3），行业环境拖累明显", weakMomentumCount, worst3.size()));
+            }
+            // 检查是否风险评分偏高
+            double worstAvgRisk = worst3.stream()
+                    .filter(r -> r.getRiskScore() != null)
+                    .mapToInt(StockRecommendation::getRiskScore).average().orElse(0);
+            double bestAvgRisk = best3.stream()
+                    .filter(r -> r.getRiskScore() != null)
+                    .mapToInt(StockRecommendation::getRiskScore).average().orElse(0);
+            if (worstAvgRisk > bestAvgRisk + 2) {
+                failurePatterns.add(String.format("最差组平均风险评分 %.1f 显著高于最佳组 %.1f，风险控制不足", worstAvgRisk, bestAvgRisk));
+            }
+            // 检查是否流动性评分偏低
+            double worstAvgLiquidity = worst3.stream()
+                    .filter(r -> r.getLiquidityScore() != null)
+                    .mapToInt(StockRecommendation::getLiquidityScore).average().orElse(0);
+            double bestAvgLiquidity = best3.stream()
+                    .filter(r -> r.getLiquidityScore() != null)
+                    .mapToInt(StockRecommendation::getLiquidityScore).average().orElse(0);
+            if (worstAvgLiquidity < bestAvgLiquidity - 2) {
+                failurePatterns.add(String.format("最差组平均流动性评分 %.1f 低于最佳组 %.1f，流动性风险较高", worstAvgLiquidity, bestAvgLiquidity));
+            }
+            // 检查同行业集中度
+            if (worstIndustries.size() == 1 && worst3.size() >= 2) {
+                failurePatterns.add(String.format("最差组全部来自「%s」行业，行业集中风险极高", worstIndustries.keySet().iterator().next()));
+            }
+            if (failurePatterns.isEmpty()) {
+                failurePatterns.add("无明显共性失败模式，可能受个股特有事件或市场随机波动影响");
+            }
+        }
+        analysis.put("failurePatterns", failurePatterns);
+
+        result.put("analysis", analysis);
+        return result;
+    }
+
+    /** 计算中位数 */
+    private Double median(List<Double> values) {
+        if (values.isEmpty()) return null;
+        List<Double> sorted = new java.util.ArrayList<>(values);
+        java.util.Collections.sort(sorted);
+        int n = sorted.size();
+        if (n % 2 == 1) return sorted.get(n / 2);
+        return (sorted.get(n / 2 - 1) + sorted.get(n / 2)) / 2.0;
+    }
+
     // ── 私有方法 ──
 
     /**
@@ -566,8 +923,10 @@ public class RecommendationService {
         info.indexMa20 = ma20;
         info.indexMa60 = ma60;
 
-        boolean bullishTrend = info.indexClose > ma20 && ma20 > ma60;
-        boolean bearishTrend = info.indexClose < ma20 && ma20 < ma60;
+        // 引入0.5%缓冲带，避免单日噪声导致Regime频繁切换
+        double trendBuffer = info.indexClose * 0.005;
+        boolean bullishTrend = info.indexClose > ma20 + trendBuffer && ma20 > ma60 + trendBuffer;
+        boolean bearishTrend = info.indexClose < ma20 - trendBuffer && ma20 < ma60 - trendBuffer;
 
         // ── 维度2: 波动率体制 (ATR20 分位数) ──
         List<Double> highs = bars.stream().map(b -> b.getHigh().doubleValue()).collect(Collectors.toList());
@@ -803,28 +1162,14 @@ public class RecommendationService {
      */
     private double fuseScore(StockRecommendation rec, RegimeInfo regime, IndustryMomentum im) {
         double factorPart = rec.getFactorScore() != null ? rec.getFactorScore() : 0.0;
+        // 尺度校验：factorScore应已归一化到0~1，若异常则截断，确保融合公平
+        factorPart = Math.max(0.0, Math.min(1.0, factorPart));
 
         // 分析得分各维度归一化后加权
         double techPct = safeDiv(rec.getTechnicalScore(), 30.0);    // 技术面满分30
         double moneyPct = safeDiv(rec.getCapitalScore(), 25.0);    // 资金面满分25
         double eventPct = safeDiv(rec.getEventScore(), 25.0);      // 事件面满分25
         double fundPct = safeDiv(rec.getFundamentalScore(), 29.0); // 基本面满分29
-
-        double analysisPart;
-        switch (regime.regime) {
-            case "BULL" -> analysisPart = 0.40 * techPct + 0.30 * moneyPct + 0.10 * eventPct + 0.20 * fundPct;
-            case "BEAR" -> analysisPart = 0.20 * techPct + 0.15 * moneyPct + 0.15 * eventPct + 0.50 * fundPct;
-            default -> analysisPart = 0.30 * techPct + 0.25 * moneyPct + 0.15 * eventPct + 0.30 * fundPct;
-        }
-
-        // P1-1: 风格维度调整分析部分权重
-        if ("GROWTH".equals(regime.styleRegime)) {
-            // 成长风格占优 → 提高技术面/资金面权重，降低基本面
-            analysisPart = analysisPart * 0.9 + techPct * 0.05 + moneyPct * 0.05;
-        } else if ("VALUE".equals(regime.styleRegime)) {
-            // 价值风格占优 → 提高基本面权重
-            analysisPart = analysisPart * 0.9 + fundPct * 0.10;
-        }
 
         // P1-2: 风险和流动性评分归一化
         double riskPct = safeDiv(rec.getRiskScore(), 15.0);       // 风险满分15
@@ -987,6 +1332,7 @@ public class RecommendationService {
         for (StockRecommendation rec : recommendations) {
             String industry = rec.getIndustry() != null ? rec.getIndustry() : "UNKNOWN";
             String group = getCorrGroup(industry);  // P1-3: 获取所属相关组
+            rec.setCorrGroup(group);  // 瞬态字段，供前端展示
             int count = groupCount.getOrDefault(group, 0);
 
             // 动态上限: 优先使用行业动量中的限制, 回退到默认3
@@ -1002,6 +1348,7 @@ public class RecommendationService {
                 diversified.add(rec);
                 groupCount.put(group, count + 1);  // P1-3: 按组计数
             } else {
+                rec.setDiversificationDemoted(true);  // 标记降权
                 excess.add(rec);
             }
         }
@@ -1099,27 +1446,44 @@ public class RecommendationService {
                     .collect(Collectors.toMap(StockInfo::getCode, StockInfo::getIndustry, (a, b) -> a));
             log.info("[Recommendation] 行业动量: MySQL stock_info 返回 {} 条行业映射", codeToIndustry.size());
 
-            // Step 3: 按行业汇总涨跌幅
-            Map<String, List<Double>> industryChanges = new LinkedHashMap<>();
+            // Step 3: 按行业汇总涨跌幅（分离当日/近5日数据，解决单日噪声）
+            Map<String, List<Double>> industryDailyChanges = new LinkedHashMap<>();  // 目标日期
+            Map<String, List<Double>> industryRecentChanges = new LinkedHashMap<>(); // 近5日（平滑排名）
+
             for (Map<String, Object> row : rows) {
                 String code = (String) row.get("code");
                 Object chgObj = row.get("change_percent");
-                if (code == null || chgObj == null) continue;
+                Object tdObj = row.get("trade_date");
+                if (code == null || chgObj == null || tdObj == null) continue;
                 String industry = codeToIndustry.get(code);
                 if (industry == null) continue;
                 double chg = chgObj instanceof Number ? ((Number) chgObj).doubleValue() : 0;
-                industryChanges.computeIfAbsent(industry, k -> new ArrayList<>()).add(chg);
+                String td = tdObj.toString();
+
+                // 近5日数据用于平滑行业排名（避免单日极端值导致排名跳变）
+                try {
+                    long daysDiff = java.time.temporal.ChronoUnit.DAYS.between(
+                            LocalDate.parse(td), LocalDate.parse(targetDate));
+                    if (daysDiff >= 0 && daysDiff <= 4) {
+                        industryRecentChanges.computeIfAbsent(industry, k -> new ArrayList<>()).add(chg);
+                    }
+                } catch (Exception ignored) {}
+
+                // 仅目标日期用于精确当日数据
+                if (td.equals(targetDate)) {
+                    industryDailyChanges.computeIfAbsent(industry, k -> new ArrayList<>()).add(chg);
+                }
             }
 
-            if (industryChanges.isEmpty()) {
+            if (industryRecentChanges.isEmpty()) {
                 log.warn("[Recommendation] 行业涨跌幅汇总为空");
                 return result;
             }
 
-            // Step 4: 计算各行业平均涨跌幅
+            // Step 4: 计算各行业平均涨跌幅（使用近5日平滑，避免单日噪声导致排名跳变）
             List<Double> allChangePcts = new ArrayList<>();
             List<Map<String, Object>> industryList = new ArrayList<>();
-            for (Map.Entry<String, List<Double>> entry : industryChanges.entrySet()) {
+            for (Map.Entry<String, List<Double>> entry : industryRecentChanges.entrySet()) {
                 String industry = entry.getKey();
                 List<Double> changes = entry.getValue();
                 if (changes.isEmpty()) continue;
@@ -1276,7 +1640,15 @@ public class RecommendationService {
                 }
             }
 
-            log.info("[Recommendation] P2-1 行业动量增强完成");
+            // P2-1后：使用momentumScore重新校准fusionBonus（解决尺度不匹配，基于20日综合动量而非单日相对强度）
+            for (IndustryMomentum im : result.values()) {
+                if (im.momentumScore > 0.7) im.fusionBonus = 0.06;
+                else if (im.momentumScore > 0.55) im.fusionBonus = 0.03;
+                else if (im.momentumScore > 0.45) im.fusionBonus = 0.0;
+                else if (im.momentumScore > 0.3) im.fusionBonus = -0.03;
+                else im.fusionBonus = -0.06;
+            }
+            log.info("[Recommendation] P2-1 行业动量增强完成，fusionBonus已按momentumScore校准");
 
         } catch (Exception e) {
             log.error("[Recommendation] 行业动量计算异常: {}", e.getMessage(), e);
@@ -1299,8 +1671,15 @@ public class RecommendationService {
      * @return Regime 字符串: BULL / BEAR / SIDEWAYS
      */
     private String detectIndustryRegime(String industryName, LocalDate date, IndustryMomentum im) {
-        // 1. 查找申万代码
+        // 1. 查找申万代码（优先直接匹配；二级行业通过 SW2_TO_SW1 归约到一级）
         String swCode = INDUSTRY_TO_SW_CODE.get(industryName);
+        if (swCode == null) {
+            // 二级行业 → 归约到一级
+            String sw1 = SW2_TO_SW1.get(industryName);
+            if (sw1 != null) {
+                swCode = INDUSTRY_TO_SW_CODE.get(sw1);
+            }
+        }
         if (swCode == null) {
             log.debug("[Recommendation] 行业[{}]无申万代码映射，默认 SIDEWAYS", industryName);
             return "SIDEWAYS";
@@ -1331,8 +1710,10 @@ public class RecommendationService {
             double latestClose = closes.get(closes.size() - 1);
             double ma20 = avg(closes, 20);
             double ma60 = avg(closes, 60);
-            boolean bullishTrend = latestClose > ma20 && ma20 > ma60;
-            boolean bearishTrend = latestClose < ma20 && ma20 < ma60;
+            // 引入0.5%缓冲带，避免单日噪声导致Regime频繁切换
+            double buffer = latestClose * 0.005;
+            boolean bullishTrend = latestClose > ma20 + buffer && ma20 > ma60 + buffer;
+            boolean bearishTrend = latestClose < ma20 - buffer && ma20 < ma60 - buffer;
 
             // ── 维度2: ATR 波动率 ──
             double atr20 = calcATR(highs, lows, closes, 20);
@@ -1398,18 +1779,42 @@ public class RecommendationService {
      */
     private Double calcForwardReturn(String stockCode, LocalDate baseDate, int forwardDays) {
         try {
-            LocalDate targetDate = baseDate.plusDays(forwardDays);
-            List<MarketDailyBar> bars = marketDataService.getBarsInRange(stockCode, baseDate, targetDate);
-            if (bars == null || bars.size() < 2) return null;
+            // 先取 baseDate 前后足够多的行情，找到 baseDate 对应的交易日及之后第 forwardDays 个交易日
+            LocalDate searchStart = baseDate.minusDays(5); // 确保包含baseDate当天
+            LocalDate searchEnd = baseDate.plusDays(forwardDays * 2 + 10); // 多取一些确保有足够交易日
+            List<MarketDailyBar> bars = marketDataService.getBarsInRange(stockCode, searchStart, searchEnd);
+            if (bars == null || bars.isEmpty()) return null;
 
-            double baseClose = bars.get(0).getClose().doubleValue();
-            if (baseClose <= 0) return null;
+            // 找到 >= baseDate 的第一个交易日（作为基准日）
+            int baseIdx = -1;
+            for (int i = 0; i < bars.size(); i++) {
+                if (!bars.get(i).getTradeDate().isBefore(baseDate)) {
+                    baseIdx = i;
+                    break;
+                }
+            }
+            if (baseIdx < 0) return null;
 
-            // 找到最接近 targetDate 的交易日
-            double targetClose = bars.get(bars.size() - 1).getClose().doubleValue();
-            if (targetClose <= 0) return null;
+            // 找到基准日之后第 forwardDays 个交易日
+            int targetIdx = baseIdx + forwardDays;
+            if (targetIdx >= bars.size()) return null; // 数据不足，无法计算
 
-            return Math.round((targetClose / baseClose - 1.0) * 10000.0) / 100.0; // 百分比，保留2位
+            double baseClose = bars.get(baseIdx).getClose().doubleValue();
+            double targetClose = bars.get(targetIdx).getClose().doubleValue();
+            if (baseClose <= 0 || targetClose <= 0) return null;
+
+            // 前复权调整：用累积复权因子消除除权除息的价格跳空
+            LocalDate targetDate = bars.get(targetIdx).getTradeDate();
+            double baseAdj = dividendService.getCumulativeAdjFactor(stockCode, baseDate).doubleValue();
+            double targetAdj = dividendService.getCumulativeAdjFactor(stockCode, targetDate).doubleValue();
+            if (baseAdj <= 0 || targetAdj <= 0) {
+                // 复权因子异常，回退到不复权计算
+                return Math.round((targetClose / baseClose - 1.0) * 10000.0) / 100.0;
+            }
+
+            double adjBaseClose = baseClose * baseAdj;
+            double adjTargetClose = targetClose * targetAdj;
+            return Math.round((adjTargetClose / adjBaseClose - 1.0) * 10000.0) / 100.0; // 百分比，保留2位
         } catch (Exception e) {
             return null;
         }
@@ -1467,6 +1872,7 @@ public class RecommendationService {
         ScreenRequest req = new ScreenRequest();
         req.setScreenDate(date);
         req.setFactors(factors);
+        req.setStrategyId(strategyId);
         req.setTopN(SCREEN_TOP_N);
         req.setDirection("LONG");
         req.setExcludeSt(true);
@@ -1714,30 +2120,78 @@ public class RecommendationService {
     }
 
     /**
+     * 解析有效的 factorProfile（优先参数，其次从策略推断）
+     */
+    private String resolveEffectiveProfile(String factorProfile, Long strategyId) {
+        if (factorProfile != null && !factorProfile.isEmpty()) {
+            return factorProfile.toUpperCase();
+        }
+        if (strategyId != null) {
+            StrategyDefinition strategy = strategyDefinitionMapper.selectById(strategyId);
+            return mapStrategyToProfile(strategy);
+        }
+        return null;
+    }
+
+    /**
      * 获取行业排除列表（优先从策略 filterConfigJson 读取）
      */
     @SuppressWarnings("unchecked")
     private List<String> getExcludeIndustries(String factorProfile, Long strategyId) {
+        // 先获取硬编码的排除列表（作为兜底/合并基础）
+        String effectiveProfile = resolveEffectiveProfile(factorProfile, strategyId);
+        List<String> hardcodedList = PROFILE_EXCLUDE_INDUSTRY_MAP.getOrDefault(
+                effectiveProfile != null ? effectiveProfile : "EXISTING", List.of());
+
+        StrategyDefinition strategy = null;
         if (strategyId != null) {
-            StrategyDefinition strategy = strategyDefinitionMapper.selectById(strategyId);
+            strategy = strategyDefinitionMapper.selectById(strategyId);
             if (strategy != null && strategy.getFilterConfigJson() != null && !strategy.getFilterConfigJson().isEmpty()) {
                 try {
                     Map<String, Object> filterConfig = objectMapper.readValue(strategy.getFilterConfigJson(), Map.class);
                     Object exclude = filterConfig.get("excludeIndustries");
-                    if (exclude instanceof List) {
-                        List<String> list = ((List<?>) exclude).stream()
+                    if (exclude instanceof List && !((List<?>) exclude).isEmpty()) {
+                        List<String> dbList = ((List<?>) exclude).stream()
                                 .map(Object::toString)
                                 .collect(Collectors.toList());
-                        log.info("[Recommendation] 从策略[{}]加载行业排除: {}", strategy.getStrategyName(), list);
-                        return list;
+                        // 合并：策略配置 + 硬编码列表（去重）
+                        Set<String> merged = new LinkedHashSet<>(dbList);
+                        merged.addAll(hardcodedList);
+                        List<String> result = new ArrayList<>(merged);
+                        log.info("[Recommendation] 行业排除(合并): 策略[{}]={} + 硬编码[{}]={} → 合并={}",
+                                strategy.getStrategyName(), dbList.size(),
+                                effectiveProfile, hardcodedList.size(), result.size());
+                        return result;
                     }
                 } catch (Exception e) {
                     log.warn("[Recommendation] 策略过滤配置解析失败 strategyId={}", strategyId, e);
                 }
             }
         }
-        return PROFILE_EXCLUDE_INDUSTRY_MAP.getOrDefault(
-                factorProfile != null ? factorProfile : "EXISTING", List.of());
+        log.info("[Recommendation] 行业排除(硬编码): factorProfile={}, strategyId={}, strategyCode={}, effectiveProfile={}, excludeCount={}",
+                factorProfile, strategyId, strategy != null ? strategy.getStrategyCode() : "null",
+                effectiveProfile, hardcodedList.size());
+        return hardcodedList;
+    }
+
+    /**
+     * 根据策略代码/名称映射到 factorProfile（用于回退行业排除和因子选择）
+     */
+    private String mapStrategyToProfile(StrategyDefinition strategy) {
+        if (strategy == null) return null;
+        String code = strategy.getStrategyCode();
+        String name = strategy.getStrategyName();
+        // 精确匹配策略代码
+        if ("NEW_PRODUCTIVITY".equals(code) || "RECOMMEND_NEW_QUALITY".equals(code)) return "NEW_QUALITY";
+        if ("HOT_TRACKING".equals(code)) return "HOT";
+        if ("COMPREHENSIVE".equals(code)) return "COMPREHENSIVE";
+        // 兜底：名称匹配
+        if (name != null) {
+            if (name.contains("新质生产力") || name.contains("新质")) return "NEW_QUALITY";
+            if (name.contains("热点") || name.contains("追踪")) return "HOT";
+            if (name.contains("综合") || name.contains("均衡")) return "COMPREHENSIVE";
+        }
+        return null;
     }
 
     /**
@@ -1806,9 +2260,9 @@ public class RecommendationService {
                 }
             }
 
-            // 归一化到 0~1（109分满分）
+            // 归一化到 0~1（134分满分：技术30+资金25+事件25+基本面29+风险15+流动性10）
             rec.setAnalysisScorePct(overview.getTotalScore() != null
-                    ? overview.getTotalScore() / 109.0 : 0.0);
+                    ? overview.getTotalScore() / 134.0 : 0.0);
         } else {
             rec.setAnalysisScore(0);
             rec.setAnalysisScorePct(0.0);
