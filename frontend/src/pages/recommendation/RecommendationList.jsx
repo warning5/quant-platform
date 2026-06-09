@@ -496,12 +496,14 @@ export default function RecommendationList() {
     },
     // 追踪字段（Phase 2 填充）
     {
-      title: <Tooltip title="推荐次日收盘相对推荐日收盘的涨跌幅">次日</Tooltip>,
+      title: <Tooltip title="推荐次日收盘相对推荐日收盘的涨跌幅">次日收益</Tooltip>,
       dataIndex: 'nextDayReturn',
-      width: 65,
+      width: 85,
       render: (v, rec) => {
         if (v == null) {
-          const isToday = rec.recommendDate === new Date().toISOString().slice(0, 10);
+          const now = new Date();
+          const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+          const isToday = rec.recommendDate === todayStr;
           return (
             <Tooltip title={isToday ? '推荐当日，需次日收盘后计算' : '数据积累中，稍后可追踪'}>
               <Text type="secondary" style={{ fontSize: 11 }}>{isToday ? '当日' : '待追踪'}</Text>
@@ -513,9 +515,9 @@ export default function RecommendationList() {
       },
     },
     {
-      title: <Tooltip title="推荐后第5个交易日收盘相对推荐日收盘的涨跌幅">一周</Tooltip>,
+      title: <Tooltip title="推荐后第5个交易日收盘相对推荐日收盘的涨跌幅">一周收益</Tooltip>,
       dataIndex: 'nextWeekReturn',
-      width: 65,
+      width: 85,
       render: (v) => {
         if (v == null) return (
           <Tooltip title="需至少5个交易日后才能计算">
@@ -527,9 +529,9 @@ export default function RecommendationList() {
       },
     },
     {
-      title: <Tooltip title="推荐后第22个交易日收盘相对推荐日收盘的涨跌幅">一月</Tooltip>,
+      title: <Tooltip title="推荐后第22个交易日收盘相对推荐日收盘的涨跌幅">一月收益</Tooltip>,
       dataIndex: 'nextMonthReturn',
-      width: 65,
+      width: 85,
       render: (v) => {
         if (v == null) return (
           <Tooltip title="需至少22个交易日后才能计算">
@@ -1034,7 +1036,7 @@ export default function RecommendationList() {
       {/* 表现追踪面板 */}
       {batchHistory && batchHistory.length > 0 && (() => {
         const trackedBatches = batchHistory.filter(b => b.tracked > 0);
-        const latest = batchHistory[0];
+        const latest = batchHistory.find(b => b.tracked > 0) || batchHistory[0];
         const avgHitRate = trackedBatches.length > 0
           ? trackedBatches.reduce((s, b) => s + (b.hitRate || 0), 0) / trackedBatches.length
           : 0;
@@ -1044,7 +1046,7 @@ export default function RecommendationList() {
 
         // 命中率趋势图
         const trendOption = {
-          grid: { top: 30, right: 20, bottom: 30, left: 50 },
+          grid: { top: 30, right: 60, bottom: 30, left: 50 },
           tooltip: {
             trigger: 'axis',
             formatter: params => {
@@ -1076,6 +1078,7 @@ export default function RecommendationList() {
               type: 'value',
               name: '次日均收益',
               position: 'right',
+              nameGap: 30,
               axisLabel: { formatter: v => v.toFixed(1) + '%' },
               splitLine: { show: false },
             },
@@ -1095,7 +1098,7 @@ export default function RecommendationList() {
               type: 'bar',
               data: [...batchHistory].reverse().map(b => b.hitRate != null ? +(b.hitRate).toFixed(3) : null),
               barWidth: '40%',
-              label: { show: true, position: 'top', fontSize: 10, formatter: p => p.value != null ? (p.value * 100).toFixed(0) + '%' : '-' },
+              label: { show: true, position: 'top', fontSize: 10, color: '#595959', formatter: p => p.value != null ? (p.value * 100).toFixed(0) + '%' : '-' },
               itemStyle: { borderRadius: [4, 4, 0, 0] },
             },
             {
@@ -1104,8 +1107,7 @@ export default function RecommendationList() {
               yAxisIndex: 1,
               data: [...batchHistory].reverse().map(b => b.avgDayReturn != null ? +(b.avgDayReturn).toFixed(2) : null),
               lineStyle: { color: '#1890ff', width: 2 },
-              symbol: 'circle',
-              symbolSize: 6,
+              symbol: 'none',
               itemStyle: { color: '#1890ff' },
             },
           ],
@@ -1124,7 +1126,7 @@ export default function RecommendationList() {
               <Col span={4}>
                 <Card size="small" bodyStyle={{ padding: '12px 16px' }}>
                   <Statistic
-                    title={<span>平均命中率 <Tooltip title="所有已追踪批次的次日上涨比例均值。> 60% 为高质量，40%-60% 为正常，< 40% 建议审视策略"><QuestionCircleOutlined style={{ color: '#8c8c8c', fontSize: 12, marginLeft: 2 }} /></Tooltip></span>}
+                    title={<span>平均命中率 <Tooltip title={<>含义：所有已追踪批次中，推荐股票次日收盘上涨的比例均值<br/>作用：衡量策略整体选股的准确性<br/>阈值：≥60% 高质量 / 40%-60% 正常 / &lt;40% 低质量<br/>影响：持续低于40%时，需审视策略参数或市场环境</>}><QuestionCircleOutlined style={{ color: '#8c8c8c', fontSize: 12, marginLeft: 2 }} /></Tooltip></span>}
                     value={(avgHitRate * 100).toFixed(0)}
                     suffix="%"
                     valueStyle={{ color: avgHitRate >= 0.6 ? '#52c41a' : avgHitRate >= 0.4 ? '#1890ff' : '#ff4d4f', fontSize: 20 }}
@@ -1134,7 +1136,7 @@ export default function RecommendationList() {
               <Col span={4}>
                 <Card size="small" bodyStyle={{ padding: '12px 16px' }}>
                   <Statistic
-                    title={<span>次日均收益 <Tooltip title="所有已追踪批次的次日平均涨跌幅"><QuestionCircleOutlined style={{ color: '#8c8c8c', fontSize: 12, marginLeft: 2 }} /></Tooltip></span>}
+                    title={<span>次日均收益 <Tooltip title={<>含义：所有已追踪批次中，推荐股票次日涨跌幅的算术平均值<br/>作用：衡量策略的整体盈利能力<br/>阈值：&gt;0 为正收益策略 / 接近0 效果一般 / &lt;0 策略亏损<br/>影响：持续为负时，即使命中率高也可能是小涨大跌，需关注盈亏比</>}><QuestionCircleOutlined style={{ color: '#8c8c8c', fontSize: 12, marginLeft: 2 }} /></Tooltip></span>}
                     value={avgDayRet > 0 ? '+' + avgDayRet.toFixed(2) : avgDayRet.toFixed(2)}
                     suffix="%"
                     valueStyle={{ color: avgDayRet > 0 ? '#cf1322' : avgDayRet < 0 ? '#3f8600' : undefined, fontSize: 20 }}
@@ -1144,7 +1146,7 @@ export default function RecommendationList() {
               <Col span={4}>
                 <Card size="small" bodyStyle={{ padding: '12px 16px' }}>
                   <Statistic
-                    title={<span>已追踪批次 <Tooltip title="已完成次日收益计算的批次数"><QuestionCircleOutlined style={{ color: '#8c8c8c', fontSize: 12, marginLeft: 2 }} /></Tooltip></span>}
+                    title={<span>已追踪批次 <Tooltip title={<>含义：已完成次日收益计算的推荐批次数 / 总批次数<br/>作用：反映数据完整度，样本量越大指标越可靠<br/>阈值：建议至少追踪10期以上再评估策略稳定性<br/>影响：样本过少时（&lt;5期），命中率和收益波动大，参考价值有限</>}><QuestionCircleOutlined style={{ color: '#8c8c8c', fontSize: 12, marginLeft: 2 }} /></Tooltip></span>}
                     value={trackedBatches.length}
                     suffix={`/ ${batchHistory.length}`}
                     valueStyle={{ fontSize: 20 }}
@@ -1153,26 +1155,24 @@ export default function RecommendationList() {
               </Col>
               <Col span={4}>
                 <Card size="small" bodyStyle={{ padding: '12px 16px' }}>
-                  <Statistic
-                    title={<span>当前批次质量 <Tooltip title="基于近5期滚动平均命中率判定，比单期更稳定"><QuestionCircleOutlined style={{ color: '#8c8c8c', fontSize: 12, marginLeft: 2 }} /></Tooltip></span>}
-                    value={qualityTag ? qConfig[qualityTag]?.text || '-' : '-'}
-                    valueStyle={{ color: qualityTag ? qConfig[qualityTag]?.color : '#8c8c8c', fontSize: 20 }}
-                    prefix={qualityTag ? <Tag color={qConfig[qualityTag]?.color} style={{ marginRight: 4 }}>{qConfig[qualityTag]?.desc}</Tag> : null}
-                  />
                   {(() => {
                     const entry = batchHistory?.find(b => b.batchId === batchId);
-                    return entry?.rollingAvgHitRate != null ? (
-                      <div style={{ fontSize: 11, color: '#8c8c8c', marginTop: 4 }}>
-                        近5期均值: {(entry.rollingAvgHitRate * 100).toFixed(0)}%
-                      </div>
-                    ) : null;
+                    const tag = qualityTag ? qConfig[qualityTag] : null;
+                    return (
+                      <Statistic
+                        title={<span>当前批次质量 <Tooltip title={<>含义：当前批次及前4期已追踪批次的滚动平均命中率<br/>作用：比单期命中率更稳定，反映当前推荐质量趋势<br/>阈值：≥60% 高质量 / 40%-60% 正常 / &lt;40% 低质量<br/>影响：低质量时建议减少仓位或暂停跟单，等待质量回升</>}><QuestionCircleOutlined style={{ color: '#8c8c8c', fontSize: 12, marginLeft: 2 }} /></Tooltip></span>}
+                        value={tag ? tag.text : '-'}
+                        suffix={entry?.rollingAvgHitRate != null ? `(${(entry.rollingAvgHitRate * 100).toFixed(0)}%)` : ''}
+                        valueStyle={{ color: tag ? tag.color : '#8c8c8c', fontSize: 20 }}
+                      />
+                    );
                   })()}
                 </Card>
               </Col>
               <Col span={4}>
                 <Card size="small" bodyStyle={{ padding: '12px 16px' }}>
                   <Statistic
-                    title={<span>最近批次命中反馈 <Tooltip title="上期命中率低（< 40%）时自动缩减推荐数量（20→15），减少噪音推荐"><QuestionCircleOutlined style={{ color: '#8c8c8c', fontSize: 12, marginLeft: 2 }} /></Tooltip></span>}
+                    title={<span>最近批次命中反馈 <Tooltip title={<>含义：最近一期已追踪批次的命中率及对应的自动反馈动作<br/>作用：根据上期表现动态调整下一批推荐数量，降低风险<br/>阈值：≥60% 正常(20只) / 40%-60% 观察中(20只) / &lt;40% 缩减(15只)<br/>影响：命中过低时自动减少推荐数量，过滤噪音，保留高置信度标的</>}><QuestionCircleOutlined style={{ color: '#8c8c8c', fontSize: 12, marginLeft: 2 }} /></Tooltip></span>}
                     value={latest && latest.tracked > 0 ? (latest.hitRate < 0.4 ? '⚠ 已缩减' : latest.hitRate >= 0.6 ? '✅ 正常' : '↗ 观察中') : '等待数据'}
                     valueStyle={{ color: latest && latest.tracked > 0 ? (latest.hitRate < 0.4 ? '#ff4d4f' : latest.hitRate >= 0.6 ? '#52c41a' : '#fa8c16') : '#8c8c8c', fontSize: 18 }}
                   />

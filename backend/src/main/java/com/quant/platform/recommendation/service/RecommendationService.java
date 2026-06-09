@@ -700,12 +700,13 @@ public class RecommendationService {
         }
 
         // 质量标签: 基于近5期滚动平均命中率判定
+        // batchHistory 按 batch_id DESC 排序（最新在前），所以"近5期"是当前及索引更大的（更早的）批次
         for (int i = 0; i < rawEntries.size(); i++) {
             Map<String, Object> entry = rawEntries.get(i);
             // 计算当前批次及之前的近5期（含当前批次）滚动均值
             double rollingSum = 0;
             long rollingTracked = 0;
-            for (int j = i; j >= 0 && j > i - 5; j--) {
+            for (int j = i; j < rawEntries.size() && j <= i + 4; j++) {
                 if (trackedCounts.get(j) > 0) {
                     rollingSum += hitRates.get(j) != null ? hitRates.get(j) : 0;
                     rollingTracked++;
