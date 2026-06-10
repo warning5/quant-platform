@@ -64,7 +64,7 @@ public class PriceAdvisorService {
         if (history.isEmpty()) return null;
 
         // 当日行情
-        StockDaily today = history.get(history.size() - 1);
+        StockDaily today = history.getLast();
         BigDecimal currentClose = today.getClosePrice();
         if (currentClose == null || currentClose.doubleValue() <= 0) return null;
 
@@ -118,7 +118,7 @@ public class PriceAdvisorService {
         advice.put("atr", profitLoss.get("atr"));
 
         // 6. 风险提示
-        List<String> risks = assessRisks(currentClose, suggestPrice, history, valuationLevels, techLevels);
+        List<String> risks = assessRisks(currentClose, suggestPrice, history, valuationLevels);
         advice.put("risks", risks);
         advice.put("riskLevel", calcRiskLevel(risks));
 
@@ -392,16 +392,10 @@ public class PriceAdvisorService {
         return levels;
     }
 
-    /**
-     * 风险评估
-     */
-    private List<String> risks = new ArrayList<>();
-
     private List<String> assessRisks(BigDecimal currentClose, double suggestPrice,
                                      List<StockDaily> history,
-                                     Map<String, Object> valuationLevels,
-                                     Map<String, Object> techLevels) {
-        risks = new ArrayList<>();
+                                     Map<String, Object> valuationLevels) {
+        List<String> risks = new ArrayList<>();
         double close = currentClose.doubleValue();
 
         // 1. 当前价距离建议买入价的偏离度
@@ -430,8 +424,6 @@ public class PriceAdvisorService {
             }
         }
 
-        // 4. 估值风险
-        Double industryPbMedian = (Double) valuationLevels.get("industryPbMedian");
         Double pbPrice = (Double) valuationLevels.get("pbPrice");
         if (pbPrice != null && pbPrice > 0 && close > pbPrice * 1.5) {
             risks.add("当前价高于行业PB中位数估值较多，存在高估风险");
@@ -442,13 +434,13 @@ public class PriceAdvisorService {
             List<StockDaily> last10 = history.subList(history.size() - 10, history.size());
             double vol5 = last10.stream()
                     .filter(d -> d.getVolume() != null)
-                    .mapToLong(d -> d.getVolume())
+                    .mapToLong(StockDaily::getVolume)
                     .average().orElse(0);
             List<StockDaily> prev10 = history.size() >= 20
                     ? history.subList(history.size() - 20, history.size() - 10) : last10;
             double volPrev = prev10.stream()
                     .filter(d -> d.getVolume() != null)
-                    .mapToLong(d -> d.getVolume())
+                    .mapToLong(StockDaily::getVolume)
                     .average().orElse(1);
 
             if (volPrev > 0 && vol5 < volPrev * 0.5) {
@@ -535,7 +527,7 @@ public class PriceAdvisorService {
     // ── 技术指标计算辅助方法 ──
 
     private double calcMA(List<StockDaily> bars, int period) {
-        if (bars.size() < period) return bars.isEmpty() ? 0 : bars.get(bars.size() - 1).getClosePrice().doubleValue();
+        if (bars.size() < period) return bars.isEmpty() ? 0 : bars.getLast().getClosePrice().doubleValue();
         double sum = 0;
         for (int i = bars.size() - period; i < bars.size(); i++) {
             if (bars.get(i).getClosePrice() != null) {
@@ -559,7 +551,7 @@ public class PriceAdvisorService {
 
     private double calcATR(List<StockDaily> bars, int period) {
         if (bars.size() < period + 1)
-            return bars.isEmpty() ? 0 : bars.get(bars.size() - 1).getClosePrice().doubleValue() * 0.02;
+            return bars.isEmpty() ? 0 : bars.getLast().getClosePrice().doubleValue() * 0.02;
         double sum = 0;
         for (int i = bars.size() - period; i < bars.size(); i++) {
             sum += calcTrueRange(bars.get(i), bars.get(i - 1));

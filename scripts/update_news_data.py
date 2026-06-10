@@ -304,16 +304,24 @@ def upsert_news_batch(conn, records):
     return total
 
 
-def get_batch_stocks(conn, force_all=False):
+def get_batch_stocks(conn, force_all=False, stale_days=7):
+    """获取待采集新闻的股票列表。
+    - force_all: 全量（所有股票）
+    - 增量模式: 从未采集过的股票 + 最新新闻超过 stale_days 天的股票
+    """
     cur = conn.cursor()
     if force_all:
         cur.execute("SELECT code FROM stock_info ORDER BY code")
     else:
         cur.execute("""
             SELECT si.code FROM stock_info si
-            LEFT JOIN stock_news sn ON sn.code = si.code COLLATE utf8mb4_unicode_ci
-            WHERE sn.code IS NULL ORDER BY si.code
-        """)
+            LEFT JOIN (
+                SELECT code, MAX(publish_date) as latest_date FROM stock_news GROUP BY code
+            ) sn ON sn.code = si.code COLLATE utf8mb4_unicode_ci
+            WHERE sn.code IS NULL
+               OR sn.latest_date < DATE_SUB(NOW(), INTERVAL %s DAY)
+            ORDER BY si.code
+        """, (stale_days,))
     stocks = [r[0] for r in cur.fetchall()]
     cur.close()
     return stocks
@@ -477,7 +485,7 @@ def main():
 
     if args.batch:
         conn = get_conn()
-        stocks = get_batch_stocks(conn, force_all=args.all)
+        stocks = get_batch_stocks(conn, force_all=args.all, stale_days=7)
         conn.close()
         run_batch(stocks, days=args.days, workers=args.workers)
         return

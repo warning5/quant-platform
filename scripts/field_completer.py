@@ -158,11 +158,14 @@ def fix_valuation_by_qq(db, codes=None, batch_size=200, delay=0.1, max_workers=3
                 continue
             mn, mx = date_range_map[code]
             bs_code = _bs_code(code, market)
-            BS_MIN_DATE = "20050101"
-            mn_fmt = mn.replace("-", "")
-            mx_fmt = mx.replace("-", "")
-            if mn_fmt < BS_MIN_DATE:
-                mn_fmt = BS_MIN_DATE
+            BS_MIN_DATE = "2005-01-01"
+            # Baostock 要求 YYYY-MM-DD 格式
+            if "-" not in mn:
+                mn = f"{mn[:4]}-{mn[4:6]}-{mn[6:8]}"
+            if "-" not in mx:
+                mx = f"{mx[:4]}-{mx[4:6]}-{mx[6:8]}"
+            if mn < BS_MIN_DATE:
+                mn = BS_MIN_DATE
 
             raw_rows = []
             attempt = 0
@@ -172,8 +175,8 @@ def fix_valuation_by_qq(db, codes=None, batch_size=200, delay=0.1, max_workers=3
                     rs = _bs.query_history_k_data_plus(
                         bs_code,
                         "date,close,peTTM,pbMRQ",
-                        start_date=mn_fmt,
-                        end_date=mx_fmt,
+                        start_date=mn,
+                        end_date=mx,
                         frequency="d"
                     )
                     while rs.next():

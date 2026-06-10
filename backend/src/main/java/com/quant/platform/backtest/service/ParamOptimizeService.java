@@ -381,7 +381,7 @@ public class ParamOptimizeService {
      */
     private Map<String, Object> runSingleBacktest(StrategyDefinition baseSt,
                                                   OptimizeRequest req,
-                                                  Map<String, Object> params) throws Exception {
+                                                  Map<String, Object> params) {
         // 构造回测任务
         BacktestTask task = BacktestTask.builder()
                 .strategyId(baseSt.getId())

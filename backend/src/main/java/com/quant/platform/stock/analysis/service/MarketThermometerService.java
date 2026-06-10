@@ -95,8 +95,11 @@ public class MarketThermometerService {
         double maScore = ((Number) result.get("maTemperature")).doubleValue();
         double bondScore = calcBondScore((Double) result.get("stockBondRatio"));
         double qvixScore = ((Number) result.getOrDefault("qvixScore", 50.0)).doubleValue();
+        // PE分位越高=估值越贵=越恐慌，故反转: 100 - pePct
+        double peScore = 100.0 - pePct;
+        double pbScore = 100.0 - pbPct;
         // PE×25% + PB×15% + 均线×25% + 股债×20% + QVIX×15%
-        double fearGreed = pePct * 0.25 + pbPct * 0.15 + maScore * 0.25
+        double fearGreed = peScore * 0.25 + pbScore * 0.15 + maScore * 0.25
                          + bondScore * 0.20 + qvixScore * 0.15;
         result.put("fearGreedIndex", Math.round(fearGreed * 10) / 10.0);
         result.put("fearGreedLabel", getFearGreedLabel(fearGreed));
@@ -109,6 +112,11 @@ public class MarketThermometerService {
         // 8. 风格/大小盘 regime (P1-1)
         Map<String, Object> styleSize = calcStyleSizeRegime(today);
         result.putAll(styleSize);
+
+        // 9. 主要指数行情（上证/深证/创业板/科创50/北证50）
+        String tradeDate = (String) result.getOrDefault("tradeDate", today.toString());
+        List<Map<String, Object>> majorIndices = calcMajorIndices(tradeDate);
+        result.put("majorIndices", majorIndices);
 
         // 缓存结果（带上版本号，前端或重启后可强制刷新）
         result.put("_cacheVersion", THERM_CACHE_VERSION);
@@ -662,6 +670,66 @@ except Exception as e:
         if (score >= 35) return "偏恐慌";
         if (score >= 20) return "恐慌";
         return "极度恐慌";
+    }
+
+    // ─── 主要指数行情 ─────────────────────────────────────────────
+
+    private static final String[][] MAJOR_INDEX_DEFS = {
+        {"000001", "上证指数"},
+        {"399001", "深证成指"},
+        {"399006", "创业板指"},
+        {"000688", "科创50"},
+        {"899050", "北证50"},
+    };
+
+    /**
+     * 查询主要指数最新收盘价和涨跌幅
+     */
+    private List<Map<String, Object>> calcMajorIndices(String tradeDate) {
+        List<Map<String, Object>> indices = new ArrayList<>();
+        if (chJdbc == null) return indices;
+
+        for (String[] def : MAJOR_INDEX_DEFS) {
+            String code = def[0];
+            String name = def[1];
+            try {
+                // 取最新2天数据算涨跌幅
+                String sql = String.format("""
+                    SELECT trade_date, close_price, change_percent
+                    FROM stock.index_daily FINAL
+                    WHERE code = '%s' AND trade_date <= '%s'
+                    ORDER BY trade_date DESC
+                    LIMIT 2
+                    """, code, tradeDate);
+                List<Map<String, Object>> rows = chJdbc.queryForList(sql);
+                if (rows.isEmpty()) continue;
+
+                Map<String, Object> curr = rows.get(0);
+                double close = ((Number) curr.get("close_price")).doubleValue();
+                // change_percent 可能不存在（北证50等），用前后两天收盘价计算
+                double changePct;
+                Object cpObj = curr.get("change_percent");
+                if (cpObj != null) {
+                    changePct = ((Number) cpObj).doubleValue();
+                } else if (rows.size() >= 2) {
+                    double prevClose = ((Number) rows.get(1).get("close_price")).doubleValue();
+                    changePct = prevClose > 0 ? (close - prevClose) / prevClose * 100 : 0;
+                } else {
+                    changePct = 0;
+                }
+
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("code", code);
+                item.put("name", name);
+                item.put("close", Math.round(close * 100) / 100.0);
+                item.put("changePct", Math.round(changePct * 100) / 100.0);
+                item.put("date", curr.get("trade_date").toString());
+                indices.add(item);
+            } catch (Exception e) {
+                log.debug("指数{}行情查询失败: {}", code, e.getMessage());
+            }
+        }
+        return indices;
     }
 
 }

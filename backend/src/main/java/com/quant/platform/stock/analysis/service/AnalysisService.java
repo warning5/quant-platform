@@ -1346,7 +1346,8 @@ public class AnalysisService {
             if (epsRaw == null || epsRaw.toString().isBlank()) continue;
             try {
                 Map<String, Object> forecast = objectMapper.readValue(epsRaw.toString(),
-                        new TypeReference<Map<String, Object>>() {});
+                        new TypeReference<>() {
+                        });
                 for (Map.Entry<String, Object> entry : forecast.entrySet()) {
                     String year = entry.getKey();
                     Object val = entry.getValue();

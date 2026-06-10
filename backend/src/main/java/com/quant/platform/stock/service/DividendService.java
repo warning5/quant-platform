@@ -186,10 +186,9 @@ public class DividendService {
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<StockDividend>()
                         .between(StockDividend::getExDividendDate, start, end)
         );
-        return all.stream().collect(Collectors.groupingBy(d -> {
-            // 需要拼上市场后缀才能与回测引擎的 symbol 匹配
-            return d.getCode(); // 返回纯 code，由调用方处理
-        }));
+        // 需要拼上市场后缀才能与回测引擎的 symbol 匹配
+        // 返回纯 code，由调用方处理
+        return all.stream().collect(Collectors.groupingBy(StockDividend::getCode));
     }
 
     private String parseCode(String symbol) {

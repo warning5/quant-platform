@@ -60,7 +60,7 @@ public class ChanTheoryCalculator {
         }
 
         // Step 4: 线段
-        List<Segment> segments = buildSegments(pens, merged);
+        List<Segment> segments = buildSegments(pens);
         if (segments.size() < 3) {
             return buildPartialResult(merged, fractals, pens, segments);
         }
@@ -386,7 +386,7 @@ public class ChanTheoryCalculator {
      * 上升线段: 反向笔低点低于前一笔低点,且终点低于前一笔起点
      * 下降线段: 反向笔高点高于前一笔高点,且终点高于前一笔起点
      */
-    public static List<Segment> buildSegments(List<Pen> pens, List<MergedBar> mergedBars) {
+    public static List<Segment> buildSegments(List<Pen> pens) {
         if (pens == null || pens.size() < 3) {
             return new ArrayList<>();
         }

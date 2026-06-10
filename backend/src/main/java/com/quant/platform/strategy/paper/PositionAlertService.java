@@ -565,15 +565,14 @@ public class PositionAlertService {
                     String title = (String) row.get("title");
                     LocalDate noticeDate = LocalDate.parse(row.get("date").toString());
 
-                    String alertType;
-                    switch (type) {
-                        case "定增": alertType = "EVENT_INCREASE"; break;
-                        case "解禁": alertType = "EVENT_UNLOCK"; break;
-                        case "股权激励": alertType = "EVENT_INCENTIVE"; break;
-                        case "业绩预告": alertType = "EVENT_FORECAST"; break;
-                        case "业绩快报": alertType = "EVENT_EXPRESS"; break;
-                        default: alertType = "EVENT_" + type;
-                    }
+                    String alertType = switch (type) {
+                        case "定增" -> "EVENT_INCREASE";
+                        case "解禁" -> "EVENT_UNLOCK";
+                        case "股权激励" -> "EVENT_INCENTIVE";
+                        case "业绩预告" -> "EVENT_FORECAST";
+                        case "业绩快报" -> "EVENT_EXPRESS";
+                        default -> "EVENT_" + type;
+                    };
                     String level = ("股权激励".equals(type) || "业绩预告".equals(type) || "业绩快报".equals(type)) ? "INFO" : "WARNING";
 
                     saveAlert(PositionAlert.builder()

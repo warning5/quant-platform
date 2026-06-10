@@ -73,14 +73,13 @@ public class BidAskService {
             result.put("trend", trend);
 
             // 趋势说明
-            String trendLabel;
-            switch (trend) {
-                case "BUYER_STRONG":   trendLabel = "强势买方主导（主动买盘压倒性）"; break;
-                case "BUYER_SLIGHT":   trendLabel = "买方略强（主动买盘为主）"; break;
-                case "SELLER_SLIGHT":  trendLabel = "卖方略强（主动卖盘为主）"; break;
-                case "SELLER_STRONG":  trendLabel = "强势卖方主导（主动卖盘压倒性）"; break;
-                default:               trendLabel = "多空均衡"; break;
-            }
+            String trendLabel = switch (trend) {
+                case "BUYER_STRONG" -> "强势买方主导（主动买盘压倒性）";
+                case "BUYER_SLIGHT" -> "买方略强（主动买盘为主）";
+                case "SELLER_SLIGHT" -> "卖方略强（主动卖盘为主）";
+                case "SELLER_STRONG" -> "强势卖方主导（主动卖盘压倒性）";
+                default -> "多空均衡";
+            };
             result.put("trendLabel", trendLabel);
 
             // 评分（满分3分）

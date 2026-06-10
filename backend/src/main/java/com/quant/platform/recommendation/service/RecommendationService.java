@@ -803,16 +803,16 @@ public class RecommendationService {
         Map<String, Object> scoreDiff = new LinkedHashMap<>();
         double bestAvgFactor = best3.stream()
                 .filter(r -> r.getFactorScore() != null)
-                .mapToDouble(r -> r.getFactorScore()).average().orElse(0);
+                .mapToDouble(StockRecommendation::getFactorScore).average().orElse(0);
         double worstAvgFactor = worst3.stream()
                 .filter(r -> r.getFactorScore() != null)
-                .mapToDouble(r -> r.getFactorScore()).average().orElse(0);
+                .mapToDouble(StockRecommendation::getFactorScore).average().orElse(0);
         double bestAvgAnalysis = best3.stream()
                 .filter(r -> r.getAnalysisScorePct() != null)
-                .mapToDouble(r -> r.getAnalysisScorePct()).average().orElse(0);
+                .mapToDouble(StockRecommendation::getAnalysisScorePct).average().orElse(0);
         double worstAvgAnalysis = worst3.stream()
                 .filter(r -> r.getAnalysisScorePct() != null)
-                .mapToDouble(r -> r.getAnalysisScorePct()).average().orElse(0);
+                .mapToDouble(StockRecommendation::getAnalysisScorePct).average().orElse(0);
         scoreDiff.put("bestAvgFactorScore", bestAvgFactor);
         scoreDiff.put("worstAvgFactorScore", worstAvgFactor);
         scoreDiff.put("bestAvgAnalysisPct", bestAvgAnalysis);

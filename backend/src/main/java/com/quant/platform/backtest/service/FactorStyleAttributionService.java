@@ -438,7 +438,8 @@ public class FactorStyleAttributionService {
             // 解析 factorConfigJson: {"factors":[{"code":"TURN20","weight":1.0}]}
             List<Map<String, Object>> factorList = objectMapper.readValue(
                     strategy.getFactorConfigJson(),
-                    new TypeReference<List<Map<String, Object>>>() {});
+                    new TypeReference<>() {
+                    });
             if (factorList == null || factorList.isEmpty()) {
                 factorCodes = List.of();
             } else {

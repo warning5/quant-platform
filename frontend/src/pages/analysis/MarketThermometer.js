@@ -419,6 +419,34 @@ export default function MarketThermometer() {
         </Row>
       </Card>
 
+      {/* 主要指数行情 */}
+      {(() => {
+        const indices = data?.majorIndices;
+        if (!indices || indices.length === 0) return null;
+        return (
+          <Card size="small" style={{ marginBottom: 16 }} styles={{ body: { padding: '12px 20px' } }}>
+            <Row gutter={[16, 8]} align="middle">
+              {indices.map(idx => {
+                const pct = idx.changePct ?? 0;
+                const color = pct > 0 ? '#cf1322' : pct < 0 ? '#3f8600' : '#999';
+                const sign = pct > 0 ? '+' : '';
+                return (
+                  <Col key={idx.code} flex="1" style={{ minWidth: 100, textAlign: 'center' }}>
+                    <div style={{ fontSize: 12, color: '#888', marginBottom: 2 }}>{idx.name}</div>
+                    <div style={{ fontSize: 18, fontWeight: 600, color, lineHeight: 1.3 }}>
+                      {idx.close?.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                    <div style={{ fontSize: 13, color, fontWeight: 500 }}>
+                      {sign}{pct.toFixed(2)}%
+                    </div>
+                  </Col>
+                );
+              })}
+            </Row>
+          </Card>
+        );
+      })()}
+
       {/* 风格/大小盘 regime (P1-1) */}
       {(() => {
         const styleRegime = data?.styleRegime;

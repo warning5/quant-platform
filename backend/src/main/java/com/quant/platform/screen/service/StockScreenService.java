@@ -84,7 +84,8 @@ public class StockScreenService {
                 if (strategy.getFilterConfigJson() != null && !strategy.getFilterConfigJson().isBlank()) {
                     try {
                         filterConfig = objectMapper.readValue(strategy.getFilterConfigJson(),
-                                new TypeReference<Map<String, Object>>() {});
+                                new TypeReference<>() {
+                                });
                         log.info("Loaded filter config for strategy [{}]: {}", strategy.getStrategyName(), filterConfig.keySet());
                     } catch (Exception e) {
                         log.warn("Failed to parse filterConfigJson for strategy {}: {}", sid, e.getMessage());
@@ -441,7 +442,7 @@ public class StockScreenService {
 
             // 按 raw 值排序，分配 rank（0~1）
             List<Map.Entry<String, Double>> sorted = vals.stream()
-                    .sorted((a, b) -> Double.compare(a.getValue(), b.getValue()))
+                    .sorted(Comparator.comparingDouble(Map.Entry::getValue))
                     .toList();
 
             int n = sorted.size();
@@ -1175,7 +1176,8 @@ public class StockScreenService {
     private List<ScreenRequest.FactorWeight> parseStrategyFactorConfig(String factorConfigJson) {
         try {
             Map<String, Object> root = objectMapper.readValue(factorConfigJson,
-                    new TypeReference<Map<String, Object>>() {});
+                    new TypeReference<>() {
+                    });
             @SuppressWarnings("unchecked")
             List<Map<String, Object>> factorList = (List<Map<String, Object>>) root.get("factors");
             if (factorList == null) return Collections.emptyList();
