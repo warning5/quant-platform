@@ -127,9 +127,11 @@ def _batch_infer(texts, model, tokenizer, batch_size=256):
     - 2分类模型 (num_labels=2): 0=negative, 1=positive
     - 3分类模型 (num_labels=3): 0=negative, 1=neutral, 2=positive
     """
-    import torch
+    import torch, time
     num_labels = model.config.num_labels
     results = []
+    total_batches = (len(texts) + batch_size - 1) // batch_size
+    t_start = time.time()
     for i in range(0, len(texts), batch_size):
         batch = texts[i:i + batch_size]
         inputs = tokenizer(batch, return_tensors='pt', truncation=True,
@@ -137,6 +139,12 @@ def _batch_infer(texts, model, tokenizer, batch_size=256):
         with torch.no_grad():
             outputs = model(**inputs)
             probs = torch.softmax(outputs.logits, dim=-1)
+        # 每10个batch打印一次进度
+        batch_idx = i // batch_size + 1
+        if batch_idx % 10 == 0 or batch_idx == 1:
+            elapsed = time.time() - t_start
+            eta = elapsed / batch_idx * (total_batches - batch_idx)
+            print(f"    推理 {min(i + batch_size, len(texts))}/{len(texts)} | {elapsed:.0f}s | ETA {eta:.0f}s", flush=True)
         if num_labels == 3:
             neg_probs = probs[:, 0].tolist()
             neu_probs = probs[:, 1].tolist()
