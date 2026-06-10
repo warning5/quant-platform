@@ -30,6 +30,7 @@ os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 os.environ["HF_HUB_HTTP_ENDPOINT"] = "https://hf-mirror.com"
 
 import time
+import threading
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -62,6 +63,7 @@ def _load_model_local(model_path):
     os.environ["DISABLE_TQDM"] = "1"
     tokenizer = AutoTokenizer.from_pretrained(model_path)
     model_holder = [None]
+    model_error = [None]
     def load():
         # 将 stderr 重定向到 devnull，彻底屏蔽 tqdm 输出
         devnull = os.open(os.devnull, os.O_RDWR)
@@ -69,8 +71,10 @@ def _load_model_local(model_path):
         os.dup2(devnull, 2)
         try:
             model_holder[0] = AutoModelForSequenceClassification.from_pretrained(
-                model_path, use_safetensors=False
+                model_path
             )
+        except Exception as e:
+            model_error[0] = e
         finally:
             os.dup2(old_stderr, 2)
             os.close(devnull)
@@ -78,25 +82,39 @@ def _load_model_local(model_path):
     t = threading.Thread(target=load)
     t.start()
     t.join()
+    if model_error[0] is not None:
+        raise model_error[0]
+    if model_holder[0] is None:
+        raise RuntimeError(f"模型加载失败: {model_path}")
     return model_holder[0], tokenizer
 
 
+_model_lock = threading.Lock()
+
 def _init_sentiment():
-    """采集时初始化（金融新闻专用模型）"""
+    """采集时初始化（金融新闻专用模型），多线程安全"""
     global _sentiment_model, _sentiment_tokenizer
-    if _sentiment_model is None:
-        print("  [NLP] 加载金融新闻情感模型（本地）...", flush=True)
+    if _sentiment_model is not None:
+        return
+    with _model_lock:
+        if _sentiment_model is not None:
+            return
+        print("[NLP] 加载金融新闻情感模型（本地）...", flush=True)
         _sentiment_model, _sentiment_tokenizer = _load_model_local(_FIN_NEWS_MODEL_PATH)
-        print("  [NLP] 模型就绪", flush=True)
+        print("[NLP] 模型就绪", flush=True)
 
 
 def _init_refresh():
-    """refresh 时初始化（JD模型）"""
+    """refresh 时初始化（JD模型），多线程安全"""
     global _refresh_model, _refresh_tokenizer
-    if _refresh_model is None:
-        print("  [NLP] 加载情感模型（本地）...", flush=True)
+    if _refresh_model is not None:
+        return
+    with _model_lock:
+        if _refresh_model is not None:
+            return
+        print("[NLP] 加载情感模型（本地）...", flush=True)
         _refresh_model, _refresh_tokenizer = _load_model_local(_JD_MODEL_PATH)
-        print("  [NLP] 模型就绪", flush=True)
+        print("[NLP] 模型就绪", flush=True)
 
 
 def _batch_infer(texts, model, tokenizer, batch_size=256):
@@ -104,8 +122,13 @@ def _batch_infer(texts, model, tokenizer, batch_size=256):
     批量推理，直接用 model.forward() + torch.no_grad()，无 tqdm。
     texts: list of str
     返回: list of (score, type)
+    
+    自动适配:
+    - 2分类模型 (num_labels=2): 0=negative, 1=positive
+    - 3分类模型 (num_labels=3): 0=negative, 1=neutral, 2=positive
     """
     import torch
+    num_labels = model.config.num_labels
     results = []
     for i in range(0, len(texts), batch_size):
         batch = texts[i:i + batch_size]
@@ -114,14 +137,32 @@ def _batch_infer(texts, model, tokenizer, batch_size=256):
         with torch.no_grad():
             outputs = model(**inputs)
             probs = torch.softmax(outputs.logits, dim=-1)
-            # 0=negative, 1=positive（两个模型都如此）
-            pos_prob = probs[:, 1].tolist()
-        for p in pos_prob:
-            score = round(float(p), 4)
-            ntype = "positive" if score >= 0.5 else "negative"
-            if score < 0.5:
-                score = round(1.0 - score, 4)
-            results.append((score, ntype))
+        if num_labels == 3:
+            neg_probs = probs[:, 0].tolist()
+            neu_probs = probs[:, 1].tolist()
+            pos_probs = probs[:, 2].tolist()
+            for neg_p, neu_p, pos_p in zip(neg_probs, neu_probs, pos_probs):
+                neg_p, neu_p, pos_p = float(neg_p), float(neu_p), float(pos_p)
+                if pos_p >= neg_p and pos_p >= neu_p:
+                    score = round(pos_p, 4)
+                    ntype = "positive"
+                elif neg_p >= pos_p and neg_p >= neu_p:
+                    score = round(neg_p, 4)
+                    ntype = "negative"
+                else:
+                    score = round(neu_p, 4)
+                    ntype = "neutral"
+                results.append((score, ntype))
+        else:
+            # 2分类: 0=negative, 1=positive
+            pos_probs = probs[:, 1].tolist()
+            for p in pos_probs:
+                p = float(p)
+                score = round(p, 4)
+                ntype = "positive" if score >= 0.5 else "negative"
+                if score < 0.5:
+                    score = round(1.0 - score, 4)
+                results.append((score, ntype))
     return results
 
 # ── 数据库配置 ──────────────────────────────────────────────
@@ -177,7 +218,12 @@ def _kw_classify(text):
 
 
 def classify_sentiment(title, content=""):
-    """混合分类：关键词优先 + 情感模型兜底（直接 model.forward，无 tqdm）"""
+    """混合分类：关键词优先 + 情感模型兜底（直接 model.forward，无 tqdm）
+    
+    自动适配:
+    - 2分类模型 (num_labels=2): 0=negative, 1=positive
+    - 3分类模型 (num_labels=3): 0=negative, 1=neutral, 2=positive
+    """
     text = (str(title) + " " + str(content))[:300]
     score, ntype = _kw_classify(text)
     if score is not None:
@@ -190,11 +236,26 @@ def classify_sentiment(title, content=""):
         with torch.no_grad():
             outputs = _sentiment_model(**inputs)
             probs = torch.softmax(outputs.logits, dim=-1)
-        pos_prob = float(probs[0, 1])
-        score = round(pos_prob, 4)
-        ntype = "positive" if pos_prob >= 0.5 else "negative"
-        if ntype == "negative":
-            score = round(1.0 - pos_prob, 4)
+        num_labels = _sentiment_model.config.num_labels
+        if num_labels == 3:
+            neg_p = float(probs[0, 0])
+            neu_p = float(probs[0, 1])
+            pos_p = float(probs[0, 2])
+            if pos_p >= neg_p and pos_p >= neu_p:
+                score = round(pos_p, 4)
+                ntype = "positive"
+            elif neg_p >= pos_p and neg_p >= neu_p:
+                score = round(neg_p, 4)
+                ntype = "negative"
+            else:
+                score = round(neu_p, 4)
+                ntype = "neutral"
+        else:
+            pos_p = float(probs[0, 1])
+            score = round(pos_p, 4)
+            ntype = "positive" if pos_p >= 0.5 else "negative"
+            if ntype == "negative":
+                score = round(1.0 - pos_p, 4)
         return score, ntype
     except Exception:
         return 0.5, "neutral"
@@ -236,11 +297,27 @@ def ensure_table(conn):
     cur.close()
 
 
-def fetch_news_for_stock(code, days=90):
+def fetch_news_for_stock(code, days=90, timeout=30):
     records = []
     cutoff = datetime.now() - timedelta(days=days)
     try:
-        df = ak.stock_news_em(symbol=code)
+        import signal
+        # Windows 不支持 signal.alarm，用线程超时
+        result_holder = [None]
+        error_holder = [None]
+        def _fetch():
+            try:
+                result_holder[0] = ak.stock_news_em(symbol=code)
+            except Exception as e:
+                error_holder[0] = e
+        t = threading.Thread(target=_fetch, daemon=True)
+        t.start()
+        t.join(timeout=timeout)
+        if t.is_alive():
+            return records  # 超时，跳过
+        if error_holder[0] is not None:
+            return records
+        df = result_holder[0]
     except Exception:
         return records
     if df is None or df.empty:
@@ -331,6 +408,10 @@ def run_batch(stocks, days=90, workers=8):
     conn = get_conn()
     ensure_table(conn)
     conn.close()
+
+    # 预加载模型，避免多线程同时触发加载
+    _init_sentiment()
+
     total, failed, results = 0, 0, []
 
     def worker(code):
@@ -358,7 +439,7 @@ def run_batch(stocks, days=90, workers=8):
                 failed += 1
             if n > 0:
                 results.append((code, n))
-            if done % 200 == 0:
+            if done % 50 == 0 or done == 1:
                 print(f"  {done}/{len(stocks)} | {total} 条 | {time.time()-t0:.0f}s", flush=True)
 
     print(f"\n✅ {total} 条（{len(results)} 只有效，失败 {failed} 只）| {time.time()-t0:.0f}s", flush=True)
