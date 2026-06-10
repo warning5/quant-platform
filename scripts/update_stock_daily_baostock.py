@@ -71,7 +71,7 @@ def fetch_stock_history(code, name, market, start_date, end_date, max_retries=2,
     def _do_query():
         rs = bs.query_history_k_data_plus(
             bs_code,
-            "date,code,open,high,low,close,volume,amount,adjustflag,turn,tradestatus,pctChg,isST,peTTM,pbMRQ",
+            "date,code,open,high,low,close,preclose,volume,amount,adjustflag,turn,tradestatus,pctChg,isST,peTTM,pbMRQ",
             start_date=start_str,
             end_date=end_str,
             frequency="d",
@@ -172,18 +172,22 @@ def build_daily_rows(db, code, name, market, df):
     for _, row in df.iterrows():
         close_price = to_float(row['close'])
         pct_chg = to_float(row['pctChg'])
+        bs_preclose = to_float(row['preclose'])  # Baostock 前复权昨收价
 
-        # pre_close: 优先用 DB 查询的昨收；若 DB 为空则用 pctChg 反算
-        # 反算公式: pre_close = close / (1 + pctChg/100)
-        # 当 CH 数据有缺口（如周末/节假日）时，get_prev_close 返回 None，
-        # 此时 baostock 自带的 pctChg 可保证 pre_close 正确
-        if prev_close is not None:
-            pre_close_val = prev_close
+        # pre_close 优先级：
+        #   1) Baostock 原生 preclose（真实昨收价，不受复权影响）
+        #      经验证：前复权模式下 Baostock 的 preclose 字段 = 真实昨收价，
+        #      而 close 是前复权价格。pctChg = (close_复权 - preclose_真实) / preclose_真实 * 100
+        #   2) pctChg 反算（preclose 缺失时的兜底）
+        #   3) DB 查询的前一交易日 close_price
+        #   4) 递推 prev_close（最后兜底）
+        if bs_preclose is not None and bs_preclose > 0:
+            pre_close_val = round(bs_preclose, 2)
         elif pct_chg is not None and close_price is not None and pct_chg != 0:
             pre_close_val = round(close_price / (1 + pct_chg / 100), 2)
+        elif prev_close is not None:
+            pre_close_val = prev_close
         elif close_price is not None:
-            # pctChg=0（停牌/非交易日/数据缺失）时：向前查找最近交易日
-            # get_prev_close 的 30 天 lookback 已包含相邻交易日
             db_prev = db.get_prev_close(code, row['date'])
             pre_close_val = db_prev if db_prev is not None else None
         else:

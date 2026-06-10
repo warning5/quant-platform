@@ -1038,16 +1038,26 @@ class StockDailyDB:
         """
         table = self.CH_TABLE
 
-        # Step 1: 查出需要修复的 code 列表
+        # Step 1: 查出需要修复的 code 列表（只补全 change_percent IS NULL 的，避免覆盖 Baostock 原生 pctChg）
         if code:
-            codes = [code]
+            r = self.ch_client.query(
+                f"SELECT DISTINCT code FROM {table} "
+                f"WHERE code = '{code}' AND change_percent IS NULL "
+                f"ORDER BY code"
+            )
+            codes = [row[0] for row in r.result_rows]
         elif stock_list:
-            codes = [s[0] for s in stock_list]
+            escaped = "', '".join([s[0] for s in stock_list])
+            r = self.ch_client.query(
+                f"SELECT DISTINCT code FROM {table} "
+                f"WHERE code IN ('{escaped}') AND change_percent IS NULL "
+                f"ORDER BY code"
+            )
+            codes = [row[0] for row in r.result_rows]
         else:
             r = self.ch_client.query(
                 f"SELECT DISTINCT code FROM {table} "
-                f"WHERE pre_close IS NULL OR change_percent IS NULL OR change_amount IS NULL "
-                f"OR pre_close = close_price "
+                f"WHERE change_percent IS NULL "
                 f"ORDER BY code"
             )
             codes = [row[0] for row in r.result_rows]
@@ -1109,6 +1119,12 @@ class StockDailyDB:
 
             # Step 4: 读出这些行的完整数据，打补丁后重新 INSERT（零 mutation）
             # ReplacingMergeTree 靠 update_time 版本列覆盖旧数据
+            #
+            # 重要：只覆盖真正缺失的字段，不覆盖已有正确值。
+            # 因为 lagInFrame 用前一行 close_price 计算 pre_close，
+            # 在除权除息日会得到错误值（复权 close ≠ 真实昨收价）。
+            # 如果某行已有正确的 pre_close（来自 Baostock pctChg 反算），
+            # 则只补全 change_percent/change_amount，不覆盖 pre_close。
             keys_by_code = {}
             for (c, d) in need_update:
                 keys_by_code.setdefault(c, []).append(d)
@@ -1127,9 +1143,16 @@ class StockDailyDB:
                     key = (c, str(row_dict['trade_date']))
                     if key in need_update:
                         patch = need_update[key]
-                        row_dict['pre_close'] = patch['pre_close']
-                        row_dict['change_percent'] = patch['change_percent']
-                        row_dict['change_amount'] = patch['change_amount']
+                        # 只覆盖 NULL/0 的字段，保留已有正确值
+                        existing_pre = row_dict.get('pre_close')
+                        if existing_pre is None or (isinstance(existing_pre, (int, float)) and float(existing_pre) == 0):
+                            row_dict['pre_close'] = patch['pre_close']
+                        existing_pct = row_dict.get('change_percent')
+                        if existing_pct is None or (isinstance(existing_pct, (int, float)) and float(existing_pct) == 0):
+                            row_dict['change_percent'] = patch['change_percent']
+                        existing_amt = row_dict.get('change_amount')
+                        if existing_amt is None or (isinstance(existing_amt, (int, float)) and float(existing_amt) == 0):
+                            row_dict['change_amount'] = patch['change_amount']
                         row_dict['update_time'] = now_dt  # 递增版本，触发覆盖
                     vals = [row_dict.get(col) for col in self.DAILY_COLUMNS]
                     insert_rows.append(vals)
