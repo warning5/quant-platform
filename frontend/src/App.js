@@ -6,7 +6,7 @@ import {
   DashboardOutlined, BarChartOutlined, StockOutlined,
   MenuFoldOutlined, MenuUnfoldOutlined, FilterOutlined, BookOutlined,
   PartitionOutlined, AccountBookOutlined,
-  SearchOutlined, HistoryOutlined,
+  SearchOutlined,
   AppstoreOutlined, ControlOutlined,
 } from '@ant-design/icons';
 
@@ -85,17 +85,10 @@ function AppLayout() {
       label: '策略管理',
       children: [
         { key: '/strategies', label: <Link to="/strategies">策略列表</Link> },
-        { key: '/backtests/param-optimize', label: <Link to="/backtests/param-optimize">参数优化</Link> },
-        { key: '/paper-trading', label: <Link to="/paper-trading">模拟盘</Link> },
-      ],
-    },
-    {
-      key: 'backtests',
-      icon: <HistoryOutlined />,
-      label: '回测管理',
-      children: [
         { key: '/backtests', label: <Link to="/backtests">回测列表</Link> },
         { key: '/backtests/compare', label: <Link to="/backtests/compare">策略对比</Link> },
+        { key: '/backtests/param-optimize', label: <Link to="/backtests/param-optimize">参数优化</Link> },
+        { key: '/paper-trading', label: <Link to="/paper-trading">模拟盘</Link> },
       ],
     },
     {
@@ -130,7 +123,6 @@ function AppLayout() {
         { key: '/manual/market-thermometer', label: <Link to="/manual/market-thermometer">大盘温度计</Link> },
         { key: '/manual/factors', label: <Link to="/manual/factors">因子管理</Link> },
         { key: '/manual/strategy', label: <Link to="/manual/strategy">策略管理</Link> },
-        { key: '/manual/backtest', label: <Link to="/manual/backtest">回测管理</Link> },
       ],
     },
   ];
@@ -139,8 +131,7 @@ function AppLayout() {
   const [openKeys, setOpenKeys] = useState(() => {
     const path = window.location.pathname;
     if (path.startsWith('/factor') || path === '/factor-weight-optimize') return ['factors'];
-    if (path.startsWith('/strateg') || path === '/paper-trading' || path === '/backtests/param-optimize') return ['strategies'];
-    if (path.startsWith('/backtest') && !path.startsWith('/backtests/param-optimize')) return ['backtests'];
+    if (path.startsWith('/strateg') || path.startsWith('/backtest') || path === '/paper-trading') return ['strategies'];
     if (path === '/screen') return ['screen'];
     if (path.startsWith('/data-detail')) return ['data-info'];
     if (path === '/data-update' || path === '/scheduled-tasks' || path === '/sector-ranking') return ['data-info'];

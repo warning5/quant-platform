@@ -51,7 +51,7 @@ const valueColor = (positive) => positive ? '#f5222d' : '#52c41a';
 
 // ── 最近查询历史（localStorage） ────────────────────────────────────────────
 const RECENT_KEY = 'stock_analysis_recent';
-const RECENT_MAX = 15;
+const RECENT_MAX = 8;
 
 const loadRecent = () => {
   try { return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]'); }
@@ -617,14 +617,14 @@ export default function StockAnalysis() {
         </Row>
         {/* ── 最近查询历史 ──────────────────────────────────────────────── */}
         {recentQueries.length > 0 && (
-          <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid #f0f0f0' }}>
+          <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid #f0f0f0', whiteSpace: 'nowrap', overflow: 'hidden' }}>
             <Text type="secondary" style={{ fontSize: 12, marginRight: 8 }}>最近:</Text>
             {recentQueries.map(item => (
               <Tag
                 key={item.code}
                 closable
                 onClose={(e) => { e.preventDefault(); removeRecent(item.code); }}
-                style={{ cursor: 'pointer', marginBottom: 4 }}
+                style={{ cursor: 'pointer' }}
                 onClick={() => {
                   setInputCode(item.code);
                   doSearch(item.code);

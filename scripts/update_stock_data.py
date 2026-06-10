@@ -64,7 +64,6 @@ from db_config import DB_BACKEND, get_backend_label
 
 # ─── 子脚本映射 ─────────────────────────────────────────────
 BAOSTOCK_SCRIPT = os.path.join(SCRIPT_DIR, "update_stock_daily_baostock.py")
-AKSHARE_SCRIPT  = os.path.join(SCRIPT_DIR, "update_stock_daily_akshare.py")
 BJ_QQ_SCRIPT    = os.path.join(SCRIPT_DIR, "update_bj_stock_daily_qq.py")
 INFO_SCRIPT     = os.path.join(SCRIPT_DIR, "update_stock_info_daily.py")
 INDEX_SCRIPT    = os.path.join(SCRIPT_DIR, "update_index_daily_baostock.py")
@@ -145,12 +144,12 @@ def run_cmd(cmd, description):
 
 
 def run_baostock(market, start_date, end_date, extra_args, max_retries=3, retry_wait=10):
-    """调用 Baostock 脚本更新 SH/SZ 日线，超时/失败时先重试，重试耗尽才切换 akshare。
+    """调用 Baostock 脚本更新 SH/SZ 日线，失败时重试。
     
     重试策略：
     - 第 1 次失败：等 retry_wait 秒后重跑，带 --resume 跳过已写入的股票
     - 第 2 次失败：再等 retry_wait*2 秒后重跑
-    - max_retries 次都失败：切换到 akshare 备用数据源
+    - max_retries 次都失败：返回 False
     """
     if not os.path.exists(BAOSTOCK_SCRIPT):
         print(f"[ERROR] 找不到脚本: {BAOSTOCK_SCRIPT}")
@@ -177,26 +176,9 @@ def run_baostock(market, start_date, end_date, extra_args, max_retries=3, retry_
             print(f"\n[WARN] Baostock 第{attempt}次失败，{wait}s 后重试（将使用 --resume 断点续传）...")
             time.sleep(wait)
         else:
-            print(f"\n[WARN] Baostock 重试 {max_retries} 次均失败，切换到 akshare 备用数据源...")
+            print(f"\n[WARN] Baostock 重试 {max_retries} 次均失败，放弃更新该市场日线")
 
-    return run_akshare(market, start_date, end_date, extra_args)
-
-
-def run_akshare(market, start_date, end_date, extra_args):
-    """调用 akshare 脚本更新 SH/SZ 日线（Baostock 备用）"""
-    if not os.path.exists(AKSHARE_SCRIPT):
-        print(f"[ERROR] 找不到脚本: {AKSHARE_SCRIPT}")
-        return False
-
-    cmd = [sys.executable, AKSHARE_SCRIPT, "--market", market, "--start-date", start_date]
-    if end_date:
-        cmd += ["--end-date", end_date]
-    
-    # akshare 不需要 --resume 参数，过滤掉
-    filtered_args = [arg for arg in extra_args if arg not in ['--resume']]
-    cmd += filtered_args
-
-    return run_cmd(cmd, f"{market} 日线数据 (akshare 备用)")
+    return False
 
 
 def run_bj_qq(start_date, end_date, extra_args):
