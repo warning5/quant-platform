@@ -85,7 +85,6 @@ const DIAG_CONFIG = {
 
 export default function RecommendationList() {
   const [recommendations, setRecommendations] = useState([]);
-  const [batchId, setBatchId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [regime, setRegime] = useState(null);
@@ -98,12 +97,17 @@ export default function RecommendationList() {
   const [diagExpanded, setDiagExpanded] = useState(false); // 已剔除/异常面板默认收起
   const [weightMode, setWeightMode] = useState('STATIC'); // 权重模式: STATIC(固定) / IC(动态IC)
   const [icDataDate, setIcDataDate] = useState(null); // IC数据可用日期
-  const [batchHistory, setBatchHistory] = useState(null); // 历史批次表现汇总
-  const [topBottom, setTopBottom] = useState(null); // 当前批次最佳/最差
+  const [batchHistory, setBatchHistory] = useState(null); // 历史表现汇总（按策略+日期）
+  const [topBottom, setTopBottom] = useState(null); // 当前策略+日期的最佳/最差
   const [trackingLoading, setTrackingLoading] = useState(false); // 追踪触发中
-  const [qualityTag, setQualityTag] = useState(null); // 当前批次质量标签
+  const [qualityTag, setQualityTag] = useState(null); // 当前策略+日期质量标签
+  // 复盘筛选状态（按策略隔离）
+  const [reviewStrategyId, setReviewStrategyId] = useState(null);
+  const [reviewDate, setReviewDate] = useState(null);
+  const [strategyDates, setStrategyDates] = useState([]); // 筛选策略对应的可用日期列表
+  const [strategiesWithData, setStrategiesWithData] = useState([]); // 有推荐数据的策略列表
 
-  // 加载策略列表
+  // 加载策略列表（含复盘筛选用）
   useEffect(() => {
     api.get('/strategies', { params: { status: 'ACTIVE', size: 100 } })
       .then(res => {
@@ -111,6 +115,15 @@ export default function RecommendationList() {
         setStrategies(list);
         if (list.length > 0 && !selectedStrategyId) {
           setSelectedStrategyId(list[0].id);
+        }
+      })
+      .catch(() => {});
+    // 加载有推荐数据的策略列表（用于复盘筛选下拉）
+    recommendationApi.strategiesWithData()
+      .then(ids => {
+        setStrategiesWithData(ids);
+        if (ids.length > 0 && !reviewStrategyId) {
+          setReviewStrategyId(ids[0]);
         }
       })
       .catch(() => {});
@@ -151,12 +164,12 @@ export default function RecommendationList() {
   };
 
   // 加载推荐数据
-  const loadRecommendations = useCallback(async (bid) => {
+  const loadRecommendations = useCallback(async (sid, date) => {
     setLoading(true);
     try {
       let data;
-      if (bid) {
-        data = await recommendationApi.getByBatch(bid);
+      if (sid && date) {
+        data = await recommendationApi.getByStrategyAndDate(sid, date);
       } else {
         data = await recommendationApi.getLatest();
       }
@@ -164,7 +177,9 @@ export default function RecommendationList() {
       list.sort((a, b) => (b.finalScore || 0) - (a.finalScore || 0));
       setRecommendations(list);
       if (list.length > 0) {
-        setBatchId(list[0].batchId);
+        // 同步复盘筛选状态到当前查看的数据
+        setReviewStrategyId(list[0].strategyId);
+        setReviewDate(list[0].recommendDate);
         setRegime(list[0].regime);
         setIndexInfo({
           close: list[0].indexClose,
@@ -207,33 +222,41 @@ export default function RecommendationList() {
     setGenerating(false);
   };
 
-  // 切换批次
-  const handleBatchChange = (value) => {
-    loadRecommendations(value);
+  // 切换复盘策略
+  const handleReviewStrategyChange = (value) => {
+    setReviewStrategyId(value);
+    setReviewDate(null); // 切策略时清空日期，等 batchHistory 加载后自动选最新
   };
 
-  // 加载批次历史表现和当前批次复盘
+  // 切换复盘日期
+  const handleReviewDateChange = (dateStr) => {
+    setReviewDate(dateStr);
+  };
+
+  // 加载批次历史表现（支持按策略筛选）
   useEffect(() => {
     const load = async () => {
       try {
-        const hist = await recommendationApi.getBatchHistory(20);
+        const hist = await recommendationApi.getBatchHistory(20, reviewStrategyId);
         setBatchHistory(hist);
+        if (hist && hist.length > 0 && !reviewDate) {
+          setReviewDate(hist[hist.length - 1].recommendDate);
+        }
       } catch { /* ignore */ }
     };
     load();
-  }, [batchId]);
+  }, [reviewStrategyId]);
 
-  // 当 batchId 变化时加载当批次的最佳/最差，并从 batchHistory 取近5期滚动平均质量标签
+  // 当 reviewStrategyId + reviewDate 变化时加载最佳/最差，并取质量标签
   useEffect(() => {
-    if (!batchId) { setTopBottom(null); setQualityTag(null); return; }
+    if (!reviewStrategyId || !reviewDate) { setTopBottom(null); setQualityTag(null); return; }
     const load = async () => {
       try {
-        const tb = await recommendationApi.getBatchTopBottom(batchId);
+        const tb = await recommendationApi.getBatchTopBottom(reviewStrategyId, reviewDate);
         setTopBottom(tb);
       } catch { setTopBottom(null); }
-      // 质量标签：优先从 batchHistory（后端已计算近5期滚动平均）取
       if (batchHistory && batchHistory.length > 0) {
-        const entry = batchHistory.find(b => b.batchId === batchId);
+        const entry = batchHistory.find(b => b.recommendDate === reviewDate);
         if (entry && entry.qualityTag) {
           setQualityTag(entry.qualityTag);
         } else {
@@ -244,7 +267,7 @@ export default function RecommendationList() {
       }
     };
     load();
-  }, [batchId, batchHistory]);
+  }, [reviewStrategyId, reviewDate, batchHistory]);
 
   // 手动触发表现追踪
   const handleTrack = async () => {
@@ -253,19 +276,15 @@ export default function RecommendationList() {
       const res = await recommendationApi.trackPerformance();
       message.success(`表现追踪完成，更新 ${res.updated} 条记录`);
       // 刷新推荐列表
-      if (batchId) {
-        loadRecommendations(batchId);
-      } else {
-        loadRecommendations(null);
-      }
+      loadRecommendations(reviewStrategyId, reviewDate);
       // 刷新历史命中率趋势图、质量标签、复盘数据
       try {
-        const hist = await recommendationApi.getBatchHistory(20);
+        const hist = await recommendationApi.getBatchHistory(20, reviewStrategyId);
         setBatchHistory(hist);
       } catch { /* ignore */ }
-      if (batchId) {
+      if (reviewStrategyId && reviewDate) {
         try {
-          const tb = await recommendationApi.getBatchTopBottom(batchId);
+          const tb = await recommendationApi.getBatchTopBottom(reviewStrategyId, reviewDate);
           setTopBottom(tb);
         } catch { /* ignore */ }
       }
@@ -1036,7 +1055,7 @@ export default function RecommendationList() {
       {/* 表现追踪面板 */}
       {batchHistory && batchHistory.length > 0 && (() => {
         const trackedBatches = batchHistory.filter(b => b.tracked > 0);
-        const latest = batchHistory.find(b => b.tracked > 0) || batchHistory[0];
+        const latest = [...batchHistory].reverse().find(b => b.tracked > 0) || batchHistory[batchHistory.length - 1];
         const avgHitRate = trackedBatches.length > 0
           ? trackedBatches.reduce((s, b) => s + (b.hitRate || 0), 0) / trackedBatches.length
           : 0;
@@ -1052,7 +1071,7 @@ export default function RecommendationList() {
             formatter: params => {
               if (!params || params.length === 0) return '';
               const p = params[0];
-              const batch = batchHistory.find(b => b.batchId === p.axisValue);
+              const batch = batchHistory.find(b => b.recommendDate === p.axisValue);
               if (!batch) return '';
               return `<b>${p.axisValue}</b><br/>
                 次日命中率: ${(batch.hitRate * 100).toFixed(0)}%<br/>
@@ -1063,7 +1082,7 @@ export default function RecommendationList() {
           },
           xAxis: {
             type: 'category',
-            data: [...batchHistory].reverse().map(b => b.batchId),
+            data: batchHistory.map(b => b.recommendDate),
             axisLabel: { fontSize: 10, rotate: 30 },
           },
           yAxis: [
@@ -1096,7 +1115,7 @@ export default function RecommendationList() {
             {
               name: '命中率',
               type: 'bar',
-              data: [...batchHistory].reverse().map(b => b.hitRate != null ? +(b.hitRate).toFixed(3) : null),
+              data: batchHistory.map(b => b.hitRate != null ? +(b.hitRate).toFixed(3) : null),
               barWidth: '40%',
               label: { show: true, position: 'top', fontSize: 10, color: '#595959', formatter: p => p.value != null ? (p.value * 100).toFixed(0) + '%' : '-' },
               itemStyle: { borderRadius: [4, 4, 0, 0] },
@@ -1105,7 +1124,7 @@ export default function RecommendationList() {
               name: '次日均收益',
               type: 'line',
               yAxisIndex: 1,
-              data: [...batchHistory].reverse().map(b => b.avgDayReturn != null ? +(b.avgDayReturn).toFixed(2) : null),
+              data: batchHistory.map(b => b.avgDayReturn != null ? +(b.avgDayReturn).toFixed(2) : null),
               lineStyle: { color: '#1890ff', width: 2 },
               symbol: 'none',
               itemStyle: { color: '#1890ff' },
@@ -1122,7 +1141,61 @@ export default function RecommendationList() {
 
         return (
           <>
-            <Row gutter={12} style={{ marginTop: 16, marginBottom: 16 }}>
+            {/* 复盘策略筛选栏 */}
+            <Row gutter={12} style={{ marginTop: 16, marginBottom: 12 }} align="middle">
+              <Col>
+                <Space>
+                  <Text strong style={{ fontSize: 13 }}>复盘筛选：</Text>
+                  <Select
+                    value={reviewStrategyId}
+                    onChange={handleReviewStrategyChange}
+                    style={{ width: 200 }}
+                    placeholder="选择策略"
+                    size="small"
+                  >
+                    {strategiesWithData.map(sid => {
+                      const s = strategies.find(st => st.id === sid);
+                      return (
+                        <Select.Option key={sid} value={sid}>
+                          {s ? s.strategyName : `策略${sid}`}
+                        </Select.Option>
+                      );
+                    })}
+                  </Select>
+                  <Select
+                    value={reviewDate}
+                    onChange={handleReviewDateChange}
+                    style={{ width: 140 }}
+                    placeholder="选择日期"
+                    size="small"
+                    disabled={!reviewStrategyId}
+                  >
+                    {(batchHistory || []).map(b => (
+                      <Select.Option key={b.recommendDate} value={b.recommendDate}>
+                        {b.recommendDate}
+                      </Select.Option>
+                    ))}
+                  </Select>
+                </Space>
+              </Col>
+              <Col flex="auto">
+                <Text type="secondary" style={{ fontSize: 11 }}>
+                  {qualityTag && (() => {
+                    const tag = qConfig[qualityTag];
+                    return tag ? (
+                      <Tag color={tag.color} style={{ marginRight: 0 }}>
+                        质量标签: {tag.text}
+                      </Tag>
+                    ) : null;
+                  })()}
+                  {reviewStrategyId && reviewDate && (
+                    <span style={{ marginLeft: 8 }}>当前查看: 策略{reviewStrategyId} @ {reviewDate}</span>
+                  )}
+                </Text>
+              </Col>
+            </Row>
+
+            <Row gutter={12} style={{ marginBottom: 16 }}>
               <Col span={4}>
                 <Card size="small" bodyStyle={{ padding: '12px 16px' }}>
                   <Statistic
@@ -1156,7 +1229,7 @@ export default function RecommendationList() {
               <Col span={4}>
                 <Card size="small" bodyStyle={{ padding: '12px 16px' }}>
                   {(() => {
-                    const entry = batchHistory?.find(b => b.batchId === batchId);
+                    const entry = batchHistory?.find(b => b.recommendDate === reviewDate);
                     const tag = qualityTag ? qConfig[qualityTag] : null;
                     return (
                       <Statistic
@@ -1444,7 +1517,7 @@ export default function RecommendationList() {
           <StockOutlined /> 综合得分 = Regime-Adaptive 动态权重融合 | 牛市因子60%+分析40%，熊市因子40%+分析60%，震荡均衡50:50 | 12因子: 动量/波动/价值×3/技术×2/换手率/质量×3/成长
         </Text>
         <Text type="secondary" style={{ fontSize: 12 }}>
-          {batchId && `批次: ${batchId} | ${recommendations.length} 只`}
+          {reviewDate && `策略${reviewStrategyId} | ${reviewDate} | ${recommendations.length} 只`}
         </Text>
       </div>
     </div>

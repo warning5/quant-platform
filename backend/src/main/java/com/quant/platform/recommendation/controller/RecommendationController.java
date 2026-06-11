@@ -50,7 +50,14 @@ public class RecommendationController {
             List<StockRecommendation> recommendations = recommendationService.generateRecommendations(date, topN, factorProfile, strategyId, weightMode, diagnostics);
 
             Map<String, Object> result = new HashMap<>();
-            result.put("batchId", recommendations.isEmpty() ? null : recommendations.getFirst().getBatchId());
+            if (!recommendations.isEmpty()) {
+                StockRecommendation first = recommendations.getFirst();
+                result.put("strategyId", first.getStrategyId());
+                result.put("recommendDate", first.getRecommendDate().toString());
+            } else {
+                result.put("strategyId", null);
+                result.put("recommendDate", null);
+            }
             result.put("count", recommendations.size());
             result.put("recommendations", recommendations);
             result.put("factorDiagnostics", diagnostics);
@@ -84,21 +91,30 @@ public class RecommendationController {
     }
 
     /**
-     * 获取指定批次推荐列表
+     * 获取指定策略+日期的推荐列表
      */
-    @GetMapping("/batch/{batchId}")
-    public ApiResponse<List<StockRecommendation>> getByBatch(@PathVariable String batchId) {
-        List<StockRecommendation> list = recommendationService.getRecommendationsByBatch(batchId);
+    @GetMapping("/strategy/{strategyId}/date/{date}")
+    public ApiResponse<List<StockRecommendation>> getByStrategyAndDate(
+            @PathVariable Long strategyId,
+            @PathVariable @JsonFormat(pattern = "yyyy-MM-dd") LocalDate date) {
+        List<StockRecommendation> list = recommendationService.getRecommendationsByStrategyAndDate(strategyId, date);
         return ApiResponse.success(list);
     }
 
     /**
-     * 获取批次列表
+     * 获取有推荐记录的策略+日期组合列表
      */
-    @GetMapping("/batches")
-    public ApiResponse<List<String>> getBatches(@RequestParam(defaultValue = "20") int limit) {
-        List<String> batches = recommendationService.getBatchIds(limit);
-        return ApiResponse.success(batches);
+    @GetMapping("/strategy-date-combos")
+    public ApiResponse<List<Map<String, Object>>> getStrategyDateCombos(@RequestParam(defaultValue = "20") int limit) {
+        return ApiResponse.success(recommendationService.getStrategyDateCombos(limit));
+    }
+
+    /**
+     * 获取所有有推荐记录的策略ID列表（用于前端筛选下拉）
+     */
+    @GetMapping("/strategies-with-data")
+    public ApiResponse<List<Long>> strategiesWithData() {
+        return ApiResponse.success(recommendationService.strategiesWithData());
     }
 
     /**
@@ -198,26 +214,32 @@ public class RecommendationController {
     /**
      * 获取推荐命中率统计
      */
-    @GetMapping("/hit-rate/{batchId}")
-    public ApiResponse<Map<String, Object>> getHitRate(@PathVariable String batchId) {
-        return ApiResponse.success(recommendationService.getHitRate(batchId));
+    @GetMapping("/hit-rate/strategy/{strategyId}/date/{date}")
+    public ApiResponse<Map<String, Object>> getHitRate(
+            @PathVariable Long strategyId,
+            @PathVariable @JsonFormat(pattern = "yyyy-MM-dd") LocalDate date) {
+        return ApiResponse.success(recommendationService.getHitRate(strategyId, date));
     }
 
     /**
-     * 获取批次历史表现汇总（含质量标签）
+     * 获取批次历史表现汇总（含质量标签，支持按策略筛选）
      * 用于前端表现追踪面板：命中趋势图 + 平均收益率统计
      */
     @GetMapping("/batch-history")
-    public ApiResponse<List<Map<String, Object>>> getBatchHistory(@RequestParam(defaultValue = "20") int limit) {
-        return ApiResponse.success(recommendationService.getBatchHistory(limit));
+    public ApiResponse<List<Map<String, Object>>> getBatchHistory(
+            @RequestParam(defaultValue = "20") int limit,
+            @RequestParam(required = false) Long strategyId) {
+        return ApiResponse.success(recommendationService.getBatchHistory(limit, strategyId));
     }
 
     /**
-     * 获取指定批次的最佳/最差股票（推荐复盘）
+     * 获取指定策略+日期的最佳/最差股票（推荐复盘）
      */
-    @GetMapping("/batch/{batchId}/top-bottom")
-    public ApiResponse<Map<String, Object>> getBatchTopBottom(@PathVariable String batchId) {
-        return ApiResponse.success(recommendationService.getBatchTopBottom(batchId));
+    @GetMapping("/top-bottom")
+    public ApiResponse<Map<String, Object>> getBatchTopBottom(
+            @RequestParam Long strategyId,
+            @RequestParam @JsonFormat(pattern = "yyyy-MM-dd") LocalDate recommendDate) {
+        return ApiResponse.success(recommendationService.getBatchTopBottom(strategyId, recommendDate));
     }
 
     /**

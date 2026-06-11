@@ -19,8 +19,8 @@ public class StockRecommendation {
     @TableId(type = IdType.AUTO)
     private Long id;
 
-    /** 批次ID（日期格式: 2026-06-04） */
-    private String batchId;
+    /** 策略ID（关联 strategy_definition 表） */
+    private Long strategyId;
 
     /** 股票代码（纯代码，无后缀） */
     private String stockCode;

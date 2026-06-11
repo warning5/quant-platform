@@ -293,16 +293,21 @@ public class RecommendationService {
                     dbStrategy != null && dbStrategy.getFilterConfigJson() != null ? "present" : "null");
         }
 
-        // P1-4: 检查上期推荐命中率，动态调整 topN
-        String prevBatchId = recommendationMapper.findLatestBatchId();
-        if (prevBatchId != null && topN > 10) {
-            Map<String, Object> hitStats = getHitRate(prevBatchId);
-            Double hitRate = (Double) hitStats.get("hitRate");
-            if (hitRate != null && hitRate < 0.4) {
-                int originalTopN = topN;
-                topN = Math.max(10, topN - 5);
-                log.info("[Recommendation] 上期命中率{:.0f}%偏低({}), 缩减topN: {} -> {}",
-                    hitRate * 100, prevBatchId, originalTopN, topN);
+        // P1-4: 检查上期推荐命中率，动态调整 topN（仅当指定了 strategyId 时）
+        if (strategyId != null && topN > 10) {
+            StockRecommendation latestRec = recommendationMapper.findLatest();
+            if (latestRec != null && latestRec.getStrategyId() != null && latestRec.getStrategyId().equals(strategyId)) {
+                LocalDate prevDate = latestRec.getRecommendDate();
+                if (prevDate != null) {
+                    Map<String, Object> hitStats = getHitRate(latestRec.getStrategyId(), prevDate);
+                    Double hitRate = (Double) hitStats.get("hitRate");
+                    if (hitRate != null && hitRate < 0.4) {
+                        int originalTopN = topN;
+                        topN = Math.max(10, topN - 5);
+                        log.info("[Recommendation] 上期命中率{:.0f}%偏低({}), 缩减topN: {} -> {}",
+                            hitRate * 100, prevDate, originalTopN, topN);
+                    }
+                }
             }
         }
 
@@ -455,20 +460,25 @@ public class RecommendationService {
             recommendations.get(i).setRankNum(i + 1);
         }
 
-        // Step 6: 写入数据库（先生成 batchId，再删旧写新，避免唯一键冲突）
-        String batchId = actualDate.format(DateTimeFormatter.ISO_LOCAL_DATE);
-        recommendationMapper.deleteByBatchId(batchId);
+        // Step 6: 写入数据库（按 strategy_id + recommend_date 去重，先删旧写新）
         for (StockRecommendation rec : recommendations) {
-            rec.setBatchId(batchId);
+            rec.setStrategyId(strategyId);
+            rec.setRecommendDate(actualDate);
+        }
+        // 仅当指定了策略时才做清理（避免误删）
+        if (strategyId != null) {
+            recommendationMapper.deleteByStrategyAndDate(strategyId, actualDate);
+        }
+        for (StockRecommendation rec : recommendations) {
             try {
                 recommendationMapper.insert(rec);
             } catch (Exception e) {
-                log.warn("[Recommendation] 写入失败: code={} batchId={} error={}",
-                        rec.getStockCode(), batchId, e.getMessage());
+                log.warn("[Recommendation] 写入失败: code={} strategyId={} date={} error={}",
+                        rec.getStockCode(), strategyId, actualDate, e.getMessage());
             }
         }
 
-        log.info("[Recommendation] 推荐列表生成完成: batchId={} count={}", batchId, recommendations.size());
+        log.info("[Recommendation] 推荐列表生成完成: strategyId={} date={} count={}", strategyId, actualDate, recommendations.size());
         return recommendations;
     }
 
@@ -476,18 +486,20 @@ public class RecommendationService {
      * 获取最新推荐列表
      */
     public List<StockRecommendation> getLatestRecommendations() {
-        String latestBatch = recommendationMapper.findLatestBatchId();
-        if (latestBatch == null) {
+        StockRecommendation latest = recommendationMapper.findLatest();
+        if (latest == null) {
             return List.of();
         }
-        return enrichFromStockInfo(recommendationMapper.findByBatchId(latestBatch));
+        List<StockRecommendation> recs = recommendationMapper.findByStrategyAndDate(
+                latest.getStrategyId(), latest.getRecommendDate());
+        return enrichFromStockInfo(recs);
     }
 
     /**
-     * 获取指定批次推荐列表
+     * 获取指定策略+日期的推荐列表
      */
-    public List<StockRecommendation> getRecommendationsByBatch(String batchId) {
-        return enrichFromStockInfo(recommendationMapper.findByBatchId(batchId));
+    public List<StockRecommendation> getRecommendationsByStrategyAndDate(Long strategyId, LocalDate recommendDate) {
+        return enrichFromStockInfo(recommendationMapper.findByStrategyAndDate(strategyId, recommendDate));
     }
 
     /**
@@ -539,7 +551,6 @@ public class RecommendationService {
 
     /**
      * 追踪推荐表现（Phase 3.2）
-     *
      * 对未追踪或需要更新的推荐批次，计算:
      * - 次日收益率
      * - 一周收益率
@@ -548,17 +559,20 @@ public class RecommendationService {
      * @return 更新的记录数
      */
     public int trackRecommendationPerformance() {
-        // 找到所有需要更新的批次（最新3个未完全追踪的批次）
-        List<String> batchIds = recommendationMapper.findRecentBatchIds(5);
+        // 找到所有需要更新的策略+日期组合（最近5组未完全追踪的）
+        List<Map<String, Object>> recentCombos = recommendationMapper.findRecentStrategyDates(5);
         int totalUpdated = 0;
 
         LocalDate today = LocalDate.now();
 
-        for (String batchId : batchIds) {
-            List<StockRecommendation> recs = recommendationMapper.findByBatchId(batchId);
+        for (Map<String, Object> combo : recentCombos) {
+            Long sid = ((Number) combo.get("strategy_id")).longValue();
+            java.sql.Date sqlDate = (java.sql.Date) combo.get("recommend_date");
+            LocalDate recDate = sqlDate.toLocalDate();
+
+            List<StockRecommendation> recs = recommendationMapper.findByStrategyAndDate(sid, recDate);
             if (recs.isEmpty()) continue;
 
-            LocalDate recDate = recs.get(0).getRecommendDate();
             int daysSince = (int) java.time.temporal.ChronoUnit.DAYS.between(recDate, today);
             if (daysSince <= 0) continue; // 推荐当天或未来，不追踪
 
@@ -599,7 +613,8 @@ public class RecommendationService {
                         totalUpdated++;
                     }
                 } catch (Exception e) {
-                    log.warn("[Recommendation] 追踪失败: code={} batchId={} error={}", rec.getStockCode(), batchId, e.getMessage());
+                    log.warn("[Recommendation] 追踪失败: code={} strategyId={} date={} error={}",
+                            rec.getStockCode(), sid, recDate, e.getMessage());
                 }
             }
         }
@@ -611,13 +626,15 @@ public class RecommendationService {
     /**
      * 获取推荐命中率统计
      *
-     * @param batchId 批次ID
+     * @param strategyId 策略ID
+     * @param recommendDate 推荐日期
      * @return { total, positive, hitRate, avgReturn }
      */
-    public Map<String, Object> getHitRate(String batchId) {
-        List<StockRecommendation> recs = recommendationMapper.findByBatchId(batchId);
+    public Map<String, Object> getHitRate(Long strategyId, LocalDate recommendDate) {
+        List<StockRecommendation> recs = recommendationMapper.findByStrategyAndDate(strategyId, recommendDate);
         Map<String, Object> stats = new HashMap<>();
-        stats.put("batchId", batchId);
+        stats.put("strategyId", strategyId);
+        stats.put("recommendDate", recommendDate.toString());
         stats.put("total", recs.size());
 
         if (recs.isEmpty()) return stats;
@@ -644,40 +661,59 @@ public class RecommendationService {
     }
 
     /**
-     * 获取所有批次ID
+     * 获取最近的策略+日期组合列表
      */
-    public List<String> getBatchIds(int limit) {
-        return recommendationMapper.findRecentBatchIds(limit);
+    public List<Map<String, Object>> getStrategyDateCombos(int limit) {
+        return recommendationMapper.findRecentStrategyDates(limit);
     }
 
     /**
-     * 获取批次历史表现汇总（含质量标签）
-     * 用于前端表现追踪面板：命中趋势图 + 质量标签展示
-     *
-     * @param limit 返回最近N个批次
-     * @return [{ batchId, recommendDate, total, hitRate, avgDayReturn, avgWeekReturn, avgMonthReturn, qualityTag, tracked }]
+     * 获取所有有推荐记录的策略ID列表
      */
-    public List<Map<String, Object>> getBatchHistory(int limit) {
-        List<String> batchIds = recommendationMapper.findRecentBatchIds(limit);
-        List<Map<String, Object>> history = new ArrayList<>();
+    public List<Long> strategiesWithData() {
+        return recommendationMapper.findDistinctStrategyIds();
+    }
 
-        // 先收集所有批次的 hitRate，用于滚动5期均值计算
+    /**
+     * 获取批次历史表现汇总（含质量标签，按策略隔离）
+     * 用于前端表现追踪面板：命中趋势图 + 平均收益率统计
+     *
+     * @param limit 返回最近N条策略+日期组合
+     * @param strategyId 可选，指定时只返回该策略的数据
+     * @return [{ strategyId, recommendDate, total, hitRate, avgDayReturn, avgWeekReturn, avgMonthReturn, qualityTag, tracked }]
+     */
+    public List<Map<String, Object>> getBatchHistory(int limit, Long strategyId) {
+        List<Map<String, Object>> rawCombos;
+        if (strategyId != null) {
+            // 按策略筛选：获取该策略的日期列表
+            List<LocalDate> dates = recommendationMapper.findDatesByStrategyId(strategyId, limit);
+            rawCombos = new ArrayList<>();
+            for (LocalDate d : dates) {
+                Map<String, Object> m = new HashMap<>();
+                m.put("strategy_id", strategyId);
+                m.put("recommend_date", java.sql.Date.valueOf(d));
+                rawCombos.add(m);
+            }
+        } else {
+            rawCombos = recommendationMapper.findRecentStrategyDates(limit);
+        }
+
+        // 先收集所有组合的 hitRate，用于滚动5期均值计算
         List<Double> hitRates = new ArrayList<>();
         List<Long> trackedCounts = new ArrayList<>();
         List<Map<String, Object>> rawEntries = new ArrayList<>();
 
-        for (String batchId : batchIds) {
-            Map<String, Object> stats = getHitRate(batchId);
+        for (Map<String, Object> combo : rawCombos) {
+            Long sid = ((Number) combo.get("strategy_id")).longValue();
+            java.sql.Date sqlDate = (java.sql.Date) combo.get("recommend_date");
+            LocalDate recDate = sqlDate.toLocalDate();
+
+            Map<String, Object> stats = getHitRate(sid, recDate);
             Map<String, Object> entry = new LinkedHashMap<>();
-            entry.put("batchId", batchId);
+            entry.put("strategyId", sid);
+            entry.put("recommendDate", recDate.toString());
             entry.put("total", stats.get("total"));
             entry.put("tracked", stats.get("tracked"));
-
-            // 获取推荐日期
-            List<StockRecommendation> recs = recommendationMapper.findByBatchId(batchId);
-            if (!recs.isEmpty()) {
-                entry.put("recommendDate", recs.get(0).getRecommendDate().toString());
-            }
 
             Double hitRate = (Double) stats.get("hitRate");
             Double avgDayReturn = (Double) stats.get("avgReturn");
@@ -685,6 +721,7 @@ public class RecommendationService {
             entry.put("avgDayReturn", avgDayReturn);
 
             // 计算一周/一月平均收益
+            List<StockRecommendation> recs = recommendationMapper.findByStrategyAndDate(sid, recDate);
             double sumWeek = 0, sumMonth = 0;
             long weekTracked = 0, monthTracked = 0;
             for (StockRecommendation rec : recs) {
@@ -700,10 +737,10 @@ public class RecommendationService {
         }
 
         // 质量标签: 基于近5期滚动平均命中率判定
-        // batchHistory 按 batch_id DESC 排序（最新在前），所以"近5期"是当前及索引更大的（更早的）批次
+        // rawEntries 按日期 DESC 排序（最新在前）
         for (int i = 0; i < rawEntries.size(); i++) {
             Map<String, Object> entry = rawEntries.get(i);
-            // 计算当前批次及之前的近5期（含当前批次）滚动均值
+            // 计算当前及之后4期（共5期）滚动均值
             double rollingSum = 0;
             long rollingTracked = 0;
             for (int j = i; j < rawEntries.size() && j <= i + 4; j++) {
@@ -726,21 +763,23 @@ public class RecommendationService {
             }
             entry.put("qualityTag", qualityTag);
             entry.put("rollingAvgHitRate", rollingTracked > 0 ? rollingAvg : null);
-
-            history.add(entry);
         }
-        return history;
+
+        // 按日期 ASC 排序返回（图表从左到右时间递增）
+        List<Map<String, Object>> result = new ArrayList<>(rawEntries);
+        result.sort((a, b) -> ((String) a.get("recommendDate")).compareTo((String) b.get("recommendDate")));
+        return result;
     }
 
     /**
-     * 获取指定批次的最佳/最差股票（用于推荐复盘）
+     * 获取指定策略+日期的最佳/最差股票（用于推荐复盘）
      * 按次日收益率排序，分别取 top3 / bottom3
      * 含深度归因分析：行业分布对比、市值中位数对比、因子/分析得分对比
      *
      * @return { best3: [...], worst3: [...], analysis: { industryDiff, marketCapDiff, scoreDiff, failurePatterns } }
      */
-    public Map<String, Object> getBatchTopBottom(String batchId) {
-        List<StockRecommendation> recs = recommendationMapper.findByBatchId(batchId);
+    public Map<String, Object> getBatchTopBottom(Long strategyId, LocalDate recommendDate) {
+        List<StockRecommendation> recs = recommendationMapper.findByStrategyAndDate(strategyId, recommendDate);
         Map<String, Object> result = new HashMap<>();
 
         // 只取有次日收益的

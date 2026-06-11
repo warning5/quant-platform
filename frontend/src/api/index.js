@@ -341,10 +341,12 @@ export const recommendationApi = {
   generate: (date, topN, strategyId, weightMode) => api.post('/recommendations/generate', { date, topN, strategyId, weightMode }),
   /** 获取最新推荐列表 */
   getLatest: () => api.get('/recommendations/latest'),
-  /** 获取指定批次推荐 */
-  getByBatch: (batchId) => api.get(`/recommendations/batch/${batchId}`),
-  /** 获取批次列表 */
-  getBatches: (limit = 20) => api.get('/recommendations/batches', { params: { limit } }),
+  /** 获取指定策略+日期的推荐列表 */
+  getByStrategyAndDate: (strategyId, date) => api.get(`/recommendations/strategy/${strategyId}/date/${date}`),
+  /** 获取有推荐记录的策略+日期组合列表 */
+  getStrategyDateCombos: (limit = 20) => api.get('/recommendations/strategy-date-combos', { params: { limit } }),
+  /** 获取所有有推荐记录的策略ID列表（用于筛选下拉） */
+  strategiesWithData: () => api.get('/recommendations/strategies-with-data'),
   /** 计算并存储因子IC值（需先计算IC，再使用动态IC加权生成推荐）
    * @param {string[]} factorCodes - 要计算的因子代码列表 */
   computeIc: (date, factorCodes) => api.post('/recommendations/ic/compute', { date, factorCodes }),
@@ -353,14 +355,14 @@ export const recommendationApi = {
   computeIcBatch: (startDate, endDate, factorCodes) => api.post('/recommendations/ic/compute-batch', { startDate, endDate, factorCodes }, { timeout: 600000 }),
   /** 获取IC最新摘要 */
   getIcSummary: () => api.get('/recommendations/ic/summary'),
-  /** 获取批次命中率 */
-  getHitRate: (batchId) => api.get(`/recommendations/hit-rate/${batchId}`),
-  /** 获取批次历史表现汇总（含质量标签） */
-  getBatchHistory: (limit = 20) => api.get('/recommendations/batch-history', { params: { limit } }),
+  /** 获取批次命中率（按策略+日期） */
+  getHitRate: (strategyId, date) => api.get(`/recommendations/hit-rate/strategy/${strategyId}/date/${date}`),
+  /** 获取批次历史表现汇总（含质量标签，支持按策略筛选） */
+  getBatchHistory: (limit = 20, strategyId) => api.get('/recommendations/batch-history', { params: { limit, strategyId } }),
   /** 触发表现追踪 */
   trackPerformance: () => api.post('/recommendations/track'),
-  /** 获取批次最佳/最差股票 */
-  getBatchTopBottom: (batchId) => api.get(`/recommendations/batch/${batchId}/top-bottom`),
+  /** 获取指定策略+日期的最佳/最差股票（推荐复盘） */
+  getBatchTopBottom: (strategyId, recommendDate) => api.get('/recommendations/top-bottom', { params: { strategyId, recommendDate } }),
 };
 
 export default api;
