@@ -1194,7 +1194,64 @@ export default function RecommendationList() {
 
             {/* 命中率趋势图 */}
             {trackedBatches.length >= 2 && (
-              <Card size="small" title={<span><LineChartOutlined /> 命中率 & 次日均收益趋势</span>} style={{ marginBottom: 16 }}>
+              <Card
+                size="small"
+                title={
+                  <span>
+                    <LineChartOutlined /> 命中率 & 次日均收益趋势
+                    <Tooltip
+                      overlayStyle={{ maxWidth: 560 }}
+                      title={
+                        <div style={{ fontSize: 12, lineHeight: '20px' }}>
+                          <div style={{ fontWeight: 'bold', marginBottom: 6, fontSize: 13 }}>图表指标说明</div>
+                          <table style={{ borderCollapse: 'collapse', width: '100%', marginBottom: 10 }}>
+                            <thead>
+                              <tr style={{ borderBottom: '1px solid #555' }}>
+                                <th style={{ textAlign: 'left', padding: '2px 6px', fontWeight: 'bold' }}>指标</th>
+                                <th style={{ textAlign: 'left', padding: '2px 6px', fontWeight: 'bold' }}>含义</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              <tr style={{ borderBottom: '1px solid #434343' }}>
+                                <td style={{ padding: '2px 6px', whiteSpace: 'nowrap' }}>次日命中率</td>
+                                <td style={{ padding: '2px 6px' }}>推荐日 T 的名单中，T+1 当天收益为正的股票占比</td>
+                              </tr>
+                              <tr style={{ borderBottom: '1px solid #434343' }}>
+                                <td style={{ padding: '2px 6px', whiteSpace: 'nowrap' }}>次日均收益</td>
+                                <td style={{ padding: '2px 6px' }}>推荐日 T 名单的所有股票，T+1 当天的平均涨跌幅</td>
+                              </tr>
+                              <tr style={{ borderBottom: '1px solid #434343' }}>
+                                <td style={{ padding: '2px 6px', whiteSpace: 'nowrap' }}>一周收益</td>
+                                <td style={{ padding: '2px 6px' }}>推荐日 T 名单，T+1 到 T+5（约一周）的平均持有收益</td>
+                              </tr>
+                              <tr>
+                                <td style={{ padding: '2px 6px', whiteSpace: 'nowrap' }}>一月均收益</td>
+                                <td style={{ padding: '2px 6px' }}>推荐日 T 名单，T+1 到 T+22（约一个月）的平均持有收益</td>
+                              </tr>
+                            </tbody>
+                          </table>
+                          <div style={{ marginBottom: 10, color: '#aaa' }}>
+                            提示：tooltip 显示的日期是<b>推荐日</b>，不是收益结算日。例如 26% 命中率代表：当天推荐的股票里，只有 26% 在次日上涨（柱子变红/深色的原因）。
+                          </div>
+                          <div style={{ fontWeight: 'bold', marginBottom: 6, fontSize: 13 }}>蓝色折线的含义</div>
+                          <div style={{ marginBottom: 4 }}>蓝色线是<b>次日均收益趋势</b>，对应右侧 Y 轴（收益率 %）。</div>
+                          <div style={{ marginBottom: 4 }}>• 蓝线显著上扬 → 那批推荐次日平均收益高</div>
+                          <div style={{ marginBottom: 4 }}>• 蓝线跌入负区间 → 那批推荐次日平均亏损（即使命中率过半，也可能赚小赔大、均值被拉低）</div>
+                          <div style={{ marginBottom: 10, color: '#ff7875' }}>
+                            注意：命中率高 ≠ 赚钱。命中率 53% 但均收益为负，说明涨得少、跌得多。
+                          </div>
+                          <div style={{ fontWeight: 'bold', marginBottom: 6, fontSize: 13 }}>整体读图建议</div>
+                          <div style={{ marginBottom: 4, color: '#52c41a' }}>好信号 = 命中率高（柱子高/绿色）AND 蓝线在正区间</div>
+                          <div style={{ marginBottom: 2, color: '#ff4d4f' }}>坏信号 = 命中率低（柱子矮/红色）OR 蓝线跌入负区间（即使命中率 {'>'} 50%）</div>
+                        </div>
+                      }
+                    >
+                      <QuestionCircleOutlined style={{ color: '#91caff', fontSize: 13, marginLeft: 6, cursor: 'help' }} />
+                    </Tooltip>
+                  </span>
+                }
+                style={{ marginBottom: 16 }}
+              >
                 <ReactEcharts option={trendOption} style={{ height: 260 }} />
               </Card>
             )}
