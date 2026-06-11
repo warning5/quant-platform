@@ -44,10 +44,13 @@ public class RecommendationController {
             String factorProfile = req != null ? req.getFactorProfile() : null;
             Long strategyId = req != null ? req.getStrategyId() : null;
             String weightMode = req != null ? req.getWeightMode() : null;
+            Boolean enableConfidenceControl = req != null && req.getEnableConfidenceControl() != null
+                    ? req.getEnableConfidenceControl() : true; // 默认开启
 
             List<RecommendationService.FactorDiagnostic> diagnostics = new ArrayList<>();
 
-            List<StockRecommendation> recommendations = recommendationService.generateRecommendations(date, topN, factorProfile, strategyId, weightMode, diagnostics);
+            List<StockRecommendation> recommendations = recommendationService.generateRecommendations(
+                    date, topN, factorProfile, strategyId, weightMode, diagnostics, enableConfidenceControl);
 
             Map<String, Object> result = new HashMap<>();
             if (!recommendations.isEmpty()) {
@@ -258,5 +261,7 @@ public class RecommendationController {
         private Long strategyId;
         /** 权重模式: STATIC(固定权重) / IC(动态IC加权) */
         private String weightMode;
+        /** 是否启用置信度控制（默认 true） */
+        private Boolean enableConfidenceControl;
     }
 }

@@ -17,6 +17,8 @@ import com.quant.platform.stock.entity.StockInfo;
 import com.quant.platform.stock.mapper.StockInfoMapper;
 import com.quant.platform.stock.service.ClickHouseStockService;
 import com.quant.platform.stock.service.DividendService;
+import com.quant.platform.recommendation.service.StockBlacklistService;
+import com.quant.platform.recommendation.service.StrategyConfidenceService;
 import com.quant.platform.strategy.domain.StrategyDefinition;
 import com.quant.platform.strategy.mapper.StrategyDefinitionMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -57,6 +59,8 @@ public class RecommendationService {
     private final ObjectMapper objectMapper;
     private final FactorIcService factorIcService;
     private final DividendService dividendService;
+    private final StockBlacklistService stockBlacklistService;
+    private final StrategyConfidenceService strategyConfidenceService;
     private final javax.sql.DataSource dataSource;
 
     /** 因子选股取 Top N（广筛） */
@@ -251,6 +255,8 @@ public class RecommendationService {
                                  ObjectMapper objectMapper,
                                  FactorIcService factorIcService,
                                  DividendService dividendService,
+                                 StockBlacklistService stockBlacklistService,
+                                 StrategyConfidenceService strategyConfidenceService,
                                  javax.sql.DataSource dataSource) {
         this.stockScreenService = stockScreenService;
         this.analysisService = analysisService;
@@ -262,6 +268,8 @@ public class RecommendationService {
         this.objectMapper = objectMapper;
         this.factorIcService = factorIcService;
         this.dividendService = dividendService;
+        this.stockBlacklistService = stockBlacklistService;
+        this.strategyConfidenceService = strategyConfidenceService;
         this.dataSource = dataSource;
     }
 
@@ -274,14 +282,16 @@ public class RecommendationService {
      * @return 推荐结果列表
      */
     public List<StockRecommendation> generateRecommendations(LocalDate date, Integer topN,
-            String factorProfile, Long strategyId, String weightMode, List<FactorDiagnostic> diagnostics) {
+            String factorProfile, Long strategyId, String weightMode, List<FactorDiagnostic> diagnostics,
+            boolean enableConfidenceControl) {
         // date=null 时 StockScreenService.screen() 会自动取最新日期
         if (topN == null || topN <= 0) {
             topN = ANALYSIS_TOP_N;
         }
         boolean useDynamicIc = "IC".equalsIgnoreCase(weightMode);
 
-        log.info("[Recommendation] 开始生成推荐列表: date={}, topN={}, factorProfile={}, strategyId={}, weightMode={}", date, topN, factorProfile, strategyId, weightMode);
+        log.info("[Recommendation] 开始生成推荐列表: date={}, topN={}, factorProfile={}, strategyId={}, weightMode={}, confidenceControl={}",
+                date, topN, factorProfile, strategyId, weightMode, enableConfidenceControl);
 
         // 诊断：加载策略详情
         if (strategyId != null) {
@@ -308,6 +318,39 @@ public class RecommendationService {
                             hitRate * 100, prevDate, originalTopN, topN);
                     }
                 }
+            }
+        }
+
+        // Step 0.5: 策略置信度检查（方案C - Layer 1: 策略级风控）
+        // 在黑名单过滤(Layer 2)之前执行，如果置信度过低直接降topN或建议暂停
+        // 仅在启用置信度控制时生效
+        if (enableConfidenceControl && strategyId != null) {
+            try {
+                var confidenceOpt = strategyConfidenceService.getLatestConfidence(strategyId);
+                if (confidenceOpt.isPresent()) {
+                    var conf = confidenceOpt.get();
+                    String level = conf.getLevel();
+                    Integer score = conf.getScore();
+                    log.info("[Recommendation] 策略置信度: strategyId={}, level={}, score={}, hitRate={:.1f}%, avgReturn={:.2f}%",
+                            strategyId, level,
+                            score != null ? score : "N/A",
+                            conf.getHitRateValue() != null ? conf.getHitRateValue().doubleValue() * 100 : 0,
+                            conf.getAvgReturnValue() != null ? conf.getAvgReturnValue().doubleValue() : 0);
+
+                    // 根据置信度调整 topN
+                    int adjustedTopN = strategyConfidenceService.getAdjustedTopN(topN, conf);
+                    if (adjustedTopN == -1) {
+                        log.warn("[Recommendation] 策略置信度过低(SUSPENDED), 建议暂停使用该策略: strategyId={}, score={}", strategyId, score);
+                        // 不阻止生成，但大幅缩减
+                        topN = Math.max(3, topN / 3);
+                    } else if (adjustedTopN < topN) {
+                        int originalTopN = topN;
+                        topN = adjustedTopN;
+                        log.info("[Recommendation] 置信度调整topN: {} -> {} (level={}, score={})", originalTopN, topN, level, score);
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("[Recommendation] 置信度查询异常，跳过调整: error={}", e.getMessage());
             }
         }
 
@@ -404,6 +447,32 @@ public class RecommendationService {
             if (candidates.isEmpty()) {
                 log.warn("[Recommendation] 行业排除后候选池为空，跳过生成");
                 return List.of();
+            }
+        }
+
+        // Step 1.7: 黑名单过滤（方案B - 个股级风控）
+        // 在行业排除之后、市场环境识别之前执行
+        if (strategyId != null) {
+            Set<String> blacklistCodes = stockBlacklistService.getActiveBlacklistCodes(strategyId);
+            if (!blacklistCodes.isEmpty()) {
+                int beforeBl = candidates.size();
+                List<String> filteredStocks = new ArrayList<>();
+                candidates = candidates.stream()
+                        .filter(s -> {
+                            String pureCode = stripSuffix(s.getSymbol());
+                            if (blacklistCodes.contains(pureCode)) {
+                                filteredStocks.add(s.getName() + "(" + pureCode + ")");
+                                return false;
+                            }
+                            return true;
+                        })
+                        .collect(Collectors.toList());
+
+                log.info("[Recommendation] 黑名单过滤 [strategyId={}]: 黑名单股票数={}, 过滤前={}, 过滤后={}, 被过滤={}",
+                        strategyId, blacklistCodes.size(), beforeBl, candidates.size(), filteredStocks);
+                if (candidates.isEmpty()) {
+                    log.warn("[Recommendation] 黑名单过滤后候选池为空，跳过生成（建议先清理黑名单）");
+                }
             }
         }
 
@@ -620,6 +689,31 @@ public class RecommendationService {
         }
 
         log.info("[Recommendation] 表现追踪完成: 更新{}条记录", totalUpdated);
+
+        // 追踪完成后，自动评估并更新黑名单（方案B）
+        for (Map<String, Object> combo : recentCombos) {
+            Long sid = ((Number) combo.get("strategy_id")).longValue();
+            java.sql.Date sqlDate = (java.sql.Date) combo.get("recommend_date");
+            LocalDate recDate = sqlDate.toLocalDate();
+            try {
+                stockBlacklistService.evaluateAndBlacklist(sid, recDate);
+            } catch (Exception e) {
+                log.warn("[Recommendation] 黑名单自动评估异常: strategyId={} date={} error={}", sid, recDate, e.getMessage());
+            }
+        }
+
+        // 追踪完成后，自动更新策略置信度（方案C）
+        Set<Long> strategyIds = recentCombos.stream()
+                .map(c -> ((Number) c.get("strategy_id")).longValue())
+                .collect(java.util.stream.Collectors.toSet());
+        for (Long sid : strategyIds) {
+            try {
+                strategyConfidenceService.calculateAndSave(sid);
+            } catch (Exception e) {
+                log.warn("[Recommendation] 置信度自动计算异常: strategyId={} error={}", sid, e.getMessage());
+            }
+        }
+
         return totalUpdated;
     }
 

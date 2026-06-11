@@ -338,7 +338,7 @@ export const recommendationApi = {
    * @param {number} topN - 推荐数量
    * @param {number} strategyId - 策略ID（从策略列表选择）
    */
-  generate: (date, topN, strategyId, weightMode) => api.post('/recommendations/generate', { date, topN, strategyId, weightMode }),
+  generate: (date, topN, strategyId, weightMode, enableConfidenceControl) => api.post('/recommendations/generate', { date, topN, strategyId, weightMode, enableConfidenceControl }),
   /** 获取最新推荐列表 */
   getLatest: () => api.get('/recommendations/latest'),
   /** 获取指定策略+日期的推荐列表 */
@@ -363,6 +363,38 @@ export const recommendationApi = {
   trackPerformance: () => api.post('/recommendations/track'),
   /** 获取指定策略+日期的最佳/最差股票（推荐复盘） */
   getBatchTopBottom: (strategyId, recommendDate) => api.get('/recommendations/top-bottom', { params: { strategyId, recommendDate } }),
+};
+
+/** 方案B: 个股黑名单 API */
+export const blacklistApi = {
+  /** 获取黑名单列表（含已过期） */
+  getList: (strategyId, includeExpired = false) => api.get('/blacklist', { params: { strategyId, includeExpired } }),
+  /** 获取当前生效的黑名单股票代码集合 */
+  getCodes: (strategyId) => api.get('/blacklist/codes', { params: { strategyId } }),
+  /** 手动添加到黑名单 */
+  add: (strategyId, stockCode, stockName, reasonDetail, days) =>
+    api.post('/blacklist', { strategyId, stockCode, stockName, reasonDetail, days }),
+  /** 按策略+代码解封 */
+  remove: (strategyId, stockCode) => api.delete('/blacklist', { params: { strategyId, stockCode } }),
+  /** 按ID解封 */
+  removeById: (id) => api.delete(`/blacklist/${id}`),
+  /** 清空全部黑名单 */
+  clearAll: (strategyId) => api.delete('/blacklist/all', { params: { strategyId } }),
+};
+
+/** 方案C: 策略置信度 API */
+export const confidenceApi = {
+  /** 获取所有策略的最新置信度列表 */
+  getAllLatest: () => api.get('/strategy-confidence/latest-all'),
+  /** 获取某策略的最新置信度 */
+  getLatest: (strategyId) => api.get('/strategy-confidence', { params: { strategyId } }),
+  /** 获取某策略的置信度历史趋势 */
+  getHistory: (strategyId) => api.get('/strategy-confidence/history', { params: { strategyId } }),
+  /** 手动触发重新计算 */
+  recalculate: (strategyId) => api.post('/strategy-confidence/recalculate', null, { params: { strategyId } }),
+  /** 获取调整后的topN */
+  getAdjustedTopN: (strategyId, originalTopN) =>
+    api.get('/strategy-confidence/adjusted-topn', { params: { strategyId, originalTopN } }),
 };
 
 export default api;
