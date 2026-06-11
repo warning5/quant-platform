@@ -297,8 +297,8 @@ export default function RecommendationList() {
     try {
       const res = await recommendationApi.trackPerformance();
       message.success(`表现追踪完成，更新 ${res.updated} 条记录`);
-      // 刷新推荐列表
-      loadRecommendations(reviewStrategyId, reviewDate);
+      // 刷新推荐列表（主列表始终加载最新数据，复盘区域单独刷新）
+      loadRecommendations(null);
       // 刷新历史命中率趋势图、质量标签、复盘数据
       try {
         const hist = await recommendationApi.getBatchHistory(20, reviewStrategyId);
