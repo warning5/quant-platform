@@ -2273,26 +2273,31 @@ function DataUpdate() {
               />
             </Col>
           </Row>
-          {/* 市场维度统计（完成后显示） */}
+          {/* 日期维度统计（完成后显示） */}
           {bidaskTask?.bidAskStats && (
             <Table
               size="small"
-              dataSource={Object.entries(bidaskTask.bidAskStats).map(([mkt, s]) => ({
-                key: mkt,
-                market: mkt,
+              dataSource={Object.entries(bidaskTask.bidAskStats).map(([date, s]) => ({
+                key: date,
+                date: date,
                 total: s.total,
                 success: s.success,
                 failed: s.failed,
                 rate: s.rate,
+                holiday: s.holiday,
+                label: s.label,
               }))}
               columns={[
-                { title: '市场', dataIndex: 'market', width: 80 },
-                { title: '目标', dataIndex: 'total', align: 'right', width: 80 },
+                { title: '日期', dataIndex: 'date', width: 100,
+                  render: (v, r) => r.holiday ? <span style={{ color: '#999' }}>{v} <Tag color="default" style={{ fontSize: 10 }}>{r.label}</Tag></span> : v },
+                { title: '目标', dataIndex: 'total', align: 'right', width: 80,
+                  render: (v, r) => r.holiday ? '-' : v },
                 { title: '成功', dataIndex: 'success', align: 'right', width: 80,
-                  render: v => <span style={{ color: '#52c41a' }}>{v}</span> },
+                  render: (v, r) => r.holiday ? '-' : <span style={{ color: '#52c41a' }}>{v}</span> },
                 { title: '失败', dataIndex: 'failed', align: 'right', width: 80,
-                  render: v => v > 0 ? <span style={{ color: '#ff4d4f' }}>{v}</span> : v },
-                { title: '成功率', dataIndex: 'rate', align: 'right', width: 80 },
+                  render: (v, r) => r.holiday ? '-' : (v > 0 ? <span style={{ color: '#ff4d4f' }}>{v}</span> : v) },
+                { title: '成功率', dataIndex: 'rate', align: 'right', width: 80,
+                  render: (v, r) => r.holiday ? '-' : v },
               ]}
               pagination={false}
               style={{ marginTop: 8 }}

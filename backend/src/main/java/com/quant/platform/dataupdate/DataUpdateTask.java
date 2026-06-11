@@ -80,7 +80,7 @@ public class DataUpdateTask {
     private Map<String, Integer> fieldChanges = new LinkedHashMap<>();
 
     /**
-     * 内外盘数据统计（市场维度），如 {"SH":{"total":2307,"success":2305,"failed":2,"rate":"99.9"},"SZ":{...}}
+     * 内外盘数据统计（日期维度），如 {"2026-06-10":{"total":5239,"success":5239,"failed":0,"rate":"100.0%"},...}
      */
     private Map<String, Map<String, Object>> bidAskStats = new LinkedHashMap<>();
 

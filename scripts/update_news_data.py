@@ -450,7 +450,7 @@ def run_batch(stocks, days=90, workers=8):
             if done % 50 == 0 or done == 1:
                 print(f"  {done}/{len(stocks)} | {total} 条 | {time.time()-t0:.0f}s", flush=True)
 
-    print(f"\n✅ {total} 条（{len(results)} 只有效，失败 {failed} 只）| {time.time()-t0:.0f}s", flush=True)
+    print(f"\n[OK] {total} 条（{len(results)} 只有效，失败 {failed} 只）| {time.time()-t0:.0f}s", flush=True)
     for code, n in results[:10]:
         print(f"  {code}: {n} 条", flush=True)
 
@@ -500,7 +500,7 @@ def run_refresh(days=90):
         batch_results = _batch_infer(neutral_texts, _refresh_model, _refresh_tokenizer, batch_size=64)
         for j, (score, ntype) in enumerate(batch_results):
             model_scores[j] = (score, ntype)
-        print(f"  模型推理 {len(neutral_texts)}/{len(neutral_texts)} ✅", flush=True)
+        print(f"  模型推理 {len(neutral_texts)}/{len(neutral_texts)} [OK]", flush=True)
 
     # 第三步：合并结果，写入数据库
     final_results = []
@@ -536,7 +536,7 @@ def run_refresh(days=90):
     cur2.close()
     conn.close()
 
-    print(f"  ✅ 更新 {updated} 条，变化 {changed} 条", flush=True)
+    print(f"  [OK] 更新 {updated} 条，变化 {changed} 条", flush=True)
     if samples:
         print("  变化样本（前5条）:", flush=True)
         for code, title, old, new, score in samples:
@@ -567,7 +567,7 @@ def main():
         ensure_table(conn)
         upsert_news_batch(conn, recs)
         conn.close()
-        print(f"✅ 写入 {len(recs)} 条", flush=True)
+        print(f"[OK] 写入 {len(recs)} 条", flush=True)
         for r in recs[:5]:
             print(f"  [{r['news_type']:8}] {r['title'][:60]}", flush=True)
         return

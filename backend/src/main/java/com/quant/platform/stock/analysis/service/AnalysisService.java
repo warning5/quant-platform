@@ -2704,7 +2704,18 @@ public class AnalysisService {
                 indCumRet += indRet;
 
                 // RS Ratio: 个股累计收益 / 行业累计收益（行业为0时取0）
-                double rsRatio = Math.abs(indCumRet) > 0.0001 ? stockCumRet / indCumRet : (stockCumRet > 0 ? 1.0 : (stockCumRet < 0 ? -1.0 : 0));
+                // 修正：当行业累计为负时，两负数相除会得到错误的大正数，改用超额收益修正
+                double rsRatio;
+                if (Math.abs(indCumRet) > 0.0001) {
+                    if (indCumRet >= 0) {
+                        rsRatio = stockCumRet / indCumRet;
+                    } else {
+                        double excess = stockCumRet - indCumRet;
+                        rsRatio = 1.0 + excess / Math.abs(indCumRet);
+                    }
+                } else {
+                    rsRatio = stockCumRet > 0 ? 1.0 : (stockCumRet < 0 ? -1.0 : 0);
+                }
 
                 Map<String, Object> day = new LinkedHashMap<>();
                 day.put("tradeDate", td);

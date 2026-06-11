@@ -408,11 +408,13 @@ public class DataUpdateService {
                     task.setStatus(bidaskOk ? "SUCCESS" : "FAILED");
                     task.setProgress(100);
                     task.setCurrentStep(bidaskOk ? "采集完成" : "采集失败");
-                    // 成功后从数据库查询市场维度统计
+                    // 成功后从数据库查询日期维度统计
                     if (bidaskOk) {
-                        LocalDate tradeDate = (request.getEndDate() != null && !request.getEndDate().isEmpty())
+                        LocalDate endDate = (request.getEndDate() != null && !request.getEndDate().isEmpty())
                             ? LocalDate.parse(request.getEndDate()) : LocalDate.now();
-                        task.setBidAskStats(loadBidAskStats(tradeDate));
+                        LocalDate startDate = (request.getStartDate() != null && !request.getStartDate().isEmpty())
+                            ? LocalDate.parse(request.getStartDate()) : endDate;
+                        task.setBidAskStats(loadBidAskStats(startDate, endDate));
                         broadcastStatus(task);
                     }
                 }
@@ -1566,7 +1568,7 @@ public class DataUpdateService {
                     "SELECT COUNT(*) FROM stock_info WHERE market = '" + market + "'", Long.class);
             long covered = jdbcTemplate.queryForObject(
                     "SELECT COUNT(DISTINCT sd.code) FROM stock_dividend sd " +
-                            "INNER JOIN stock_info si ON sd.code = si.code WHERE si.market = '" + market + "'", Long.class);
+                            "INNER JOIN stock_info si ON sd.code COLLATE utf8mb4_unicode_ci = si.code WHERE si.market = '" + market + "'", Long.class);
             result.put(market, total - covered);
         }
         long totalSh = (long) result.getOrDefault("SH", 0L);
@@ -1615,47 +1617,103 @@ public class DataUpdateService {
     }
 
     /**
-     * 从数据库查询指定日期的内外盘数据统计（按市场拆分）
-     * @return Map: {"SH":{"total":N,"success":N,"failed":N,"rate":"xx.x%"}, ...}
+     * 从数据库查询指定日期范围的内外盘数据统计（按日期拆分）
+     * 周末/节假日标记为 holiday=true，前端据此不显示失败数和成功率
+     * @return Map: {"2026-06-10":{"total":N,"success":N,"failed":N,"rate":"xx.x%"}, ...}
      */
-    public Map<String, Map<String, Object>> loadBidAskStats(LocalDate tradeDate) {
+    public Map<String, Map<String, Object>> loadBidAskStats(LocalDate startDate, LocalDate endDate) {
         Map<String, Map<String, Object>> result = new LinkedHashMap<>();
-        String dateStr = tradeDate.toString();
-        String[] markets = {"SH", "SZ", "BJ"};
-        // 用 LEFT(b.code,1) 直接从 stock_bid_ask 判断市场，避免 JOIN collate 冲突
-        for (String mkt : markets) {
-            String mktCond;
-            if ("SH".equals(mkt)) {
-                mktCond = "LEFT(b.code,1) = '6'";
-            } else if ("SZ".equals(mkt)) {
-                mktCond = "LEFT(b.code,1) IN ('0','3')";
-            } else {
-                mktCond = "LEFT(b.code,1) IN ('4','8','9')";
-            }
-            String siCond = mktCond.replace("b.code", "si.code");
-            // 目标总数（stock_info 中排除 ST/退市）
-            String totalSql = String.format("""
-                SELECT COUNT(*) FROM stock_info si
-                WHERE LENGTH(si.code)=6 AND (%s)
-                AND (si.name NOT LIKE '%%%s%%' AND si.name NOT LIKE '%%%s%%')
-                """, siCond, "退", "ST");
-            int total = jdbcTemplate.queryForObject(totalSql, Integer.class);
+        if (startDate == null) startDate = endDate;
 
-            // 成功数（直接查 stock_bid_ask，按 code 前缀判断市场）
-            String successSql = String.format("""
-                SELECT COUNT(*) FROM stock_bid_ask b
-                WHERE b.trade_date = '%s' AND (%s)
-                """, dateStr, mktCond);
-            int success = jdbcTemplate.queryForObject(successSql, Integer.class);
+        // 目标总数（stock_info 中所有市场，排除 ST/退市）
+        String totalSql = """
+            SELECT COUNT(*) FROM stock_info si
+            WHERE LENGTH(si.code)=6
+            AND (si.name NOT LIKE '%退%' AND si.name NOT LIKE '%ST%')
+            """;
+        int total = jdbcTemplate.queryForObject(totalSql, Integer.class);
+
+        // 查询日期范围内每一天的成功数（和 stock_info 目标范围保持一致）
+        String dailySql = """
+            SELECT b.trade_date, COUNT(*) as cnt
+            FROM stock_bid_ask b
+            INNER JOIN stock_info si ON si.code COLLATE utf8mb4_unicode_ci = b.code
+            WHERE b.trade_date >= ? AND b.trade_date <= ?
+              AND LENGTH(si.code)=6
+              AND (si.name NOT LIKE '%退%' AND si.name NOT LIKE '%ST%')
+            GROUP BY b.trade_date
+            ORDER BY b.trade_date
+            """;
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(dailySql, startDate.toString(), endDate.toString());
+        Map<String, Integer> dateSuccessMap = new HashMap<>();
+        for (Map<String, Object> row : rows) {
+            String d = row.get("trade_date").toString();
+            Integer cnt = ((Number) row.get("cnt")).intValue();
+            dateSuccessMap.put(d, cnt);
+        }
+
+        // 2026年A股休市日（含周末补班调休为交易日）
+        Set<LocalDate> holidays = getHolidays(startDate.getYear());
+
+        // 遍历日期范围，生成每一天的统计
+        for (LocalDate d = startDate; !d.isAfter(endDate); d = d.plusDays(1)) {
+            String dateStr = d.toString();
+            java.time.DayOfWeek dow = d.getDayOfWeek();
+            boolean isWeekend = dow == java.time.DayOfWeek.SATURDAY || dow == java.time.DayOfWeek.SUNDAY;
+            boolean isHoliday = !isWeekend && holidays.contains(d);
 
             Map<String, Object> stats = new LinkedHashMap<>();
-            stats.put("total", total);
-            stats.put("success", success);
-            stats.put("failed", total - success);
-            stats.put("rate", total > 0 ? String.format("%.1f%%", 100.0 * success / total) : "N/A");
-            result.put(mkt, stats);
+
+            if (isWeekend || isHoliday) {
+                // 非交易日：标记为假日，不显示失败数和成功率
+                stats.put("total", total);
+                stats.put("success", 0);
+                stats.put("failed", null);
+                stats.put("rate", null);
+                stats.put("holiday", true);
+                stats.put("label", isWeekend ? "周末" : "节假日");
+            } else {
+                int success = dateSuccessMap.getOrDefault(dateStr, 0);
+                stats.put("total", total);
+                stats.put("success", success);
+                stats.put("failed", total - success);
+                stats.put("rate", total > 0 ? String.format("%.1f%%", 100.0 * success / total) : "N/A");
+                stats.put("holiday", false);
+                stats.put("label", null);
+            }
+            result.put(dateStr, stats);
         }
         return result;
+    }
+
+    /** 获取指定年份的A股节假日集合（周末休市由 isWeekend 判断，此处只列工作日休市） */
+    private Set<LocalDate> getHolidays(int year) {
+        Set<LocalDate> set = new java.util.HashSet<>();
+        if (year == 2026) {
+            // 元旦: 1月1日(周四) ~ 1月3日(周六)，工作日休市: 1月1日,1月2日
+            set.add(LocalDate.of(2026, 1, 1));
+            set.add(LocalDate.of(2026, 1, 2));
+            // 春节: 2月15日(周日) ~ 2月23日(周一)，工作日休市: 2月16~20日,2月23日
+            for (int d = 16; d <= 20; d++) set.add(LocalDate.of(2026, 2, d));
+            set.add(LocalDate.of(2026, 2, 23));
+            // 清明: 4月4日(周六) ~ 4月6日(周一)，工作日休市: 4月6日
+            set.add(LocalDate.of(2026, 4, 6));
+            // 劳动节: 5月1日(周五) ~ 5月5日(周二)，工作日休市: 5月1日,5月4日,5月5日
+            set.add(LocalDate.of(2026, 5, 1));
+            set.add(LocalDate.of(2026, 5, 4));
+            set.add(LocalDate.of(2026, 5, 5));
+            // 端午节: 6月19日(周五) ~ 6月21日(周日)，工作日休市: 6月19日
+            set.add(LocalDate.of(2026, 6, 19));
+            // 中秋节: 9月25日(周五) ~ 9月27日(周日)，工作日休市: 9月25日
+            set.add(LocalDate.of(2026, 9, 25));
+            // 国庆节: 10月1日(周四) ~ 10月7日(周三)，工作日休市: 10月1~3日,10月6~7日
+            set.add(LocalDate.of(2026, 10, 1));
+            set.add(LocalDate.of(2026, 10, 2));
+            set.add(LocalDate.of(2026, 10, 3));
+            set.add(LocalDate.of(2026, 10, 6));
+            set.add(LocalDate.of(2026, 10, 7));
+        }
+        return set;
     }
 
     @PreDestroy

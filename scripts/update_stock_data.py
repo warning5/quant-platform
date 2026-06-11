@@ -557,8 +557,26 @@ def main():
 
     # ─── Part 2.6: 内外盘数据 ───
     if args.bidask_only or (not args.info_only and not args.daily_only and not args.index_only and not args.sentiment_only):
-        ok = run_bidask(date_str=end_date, code=args.code, limit=args.limit)
-        results.append(("内外盘数据", ok))
+        # 支持日期范围：逐日采集
+        if start_date and end_date and start_date != end_date:
+            from datetime import timedelta as _td
+            sd = datetime.strptime(start_date, '%Y-%m-%d').date()
+            ed = datetime.strptime(end_date, '%Y-%m-%d').date()
+            d = sd
+            bidask_all_ok = True
+            while d <= ed:
+                ds = d.strftime('%Y-%m-%d')
+                print(f"\n{'=' * 50}")
+                print(f"  内外盘数据 · {ds}")
+                print(f"{'=' * 50}")
+                ok = run_bidask(date_str=ds, code=args.code, limit=args.limit)
+                if not ok:
+                    bidask_all_ok = False
+                d += _td(days=1)
+            results.append(("内外盘数据", bidask_all_ok))
+        else:
+            ok = run_bidask(date_str=end_date, code=args.code, limit=args.limit)
+            results.append(("内外盘数据", ok))
 
     # ─── Part 3: 自动补全缺失字段 ───
     do_fix = not args.info_only and not args.sentiment_only and not args.bidask_only  # info-only / sentiment-only / bond-yield / shenwan 模式不补全日线字段
