@@ -45,3 +45,12 @@
 - 策略管理完全依赖数据库（strategy_definition表），StrategyDataInitializer已删除
 - 推荐引擎零硬编码：因子配置(factorConfigJson)和行业排除(filterConfigJson)全部从数据库策略读取
 - generateRecommendations() 不再接受 factorProfile 参数，只通过 strategyId 获取所有配置
+- MySQL表统一用 `code` 列名（stock_daily/stock_info/stock_financial_indicator），**不是** `stock_code`
+- CH factor_value 存在两种 symbol 格式：纯代码(000526,94因子) + 带后缀(000526.SZ,3个特殊因子)，查询需双格式合并
+- CH stock_daily 有完整数据（719万行/5490股，含pe_ttm/pb），MySQL stock_daily 可能为空
+- stock_financial_indicator 用 `net_operate_cf`（非 operating_cash_flow）和 `operating_cf_to_np`（现成OCF/NP比率）
+- LLM推理数据链路：CH factor_value(97因子) → CH stock_daily(PE/PB补齐) → MySQL financial_indicator(ROE等)
+- VAL_*/FIN_* 因子按**季度计算**（季末日期：03-30/06-30/09-30/12-31），Q2数据需等到06-30后
+- 北交所BJ股票VAL/FIN因子覆盖率更低（约50%），但CH stock_daily和MySQL财务表有完整日频/最新数据可fallback
+- StockRecommendation.stockCode是**纯代码**（无.SZ/.SH/.BJ后缀），LLM查询时需从stock_info查market拼接后缀
+- LLM分析getLatestFactorValues()三级fallback: CH纯代码(94技术因子) → CH后缀格式(3个特殊因子) → CH stock_daily(PE/PB) → MySQL(ROE/财务)

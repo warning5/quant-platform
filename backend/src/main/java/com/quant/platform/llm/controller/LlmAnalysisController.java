@@ -50,7 +50,7 @@ public class LlmAnalysisController {
     @PostMapping("/analyze")
     public ResponseEntity<Map<String, Object>> triggerAnalysis(
             @RequestParam(defaultValue = "15") Integer topN,
-            @RequestParam(required = false) Long strategyId) {
+            @RequestParam(defaultValue = "74") Long strategyId) {
 
         log.info("[LlmController] 手动触发LLM推理: strategyId={}, topN={}", strategyId, topN);
 
@@ -66,6 +66,7 @@ public class LlmAnalysisController {
         result.put("data", Map.of(
                 "candidateCount", recommendations.size(),
                 "analyzedCount", analyses.size(),
+                "strategyId", strategyId,
                 "analyses", analyses
         ));
         return ResponseEntity.ok(result);

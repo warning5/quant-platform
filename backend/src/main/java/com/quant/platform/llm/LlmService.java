@@ -32,7 +32,7 @@ public class LlmService {
     @Value("${llm.model:deepseek-v4-flash}")
     private String defaultModel;
 
-    @Value("${llm.max-tokens:2048}")
+    @Value("${llm.max-tokens:4096}")
     private int maxTokens;
 
     @Value("${llm.temperature:0.3}")
@@ -157,7 +157,19 @@ public class LlmService {
             String jsonStr = extractJson(raw);
             return objectMapper.readTree(jsonStr);
         } catch (Exception e) {
-            log.warn("[LlmService] LLM返回内容无法解析为JSON: {}", raw.substring(0, Math.min(200, raw.length())));
+            // 首次解析失败，尝试截断修复
+            log.warn("[LlmService] LLM返回内容首次解析失败，尝试截断修复... (原始长度={})", raw.length());
+            try {
+                String repaired = repairTruncatedJson(raw);
+                if (repaired != null) {
+                    JsonNode node = objectMapper.readTree(repaired);
+                    log.info("[LlmService] 截断修复成功，已解析JSON");
+                    return node;
+                }
+            } catch (Exception e2) {
+                log.warn("[LlmService] 截断修复也失败: {}", e2.getMessage());
+            }
+            log.warn("[LlmService] LLM返回内容无法解析为JSON: {}", raw.substring(0, Math.min(300, raw.length())));
             return null;
         }
     }
@@ -189,6 +201,135 @@ public class LlmService {
         }
 
         return trimmed;
+    }
+
+    /**
+     * 修复被截断的JSON字符串
+     * 常见场景：LLM因max_tokens限制导致输出截断，JSON不完整
+     * 策略：找到最后一个完整的key:value对，截断后面的部分，然后补齐缺失的}和"
+     */
+    private String repairTruncatedJson(String text) {
+        String trimmed = text.trim();
+
+        // 先提取JSON部分（去掉markdown包裹）
+        if (trimmed.startsWith("```")) {
+            int firstNewline = trimmed.indexOf('\n');
+            if (firstNewline > 0) {
+                trimmed = trimmed.substring(firstNewline + 1);
+            }
+            trimmed = trimmed.trim();
+        }
+
+        if (!trimmed.contains("{")) return null;
+
+        int start = trimmed.indexOf('{');
+        String json = trimmed.substring(start);
+
+        // 如果已经能正常解析，不需要修复
+        try {
+            objectMapper.readTree(json);
+            return json;
+        } catch (Exception ignored) {}
+
+        // 计算未闭合的引号和大括号
+        // 策略：从后向前找到最后一个完整的 value，然后截断补齐
+        StringBuilder sb = new StringBuilder(json);
+
+        // 去掉末尾不完整的部分（截断通常发生在字符串值中间）
+        // 找到最后一个逗号或冒号的位置，判断是否在值中间被截断
+        int lastComma = sb.lastIndexOf(",");
+        int lastColon = sb.lastIndexOf(":");
+        int lastOpenBrace = sb.lastIndexOf("{");
+        int lastCloseBrace = sb.lastIndexOf("}");
+        int lastOpenBracket = sb.lastIndexOf("[");
+        int lastCloseBracket = sb.lastIndexOf("]");
+        int lastQuote = sb.lastIndexOf("\"");
+
+        // 情况1: 截断在字符串值中间（如 "logic": "公司估值处于3年...）
+        // 找到最后一个 key: value 模式中的完整 value
+        // 从后向前找，去掉不完整的键值对
+        if (lastColon > lastCloseBrace && lastColon > lastCloseBracket) {
+            // 最后一个冒号后面是值，值可能不完整
+            // 找到这个值的起始key
+            int valueStart = lastColon + 1;
+            String afterColon = sb.substring(valueStart).trim();
+
+            if (afterColon.startsWith("\"")) {
+                // 值是字符串类型，检查引号是否闭合
+                // 找第二个引号（值的结束引号）
+                int valueQuoteEnd = -1;
+                boolean escaped = false;
+                for (int i = valueStart + 1; i < sb.length(); i++) {
+                    char c = sb.charAt(i);
+                    if (escaped) { escaped = false; continue; }
+                    if (c == '\\') { escaped = true; continue; }
+                    if (c == '"') { valueQuoteEnd = i; break; }
+                }
+
+                if (valueQuoteEnd == -1) {
+                    // 字符串值未闭合（被截断），需要补上结束引号
+                    // 截断到冒号前一个完整键值对的末尾
+                    // 更好的策略：补齐当前字符串的引号
+                    sb.append("\"");
+                }
+            }
+
+            // 去掉这个不完整键值对前面的逗号问题
+            // 如果值后面没有逗号和更多内容，说明这是截断点
+        }
+
+        // 补齐未闭合的括号
+        int openBraces = 0, openBrackets = 0;
+        boolean inString = false;
+        boolean escape = false;
+        for (int i = 0; i < sb.length(); i++) {
+            char c = sb.charAt(i);
+            if (escape) { escape = false; continue; }
+            if (c == '\\') { escape = true; continue; }
+            if (c == '"') { inString = !inString; continue; }
+            if (inString) continue;
+            if (c == '{') openBraces++;
+            else if (c == '}') openBraces--;
+            else if (c == '[') openBrackets++;
+            else if (c == ']') openBrackets--;
+        }
+
+        // 如果在字符串内被截断，先闭合字符串
+        if (inString) {
+            sb.append("\"");
+        }
+
+        // 补齐缺失的闭合括号
+        // 重新计算（因为可能刚补了引号）
+        openBraces = 0; openBrackets = 0;
+        inString = false; escape = false;
+        for (int i = 0; i < sb.length(); i++) {
+            char c = sb.charAt(i);
+            if (escape) { escape = false; continue; }
+            if (c == '\\') { escape = true; continue; }
+            if (c == '"') { inString = !inString; continue; }
+            if (inString) continue;
+            if (c == '{') openBraces++;
+            else if (c == '}') openBraces--;
+            else if (c == '[') openBrackets++;
+            else if (c == ']') openBrackets--;
+        }
+
+        for (int i = 0; i < openBrackets; i++) sb.append("]");
+        for (int i = 0; i < openBraces; i++) sb.append("}");
+
+        String repaired = sb.toString();
+        log.debug("[LlmService] 截断修复: 原始长度={}, 修复后长度={}, 补了{}个]和{}个}",
+                json.length(), repaired.length(), Math.max(0, openBrackets), Math.max(0, openBraces));
+
+        // 验证修复后能否解析
+        try {
+            objectMapper.readTree(repaired);
+            return repaired;
+        } catch (Exception e) {
+            // 修复失败，返回null
+            return null;
+        }
     }
 
     /**

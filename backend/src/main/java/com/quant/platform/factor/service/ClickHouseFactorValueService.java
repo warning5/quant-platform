@@ -322,6 +322,122 @@ public class ClickHouseFactorValueService {
         return result;
     }
 
+    // ==================== 按股票查询因子值 ====================
+
+    /**
+     * 根据股票代码查询最新所有因子值（CH）
+     * 用于 LLM 推理等场景：给定一只股票，获取其全部因子的最新值
+     *
+     * <p>CH 中 factor_value 存在两种 symbol 格式：
+     * <ul>
+     *   <li>带后缀（如 000526.SZ）：仅存 3 个 Python 特殊因子（PE/PB分位、52周回撤）</li>
+     *   <li>纯代码（如 000526）：存 94+ 个主因子（RSI/MACD/ROE/PE/PB 等）</li>
+     * </ul>
+     * 本方法自动查询两种格式并合并结果。
+     *
+     * @param symbol CH 格式的股票代码（如 000526.SZ, 600027.SH）
+     * @return Map<factorCode, Map<"factorVal"/"rankValue", Double>>
+     */
+    public Map<String, Map<String, Double>> findLatestBySymbol(String symbol) {
+        if (!clickHouseConfig.isEnabled() || symbol == null || symbol.isBlank()) {
+            return Map.of();
+        }
+
+        Map<String, Map<String, Double>> result = new LinkedHashMap<>();
+
+        // 1. 查纯代码格式（000526）— 包含 94+ 个主因子
+        String pureCode = stripSymbolSuffix(symbol);
+        if (pureCode != null) {
+            queryAndMerge(result, pureCode);
+        }
+
+        // 2. 查带后缀格式（000526.SZ）— 包含 3 个 Python 特殊因子
+        //    纯代码查询可能已覆盖部分因子，这里做补充覆盖
+        queryAndMerge(result, symbol);
+
+        log.debug("[ClickHouse] findLatestBySymbol: symbol={}, 合并后因子数={}", symbol, result.size());
+        return result;
+    }
+
+    private void queryAndMerge(Map<String, Map<String, Double>> result, String querySymbol) {
+        String escaped = querySymbol.replace("'", "''");
+        String sql = String.format("""
+                SELECT factor_code, factor_val, rank_value
+                FROM stock.factor_value FINAL
+                WHERE symbol = '%s'
+                  AND calc_date = (SELECT max(calc_date) FROM stock.factor_value FINAL WHERE symbol = '%s')
+                """, escaped, escaped);
+        try (Connection conn = getConnection();
+             java.sql.Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+            int count = 0;
+            while (rs.next()) {
+                String factorCode = rs.getString("factor_code");
+                Map<String, Double> vals = new LinkedHashMap<>();
+                double fv = rs.getDouble("factor_val");
+                vals.put("factorVal", rs.wasNull() ? null : fv);
+                double rv = rs.getDouble("rank_value");
+                vals.put("rankValue", rs.wasNull() ? null : rv);
+                result.put(factorCode, vals); // 后查的会覆盖先查的同名因子
+                count++;
+            }
+            log.debug("[ClickHouse] queryAndMerge: symbol={}, 命中{}个因子", querySymbol, count);
+        } catch (Exception e) {
+            log.warn("[ClickHouse] queryAndMerge 失败: symbol={}, error={}", querySymbol, e.getMessage());
+        }
+    }
+
+    /** 去掉 symbol 的交易所后缀：000526.SZ → 000526 */
+    private static String stripSymbolSuffix(String code) {
+        if (code == null) return null;
+        int dot = code.indexOf('.');
+        return dot > 0 ? code.substring(0, dot) : code;
+    }
+
+    // ==================== CH stock_daily 查询（估值/价格回退） ====================
+
+    /**
+     * 从 CH stock_daily 表获取基础估值和价格数据
+     * 用于 LLM 推理等场景：当 factor_value 中缺少 VAL_PE_TTM / VAL_PB 等估值因子时，从原始行情数据补齐
+     *
+     * @param code 纯股票代码（不带后缀，如 000526）
+     * @return Map 含 pe_ttm, pb, close_price, high_price
+     */
+    public Map<String, Double> findStockDailyLatest(String code) {
+        if (!clickHouseConfig.isEnabled() || code == null || code.isBlank()) {
+            return Map.of();
+        }
+        String escaped = code.replace("'", "''");
+        String sql = String.format("""
+                SELECT pe_ttm, pb, close_price, high_price
+                FROM stock_daily
+                WHERE code = '%s'
+                ORDER BY trade_date DESC LIMIT 1
+                """, escaped);
+
+        Map<String, Double> result = new LinkedHashMap<>();
+        try (Connection conn = getConnection();
+             java.sql.Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+            if (rs.next()) {
+                putIfNotNull(result, "pe_ttm", rs.getDouble("pe_ttm"), rs);
+                putIfNotNull(result, "pb", rs.getDouble("pb"), rs);
+                putIfNotNull(result, "close_price", rs.getDouble("close_price"), rs);
+                putIfNotNull(result, "high_price", rs.getDouble("high_price"), rs);
+            }
+            log.debug("[ClickHouse] findStockDailyLatest: code={}, result={}", code, result);
+        } catch (Exception e) {
+            log.warn("[ClickHouse] findStockDailyLatest 失败: code={}, error={}", code, e.getMessage());
+        }
+        return result;
+    }
+
+    private void putIfNotNull(Map<String, Double> map, String key, double value, ResultSet rs) throws java.sql.SQLException {
+        if (!rs.wasNull()) {
+            map.put(key, value);
+        }
+    }
+
     // ==================== 缺失因子查询 ====================
 
     /**

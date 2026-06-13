@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Tag, Button, Descriptions, Badge, Space, Typography, Spin, Alert, Row, Col, Statistic, Tooltip } from 'antd';
+import { Card, Tag, Button, Descriptions, Badge, Space, Typography, Spin, Alert, Row, Col, Statistic, Tooltip, Select } from 'antd';
 import {
   RobotOutlined, ThunderboltOutlined, SafetyCertificateOutlined,
   RiseOutlined, FallOutlined, BulbOutlined, WarningOutlined,
   ClockCircleOutlined, DollarOutlined, StockOutlined
 } from '@ant-design/icons';
-import { llmApi } from '../../api';
+import api, { llmApi } from '../../api';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -20,16 +20,35 @@ const LlmAnalysisPage = () => {
   const [loading, setLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState(null);
+  const [strategies, setStrategies] = useState([]);
+  const [selectedStrategyId, setSelectedStrategyId] = useState(74);
 
   useEffect(() => {
     fetchAnalyses();
+    fetchStrategies();
   }, []);
+
+  const fetchStrategies = async () => {
+    try {
+      // 响应拦截器已 return res.data.data，这里直接拿到 IPage 对象
+      const pageData = await api.get('/strategies', { params: { size: 100 } });
+      const records = pageData?.records;
+      console.log('[LLM] 策略列表 IPage:', pageData);
+      console.log('[LLM] records:', records);
+      if (Array.isArray(records) && records.length > 0) {
+        setStrategies(records);
+      }
+    } catch (e) {
+      console.error('获取策略列表失败', e);
+    }
+  };
 
   const fetchAnalyses = async () => {
     setLoading(true);
     try {
-      const res = await llmApi.getAnalyses();
-      setAnalyses(res.data?.data || []);
+      // 响应拦截器已 return res.data.data，这里直接拿到数组
+      const data = await llmApi.getAnalyses();
+      setAnalyses(data || []);
     } catch (e) {
       setError('获取LLM分析结果失败');
     } finally {
@@ -41,8 +60,8 @@ const LlmAnalysisPage = () => {
     setAnalyzing(true);
     setError(null);
     try {
-      const res = await llmApi.triggerAnalysis('VALUE_QUALITY', 15);
-      const result = res.data?.data;
+      // 响应拦截器已 return res.data.data，这里直接拿到 { candidateCount, analyzedCount, ... }
+      const result = await llmApi.triggerAnalysis(selectedStrategyId, 15);
       if (result) {
         await fetchAnalyses();
       }
@@ -68,6 +87,18 @@ const LlmAnalysisPage = () => {
           </Col>
           <Col>
             <Space>
+              <Select
+                value={selectedStrategyId}
+                onChange={setSelectedStrategyId}
+                style={{ width: 180 }}
+                placeholder="选择策略"
+              >
+                {strategies.map(s => (
+                  <Select.Option key={s.id} value={s.id}>
+                    {s.strategyName || `策略${s.id}`}
+                  </Select.Option>
+                ))}
+              </Select>
               <Button
                 type="primary"
                 icon={<ThunderboltOutlined />}
@@ -147,13 +178,19 @@ const LlmAnalysisPage = () => {
                       <Text strong style={{ color: '#cf1322', fontSize: 16 }}>
                         ¥{a.buyPriceLow} ~ ¥{a.buyPriceHigh}
                       </Text>
+                    ) : a.recommendation === 'SKIP' ? (
+                      <Text type="secondary" italic>不适用</Text>
                     ) : 'N/A'}
                   </Descriptions.Item>
                   <Descriptions.Item label={<><FallOutlined /> 止损价</>}>
-                    {a.stopLoss ? <Text type="danger">¥{a.stopLoss}</Text> : 'N/A'}
+                    {a.stopLoss ? <Text type="danger">¥{a.stopLoss}</Text> 
+                      : a.recommendation === 'SKIP' ? <Text type="secondary" italic>不适用</Text> 
+                      : 'N/A'}
                   </Descriptions.Item>
                   <Descriptions.Item label={<><RiseOutlined /> 目标价</>}>
-                    {a.targetPrice ? <Text style={{ color: '#52c41a' }}>¥{a.targetPrice}</Text> : 'N/A'}
+                    {a.targetPrice ? <Text style={{ color: '#52c41a' }}>¥{a.targetPrice}</Text> 
+                      : a.recommendation === 'SKIP' ? <Text type="secondary" italic>不适用</Text> 
+                      : 'N/A'}
                   </Descriptions.Item>
                   <Descriptions.Item label={<><ClockCircleOutlined /> 投资周期</>}>
                     {a.timeHorizon || 'N/A'}

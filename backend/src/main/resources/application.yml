@@ -76,11 +76,11 @@ logging:
 
 # DeepSeek LLM 统一配置（OpenAI 兼容接口，支持 DeepSeek / Ollama / Qwen 等）
 llm:
-  enabled: false                                    # 设为 true 启用 LLM
+  enabled: true                                    # 设为 true 启用 LLM
   base-url: https://api.deepseek.com/v1             # API 地址（Ollama: http://localhost:11434/v1）
-  api-key: ""                                       # API Key（Ollama 无需填写）
+  api-key: "sk-3bedb909271f49d59edbb2c1e5ab989d"                                       # API Key（Ollama 无需填写）
   model: deepseek-v4-flash                          # 模型名（deepseek-v4-flash / deepseek-v4-pro）
-  max-tokens: 2048                                  # 最大输出 token 数
+  max-tokens: 4096                                  # 最大输出 token 数（2048不够会导致JSON截断）
   temperature: 0.3                                  # 温度（低温更准确）
   timeout-seconds: 60                               # 请求超时（秒）
 

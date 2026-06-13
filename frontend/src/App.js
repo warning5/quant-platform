@@ -138,7 +138,7 @@ function AppLayout() {
     const path = window.location.pathname;
     if (path.startsWith('/factor') || path === '/factor-weight-optimize') return ['factors'];
     if (path.startsWith('/strateg') || path.startsWith('/backtest') || path === '/paper-trading') return ['strategies'];
-    if (path === '/screen') return ['screen'];
+    if (path.startsWith('/screen') || path.startsWith('/recommendation') || path.startsWith('/watchlist') || path.startsWith('/llm') || path.startsWith('/positions')) return ['screen'];
     if (path.startsWith('/data-detail')) return ['data-info'];
     if (path === '/data-update' || path === '/scheduled-tasks' || path === '/sector-ranking') return ['data-info'];
     if (path.startsWith('/manual/')) return ['manual'];

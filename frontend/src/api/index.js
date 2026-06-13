@@ -404,8 +404,8 @@ export const llmApi = {
   /** 获取指定股票的LLM分析 */
   getAnalysis: (stockCode) => api.get(`/llm/analysis/${stockCode}`),
   /** 手动触发LLM推理 */
-  triggerAnalysis: (factorProfile = 'VALUE_QUALITY', topN = 15) =>
-    api.post('/llm/analyze', null, { params: { factorProfile, topN }, timeout: 300000 }),
+  triggerAnalysis: (strategyId = 77, topN = 15) =>
+    api.post('/llm/analyze', null, { params: { strategyId, topN }, timeout: 300000 }),
 };
 
 /** 自选股看板 API */

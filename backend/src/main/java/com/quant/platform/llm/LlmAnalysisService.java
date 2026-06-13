@@ -2,6 +2,7 @@ package com.quant.platform.llm;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.quant.platform.factor.service.ClickHouseFactorValueService;
 import com.quant.platform.llm.domain.LlmAnalysis;
 import com.quant.platform.llm.domain.LlmAnalysisMapper;
 import com.quant.platform.recommendation.domain.StockRecommendation;
@@ -11,6 +12,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
@@ -29,6 +31,7 @@ public class LlmAnalysisService {
     private final RecommendationService recommendationService;
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
+    private final ClickHouseFactorValueService clickHouseFactorValueService;
 
     /** 系统Prompt */
     private static final String SYSTEM_PROMPT = """
@@ -80,6 +83,14 @@ public class LlmAnalysisService {
               "risks": ["风险1", "风险2"],
               "time_horizon": "投资周期，如1~3个月"
             }
+
+            【重要约束 - 价格字段规则】
+            ★ BUY和WATCH类型：buy_price_range、stop_loss、target_price 为必填项！
+              - BUY: 建议买入区间（低于当前合理估值的建仓价），止损-8%%以内，目标+20%%以上
+              - WATCH: 观望参考价（如基本面改善值得介入的价位），止损-10%%以内，目标+15%%左右
+              - 所有价格保留1~2位小数，使用正数。禁止填写0、null、或省略！
+            ★ SKIP类型：buy_price_range、stop_loss、target_price 填 null 即可
+              - 因为不推荐买入，无需给出价格建议
             """;
 
     /**
@@ -93,6 +104,10 @@ public class LlmAnalysisService {
         if (recommendations == null || recommendations.isEmpty()) {
             return Collections.emptyList();
         }
+
+        // 先清除今天的旧记录，防止历史旧记录（如用其他策略运行的结果）污染前端展示
+        int deleted = llmAnalysisMapper.deleteByAnalysisDate(LocalDate.now());
+        log.info("[LlmAnalysisService] 清除今日旧LLM分析记录: {} 条", deleted);
 
         log.info("[LlmAnalysisService] 开始LLM推理: 候选股数量={}", recommendations.size());
 
@@ -126,7 +141,7 @@ public class LlmAnalysisService {
         String industry = getIndustry(rec.getStockCode());
         Map<String, Object> financialData = getFinancialData(rec.getStockCode());
 
-        return String.format(USER_PROMPT_TEMPLATE,
+        String prompt = String.format(USER_PROMPT_TEMPLATE,
                 rec.getStockCode(), rec.getStockName(), industry,
                 fmt(factorValues.get("VAL_PE_TTM")), fmt(factorValues.get("VAL_PB")),
                 fmt(factorValues.get("VAL_DIVIDEND_YIELD")),
@@ -141,6 +156,14 @@ public class LlmAnalysisService {
                 fmt(factorValues.get("TURN20")), fmt(factorValues.get("MACD")),
                 String.valueOf(rec.getFinalScore() != null ? Math.round(rec.getFinalScore() * 100) : "N/A")
         );
+
+        log.info("[LlmAnalysisService] {}({}) Prompt摘要: PE={}, PB={}, ROE={}, 因子数={}",
+                rec.getStockName(), rec.getStockCode(),
+                factorValues.getOrDefault("VAL_PE_TTM", -1.0),
+                factorValues.getOrDefault("VAL_PB", -1.0),
+                financialData.get("roe"),
+                factorValues.size());
+        return prompt;
     }
 
     private LlmAnalysis parseAnalysis(StockRecommendation rec, JsonNode json) {
@@ -157,14 +180,46 @@ public class LlmAnalysisService {
                 .createdAt(LocalDateTime.now())
                 .build();
 
-        JsonNode buyRange = json.path("buy_price_range");
-        if (!buyRange.isMissingNode()) {
-            analysis.setBuyPriceLow(buyRange.path("low").decimalValue());
-            analysis.setBuyPriceHigh(buyRange.path("high").decimalValue());
-        }
+        // 获取当前价格作为fallback基准
+        double currentPrice = fetchCurrentPrice(rec.getStockCode());
+        String recType = json.path("recommendation").asText("WATCH");
 
-        if (!json.path("stop_loss").isMissingNode()) analysis.setStopLoss(json.path("stop_loss").decimalValue());
-        if (!json.path("target_price").isMissingNode()) analysis.setTargetPrice(json.path("target_price").decimalValue());
+        // ===== 价格字段解析策略 =====
+        // BUY/WATCH: LLM应给出完整价格，缺失时用当前价兜底计算
+        // SKIP: 不建议买入，价格字段留null（前端显示"不适用"），避免误导
+        boolean isSkip = "SKIP".equals(recType);
+
+        if (!isSkip) {
+            // --- BUY / WATCH: 价格字段必填 ---
+            // 买入价区间
+            JsonNode buyRange = json.path("buy_price_range");
+            if (!buyRange.isMissingNode()) {
+                double low = parsePriceWithFallback(buyRange.path("low"), currentPrice * 0.95, currentPrice);
+                double high = parsePriceWithFallback(buyRange.path("high"), currentPrice * 1.02, currentPrice);
+                // 防止 low >= high
+                if (low >= high && currentPrice > 0) {
+                    low = round2(currentPrice * 0.95);
+                    high = round2(currentPrice * 1.02);
+                }
+                analysis.setBuyPriceLow(BigDecimal.valueOf(low));
+                analysis.setBuyPriceHigh(BigDecimal.valueOf(high));
+            } else if (currentPrice > 0) {
+                // 整个buy_price_range字段缺失
+                analysis.setBuyPriceLow(BigDecimal.valueOf(round2(currentPrice * 0.95)));
+                analysis.setBuyPriceHigh(BigDecimal.valueOf(round2(currentPrice * 1.02)));
+            }
+
+            // 止损价（BUY -8%, WATCH -10%）
+            double stopLossPct = "BUY".equals(recType) ? 0.92 : 0.90;
+            double stopLoss = parsePriceWithFallback(json.path("stop_loss"), currentPrice * stopLossPct, currentPrice);
+            if (stopLoss > 0) analysis.setStopLoss(BigDecimal.valueOf(stopLoss));
+
+            // 目标价（BUY +25%, WATCH +15%）
+            double targetPct = "BUY".equals(recType) ? 1.25 : 1.15;
+            double targetPrice = parsePriceWithFallback(json.path("target_price"), currentPrice * targetPct, currentPrice);
+            if (targetPrice > 0) analysis.setTargetPrice(BigDecimal.valueOf(targetPrice));
+        }
+        // SKIP: buyPriceLow/High/stopLoss/targetPrice 保持 null → 前端显示"不适用"
 
         List<String> catalysts = new ArrayList<>();
         JsonNode cn = json.path("catalysts");
@@ -180,34 +235,197 @@ public class LlmAnalysisService {
         return analysis;
     }
 
+    /**
+     * 解析价格节点，处理0/null/缺失情况
+     *
+     * @param node JSON价格节点
+     * @param defaultValue 当前价格为基准计算的默认值
+     * @param currentPrice 当前股价（用于判断值是否合理）
+     * @return 有效价格，或defaultValue
+     */
+    private double parsePriceWithFallback(JsonNode node, double defaultValue, double currentPrice) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return round2(defaultValue);
+        }
+        try {
+            double val = node.decimalValue().doubleValue();
+            // LLM返回0或负数视为无效，使用默认值
+            if (val <= 0) {
+                return round2(defaultValue);
+            }
+            // 价格异常高（>当前价10倍）也视为异常
+            if (currentPrice > 0 && val > currentPrice * 10) {
+                log.warn("[LlmAnalysisService] 价格异常偏高: value={}, currentPrice={}", val, currentPrice);
+                return round2(defaultValue);
+            }
+            return round2(val);
+        } catch (Exception e) {
+            return round2(defaultValue);
+        }
+    }
+
+    /** 获取股票最新收盘价（用于price fallback计算） */
+    private double fetchCurrentPrice(String stockCode) {
+        String pureCode = stripSuffix(stockCode);
+        try {
+            Map<String, Double> dailyData = clickHouseFactorValueService.findStockDailyLatest(pureCode);
+            if (dailyData != null && dailyData.containsKey("close_price")) {
+                return dailyData.get("close_price");
+            }
+        } catch (Exception e) {
+            log.debug("[LlmAnalysisService] 获取{}当前价失败: {}", stockCode, e.getMessage());
+        }
+        return 0;
+    }
+
+    private static double round2(double val) {
+        return Math.round(val * 100.0) / 100.0;
+    }
+
+    /**
+     * 获取股票最新因子值
+     * 三级fallback链路：
+     *   1. CH factor_value 纯代码格式（94+技术因子）
+     *   2. CH factor_value 带后缀格式（3个Python特殊因子：PE分位/PB分位/52周回撤）
+     *   3. CH stock_daily 补齐基础估值（PE/PB/价格）— 5490股全覆盖
+     *
+     * @param stockCode 股票代码，可能带后缀（如 600027.SH）或不带（如 000526）
+     * @return Map<factorCode, Double> 因子实际值（非排名）
+     */
     private Map<String, Double> getLatestFactorValues(String stockCode) {
         Map<String, Double> result = new HashMap<>();
+
+        // 1. 优先从 ClickHouse 查纯代码格式（94+ 技术因子）
         try {
-            jdbcTemplate.query(
-                "SELECT factor_code, factor_value FROM factor_value WHERE stock_code = ? AND trade_date = (SELECT MAX(trade_date) FROM factor_value WHERE stock_code = ?)",
-                rs -> { result.put(rs.getString("factor_code"), rs.getDouble("factor_value")); },
-                stockCode, stockCode);
-        } catch (Exception ignored) {}
+            Map<String, Map<String, Double>> chFactors = clickHouseFactorValueService.findLatestBySymbol(stockCode);
+            if (chFactors != null && !chFactors.isEmpty()) {
+                for (Map.Entry<String, Map<String, Double>> entry : chFactors.entrySet()) {
+                    String factorCode = entry.getKey();
+                    Map<String, Double> vals = entry.getValue();
+                    Double factorVal = vals.get("factorVal");
+                    if (factorVal != null) {
+                        result.put(factorCode, factorVal);
+                    } else {
+                        Double rankValue = vals.get("rankValue");
+                        if (rankValue != null) {
+                            result.put(factorCode, rankValue);
+                        }
+                    }
+                }
+                log.info("[LlmAnalysisService] {} CH因子命中(纯代码): {} 个因子", stockCode, result.size());
+            }
+        } catch (Exception e) {
+            log.warn("[LlmAnalysisService] {} ClickHouse因子查询失败: {}", stockCode, e.getMessage());
+        }
+
+        // 2. 查带后缀格式（补充 Python 特殊因子：VAL_PE_PERCENTILE/VAL_PB_PERCENTILE/PRICE_52W_HIGH_PCT）
+        //    StockRecommendation.stockCode 是纯代码（无后缀），findLatestBySymbol("920906") 不会查 "920906.BJ"
+        //    需要显式拼接后缀查询，获取存储在后缀格式中的3个特殊因子
+        String pureCode = stripSuffix(stockCode);
+        if (!stockCode.contains(".")) {
+            String suffixedCode = lookupSuffixedCode(pureCode);
+            if (suffixedCode != null && !suffixedCode.equals(stockCode)) {
+                try {
+                    Map<String, Map<String, Double>> suffixFactors = clickHouseFactorValueService.findLatestBySymbol(suffixedCode);
+                    if (suffixFactors != null) {
+                        int added = 0;
+                        for (Map.Entry<String, Map<String, Double>> entry : suffixFactors.entrySet()) {
+                            // 只补充纯代码查询中缺失的因子（避免覆盖已有值）
+                            if (!result.containsKey(entry.getKey())) {
+                                Double fv = entry.getValue().get("factorVal");
+                                if (fv != null) {
+                                    result.put(entry.getKey(), fv);
+                                    added++;
+                                }
+                            }
+                        }
+                        if (added > 0) {
+                            log.info("[LlmAnalysisService] {} 后缀({})补齐: {} 个新因子", stockCode, suffixedCode, added);
+                        }
+                    }
+                } catch (Exception e) {
+                    log.warn("[LlmAnalysisService] {} 后缀因子查询失败: {}", suffixedCode, e.getMessage());
+                }
+            }
+        }
+
+        // 3. CH stock_daily 回退：补充缺失的基础估值指标（PE/PB/价格）
+        //    CH stock_daily 有 5490 只股票的完整行情+估值数据，MySQL stock_daily 为空
+        //    特别重要：北交所(BJ)股票的 VAL_*/FIN_* 因子按季度计算（最新仅到2026-03-31），日常缺失严重
+        try {
+            boolean needsDailyFallback = !result.containsKey("VAL_PE_TTM")
+                    || !result.containsKey("VAL_PB")
+                    || !result.containsKey("PRICE_52W_HIGH_PCT");
+            if (needsDailyFallback) {
+                Map<String, Double> dailyData = clickHouseFactorValueService.findStockDailyLatest(pureCode);
+                if (!dailyData.isEmpty()) {
+                    if (!result.containsKey("VAL_PE_TTM") && dailyData.containsKey("pe_ttm"))
+                        result.put("VAL_PE_TTM", dailyData.get("pe_ttm"));
+                    if (!result.containsKey("VAL_PB") && dailyData.containsKey("pb"))
+                        result.put("VAL_PB", dailyData.get("pb"));
+                    // 52周回撤
+                    if (!result.containsKey("PRICE_52W_HIGH_PCT")
+                            && dailyData.containsKey("high_price") && dailyData.containsKey("close_price")) {
+                        double high = dailyData.get("high_price");
+                        double close = dailyData.get("close_price");
+                        if (high > 0) {
+                            result.put("PRICE_52W_HIGH_PCT", Math.round((close / high - 1) * 10000) / 100.0);
+                        }
+                    }
+                    log.info("[LlmAnalysisService] {} CH stock_daily 补齐: {}", stockCode, dailyData.keySet());
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[LlmAnalysisService] {} CH stock_daily 查询失败: {}", stockCode, e.getMessage());
+        }
+
         return result;
     }
 
-    private String getIndustry(String stockCode) {
+    /** 查询纯代码对应的带后缀代码（如 920906 → 920906.BJ） */
+    private String lookupSuffixedCode(String pureCode) {
         try {
-            return jdbcTemplate.queryForObject("SELECT industry FROM stock_info WHERE stock_code = ? LIMIT 1", String.class, stockCode);
+            return jdbcTemplate.queryForObject(
+                "SELECT CONCAT(code, '.', market) FROM stock_info WHERE code = ? LIMIT 1",
+                String.class, pureCode);
+        } catch (Exception e) {
+            log.debug("[LlmAnalysisService] 无法查找后缀: code={}", pureCode);
+            return null;
+        }
+    }
+
+    /** 去掉股票代码后缀: "600027.SH" → "600027" */
+    private static String stripSuffix(String code) {
+        if (code == null) return null;
+        int dot = code.indexOf('.');
+        return dot > 0 ? code.substring(0, dot) : code;
+    }
+
+    private String getIndustry(String stockCode) {
+        String pureCode = stripSuffix(stockCode);
+        try {
+            return jdbcTemplate.queryForObject("SELECT industry FROM stock_info WHERE code = ? LIMIT 1", String.class, pureCode);
         } catch (Exception e) { return "未知"; }
     }
 
     private Map<String, Object> getFinancialData(String stockCode) {
         Map<String, Object> result = new HashMap<>();
+        String pureCode = stripSuffix(stockCode);
         try {
+            // 注意：stock_financial_indicator 列名是 code（不是 stock_code）
+            // 经营现金流用 net_operate_cf，净利润比率用 operating_cf_to_np
             jdbcTemplate.query(
-                "SELECT roe, net_profit_yoy, debt_to_asset_ratio, gross_profit_margin FROM stock_financial_indicator WHERE stock_code = ? ORDER BY end_date DESC LIMIT 1",
+                "SELECT roe, net_profit_yoy, debt_to_asset_ratio, gross_profit_margin, "
+                + "net_operate_cf, operating_cf_to_np "
+                + "FROM stock_financial_indicator WHERE code = ? ORDER BY end_date DESC LIMIT 1",
                 rs -> {
                     result.put("roe", rs.getObject("roe"));
                     result.put("netProfitYoy", rs.getObject("net_profit_yoy"));
                     result.put("debtToAsset", rs.getObject("debt_to_asset_ratio"));
                     result.put("grossMargin", rs.getObject("gross_profit_margin"));
-                }, stockCode);
+                    // 经营现金流/净利润：表中有现成的 operating_cf_to_np 字段
+                    result.put("ocfRatio", rs.getObject("operating_cf_to_np"));
+                }, pureCode);
         } catch (Exception ignored) {}
         return result;
     }
