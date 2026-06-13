@@ -2,6 +2,7 @@ package com.quant.platform.dataupdate;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationContext;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.annotation.SchedulingConfigurer;
@@ -32,6 +33,7 @@ public class ScheduleService implements SchedulingConfigurer {
     private final DataUpdateService dataUpdateService;
     private final TaskScheduler taskScheduler;
     private final RecommendationService recommendationService;
+    private final ApplicationContext applicationContext;
 
     // taskKey → ScheduledFuture（用于动态取消）
     private final Map<String, ScheduledFuture<?>> scheduledTasks = new ConcurrentHashMap<>();
@@ -154,6 +156,12 @@ public class ScheduleService implements SchedulingConfigurer {
             if ("RECOMMENDATION_TRACK".equals(taskKey)) {
                 int updated = recommendationService.trackRecommendationPerformance();
                 log.info("[ScheduleService] 推荐追踪完成: 更新{}条", updated);
+                return;
+            }
+
+            // Phase 2: 每日自动推荐任务
+            if ("DAILY_RECOMMENDATION".equals(taskKey)) {
+                executeDailyRecommendation();
                 return;
             }
 
@@ -292,7 +300,125 @@ public class ScheduleService implements SchedulingConfigurer {
             }
             case "RESEARCH"      -> { req.setUpdateType("RESEARCH");      yield req; }
             case "RECOMMENDATION_TRACK" -> { /* P1-4: 已在executeTask中特殊处理 */ yield null; }
+            case "DAILY_RECOMMENDATION" -> { /* Phase 2: 已在executeTask中特殊处理 */ yield null; }
             default -> throw new IllegalArgumentException("未知任务类型: " + taskKey);
         };
+    }
+
+    /**
+     * Phase 2: 每日自动推荐执行
+     * 1. 读取 extra_config 中的 strategyId
+     * 2. 调用 RecommendationService 生成推荐（因子配置从数据库策略读取）
+     * 3. 推荐结果同步到 Watchlist
+     * 4. 调用通知服务推送结果
+     */
+    private void executeDailyRecommendation() {
+        log.info("[ScheduleService] 开始执行每日自动推荐");
+
+        // 读取推荐配置
+        Integer topN = 15;                       // 默认推荐15只
+        String weightMode = null;
+        Long strategyId = null;
+        boolean enableConfidenceControl = true;
+        boolean syncToWatchlist = true;
+
+        try {
+            Map<String, Object> configRow = null;
+            try {
+                configRow = jdbcTemplate.queryForMap(
+                    "SELECT extra_config FROM data_schedule_config WHERE task_key = 'DAILY_RECOMMENDATION'");
+            } catch (Exception ignored) {}
+
+            if (configRow != null && configRow.get("extra_config") != null) {
+                String extraConfigJson = (String) configRow.get("extra_config");
+                if (extraConfigJson != null && !extraConfigJson.isEmpty() && !extraConfigJson.equals("null")) {
+                    com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> ec = mapper.readValue(extraConfigJson, Map.class);
+                    if (ec.get("topN") != null) topN = Integer.parseInt(ec.get("topN").toString());
+                    if (ec.get("weightMode") != null) weightMode = ec.get("weightMode").toString();
+                    if (ec.get("strategyId") != null) strategyId = Long.parseLong(ec.get("strategyId").toString());
+                    if (ec.get("enableConfidenceControl") != null) enableConfidenceControl = Boolean.parseBoolean(ec.get("enableConfidenceControl").toString());
+                    if (ec.get("syncToWatchlist") != null) syncToWatchlist = Boolean.parseBoolean(ec.get("syncToWatchlist").toString());
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[ScheduleService] 解析DAILY_RECOMMENDATION配置失败，使用默认值: {}", e.getMessage());
+        }
+
+        try {
+            List<com.quant.platform.recommendation.domain.StockRecommendation> recommendations =
+                recommendationService.generateRecommendations(
+                    null, topN, strategyId, weightMode,
+                    new java.util.ArrayList<>(), enableConfidenceControl);
+
+            log.info("[ScheduleService] 每日推荐生成完成: strategyId={}, 推荐数量={}", strategyId, recommendations.size());
+
+            // 同步到 Watchlist
+            if (syncToWatchlist && !recommendations.isEmpty()) {
+                String strategyLabel = !recommendations.isEmpty() && recommendations.getFirst().getStrategyId() != null
+                        ? "strategy#" + recommendations.getFirst().getStrategyId() : "default";
+                int synced = syncRecommendationsToWatchlist(recommendations, strategyLabel);
+                log.info("[ScheduleService] 推荐结果同步Watchlist: {} 条", synced);
+            }
+
+            // 推送通知
+            if (!recommendations.isEmpty()) {
+                try {
+                    com.quant.platform.notification.NotificationService notificationService =
+                        applicationContext.getBean(com.quant.platform.notification.NotificationService.class);
+                    String strategyLabel = !recommendations.isEmpty() && recommendations.getFirst().getStrategyId() != null
+                            ? "strategy#" + recommendations.getFirst().getStrategyId() : "default";
+                    notificationService.sendDailyRecommendation(recommendations, strategyLabel);
+                } catch (Exception e) {
+                    log.warn("[ScheduleService] 推送通知失败（NotificationService可能未配置）: {}", e.getMessage());
+                }
+            }
+
+            // 更新调度状态
+            jdbcTemplate.update(
+                "UPDATE data_schedule_config SET last_run_time = ?, last_run_status = 'SUCCESS' " +
+                "WHERE task_key = 'DAILY_RECOMMENDATION'",
+                LocalDateTime.now());
+
+        } catch (Exception e) {
+            log.error("[ScheduleService] 每日推荐执行失败", e);
+            jdbcTemplate.update(
+                "UPDATE data_schedule_config SET last_run_time = ?, last_run_status = 'FAILED' " +
+                "WHERE task_key = 'DAILY_RECOMMENDATION'",
+                LocalDateTime.now());
+        }
+    }
+
+    /**
+     * 将推荐结果同步到 Watchlist
+     */
+    private int syncRecommendationsToWatchlist(
+            List<com.quant.platform.recommendation.domain.StockRecommendation> recommendations,
+            String strategyLabel) {
+        int count = 0;
+        for (com.quant.platform.recommendation.domain.StockRecommendation rec : recommendations) {
+            try {
+                // 检查是否已在 Watchlist 中
+                Integer existing = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM stock_watchlist WHERE stock_code = ? AND archived = 0",
+                    Integer.class, rec.getStockCode());
+                if (existing != null && existing > 0) continue;
+
+                // 插入 Watchlist
+                jdbcTemplate.update(
+                    "INSERT INTO stock_watchlist (stock_code, stock_name, group_name, reason, source, " +
+                    "target_buy_price, watch_end_date, sort_order) " +
+                    "VALUES (?, ?, ?, ?, 'RECOMMENDATION', ?, DATE_ADD(CURDATE(), INTERVAL 7 DAY), ?)",
+                    rec.getStockCode(), rec.getStockName(), strategyLabel,
+                    String.format("自动推荐(得分%.1f)", rec.getFinalScore() != null ? rec.getFinalScore() * 100 : 0),
+                    rec.getSuggestedBuyPrice(),
+                    count + 1);
+                count++;
+            } catch (Exception e) {
+                log.warn("[ScheduleService] 同步Watchlist失败: code={}, error={}", rec.getStockCode(), e.getMessage());
+            }
+        }
+        return count;
     }
 }

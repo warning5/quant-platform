@@ -134,12 +134,12 @@ export default function RecommendationList() {
         }
       })
       .catch(() => {});
-    // 加载有推荐数据的策略列表（用于复盘筛选下拉）
+    // 加载有推荐数据的策略列表（用于复盘筛选下拉，含名称）
     recommendationApi.strategiesWithData()
-      .then(ids => {
-        setStrategiesWithData(ids);
-        if (ids.length > 0 && !reviewStrategyId) {
-          setReviewStrategyId(ids[0]);
+      .then(list => {
+        setStrategiesWithData(list);
+        if (list.length > 0 && !reviewStrategyId) {
+          setReviewStrategyId(list[0].id);
         }
       })
       .catch(() => {});
@@ -713,48 +713,60 @@ export default function RecommendationList() {
           <Title level={4} style={{ margin: 0 }}>
             <ThunderboltOutlined /> 智能推荐
             <Tooltip
-              styles={{ root: {maxWidth: 520} }}
+              styles={{ root: {maxWidth: 480} }}
+              overlayInnerStyle={{ maxHeight: 420, overflowY: 'auto', padding: '8px 12px' }}
               title={
                 <div style={{ fontSize: 12, lineHeight: '20px' }}>
-                  <div style={{ fontWeight: 'bold', marginBottom: 6, fontSize: 13 }}>推荐生成流程</div>
+                  <div style={{ fontWeight: 'bold', marginBottom: 6, fontSize: 13 }}>推荐生成管线（6步）</div>
                   <div style={{ fontFamily: 'monospace', marginBottom: 8 }}>
                     全市场 ~5000只 A股<br />
-                    &nbsp;→ <b>多因子筛选</b>（按选定因子组合筛选）<br />
-                    &nbsp;&nbsp;→ <b>个股深度分析</b>（六维度：技术/资金/事件/基本面/风险/流动性）<br />
-                    &nbsp;&nbsp;&nbsp;→ <b>Regime-Adaptive融合</b>（市场环境自适应权重）<br />
-                    &nbsp;&nbsp;&nbsp;&nbsp;→ <b>行业分散化</b>（同行业≤3只）
+                    &nbsp;→ ❶ <b>行业排除 + 黑名单过滤</b><br />
+                    &nbsp;&nbsp;→ ❷ <b>多因子筛选</b>（Top50，按策略因子配置加权排序）<br />
+                    &nbsp;&nbsp;&nbsp;→ ❸ <b>市场环境识别</b>（Regime: BULL/BEAR/SIDEWAYS）<br />
+                    &nbsp;&nbsp;&nbsp;&nbsp;→ ❹ <b>个股深度分析</b>（Top20，六维度评分）<br />
+                    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→ ❺ <b>Regime-Adaptive 动态融合</b>（环境自适应权重）<br />
+                    &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→ ❻ <b>行业分散化</b>（动态上限 + 相关性分组）→ 输出
                   </div>
-                  <div style={{ fontWeight: 'bold', marginBottom: 4, fontSize: 13, borderTop: '1px solid #444', paddingTop: 6 }}>综合得分计算过程</div>
+                  <div style={{ fontWeight: 'bold', marginBottom: 4, fontSize: 13, borderTop: '1px solid #444', paddingTop: 6 }}>❶ 行业排除 + 黑名单</div>
+                  <div style={{ marginBottom: 4 }}>
+                    策略配置的排除行业（如新质生产力排除金融/地产/周期）→ 个股黑名单过滤 → 剩余候选股进入筛选
+                  </div>
+                  <div style={{ fontWeight: 'bold', marginBottom: 4, fontSize: 13, borderTop: '1px solid #444', paddingTop: 6 }}>❷ 多因子筛选</div>
+                  <div style={{ marginBottom: 4 }}>
+                    按策略因子配置（factorConfigJson）加权排序，取 Top 50。因子方向决定排序：direction=1 正向（越大越好），direction=-1 反向（越小越好）
+                  </div>
+                  <div style={{ fontWeight: 'bold', marginBottom: 4, fontSize: 13, borderTop: '1px solid #444', paddingTop: 6 }}>❸ 市场环境识别（Regime Detection）</div>
+                  <div style={{ marginBottom: 2 }}>三维度综合判断市场状态：</div>
+                  <div style={{ marginLeft: 8, marginBottom: 2 }}>• 指数趋势：沪深300 MA20/MA60 排列</div>
+                  <div style={{ marginLeft: 8, marginBottom: 2 }}>• 波动率体制：ATR20 历史分位数（高波动 Risk-off，低波动 Risk-on）</div>
+                  <div style={{ marginLeft: 8, marginBottom: 4 }}>• 市场宽度：涨跌家数比（扩散好 Risk-on，极端分化 Risk-off）</div>
+                  <div style={{ fontWeight: 'bold', marginBottom: 4, fontSize: 13, borderTop: '1px solid #444', paddingTop: 6 }}>❹ 个股深度分析</div>
+                  <div style={{ marginBottom: 2 }}>六维度评分（134分制，归一化到 0~1）：</div>
+                  <div style={{ marginLeft: 8, marginBottom: 2 }}>• 技术面（30分）：RSI、MACD、MTM6、缠论信号</div>
+                  <div style={{ marginLeft: 8, marginBottom: 2 }}>• 资金面（25分）：主力净流入、换手率</div>
+                  <div style={{ marginLeft: 8, marginBottom: 2 }}>• 事件面（25分）：利好事件驱动</div>
+                  <div style={{ marginLeft: 8, marginBottom: 2 }}>• 基本面（29分）：盈利增速、估值、分红</div>
+                  <div style={{ marginLeft: 8, marginBottom: 2 }}>• 风险（15分）：最大回撤、波动率、ATR</div>
+                  <div style={{ marginLeft: 8, marginBottom: 4 }}>• 流动性（10分）：成交额、换手率适中度</div>
+                  <div style={{ fontWeight: 'bold', marginBottom: 4, fontSize: 13, borderTop: '1px solid #444', paddingTop: 6 }}>❺ Regime-Adaptive 动态融合</div>
                   <div style={{ marginBottom: 4 }}>
                     <b>finalScore = wFactor × 因子得分 + wAnalysis × 分析得分 + 行业加分</b>
                   </div>
-                  <div style={{ marginBottom: 4 }}>
-                    <b>① 因子得分</b>：用户选定因子组合的 Z-score 标准化加权综合得分（0~1）
-                  </div>
-                  <div style={{ marginBottom: 4 }}>
-                    <b>② 分析得分</b>（134分制，归一化到 0~1）：六维度加权求和
-                  </div>
-                  <div style={{ marginLeft: 8, marginBottom: 2 }}>• 技术面（满分30）：RSI、MACD、MTM6 等</div>
-                  <div style={{ marginLeft: 8, marginBottom: 2 }}>• 资金面（满分25）：主力净流入、换手率</div>
-                  <div style={{ marginLeft: 8, marginBottom: 2 }}>• 事件面（满分25）：利好事件驱动</div>
-                  <div style={{ marginLeft: 8, marginBottom: 2 }}>• 基本面（满分29）：盈利增速、估值、分红</div>
-                  <div style={{ marginLeft: 8, marginBottom: 2 }}>• 风险（满分15）：最大回撤、波动率、ATR</div>
-                  <div style={{ marginLeft: 8, marginBottom: 4 }}>• 流动性（满分10）：成交额、换手率适中度</div>
-                  <div style={{ marginBottom: 4 }}>
-                    <b>③ 市场环境权重</b>（wFactor / wAnalysis）：根据 Regime 动态分配
-                  </div>
-                  <div style={{ marginLeft: 8, marginBottom: 2 }}>• 📈 牛市（BULL）：因子60% / 分析40%</div>
-                  <div style={{ marginLeft: 8, marginBottom: 2 }}>• 📉 熊市（BEAR）：因子40% / 分析60%</div>
-                  <div style={{ marginLeft: 8, marginBottom: 4 }}>• ↔️ 震荡（SIDEWAYS）：因子50% / 分析50%</div>
-                  <div style={{ marginBottom: 4 }}>
-                    <b>④ 行业轮动加分</b>：基于近5日行业动量校准值（非固定值），加速期 ×1.5，减速期 ×0.5
-                  </div>
-                  <div style={{ marginBottom: 4 }}>
-                    <b>⑤ 利率环境影响</b>：利率下行加技术面/资金面权重，利率上行加基本面/风险权重
-                  </div>
                   <div style={{ marginBottom: 2 }}>
-                    <b>⑥ 市值风格</b>：小盘风格时，因子权重再 +0.05（偏向量化因子选股）
+                    <b>权重随市场环境动态调整：</b>
                   </div>
+                  <div style={{ marginLeft: 8, marginBottom: 2 }}>• 📈 牛市（BULL）：因子 60% / 分析 40%（趋势因子更有效）</div>
+                  <div style={{ marginLeft: 8, marginBottom: 2 }}>• 📉 熊市（BEAR）：因子 40% / 分析 60%（基本面更抗跌）</div>
+                  <div style={{ marginLeft: 8, marginBottom: 2 }}>• ↔️ 震荡（SIDEWAYS）：因子 50% / 分析 50%（均衡）</div>
+                  <div style={{ marginBottom: 2, marginTop: 4 }}>额外调节：</div>
+                  <div style={{ marginLeft: 8, marginBottom: 2 }}>• 行业轮动加分：强势行业 +0.06，弱势行业 -0.06</div>
+                  <div style={{ marginLeft: 8, marginBottom: 2 }}>• 利率环境：利率下行加技术/资金权重，上行加基本面/风险权重</div>
+                  <div style={{ marginLeft: 8, marginBottom: 4 }}>• 市值风格：小盘风格时因子权重 +0.05</div>
+                  <div style={{ fontWeight: 'bold', marginBottom: 4, fontSize: 13, borderTop: '1px solid #444', paddingTop: 6 }}>❻ 行业分散化（动态上限 + 相关性分组）</div>
+                  <div style={{ marginBottom: 2 }}>防止推荐集中在少数行业：</div>
+                  <div style={{ marginLeft: 8, marginBottom: 2 }}>• 动态上限：强势行业 ≤6 只，中等 ≤3 只，弱势 ≤1 只</div>
+                  <div style={{ marginLeft: 8, marginBottom: 2 }}>• 相关性分组：高相关行业（如银行+证券）共享名额，避免"伪分散"</div>
+                  <div style={{ marginLeft: 8, marginBottom: 2 }}>• 超额处理：超出限制的股票移至末尾并标记"降权"</div>
                 </div>
               }
             >
@@ -1398,14 +1410,11 @@ export default function RecommendationList() {
                     placeholder="选择策略"
                     size="small"
                   >
-                    {strategiesWithData.map(sid => {
-                      const s = strategies.find(st => st.id === sid);
-                      return (
-                        <Select.Option key={sid} value={sid}>
-                          {s ? s.strategyName : `策略${sid}`}
-                        </Select.Option>
-                      );
-                    })}
+                    {strategiesWithData.map(s => (
+                      <Select.Option key={s.id} value={s.id}>
+                        {s.strategyName || `策略${s.id}`}
+                      </Select.Option>
+                    ))}
                   </Select>
                   <Select
                     value={reviewDate}

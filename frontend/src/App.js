@@ -29,6 +29,9 @@ import BacktestCompare from './pages/backtest/BacktestCompare';
 import ParamOptimize from './pages/backtest/ParamOptimize';
 import FactorWeightOptimize from './pages/factors/FactorWeightOptimize';
 import RecommendationList from './pages/recommendation/RecommendationList';
+import WatchlistPage from './pages/watchlist/WatchlistPage';
+import LlmAnalysisPage from './pages/llm/LlmAnalysisPage';
+import PositionPage from './pages/position/PositionPage';
 import FactorIcIrAnalysis from './pages/factors/FactorIcIrAnalysis';
 import StockScreen from './pages/screen/StockScreen';
 import ManualOverviewPage from './pages/manual/ManualOverviewPage';
@@ -98,6 +101,9 @@ function AppLayout() {
       children: [
         { key: '/screen', label: <Link to="/screen">因子选股</Link> },
         { key: '/recommendation', label: <Link to="/recommendation">智能推荐</Link> },
+        { key: '/watchlist', label: <Link to="/watchlist">自选股看板</Link> },
+        { key: '/llm', label: <Link to="/llm">AI推理分析</Link> },
+        { key: '/positions', label: <Link to="/positions">持仓管理</Link> },
       ],
     },
     {
@@ -257,6 +263,9 @@ function AppLayout() {
             <Route path="/factor-ic-ir" element={<FactorIcIrAnalysis />} />
             <Route path="/screen" element={<StockScreen />} />
             <Route path="/recommendation" element={<RecommendationList />} />
+            <Route path="/watchlist" element={<WatchlistPage />} />
+            <Route path="/llm" element={<LlmAnalysisPage />} />
+            <Route path="/positions" element={<PositionPage />} />
             <Route path="/screen/backtest/:id" element={<OldRollingRedirect />} />
             <Route path="/screen/backtest" element={<OldRollingRedirect />} />
             <Route path="/manual/overview" element={<ManualOverviewPage />} />

@@ -17,8 +17,6 @@ import com.quant.platform.stock.entity.StockInfo;
 import com.quant.platform.stock.mapper.StockInfoMapper;
 import com.quant.platform.stock.service.ClickHouseStockService;
 import com.quant.platform.stock.service.DividendService;
-import com.quant.platform.recommendation.service.StockBlacklistService;
-import com.quant.platform.recommendation.service.StrategyConfidenceService;
 import com.quant.platform.strategy.domain.StrategyDefinition;
 import com.quant.platform.strategy.mapper.StrategyDefinitionMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -29,7 +27,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -117,13 +114,6 @@ public class RecommendationService {
             Map.entry("电子", "电子")
     );
 
-    /** 新质生产力需排除的一级行业（申万一级行业名称，作为排除兜底） */
-    private static final Set<String> NEW_QUALITY_EXCLUDE_SW1 = Set.of(
-            "银行", "非银金融", "房地产", "钢铁", "煤炭", "石油石化",
-            "公用事业", "交通运输", "社会服务", "纺织服饰", "建筑材料",
-            "建筑装饰", "农林牧渔", "美容护理"
-    );
-
     /** ATR 计算周期 */
     private static final int ATR_PERIOD = 20;
     /** ATR 历史分位数回溯天数 */
@@ -131,119 +121,6 @@ public class RecommendationService {
 
     /** 沪深300指数代码 */
     private static final String SSE300_CODE = "000300";
-    
-    /** 现有因子配置（12个，偏价值和低波动） */
-    private static final List<ScreenRequest.FactorWeight> EXISTING_FACTORS = List.of(
-            newFactor("MOM20", 1, 1.0),
-            newFactor("VOL20", -1, 0.8),
-            newFactor("VAL_PE_TTM", -1, 0.7),
-            newFactor("VAL_PB", -1, 0.6),
-            newFactor("VAL_DIVIDEND_YIELD", 1, 0.5),
-            newFactor("RSI14", 1, 0.4),
-            newFactor("MACD", 1, 0.3),
-            newFactor("TURN20", -1, 0.5),
-            newFactor("FIN_EARNINGS_QUALITY", 1, 0.6),
-            newFactor("FIN_DEBT_TO_ASSET", -1, 0.5),
-            newFactor("FIN_REVENUE_QUALITY", 1, 0.4),
-            newFactor("FIN_NET_PROFIT_YOY", 1, 0.5)
-    );
-    
-    /** 常规因子配置（平衡价值与成长） */
-    private static final List<ScreenRequest.FactorWeight> NORMAL_FACTORS = List.of(
-            newFactor("MOM20", 1, 1.0),
-            newFactor("VOL20", -1, 0.6),
-            newFactor("VAL_PE_TTM", -1, 0.5),
-            newFactor("VAL_PB", -1, 0.4),
-            newFactor("VAL_DIVIDEND_YIELD", 1, 0.4),
-            newFactor("RSI14", 1, 0.5),
-            newFactor("MACD", 1, 0.4),
-            newFactor("TURN20", -1, 0.4),
-            newFactor("FIN_EARNINGS_QUALITY", 1, 0.5),
-            newFactor("FIN_DEBT_TO_ASSET", -1, 0.4),
-            newFactor("FIN_REVENUE_QUALITY", 1, 0.5),
-            newFactor("FIN_NET_PROFIT_YOY", 1, 0.6),
-            newFactor("FIN_REVENUE_TTM_YOY", 1, 0.5)
-    );
-    
-    /** 新质生产力因子配置（高成长+高盈利质量，降低估值权重） */
-    private static final List<ScreenRequest.FactorWeight> NEW_QUALITY_FACTORS = List.of(
-            newFactor("MOM20", 1, 0.8),
-            newFactor("VOL20", -1, 0.5),
-            newFactor("VAL_PE_TTM", -1, 0.3),  // 降低PE权重
-            newFactor("VAL_PB", -1, 0.2),      // 降低PB权重
-            newFactor("VAL_DIVIDEND_YIELD", 1, 0.2),  // 降低分红权重
-            newFactor("RSI14", 1, 0.6),
-            newFactor("MACD", 1, 0.5),
-            newFactor("FIN_EARNINGS_QUALITY", 1, 0.8),  // 提高盈利质量
-            newFactor("FIN_DEBT_TO_ASSET", -1, 0.4),
-            newFactor("FIN_REVENUE_QUALITY", 1, 0.7),   // 提高营收质量
-            newFactor("FIN_NET_PROFIT_YOY", 1, 0.8),   // 提高净利润增长
-            newFactor("FIN_REVENUE_TTM_YOY", 1, 0.9)  // 新增：营收同比增长
-    );
-    
-    /** 热点因子配置（高动量+高波动+高换手，适合追涨） */
-    private static final List<ScreenRequest.FactorWeight> HOT_FACTORS = List.of(
-            newFactor("MOM20", 1, 1.2),
-            newFactor("MOM5", 1, 0.8),       // 短期动量
-            newFactor("VOL20", 1, 0.6),       // 反向：高波动优先
-            newFactor("TURN20", 1, 0.8),      // 反向：高换手优先
-            newFactor("RSI14", 1, 0.6),
-            newFactor("MACD", 1, 0.5),
-            newFactor("MTM6", 1, 0.7),        // 动量指标
-            newFactor("FIN_NET_PROFIT_YOY", 1, 0.6),
-            newFactor("FIN_REVENUE_TTM_YOY", 1, 0.5)
-    );
-    
-    /** 综合因子配置（均衡配置） */
-    private static final List<ScreenRequest.FactorWeight> COMPREHENSIVE_FACTORS = List.of(
-            newFactor("MOM20", 1, 0.9),
-            newFactor("VOL20", -1, 0.5),
-            newFactor("VAL_PE_TTM", -1, 0.4),
-            newFactor("VAL_PB", -1, 0.4),
-            newFactor("VAL_DIVIDEND_YIELD", 1, 0.4),
-            newFactor("RSI14", 1, 0.5),
-            newFactor("MACD", 1, 0.4),
-            newFactor("TURN20", -1, 0.4),
-            newFactor("FIN_EARNINGS_QUALITY", 1, 0.6),
-            newFactor("FIN_DEBT_TO_ASSET", -1, 0.5),
-            newFactor("FIN_REVENUE_QUALITY", 1, 0.5),
-            newFactor("FIN_NET_PROFIT_YOY", 1, 0.7),
-            newFactor("FIN_REVENUE_TTM_YOY", 1, 0.6)
-    );
-    
-    /** 因子组合配置映射 */
-    private static final Map<String, List<ScreenRequest.FactorWeight>> PROFILE_FACTORS_MAP = Map.of(
-            "EXISTING", EXISTING_FACTORS,
-            "NORMAL", NORMAL_FACTORS,
-            "NEW_QUALITY", NEW_QUALITY_FACTORS,
-            "HOT", HOT_FACTORS,
-            "COMPREHENSIVE", COMPREHENSIVE_FACTORS
-    );
-
-    /**
-     * 各组合的行业排除配置（从 stock_info.industry 字段匹配）
-     * NEW_QUALITY 排除传统金融、资源、公用事业等与新质生产力定位不符的行业
-     */
-    private static final Map<String, List<String>> PROFILE_EXCLUDE_INDUSTRY_MAP = Map.of(
-            "EXISTING", List.of(),
-            "NORMAL", List.of(),
-            "NEW_QUALITY", List.of(
-                    "证券", "银行", "保险", "信托", "期货",
-                    "房地产开发", "房地产服务",
-                    "电力", "燃气", "水务", "供热",
-                    "钢铁", "煤炭开采", "焦炭", "石油石化", "油气开采",
-                    "港口", "港口航运", "航运", "高速公路", "铁路公路", "机场",
-                    "旅游", "酒店", "旅游及酒店", "餐饮", "景点",
-                    "造纸", "纺织制造", "服装家纺",
-                    "基础建设", "房屋建设",
-                    "种植业", "渔业", "畜牧业",
-                    "贵金属", "工业金属", "能源金属"
-            ),
-            "HOT", List.of(
-                    "银行", "保险", "信托", "期货"
-            ),
-            "COMPREHENSIVE", List.of()
-    );
 
     public RecommendationService(StockScreenService stockScreenService,
                                  AnalysisService analysisService,
@@ -282,7 +159,7 @@ public class RecommendationService {
      * @return 推荐结果列表
      */
     public List<StockRecommendation> generateRecommendations(LocalDate date, Integer topN,
-            String factorProfile, Long strategyId, String weightMode, List<FactorDiagnostic> diagnostics,
+            Long strategyId, String weightMode, List<FactorDiagnostic> diagnostics,
             boolean enableConfidenceControl) {
         // date=null 时 StockScreenService.screen() 会自动取最新日期
         if (topN == null || topN <= 0) {
@@ -290,8 +167,8 @@ public class RecommendationService {
         }
         boolean useDynamicIc = "IC".equalsIgnoreCase(weightMode);
 
-        log.info("[Recommendation] 开始生成推荐列表: date={}, topN={}, factorProfile={}, strategyId={}, weightMode={}, confidenceControl={}",
-                date, topN, factorProfile, strategyId, weightMode, enableConfidenceControl);
+        log.info("[Recommendation] 开始生成推荐列表: date={}, topN={}, strategyId={}, weightMode={}, confidenceControl={}",
+                date, topN, strategyId, weightMode, enableConfidenceControl);
 
         // 诊断：加载策略详情
         if (strategyId != null) {
@@ -356,22 +233,17 @@ public class RecommendationService {
 
         // Step 1: 多因子选股（广筛 Top 50）
         // date=null 时 StockScreenService.screen() 内部自动 resolveLatestDate()
-        ScreenResult screenResult = screenStocks(date, factorProfile, strategyId, useDynamicIc, diagnostics);
+        ScreenResult screenResult = screenStocks(date, strategyId, useDynamicIc, diagnostics);
         List<ScreenResult.StockScore> candidates = screenResult.getStocks();
         if (candidates == null || candidates.isEmpty()) {
             log.warn("[Recommendation] 因子选股结果为空，无法生成推荐");
             return List.of();
         }
 
-        // Step 1.5: 行业排除过滤（根据组合配置或策略 filterConfigJson）
-        List<String> excludeIndustries = getExcludeIndustries(factorProfile, strategyId);
-        // 判断是否为新质生产力风格
-        String effectiveProfile = resolveEffectiveProfile(factorProfile, strategyId);
-        boolean isNewQuality = "NEW_QUALITY".equals(effectiveProfile);
-        if (!excludeIndustries.isEmpty() || isNewQuality) {
+        // Step 1.5: 行业排除过滤（从策略 filterConfigJson 读取）
+        List<String> excludeIndustries = getExcludeIndustries(strategyId);
+        if (!excludeIndustries.isEmpty()) {
             Set<String> excludeSet = new HashSet<>(excludeIndustries);
-            // 新质生产力额外排除申万一级行业 + 无行业信息股票
-            Set<String> excludeSw1 = isNewQuality ? NEW_QUALITY_EXCLUDE_SW1 : Set.of();
             List<String> candidateCodes = candidates.stream()
                     .map(s -> stripSuffix(s.getSymbol()))
                     .collect(Collectors.toList());
@@ -382,7 +254,7 @@ public class RecommendationService {
             Map<String, StockInfo> codeInfoMap = infos.stream()
                     .filter(i -> i.getCode() != null)
                     .collect(Collectors.toMap(StockInfo::getCode, i -> i, (a, b) -> a));
-            
+
             // 收集被排除的股票及其行业（用于日志诊断）
             List<String> excludedStocks = new ArrayList<>();
             int before = candidates.size();
@@ -392,13 +264,13 @@ public class RecommendationService {
                         StockInfo info = codeInfoMap.get(pureCode);
                         String ind = info != null && info.getIndustry() != null ? info.getIndustry() : "";
                         String name = info != null && info.getName() != null ? info.getName() : s.getName();
-                        
+
                         // 检查是否应排除
                         boolean excluded = false;
                         String reason = "";
-                        
-                        // 1. 无行业信息且为新质生产力 → 排除（安全起见）
-                        if (isNewQuality && ind.isEmpty()) {
+
+                        // 1. 无行业信息且配置了行业排除 → 排除（安全起见）
+                        if (ind.isEmpty()) {
                             excluded = true;
                             reason = "无行业信息";
                         }
@@ -407,12 +279,7 @@ public class RecommendationService {
                             excluded = excludeSet.stream().anyMatch(ind::contains);
                             if (excluded) reason = "匹配排除关键词";
                         }
-                        // 3. 申万一级行业匹配
-                        if (!excluded) {
-                            excluded = excludeSw1.stream().anyMatch(ind::contains);
-                            if (excluded) reason = "匹配排除一级行业";
-                        }
-                        
+
                         if (excluded) {
                             excludedStocks.add(name + "(" + pureCode + ")[" + ind + "]-" + reason);
                         }
@@ -440,8 +307,8 @@ public class RecommendationService {
                 }
             }
             
-            log.info("[Recommendation] 行业排除过滤 [profile={}, effective={}, isNewQuality={}]: 排除关键词数={}, 排除一级行业数={}, 过滤前={}, 过滤后={}",
-                    factorProfile, effectiveProfile, isNewQuality, excludeSet.size(), excludeSw1.size(), before, candidates.size());
+            log.info("[Recommendation] 行业排除过滤 [strategyId={}]: 排除关键词数={}, 过滤前={}, 过滤后={}",
+                    strategyId, excludeSet.size(), before, candidates.size());
             log.info("[Recommendation] 被排除股票: {}", excludedStocks);
             log.info("[Recommendation] 通过过滤的股票样本(前10): {}", keptSamples);
             if (candidates.isEmpty()) {
@@ -635,8 +502,11 @@ public class RecommendationService {
         LocalDate today = LocalDate.now();
 
         for (Map<String, Object> combo : recentCombos) {
-            Long sid = ((Number) combo.get("strategy_id")).longValue();
+            Object sidObj = combo.get("strategy_id");
+            if (sidObj == null) continue; // 跳过 strategy_id 为空的脏数据
+            Long sid = ((Number) sidObj).longValue();
             java.sql.Date sqlDate = (java.sql.Date) combo.get("recommend_date");
+            if (sqlDate == null) continue;
             LocalDate recDate = sqlDate.toLocalDate();
 
             List<StockRecommendation> recs = recommendationMapper.findByStrategyAndDate(sid, recDate);
@@ -692,9 +562,11 @@ public class RecommendationService {
 
         // 追踪完成后，自动评估并更新黑名单（方案B）
         for (Map<String, Object> combo : recentCombos) {
-            Long sid = ((Number) combo.get("strategy_id")).longValue();
-            java.sql.Date sqlDate = (java.sql.Date) combo.get("recommend_date");
-            LocalDate recDate = sqlDate.toLocalDate();
+            Object sidObj = combo.get("strategy_id");
+            Object dateObj = combo.get("recommend_date");
+            if (sidObj == null || dateObj == null) continue;
+            Long sid = ((Number) sidObj).longValue();
+            LocalDate recDate = ((java.sql.Date) dateObj).toLocalDate();
             try {
                 stockBlacklistService.evaluateAndBlacklist(sid, recDate);
             } catch (Exception e) {
@@ -704,6 +576,7 @@ public class RecommendationService {
 
         // 追踪完成后，自动更新策略置信度（方案C）
         Set<Long> strategyIds = recentCombos.stream()
+                .filter(c -> c.get("strategy_id") != null)
                 .map(c -> ((Number) c.get("strategy_id")).longValue())
                 .collect(java.util.stream.Collectors.toSet());
         for (Long sid : strategyIds) {
@@ -762,10 +635,19 @@ public class RecommendationService {
     }
 
     /**
-     * 获取所有有推荐记录的策略ID列表
+     * 获取所有有推荐记录的策略列表（id + name）
      */
-    public List<Long> strategiesWithData() {
-        return recommendationMapper.findDistinctStrategyIds();
+    public List<Map<String, Object>> strategiesWithData() {
+        List<Long> ids = recommendationMapper.findDistinctStrategyIds();
+        List<Map<String, Object>> result = new java.util.ArrayList<>(ids.size());
+        for (Long sid : ids) {
+            StrategyDefinition s = strategyDefinitionMapper.selectById(sid);
+            Map<String, Object> m = new java.util.LinkedHashMap<>();
+            m.put("id", sid);
+            m.put("strategyName", s != null ? s.getStrategyName() : "策略" + sid);
+            result.add(m);
+        }
+        return result;
     }
 
     /**
@@ -798,8 +680,15 @@ public class RecommendationService {
         List<Map<String, Object>> rawEntries = new ArrayList<>();
 
         for (Map<String, Object> combo : rawCombos) {
-            Long sid = ((Number) combo.get("strategy_id")).longValue();
+            Object sidObj = combo.get("strategy_id");
+            if (sidObj == null) {
+                continue;
+            }
+            Long sid = ((Number) sidObj).longValue();
             java.sql.Date sqlDate = (java.sql.Date) combo.get("recommend_date");
+            if (sqlDate == null) {
+                continue;
+            }
             LocalDate recDate = sqlDate.toLocalDate();
 
             Map<String, Object> stats = getHitRate(sid, recDate);
@@ -1990,13 +1879,12 @@ public class RecommendationService {
 
     /**
      * 多因子选股
-     * @param factorProfile 因子组合配置名称（旧版）
-     * @param strategyId    策略ID（优先）
+     * @param strategyId    策略ID（必须）
      */
-    private ScreenResult screenStocks(LocalDate date, String factorProfile, Long strategyId,
+    private ScreenResult screenStocks(LocalDate date, Long strategyId,
                                       boolean useDynamicIc, List<FactorDiagnostic> diagnostics) {
-        // 根据因子组合配置或策略选择因子
-        List<ScreenRequest.FactorWeight> factors = getFactorConfig(factorProfile, strategyId);
+        // 从策略因子配置获取因子列表
+        List<ScreenRequest.FactorWeight> factors = getFactorConfig(strategyId);
 
         // 动态调整因子权重（基于IC），同时收集诊断信息
         if (useDynamicIc) {
@@ -2197,135 +2085,88 @@ public class RecommendationService {
     }
 
     /**
-     * 根据因子组合名称或策略ID获取对应的因子配置
+     * 从策略 factorConfigJson 获取因子配置（全部走数据库，无硬编码兜底）
      */
-    private List<ScreenRequest.FactorWeight> getFactorConfig(String factorProfile, Long strategyId) {
-        // 优先从策略读取
-        if (strategyId != null) {
-            StrategyDefinition strategy = strategyDefinitionMapper.selectById(strategyId);
-            if (strategy != null && strategy.getFactorConfigJson() != null && !strategy.getFactorConfigJson().isEmpty()) {
-                try {
-                    Object raw = objectMapper.readValue(strategy.getFactorConfigJson(), Object.class);
-                    List<Map<String, Object>> factorConfigs;
-                    if (raw instanceof List) {
-                        @SuppressWarnings("unchecked")
-                        List<Map<String, Object>> list = (List<Map<String, Object>>) raw;
-                        factorConfigs = list;
-                    } else if (raw instanceof Map) {
-                        @SuppressWarnings("unchecked")
-                        Map<String, Object> map = (Map<String, Object>) raw;
-                        @SuppressWarnings("unchecked")
-                        List<Map<String, Object>> factors = (List<Map<String, Object>>) map.get("factors");
-                        factorConfigs = factors != null ? factors : List.of();
-                    } else {
-                        factorConfigs = List.of();
-                    }
-
-                    List<ScreenRequest.FactorWeight> result = new ArrayList<>();
-                    for (Map<String, Object> cfg : factorConfigs) {
-                        ScreenRequest.FactorWeight fw = new ScreenRequest.FactorWeight();
-                        Object code = cfg.get("factorCode");
-                        if (code == null) code = cfg.get("code");
-                        fw.setFactorCode(code != null ? code.toString() : null);
-                        Object dir = cfg.get("direction");
-                        if (dir == null) dir = cfg.get("dir");
-                        fw.setDirection(dir instanceof Number ? ((Number) dir).intValue() : 1);
-                        Object weight = cfg.get("weight");
-                        fw.setWeight(weight instanceof Number ? ((Number) weight).doubleValue() : 1.0);
-                        Object filterOp = cfg.get("filterOp");
-                        if (filterOp != null) fw.setFilterOp(filterOp.toString());
-                        Object filterValue = cfg.get("filterValue");
-                        if (filterValue != null) fw.setFilterValue(((Number) filterValue).doubleValue());
-                        result.add(fw);
-                    }
-                    log.info("[Recommendation] 从策略[{}]加载因子配置: {}个因子", strategy.getStrategyName(), result.size());
-                    return result;
-                } catch (Exception e) {
-                    log.warn("[Recommendation] 策略因子配置解析失败 strategyId={}, 回退到默认配置", strategyId, e);
-                }
+    private List<ScreenRequest.FactorWeight> getFactorConfig(Long strategyId) {
+        if (strategyId == null) {
+            throw new IllegalArgumentException("strategyId 不能为空，因子配置必须从数据库策略中获取");
+        }
+        StrategyDefinition strategy = strategyDefinitionMapper.selectById(strategyId);
+        if (strategy == null) {
+            throw new IllegalArgumentException("策略不存在: strategyId=" + strategyId);
+        }
+        if (strategy.getFactorConfigJson() == null || strategy.getFactorConfigJson().isEmpty()) {
+            throw new IllegalStateException("策略[" + strategy.getStrategyName() + "]未配置因子权重(factorConfigJson为空)，请在策略管理中配置");
+        }
+        try {
+            Object raw = objectMapper.readValue(strategy.getFactorConfigJson(), Object.class);
+            List<Map<String, Object>> factorConfigs;
+            if (raw instanceof List) {
+                @SuppressWarnings("unchecked")
+                List<Map<String, Object>> list = (List<Map<String, Object>>) raw;
+                factorConfigs = list;
+            } else if (raw instanceof Map) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> map = (Map<String, Object>) raw;
+                @SuppressWarnings("unchecked")
+                List<Map<String, Object>> factors = (List<Map<String, Object>>) map.get("factors");
+                factorConfigs = factors != null ? factors : List.of();
+            } else {
+                factorConfigs = List.of();
             }
-        }
 
-        // 回退到旧版 factorProfile
-        if (factorProfile == null || factorProfile.isEmpty()) {
-            return EXISTING_FACTORS;
+            List<ScreenRequest.FactorWeight> result = new ArrayList<>();
+            for (Map<String, Object> cfg : factorConfigs) {
+                ScreenRequest.FactorWeight fw = new ScreenRequest.FactorWeight();
+                Object code = cfg.get("factorCode");
+                if (code == null) code = cfg.get("code");
+                fw.setFactorCode(code != null ? code.toString() : null);
+                Object dir = cfg.get("direction");
+                if (dir == null) dir = cfg.get("dir");
+                fw.setDirection(dir instanceof Number ? ((Number) dir).intValue() : 1);
+                Object weight = cfg.get("weight");
+                fw.setWeight(weight instanceof Number ? ((Number) weight).doubleValue() : 1.0);
+                Object filterOp = cfg.get("filterOp");
+                if (filterOp != null) fw.setFilterOp(filterOp.toString());
+                Object filterValue = cfg.get("filterValue");
+                if (filterValue != null) fw.setFilterValue(((Number) filterValue).doubleValue());
+                result.add(fw);
+            }
+            log.info("[Recommendation] 从策略[{}]加载因子配置: {}个因子", strategy.getStrategyName(), result.size());
+            return result;
+        } catch (IllegalArgumentException e) {
+            throw e; // 直接抛出业务异常
+        } catch (Exception e) {
+            throw new IllegalStateException("策略因子配置解析失败 strategyId=" + strategyId + ": " + e.getMessage(), e);
         }
-        return PROFILE_FACTORS_MAP.getOrDefault(factorProfile.toUpperCase(), EXISTING_FACTORS);
     }
 
     /**
-     * 解析有效的 factorProfile（优先参数，其次从策略推断）
-     */
-    private String resolveEffectiveProfile(String factorProfile, Long strategyId) {
-        if (factorProfile != null && !factorProfile.isEmpty()) {
-            return factorProfile.toUpperCase();
-        }
-        if (strategyId != null) {
-            StrategyDefinition strategy = strategyDefinitionMapper.selectById(strategyId);
-            return mapStrategyToProfile(strategy);
-        }
-        return null;
-    }
-
-    /**
-     * 获取行业排除列表（优先从策略 filterConfigJson 读取）
+     * 从策略 filterConfigJson 获取行业排除列表（全部走数据库，无硬编码兜底）
      */
     @SuppressWarnings("unchecked")
-    private List<String> getExcludeIndustries(String factorProfile, Long strategyId) {
-        // 先获取硬编码的排除列表（作为兜底/合并基础）
-        String effectiveProfile = resolveEffectiveProfile(factorProfile, strategyId);
-        List<String> hardcodedList = PROFILE_EXCLUDE_INDUSTRY_MAP.getOrDefault(
-                effectiveProfile != null ? effectiveProfile : "EXISTING", List.of());
-
-        StrategyDefinition strategy = null;
-        if (strategyId != null) {
-            strategy = strategyDefinitionMapper.selectById(strategyId);
-            if (strategy != null && strategy.getFilterConfigJson() != null && !strategy.getFilterConfigJson().isEmpty()) {
-                try {
-                    Map<String, Object> filterConfig = objectMapper.readValue(strategy.getFilterConfigJson(), Map.class);
-                    Object exclude = filterConfig.get("excludeIndustries");
-                    if (exclude instanceof List && !((List<?>) exclude).isEmpty()) {
-                        List<String> dbList = ((List<?>) exclude).stream()
-                                .map(Object::toString)
-                                .collect(Collectors.toList());
-                        // 合并：策略配置 + 硬编码列表（去重）
-                        Set<String> merged = new LinkedHashSet<>(dbList);
-                        merged.addAll(hardcodedList);
-                        List<String> result = new ArrayList<>(merged);
-                        log.info("[Recommendation] 行业排除(合并): 策略[{}]={} + 硬编码[{}]={} → 合并={}",
-                                strategy.getStrategyName(), dbList.size(),
-                                effectiveProfile, hardcodedList.size(), result.size());
-                        return result;
-                    }
-                } catch (Exception e) {
-                    log.warn("[Recommendation] 策略过滤配置解析失败 strategyId={}", strategyId, e);
-                }
+    private List<String> getExcludeIndustries(Long strategyId) {
+        if (strategyId == null) {
+            return List.of(); // 无策略时不排除
+        }
+        StrategyDefinition strategy = strategyDefinitionMapper.selectById(strategyId);
+        if (strategy == null || strategy.getFilterConfigJson() == null || strategy.getFilterConfigJson().isEmpty()) {
+            return List.of();
+        }
+        try {
+            Map<String, Object> filterConfig = objectMapper.readValue(strategy.getFilterConfigJson(), Map.class);
+            Object exclude = filterConfig.get("excludeIndustries");
+            if (exclude instanceof List && !((List<?>) exclude).isEmpty()) {
+                List<String> result = ((List<?>) exclude).stream()
+                        .map(Object::toString)
+                        .collect(Collectors.toList());
+                log.info("[Recommendation] 从策略[{}]加载行业排除: {}个", strategy.getStrategyName(), result.size());
+                return result;
             }
+        } catch (Exception e) {
+            log.warn("[Recommendation] 策略过滤配置解析失败 strategyId={}", strategyId, e);
         }
-        log.info("[Recommendation] 行业排除(硬编码): factorProfile={}, strategyId={}, strategyCode={}, effectiveProfile={}, excludeCount={}",
-                factorProfile, strategyId, strategy != null ? strategy.getStrategyCode() : "null",
-                effectiveProfile, hardcodedList.size());
-        return hardcodedList;
-    }
-
-    /**
-     * 根据策略代码/名称映射到 factorProfile（用于回退行业排除和因子选择）
-     */
-    private String mapStrategyToProfile(StrategyDefinition strategy) {
-        if (strategy == null) return null;
-        String code = strategy.getStrategyCode();
-        String name = strategy.getStrategyName();
-        // 精确匹配策略代码
-        if ("NEW_PRODUCTIVITY".equals(code) || "RECOMMEND_NEW_QUALITY".equals(code)) return "NEW_QUALITY";
-        if ("HOT_TRACKING".equals(code)) return "HOT";
-        if ("COMPREHENSIVE".equals(code)) return "COMPREHENSIVE";
-        // 兜底：名称匹配
-        if (name != null) {
-            if (name.contains("新质生产力") || name.contains("新质")) return "NEW_QUALITY";
-            if (name.contains("热点") || name.contains("追踪")) return "HOT";
-            if (name.contains("综合") || name.contains("均衡")) return "COMPREHENSIVE";
-        }
-        return null;
+        return List.of();
     }
 
     /**

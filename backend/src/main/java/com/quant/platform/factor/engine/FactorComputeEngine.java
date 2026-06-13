@@ -233,6 +233,7 @@ public class FactorComputeEngine {
         registerFinancial(financialFactorsBean.new PsTtmCalc());
         registerFinancial(financialFactorsBean.new PbCalc());
         registerFinancial(financialFactorsBean.new DividendYieldCalc());
+        registerFinancial(financialFactorsBean.new FcfYieldCalc());
         // 质量因子 (Phase 2.3)
         registerFinancial(financialFactorsBean.new EarningsQualityCalc());
         registerFinancial(financialFactorsBean.new FinancialHealthCalc());
@@ -259,6 +260,7 @@ public class FactorComputeEngine {
     private boolean isFinancialFactor(String code) {
         if (code == null) return false;
         if (code.startsWith("FIN_")) return true;
+        if (code.startsWith("VAL_") || code.startsWith("QUAL_")) return true;
         return financialCalculators.containsKey(code);
     }
 

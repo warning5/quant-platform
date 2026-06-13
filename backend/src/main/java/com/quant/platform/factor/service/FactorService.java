@@ -190,7 +190,13 @@ public class FactorService {
                 new String[]{"VAL_PE_TTM", "市盈率TTM", "总市值/最近4季度净利润（TTM），越低估值越便宜", "VALUE"},
                 new String[]{"VAL_PS_TTM", "市销率TTM", "总市值/最近4季度营收（TTM），越低估值越便宜", "VALUE"},
                 new String[]{"VAL_PB", "市净率", "总市值/净资产，越低估值越便宜", "VALUE"},
-                new String[]{"VAL_DIVIDEND_YIELD", "股息率", "最近12个月每股派息总和/当前股价×100，越高分红回报越好", "VALUE"}
+                new String[]{"VAL_DIVIDEND_YIELD", "股息率", "最近12个月每股派息总和/当前股价×100，越高分红回报越好", "VALUE"},
+                // 新增估值分位+回撤因子 (Phase 1.1, 2026-06-12)
+                new String[]{"VAL_PE_PERCENTILE", "PE历史分位", "当前PE在近3年历史PE中的百分位排名，越低说明估值越便宜", "VALUE"},
+                new String[]{"VAL_PB_PERCENTILE", "PB历史分位", "当前PB在近3年历史PB中的百分位排名，越低说明估值越便宜", "VALUE"},
+                new String[]{"PRICE_52W_HIGH_PCT", "距52周高点回撤", "当前价距近1年最高价的回撤百分比，越低说明回撤越深", "VALUE"},
+                // 新增自由现金流收益率 (Phase 1.2, 2026-06-12)
+                new String[]{"VAL_FCF_YIELD", "自由现金流收益率", "自由现金流/总市值×100，越高说明公司产生自由现金流能力越强", "VALUE"}
         );
 
         for (String[] b : builtins) {

@@ -985,6 +985,35 @@ public class FinancialFactors {
         }
     }
 
+    /**
+     * 自由现金流收益率 = 自由现金流 / 总市值 × 100
+     * 含义：公司产生的自由现金流相对于市值的比率，越高说明公司"便宜"且现金流充沛
+     * 类似于股息率，但更全面（不依赖分红政策，反映真实可支配现金）
+     */
+    public class FcfYieldCalc implements FinancialFactorCalculator {
+        @Override
+        public String getFactorCode() {
+            return "VAL_FCF_YIELD";
+        }
+
+        @Override
+        public BigDecimal calculate(String code, StockFinancialIndicator ind) {
+            if (ind == null || ind.getEndDate() == null) return null;
+            if (ind.getFreeCashFlow() == null || ind.getFreeCashFlow().doubleValue() <= 0) return null;
+
+            StockInfo info = stockInfoMapper.selectOne(
+                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<StockInfo>()
+                            .eq(StockInfo::getCode, code).last("LIMIT 1"));
+            if (info == null || info.getTotalMarketCap() == null || info.getTotalMarketCap().doubleValue() <= 0) return null;
+
+            // 总市值单位是万元，FCF单位是元
+            // FCF Yield = FCF / (总市值 × 10000) × 100
+            BigDecimal mcapYuan = info.getTotalMarketCap().multiply(BigDecimal.valueOf(10000));
+            return ind.getFreeCashFlow().divide(mcapYuan, SCALE, RoundingMode.HALF_UP)
+                    .multiply(BigDecimal.valueOf(100));
+        }
+    }
+
     // ======================== 估值因子辅助方法 ========================
 
     /**

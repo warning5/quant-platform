@@ -397,4 +397,42 @@ export const confidenceApi = {
     api.get('/strategy-confidence/adjusted-topn', { params: { strategyId, originalTopN } }),
 };
 
+/** LLM分析 API */
+export const llmApi = {
+  /** 获取今日LLM分析结果 */
+  getAnalyses: () => api.get('/llm/analyses'),
+  /** 获取指定股票的LLM分析 */
+  getAnalysis: (stockCode) => api.get(`/llm/analysis/${stockCode}`),
+  /** 手动触发LLM推理 */
+  triggerAnalysis: (factorProfile = 'VALUE_QUALITY', topN = 15) =>
+    api.post('/llm/analyze', null, { params: { factorProfile, topN }, timeout: 300000 }),
+};
+
+/** 自选股看板 API */
+export const watchlistApi = {
+  /** 获取所有自选股（可选按分组过滤） */
+  getList: (group) => api.get('/watchlist', { params: { group } }),
+  /** 获取按分组汇总的Map */
+  getGrouped: () => api.get('/watchlist/grouped'),
+  /** 获取所有分组名 */
+  getGroups: () => api.get('/watchlist/groups'),
+  /** 获取观测到期的股票 */
+  getExpired: () => api.get('/watchlist/expired'),
+  /** 检查股票是否在自选池 */
+  check: (stockCode) => api.get('/watchlist/check', { params: { stockCode } }),
+  /** 添加自选股 */
+  add: (data) => api.post('/watchlist', data),
+  /** 从推荐结果批量添加 */
+  addBatch: (stockCodes, stockNames, batchId, groupName) =>
+    api.post('/watchlist/batch', { stockCodes, stockNames, batchId, groupName }),
+  /** 更新自选股 */
+  update: (id, data) => api.put(`/watchlist/${id}`, data),
+  /** 移除自选股（归档） */
+  remove: (id) => api.delete(`/watchlist/${id}`),
+  /** 真正删除 */
+  deleteStock: (id) => api.delete(`/watchlist/${id}/delete`),
+  /** 清空分组 */
+  clearGroup: (groupName) => api.delete(`/watchlist/group/${groupName}`),
+};
+
 export default api;

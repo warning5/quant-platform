@@ -33,7 +33,7 @@ public interface RecommendationMapper extends BaseMapper<StockRecommendation> {
      * 查询最近的策略+日期组合（按时间倒序，用于历史列表）
      * 返回去重后的 (strategy_id, recommend_date) 组合
      */
-    @Select("SELECT DISTINCT strategy_id, recommend_date FROM stock_recommendation ORDER BY recommend_date DESC, strategy_id DESC LIMIT #{limit}")
+    @Select("SELECT DISTINCT strategy_id, recommend_date FROM stock_recommendation WHERE strategy_id IS NOT NULL ORDER BY recommend_date DESC, strategy_id DESC LIMIT #{limit}")
     List<Map<String, Object>> findRecentStrategyDates(@Param("limit") int limit);
 
     /**

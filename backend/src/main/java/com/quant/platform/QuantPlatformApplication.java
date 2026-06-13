@@ -9,7 +9,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @SpringBootApplication
 @EnableAsync
 @EnableScheduling
-@MapperScan({"com.quant.platform.**.mapper", "com.quant.platform.strategy.paper"})
+@MapperScan({"com.quant.platform.**"})
 public class QuantPlatformApplication {
 
     public static void main(String[] args) {

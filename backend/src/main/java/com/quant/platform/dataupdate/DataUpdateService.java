@@ -447,19 +447,7 @@ public class DataUpdateService {
                 log.info("[DataUpdate] 启动任务 {}: {}", taskId, cmd);
                 boolean ok = runSingleScript(taskId, task, cmd, marketLabel);
 
-                // 单个市场执行失败时，尝试备用数据源（SH/SZ 支持 akshare 备用）
-                if (!ok && !"CANCELLED".equals(task.getStatus()) && ("SH".equals(m) || "SZ".equals(m))) {
-                    broadcastLog(taskId, "\n[WARN] Baostock 更新失败，尝试使用 akshare 作为备用数据源...");
-                    List<String> backupCmd = new ArrayList<>();
-                    backupCmd.add(pythonPath);
-                    backupCmd.add("-u");
-                    backupCmd.add("update_stock_daily_akshare.py");
-                    backupCmd.add("--market");
-                    backupCmd.add(m);
-                    addCommonArgs(backupCmd, request);
-                    ok = runSingleScript(taskId, task, backupCmd, marketLabel + " (备用)");
-                }
-
+                // 不再使用 akshare 作为备用数据源
                 if (!"CANCELLED".equals(task.getStatus())) {
                     task.setStatus(ok ? "SUCCESS" : "FAILED");
                     task.setProgress(100);
@@ -546,9 +534,9 @@ public class DataUpdateService {
         boolean hasPoolFilter = pool != null && !"ALL".equals(pool);
 
         if (!"BJ".equals(request.getMarket())) {
-            // BAOSTOCK 或 ALL → 更新沪市和深市，支持备用数据源
-            marketScripts.add(new String[]{"沪市", "update_stock_daily_baostock.py", "update_stock_daily_akshare.py", "--market", "SH"});
-            marketScripts.add(new String[]{"深市", "update_stock_daily_baostock.py", "update_stock_daily_akshare.py", "--market", "SZ"});
+            // BAOSTOCK 或 ALL → 更新沪市和深市（不再使用 akshare 备用）
+            marketScripts.add(new String[]{"沪市", "update_stock_daily_baostock.py", "--market", "SH"});
+            marketScripts.add(new String[]{"深市", "update_stock_daily_baostock.py", "--market", "SZ"});
         }
         // 指定股票池时只更新池内股票池（SH/SZ），跳过北交所
         if (!"BAOSTOCK".equals(request.getSource()) && !hasPoolFilter) {
@@ -584,20 +572,7 @@ public class DataUpdateService {
             addCommonArgs(scriptCmd, request);
             boolean ok = runSingleScript(taskId, task, scriptCmd, ms[0]);
 
-            if (!ok && ms.length > 2 && ms[2].endsWith("akshare.py")) {
-                broadcastLog(taskId, "\n[WARN] Baostock 更新失败，尝试使用 akshare 作为备用数据源...");
-                List<String> backupCmd = new ArrayList<>();
-                backupCmd.add(pythonPath);
-                backupCmd.add("-u");
-                backupCmd.add(ms[2]);
-                if (marketArgIndex > 0) {
-                    backupCmd.add(ms[marketArgIndex]);
-                    backupCmd.add(ms[marketArgIndex + 1]);
-                }
-                addCommonArgs(backupCmd, request);
-                ok = runSingleScript(taskId, task, backupCmd, ms[0] + " (备用)");
-            }
-
+            // 不再使用 akshare 作为备用数据源
             if (!ok) allSuccess = false;
         }
 

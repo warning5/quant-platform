@@ -74,6 +74,16 @@ logging:
     com.quant.platform: INFO
     org.springframework.web: INFO
 
+# DeepSeek LLM 统一配置（OpenAI 兼容接口，支持 DeepSeek / Ollama / Qwen 等）
+llm:
+  enabled: false                                    # 设为 true 启用 LLM
+  base-url: https://api.deepseek.com/v1             # API 地址（Ollama: http://localhost:11434/v1）
+  api-key: ""                                       # API Key（Ollama 无需填写）
+  model: deepseek-v4-flash                          # 模型名（deepseek-v4-flash / deepseek-v4-pro）
+  max-tokens: 2048                                  # 最大输出 token 数
+  temperature: 0.3                                  # 温度（低温更准确）
+  timeout-seconds: 60                               # 请求超时（秒）
+
 quant:
   clickhouse:
     enabled: true  # 分析模块 CH 查询开关
@@ -81,15 +91,6 @@ quant:
     thread-pool-size: 4
     max-concurrent-tasks: 10
   factor:
-    # LLM 配置（用于研报摘要生成 + 综合结论输出）
-    llm:
-      enabled: false                        # 设为 true 启用 LLM
-      base-url: http://localhost:11434/v1   # Ollama / DeepSeek / Qwen 等
-      api-key: ""                           # Ollama 无需 key；API key 留空
-      model: qwen2.5:14b                    # 模型名（确保已启动）
-      temperature: 0.3                       # 摘要用低温保持准确性
-      max-tokens: 1024                       # 最大输出 token 数
-      timeout: 30                            # 请求超时（秒）
     script-timeout-seconds: 30
     cache-size: 1000
   aktools:
@@ -100,6 +101,16 @@ quant:
     python-path: python  # Python 可执行文件路径
     script-dir: C:/Users/warning5/WorkBuddy/Claw/quant-platform/scripts  # Python 脚本绝对路径
     default-start-days: 3       # 默认从几天前开始更新
+  # 通知推送配置
+  notification:
+    channel: none  # none / serverchan / wecom / dingtalk
+    serverchan:
+      sendkey: ""   # Server酱 SendKey，https://sct.ftqq.com/ 获取
+    wecom:
+      webhook-url: ""  # 企业微信机器人 Webhook URL
+    dingtalk:
+      webhook-url: ""  # 钉钉机器人 Webhook URL
+      secret: ""      # 钉钉加签密钥（可选）
 
 
 

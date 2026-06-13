@@ -1,0 +1,23 @@
+CREATE TABLE IF NOT EXISTS llm_analysis (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    stock_code VARCHAR(20) NOT NULL COMMENT '股票代码',
+    stock_name VARCHAR(50) DEFAULT NULL COMMENT '股票名称',
+    analysis_date DATE NOT NULL COMMENT '分析日期',
+    model VARCHAR(50) DEFAULT 'deepseek-chat' COMMENT '使用的LLM模型',
+    recommendation VARCHAR(10) DEFAULT 'WATCH' COMMENT 'BUY/WATCH/SKIP',
+    buy_price_low DECIMAL(10,3) DEFAULT NULL COMMENT '买入价下限',
+    buy_price_high DECIMAL(10,3) DEFAULT NULL COMMENT '买入价上限',
+    stop_loss DECIMAL(10,3) DEFAULT NULL COMMENT '止损价',
+    target_price DECIMAL(10,3) DEFAULT NULL COMMENT '目标价',
+    risk_level VARCHAR(10) DEFAULT 'MEDIUM' COMMENT 'LOW/MEDIUM/HIGH',
+    logic TEXT DEFAULT NULL COMMENT '投资逻辑',
+    position_advice VARCHAR(100) DEFAULT NULL COMMENT '仓位建议',
+    time_horizon VARCHAR(50) DEFAULT NULL COMMENT '投资周期',
+    catalysts VARCHAR(500) DEFAULT NULL COMMENT '催化剂(分号分隔)',
+    risks VARCHAR(500) DEFAULT NULL COMMENT '风险(分号分隔)',
+    raw_response TEXT DEFAULT NULL COMMENT 'LLM原始返回JSON',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_stock_date (stock_code, analysis_date),
+    KEY idx_date (analysis_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='LLM推理分析结果';

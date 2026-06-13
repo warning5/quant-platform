@@ -41,7 +41,6 @@ public class RecommendationController {
         try {
             LocalDate date = req != null ? req.getDate() : null;
             Integer topN = req != null ? req.getTopN() : null;
-            String factorProfile = req != null ? req.getFactorProfile() : null;
             Long strategyId = req != null ? req.getStrategyId() : null;
             String weightMode = req != null ? req.getWeightMode() : null;
             Boolean enableConfidenceControl = req != null && req.getEnableConfidenceControl() != null
@@ -50,7 +49,7 @@ public class RecommendationController {
             List<RecommendationService.FactorDiagnostic> diagnostics = new ArrayList<>();
 
             List<StockRecommendation> recommendations = recommendationService.generateRecommendations(
-                    date, topN, factorProfile, strategyId, weightMode, diagnostics, enableConfidenceControl);
+                    date, topN, strategyId, weightMode, diagnostics, enableConfidenceControl);
 
             Map<String, Object> result = new HashMap<>();
             if (!recommendations.isEmpty()) {
@@ -113,10 +112,10 @@ public class RecommendationController {
     }
 
     /**
-     * 获取所有有推荐记录的策略ID列表（用于前端筛选下拉）
+     * 获取所有有推荐记录的策略列表（用于前端筛选下拉，含名称）
      */
     @GetMapping("/strategies-with-data")
-    public ApiResponse<List<Long>> strategiesWithData() {
+    public ApiResponse<List<Map<String, Object>>> strategiesWithData() {
         return ApiResponse.success(recommendationService.strategiesWithData());
     }
 
@@ -256,8 +255,8 @@ public class RecommendationController {
         /** 最终推荐数量，默认20 */
         private Integer topN;
         /** 因子组合配置: EXISTING/NORMAL/NEW_QUALITY/HOT/COMPREHENSIVE（旧版，优先使用 strategyId） */
-        private String factorProfile;
-        /** 策略ID，从策略列表选择，优先于 factorProfile */
+        private String factorProfile;  // @Deprecated 已废弃，请使用 strategyId
+        /** 策略ID，从策略列表选择（因子配置从数据库读取） */
         private Long strategyId;
         /** 权重模式: STATIC(固定权重) / IC(动态IC加权) */
         private String weightMode;
