@@ -262,6 +262,9 @@ public class MarketDataService {
 
         // 股票：查 stock_daily 表
         List<StockDaily> dailies = clickHouseStockService.getStockDaily(code, startDate, endDate);
+        if (dailies.isEmpty()) {
+            log.warn("[getBarsInRange] {} (parsedCode={}) 无K线数据, startDate={}, endDate={}", symbol, code, startDate, endDate);
+        }
 
         return dailies.stream()
                 .map(sd -> toMarketBar(sd, market))

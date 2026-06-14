@@ -1855,7 +1855,10 @@ public class RecommendationService {
         try {
             LocalDate startDate = date.minusDays(40); // 多取一些保证20个交易日
             List<MarketDailyBar> bars = marketDataService.getBarsInRange(stockCode, startDate, date);
-            if (bars == null || bars.isEmpty()) return null;
+            if (bars == null || bars.isEmpty()) {
+                log.warn("[calcSuggestedBuyPrice] {} getBarsInRange返回空, date={}, startDate={}", stockCode, date, startDate);
+                return null;
+            }
 
             // 计算MA20：取最近20根K线的收盘均值
             int count = Math.min(20, bars.size());

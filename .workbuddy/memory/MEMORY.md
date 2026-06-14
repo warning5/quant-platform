@@ -13,7 +13,6 @@
 - 缠论引擎：K线合并→分型→笔→线段→中枢→走势→买卖点（Java+Python双版本）
 - 回测：3种归因(Brinson/因子风格/FF3)+蒙特卡洛+参数优化+Walk-Forward
 - 模拟盘：信号生成/执行/风控/预警/分红处理
-- 自选股看板(Watchlist)：分组管理+目标价+止损+观测期+到期提醒
 
 ## 关键约定
 - 估值分位因子(VAL_PE_PERCENTILE, VAL_PB_PERCENTILE)已封装为独立因子，通过Python recompute_factors.py计算
@@ -26,7 +25,7 @@
 
 ## 当前阶段（2026-06）
 - Phase 1~5全部开发完成
-- 新增模块：LLM推理(DeepSeek API) + 分钟K线采集 + 盘中监控 + 持仓管理
+- 新增模块：LLM推理(DeepSeek API) + 分钟K线采集 + 盘中监控
 - LLM统一配置：llm.enabled/base-url/api-key/model（OpenAI兼容接口，支持DeepSeek/Ollama/Qwen等）
 - LlmService支持enable_thinking参数（DeepSeek V4思考模式），思考token按输出token计费
 - 旧别名deepseek-chat/deepseek-reasoner将于2026/07/24废弃，已改用deepseek-v4-flash/deepseek-v4-pro

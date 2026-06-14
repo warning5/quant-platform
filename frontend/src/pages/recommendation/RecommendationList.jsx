@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { Card, Table, Button, Tag, Select, Space, Statistic, Row, Col, Typography, Tooltip, Spin, message, Progress, DatePicker, Divider, Modal, Popconfirm, Switch } from 'antd';
+import { Card, Table, Button, Tag, Select, Space, Statistic, Row, Col, Typography, Tooltip, Spin, Progress, DatePicker, Divider, Modal, Popconfirm, Switch } from 'antd';
+import { message } from '../../utils/messageUtil';
 import dayjs from 'dayjs';
 import { ThunderboltOutlined, ReloadOutlined, LineChartOutlined, StockOutlined, RiseOutlined, FallOutlined, MinusOutlined, QuestionCircleOutlined, RadarChartOutlined, StopOutlined, UnlockOutlined } from '@ant-design/icons';
 import { recommendationApi, blacklistApi, confidenceApi } from '../../api';
@@ -8,6 +9,41 @@ import api from '../../api';
 import ReactEcharts from 'echarts-for-react';
 
 const { Title, Text } = Typography;
+
+
+// ── 中国交易日判断（用于DatePicker disabledDate） ──
+const HOLIDAYS_2026 = [
+  '2026-01-01', '2026-01-02', '2026-01-03',
+  '2026-02-17', '2026-02-18', '2026-02-19', '2026-02-20',
+  '2026-02-21', '2026-02-22', '2026-02-23',
+  '2026-04-04', '2026-04-05', '2026-04-06',
+  '2026-05-01', '2026-05-02', '2026-05-03', '2026-05-04', '2026-05-05',
+  '2026-10-01', '2026-10-02', '2026-10-03', '2026-10-04',
+  '2026-10-05', '2026-10-06', '2026-10-07',
+];
+
+const MAKEUP_DAYS_2026 = [
+  '2026-02-14', '2026-02-15',
+  '2026-10-10',
+];
+
+function isNonTradingDay(current) {
+  if (!current) return false;
+  const dateStr = current.format('YYYY-MM-DD');
+  if (MAKEUP_DAYS_2026.includes(dateStr)) return false;
+  if (HOLIDAYS_2026.includes(dateStr)) return true;
+  if (current.day() === 0 || current.day() === 6) return true;
+  return false;
+}
+
+// 从今天往前找最近的交易日
+function getLatestTradingDay() {
+  let d = dayjs();
+  while (isNonTradingDay(d)) {
+    d = d.subtract(1, 'day');
+  }
+  return d.format('YYYY-MM-DD');
+}
 
 // ── 市场环境配色 ──
 const REGIME_CONFIG = {
@@ -92,7 +128,7 @@ export default function RecommendationList() {
   const [weightInfo, setWeightInfo] = useState(null); // Phase 2: 动态权重
   const [strategies, setStrategies] = useState([]);
   const [selectedStrategyId, setSelectedStrategyId] = useState(null);
-  const [screenDate, setScreenDate] = useState(null);
+  const [screenDate, setScreenDate] = useState(() => getLatestTradingDay());
   const [factorDiagnostics, setFactorDiagnostics] = useState(null); // IC加权诊断
   const [diagExpanded, setDiagExpanded] = useState(false); // 已剔除/异常面板默认收起
   const [weightMode, setWeightMode] = useState('STATIC'); // 权重模式: STATIC(固定) / IC(动态IC)
@@ -785,7 +821,11 @@ export default function RecommendationList() {
             onChange={date => setScreenDate(date ? date.format('YYYY-MM-DD') : null)}
             placeholder="选择日期"
             style={{ width: 170 }}
-            disabledDate={(current) => current && current.isAfter(dayjs().endOf('day'))}
+            disabledDate={(current) => {
+            if (!current) return false;
+            if (current.isAfter(dayjs().endOf('day'))) return true;
+            return isNonTradingDay(current);
+          }}
           />
           <Select
             value={selectedStrategyId}

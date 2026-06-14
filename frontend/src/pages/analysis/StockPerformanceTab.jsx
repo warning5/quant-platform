@@ -110,7 +110,7 @@ export function StockPerformanceTab({ data, code }) {
               background: '#fafafa',
               textAlign: 'center',
             }}
-            bodyStyle={{ padding: '10px 8px' }}
+            styles={{ body: {padding: '10px 8px'} }}
           >
             <Statistic
               title={<span style={{ fontSize: 11, color: '#666' }}>YTD涨幅（今年至今）</span>}
@@ -137,7 +137,7 @@ export function StockPerformanceTab({ data, code }) {
               background: excessVal >= 0 ? '#fff2f0' : '#f6ffed',
               textAlign: 'center',
             }}
-            bodyStyle={{ padding: '10px 8px' }}
+            styles={{ body: {padding: '10px 8px'} }}
           >
             <Statistic
               title={
@@ -172,7 +172,7 @@ export function StockPerformanceTab({ data, code }) {
               background: rsRatingVal >= 80 ? '#fff0f0' : '#fafafa',
               textAlign: 'center',
             }}
-            bodyStyle={{ padding: '10px 8px' }}
+            styles={{ body: {padding: '10px 8px'} }}
           >
             <Statistic
               title={

@@ -242,42 +242,42 @@ export function NewsEventTab({ data, code, catalysts }) {
       {/* 统计卡片 */}
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={4}>
-          <Card size="small" bodyStyle={{ padding: '10px 12px', textAlign: 'center' }}>
+          <Card size="small" styles={{ body: {padding: '10px 12px', textAlign: 'center'} }}>
             <div style={{ fontSize: 11, color: '#999' }}>新闻评分</div>
             <div style={{ fontSize: 22, fontWeight: 600, color: '#1890ff' }}>{newsScore}</div>
             <div style={{ fontSize: 11, color: '#999' }}>/10分</div>
           </Card>
         </Col>
         <Col span={4}>
-          <Card size="small" bodyStyle={{ padding: '10px 12px', textAlign: 'center' }}>
+          <Card size="small" styles={{ body: {padding: '10px 12px', textAlign: 'center'} }}>
             <div style={{ fontSize: 11, color: '#999' }}>近30天</div>
             <div style={{ fontSize: 22, fontWeight: 600, color: '#333' }}>{total30d}</div>
             <div style={{ fontSize: 11, color: '#999' }}>条新闻</div>
           </Card>
         </Col>
         <Col span={4}>
-          <Card size="small" bodyStyle={{ padding: '10px 12px', textAlign: 'center' }}>
+          <Card size="small" styles={{ body: {padding: '10px 12px', textAlign: 'center'} }}>
             <div style={{ fontSize: 11, color: '#999' }}>利好新闻</div>
             <div style={{ fontSize: 22, fontWeight: 600, color: '#f5222d' }}>{positive30d}</div>
             <div style={{ fontSize: 11, color: '#999' }}>条</div>
           </Card>
         </Col>
         <Col span={4}>
-          <Card size="small" bodyStyle={{ padding: '10px 12px', textAlign: 'center' }}>
+          <Card size="small" styles={{ body: {padding: '10px 12px', textAlign: 'center'} }}>
             <div style={{ fontSize: 11, color: '#999' }}>风险新闻</div>
             <div style={{ fontSize: 22, fontWeight: 600, color: '#52c41a' }}>{negative30d}</div>
             <div style={{ fontSize: 11, color: '#999' }}>条</div>
           </Card>
         </Col>
         <Col span={4}>
-          <Card size="small" bodyStyle={{ padding: '10px 12px', textAlign: 'center' }}>
+          <Card size="small" styles={{ body: {padding: '10px 12px', textAlign: 'center'} }}>
             <div style={{ fontSize: 11, color: '#999' }}>事件标签</div>
             <div style={{ fontSize: 22, fontWeight: 600, color: '#722ed1' }}>{tagged30d}</div>
             <div style={{ fontSize: 11, color: '#999' }}>条</div>
           </Card>
         </Col>
         <Col span={4}>
-          <Card size="small" bodyStyle={{ padding: '10px 12px', textAlign: 'center' }}>
+          <Card size="small" styles={{ body: {padding: '10px 12px', textAlign: 'center'} }}>
             <div style={{ fontSize: 11, color: '#999' }}>情感偏向</div>
             <div style={{ fontSize: 18, fontWeight: 600, color: biasColor }}>
               {biasLabel}

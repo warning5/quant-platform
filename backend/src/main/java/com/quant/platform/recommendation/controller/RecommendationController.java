@@ -3,6 +3,7 @@ package com.quant.platform.recommendation.controller;
 import com.quant.platform.common.dto.ApiResponse;
 import com.quant.platform.factor.ic.domain.FactorIcRecord;
 import com.quant.platform.factor.ic.service.FactorIcService;
+import com.quant.platform.monitor.IntradayMonitorService;
 import com.quant.platform.recommendation.domain.StockRecommendation;
 import com.quant.platform.recommendation.service.RecommendationService;
 import com.fasterxml.jackson.annotation.JsonFormat;
@@ -27,10 +28,12 @@ public class RecommendationController {
 
     private final RecommendationService recommendationService;
     private final FactorIcService factorIcService;
+    private final IntradayMonitorService intradayMonitorService;
 
-    public RecommendationController(RecommendationService recommendationService, FactorIcService factorIcService) {
+    public RecommendationController(RecommendationService recommendationService, FactorIcService factorIcService, IntradayMonitorService intradayMonitorService) {
         this.recommendationService = recommendationService;
         this.factorIcService = factorIcService;
+        this.intradayMonitorService = intradayMonitorService;
     }
 
     /**
@@ -74,6 +77,14 @@ public class RecommendationController {
                 if (icDate != null) {
                     result.put("icDataDate", icDate.toString());
                 }
+            }
+
+            // 生成推荐成功后，自动刷新盘中监控目标价缓存
+            try {
+                intradayMonitorService.loadTargetPrices();
+                log.info("[Recommendation] 已自动刷新监控目标价");
+            } catch (Exception ex) {
+                log.warn("[Recommendation] 刷新监控目标价失败: {}", ex.getMessage());
             }
 
             return ApiResponse.success("推荐列表生成成功", result);

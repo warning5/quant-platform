@@ -130,7 +130,7 @@ export default function AttributionHub({ taskId }) {
                 : <Tag color="warning" style={{marginLeft:8,fontSize:10}}>数据异常</Tag>)
               : <Tag color="default" style={{marginLeft:8,fontSize:10}}>不可用</Tag>
             }
-            <Tooltip overlayStyle={{maxWidth:400}} title="Fama-French 三因子模型：用市场(MKT)、规模(SMB)、价值(HML)三个标准因子回归组合超额收益，诊断策略风格暴露。">
+            <Tooltip styles={{ root: {maxWidth:400} }} title="Fama-French 三因子模型：用市场(MKT)、规模(SMB)、价值(HML)三个标准因子回归组合超额收益，诊断策略风格暴露。">
               <QuestionCircleOutlined style={{marginLeft:4,color:'#8c8c8c',cursor:'help'}} />
             </Tooltip>
           </Button>
@@ -181,7 +181,7 @@ export default function AttributionHub({ taskId }) {
             onClick={() => setAlphaMonitorOpen(true)}
           >
             Alpha 滚动监控
-            <Tooltip overlayStyle={{maxWidth:680}} title={
+            <Tooltip styles={{ root: {maxWidth:680} }} title={
               <div style={{maxWidth:680,maxHeight:520,overflowY:'auto',lineHeight:1.7,fontSize:13}}>
                 <p style={{margin:0,fontWeight:600,fontSize:14}}>Alpha 滚动窗口监控</p>
                 <p style={{margin:'6px 0'}}><b>用途：</b>追踪策略「选股能力」是否随时间退化。当因子被市场发现、风格切换或过拟合失效时，Alpha 会从高位持续下滑——滚动监控能最早发现这一趋势。</p>
@@ -217,7 +217,7 @@ export default function AttributionHub({ taskId }) {
             onClick={() => setStyleMonitorOpen(true)}
           >
             风格β 漂移监控
-            <Tooltip overlayStyle={{maxWidth:400}} title="FF3 滚动窗口 SMB/HML beta 序列分析 + 风格漂移预警">
+            <Tooltip styles={{ root: {maxWidth:400} }} title="FF3 滚动窗口 SMB/HML beta 序列分析 + 风格漂移预警">
               <QuestionCircleOutlined style={{marginLeft:4,color:'#8c8c8c',cursor:'help'}} />
             </Tooltip>
           </Button>
@@ -227,7 +227,7 @@ export default function AttributionHub({ taskId }) {
       {/* ── 归因详情弹窗 ── */}
       <Modal title={<>
         <PieChartOutlined style={{marginRight:8}}/>Brinson 行业归因详情
-        <Tooltip overlayStyle={{ maxWidth: 520 }} title={
+        <Tooltip styles={{ root: {maxWidth: 520} }} title={
           <div style={{maxWidth:520,lineHeight:1.8}}>
             <p style={{margin:0,fontWeight:600}}>Brinson 归因模型</p>
             <p style={{margin:'4px 0'}}><b>思路：</b>将策略超额收益分解为「行业配置」（是否选对行业）+「行业内选股」（是否选对个股）+「交互效应」（两者是否同向）。适合行业集中度高、持仓周期长的低频策略。</p>
@@ -254,7 +254,7 @@ export default function AttributionHub({ taskId }) {
       {/* 因子风格归因 弹窗 */}
       <Modal title={<>
         <BarChartOutlined style={{marginRight:8}}/>因子风格归因详情
-        <Tooltip overlayStyle={{ maxWidth: 560 }} title={
+        <Tooltip styles={{ root: {maxWidth: 560} }} title={
           <div style={{maxWidth:560,lineHeight:1.8}}>
             <p style={{margin:0,fontWeight:600}}>因子风格归因模型</p>
             <p style={{margin:'4px 0'}}><b>思路：</b>将策略超额收益对动量/波动率/市值/换手率四个风格因子做多元回归（OLS），拆解为各因子的 β 暴露 × 因子收益。衡量「赚的是因子贝塔的钱，还是选股能力的 α」。适合高换手率、因子驱动的量化策略。</p>
@@ -282,7 +282,7 @@ export default function AttributionHub({ taskId }) {
       {/* FF3 风格归因 弹窗 */}
       <Modal title={<>
         <FundOutlined style={{marginRight:8}}/>FF3 三因子风格归因
-        <Tooltip overlayStyle={{ maxWidth: 680 }} title={
+        <Tooltip styles={{ root: {maxWidth: 680} }} title={
           <div style={{maxWidth:680,lineHeight:1.8}}>
             <p style={{margin:0,fontWeight:600}}>Fama-French 三因子模型</p>
             <p style={{margin:'4px 0'}}><b>思路：</b>用市场(MKT)、规模(SMB)、价值(HML)三个标准因子回归组合超额收益，诊断"赚的是市场Beta还是规模/价值溢价"，评估风格暴露的合理性。</p>
@@ -343,7 +343,7 @@ export default function AttributionHub({ taskId }) {
       {/* Alpha 滚动监控 弹窗 */}
       <Modal title={<>
         <LineChartOutlined style={{marginRight:8}}/>Alpha 滚动窗口监控
-        <Tooltip overlayStyle={{ maxWidth: 680 }} title={
+        <Tooltip styles={{ root: {maxWidth: 680} }} title={
           <div style={{maxWidth:680,maxHeight:500,overflowY:'auto',lineHeight:1.7,fontSize:13}}>
             <p style={{margin:0,fontWeight:600,fontSize:14}}>Alpha 滚动窗口监控</p>
             <p style={{margin:'6px 0'}}><b>用途：</b>追踪策略「选股能力」是否随时间退化。因子被市场发现、风格切换或过拟合失效时，Alpha 会从高位下滑——多窗口对比能最早发现。</p>
@@ -1110,7 +1110,7 @@ function BrinsonDetail({ taskId }) {
             tip: '超额收益 − 估算交易成本。正值=扣除成本后仍跑赢基准。' },
         ].map((m, i) => (
           <Col key={i} span={3} style={{textAlign:'center',padding:'4px 8px',borderRight:i<7?'1px solid #e8e8e8':'none'}}>
-            <Tooltip title={m.tip} placement="top" overlayStyle={{ maxWidth: 420 }}>
+            <Tooltip title={m.tip} placement="top" styles={{ root: {maxWidth: 420} }}>
               <div style={{fontSize:11,color:'#888',cursor:'help'}}>
                 {m.label} <span style={{fontSize:10,color:'#bbb'}}>ⓘ</span>
               </div>
@@ -1454,7 +1454,7 @@ function BrinsonConclusion({ summary, industrySummary, periods }) {
             : (item.val >= 0 ? '#52c41a' : '#cf1322');
           return (
             <div key={idx} style={{textAlign:'center',padding:'2px 10px',borderRight:idx<arr.length-1?'1px solid #e8e8e8':'none',whiteSpace:'nowrap',cursor:item.tip?'help':'default'}}>
-              <Tooltip title={item.tip} placement="top" overlayStyle={{ maxWidth: 420 }}>
+              <Tooltip title={item.tip} placement="top" styles={{ root: {maxWidth: 420} }}>
                 <div style={{fontSize:12,color:'#888'}}>
                   {item.label}{item.tip && <span style={{marginLeft:2,color:'#bbb',fontSize:10}}>ⓘ</span>}
                 </div>
@@ -1767,7 +1767,7 @@ function FactorDetail({ taskId }) {
           }},
           { title: '含义', dataIndex: 'description', width: 220, ellipsis: true,
             render: v => <Text type="secondary" style={{fontSize:11}}>{v}</Text> },
-          { title: (<Tooltip overlayStyle={{maxWidth:460}} title={
+          { title: (<Tooltip styles={{ root: {maxWidth:460} }} title={
                 <div style={{lineHeight:1.9,fontSize:12}}>
                   <p style={{margin:'0 0 6px',fontWeight:700}}>β 暴露（Beta Exposure）</p>
                   <p style={{margin:'2px 0'}}><b>含义：</b>策略对单个因子的敏感度。β=0.5 表示该因子值每变化 1 个标准差，策略日超额收益平均变化 0.5 个标准差。</p>
@@ -2086,7 +2086,7 @@ function FactorConclusionHeader({ betas, summary, regressionDetail }) {
             : (typeof item.val === 'number' && item.val >= 0 ? '#52c41a' : '#cf1322');
           return (
             <div key={idx} style={{textAlign:'center',padding:'2px 10px',borderRight:idx<arr.length-1?'1px solid #e8e8e8':'none',whiteSpace:'nowrap',cursor:item.tip?'help':'default'}}>
-              <Tooltip title={item.tip} placement="top" overlayStyle={{ maxWidth: 560 }}>
+              <Tooltip title={item.tip} placement="top" styles={{ root: {maxWidth: 560} }}>
                 <div style={{fontSize:12,color:'#888'}}>
                   {item.label}{item.tip && <span style={{marginLeft:2,color:'#bbb',fontSize:10}}>ⓘ</span>}
                 </div>
@@ -2473,7 +2473,7 @@ function FF3Detail({ taskId }) {
             rowKey={r => r.factorCode}
             columns={[
               { title: '因子', dataIndex: 'factorCode', width: 60 },
-              { title: <Tooltip overlayStyle={{maxWidth:460}} title={
+              { title: <Tooltip styles={{ root: {maxWidth:460} }} title={
                 <div style={{lineHeight:1.9,fontSize:12}}>
                   <p style={{margin:'0 0 6px',fontWeight:700}}>β（风格 Beta）</p>
                   <p style={{margin:'2px 0'}}><b>含义：</b>策略对 MKT/SMB/HML 三个被动风格因子的暴露。β_MKT 衡量大盘联动，β_SMB 衡量大小盘偏好，β_HML 衡量价值/成长倾向。</p>
@@ -2792,7 +2792,7 @@ function StyleMonitorPanel({ taskId }) {
     <div>
       {/* 说明 Tooltip */}
       <div style={{marginBottom:12,display:'flex',alignItems:'center',justifyContent:'flex-end'}}>
-        <Tooltip overlayStyle={{ maxWidth: 700 }} title={driftTooltipContent}>
+        <Tooltip styles={{ root: {maxWidth: 700} }} title={driftTooltipContent}>
           <Button size="small" type="text" icon={<QuestionCircleOutlined style={{fontSize:14,color:'#8c8c8c'}}/>}>
             监控原理 &amp; 判定逻辑
           </Button>

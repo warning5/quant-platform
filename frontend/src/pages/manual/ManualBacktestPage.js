@@ -19,7 +19,7 @@ export default function ManualBacktestPage() {
       </div>
 
       {/* 顶部锚点导航 */}
-      <Card size="small" style={{ marginBottom: 12 }} bodyStyle={{ padding: '8px 12px' }}>
+      <Card size="small" style={{ marginBottom: 12 }} styles={{ body: {padding: '8px 12px'} }}>
         <Space size={[4, 4]} wrap>
           <a onClick={() => scrollTo('overview')}><Tag color="blue">功能概述</Tag></a>
           <a onClick={() => scrollTo('config')}><Tag color="green">回测配置</Tag></a>

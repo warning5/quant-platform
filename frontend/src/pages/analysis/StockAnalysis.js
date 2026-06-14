@@ -2062,7 +2062,7 @@ function IndicatorRow({ label, value, score, maxScore, desc, color }) {
         <Tooltip
           title={<span style={{ fontSize: 12, lineHeight: '18px' }}>{interp}</span>}
           placement="top"
-          overlayStyle={{ maxWidth: 320 }}
+          styles={{ root: {maxWidth: 320} }}
         >
           <QuestionCircleOutlined style={{ fontSize: 12, color: '#bfbfbf', cursor: 'pointer' }} />
         </Tooltip>
@@ -2213,7 +2213,7 @@ function ResearchReportTab({ data, code }) {
       <Row gutter={16} style={{ marginBottom: 16 }}>
         {/* 左：评级共识 */}
         <Col span={8}>
-          <Card size="small" title="评级共识" bodyStyle={{ padding: '12px 16px' }}>
+          <Card size="small" title="评级共识" styles={{ body: {padding: '12px 16px'} }}>
             <Tag color="blue" style={{ fontSize: 14, padding: '2px 12px' }}>{rs.latestRating || '-'}</Tag>
             <Text type="secondary" style={{ marginLeft: 8 }}>{rs.consensusDesc}</Text>
             <div style={{ marginTop: 12, marginBottom: 4, fontSize: 13 }}>买入+增持占比</div>
@@ -2223,7 +2223,7 @@ function ResearchReportTab({ data, code }) {
 
         {/* 中：覆盖强度 */}
         <Col span={7}>
-          <Card size="small" title="覆盖强度" bodyStyle={{ padding: '12px 16px' }}>
+          <Card size="small" title="覆盖强度" styles={{ body: {padding: '12px 16px'} }}>
             <Row gutter={[16, 8]}>
               <Col span={8}><Text type="secondary">覆盖机构</Text></Col>
               <Col span={8}><Text type="secondary">研报总数</Text></Col>
@@ -2237,7 +2237,7 @@ function ResearchReportTab({ data, code }) {
 
         {/* 右：EPS 一致预期 */}
         <Col span={9}>
-          <Card size="small" title="EPS 一致预期" bodyStyle={{ padding: '12px 16px' }}>
+          <Card size="small" title="EPS 一致预期" styles={{ body: {padding: '12px 16px'} }}>
             <Row gutter={12}>
               {epsList.map((ep, i) => (
                 <Col span={8} key={ep.year || i} style={{ textAlign: 'center' }}>
@@ -2320,7 +2320,7 @@ function ResearchReportTab({ data, code }) {
       <Row gutter={16} style={{ marginTop: 16 }}>
         {/* 左：涉及机构 */}
         <Col span={8}>
-          <Card size="small" title={`涉及机构（${instCount} 家）`} bodyStyle={{ padding: 0, maxHeight: 420, overflowY: 'auto' }}>
+          <Card size="small" title={`涉及机构（${instCount} 家）`} styles={{ body: {padding: 0, maxHeight: 420, overflowY: 'auto'} }}>
             {(cov.institutions || []).length > 0 ? (
               <Table
                 size="small"
@@ -2345,7 +2345,7 @@ function ResearchReportTab({ data, code }) {
 
         {/* 右：具体研报列表 */}
         <Col span={16}>
-          <Card size="small" title={`研报列表（最近 ${data.recentReports?.length || 0} 篇）`} bodyStyle={{ padding: 0, maxHeight: 420, overflowY: 'auto' }}>
+          <Card size="small" title={`研报列表（最近 ${data.recentReports?.length || 0} 篇）`} styles={{ body: {padding: 0, maxHeight: 420, overflowY: 'auto'} }}>
             {(data.recentReports || []).length > 0 ? (
               <Table
                 size="small"
@@ -2604,7 +2604,7 @@ function IndustryCorrelationTab({ data, code }) {
       {/* 第一行：三指标卡 */}
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={8}>
-          <Card size="small" bodyStyle={{ padding: '12px 16px', textAlign: 'center' }}>
+          <Card size="small" styles={{ body: {padding: '12px 16px', textAlign: 'center'} }}>
             <div style={{ fontSize: 12, color: '#999', marginBottom: 4, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 4 }}>
               Beta系数
               <Tooltip title="衡量个股相对于所属行业的波动敏感度。Beta>1 表示个股波动大于行业（高弹性），Beta<1 表示波动小于行业（防御性）。例如 Beta=0.63 意味着行业涨跌1%时，个股平均波动0.63%。">
@@ -2616,7 +2616,7 @@ function IndustryCorrelationTab({ data, code }) {
           </Card>
         </Col>
         <Col span={8}>
-          <Card size="small" bodyStyle={{ padding: '12px 16px', textAlign: 'center' }}>
+          <Card size="small" styles={{ body: {padding: '12px 16px', textAlign: 'center'} }}>
             <div style={{ fontSize: 12, color: '#999', marginBottom: 4, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 4 }}>
               行业相关系数
               <Tooltip title="衡量个股与行业指数价格走势的线性相关程度，范围 -1 到 1。>0.7 强联动（几乎同步），0.3~0.7 中等相关，<0.3 弱相关（有独立行情）。例如 0.4 表示个股不完全跟随行业，有自己的独立逻辑。">
@@ -2628,7 +2628,7 @@ function IndustryCorrelationTab({ data, code }) {
           </Card>
         </Col>
         <Col span={8}>
-          <Card size="small" bodyStyle={{ padding: '12px 16px', textAlign: 'center' }}>
+          <Card size="small" styles={{ body: {padding: '12px 16px', textAlign: 'center'} }}>
             <div style={{ fontSize: 12, color: '#999', marginBottom: 4, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 4 }}>
               行业分布（今日）
               <Tooltip title="所属行业今日整体涨跌分布。涨/跌家数反映板块情绪，可用于判断个股是否跑赢板块内多数股票。">
@@ -2742,25 +2742,25 @@ function LimitUpTab({ data, code }) {
       {/* 统计卡 */}
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={6}>
-          <Card size="small" bodyStyle={{ padding: '12px 16px', textAlign: 'center' }}>
+          <Card size="small" styles={{ body: {padding: '12px 16px', textAlign: 'center'} }}>
             <div style={{ fontSize: 12, color: '#999' }}>涨停次数</div>
             <div style={{ fontSize: 24, fontWeight: 600, color: '#f5222d' }}>{stats.limitUpCount || 0}</div>
           </Card>
         </Col>
         <Col span={6}>
-          <Card size="small" bodyStyle={{ padding: '12px 16px', textAlign: 'center' }}>
+          <Card size="small" styles={{ body: {padding: '12px 16px', textAlign: 'center'} }}>
             <div style={{ fontSize: 12, color: '#999' }}>跌停次数</div>
             <div style={{ fontSize: 24, fontWeight: 600, color: '#52c41a' }}>{stats.limitDownCount || 0}</div>
           </Card>
         </Col>
         <Col span={6}>
-          <Card size="small" bodyStyle={{ padding: '12px 16px', textAlign: 'center' }}>
+          <Card size="small" styles={{ body: {padding: '12px 16px', textAlign: 'center'} }}>
             <div style={{ fontSize: 12, color: '#999' }}>炸板次数</div>
             <div style={{ fontSize: 24, fontWeight: 600, color: '#fa8c16' }}>{stats.brokenCount || 0}</div>
           </Card>
         </Col>
         <Col span={6}>
-          <Card size="small" bodyStyle={{ padding: '12px 16px', textAlign: 'center' }}>
+          <Card size="small" styles={{ body: {padding: '12px 16px', textAlign: 'center'} }}>
             <div style={{ fontSize: 12, color: '#999' }}>统计区间</div>
             <div style={{ fontSize: 13, fontWeight: 500, color: '#333' }}>
               {stats.firstDate ? stats.firstDate.toString().slice(0,10) : '-'} ~ {stats.lastDate ? stats.lastDate.toString().slice(0,10) : '-'}
@@ -2848,19 +2848,19 @@ function BlockTradeTab({ data, code }) {
       {/* 统计卡 */}
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={6}>
-          <Card size="small" bodyStyle={{ padding: '12px 16px', textAlign: 'center' }}>
+          <Card size="small" styles={{ body: {padding: '12px 16px', textAlign: 'center'} }}>
             <div style={{ fontSize: 12, color: '#999' }}>交易笔数</div>
             <div style={{ fontSize: 24, fontWeight: 600, color: '#333' }}>{stats.totalCount || 0}</div>
           </Card>
         </Col>
         <Col span={6}>
-          <Card size="small" bodyStyle={{ padding: '12px 16px', textAlign: 'center' }}>
+          <Card size="small" styles={{ body: {padding: '12px 16px', textAlign: 'center'} }}>
             <div style={{ fontSize: 12, color: '#999' }}>累计金额</div>
             <div style={{ fontSize: 20, fontWeight: 600, color: '#333' }}>{formatAmt(stats.totalAmount)}</div>
           </Card>
         </Col>
         <Col span={6}>
-          <Card size="small" bodyStyle={{ padding: '12px 16px', textAlign: 'center' }}>
+          <Card size="small" styles={{ body: {padding: '12px 16px', textAlign: 'center'} }}>
             <div style={{ fontSize: 12, color: '#999' }}>平均折价率</div>
             <div style={{ fontSize: 24, fontWeight: 600, color: avgDiscount != null && avgDiscount < 0 ? '#52c41a' : '#f5222d' }}>
               {avgDiscount != null ? (avgDiscount * 100).toFixed(2) + '%' : '-'}
@@ -2868,7 +2868,7 @@ function BlockTradeTab({ data, code }) {
           </Card>
         </Col>
         <Col span={6}>
-          <Card size="small" bodyStyle={{ padding: '12px 16px', textAlign: 'center' }}>
+          <Card size="small" styles={{ body: {padding: '12px 16px', textAlign: 'center'} }}>
             <div style={{ fontSize: 12, color: '#999' }}>统计区间</div>
             <div style={{ fontSize: 13, fontWeight: 500, color: '#333' }}>
               {stats.firstDate ? stats.firstDate.toString().slice(0,10) : '-'} ~ {stats.lastDate ? stats.lastDate.toString().slice(0,10) : '-'}
@@ -2880,7 +2880,7 @@ function BlockTradeTab({ data, code }) {
       {/* 买卖营业部 */}
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={12}>
-          <Card size="small" title="买方营业部（Top10）" bodyStyle={{ padding: 0 }}>
+          <Card size="small" title="买方营业部（Top10）" styles={{ body: {padding: 0} }}>
             {topBuy.length > 0 ? (
               <Table size="small" pagination={false} dataSource={topBuy} rowKey="branch"
                 columns={[
@@ -2893,7 +2893,7 @@ function BlockTradeTab({ data, code }) {
           </Card>
         </Col>
         <Col span={12}>
-          <Card size="small" title="卖方营业部（Top10）" bodyStyle={{ padding: 0 }}>
+          <Card size="small" title="卖方营业部（Top10）" styles={{ body: {padding: 0} }}>
             {topSell.length > 0 ? (
               <Table size="small" pagination={false} dataSource={topSell} rowKey="branch"
                 columns={[

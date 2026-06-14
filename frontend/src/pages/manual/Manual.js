@@ -124,7 +124,7 @@ export default function Manual() {
       </div>
 
       {/* 顶部导航菜单 */}
-      <Card size="small" style={{ marginBottom: 12 }} bodyStyle={{ padding: '8px 12px' }}>
+      <Card size="small" style={{ marginBottom: 12 }} styles={{ body: {padding: '8px 12px'} }}>
         <Menu
           mode="horizontal"
           selectedKeys={[]}

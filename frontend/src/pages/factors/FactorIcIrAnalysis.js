@@ -752,7 +752,7 @@ export default function FactorIcIrAnalysis() {
                 <p style={{ margin: 0 }}>4. 用有效因子构建策略或优化权重</p>
               </div>
             }
-            overlayStyle={{ maxWidth: 640 }}
+            styles={{ root: {maxWidth: 640} }}
           >
             <InfoCircleOutlined style={{ marginLeft: 6, color: '#bbb', fontSize: 16, cursor: 'pointer' }} />
           </Popover>

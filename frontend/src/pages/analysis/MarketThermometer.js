@@ -123,7 +123,7 @@ export default function MarketThermometer() {
               </div>
             }
             placement="bottomLeft"
-            overlayStyle={{ maxWidth: 480 }}
+            styles={{ root: {maxWidth: 480} }}
           >
             <QuestionCircleOutlined style={{ color: '#999', cursor: 'pointer', fontSize: 16 }} />
           </Tooltip>
@@ -218,7 +218,7 @@ export default function MarketThermometer() {
                     );
                   })()
                 }
-                overlayStyle={{ maxWidth: 420 }}
+                styles={{ root: {maxWidth: 420} }}
               >
                 <QuestionCircleOutlined style={{ color: '#999', cursor: 'pointer', fontSize: 13 }} />
               </Tooltip>
@@ -247,7 +247,7 @@ export default function MarketThermometer() {
                               <div style={{ marginTop: 6, color: '#aaa', fontSize: 11 }}>数据来源：stock_daily（ClickHouse）</div>
                             </div>
                           }
-                          overlayStyle={{ maxWidth: 400 }}
+                          styles={{ root: {maxWidth: 400} }}
                         >
                           <QuestionCircleOutlined style={{ color: '#999', cursor: 'pointer', fontSize: 13 }} />
                         </Tooltip>
@@ -282,7 +282,7 @@ export default function MarketThermometer() {
                               <div style={{ marginTop: 6, color: '#aaa', fontSize: 11 }}>数据来源：stock_daily（ClickHouse）</div>
                             </div>
                           }
-                          overlayStyle={{ maxWidth: 400 }}
+                          styles={{ root: {maxWidth: 400} }}
                         >
                           <QuestionCircleOutlined style={{ color: '#999', cursor: 'pointer', fontSize: 13 }} />
                         </Tooltip>
@@ -319,7 +319,7 @@ export default function MarketThermometer() {
                               </div>
                             </div>
                           }
-                          overlayStyle={{ maxWidth: 400 }}
+                          styles={{ root: {maxWidth: 400} }}
                         >
                           <QuestionCircleOutlined style={{ color: '#999', cursor: 'pointer', fontSize: 13 }} />
                         </Tooltip>
@@ -362,7 +362,7 @@ export default function MarketThermometer() {
                               <div style={{ marginTop: 6, color: '#aaa', fontSize: 11 }}>数据来源：沪深300指数 PE + 中债估值</div>
                             </div>
                           }
-                          overlayStyle={{ maxWidth: 400 }}
+                          styles={{ root: {maxWidth: 400} }}
                         >
                           <QuestionCircleOutlined style={{ color: '#999', cursor: 'pointer', fontSize: 13 }} />
                         </Tooltip>
@@ -398,7 +398,7 @@ export default function MarketThermometer() {
                               <div style={{ marginTop: 6, color: '#aaa', fontSize: 11 }}>数据来源：中金所（akshare）</div>
                             </div>
                           }
-                          overlayStyle={{ maxWidth: 400 }}
+                          styles={{ root: {maxWidth: 400} }}
                         >
                           <QuestionCircleOutlined style={{ color: '#999', cursor: 'pointer', fontSize: 13 }} />
                         </Tooltip>

@@ -27,7 +27,7 @@ export default function ManualOthersPage() {
       </div>
 
       {/* 顶部锚点导航 */}
-      <Card size="small" style={{ marginBottom: 12 }} bodyStyle={{ padding: '8px 12px' }}>
+      <Card size="small" style={{ marginBottom: 12 }} styles={{ body: {padding: '8px 12px'} }}>
         <Space size={[4, 4]} wrap>
           {othersNav.map(item => (
             <a key={item.id} onClick={() => scrollTo(item.id)}>
