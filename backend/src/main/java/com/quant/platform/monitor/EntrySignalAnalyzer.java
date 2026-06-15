@@ -9,8 +9,6 @@ import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -37,8 +35,8 @@ public class EntrySignalAnalyzer {
     @Value("${quant.monitor.signal.proximity-pct:0.02}")
     private double proximityPct;
 
-    /** 腾讯分钟K线接口 */
-    private static final String KLINE_URL = "http://proxy.finance.qq.com/ifzqgtimg/appstock/app/newfqkline/get?param=%s";
+    /** 腾讯分钟K线接口（mkline支持m5，newfqkline只支持day/week/month） */
+    private static final String KLINE_URL = "https://ifzq.gtimg.cn/appstock/app/kline/mkline?param=%s&_var=m5_today&r=%f";
 
     /** 信号权重配置 */
     private static final int W_BREAKOUT = 35;
@@ -251,25 +249,22 @@ public class EntrySignalAnalyzer {
 
     /**
      * 获取m5 K线数据
-     * @return 最近30根m5 K线，失败返回null
+     * @return 最近N根m5 K线，失败返回null
      */
     private List<KlineBar> fetchM5Kline(String stockCode) {
         try {
-            // 需要从stock_info查市场后缀来构造腾讯代码
-            // 这里简化：尝试三种市场后缀
             String tencentCode = guessTencentCode(stockCode);
-            String today = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE);
-            String yesterday = LocalDate.now().minusDays(1).format(DateTimeFormatter.ISO_LOCAL_DATE);
-            String param = String.format("%s,m5,%s,%s,30,qfq", tencentCode, yesterday, today);
-            String url = String.format(KLINE_URL, param);
+            // mkline接口参数格式: code,period,,count（不需要日期范围）
+            String param = String.format("%s,m5,,320", tencentCode);
+            String url = String.format(KLINE_URL, param, Math.random());
 
             java.net.http.HttpClient client = java.net.http.HttpClient.newBuilder()
-                    .connectTimeout(java.time.Duration.ofSeconds(3))
+                    .connectTimeout(java.time.Duration.ofSeconds(5))
                     .build();
 
             java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
                     .uri(java.net.URI.create(url))
-                    .timeout(java.time.Duration.ofSeconds(3))
+                    .timeout(java.time.Duration.ofSeconds(8))
                     .GET()
                     .build();
 
@@ -277,7 +272,15 @@ public class EntrySignalAnalyzer {
 
             if (response.statusCode() != 200) return null;
 
-            return parseM5Kline(response.body(), tencentCode);
+            // mkline响应以_var值开头（如"m5_today="），需要去掉前缀才是JSON
+            String body = response.body();
+            String jsonPrefix = "m5_today=";
+            int jsonStart = body.indexOf(jsonPrefix);
+            if (jsonStart >= 0) {
+                body = body.substring(jsonStart + jsonPrefix.length());
+            }
+
+            return parseM5Kline(body, tencentCode);
 
         } catch (Exception e) {
             log.debug("[EntrySignal] 获取m5 K线失败: code={}, error={}", stockCode, e.getMessage());
@@ -287,6 +290,7 @@ public class EntrySignalAnalyzer {
 
     /**
      * 解析m5 K线JSON
+     * mkline返回格式: data.{code}.m5 = [[datetime,open,close,high,low,volume,{},turnover],...]
      */
     private List<KlineBar> parseM5Kline(String body, String tencentCode) {
         try {
@@ -299,20 +303,26 @@ public class EntrySignalAnalyzer {
                 if (fields.hasNext()) stockData = fields.next().getValue();
             }
 
-            // 找K线数组
+            // 找K线数组：优先找m5键，其次找qfq/day前缀键
             JsonNode klineArray = null;
-            var entryIter = stockData.fields();
-            while (entryIter.hasNext()) {
-                var entry = entryIter.next();
-                if (entry.getKey().startsWith("qfq") || entry.getKey().startsWith("day")) {
-                    if (entry.getValue().isArray()) {
+            // 1) 直接找m5键（mkline接口）
+            if (stockData.has("m5") && stockData.get("m5").isArray()) {
+                klineArray = stockData.get("m5");
+            }
+            // 2) 找qfq/day前缀键（newfqkline接口兜底）
+            if (klineArray == null) {
+                var entryIter = stockData.fields();
+                while (entryIter.hasNext()) {
+                    var entry = entryIter.next();
+                    if ((entry.getKey().startsWith("qfq") || entry.getKey().startsWith("day"))
+                            && entry.getValue().isArray()) {
                         klineArray = entry.getValue();
                         break;
                     }
                 }
             }
 
-            if (klineArray == null) return null;
+            if (klineArray == null || klineArray.isEmpty()) return null;
 
             List<KlineBar> bars = new ArrayList<>();
             for (JsonNode kline : klineArray) {
@@ -326,6 +336,12 @@ public class EntrySignalAnalyzer {
                 bar.volume = kline.get(5).asDouble();
                 bars.add(bar);
             }
+
+            // 只保留最近30根（足够计算MA30）
+            if (bars.size() > 50) {
+                bars = new ArrayList<>(bars.subList(bars.size() - 50, bars.size()));
+            }
+
             return bars;
 
         } catch (Exception e) {

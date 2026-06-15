@@ -40,6 +40,8 @@
 - 每日07:15自动推荐+推送通知
 - 盘中每10秒高频轮询候选股实时价格(qt.gtimg.cn)+SSE推送
 - K线并行拉取(CompletableFuture线程池，4线程)
+- m5分钟K线接口已修复：使用HTTPS mkline端点(https://ifzq.gtimg.cn/appstock/app/kline/mkline)，参数格式为code,m5,,320&_var=m5_today，响应需去掉_var前缀再解析JSON；北交所BJ股票m5数据为空，自动降级fallbackPriceOnly()
+- 腾讯分钟K线注意：qt.gtimg.cn用HTTP(快)，ifzq.gtimg.cn必须用HTTPS(HTTP会302重定向)
 - "我的收藏"和"持仓管理"已删除（价值低，与盘中监控/模拟盘重叠）
 
 ## 关键约定（补充）
