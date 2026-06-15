@@ -63,3 +63,56 @@ VALUES ('CUSTOM_MEAN_REVERSION', '均值回归策略',
         'CUSTOM', 'ACTIVE', 'WEEKLY', 15, 'EQUAL', 0.08,
         '// 均值回归策略脚本\n// 使用动量因子反向选取：前期跌幅较大的股票可能有反弹机会\ndef momMap = factorValues[''MOM20''] ?: [:]\ndef volMap = factorValues[''VOL20''] ?: [:]\ndef scores = [:]\nmarketBars.each { bar ->\n    def mom = momMap[bar.symbol]?.rankValue?.toDouble() ?: 0.5\n    def vol = volMap[bar.symbol]?.rankValue?.toDouble() ?: 0.5\n    def score = (1 - mom) * 60 + (1 - Math.abs(vol - 0.5) * 2) * 40\n    scores[bar.symbol] = score\n}\ndef top = scores.sort { -it.value }.take(maxPositions ?: 15)\ndef totalScore = top.values().sum() ?: 1.0\nreturn top.collectEntries { k, v -> [k, v / totalScore] }',
         'system');
+
+-- ============================================================
+-- 以下为 A股适配策略（2026-06-15 新增6个，排除北向资金）
+-- ============================================================
+
+-- 8. 红利低波 ⭐ 无阻塞
+INSERT IGNORE INTO strategy_definition (strategy_code, strategy_name, description, strategy_type, status, rebalance_frequency, max_position_count, position_size_type, stop_loss_pct, factor_config_json, author)
+VALUES ('DIVIDEND_LOW_VOL', '红利低波',
+        '高股息率+低波动率组合，熊市防御性强，适合稳健型投资者',
+        'FACTOR_LONG', 'ACTIVE', 'MONTHLY', 20, 'EQUAL', 0.08,
+        '{"factors":[{"code":"VAL_DIVIDEND_YIELD","weight":0.35,"direction":1},{"code":"VOL20","weight":0.25,"direction":-1},{"code":"VAL_PE_PERCENTILE","weight":0.15,"direction":-1},{"code":"FIN_ROE","weight":0.15,"direction":1},{"code":"VAL_PB_PERCENTILE","weight":0.10,"direction":-1}]}',
+        'system');
+
+-- 9. 涨停板 ⭐ 无阻塞
+INSERT IGNORE INTO strategy_definition (strategy_code, strategy_name, description, strategy_type, status, rebalance_frequency, max_position_count, position_size_type, stop_loss_pct, factor_config_json, author)
+VALUES ('LIMIT_UP_MOMENTUM', '涨停板',
+        '捕捉涨停板股票短期动量，基于涨停次数+短期动量+量比，高风险高收益',
+        'MOMENTUM', 'ACTIVE', 'WEEKLY', 10, 'EQUAL', 0.10,
+        '{"factors":[{"code":"LIMIT_UP_COUNT","weight":0.40,"direction":1},{"code":"MOM5","weight":0.30,"direction":1},{"code":"VOLUME_RATIO","weight":0.30,"direction":1}]}',
+        'system');
+
+-- 10. 板块轮动（降级版）⚠️ 可绕过，用行业动量替代资金流
+INSERT IGNORE INTO strategy_definition (strategy_code, strategy_name, description, strategy_type, status, rebalance_frequency, max_position_count, position_size_type, stop_loss_pct, factor_config_json, filter_config_json, author)
+VALUES ('SECTOR_ROTATION', '板块轮动',
+        '基于行业动量轮动，选择近期表现最好的行业中的低估值优质股票。降级版：用个股动量代替行业资金流',
+        'FACTOR_LONG', 'ACTIVE', 'MONTHLY', 20, 'EQUAL', 0.08,
+        '{"factors":[{"code":"MOM20","weight":0.30,"direction":1},{"code":"VAL_PE_PERCENTILE","weight":0.25,"direction":-1},{"code":"VOL20","weight":0.20,"direction":-1},{"code":"FIN_ROE","weight":0.25,"direction":1}]}',
+        '{"excludeIndustries":["证券","银行","保险","信托","房地产开发","钢铁","煤炭开采","电力"]}',
+        'system');
+
+-- 11. 市场情绪（降级版）⚠️ 可绕过，用技术指标准替代VIX
+INSERT IGNORE INTO strategy_definition (strategy_code, strategy_name, description, strategy_type, status, rebalance_frequency, max_position_count, position_size_type, stop_loss_pct, factor_config_json, author)
+VALUES ('MARKET_SENTIMENT', '市场情绪',
+        '基于换手率异常+成交量惊喜+涨停次数捕捉市场情绪，适合短线操作。降级版：用技术指标准替代VIX',
+        'MOMENTUM', 'ACTIVE', 'WEEKLY', 15, 'EQUAL', 0.10,
+        '{"factors":[{"code":"TURNOVER_ANOMALY","weight":0.25,"direction":1},{"code":"VOLUME_SURPRISE","weight":0.25,"direction":1},{"code":"LIMIT_UP_COUNT","weight":0.25,"direction":1},{"code":"MOM5","weight":0.25,"direction":1}]}',
+        'system');
+
+-- 12. 估值修复（LLM版基础版）⚠️ 部分阻塞，LLM解析增减持/回购后可完全解决
+INSERT IGNORE INTO strategy_definition (strategy_code, strategy_name, description, strategy_type, status, rebalance_frequency, max_position_count, position_size_type, stop_loss_pct, factor_config_json, author)
+VALUES ('VALUATION_RECOVERY_LLM', '估值修复',
+        '低估值+高质量+现金流安全，后续加入LLM新闻解析（增持/回购事件）',
+        'FACTOR_LONG', 'ACTIVE', 'MONTHLY', 20, 'EQUAL', 0.08,
+        '{"factors":[{"code":"VAL_PE_PERCENTILE","weight":0.30,"direction":-1},{"code":"VAL_PB_PERCENTILE","weight":0.20,"direction":-1},{"code":"PRICE_52W_HIGH_PCT","weight":0.20,"direction":-1},{"code":"FIN_EARNINGS_QUALITY","weight":0.15,"direction":1},{"code":"VAL_FCF_YIELD","weight":0.15,"direction":1}]}',
+        'system');
+
+-- 13. 事件驱动（降级版）❌ 核心阻塞，无一致预期数据
+INSERT IGNORE INTO strategy_definition (strategy_code, strategy_name, description, strategy_type, status, rebalance_frequency, max_position_count, position_size_type, stop_loss_pct, factor_config_json, author)
+VALUES ('EVENT_DRIVEN_DOWNGRADED', '事件驱动（降级版）',
+        '基于业绩增长+盈利质量，降级版无一致预期数据，无法判断超预期',
+        'FACTOR_LONG', 'ACTIVE', 'MONTHLY', 15, 'EQUAL', 0.08,
+        '{"factors":[{"code":"FIN_NET_PROFIT_YOY","weight":0.30,"direction":1},{"code":"FIN_REVENUE_YOY","weight":0.30,"direction":1},{"code":"FIN_EARNINGS_QUALITY","weight":0.20,"direction":1},{"code":"FIN_ROE","weight":0.20,"direction":1}]}',
+        'system');

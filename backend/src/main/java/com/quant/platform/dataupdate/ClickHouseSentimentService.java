@@ -100,14 +100,13 @@ public class ClickHouseSentimentService {
     private Map<String, Object> queryCoverageFromClickHouse() {
         Map<String, Object> result = new LinkedHashMap<>();
         int totalRecords = 0;
-        int tableCount = 0;
         List<Map<String, Object>> tableStats = new ArrayList<>();
 
         for (String table : SENTIMENT_TABLES) {
             try {
                 // 查询记录数
                 String countSql = "SELECT COUNT(*) as cnt FROM " + table;
-                Long count = 0L;
+                long count = 0L;
                 try (Connection conn = getConnection();
                      PreparedStatement stmt = conn.prepareStatement(countSql);
                      ResultSet rs = stmt.executeQuery()) {
@@ -117,8 +116,7 @@ public class ClickHouseSentimentService {
                 }
 
                 // 始终统计，即使 count=0
-                tableCount++;
-                totalRecords += count;
+                totalRecords += (int) count;
 
                 // 查询时间范围（不同表日期字段名不同）
                 String dateCol = getDateColumn(table);
@@ -154,12 +152,14 @@ public class ClickHouseSentimentService {
             }
         }
 
-        // 追加：基金持仓、股东人数、新闻、国债收益率（MySQL-only 表）
+        // 追加：基金持仓、股东人数、新闻、国债收益率、一致预期、业绩快报（MySQL-only 表）
         for (String[] extra : new String[][]{
                 {"stock_fund_holder", "基金持仓", "report_date"},
                 {"stock_shareholder", "股东人数", "report_date"},
                 {"stock_news", "新闻", "publish_date"},
-                {"macro_bond_yield", "国债收益率", "trade_date"}
+                {"macro_bond_yield", "国债收益率", "trade_date"},
+                {"stock_consensus_estimate", "一致预期", "update_time"},
+                {"stock_earnings_report", "业绩快报", "report_date"}
         }) {
             String table = extra[0];
             String name = extra[1];
@@ -169,8 +169,8 @@ public class ClickHouseSentimentService {
                 if (count == null) count = 0;
                 totalRecords += count;
 
-                // 新闻表 publish_date 含时间，只取 DATE 部分
-                String dateSql = "news".equals(extra[0])
+                // 新闻/一致预期的日期字段含时间，只取 DATE 部分
+                String dateSql = ("news".equals(extra[0]) || "stock_consensus_estimate".equals(extra[0]))
                         ? "SELECT MIN(DATE(" + dateCol + ")) as min_date, MAX(DATE(" + dateCol + ")) as max_date FROM " + table
                         : "SELECT MIN(" + dateCol + ") as min_date, MAX(" + dateCol + ") as max_date FROM " + table;
                 Map<String, Object> dateRange = jdbcTemplate.queryForMap(dateSql);

@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Card, Row, Col, Statistic, Button, Input, Select, DatePicker, Form,
-  Checkbox, Tag, Typography, Space, Alert, Table, Tooltip, Progress, Badge, Divider, Tabs, Spin, Modal, Popconfirm, Radio
+  Checkbox, Tag, Typography, Space, Alert, Table, Tooltip, Progress, Badge, Divider, Tabs, Spin, Modal, Popconfirm, Radio, Collapse
 } from 'antd';
+import { QuestionCircleOutlined } from '@ant-design/icons';
 import { message } from '../../utils/messageUtil';
 import {
   PlayCircleOutlined, StopOutlined, ReloadOutlined,
@@ -954,6 +955,8 @@ function DataUpdate() {
             fetchNews: values.fetchNews !== false,
             fetchBondYield: values.fetchBondYield !== false,
             fetchShenwanIndex: values.fetchShenwanIndex !== false,
+            fetchConsensusEstimate: values.fetchConsensusEstimate !== false,
+            fetchEarningsReport: values.fetchEarningsReport !== false,
           } : {
             // westock 模式：显式关闭其他模块，防止 Java 默认值 true 导致误执行
             fetchLhb: false,
@@ -969,6 +972,8 @@ function DataUpdate() {
             fetchNews: false,
             fetchBondYield: false,
             fetchShenwanIndex: false,
+            fetchConsensusEstimate: false,
+            fetchEarningsReport: false,
           }),
           moneyflowSource: sentimentMoneyflowSource,
           sentimentCodes: (values.sentimentCodes || '').trim() || null,
@@ -1768,41 +1773,69 @@ function DataUpdate() {
             <Col span={7}>
               <Statistic
                 title="数据表"
-                formatter={() => <Text style={{ fontSize: 12, whiteSpace: 'nowrap' }}>涨跌停/龙虎榜/融资融券/机构调研/大宗交易/市场活跃度/资金流向/公告/国债收益率/申万行业指数</Text>}
+                formatter={() => <Text style={{ fontSize: 12, whiteSpace: 'nowrap' }}>涨跌停/龙虎榜/融资融券/机构调研/大宗交易/市场活跃度/资金流向/公告/国债收益率/申万行业指数/一致预期/业绩快报</Text>}
                 valueStyle={{ fontSize: 12 }}
               />
             </Col>
           </Row>
-          {/* 各表详细统计 */}
+          {/* 各表详细统计 - 默认收起 */}
           {sentimentCoverage?.tables && sentimentCoverage.tables.length > 0 && (
-            <Row gutter={[12, 12]} style={{ marginTop: 12 }}>
-              {sentimentCoverage.tables.map(table => (
-                <Col style={{ flex: '0 0 19.8%', maxWidth: '19.8%' }} key={table.table}>
-                  <Card size="small" style={{ backgroundColor: '#fafafa', borderLeft: '3px solid #722ed1', marginBottom: 4 }}>
-                    <Statistic
-                      title={table.name}
-                      value={table.recordCount || 0}
-                      suffix={
-                        <span style={{ fontSize: 11, color: '#8c8c8c', fontWeight: 400, marginLeft: 4 }}>
-                          条 · {
-                            table.minDate && table.maxDate
-                              ? (() => {
-                                  // 统一取前10位（日期部分），避免 datetime 含时间导致显示异常
-                                  const minD = String(table.minDate).slice(0, 10);
-                                  const maxD = String(table.maxDate).slice(0, 10);
-                                  const crossYear = minD.slice(0, 4) !== maxD.slice(0, 4);
-                                  return crossYear ? `${minD}~${maxD}` : `${minD.slice(5)}~${maxD.slice(5)}`;
-                                })()
-                              : ''
-                          }
-                        </span>
-                      }
-                      valueStyle={{ fontSize: 14, color: '#722ed1', fontWeight: 600 }}
-                    />
-                  </Card>
-                </Col>
-              ))}
-            </Row>
+            <Collapse
+              size="small"
+              ghost
+              style={{ marginTop: 12 }}
+              items={[{
+                key: 'detail',
+                label: <span style={{ color: '#8c8c8c' }}>各表详细统计 ({sentimentCoverage.tables.length} 张表)</span>,
+                children: (
+                  <Row gutter={[12, 12]}>
+                    {sentimentCoverage.tables.map(table => (
+                      <Col style={{ flex: '0 0 19.8%', maxWidth: '19.8%' }} key={table.table}>
+                        <Card size="small" style={{ backgroundColor: '#fafafa', borderLeft: '3px solid #722ed1', marginBottom: 4 }}>
+                          <Statistic
+                            title={table.name === '一致预期'
+                              ? (<span>一致预期{' '}
+                                <Tooltip title="同花顺一致预期数据（预测净利润），用于事件驱动策略对比实际业绩vs预期，生成超预期/不及预期信号">
+                                  <QuestionCircleOutlined style={{ color: '#999', fontSize: 12 }} />
+                                </Tooltip></span>)
+                              : table.name === '业绩快报'
+                                ? (<span>业绩快报{' '}
+                                  <Tooltip title="东方财富业绩快报数据（EPS/营收/净利/ROE等），用于事件驱动策略判断业绩超预期或不及预期，触发买入/卖出信号">
+                                    <QuestionCircleOutlined style={{ color: '#999', fontSize: 12 }} />
+                                  </Tooltip></span>
+                                )
+                                : table.name
+                            }
+                            value={table.recordCount || 0}
+                            suffix={
+                              <span style={{ fontSize: 11, color: '#8c8c8c', fontWeight: 400, marginLeft: 4 }}>
+                                条 · {
+                                  table.minDate && table.maxDate
+                                    ? (() => {
+                                        const fmt = (s) => {
+                                          const d = String(s).slice(0, 10);
+                                          // 无横杠的纯数字日期（如20240630）→ 补横杠
+                                          if (/^\d{8}$/.test(d)) return d.slice(0,4) + '-' + d.slice(4,6) + '-' + d.slice(6);
+                                          return d;
+                                        };
+                                        const minD = fmt(table.minDate);
+                                        const maxD = fmt(table.maxDate);
+                                        const crossYear = minD.slice(0, 4) !== maxD.slice(0, 4);
+                                        return crossYear ? `${minD}~${maxD}` : `${minD.slice(5)}~${maxD.slice(5)}`;
+                                      })()
+                                    : ''
+                                }
+                              </span>
+                            }
+                            valueStyle={{ fontSize: 14, color: '#722ed1', fontWeight: 600 }}
+                          />
+                        </Card>
+                      </Col>
+                    ))}
+                  </Row>
+                ),
+              }]}
+            />
           )}
         </Card>
 
@@ -1823,6 +1856,8 @@ function DataUpdate() {
             fetchNews: true,
             fetchBondYield: true,
             fetchShenwanIndex: true,
+            fetchConsensusEstimate: true,
+            fetchEarningsReport: true,
             force: false,
             moneyflowSource: 'AKSHARE',
           }}>
@@ -1859,6 +1894,8 @@ function DataUpdate() {
                         fetchNews: false,
                         fetchBondYield: false,
                         fetchShenwanIndex: false,
+                        fetchConsensusEstimate: false,
+                        fetchEarningsReport: false,
                         force: false,
                       });
                     } else {
@@ -1878,6 +1915,8 @@ function DataUpdate() {
                         fetchNews: true,
                         fetchBondYield: true,
                         fetchShenwanIndex: true,
+                        fetchConsensusEstimate: true,
+                        fetchEarningsReport: true,
                         force: false,
                       });
                     }
@@ -1912,6 +1951,7 @@ function DataUpdate() {
                         fetchMoneyflow: true, fetchNotice: true, fetchFundHolder: true,
                         fetchShareholder: true, fetchNews: true,
                         fetchBondYield: true, fetchShenwanIndex: true,
+                        fetchConsensusEstimate: true, fetchEarningsReport: true,
                       })}>
                       全选
                     </Button>
@@ -1926,12 +1966,14 @@ function DataUpdate() {
                           fetchFundHolder: !vals.fetchFundHolder,
                           fetchShareholder: !vals.fetchShareholder, fetchNews: !vals.fetchNews,
                           fetchBondYield: !vals.fetchBondYield, fetchShenwanIndex: !vals.fetchShenwanIndex,
+                          fetchConsensusEstimate: !vals.fetchConsensusEstimate,
+                          fetchEarningsReport: !vals.fetchEarningsReport,
                         });
                       }}>
                       反选
                     </Button>
                   </Space>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '8px 16px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: '8px 16px' }}>
                     <Form.Item name="fetchLhb" valuePropName="checked" style={{ marginBottom: 0 }}>
                       <Checkbox>龙虎榜</Checkbox>
                     </Form.Item>
@@ -1970,6 +2012,12 @@ function DataUpdate() {
                     </Form.Item>
                     <Form.Item name="fetchShenwanIndex" valuePropName="checked" style={{ marginBottom: 0 }}>
                       <Checkbox>申万行业指数</Checkbox>
+                    </Form.Item>
+                    <Form.Item name="fetchConsensusEstimate" valuePropName="checked" style={{ marginBottom: 0 }}>
+                      <Checkbox>一致预期</Checkbox>
+                    </Form.Item>
+                    <Form.Item name="fetchEarningsReport" valuePropName="checked" style={{ marginBottom: 0 }}>
+                      <Checkbox>业绩快报</Checkbox>
                     </Form.Item>
                   </div>
                 </div>
@@ -2039,6 +2087,8 @@ function DataUpdate() {
                   {sentimentTask.configFetchNews && <Tag size="small">新闻</Tag>}
                   {sentimentTask.configFetchBondYield !== false && <Tag size="small">国债收益率</Tag>}
                   {sentimentTask.configFetchShenwanIndex !== false && <Tag size="small">申万行业指数</Tag>}
+                  {sentimentTask.configFetchConsensusEstimate !== false && <Tag size="small">一致预期</Tag>}
+                  {sentimentTask.configFetchEarningsReport !== false && <Tag size="small">业绩快报</Tag>}
                 </Text>
               )}
             </Space>

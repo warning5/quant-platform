@@ -4,8 +4,10 @@ import com.quant.platform.stock.analysis.domain.AnalysisOverview;
 import com.quant.platform.stock.analysis.engine.TradingSignalEngine;
 import com.quant.platform.stock.analysis.service.AnalysisService;
 import com.quant.platform.stock.analysis.service.BidAskService;
+import com.quant.platform.stock.analysis.service.EventSignalService;
 import com.quant.platform.stock.analysis.service.InstitutionCoverageService;
 import com.quant.platform.stock.analysis.service.MarketThermometerService;
+import com.quant.platform.stock.analysis.service.NewsEventParser;
 import com.quant.platform.stock.analysis.service.NewsService;
 import com.quant.platform.stock.analysis.service.WorkflowReportService;
 import lombok.RequiredArgsConstructor;
@@ -74,6 +76,12 @@ public class StockAnalysisController {
 
     @Autowired(required = false)
     private WorkflowReportService workflowReportService;
+
+    @Autowired(required = false)
+    private NewsEventParser newsEventParser;
+
+    @Autowired(required = false)
+    private EventSignalService eventSignalService;
 
     /**
      * 获取个股分析总览（含四维度评分）
@@ -692,6 +700,45 @@ public class StockAnalysisController {
         } catch (Exception e) {
             log.error("K线数据获取失败: code={}, error={}", code, e.getMessage(), e);
             return ResponseEntity.internalServerError().body(errorBody("K线数据获取失败：" + e.getMessage()));
+        }
+    }
+
+    /**
+     * 手动触发新闻事件解析
+     * POST /api/analysis/news-event/parse
+     */
+    @GetMapping("/news-event/parse")
+    public ResponseEntity<?> parseNewsEvents() {
+        if (newsEventParser == null) {
+            return ResponseEntity.status(503).body(errorBody("新闻事件解析服务不可用"));
+        }
+        try {
+            int count = newsEventParser.parseUnprocessedNews();
+            Map<String, Object> data = new HashMap<>();
+            data.put("parsedCount", count);
+            data.put("message", "成功解析 " + count + " 条新闻");
+            return ResponseEntity.ok(new ApiResponse<>(data));
+        } catch (Exception e) {
+            log.error("新闻事件解析失败: error={}", e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(errorBody("新闻事件解析失败：" + e.getMessage()));
+        }
+    }
+
+    /**
+     * 获取个股事件信号（超预期/不及预期）
+     * GET /api/analysis/event-signal?code=000001
+     */
+    @GetMapping("/event-signal")
+    public ResponseEntity<?> getEventSignal(@RequestParam String code) {
+        if (eventSignalService == null) {
+            return ResponseEntity.status(503).body(errorBody("事件信号服务不可用"));
+        }
+        try {
+            EventSignalService.EventSignal signal = eventSignalService.getEventSignal(code.trim());
+            return ResponseEntity.ok(new ApiResponse<>(signal));
+        } catch (Exception e) {
+            log.error("事件信号获取失败: code={}, error={}", code, e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(errorBody("事件信号获取失败：" + e.getMessage()));
         }
     }
 }

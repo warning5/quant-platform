@@ -88,3 +88,21 @@ CREATE TABLE IF NOT EXISTS `stock_company`
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_unicode_ci COMMENT ='股票公司信息表';
+
+-- 盘中监控自定义股票表
+CREATE TABLE IF NOT EXISTS `monitor_custom_stock`
+(
+    `id`             BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    `stock_code`     VARCHAR(20)  NOT NULL COMMENT '股票代码（纯代码，如600519）',
+    `stock_name`     VARCHAR(100) NOT NULL COMMENT '股票名称',
+    `buy_price_low`  DECIMAL(10, 2) COMMENT '买入区间下沿',
+    `buy_price_high` DECIMAL(10, 2) COMMENT '买入区间上沿',
+    `stop_loss`      DECIMAL(10, 2) COMMENT '止损价',
+    `target_price`   DECIMAL(10, 2) COMMENT '目标价',
+    `create_time`    DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_time`    DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_stock_code` (`stock_code`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci COMMENT ='盘中监控自定义股票表';

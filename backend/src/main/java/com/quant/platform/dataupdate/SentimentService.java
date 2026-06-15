@@ -102,12 +102,14 @@ public class SentimentService {
             }
         }
 
-        // 追加：基金持仓、股东人数、新闻、国债收益率（非情绪数据表，但同属数据采集管线）
+        // 追加：基金持仓、股东人数、新闻、国债收益率、一致预期、业绩快报（非情绪数据表，但同属数据采集管线）
         for (String[] extra : new String[][]{
                 {"stock_fund_holder", "基金持仓", "report_date"},
                 {"stock_shareholder", "股东人数", "report_date"},
                 {"stock_news", "新闻", "publish_date"},
-                {"macro_bond_yield", "国债收益率", "trade_date"}
+                {"macro_bond_yield", "国债收益率", "trade_date"},
+                {"stock_consensus_estimate", "一致预期", "update_time"},
+                {"stock_earnings_report", "业绩快报", "report_date"}
         }) {
             String table = extra[0];
             String name = extra[1];
@@ -117,8 +119,8 @@ public class SentimentService {
                 if (count == null) count = 0;
                 totalRecords += count;
 
-                // 新闻表 publish_date 含时间，只取 DATE 部分
-                String dateSql = "news".equals(extra[0])
+                // 新闻/一致预期的日期字段含时间，只取 DATE 部分
+                String dateSql = ("news".equals(extra[0]) || "stock_consensus_estimate".equals(extra[0]))
                         ? "SELECT MIN(DATE(" + dateCol + ")) as min_date, MAX(DATE(" + dateCol + ")) as max_date FROM " + table
                         : "SELECT MIN(" + dateCol + ") as min_date, MAX(" + dateCol + ") as max_date FROM " + table;
                 Map<String, Object> dateRange = jdbcTemplate.queryForMap(dateSql);

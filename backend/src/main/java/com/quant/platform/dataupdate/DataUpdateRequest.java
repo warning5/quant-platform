@@ -156,6 +156,16 @@ public class DataUpdateRequest {
     private boolean fetchShenwanIndex = true;
 
     /**
+     * 情绪数据：采集一致预期（同花顺，默认 true）
+     */
+    private boolean fetchConsensusEstimate = true;
+
+    /**
+     * 情绪数据：采集业绩快报（东方财富，默认 true）
+     */
+    private boolean fetchEarningsReport = true;
+
+    /**
      * 情绪数据：资金流向数据源
      * AKSHARE = akshare（默认，与原行为一致）
      * WESTOCK = westock-data（更快，推荐）

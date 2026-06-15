@@ -8,6 +8,8 @@
 ## 核心模块
 - 因子引擎：39+因子(技术14+财务25+缠论+估值6)，IC/IR分析，权重优化，Walk-Forward
 - 推荐管线(6步)：市场环境识别→选股→深度分析→评分融合→行业分散→黑名单过滤
+- 策略体系：7个核心策略 + 6个A股适配策略（红利低波/涨停板/板块轮动/市场情绪/估值修复/事件驱动），共13个
+- 北向资金策略暂时阻塞（个股持股数据周频延迟3~5天）
 - 策略置信度：4维度评分(命中率40+收益25+回撤20+波动15)，动态调整topN
 - 个股黑名单：自动评估+手动管理，按策略维度排除
 - 缠论引擎：K线合并→分型→笔→线段→中枢→走势→买卖点（Java+Python双版本）
@@ -25,14 +27,20 @@
 
 ## 当前阶段（2026-06）
 - Phase 1~5全部开发完成
-- 新增模块：LLM推理(DeepSeek API) + 分钟K线采集 + 盘中监控
+- 新增模块：LLM推理(DeepSeek API) + 分钟K线采集 + 盘中监控 + NewsEventParser + EventSignalService
 - LLM统一配置：llm.enabled/base-url/api-key/model（OpenAI兼容接口，支持DeepSeek/Ollama/Qwen等）
 - LlmService支持enable_thinking参数（DeepSeek V4思考模式），思考token按输出token计费
 - 旧别名deepseek-chat/deepseek-reasoner将于2026/07/24废弃，已改用deepseek-v4-flash/deepseek-v4-pro
+- NewsEventParser：LLM解析新闻→12种事件标签(BUYBACK/INCREASE/EARN_PRE等)，每10分钟工作日9-18点执行；Python采集只存原始新闻，情感分析+事件标签全部交给LLM
+- EventSignalService：一致预期vs业绩快报→超预期/不及预期信号，供事件驱动策略使用
+- 新增MySQL表：stock_consensus_estimate(一致预期293只/876行，同花顺源)、stock_earnings_report(业绩快报1373行，东财源)，均已集成到情绪数据Tab可手动触发采集
+- 估值修复/事件驱动/市场情绪策略自动应用新闻事件加分，事件驱动策略额外使用超预期信号
+- 盘中监控支持自定义股票（来源"客户定义"），刷新目标价时不被覆盖，API: POST /monitor/add-custom-stock, DELETE /monitor/custom-stock
 - VALUE_QUALITY策略模板：三层漏斗(估值+质量+技术)，15个因子
-- 每日07:15自动推荐+同步Watchlist+推送通知
-- 盘中每分钟监控候选股实时价格(qt.gtimg.cn)
-- 持仓管理：建仓/平仓/止损止盈/每日报告推送
+- 每日07:15自动推荐+推送通知
+- 盘中每10秒高频轮询候选股实时价格(qt.gtimg.cn)+SSE推送
+- K线并行拉取(CompletableFuture线程池，4线程)
+- "我的收藏"和"持仓管理"已删除（价值低，与盘中监控/模拟盘重叠）
 
 ## 关键约定（补充）
 - Spring Boot context-path=/api，controller的@RequestMapping不要加/api前缀

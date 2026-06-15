@@ -348,17 +348,15 @@ def fetch_news_for_stock(code, days=90, timeout=30):
         if not title:
             continue
         content = str(row.get("新闻内容", "") or "")[:1000]
-        sentiment, news_type = classify_sentiment(title, content)
-        event_tag = extract_event_tags(title, content)
         records.append({
             "code": code,
             "title": title[:500],
             "content": content[:2000],
             "source": str(row.get("文章来源", "") or "")[:50],
             "publish_date": pub_date,
-            "news_type": news_type,
-            "sentiment_score": sentiment,
-            "event_tag": event_tag,
+            "news_type": None,
+            "sentiment_score": None,
+            "event_tag": None,
             "url": str(row.get("新闻链接", "") or "")[:500],
         })
     return records
@@ -373,7 +371,8 @@ def upsert_news_batch(conn, records):
     VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
     ON DUPLICATE KEY UPDATE
         title = VALUES(title), content = VALUES(content),
-        sentiment_score = VALUES(sentiment_score), event_tag = VALUES(event_tag)
+        sentiment_score = IFNULL(sentiment_score, VALUES(sentiment_score)),
+        event_tag = IFNULL(event_tag, VALUES(event_tag))
     """
     cur = conn.cursor()
     total = 0

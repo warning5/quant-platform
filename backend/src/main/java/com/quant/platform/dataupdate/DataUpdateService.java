@@ -393,6 +393,36 @@ public class DataUpdateService {
                     }
                 }
 
+                // 串行执行一致预期脚本（同花顺）
+                if (request.isFetchConsensusEstimate() && !"CANCELLED".equals(task.getStatus())) {
+                    List<String> ceCmd = new ArrayList<>();
+                    ceCmd.add(pythonPath);
+                    ceCmd.add("-u");
+                    ceCmd.add("update_consensus_estimate.py");
+                    task.setCurrentStep("情绪数据 · 一致预期");
+                    broadcastStatus(task);
+                    boolean ceOk = runSingleScript(taskId, task, ceCmd, "一致预期");
+                    if (!ceOk) {
+                        broadcastLog(taskId, "[WARN] 一致预期采集失败，继续执行后续任务...");
+                        senOk = false;
+                    }
+                }
+
+                // 串行执行业绩快报脚本（东方财富）
+                if (request.isFetchEarningsReport() && !"CANCELLED".equals(task.getStatus())) {
+                    List<String> erCmd = new ArrayList<>();
+                    erCmd.add(pythonPath);
+                    erCmd.add("-u");
+                    erCmd.add("update_earnings_report.py");
+                    task.setCurrentStep("情绪数据 · 业绩快报");
+                    broadcastStatus(task);
+                    boolean erOk = runSingleScript(taskId, task, erCmd, "业绩快报");
+                    if (!erOk) {
+                        broadcastLog(taskId, "[WARN] 业绩快报采集失败");
+                        senOk = false;
+                    }
+                }
+
                 if (!"CANCELLED".equals(task.getStatus())) {
                     task.setStatus(senOk ? "SUCCESS" : "FAILED");
                     task.setProgress(100);
@@ -1195,6 +1225,8 @@ public class DataUpdateService {
                 msg.put("fetchNews", req.isFetchNews());
                 msg.put("fetchBondYield", req.isFetchBondYield());
                 msg.put("fetchShenwanIndex", req.isFetchShenwanIndex());
+                msg.put("fetchConsensusEstimate", req.isFetchConsensusEstimate());
+                msg.put("fetchEarningsReport", req.isFetchEarningsReport());
                 msg.put("moneyflowSource", req.getMoneyflowSource());
                 msg.put("emMoneyflowMode", req.getEmMoneyflowMode());
             }
