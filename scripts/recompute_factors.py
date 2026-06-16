@@ -48,10 +48,12 @@ from db_config import CLICKHOUSE_CONFIG, MYSQL_CONFIG
 
 # ---- 因子分组 ----
 TECH_FACTORS = ["MOM20", "MOM60", "VOL20", "TURN20", "SIZE", "RSI5", "BOLL_POS", "VPCORR20"]
-VOL_LIQ_FACTORS = ["VOL5", "VOL60", "VOL_RATIO", "AMIHUD", "TURNOVER_CHANGE", "VOLUME_RATIO"]
-# 估值+技术混合因子（日频，但依赖 pe_ttm/pb/high_price 字段）
-VAL_TECH_FACTORS = ["VAL_PE_PERCENTILE", "VAL_PB_PERCENTILE", "PRICE_52W_HIGH_PCT"]
-ALL_TECH_FACTORS = TECH_FACTORS + VOL_LIQ_FACTORS + VAL_TECH_FACTORS  # 17个日频因子
+VOL_LIQ_FACTORS = ["VOL5", "VOL60", "VOL_RATIO", "AMIHUD", "TURNOVER_CHANGE", "VOLUME_RATIO",
+                    "TURNOVER_ANOMALY", "VOLUME_SURPRISE", "LIMIT_UP_COUNT"]
+# 估值+技术混合因子（日频，但依赖 pe_ttm/pb/high_price/dividend/fcf 字段）
+VAL_TECH_FACTORS = ["VAL_PE_PERCENTILE", "VAL_PB_PERCENTILE", "PRICE_52W_HIGH_PCT",
+                     "VAL_DIVIDEND_YIELD", "VAL_FCF_YIELD"]
+ALL_TECH_FACTORS = TECH_FACTORS + VOL_LIQ_FACTORS + VAL_TECH_FACTORS  # 19个日频因子
 
 # 财务因子（季频，从 stock_financial_indicator 加载）
 # report_type: 1=Q1, 2=中报, 3=三季报, 4=年报
@@ -99,22 +101,56 @@ FIN_FACTORS = [
     "FIN_ROE_TTM",           # ROE(TTM)
     "FIN_REVENUE_TTM_YOY",   # 营收同比(TTM)
     "FIN_NET_PROFIT_TTM_YOY",# 净利同比(TTM)
-    # 价值因子 (Phase 1.2)
-    "VAL_FCF_YIELD",         # 自由现金流收益率 = FCF/总市值 × 100
-]  # 共37个财务因子
+    # 价值因子 (Phase 1.2) — VAL_FCF_YIELD 已移至日频因子(VAL_TECH_FACTORS)
+]  # 共36个财务因子
 
 
 def load_stock_daily():
     """加载全部 stock_daily，按 code 分组，按 trade_date 排序
-    含 pe_ttm/pb/high_price 供估值分位和52周回撤因子使用"""
+    含 pe_ttm/pb/high_price 供估值分位和52周回撤因子使用
+    含 dividend_per_share_12m/fcf 供股息率和FCF收益率日频计算使用"""
     print("[1/5] 加载 stock_daily 数据...")
     ch_client = clickhouse_connect.get_client(**CLICKHOUSE_CONFIG)
     mysql_conn = pymysql.connect(**MYSQL_CONFIG)
 
     try:
         mysql_cur = mysql_conn.cursor()
+
+        # 1) 市值
         mysql_cur.execute("SELECT code, total_market_cap FROM stock_info WHERE total_market_cap IS NOT NULL AND total_market_cap > 0")
         info_mcap = {code: float(mcap) / 10000 for code, mcap in mysql_cur.fetchall()}
+
+        # 2) 最近12个月每股派息 — 股息率日频计算
+        mysql_cur.execute("""
+            SELECT code, SUM(cash_dividend) as total_dps
+            FROM stock_dividend
+            WHERE cash_dividend > 0
+              AND ex_dividend_date >= DATE_SUB(CURDATE(), INTERVAL 13 MONTH)
+            GROUP BY code
+        """)
+        dividend_12m = {code: float(dps) for code, dps in mysql_cur.fetchall() if dps}
+        print(f"  加载分红数据: {len(dividend_12m)} 只股票有近12月派息")
+
+        # 3) 最新FCF — FCF收益率日频计算
+        mysql_cur.execute("""
+            SELECT fi.code, fi.free_cash_flow
+            FROM stock_financial_indicator fi
+            INNER JOIN (
+                SELECT code, MAX(end_date) as max_end
+                FROM stock_financial_indicator
+                WHERE free_cash_flow IS NOT NULL AND report_type IN (1,2,3,4)
+                GROUP BY code
+            ) latest ON fi.code = latest.code AND fi.end_date = latest.max_end
+            WHERE fi.free_cash_flow IS NOT NULL
+        """)
+        fcf_map = {}
+        for code, fcf in mysql_cur.fetchall():
+            if fcf is not None:
+                fv = float(fcf)
+                if fv != 0:  # 保留负值（FCF可以为负），只排除0/None
+                    fcf_map[code] = fv
+        print(f"  加载FCF数据: {len(fcf_map)} 只股票有最新FCF")
+
         mysql_cur.close()
 
         result = ch_client.query("""
@@ -137,6 +173,8 @@ def load_stock_daily():
                 "market_cap": info_mcap.get(code, 0.0),
                 "pe_ttm": float(pe_ttm) if pe_ttm else None,
                 "pb": float(pb) if pb else None,
+                "dividend_per_share_12m": dividend_12m.get(code, 0.0),
+                "fcf": fcf_map.get(code, None),
             })
         print(f"  加载 {len(rows):,} 条, {len(data)} 只股票")
         return data
@@ -395,6 +433,50 @@ def calc_volume_ratio(history):
     return recent / prior
 
 
+def calc_turnover_anomaly(history):
+    """换手率异常 = 今日换手率 / 近20日平均换手率
+    值>2表示今日换手是平均的2倍以上，异常活跃"""
+    if len(history) < 21:
+        return None
+    today_turn = history[-1].get("turnover", 0.0)
+    if today_turn == 0:
+        return None
+    window = history[-21:-1]  # 前20日
+    avg_turn = sum(d.get("turnover", 0.0) for d in window) / 20
+    if avg_turn == 0:
+        return None
+    return today_turn / avg_turn
+
+
+def calc_volume_surprise(history):
+    """成交量惊喜 = 今日成交量 / 近20日平均成交量
+    与量比类似但用单日/均值（量比是5日均/20日均）"""
+    if len(history) < 21:
+        return None
+    today_vol = history[-1].get("volume", 0.0)
+    if today_vol == 0:
+        return None
+    window = history[-21:-1]
+    avg_vol = sum(d.get("volume", 0.0) for d in window) / 20
+    if avg_vol == 0:
+        return None
+    return today_vol / avg_vol
+
+
+def calc_limit_up_count(history):
+    """涨停次数 = 近20日涨停次数（收盘价≥前收9.8%）
+    覆盖沪深主板/创业板/科创板，用9.8%阈值兼顾"""
+    if len(history) < 21:
+        return None
+    count = 0
+    for i in range(1, min(21, len(history))):
+        prev = history[-i]["close"]
+        curr = history[-i + 1]["close"]
+        if prev > 0 and curr >= prev * 1.098:
+            count += 1
+    return float(count)
+
+
 # ---- 新增估值+回撤因子 (Phase 1.1) ----
 
 def calc_pe_percentile(history):
@@ -455,6 +537,40 @@ def calc_price_52w_high_pct(history):
     return ((current_price - high_52w) / high_52w) * 100
 
 
+def calc_dividend_yield_daily(history):
+    """股息率(日频) = 最近12个月每股派息总和 / 当前收盘价 × 100
+    分红金额相对稳定(季度/年度变化)，但股价每天变化，因此日频计算更准确"""
+    if not history:
+        return None
+    dps_12m = history[-1].get("dividend_per_share_12m", 0.0)
+    if not dps_12m or dps_12m <= 0:
+        return None
+    close = history[-1]["close"]
+    if close <= 0:
+        return None
+    return (dps_12m / close) * 100
+
+
+def calc_fcf_yield_daily(history):
+    """自由现金流收益率(日频) = FCF / 总市值 × 100
+    FCF取最新财报数据(相对稳定)，但市值每天变化，因此日频计算更准确
+    市值单位万元，FCF单位元，需要统一"""
+    if not history:
+        return None
+    fcf = history[-1].get("fcf")
+    if fcf is None:
+        return None
+    mcap_wan = history[-1].get("market_cap", 0.0)  # 万元
+    if mcap_wan <= 0:
+        return None
+    # FCF(元) / 市值(万元×10000=元) × 100
+    mcap_yuan = mcap_wan * 10000
+    result = (fcf / mcap_yuan) * 100
+    if math.isnan(result) or math.isinf(result):
+        return None
+    return result
+
+
 # ---- 日频因子函数注册表 ----
 TECH_FACTOR_FUNCS = {
     "MOM20": lambda h: calc_mom(h, 20),
@@ -472,10 +588,17 @@ TECH_FACTOR_FUNCS = {
     "AMIHUD": calc_amihud,
     "TURNOVER_CHANGE": calc_turnover_change,
     "VOLUME_RATIO": calc_volume_ratio,
+    # 第二批新增（涨停板/市场情绪策略缺失因子）
+    "TURNOVER_ANOMALY": calc_turnover_anomaly,
+    "VOLUME_SURPRISE": calc_volume_surprise,
+    "LIMIT_UP_COUNT": calc_limit_up_count,
     # Phase 1.1: 估值分位+52周回撤
     "VAL_PE_PERCENTILE": calc_pe_percentile,
     "VAL_PB_PERCENTILE": calc_pb_percentile,
     "PRICE_52W_HIGH_PCT": calc_price_52w_high_pct,
+    # Phase 4: 股息率+FCF收益率（日频，市值/股价每天变）
+    "VAL_DIVIDEND_YIELD": calc_dividend_yield_daily,
+    "VAL_FCF_YIELD": calc_fcf_yield_daily,
 }
 
 
@@ -551,9 +674,7 @@ def compute_finance_factors(fin_data, fin_factor_codes, start_date, end_date, ma
         "FIN_ROE_TTM":               (lambda r: _fval(r, "roe_ttm"),                       "ROE(TTM)"),
         "FIN_REVENUE_TTM_YOY":       (lambda r: _fval(r, "revenue_ttm_yoy"),               "营收增速(TTM)"),
         "FIN_NET_PROFIT_TTM_YOY":    (lambda r: _fval(r, "net_profit_ttm_yoy"),            "净利增速(TTM)"),
-        # 自由现金流收益率 (Phase 1.2) — 需要市值数据，这里先取FCF，在计算阶段换算
-        "VAL_FCF_YIELD":             (lambda r: _fval(r, "free_cash_flow"),                "FCF收益率"),
-    }
+    }  # 共36个财务因子
 
     for code, reports in fin_data.items():
         for rpt in reports:
@@ -587,19 +708,6 @@ def compute_finance_factors(fin_data, fin_factor_codes, start_date, end_date, ma
             print(f"  进度: {processed}/{len(fin_data)} 股票")
 
     elapsed = time.time() - start_t
-
-    # ---- 后处理: VAL_FCF_YIELD = FCF / 总市值 × 100 ----
-    if "VAL_FCF_YIELD" in results and market_cap_map:
-        fcf_yield_results = []
-        for code, calc_d, fcf_raw in results["VAL_FCF_YIELD"]:
-            mcap = market_cap_map.get(code)  # 万元
-            if mcap and mcap > 0:
-                # FCF原始单位是元，市值是万元，需要统一
-                # FCF / (总市值 × 10000) × 100 = FCF收益率(%)
-                fcf_yield = (fcf_raw / (mcap * 10000)) * 100
-                if not (math.isnan(fcf_yield) or math.isinf(fcf_yield)):
-                    fcf_yield_results.append((code, calc_d, fcf_yield))
-        results["VAL_FCF_YIELD"] = fcf_yield_results
 
     for fc in fin_factor_codes:
         print(f"  {fc}: {len(results[fc]):,} 条  ({elapsed:.1f}s)")
@@ -884,9 +992,7 @@ def main():
         fin_data = load_financial_data()
         # 财务因子的 end_date 如果未指定，默认到当前
         fin_end = end_date or date.today()
-        # 加载市值数据供 VAL_FCF_YIELD 使用
-        mcap_map = load_market_cap() if "VAL_FCF_YIELD" in fin_fc else None
-        fin_factor_data = compute_finance_factors(fin_data, fin_fc, start_date, fin_end, market_cap_map=mcap_map)
+        fin_factor_data = compute_finance_factors(fin_data, fin_fc, start_date, fin_end)
 
         if args.dry_run:
             print("\n[DRY-RUN] 财务因子结果:")

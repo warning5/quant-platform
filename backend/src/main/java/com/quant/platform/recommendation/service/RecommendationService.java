@@ -151,6 +151,7 @@ public class RecommendationService {
     private final StrategyConfidenceService strategyConfidenceService;
     private final NewsEventParser newsEventParser;
     private final EventSignalService eventSignalService;
+    private final com.quant.platform.market.MarketSentimentService marketSentimentService;
     private final javax.sql.DataSource dataSource;
 
     public RecommendationService(StockScreenService stockScreenService,
@@ -167,6 +168,7 @@ public class RecommendationService {
                                  StrategyConfidenceService strategyConfidenceService,
                                  NewsEventParser newsEventParser,
                                  EventSignalService eventSignalService,
+                                 com.quant.platform.market.MarketSentimentService marketSentimentService,
                                  javax.sql.DataSource dataSource) {
         this.stockScreenService = stockScreenService;
         this.analysisService = analysisService;
@@ -182,6 +184,7 @@ public class RecommendationService {
         this.strategyConfidenceService = strategyConfidenceService;
         this.newsEventParser = newsEventParser;
         this.eventSignalService = eventSignalService;
+        this.marketSentimentService = marketSentimentService;
         this.dataSource = dataSource;
     }
 
@@ -2312,10 +2315,11 @@ public class RecommendationService {
         calculateRiskAndLiquidityScore(rec, overview, stock.getCurrentPrice());
 
         // 新闻事件加分：估值修复/事件驱动策略，如果近30天有利好事件(增持/回购/业绩预增)，额外加分
+        String strategyCode = "";
         if (strategyId != null) {
             try {
                 StrategyDefinition strat = strategyDefinitionMapper.selectById(strategyId);
-                String strategyCode = strat != null ? strat.getStrategyCode() : "";
+                strategyCode = strat != null ? strat.getStrategyCode() : "";
                 boolean useEventBoost = "VALUATION_RECOVERY_LLM".equals(strategyCode)
                         || "EVENT_DRIVEN_DOWNGRADED".equals(strategyCode)
                         || "MARKET_SENTIMENT".equals(strategyCode);
@@ -2372,6 +2376,43 @@ public class RecommendationService {
 
         // 融合评分 (Regime-Adaptive + 行业轮动)
         rec.setFinalScore(fuseScore(rec, regime, im));
+
+        // QVIX 市场恐慌指数调整（仅市场情绪策略）
+        if (strategyId != null && "MARKET_SENTIMENT".equals(strategyCode)) {
+            try {
+                var qvix = marketSentimentService.getLatestQvix();
+                if (qvix != null) {
+                    double qvixVal = qvix.getValue().doubleValue();
+                    double multiplier = 1.0;
+                    String qvixNote = "";
+                    if (qvixVal >= 35) {
+                        // 市场恐慌 → 高动量股票风险加大，降分
+                        multiplier = 0.85;
+                        qvixNote = "QVIX=" + String.format("%.1f", qvixVal) + "(恐慌)";
+                    } else if (qvixVal >= 25) {
+                        // 市场担忧 → 微降
+                        multiplier = 0.92;
+                        qvixNote = "QVIX=" + String.format("%.1f", qvixVal) + "(担忧)";
+                    } else if (qvixVal < 15) {
+                        // 市场平静 → 动量策略效果好，微增
+                        multiplier = 1.08;
+                        qvixNote = "QVIX=" + String.format("%.1f", qvixVal) + "(平静)";
+                    } else {
+                        qvixNote = "QVIX=" + String.format("%.1f", qvixVal) + "(正常)";
+                    }
+                    double adjusted = rec.getFinalScore() * multiplier;
+                    rec.setFinalScore(Math.round(adjusted * 10000.0) / 10000.0);
+                    String existing = rec.getBuyReason() != null ? rec.getBuyReason() : "";
+                    if (!qvixNote.isEmpty()) {
+                        rec.setBuyReason(existing + " | " + qvixNote);
+                    }
+                    log.info("[Recommendation] QVIX调整: code={}, QVIX={}, multiplier={}, score={}",
+                            pureCode, String.format("%.1f", qvixVal), String.format("%.2f", multiplier), rec.getFinalScore());
+                }
+            } catch (Exception e) {
+                log.debug("[Recommendation] QVIX调整异常: code={}, error={}", pureCode, e.getMessage());
+            }
+        }
 
         // Phase A: 行业 Regime
         if (im != null && im.industryRegime != null) {

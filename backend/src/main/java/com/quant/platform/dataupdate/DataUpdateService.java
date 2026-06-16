@@ -423,6 +423,21 @@ public class DataUpdateService {
                     }
                 }
 
+                // 串行执行 QVIX 中国恐慌指数采集脚本
+                if (request.isFetchQvix() && !"CANCELLED".equals(task.getStatus())) {
+                    List<String> qvixCmd = new ArrayList<>();
+                    qvixCmd.add(pythonPath);
+                    qvixCmd.add("-u");
+                    qvixCmd.add("collect_qvix.py");
+                    task.setCurrentStep("情绪数据 · QVIX恐慌指数");
+                    broadcastStatus(task);
+                    boolean qvixOk = runSingleScript(taskId, task, qvixCmd, "QVIX恐慌指数");
+                    if (!qvixOk) {
+                        broadcastLog(taskId, "[WARN] QVIX采集失败，不影响其他数据");
+                        // QVIX 失败不影响整体状态（辅助数据）
+                    }
+                }
+
                 if (!"CANCELLED".equals(task.getStatus())) {
                     task.setStatus(senOk ? "SUCCESS" : "FAILED");
                     task.setProgress(100);

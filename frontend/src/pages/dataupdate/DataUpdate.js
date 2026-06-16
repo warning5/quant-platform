@@ -135,6 +135,7 @@ const renderTaskConfig = (task, updateType) => {
     if (task.configFetchNews !== false) tags.push(<Tag key="news" color="cyan">新闻</Tag>);
     if (task.configFetchBondYield !== false) tags.push(<Tag key="bond" color="gold">国债收益率</Tag>);
     if (task.configFetchShenwanIndex !== false) tags.push(<Tag key="shenwan" color="geekblue">申万行业指数</Tag>);
+    if (task.configFetchQvix !== false) tags.push(<Tag key="qvix" color="purple">QVIX恐慌指数</Tag>);
     if (task.configForce) tags.push(<Tag key="force" color="red">全量重刷</Tag>);
   } else if (updateType === 'RESEARCH') {
     if (task.configForce) tags.push(<Tag key="force" color="red">强制重新采集</Tag>);
@@ -582,6 +583,7 @@ function DataUpdate() {
               if (msg.fetchNews !== undefined) t.configFetchNews = msg.fetchNews;
               if (msg.fetchBondYield !== undefined) t.configFetchBondYield = msg.fetchBondYield;
               if (msg.fetchShenwanIndex !== undefined) t.configFetchShenwanIndex = msg.fetchShenwanIndex;
+              if (msg.fetchQvix !== undefined) t.configFetchQvix = msg.fetchQvix;
               if (msg.moneyflowSource !== undefined) t.configMoneyflowSource = msg.moneyflowSource;
               if (msg.emMoneyflowMode !== undefined) t.configEmMoneyflowMode = msg.emMoneyflowMode;
               if (msg.singleCode !== undefined) t.configSingleCode = msg.singleCode;
@@ -957,6 +959,7 @@ function DataUpdate() {
             fetchShenwanIndex: values.fetchShenwanIndex !== false,
             fetchConsensusEstimate: values.fetchConsensusEstimate !== false,
             fetchEarningsReport: values.fetchEarningsReport !== false,
+            fetchQvix: values.fetchQvix !== false,
           } : {
             // westock 模式：显式关闭其他模块，防止 Java 默认值 true 导致误执行
             fetchLhb: false,
@@ -974,6 +977,7 @@ function DataUpdate() {
             fetchShenwanIndex: false,
             fetchConsensusEstimate: false,
             fetchEarningsReport: false,
+            fetchQvix: false,
           }),
           moneyflowSource: sentimentMoneyflowSource,
           sentimentCodes: (values.sentimentCodes || '').trim() || null,
@@ -1858,6 +1862,7 @@ function DataUpdate() {
             fetchShenwanIndex: true,
             fetchConsensusEstimate: true,
             fetchEarningsReport: true,
+            fetchQvix: true,
             force: false,
             moneyflowSource: 'AKSHARE',
           }}>
@@ -1896,6 +1901,7 @@ function DataUpdate() {
                         fetchShenwanIndex: false,
                         fetchConsensusEstimate: false,
                         fetchEarningsReport: false,
+                        fetchQvix: false,
                         force: false,
                       });
                     } else {
@@ -1917,6 +1923,7 @@ function DataUpdate() {
                         fetchShenwanIndex: true,
                         fetchConsensusEstimate: true,
                         fetchEarningsReport: true,
+                        fetchQvix: true,
                         force: false,
                       });
                     }
@@ -1952,6 +1959,7 @@ function DataUpdate() {
                         fetchShareholder: true, fetchNews: true,
                         fetchBondYield: true, fetchShenwanIndex: true,
                         fetchConsensusEstimate: true, fetchEarningsReport: true,
+                        fetchQvix: true,
                       })}>
                       全选
                     </Button>
@@ -1968,6 +1976,7 @@ function DataUpdate() {
                           fetchBondYield: !vals.fetchBondYield, fetchShenwanIndex: !vals.fetchShenwanIndex,
                           fetchConsensusEstimate: !vals.fetchConsensusEstimate,
                           fetchEarningsReport: !vals.fetchEarningsReport,
+                          fetchQvix: !vals.fetchQvix,
                         });
                       }}>
                       反选
@@ -2018,6 +2027,9 @@ function DataUpdate() {
                     </Form.Item>
                     <Form.Item name="fetchEarningsReport" valuePropName="checked" style={{ marginBottom: 0 }}>
                       <Checkbox>业绩快报</Checkbox>
+                    </Form.Item>
+                    <Form.Item name="fetchQvix" valuePropName="checked" style={{ marginBottom: 0 }}>
+                      <Checkbox>QVIX恐慌指数</Checkbox>
                     </Form.Item>
                   </div>
                 </div>
@@ -2089,6 +2101,7 @@ function DataUpdate() {
                   {sentimentTask.configFetchShenwanIndex !== false && <Tag size="small">申万行业指数</Tag>}
                   {sentimentTask.configFetchConsensusEstimate !== false && <Tag size="small">一致预期</Tag>}
                   {sentimentTask.configFetchEarningsReport !== false && <Tag size="small">业绩快报</Tag>}
+                  {sentimentTask.configFetchQvix !== false && <Tag size="small" color="purple">QVIX恐慌指数</Tag>}
                 </Text>
               )}
             </Space>

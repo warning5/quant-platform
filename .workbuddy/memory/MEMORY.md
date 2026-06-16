@@ -9,6 +9,8 @@
 - 因子引擎：39+因子(技术14+财务25+缠论+估值6)，IC/IR分析，权重优化，Walk-Forward
 - 推荐管线(6步)：市场环境识别→选股→深度分析→评分融合→行业分散→黑名单过滤
 - 策略体系：7个核心策略 + 6个A股适配策略（红利低波/涨停板/板块轮动/市场情绪/估值修复/事件驱动），共13个
+- 6个A股策略ID: 78(红利低波)/79(涨停板)/80(板块轮动)/81(市场情绪)/82(估值修复)/83(事件驱动)
+- 每日调度：DAILY_RECOMMENDATION extra_config 用 strategyIds 数组，ScheduleService 逐策略循环执行
 - 北向资金策略暂时阻塞（个股持股数据周频延迟3~5天）
 - 策略置信度：4维度评分(命中率40+收益25+回撤20+波动15)，动态调整topN
 - 个股黑名单：自动评估+手动管理，按策略维度排除
@@ -17,13 +19,20 @@
 - 模拟盘：信号生成/执行/风控/预警/分红处理
 
 ## 关键约定
-- 估值分位因子(VAL_PE_PERCENTILE, VAL_PB_PERCENTILE)已封装为独立因子，通过Python recompute_factors.py计算
-- PRICE_52W_HIGH_PCT(距52周高点回撤)和VAL_FCF_YIELD(自由现金流收益率)已新增
+- 估值分位因子(VAL_PE_PERCENTILE, VAL_PB_PERCENTILE)已封装为独立因子，通过Python recompute_factors.py**日频**计算（在TECH_FACTOR_FUNCS中）
+- PRICE_52W_HIGH_PCT(距52周高点回撤)也是**日频**计算，同在TECH_FACTOR_FUNCS中
+- VAL_FCF_YIELD(自由现金流收益率)和VAL_DIVIDEND_YIELD(股息率)已**改为日频**（从TECH_FACTOR_FUNCS日频计算，不再是季频）
+- PE/PB百分位+52W回撤已恢复到80%+(PRICE_52W_HIGH_PCT 99.6%, VAL_PB_PERCENTILE 97%, VAL_PE_PERCENTILE 69%亏损股天然排除)
 - 腾讯qt.gtimg.cn接口用HTTP而非HTTPS（Windows下HTTPS握手慢7秒）
 - 北交所数据走腾讯接口，沪深走Baostock
 - 财务三表三源互补（东财+同花顺+新浪）
 - VAL_前缀和QUAL_前缀的因子在Java端归类为财务因子(isFinancialFactor)
-- PE/PB分位和52周回撤因子通过Python脚本计算（依赖stock_daily的pe_ttm/pb/high_price字段），不走Java日频引擎
+- PE/PB分位和52周回撤因子通过Python脚本计算（依赖stock_daily的pe_ttm/pb/high_price字段），**日频**不走Java引擎
+- VAL_FCF_YIELD和VAL_DIVIDEND_YIELD已**改为日频**，从TECH_FACTOR_FUNCS计算，FIN_FACTORS中已删除
+- QVIX（中国VIX）：已入库ClickHouse market_sentiment表（50ETF 2747条，最新2026-06-15），MarketSentimentService读取，MARKET_SENTIMENT策略使用QVIX评分调整
+- collect_qvix.py已集成到DataUpdateService SENTIMENT管线，DataUpdateRequest.fetchQvix=true默认启用
+- 新增3个日频因子：LIMIT_UP_COUNT(近20日涨停次数)/TURNOVER_ANOMALY(换手率异常)/VOLUME_SURPRISE(成交量惊喜)，覆盖5489只
+- 回购事件：AKShare stock_repurchase_em()有5183条数据，可用于事件驱动策略
 
 ## 当前阶段（2026-06）
 - Phase 1~5全部开发完成
@@ -59,7 +68,8 @@
 - CH stock_daily 有完整数据（719万行/5490股，含pe_ttm/pb），MySQL stock_daily 可能为空
 - stock_financial_indicator 用 `net_operate_cf`（非 operating_cash_flow）和 `operating_cf_to_np`（现成OCF/NP比率）
 - LLM推理数据链路：CH factor_value(97因子) → CH stock_daily(PE/PB补齐) → MySQL financial_indicator(ROE等)
-- VAL_*/FIN_* 因子按**季度计算**（季末日期：03-30/06-30/09-30/12-31），Q2数据需等到06-30后
+- VAL_DIVIDEND_YIELD/VAL_FCF_YIELD 已改为**日频**，其余VAL_*/FIN_* 因子仍按**季度计算**（季末日期：03-30/06-30/09-30/12-31），Q2数据需等到06-30后
+- 推荐引擎用clickHouseFactorValueService.getLatestDate(factorCode)自动找各因子最新日期（季频用季末，日频用最新交易日）
 - 北交所BJ股票VAL/FIN因子覆盖率更低（约50%），但CH stock_daily和MySQL财务表有完整日频/最新数据可fallback
 - StockRecommendation.stockCode是**纯代码**（无.SZ/.SH/.BJ后缀），LLM查询时需从stock_info查market拼接后缀
 - LLM分析getLatestFactorValues()三级fallback: CH纯代码(94技术因子) → CH后缀格式(3个特殊因子) → CH stock_daily(PE/PB) → MySQL(ROE/财务)

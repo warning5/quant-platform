@@ -166,6 +166,12 @@ public class DataUpdateRequest {
     private boolean fetchEarningsReport = true;
 
     /**
+     * 情绪数据：采集 QVIX 中国恐慌指数（默认 true）
+     * 数据来源: scripts/collect_qvix.py → ClickHouse market_sentiment
+     */
+    private boolean fetchQvix = true;
+
+    /**
      * 情绪数据：资金流向数据源
      * AKSHARE = akshare（默认，与原行为一致）
      * WESTOCK = westock-data（更快，推荐）
