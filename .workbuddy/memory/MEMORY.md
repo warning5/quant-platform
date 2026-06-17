@@ -10,7 +10,8 @@
 - 推荐管线(6步)：市场环境识别→选股→深度分析→评分融合→行业分散→黑名单过滤
 - 策略体系：7个核心策略 + 6个A股适配策略（红利低波/涨停板/板块轮动/市场情绪/估值修复/事件驱动），共13个
 - 6个A股策略ID: 78(红利低波)/79(涨停板)/80(板块轮动)/81(市场情绪)/82(估值修复)/83(事件驱动)
-- 每日调度：DAILY_RECOMMENDATION extra_config 用 strategyIds 数组，ScheduleService 逐策略循环执行
+- 每日调度：DAILY_RECOMMENDATION extra_config 用 strategyIds 数组（可多选，不再固定6策略），ScheduleService 逐策略循环执行
+- DAILY_RECOMMENDATION 调度编辑器支持策略多选（从 /api/strategies 获取列表）、topN/置信度控制/同步监控开关
 - 北向资金策略暂时阻塞（个股持股数据周频延迟3~5天）
 - 策略置信度：4维度评分(命中率40+收益25+回撤20+波动15)，动态调整topN
 - 个股黑名单：自动评估+手动管理，按策略维度排除
@@ -59,6 +60,8 @@
 - List.of()最多10个元素，超过用Arrays.asList()
 - @MapperScan({"com.quant.platform.**"})扫描所有包
 - Maven在Git Bash下有加载问题，用PowerShell执行mvn.cmd
+- 前端构建用 Vite（`npm run build` = `vite build`，输出到 build/），**不是** react-scripts
+- MySQL数据库名是 `stock`（非 quant_platform），密码 123456
 - LLM配置已统一为llm.*前缀，旧的llm.deepseek.*和quant.factor.llm已删除
 - 策略管理完全依赖数据库（strategy_definition表），StrategyDataInitializer已删除
 - 推荐引擎零硬编码：因子配置(factorConfigJson)和行业排除(filterConfigJson)全部从数据库策略读取

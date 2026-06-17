@@ -1,8 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import {
-  Card, Row, Col, Select, DatePicker, Button, Table,
-  Spin, Alert, Space, Tag, Tooltip, Divider, message
-} from 'antd';
+import { Card, Row, Col, Select, DatePicker, Button, Table, Spin, Alert, Space, Tag, Tooltip, Divider } from 'antd';
+import { message } from '../../utils/messageUtil';
 import { PartitionOutlined, ReloadOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import dayjs from 'dayjs';

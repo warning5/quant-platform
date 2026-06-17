@@ -310,7 +310,16 @@ export default function RecommendationList() {
     if (!reviewStrategyId || !reviewDate) { setTopBottom(null); setQualityTag(null); return; }
     const load = async () => {
       try {
-        const tb = await recommendationApi.getBatchTopBottom(reviewStrategyId, reviewDate);
+        let tb = await recommendationApi.getBatchTopBottom(reviewStrategyId, reviewDate);
+        // 如果选中日期尚未追踪（best3/worst3为空），自动回退到最近已追踪批次
+        if (tb && (!tb.best3 || tb.best3.length === 0) && (!tb.worst3 || tb.worst3.length === 0)) {
+          // 从 batchHistory 中找该策略最近的一个已追踪批次
+          const trackedEntry = (batchHistory || []).find(b => b.recommendDate !== reviewDate && b.tracked > 0);
+          if (trackedEntry) {
+            tb = await recommendationApi.getBatchTopBottom(reviewStrategyId, trackedEntry.recommendDate);
+            tb._fallbackDate = trackedEntry.recommendDate;
+          }
+        }
         setTopBottom(tb);
       } catch { setTopBottom(null); }
       if (batchHistory && batchHistory.length > 0) {
@@ -1560,7 +1569,7 @@ export default function RecommendationList() {
             </Row>
 
             {/* 命中率趋势图 */}
-            {trackedBatches.length >= 2 && (
+            {trackedBatches.length >= 1 && (
               <Card
                 size="small"
                 title={
@@ -1628,7 +1637,14 @@ export default function RecommendationList() {
               <Card
                 size="small"
                 style={{ marginBottom: 16 }}
-                title={<span><RiseOutlined /> 本期推荐复盘 — 次日表现最佳/最差</span>}
+                title={<span>
+                  <RiseOutlined /> 本期推荐复盘 — 次日表现最佳/最差
+                  {topBottom?._fallbackDate && topBottom._fallbackDate !== reviewDate && (
+                    <Tag color="orange" style={{ marginLeft: 8, fontSize: 11 }}>
+                      当前日期未追踪，显示 {topBottom._fallbackDate} 数据
+                    </Tag>
+                  )}
+                </span>}
               >
                 <Row gutter={16}>
                   <Col span={12}>

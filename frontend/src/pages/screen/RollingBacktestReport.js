@@ -1,8 +1,6 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import {
-  Card, Spin, Typography, Button, Space, Alert, Descriptions, Tag, Divider,
-  Table, Row, Col, Statistic, Popconfirm, message, Progress, Empty, Tooltip, Select, Popover,
-} from 'antd';
+import { Card, Spin, Typography, Button, Space, Alert, Descriptions, Tag, Divider, Table, Row, Col, Statistic, Popconfirm, Progress, Empty, Tooltip, Select, Popover } from 'antd';
+import { message } from '../../utils/messageUtil';
 import {
   ArrowLeftOutlined, ReloadOutlined, DeleteOutlined,
   StopOutlined, QuestionCircleOutlined, DownOutlined, RightOutlined, RedoOutlined

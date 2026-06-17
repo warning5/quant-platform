@@ -1777,7 +1777,7 @@ function DataUpdate() {
             <Col span={7}>
               <Statistic
                 title="数据表"
-                formatter={() => <Text style={{ fontSize: 12, whiteSpace: 'nowrap' }}>涨跌停/龙虎榜/融资融券/机构调研/大宗交易/市场活跃度/资金流向/公告/国债收益率/申万行业指数/一致预期/业绩快报</Text>}
+                formatter={() => <Text style={{ fontSize: 12, whiteSpace: 'nowrap' }}>涨跌停/龙虎榜/融资融券/机构调研/大宗交易/市场活跃度/资金流向/公告/国债收益率/申万行业指数/一致预期/业绩快报/QVIX恐慌指数</Text>}
                 valueStyle={{ fontSize: 12 }}
               />
             </Col>
@@ -1808,7 +1808,12 @@ function DataUpdate() {
                                     <QuestionCircleOutlined style={{ color: '#999', fontSize: 12 }} />
                                   </Tooltip></span>
                                 )
-                                : table.name
+                                : table.name === 'QVIX恐慌指数'
+                                  ? (<span>QVIX恐慌指数{' '}
+                                    <Tooltip title="中国VIX指数（50ETF/300ETF/500ETF/创业板指），用于市场情绪策略判断市场恐慌程度，调整推荐权重">
+                                      <QuestionCircleOutlined style={{ color: '#999', fontSize: 12 }} />
+                                    </Tooltip></span>)
+                                  : table.name
                             }
                             value={table.recordCount || 0}
                             suffix={

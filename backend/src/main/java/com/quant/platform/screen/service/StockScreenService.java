@@ -1203,7 +1203,9 @@ public class StockScreenService {
      * 应用 filterConfigJson 中的过滤条件到候选股票池
      * 支持：
      *   - excludeIndustries: List<String> 排除的行业代码列表（申万行业）
+     *   - excludeMarkets: List<String> 排除的市场代码列表，如 ["BJ"] 排除北交所
      *   - minListingDays: int 最少上市天数
+     *   - minMarketCap: double 最小市值(亿元)
      *   - customFilters: List<Map> 自定义因子过滤 [{factor, op, value}]
      */
     @SuppressWarnings("unchecked")
@@ -1212,6 +1214,18 @@ public class StockScreenService {
                                            Map<String, Object> filterConfig,
                                            LocalDate screenDate) {
         Set<String> result = new HashSet<>(candidates);
+
+        // 0. 市场排除（北交所 BJ: code 以 8 或 9 开头）
+        Object excludeMarkets = filterConfig.get("excludeMarkets");
+        if (excludeMarkets instanceof List) {
+            Set<String> marketSet = new HashSet<>((List<String>) excludeMarkets);
+            if (marketSet.contains("BJ")) {
+                int before = result.size();
+                result.removeIf(code -> code.startsWith("8") || code.startsWith("9"));
+                log.info("[FilterConfig] ExcludeMarket(BJ): removed {} stocks, remaining={}",
+                        before - result.size(), result.size());
+            }
+        }
 
         // 1. 行业排除
         Object excludeIndustries = filterConfig.get("excludeIndustries");
@@ -1243,7 +1257,23 @@ public class StockScreenService {
             }
         }
 
-        // 3. 自定义因子过滤（单因子条件，GT/GTE/LT/LTE/EQ）
+        // 3. 最小市值过滤
+        Object minCap = filterConfig.get("minMarketCap");
+        if (minCap instanceof Number) {
+            double minMarketCap = ((Number) minCap).doubleValue();
+            if (minMarketCap > 0) {
+                Map<String, Double> marketCapMap = batchLoadMarketCap(new ArrayList<>(result), screenDate);
+                int before = result.size();
+                result.removeIf(code -> {
+                    Double cap = marketCapMap.get(code);
+                    return cap == null || cap < minMarketCap;
+                });
+                log.info("[FilterConfig] MinMarketCap={}: removed {} stocks, remaining={}",
+                        (long) minMarketCap, before - result.size(), result.size());
+            }
+        }
+
+        // 4. 自定义因子过滤（单因子条件，GT/GTE/LT/LTE/EQ）
         Object customFilters = filterConfig.get("customFilters");
         if (customFilters instanceof List) {
             List<Map<String, Object>> filters = (List<Map<String, Object>>) customFilters;

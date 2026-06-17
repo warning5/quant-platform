@@ -1,9 +1,7 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import {
-  Card, Row, Col, Statistic, Typography, Button, Space, Spin, Tabs, Skeleton,
-  Tag, Table, Alert, Badge, Tooltip as AntTooltip, Popconfirm, message, Progress,
-} from 'antd';
+import { Card, Row, Col, Statistic, Typography, Button, Space, Spin, Tabs, Skeleton, Tag, Table, Alert, Badge, Tooltip as AntTooltip, Popconfirm, Progress } from 'antd';
+import { message } from '../../utils/messageUtil';
 import {
   ArrowLeftOutlined, ReloadOutlined,
   RiseOutlined, FallOutlined, BarChartOutlined,

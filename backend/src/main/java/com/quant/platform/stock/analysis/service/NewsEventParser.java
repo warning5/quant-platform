@@ -3,6 +3,7 @@ package com.quant.platform.stock.analysis.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quant.platform.llm.LlmService;
+import com.quant.platform.stock.analysis.domain.EventTag;
 import com.quant.platform.stock.analysis.mapper.NewsMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -18,19 +19,7 @@ import java.util.stream.Collectors;
  * 新闻事件LLM解析服务
  * 定时扫描 stock_news 中未解析的新闻，用LLM提取结构化事件，
  * 回写 event_tag / sentiment_score 字段，供估值修复和事件驱动策略使用。
- * 事件标签体系:
- *   BUYBACK     - 回购
- *   INCREASE    - 增持
- *   DECREASE    - 减持
- *   EARN_PRE    - 业绩预增
- *   EARN_WARN   - 业绩预减/预警
- *   EARN_BEAT   - 超预期
- *   EARN_MISS   - 不及预期
- *   RESTRUCT    - 重组/并购
- *   UNLOCK      - 解禁
- *   INCENTIVE   - 股权激励
- *   DIVIDEND    - 分红
- *   OTHER       - 其他
+ * 事件标签体系见 {@link EventTag}
  */
 @Slf4j
 @Service
@@ -46,21 +35,6 @@ public class NewsEventParser {
     private static final int BATCH_SIZE = 30;
     /** LLM解析的最大内容长度（字符），超长截断 */
     private static final int MAX_CONTENT_LEN = 800;
-    /** 事件标签白名单（LLM输出不在白名单内的归为 OTHER） */
-    private static final Set<String> VALID_TAGS = Set.of(
-            "BUYBACK", "INCREASE", "DECREASE", "EARN_PRE", "EARN_WARN",
-            "EARN_BEAT", "EARN_MISS", "RESTRUCT", "UNLOCK", "INCENTIVE",
-            "DIVIDEND", "OTHER"
-    );
-
-    /** 利好标签 */
-    private static final Set<String> BULLISH_TAGS = Set.of(
-            "BUYBACK", "INCREASE", "EARN_PRE", "EARN_BEAT", "DIVIDEND", "INCENTIVE"
-    );
-    /** 利空标签 */
-    private static final Set<String> BEARISH_TAGS = Set.of(
-            "DECREASE", "EARN_WARN", "EARN_MISS", "UNLOCK"
-    );
 
     /**
      * 定时任务：每10分钟扫描并解析未标记的新闻
@@ -140,11 +114,12 @@ public class NewsEventParser {
     public List<String> getRecentBullishEvents(String code, int days) {
         List<Map<String, Object>> newsList = newsMapper.selectLatestNews(code, 200);
         LocalDateTime cutoff = LocalDateTime.now().minusDays(days);
+        Set<String> bullishCodes = EventTag.getBullishCodes();
 
         return newsList.stream()
                 .filter(n -> {
                     String tag = (String) n.get("event_tag");
-                    return tag != null && !tag.isEmpty() && BULLISH_TAGS.contains(tag);
+                    return tag != null && !tag.isEmpty() && bullishCodes.contains(tag);
                 })
                 .filter(n -> {
                     Object pubDate = n.get("publish_date");
@@ -170,6 +145,8 @@ public class NewsEventParser {
     public double getEventSentimentScore(String code, int days) {
         List<Map<String, Object>> newsList = newsMapper.selectLatestNews(code, 200);
         LocalDateTime cutoff = LocalDateTime.now().minusDays(days);
+        Set<String> bullishCodes = EventTag.getBullishCodes();
+        Set<String> bearishCodes = EventTag.getBearishCodes();
 
         double totalScore = 0.0;
         int count = 0;
@@ -185,9 +162,9 @@ public class NewsEventParser {
                 } catch (Exception ignored) {}
             }
 
-            if (BULLISH_TAGS.contains(tag)) {
+            if (bullishCodes.contains(tag)) {
                 totalScore += 1.0;
-            } else if (BEARISH_TAGS.contains(tag)) {
+            } else if (bearishCodes.contains(tag)) {
                 totalScore -= 1.0;
             }
             count++;
@@ -220,24 +197,13 @@ public class NewsEventParser {
                 你是一个A股新闻事件分析专家。请根据新闻标题和内容，提取结构化事件信息。
 
                 事件类型必须是以下之一：
-                - BUYBACK: 回购（公司回购股票）
-                - INCREASE: 增持（股东/高管增持）
-                - DECREASE: 减持（股东/高管减持）
-                - EARN_PRE: 业绩预增（业绩预告/快报显示增长）
-                - EARN_WARN: 业绩预减/预警
-                - EARN_BEAT: 超预期（实际业绩超市场预期）
-                - EARN_MISS: 不及预期
-                - RESTRUCT: 重组/并购
-                - UNLOCK: 解禁（限售股解禁）
-                - INCENTIVE: 股权激励
-                - DIVIDEND: 分红（高送转/分红预案）
-                - OTHER: 其他无法归类的
+                %s
 
                 请输出JSON格式：
                 {"event_type":"BUYBACK","sentiment":0.8,"direction":"positive"}
                 sentiment范围-1到1，1=极利好，-1=极利空，0=中性
                 direction为positive/negative/neutral
-                只输出JSON，不要其他内容。""";
+                只输出JSON，不要其他内容。""".formatted(EventTag.toPromptText());
 
         String userPrompt = "新闻标题：" + title;
         if (content != null && !content.isBlank()) {
@@ -253,9 +219,8 @@ public class NewsEventParser {
             String direction = result.path("direction").asText("neutral");
 
             // 校验标签合法性
-            if (!VALID_TAGS.contains(eventType)) {
-                eventType = "OTHER";
-            }
+            EventTag eventTag = EventTag.fromCode(eventType);
+            eventType = eventTag.getCode();
             // 校验sentiment范围
             sentiment = Math.max(-1.0, Math.min(1.0, sentiment));
             // 校验direction

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Card, Table, Button, Tag, Space, Alert, Typography, Tooltip, Modal, Input, InputNumber, Form, Popover, message } from 'antd';
-import { message as antMessage, notification } from '../../utils/messageUtil';
+import { Card, Table, Button, Tag, Space, Alert, Typography, Tooltip, Modal, Input, InputNumber, Form, Popover } from 'antd';
+import { message, notification } from '../../utils/messageUtil';
 import { ReloadOutlined, PlayCircleOutlined, EyeOutlined, ThunderboltOutlined, QuestionCircleOutlined, PlusOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons';
 import api, { silentConfig } from '../../api';
 
@@ -460,7 +460,9 @@ export default function MonitorPage() {
             }>
             <QuestionCircleOutlined style={{ color: '#8c8c8c', fontSize: 16, cursor: 'pointer' }} />
           </Tooltip>
-          <Tag color={status?.monitoring ? 'success' : 'default'}>{status?.monitoring ? '运行中' : '未启动'}</Tag>
+          <Tooltip title={status?.monitoring ? '盘中监控运行中' : '交易时段(9:30-15:00)内自动启动，当前处于非交易时段或服务刚重启'}>
+            <Tag color={status?.monitoring ? 'success' : 'default'}>{status?.monitoring ? '运行中' : '未启动'}</Tag>
+          </Tooltip>
           <Tooltip title={sseConnected ? 'SSE实时推送已连接' : 'SSE未连接，5秒后自动重连'}>
             <Tag color={sseConnected ? 'cyan' : 'default'}>{sseConnected ? '推送已连接' : '推送未连接'}</Tag>
           </Tooltip>

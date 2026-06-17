@@ -1,9 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import {
-  Card, Descriptions, Tag, Button, Space, Typography, Spin,
-  Tabs, Table, Modal, Select, message, Badge
-} from 'antd';
+import { Card, Descriptions, Tag, Button, Space, Typography, Spin, Tabs, Table, Modal, Select, Badge } from 'antd';
+import { message } from '../../utils/messageUtil';
 import {
   ArrowLeftOutlined, EditOutlined, ExperimentOutlined,
   PlayCircleOutlined, PauseCircleOutlined, EyeOutlined,

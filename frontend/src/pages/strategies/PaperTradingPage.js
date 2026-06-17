@@ -1,10 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import {
-  Card, Row, Col, Table, Tag, Button, Modal, Select, InputNumber, Space,
-  Typography, Statistic, Spin, Tooltip, Alert, message, Popconfirm,
-  Form, Switch, Divider, Collapse, Tabs, Badge,
-} from 'antd';
+import { Card, Row, Col, Table, Tag, Button, Modal, Select, InputNumber, Space, Typography, Statistic, Spin, Tooltip, Alert, Popconfirm, Form, Switch, Divider, Collapse, Tabs, Badge } from 'antd';
+import { message } from '../../utils/messageUtil';
 import {
   ThunderboltOutlined, PlayCircleOutlined, PauseCircleOutlined,
   CheckCircleOutlined, CloseCircleOutlined, SendOutlined, LeftOutlined,

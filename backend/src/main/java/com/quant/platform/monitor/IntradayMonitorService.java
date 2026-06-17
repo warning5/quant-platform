@@ -113,32 +113,48 @@ public class IntradayMonitorService {
         return dow == java.time.DayOfWeek.SATURDAY || dow == java.time.DayOfWeek.SUNDAY;
     }
 
+    /**
+     * 获取监控面板显示的数据日期
+     * 优先用 stock_recommendation.recommend_date（一定是交易日，含义明确）
+     *  fallback 用 llm_analysis.analysis_date（可能需要调整到交易日）
+     */
     public LocalDate getLatestDataDate() {
-        LocalDate result = null;
+        // 优先：推荐日期（一定是交易日，无需调整）
         try {
-            String sql1 = "SELECT MAX(analysis_date) FROM llm_analysis WHERE analysis_date <= CURDATE()";
-            LocalDate d1 = jdbcTemplate.queryForObject(sql1, LocalDate.class);
-            if (d1 != null) result = d1;
+            LocalDate recDate = jdbcTemplate.queryForObject(
+                "SELECT MAX(recommend_date) FROM stock_recommendation WHERE recommend_date <= CURDATE()",
+                LocalDate.class);
+            if (recDate != null) {
+                this.dataDate = recDate;
+                return recDate;
+            }
+        } catch (Exception e) {
+            log.warn("[IntradayMonitor] 查询stock_recommendation最新日期失败: {}", e.getMessage());
+        }
+
+        // fallback: LLM分析日期（可能是节假日，需调整到前一交易日）
+        try {
+            LocalDate llmDate = jdbcTemplate.queryForObject(
+                "SELECT MAX(analysis_date) FROM llm_analysis WHERE analysis_date <= CURDATE()",
+                LocalDate.class);
+            if (llmDate != null) {
+                while (isNonTradingDay(llmDate)) {
+                    llmDate = llmDate.minusDays(1);
+                }
+                this.dataDate = llmDate;
+                return llmDate;
+            }
         } catch (Exception e) {
             log.warn("[IntradayMonitor] 查询llm_analysis最新日期失败: {}", e.getMessage());
         }
-        if (result == null) {
-            try {
-                String sql2 = "SELECT MAX(recommend_date) FROM stock_recommendation WHERE recommend_date <= CURDATE()";
-                LocalDate d2 = jdbcTemplate.queryForObject(sql2, LocalDate.class);
-                if (d2 != null) result = d2;
-            } catch (Exception e) {
-                log.warn("[IntradayMonitor] 查询stock_recommendation最新日期失败: {}", e.getMessage());
-            }
+
+        // 都没有：昨天（调整到交易日）
+        LocalDate fallback = LocalDate.now().minusDays(1);
+        while (isNonTradingDay(fallback)) {
+            fallback = fallback.minusDays(1);
         }
-        if (result == null) {
-            result = LocalDate.now().minusDays(1);
-        }
-        while (isNonTradingDay(result)) {
-            result = result.minusDays(1);
-        }
-        this.dataDate = result;
-        return result;
+        this.dataDate = fallback;
+        return fallback;
     }
 
     // ── 盘中监控主循环（高频轮询） ──
@@ -292,70 +308,100 @@ public class IntradayMonitorService {
 
     public void loadTargetPrices() {
         targetPriceCache.clear();
-        LocalDate latestDate = getLatestDataDate();
-        String dateStr = latestDate.toString();
-        log.info("[IntradayMonitor] ===== 加载目标价 START ===== 数据日期: {}", dateStr);
 
-        // 诊断：先查所有BUY记录
+        // 各数据源取各自最新日期
+        LocalDate llmDate = null;
+        LocalDate recDate = null;
         try {
-            String diagSql = String.format(
-                    "SELECT r.stock_code, r.stock_name, r.suggested_buy_price " +
-                            "FROM stock_recommendation r " +
-                            "WHERE r.recommend_date = '%s' AND r.action_tag = 'BUY'", dateStr);
-            List<Map<String, Object>> allBuy = jdbcTemplate.queryForList(diagSql);
-            log.info("[IntradayMonitor] 诊断: {} 共有 {} 条BUY推荐", dateStr, allBuy.size());
-            for (Map<String, Object> rec : allBuy) {
-                log.info("[IntradayMonitor] 诊断-BUY: {}({}) suggested_buy_price={}",
-                        rec.get("stock_name"), rec.get("stock_code"), rec.get("suggested_buy_price"));
-            }
+            llmDate = jdbcTemplate.queryForObject(
+                "SELECT MAX(analysis_date) FROM llm_analysis WHERE analysis_date <= CURDATE()", LocalDate.class);
         } catch (Exception e) {
-            log.warn("[IntradayMonitor] 诊断查询失败: {}", e.getMessage());
+            log.warn("[IntradayMonitor] 查询llm_analysis最新日期失败: {}", e.getMessage());
+        }
+        try {
+            recDate = jdbcTemplate.queryForObject(
+                "SELECT MAX(recommend_date) FROM stock_recommendation WHERE recommend_date <= CURDATE()", LocalDate.class);
+        } catch (Exception e) {
+            log.warn("[IntradayMonitor] 查询stock_recommendation最新日期失败: {}", e.getMessage());
+        }
+
+        // 监控面板显示的数据日期 = 推荐日期（一定是交易日，有最直接的意义）
+        // llm_analysis.analysis_date 可以是任意一天（含节假日），不适合作为显示日期
+        if (recDate != null) {
+            this.dataDate = recDate;
+        } else if (llmDate != null) {
+            this.dataDate = llmDate;
+        } else {
+            this.dataDate = LocalDate.now().minusDays(1);
+        }
+        log.info("[IntradayMonitor] ===== 加载目标价 START ===== LLM日期={}, 推荐日期={}, 显示日期={}", llmDate, recDate, this.dataDate);
+
+        // 诊断：先查推荐BUY记录
+        if (recDate != null) {
+            try {
+                String diagSql = String.format(
+                        "SELECT r.stock_code, r.stock_name, r.suggested_buy_price " +
+                                "FROM stock_recommendation r " +
+                                "WHERE r.recommend_date = '%s' AND r.action_tag = 'BUY'", recDate);
+                List<Map<String, Object>> allBuy = jdbcTemplate.queryForList(diagSql);
+                log.info("[IntradayMonitor] 诊断: {} 共有 {} 条BUY推荐", recDate, allBuy.size());
+                for (Map<String, Object> rec : allBuy) {
+                    log.info("[IntradayMonitor] 诊断-BUY: {}({}) suggested_buy_price={}",
+                            rec.get("stock_name"), rec.get("stock_code"), rec.get("suggested_buy_price"));
+                }
+            } catch (Exception e) {
+                log.warn("[IntradayMonitor] 诊断查询失败: {}", e.getMessage());
+            }
         }
 
         try {
-            // 数据源1: llm_analysis BUY推荐
-            String llmSql = String.format(
-                    "SELECT a.stock_code, a.stock_name, a.buy_price_low, a.buy_price_high, " +
-                            "a.stop_loss, a.target_price " +
-                            "FROM llm_analysis a " +
-                            "WHERE a.analysis_date = '%s' AND a.recommendation = 'BUY' " +
-                            "AND a.buy_price_high IS NOT NULL", dateStr);
-            jdbcTemplate.query(llmSql, rs -> {
-                TargetPriceInfo info = new TargetPriceInfo();
-                info.setStockCode(rs.getString("stock_code"));
-                info.setStockName(rs.getString("stock_name"));
-                info.setBuyPriceLow(rs.getBigDecimal("buy_price_low"));
-                info.setBuyPriceHigh(rs.getBigDecimal("buy_price_high"));
-                info.setStopLoss(rs.getBigDecimal("stop_loss"));
-                info.setTargetPrice(rs.getBigDecimal("target_price"));
-                info.setSource("LLM");
-                targetPriceCache.put(info.getStockCode(), info);
-            });
+            // 数据源1: llm_analysis BUY推荐（用LLM自己的最新日期）
+            if (llmDate != null) {
+                String llmSql = String.format(
+                        "SELECT a.stock_code, a.stock_name, a.buy_price_low, a.buy_price_high, " +
+                                "a.stop_loss, a.target_price " +
+                                "FROM llm_analysis a " +
+                                "WHERE a.analysis_date = '%s' AND a.recommendation = 'BUY' " +
+                                "AND a.buy_price_high IS NOT NULL", llmDate);
+                jdbcTemplate.query(llmSql, rs -> {
+                    TargetPriceInfo info = new TargetPriceInfo();
+                    info.setStockCode(rs.getString("stock_code"));
+                    info.setStockName(rs.getString("stock_name"));
+                    info.setBuyPriceLow(rs.getBigDecimal("buy_price_low"));
+                    info.setBuyPriceHigh(rs.getBigDecimal("buy_price_high"));
+                    info.setStopLoss(rs.getBigDecimal("stop_loss"));
+                    info.setTargetPrice(rs.getBigDecimal("target_price"));
+                    info.setSource("LLM");
+                    targetPriceCache.put(info.getStockCode(), info);
+                });
+            }
             int llmCount = targetPriceCache.size();
 
-            // 数据源2: stock_recommendation 智能推荐
-            String recSql = String.format(
-                    "SELECT r.stock_code, r.stock_name, r.suggested_buy_price, r.close_price " +
-                            "FROM stock_recommendation r " +
-                            "WHERE r.recommend_date = '%s' AND r.action_tag = 'BUY' " +
-                            "AND r.suggested_buy_price IS NOT NULL", dateStr);
-            jdbcTemplate.query(recSql, rs -> {
-                String code = rs.getString("stock_code");
-                if (targetPriceCache.containsKey(code)) return;
+            // 数据源2: stock_recommendation 智能推荐（用推荐自己的最新日期）
+            if (recDate != null) {
+                String recSql = String.format(
+                        "SELECT r.stock_code, r.stock_name, r.suggested_buy_price, r.close_price " +
+                                "FROM stock_recommendation r " +
+                                "WHERE r.recommend_date = '%s' AND r.action_tag = 'BUY' " +
+                                "AND r.suggested_buy_price IS NOT NULL", recDate);
+                jdbcTemplate.query(recSql, rs -> {
+                    String code = rs.getString("stock_code");
+                    if (targetPriceCache.containsKey(code)) return;
 
-                double buyPrice = rs.getDouble("suggested_buy_price");
-                double closePrice = rs.getDouble("close_price");
+                    double buyPrice = rs.getDouble("suggested_buy_price");
+                    double closePrice = rs.getDouble("close_price");
 
-                TargetPriceInfo info = new TargetPriceInfo();
-                info.setStockCode(code);
-                info.setStockName(rs.getString("stock_name"));
-                info.setBuyPriceLow(BigDecimal.valueOf(buyPrice * 0.95));
-                info.setBuyPriceHigh(BigDecimal.valueOf(buyPrice * 1.05));
-                info.setStopLoss(BigDecimal.valueOf(buyPrice * 0.92));
-                info.setTargetPrice(closePrice > 0 ? BigDecimal.valueOf(closePrice * 1.20) : null);
-                info.setSource("推荐");
-                targetPriceCache.put(code, info);
-            });
+                    TargetPriceInfo info = new TargetPriceInfo();
+                    info.setStockCode(code);
+                    info.setStockName(rs.getString("stock_name"));
+                    info.setBuyPriceLow(BigDecimal.valueOf(buyPrice * 0.95));
+                    info.setBuyPriceHigh(BigDecimal.valueOf(buyPrice * 1.05));
+                    info.setStopLoss(BigDecimal.valueOf(buyPrice * 0.92));
+                    info.setTargetPrice(closePrice > 0 ? BigDecimal.valueOf(closePrice * 1.20) : null);
+                    info.setSource("推荐");
+                    targetPriceCache.put(code, info);
+                });
+            }
             int recCount = targetPriceCache.size() - llmCount;
 
             log.info("[IntradayMonitor] 加载目标价: {} 只股票 (LLM:{}, 推荐:{})", targetPriceCache.size(), llmCount, recCount);

@@ -10,6 +10,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * 定时任务配置管理
@@ -138,6 +139,10 @@ public class ScheduleConfigController {
             setSql.append("extra_config=?, ");
             args.add(body.get("extra_config") == null ? null : body.get("extra_config").toString());
         }
+        if (body.containsKey("task_name")) {
+            setSql.append("task_name=?, ");
+            args.add(body.get("task_name").toString());
+        }
 
         if (setSql.length() == 0) {
             return ApiResponse.error("没有可更新的字段");
@@ -223,6 +228,29 @@ public class ScheduleConfigController {
     @PostMapping("/trigger/{taskKey}")
     public ApiResponse<Map<String, Object>> triggerTask(@PathVariable String taskKey) {
         try {
+            String upper = taskKey.toUpperCase();
+
+            // DAILY_RECOMMENDATION 和 RECOMMENDATION_TRACK 走 ScheduleService 特殊处理
+            if ("DAILY_RECOMMENDATION".equals(upper) || "RECOMMENDATION_TRACK".equals(upper)) {
+                CompletableFuture.runAsync(() -> {
+                    try {
+                        scheduleService.executeTask(upper);
+                    } catch (Exception e) {
+                        log.error("[ScheduleConfig] 异步执行 {} 失败: {}", upper, e.getMessage());
+                    }
+                });
+                jdbcTemplate.update(
+                    "UPDATE data_schedule_config SET last_run_time = ?, last_run_status = 'RUNNING' WHERE task_key = ?",
+                    LocalDateTime.now(), taskKey
+                );
+                log.info("[ScheduleConfig] 手动触发(异步): {}", taskKey);
+                Map<String, Object> result = new java.util.HashMap<>();
+                result.put("taskKey", taskKey);
+                result.put("status", "RUNNING");
+                result.put("message", "任务已异步提交执行");
+                return ApiResponse.success(result);
+            }
+
             // 读取任务的 extra_config
             Map<String, Object> configRow = null;
             try {

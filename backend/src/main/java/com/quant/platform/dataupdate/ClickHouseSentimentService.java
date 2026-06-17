@@ -236,6 +236,48 @@ public class ClickHouseSentimentService {
             tableStats.add(tableStat);
         }
 
+        // 追加：QVIX恐慌指数（ClickHouse market_sentiment 表）
+        try {
+            String chTable = "market_sentiment";
+            Long count = 0L;
+            try (Connection conn = getConnection();
+                 PreparedStatement stmt = conn.prepareStatement("SELECT COUNT(*) as cnt FROM " + chTable);
+                 ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    count = rs.getLong("cnt");
+                }
+            }
+            totalRecords += count;
+
+            String minDate = null;
+            String maxDate = null;
+            try (Connection conn = getConnection();
+                 PreparedStatement stmt = conn.prepareStatement("SELECT MIN(trade_date) as min_date, MAX(trade_date) as max_date FROM " + chTable);
+                 ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    minDate = rs.getString("min_date");
+                    maxDate = rs.getString("max_date");
+                }
+            }
+
+            Map<String, Object> tableStat = new LinkedHashMap<>();
+            tableStat.put("table", chTable);
+            tableStat.put("name", "QVIX恐慌指数");
+            tableStat.put("recordCount", count);
+            tableStat.put("minDate", minDate);
+            tableStat.put("maxDate", maxDate);
+            tableStats.add(tableStat);
+        } catch (Exception e) {
+            log.warn("查询ClickHouse表 market_sentiment(QVIX) 失败: {}", e.getMessage());
+            Map<String, Object> tableStat = new LinkedHashMap<>();
+            tableStat.put("table", "market_sentiment");
+            tableStat.put("name", "QVIX恐慌指数");
+            tableStat.put("recordCount", 0);
+            tableStat.put("minDate", null);
+            tableStat.put("maxDate", null);
+            tableStats.add(tableStat);
+        }
+
         result.put("tableCount", tableStats.size());
         result.put("totalRecords", totalRecords);
         result.put("tables", tableStats);

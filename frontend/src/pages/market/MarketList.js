@@ -1,8 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import {
-  Card, Table, Tag, Button, Select, Space, Typography, Row, Col,
-  Statistic, DatePicker, Spin, Tabs, Tooltip, Badge, message, Input
-} from 'antd';
+import { Card, Table, Tag, Button, Select, Space, Typography, Row, Col, Statistic, DatePicker, Spin, Tabs, Tooltip, Badge, Input } from 'antd';
+import { message } from '../../utils/messageUtil';
 import {
   ReloadOutlined, StockOutlined, RiseOutlined, FallOutlined,
   BarChartOutlined, LineChartOutlined, SearchOutlined, QuestionCircleOutlined

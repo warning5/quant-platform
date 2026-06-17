@@ -1,8 +1,6 @@
 import React, { useEffect } from 'react';
-import {
-  Modal, Form, Input, Select, InputNumber, DatePicker, Button, Space,
-  Typography, Divider, Row, Col, Switch, Tooltip, message, Alert
-} from 'antd';
+import { Modal, Form, Input, Select, InputNumber, DatePicker, Button, Space, Typography, Divider, Row, Col, Switch, Tooltip, Alert } from 'antd';
+import { message } from '../../utils/messageUtil';
 import { PlayCircleOutlined, QuestionCircleOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { backtestApi } from '../../api';

@@ -14,9 +14,8 @@ update_news_data.py
   python update_news_data.py --refresh --days 30       # 只刷新近30天
 
 依赖：
-  pip install akshare pymysql transformers torch
-  模型：hw2942/bert-base-chinese-finetuning-financial-news-sentiment-v2
-  模型缓存路径见代码中 _FIN_NEWS_MODEL_PATH 常量
+  pip install akshare pymysql
+  可选：pip install transformers torch（本地情感模型，缺失时自动降级为关键词分类）
 """
 import sys
 import os
@@ -61,7 +60,7 @@ def _load_model_local(model_path):
     import sys, threading, contextlib, os
     os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
     os.environ["DISABLE_TQDM"] = "1"
-    tokenizer = AutoTokenizer.from_pretrained(model_path)
+    tokenizer = AutoTokenizer.from_pretrained(model_path, local_files_only=True)
     model_holder = [None]
     model_error = [None]
     def load():
@@ -71,7 +70,7 @@ def _load_model_local(model_path):
         os.dup2(devnull, 2)
         try:
             model_holder[0] = AutoModelForSequenceClassification.from_pretrained(
-                model_path
+                model_path, local_files_only=True
             )
         except Exception as e:
             model_error[0] = e
@@ -92,29 +91,49 @@ def _load_model_local(model_path):
 _model_lock = threading.Lock()
 
 def _init_sentiment():
-    """采集时初始化（金融新闻专用模型），多线程安全"""
+    """采集时初始化（金融新闻专用模型），多线程安全；模型缺失时降级为关键词模式"""
     global _sentiment_model, _sentiment_tokenizer
     if _sentiment_model is not None:
         return
     with _model_lock:
         if _sentiment_model is not None:
             return
+        if not os.path.isdir(_FIN_NEWS_MODEL_PATH):
+            print("[NLP] 本地模型缺失，降级为关键词分类模式", flush=True)
+            _sentiment_model = "KW_ONLY"  # 标记：仅关键词，无模型
+            _sentiment_tokenizer = None
+            return
         print("[NLP] 加载金融新闻情感模型（本地）...", flush=True)
-        _sentiment_model, _sentiment_tokenizer = _load_model_local(_FIN_NEWS_MODEL_PATH)
-        print("[NLP] 模型就绪", flush=True)
+        try:
+            _sentiment_model, _sentiment_tokenizer = _load_model_local(_FIN_NEWS_MODEL_PATH)
+            print("[NLP] 模型就绪", flush=True)
+        except Exception as e:
+            print(f"[NLP] 模型加载失败({e})，降级为关键词分类", flush=True)
+            _sentiment_model = "KW_ONLY"
+            _sentiment_tokenizer = None
 
 
 def _init_refresh():
-    """refresh 时初始化（JD模型），多线程安全"""
+    """refresh 时初始化（JD模型），多线程安全；模型缺失时跳过"""
     global _refresh_model, _refresh_tokenizer
     if _refresh_model is not None:
         return
     with _model_lock:
         if _refresh_model is not None:
             return
+        if not os.path.isdir(_JD_MODEL_PATH):
+            print("[NLP] 本地JD模型缺失，刷新跳过模型推理", flush=True)
+            _refresh_model = "KW_ONLY"
+            _refresh_tokenizer = None
+            return
         print("[NLP] 加载情感模型（本地）...", flush=True)
-        _refresh_model, _refresh_tokenizer = _load_model_local(_JD_MODEL_PATH)
-        print("[NLP] 模型就绪", flush=True)
+        try:
+            _refresh_model, _refresh_tokenizer = _load_model_local(_JD_MODEL_PATH)
+            print("[NLP] 模型就绪", flush=True)
+        except Exception as e:
+            print(f"[NLP] JD模型加载失败({e})，降级为关键词模式", flush=True)
+            _refresh_model = "KW_ONLY"
+            _refresh_tokenizer = None
 
 
 def _batch_infer(texts, model, tokenizer, batch_size=256):
@@ -226,19 +245,22 @@ def _kw_classify(text):
 
 
 def classify_sentiment(title, content=""):
-    """混合分类：关键词优先 + 情感模型兜底（直接 model.forward，无 tqdm）
+    """混合分类：关键词优先 + 情感模型兜底（模型缺失时仅关键词）
     
     自动适配:
     - 2分类模型 (num_labels=2): 0=negative, 1=positive
     - 3分类模型 (num_labels=3): 0=negative, 1=neutral, 2=positive
+    - 无模型: 关键词未命中 → (0.5, 'neutral')
     """
     text = (str(title) + " " + str(content))[:300]
     score, ntype = _kw_classify(text)
     if score is not None:
         return score, ntype
+    _init_sentiment()
+    if _sentiment_model == "KW_ONLY":
+        return 0.5, "neutral"
     try:
         import torch
-        _init_sentiment()
         inputs = _sentiment_tokenizer(title[:200], return_tensors='pt',
                                       truncation=True, max_length=128)
         with torch.no_grad():
@@ -489,17 +511,20 @@ def run_refresh(days=90):
         if ntype == "neutral":
             neutral_indices.append(i)
 
-    # 第二步：批量模型推理（直接 model.forward，无 tqdm）
+    # 第二步：批量模型推理（模型缺失时跳过）
     neutral_texts = [rows[i][2][:200] for i in neutral_indices]  # title only, 200 char
-    model_scores = [None] * len(neutral_indices)
+    model_scores = [(0.5, "neutral")] * len(neutral_indices)
 
     if neutral_texts:
         _init_refresh()
-        print(f"  模型推理 0/{len(neutral_texts)} ...", flush=True)
-        batch_results = _batch_infer(neutral_texts, _refresh_model, _refresh_tokenizer, batch_size=64)
-        for j, (score, ntype) in enumerate(batch_results):
-            model_scores[j] = (score, ntype)
-        print(f"  模型推理 {len(neutral_texts)}/{len(neutral_texts)} [OK]", flush=True)
+        if _refresh_model == "KW_ONLY":
+            print(f"  无本地模型，neutral 记录保持默认评分", flush=True)
+        else:
+            print(f"  模型推理 0/{len(neutral_texts)} ...", flush=True)
+            batch_results = _batch_infer(neutral_texts, _refresh_model, _refresh_tokenizer, batch_size=64)
+            for j, (score, ntype) in enumerate(batch_results):
+                model_scores[j] = (score, ntype)
+            print(f"  模型推理 {len(neutral_texts)}/{len(neutral_texts)} [OK]", flush=True)
 
     # 第三步：合并结果，写入数据库
     final_results = []

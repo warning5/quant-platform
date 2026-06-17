@@ -18,7 +18,9 @@ update_consensus_estimate.py
 import argparse
 import sys
 import time
+import threading
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import akshare as ak
 import pymysql
@@ -27,8 +29,9 @@ import pymysql
 sys.path.insert(0, ".")
 from db_config import MYSQL_CONFIG
 
-BATCH_DELAY = 0.5  # 每只股票间隔（秒），避免限流
+BATCH_DELAY = 0.2  # 每只股票间隔（秒），避免限流
 MAX_RETRIES = 2
+WORKERS = 4  # 并发线程数
 
 
 def ensure_table(conn):
@@ -71,6 +74,16 @@ def fetch_one(code):
     return None
 
 
+def _clean_decimal(val):
+    """清洗同花顺缺省占位符 '-' → None（MySQL DECIMAL 列不接受 '-')"""
+    if val is None or val == '-' or val == '' or str(val).strip() in ('-', '', 'nan', 'None'):
+        return None
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return None
+
+
 def upsert_rows(conn, code, df):
     """将一致预期数据写入MySQL"""
     now = datetime.now()
@@ -81,10 +94,10 @@ def upsert_rows(conn, code, df):
             if year < 2024:
                 continue
             agency_count = row.get("预测机构数", 0)
-            est_min = row.get("最小值")
-            est_avg = row.get("均值")
-            est_max = row.get("最大值")
-            ind_avg = row.get("行业平均数")
+            est_min = _clean_decimal(row.get("最小值"))
+            est_avg = _clean_decimal(row.get("均值"))
+            est_max = _clean_decimal(row.get("最大值"))
+            ind_avg = _clean_decimal(row.get("行业平均数"))
 
             cur.execute("""
                 INSERT INTO stock_consensus_estimate
@@ -130,39 +143,60 @@ def main():
     parser = argparse.ArgumentParser(description="采集一致预期数据")
     parser.add_argument("--top", type=int, help="只采集前N只(按市值)")
     parser.add_argument("--code", type=str, help="只采集指定代码")
+    parser.add_argument("--workers", type=int, default=WORKERS, help="并发线程数")
     args = parser.parse_args()
 
     conn = pymysql.connect(**MYSQL_CONFIG)
     ensure_table(conn)
+    conn.close()  #建表后关闭主连接
 
-    stock_list = get_stock_list(conn, top_n=args.top, code=args.code)
+    stock_list = get_stock_list(pymysql.connect(**MYSQL_CONFIG), top_n=args.top, code=args.code)
     total = len(stock_list)
-    print(f"[INFO] 待采集股票数: {total}")
+    print(f"[INFO] 待采集股票数: {total} | 线程数: {args.workers}")
 
-    ok_count = 0
-    empty_count = 0
-    error_count = 0
+    counters = {"ok": 0, "empty": 0, "error": 0, "done": 0}
+    lock = threading.Lock()
+    t0 = time.time()
 
-    for idx, (code, name) in enumerate(stock_list, 1):
+    def worker(code_name):
+        code, name = code_name
+        t_conn = pymysql.connect(**MYSQL_CONFIG)  # 每线程独立连接
         try:
             df = fetch_one(code)
             if df is not None and not df.empty:
-                rows = upsert_rows(conn, code, df)
-                ok_count += 1
-                if idx % 50 == 0 or idx == total:
-                    print(f"[{idx}/{total}] {code} {name}: {rows}行数据")
+                rows = upsert_rows(t_conn, code, df)
+                with lock:
+                    counters["ok"] += 1
+                return code, name, rows, None
             else:
-                empty_count += 1
+                with lock:
+                    counters["empty"] += 1
+                return code, name, 0, "empty"
         except Exception as e:
-            error_count += 1
-            if error_count <= 5:
-                print(f"[ERROR] {code} {name}: {e}")
+            with lock:
+                counters["error"] += 1
+            return code, name, 0, str(e)[:60]
+        finally:
+            t_conn.close()
 
-        if idx < total:
-            time.sleep(BATCH_DELAY)
+    # 提交所有任务，4线程并发即自然限流
+    with ThreadPoolExecutor(max_workers=args.workers) as pool:
+        futures = {pool.submit(worker, (code, name)): (code, name) for code, name in stock_list}
 
-    conn.close()
-    print(f"\n[DONE] 采集完成: 成功={ok_count}, 无数据={empty_count}, 失败={error_count}")
+        for fut in as_completed(futures):
+            code, name, rows, err = fut.result()
+            with lock:
+                counters["done"] += 1
+                local_done = counters["done"]
+            if local_done % 100 == 0 or local_done == 1 or local_done == total:
+                elapsed = time.time() - t0
+                eta = elapsed / local_done * (total - local_done)
+                print(f"[{local_done}/{total}] {elapsed:.0f}s ETA {eta:.0f}s | ok={counters['ok']} empty={counters['empty']} err={counters['error']}")
+            if err and err != "empty" and counters["error"] <= 10:
+                print(f"[ERROR] {code} {name}: {err}")
+
+    elapsed = time.time() - t0
+    print(f"\n[DONE] {elapsed:.0f}s | 成功={counters['ok']}, 无数据={counters['empty']}, 失败={counters['error']}")
 
 
 if __name__ == "__main__":

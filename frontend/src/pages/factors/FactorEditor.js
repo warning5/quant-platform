@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import {
-  Card, Form, Input, Select, Button, Space, Typography, Tabs, message, Spin, Alert, Modal, Tooltip
-} from 'antd';
+import { Card, Form, Input, Select, Button, Space, Typography, Tabs, Spin, Alert, Modal, Tooltip } from 'antd';
+import { message } from '../../utils/messageUtil';
 import {
   ArrowLeftOutlined, SaveOutlined, CheckCircleOutlined,
   QuestionCircleOutlined, PlusOutlined, CodeOutlined,

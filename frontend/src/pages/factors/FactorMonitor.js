@@ -1,9 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import {
-  Card, Row, Col, Statistic, Table, Tag, Progress, Button, Select,
-  Typography, Space, Badge, Modal, DatePicker, Form,
-  Switch, message, Alert, Divider
-} from 'antd';
+import { Card, Row, Col, Statistic, Table, Tag, Progress, Button, Select, Typography, Space, Badge, Modal, DatePicker, Form, Switch, Alert, Divider } from 'antd';
+import { message } from '../../utils/messageUtil';
 import {
   ReloadOutlined, PlayCircleOutlined, CheckCircleOutlined,
   ClockCircleOutlined, ThunderboltOutlined, RiseOutlined,

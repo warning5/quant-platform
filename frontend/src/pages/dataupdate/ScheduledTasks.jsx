@@ -1,18 +1,15 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import {
-  Card, Table, Switch, Button, Tag, Typography, Space,
-  Select, TimePicker, Input, message, Row, Col,
-  Popconfirm, Badge, Spin, Modal, Tabs, Checkbox, Tooltip, DatePicker
-} from 'antd';
+import { Card, Table, Switch, Button, Tag, Typography, Space, Select, TimePicker, Input, InputNumber, Row, Col, Popconfirm, Badge, Spin, Modal, Tabs, Checkbox, Tooltip, DatePicker } from 'antd';
+import { message } from '../../utils/messageUtil';
 import {
   PlayCircleOutlined, ClockCircleOutlined,
   CheckCircleOutlined, CloseCircleOutlined, SyncOutlined,
   ThunderboltOutlined, GlobalOutlined, HistoryOutlined,
   ReloadOutlined, StopOutlined, DeleteOutlined,
-  EditOutlined, CheckOutlined, ClearOutlined, SettingOutlined
+  EditOutlined, CheckOutlined, ClearOutlined, SettingOutlined, LoadingOutlined
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import { scheduleApi } from '../../api/index';
+import api, { scheduleApi } from '../../api/index';
 
 const { Text } = Typography;
 const { RangePicker } = DatePicker;
@@ -132,7 +129,7 @@ function extractTimeFromCron(cronExpr) {
 
 /** 解析 DB 中的 extra_config JSON 字符串 */
 function parseExtraConfig(raw) {
-  if (!raw) return { incremental: false, dateMode: 'today', startDate: null, endDate: null };
+  if (!raw) return { incremental: false, dateMode: 'today', startDate: null, endDate: null, strategyIds: [], topN: 15, enableConfidenceControl: true };
   try {
     const obj = typeof raw === 'string' ? JSON.parse(raw) : raw;
     return {
@@ -140,20 +137,30 @@ function parseExtraConfig(raw) {
       dateMode: obj.dateMode || 'today',
       startDate: obj.startDate || null,
       endDate: obj.endDate || null,
+      strategyIds: obj.strategyIds || (obj.strategyId ? [obj.strategyId] : []),
+      topN: obj.topN || 15,
+      enableConfidenceControl: obj.enableConfidenceControl !== false,
     };
   } catch {
-    return { incremental: false, dateMode: 'today', startDate: null, endDate: null };
+    return { incremental: false, dateMode: 'today', startDate: null, endDate: null, strategyIds: [], topN: 15, enableConfidenceControl: true };
   }
 }
 
 /** 将任务配置序列化为 extra_config JSON 字符串 */
 function stringifyExtraConfig(config) {
-  return JSON.stringify({
+  const result = {
     incremental: config.incremental,
     dateMode: config.dateMode,
     startDate: config.startDate,
     endDate: config.endDate,
-  });
+  };
+  // 推荐任务专属字段
+  if (config.strategyIds && config.strategyIds.length > 0) {
+    result.strategyIds = config.strategyIds;
+    result.topN = config.topN || 15;
+    result.enableConfidenceControl = config.enableConfidenceControl !== false;
+  }
+  return JSON.stringify(result);
 }
 
 // ========== Cron 表达式解析 / 生成工具 ==========
@@ -265,28 +272,104 @@ function generateFullCron(fieldSets) {
 
 function getNextRunTimes(cronExpr, count = 3) {
   const fieldSets = parseFullCron(cronExpr);
+  // 将每个字段的 Set 转为排序数组，便于二分查找
+  const arrays = fieldSets.map(s => Array.from(s).sort((a, b) => a - b));
   const results = [];
   const now = dayjs();
   let cursor = now.startOf('second').add(1, 'second');
   const limit = now.add(4, 'year');
 
-  while (results.length < count && cursor.isBefore(limit)) {
-    const s = cursor.second();
-    const m = cursor.minute();
-    const h = cursor.hour();
-    const dom = cursor.date();
-    const month = cursor.month() + 1;
-    const dow = cursor.day();
-
-    if (fieldSets[0].has(s) &&
-        fieldSets[1].has(m) &&
-        fieldSets[2].has(h) &&
-        fieldSets[3].has(dom) &&
-        fieldSets[4].has(month) &&
-        fieldSets[5].has(dow)) {
-      results.push(cursor);
+  function findNextOrEqual(arr, val) {
+    // 二分查找 >= val 的最小值
+    let lo = 0, hi = arr.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (arr[mid] < val) lo = mid + 1; else hi = mid;
     }
-    cursor = cursor.add(1, 'second');
+    return lo < arr.length ? arr[lo] : null;
+  }
+
+  while (results.length < count && cursor.isBefore(limit)) {
+    const curS = cursor.second();
+    const curM = cursor.minute();
+    const curH = cursor.hour();
+    const curDom = cursor.date();
+    const curMonth = cursor.month() + 1;
+    const curDow = cursor.day();
+
+    // 秒
+    let s = findNextOrEqual(arrays[0], curS);
+    if (s === null) { /* 不可能：秒字段总有值 */ }
+    if (s > curS) {
+      cursor = cursor.second(s).startOf('second');
+      // 重置更小粒度为最小值
+      cursor = cursor.minute(arrays[1][0]).hour(arrays[2][0]);
+      // 继续检查后续字段...
+    }
+
+    // 分
+    let m = findNextOrEqual(arrays[1], cursor.minute());
+    if (m === null) {
+      // 进位到下一小时
+      cursor = cursor.add(1, 'hour').minute(arrays[1][0]).second(arrays[0][0]).startOf('second');
+      continue;
+    }
+    if (m > cursor.minute()) {
+      cursor = cursor.minute(m).second(arrays[0][0]).startOf('second');
+      continue;
+    }
+
+    // 时
+    let h = findNextOrEqual(arrays[2], cursor.hour());
+    if (h === null) {
+      cursor = cursor.add(1, 'day').hour(arrays[2][0]).minute(arrays[1][0]).second(arrays[0][0]).startOf('second');
+      continue;
+    }
+    if (h > cursor.hour()) {
+      cursor = cursor.hour(h).minute(arrays[1][0]).second(arrays[0][0]).startOf('second');
+      continue;
+    }
+
+    // 月
+    let mon = findNextOrEqual(arrays[4], cursor.month() + 1);
+    if (mon === null) {
+      cursor = cursor.add(1, 'year').month(arrays[4][0] - 1).date(1).hour(arrays[2][0]).minute(arrays[1][0]).second(arrays[0][0]).startOf('second');
+      continue;
+    }
+
+    // 日 —— 需要逐日尝试（最多31次/月）
+    const maxDay = cursor.daysInMonth();
+    let d = findNextOrEqual(
+      arrays[3].filter(v => v <= maxDay),
+      cursor.date()
+    );
+    if (d === null || d > maxDay) {
+      // 进位到下月
+      const nextMonth = mon === cursor.month() + 1 ? mon + 1 : mon;
+      const nmArr = findNextOrEqual(arrays[4], nextMonth);
+      if (nmArr === null) {
+        cursor = cursor.add(1, 'year').month(arrays[4][0] - 1).date(1);
+      } else {
+        cursor = cursor.month(nmArr - 1).date(1);
+      }
+      cursor = cursor.hour(arrays[2][0]).minute(arrays[1][0]).second(arrays[0][0]).startOf('second');
+      continue;
+    }
+    if (d > cursor.date()) {
+      cursor = cursor.date(d).hour(arrays[2][0]).minute(arrays[1][0]).second(arrays[0][0]).startOf('second');
+      continue;
+    }
+
+    // 星期几（dow）—— 如果不匹配则跳到第二天
+    const dow = cursor.day();
+    if (!fieldSets[5].has(dow)) {
+      cursor = cursor.add(1, 'day').hour(arrays[2][0]).minute(arrays[1][0]).second(arrays[0][0]).startOf('second');
+      continue;
+    }
+
+    // 所有字段都匹配！
+    results.push(cursor);
+    cursor = cursor.add(1, 'second'); // 找到一个后前进1秒继续找下一个
   }
 
   return results;
@@ -294,7 +377,7 @@ function getNextRunTimes(cronExpr, count = 3) {
 
 // ========== 可视化编辑器弹窗（含 Cron + 任务配置 双 Tab） ==========
 
-function CronVisualEditor({ open, initialValue, initialExtraConfig, onOk, onCancel }) {
+function CronVisualEditor({ open, initialValue, initialExtraConfig, taskKey, onOk, onCancel }) {
   // --- Cron 相关 state ---
   const [fields, setFields] = useState(() => parseFullCron(initialValue));
   // ★ 第一层 activeTab: 'config' = 任务配置, 'cron' = Cron配置(内含6子tab)
@@ -309,6 +392,11 @@ function CronVisualEditor({ open, initialValue, initialExtraConfig, onOk, onCanc
   const [incremental, setIncremental] = useState(false);
   const [dateMode, setDateMode] = useState('today');
   const [customDates, setCustomDates] = useState(null); // [dayjs, dayjs]
+  // --- 推荐任务专属 state ---
+  const [strategyIds, setStrategyIds] = useState([]);
+  const [topN, setTopN] = useState(15);
+  const [enableConfidenceControl, setEnableConfidenceControl] = useState(true);
+  const [allStrategies, setAllStrategies] = useState([]);
 
   // 初始化
   useEffect(() => {
@@ -327,8 +415,21 @@ function CronVisualEditor({ open, initialValue, initialExtraConfig, onOk, onCanc
       } else {
         setCustomDates(null);
       }
+      setStrategyIds(ec.strategyIds || []);
+      setTopN(ec.topN || 15);
+      setEnableConfidenceControl(ec.enableConfidenceControl !== false);
+      // 推荐任务时加载策略列表
+      if (taskKey === 'DAILY_RECOMMENDATION') {
+        api.get('/strategies?size=100').then(res => {
+          // axios interceptor unwraps to res.data.data (IPage: {records, total, ...})
+          const records = res?.records;
+          const data = Array.isArray(records) ? records : (Array.isArray(res) ? res : []);
+          setAllStrategies(data);
+          setAllStrategies(data);
+        }).catch(() => {});
+      }
     }
-  }, [open, initialValue, initialExtraConfig]);
+  }, [open, initialValue, initialExtraConfig, taskKey]);
 
   /** 切换单个 checkbox */
   const toggleItem = useCallback((fieldIdx, val) => {
@@ -388,8 +489,17 @@ function CronVisualEditor({ open, initialValue, initialExtraConfig, onOk, onCanc
   const previewCron = useMemo(() => generateFullCron(fields), [fields]);
   // 实际用于保存的 cron：优先使用手动编辑的值，否则用 checkbox 生成的
   const effectiveCron = manualEditCron || previewCron;
-  // 最近3次执行时间基于 effectiveCron 计算
-  const nextRuns = useMemo(() => getNextRunTimes(effectiveCron, 3), [effectiveCron]);
+  // 最近3次执行时间：异步计算，避免阻塞渲染
+  const [nextRuns, setNextRuns] = useState([]);
+  useEffect(() => {
+    // 使用 requestIdleCallback / setTimeout 让出主线程
+    const timer = setTimeout(() => {
+      try {
+        setNextRuns(getNextRunTimes(effectiveCron, 3));
+      } catch { setNextRuns([]); }
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [effectiveCron]);
 
   /** 当用户在 Input 中手动编辑 cron 文本时，回写到 fields（反解析） */
   const handleManualCronChange = useCallback((val) => {
@@ -545,6 +655,45 @@ function CronVisualEditor({ open, initialValue, initialExtraConfig, onOk, onCanc
               )}
             </Space>
           </div>
+
+          {/* 推荐任务专属配置 */}
+          {taskKey === 'DAILY_RECOMMENDATION' && (
+            <div style={{ marginTop: 20 }}>
+              <Text strong style={{ fontSize: 13, display: 'block', marginBottom: 8 }}>策略选择</Text>
+              <Select
+                mode="multiple"
+                value={strategyIds}
+                onChange={setStrategyIds}
+                placeholder="选择要执行的策略"
+                style={{ width: '100%', marginBottom: 12 }}
+                options={allStrategies.map(s => ({
+                  value: s.id,
+                  label: `${s.strategyName}（#${s.id}）`,
+                }))}
+                maxTagCount={5}
+                maxTagTextLength={12}
+              />
+              {strategyIds.length > 0 && (
+                <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
+                  已选 {strategyIds.length} 个策略：{strategyIds.map(id => {
+                    const s = allStrategies.find(x => x.id === id);
+                    return s?.strategyName || `#${id}`;
+                  }).join('、')}
+                </Text>
+              )}
+
+              <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+                <div>
+                  <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>每策略推荐数</Text>
+                  <InputNumber min={5} max={50} value={topN} onChange={setTopN} style={{ width: 100 }} />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, justifyContent: 'center' }}>
+                  <Switch checked={enableConfidenceControl} onChange={setEnableConfidenceControl} size="small"
+                    checkedChildren="置信度控制" unCheckedChildren="固定TopN" />
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       ),
     },
@@ -588,7 +737,7 @@ function CronVisualEditor({ open, initialValue, initialExtraConfig, onOk, onCanc
               )}
             </Space>
 
-            {nextRuns.length > 0 && (
+            {nextRuns.length > 0 ? (
               <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px dashed #d6e4ff' }}>
                 <Text type="secondary" style={{ fontSize: 12 }}>最近 3 次执行：</Text>
                 {nextRuns.map((t, i) => (
@@ -601,12 +750,18 @@ function CronVisualEditor({ open, initialValue, initialExtraConfig, onOk, onCanc
                   </Tag>
                 ))}
               </div>
+            ) : open && (
+              <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px dashed #d6e4ff' }}>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  <LoadingOutlined style={{ marginRight: 4 }} /> 计算执行时间...
+                </Text>
+              </div>
             )}
           </div>
         </div>
       ),
     },
-  ], [cronFieldTabs, incremental, dateMode, customDates]);
+  ], [cronFieldTabs, incremental, dateMode, customDates, taskKey, strategyIds, topN, enableConfidenceControl, allStrategies]);
 
   /** 构建最终的 extra_config */
   const buildExtraConfig = useCallback(() => {
@@ -620,8 +775,11 @@ function CronVisualEditor({ open, initialValue, initialExtraConfig, onOk, onCanc
       dateMode,
       startDate: sd,
       endDate: ed,
+      strategyIds,
+      topN,
+      enableConfidenceControl,
     });
-  }, [incremental, dateMode, customDates]);
+  }, [incremental, dateMode, customDates, strategyIds, topN, enableConfidenceControl]);
 
   return (
     <Modal
@@ -841,8 +999,8 @@ export default function ScheduledTasks() {
     setTriggeringKeys(prev => new Set(prev).add(taskKey));
     try {
       const res = await scheduleApi.trigger(taskKey);
-      if (res && res.taskId) {
-        message.success(`${taskKey} 任务已触发`);
+      if (res && (res.taskKey || res.taskId || res.status === 'RUNNING')) {
+        message.success(res?.message || `${taskKey} 任务已触发`);
         fetchConfig();
       } else {
         message.error(res?.message || '触发失败');
@@ -957,13 +1115,28 @@ export default function ScheduledTasks() {
       width: 240,
       render: (_, record) => {
         const def = TASK_ITEMS.find(d => d.key === record.task_key);
+        // 推荐任务用 extra_config 中的策略信息生成描述
+        let desc = def?.desc;
+        if (!desc && record.task_key === 'DAILY_RECOMMENDATION') {
+          try {
+            const ec = typeof record.extra_config === 'string' ? JSON.parse(record.extra_config) : record.extra_config;
+            const ids = ec?.strategyIds || [];
+            desc = ids.length > 0
+              ? `每日按选定策略自动选股推荐（当前 ${ids.length} 个策略），含因子筛选、LLM深度分析、评分融合`
+              : '每日按选定策略自动选股推荐，含因子筛选、LLM深度分析、评分融合';
+          } catch {
+            desc = '每日按选定策略自动选股推荐，含因子筛选、LLM深度分析、评分融合';
+          }
+        } else if (!desc && record.task_key === 'RECOMMENDATION_TRACK') {
+          desc = '计算推荐股票的次日收益率，用于复盘追踪和策略效果评估';
+        }
         return (
           <div>
             <Text strong style={{ fontSize: 13 }}>
               {def?.icon || '📦'} {record.task_name || record.task_key}
             </Text>
             <br />
-            <Text type="secondary" style={{ fontSize: 11 }}>{def?.desc}</Text>
+            <Text type="secondary" style={{ fontSize: 11 }}>{desc}</Text>
           </div>
         );
       },
@@ -1189,6 +1362,7 @@ export default function ScheduledTasks() {
         open={editorOpen}
         initialValue={editorTarget?.initialValue || ''}
         initialExtraConfig={editorTarget?.initialExtraConfig || ''}
+        taskKey={editorTarget?.taskKey || ''}
         onOk={handleEditorOk}
         onCancel={() => { setEditorOpen(false); setEditorTarget(null); }}
       />

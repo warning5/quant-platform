@@ -1,9 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import {
-  Card, Table, Tag, Space, Typography, Row, Col, Statistic, Select, Spin, Tabs,
-  Descriptions, Input, Button, message, Tooltip
-} from 'antd';
+import { Card, Table, Tag, Space, Typography, Row, Col, Statistic, Select, Spin, Tabs, Descriptions, Input, Button, Tooltip } from 'antd';
+import { message } from '../../utils/messageUtil';
 import {
   SearchOutlined, ReloadOutlined, FundOutlined, RiseOutlined, FallOutlined,
   PieChartOutlined, BarChartOutlined, QuestionCircleOutlined,

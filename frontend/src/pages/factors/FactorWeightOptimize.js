@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import dayjs from 'dayjs';
-import {
-  Card, Row, Col, Select, Button, Tag, Spin, Alert, Space,
-  Typography, Table, Tooltip, Divider, Statistic, DatePicker, Modal, message,
-} from 'antd';
+import { Card, Row, Col, Select, Button, Tag, Spin, Alert, Space, Typography, Table, Tooltip, Divider, Statistic, DatePicker, Modal } from 'antd';
+import { message } from '../../utils/messageUtil';
 import {
   BarChartOutlined, ReloadOutlined, AimOutlined, InfoCircleOutlined, CheckCircleOutlined,
 } from '@ant-design/icons';
