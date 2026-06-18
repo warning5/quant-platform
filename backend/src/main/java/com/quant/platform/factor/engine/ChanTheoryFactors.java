@@ -19,32 +19,6 @@ import java.util.Map;
 public class ChanTheoryFactors {
 
     /**
-     * CHAN_PEN_DIR — 当前笔方向因子
-     * 值: +1=上升笔, -1=下降笔, 0=无有效笔
-     * 用途: 判断当前处于上升还是下降趋势中,可用于动量/反转策略
-     */
-    public static class PenDirectionCalculator implements FactorCalculator {
-        @Override
-        public String getFactorCode() {
-            return "CHAN_PEN_DIR";
-        }
-
-        @Override
-        public BigDecimal calculate(String symbol, LocalDate calcDate,
-                                    List<MarketDailyBar> history, Map<String, Object> context) {
-            if (history == null || history.size() < 20) return null;
-
-            ChanTheoryResult result = ChanTheoryCalculator.calculate(history);
-            if (result.getPens().isEmpty()) return null;
-
-            // 取最后一笔的方向
-            var lastPen = result.lastPen();
-            return BigDecimal.valueOf(lastPen.getDirection().getValue())
-                    .setScale(8, RoundingMode.HALF_UP);
-        }
-    }
-
-    /**
      * CHAN_TREND — 走势类型因子
      * 值: 1=上涨趋势, 0=盘整, -1=下跌趋势
      * 用途: 大级别趋势判断,用于择时或过滤信号
@@ -136,26 +110,4 @@ public class ChanTheoryFactors {
         }
     }
 
-    /**
-     * CHAN_PEN_COUNT — 笔数量因子
-     * 值: 最近N根K线内识别出的笔数,反映波动活跃度
-     */
-    public static class PenCountCalculator implements FactorCalculator {
-        @Override
-        public String getFactorCode() {
-            return "CHAN_PEN_COUNT";
-        }
-
-        @Override
-        public BigDecimal calculate(String symbol, LocalDate calcDate,
-                                    List<MarketDailyBar> history, Map<String, Object> context) {
-            if (history == null || history.size() < 10) return null;
-
-            ChanTheoryResult result = ChanTheoryCalculator.calculate(history);
-            int penCount = result.getPens().size();
-
-            return BigDecimal.valueOf(penCount)
-                    .setScale(4, RoundingMode.HALF_UP);
-        }
-    }
 }

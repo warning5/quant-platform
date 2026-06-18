@@ -1185,15 +1185,6 @@ public class AnalysisService {
     private void normalizeChanStrings(TechSignal tech) {
         if (tech == null) return;
 
-        // CHAN_PEN_DIR: 前端期望数字 1/-1，但 BeanPropertyRowMapper 返回 "1.0"/"-1.0"
-        // 清理为整数格式 "1"/"-1"
-        if (tech.getPenDir() != null) {
-            try {
-                int v = (int) Math.round(Double.parseDouble(tech.getPenDir()));
-                tech.setPenDir(String.valueOf(v));
-            } catch (NumberFormatException ignored) {}
-        }
-
         // CHAN_TREND: 1 → "BULLISH", 0 → "SIDEWAYS", -1 → "BEARISH"
         if (tech.getTrend() != null) {
             try {

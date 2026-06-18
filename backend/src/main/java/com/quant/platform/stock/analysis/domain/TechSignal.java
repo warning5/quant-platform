@@ -22,11 +22,6 @@ public class TechSignal {
     private LocalDate tradeDate;
     
     /**
-     * 缠论笔方向：UP/DOWN
-     */
-    private String penDir;
-    
-    /**
      * 趋势状态：BULLISH/BEARISH/SIDEWAYS
      */
     private String trend;
@@ -40,11 +35,6 @@ public class TechSignal {
      * 中枢位置：UPPER/MIDDLE/LOWER
      */
     private String hubPos;
-    
-    /**
-     * 笔的数量（近期）
-     */
-    private Integer penCount;
     
     /**
      * 均线多头排列：true/false

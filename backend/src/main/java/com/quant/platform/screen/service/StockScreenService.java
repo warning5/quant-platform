@@ -1001,7 +1001,7 @@ public class StockScreenService {
      * 获取最新可用选股日期（取所有有数据的因子中最新日期的最小值）
      */
     public String getLatestAvailableDate() {
-        List<String> keyCodes = List.of("MOM20", "VOL20", "SIZE", "MOM60");
+        List<String> keyCodes = List.of("MOM20", "VOL20");
         LocalDate latest = null;
         for (String code : keyCodes) {
             LocalDate d = clickHouseFactorValueService.getLatestDate(code);

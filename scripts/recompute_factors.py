@@ -7,22 +7,18 @@
   2. 逐股票、逐因子计算，批量 INSERT
   3. 横截面归一化（Z-Score + 百分位排名）
 
-因子分类:
+因子分类 (已清理: 仅保留37个ACTIVE因子中由Python日频计算的21个):
   技术因子 (TECHNICAL, MOMENTUM, VOLATILITY):
-    MOM20, MOM60, VOL20, TURN20, SIZE, RSI5, BOLL_POS, VPCORR20
-    VOL5, VOL60, VOL_RATIO, AMIHUD, TURNOVER_CHANGE, VOLUME_RATIO
+    MOM20, MOM60, VOL20, TURN20, SIZE
+    VOL60, VOLUME_RATIO, TURNOVER_ANOMALY, VOLUME_SURPRISE, LIMIT_UP_COUNT
 
-  财务因子 (FUNDAMENTAL) — 从 stock_financial_indicator 加载:
-    盈利能力: GROSS_MARGIN, NET_MARGIN, ROE, ROA, EBIT_MARGIN,
-              TOTAL_COST_RATIO, PERIOD_EXPENSE_RATIO
-    成长能力: REVENUE_YOY, NET_PROFIT_YOY, OPERATING_PROFIT_YOY,
-              TOTAL_ASSETS_YOY, EPS_YOY
-    偿债能力: CURRENT_RATIO, QUICK_RATIO, DEBT_TO_ASSET, DEBT_TO_EQUITY
-    营运能力: AR_TURNOVER, AR_TURNOVER_DAYS, ASSETS_TURNOVER,
-              INVENTORY_TURNOVER, INVENTORY_TURNOVER_DAYS
-    现金流:   CF_TO_NP, CF_PER_SHARE, CF_TO_REVENUE,
-              FCF, FCF_TO_OPCF, FCF_TO_NP
-    每股指标: BPS
+  估值+技术混合因子 (日频):
+    VAL_PE_PERCENTILE, VAL_PB_PERCENTILE, PRICE_52W_HIGH_PCT,
+    VAL_DIVIDEND_YIELD, VAL_FCF_YIELD
+
+  财务因子 (季频, 6个):
+    FIN_ROE, FIN_EARNINGS_QUALITY, FIN_REVENUE_YOY,
+    FIN_NET_PROFIT_YOY, FIN_ROE_TTM, FIN_REVENUE_TTM_YOY
 
 用法:
   python scripts/recompute_factors.py                              # 全部技术+波动率因子
@@ -47,62 +43,30 @@ import clickhouse_connect
 from db_config import CLICKHOUSE_CONFIG, MYSQL_CONFIG
 
 # ---- 因子分组 ----
-TECH_FACTORS = ["MOM20", "MOM60", "VOL20", "TURN20", "SIZE", "RSI5", "BOLL_POS", "VPCORR20"]
-VOL_LIQ_FACTORS = ["VOL5", "VOL60", "VOL_RATIO", "AMIHUD", "TURNOVER_CHANGE", "VOLUME_RATIO",
+# 已清理: 110个未使用因子标记为DEPRECATED，此处仅保留37个ACTIVE因子中由Python日频计算的子集
+TECH_FACTORS = ["MOM20", "MOM60", "VOL20", "TURN20", "SIZE"]
+VOL_LIQ_FACTORS = ["VOL60", "VOLUME_RATIO",
                     "TURNOVER_ANOMALY", "VOLUME_SURPRISE", "LIMIT_UP_COUNT"]
 # 估值+技术混合因子（日频，但依赖 pe_ttm/pb/high_price/dividend/fcf 字段）
 VAL_TECH_FACTORS = ["VAL_PE_PERCENTILE", "VAL_PB_PERCENTILE", "PRICE_52W_HIGH_PCT",
                      "VAL_DIVIDEND_YIELD", "VAL_FCF_YIELD"]
-ALL_TECH_FACTORS = TECH_FACTORS + VOL_LIQ_FACTORS + VAL_TECH_FACTORS  # 19个日频因子
+ALL_TECH_FACTORS = TECH_FACTORS + VOL_LIQ_FACTORS + VAL_TECH_FACTORS  # 15个日频因子
 
 # 财务因子（季频，从 stock_financial_indicator 加载）
 # report_type: 1=Q1, 2=中报, 3=三季报, 4=年报
 # 因子计算优先用年报(report_type=4)，数据最全最准；年报未出时用最新季报补充
+# 已清理: 仅保留策略+业务逻辑使用的6个财务因子
 FIN_FACTORS = [
-    # 盈利能力 (7)
-    "FIN_GROSS_MARGIN",      # 毛利率
-    "FIN_NET_MARGIN",        # 净利率
+    # 盈利能力
     "FIN_ROE",               # 净资产收益率
-    "FIN_ROA",               # 总资产收益率
-    "FIN_ROIC",              # 投入资本回报率（新增）
-    "FIN_EBIT_MARGIN",       # EBIT利润率
-    "FIN_TOTAL_COST_RATIO",  # 营业成本率
-    "FIN_PERIOD_EXPENSE_RATIO",  # 期间费用率
-    # 成长能力 (5)
+    "FIN_EARNINGS_QUALITY",  # 盈余质量（同 operating_cf_to_np）
+    # 成长能力
     "FIN_REVENUE_YOY",       # 营收同比增长率
     "FIN_NET_PROFIT_YOY",    # 净利润同比增长率
-    "FIN_OPERATING_PROFIT_YOY",  # 营业利润同比增长率
-    "FIN_TOTAL_ASSETS_YOY",  # 总资产同比增长率
-    "FIN_EPS_YOY",           # 每股收益同比增长率
-    # 偿债能力 (5)  — 新增 interest_coverage_ratio
-    "FIN_CURRENT_RATIO",     # 流动比率
-    "FIN_QUICK_RATIO",       # 速动比率
-    "FIN_DEBT_TO_ASSET",     # 资产负债率
-    "FIN_DEBT_TO_EQUITY",    # 产权比率
-    "FIN_INTEREST_COVERAGE", # 利息保障倍数（新增）
-    # 营运能力 (5)
-    "FIN_AR_TURNOVER",       # 应收账款周转率
-    "FIN_AR_TURNOVER_DAYS",  # 应收账款周转天数
-    "FIN_ASSETS_TURNOVER",   # 总资产周转率
-    "FIN_INVENTORY_TURNOVER",    # 存货周转率
-    "FIN_INVENTORY_TURNOVER_DAYS",# 存货周转天数
-    # 现金流 (8)  — 新增 operating_cf_to_debt / earnings_quality
-    "FIN_CF_TO_NP",          # 经营现金流/净利润
-    "FIN_EARNINGS_QUALITY",  # 盈余质量（同 operating_cf_to_np）
-    "FIN_CF_PER_SHARE",      # 每股经营现金流
-    "FIN_CF_TO_REVENUE",     # 经营现金流/营收
-    "FIN_FCF",               # 自由现金流
-    "FIN_FCF_TO_OPCF",       # FCF/经营CF
-    "FIN_FCF_TO_NP",         # FCF/净利润
-    "FIN_OPERATING_CF_TO_DEBT", # 经营现金流/总负债（新增）
-    # 每股指标 (1)
-    "FIN_BPS",               # 每股净资产
-    # TTM指标 (3) — 滚动12个月，消除单季度季节性
+    # TTM指标 — 滚动12个月，消除单季度季节性
     "FIN_ROE_TTM",           # ROE(TTM)
     "FIN_REVENUE_TTM_YOY",   # 营收同比(TTM)
-    "FIN_NET_PROFIT_TTM_YOY",# 净利同比(TTM)
-    # 价值因子 (Phase 1.2) — VAL_FCF_YIELD 已移至日频因子(VAL_TECH_FACTORS)
-]  # 共36个财务因子
+]  # 共6个财务因子
 
 
 def load_stock_daily():
@@ -572,23 +536,17 @@ def calc_fcf_yield_daily(history):
 
 
 # ---- 日频因子函数注册表 ----
+# 已清理: 仅保留ACTIVE因子，移除RSI5/BOLL_POS/VPCORR20/VOL5/VOL_RATIO/AMIHUD/TURNOVER_CHANGE
 TECH_FACTOR_FUNCS = {
     "MOM20": lambda h: calc_mom(h, 20),
     "MOM60": lambda h: calc_mom(h, 60),
     "VOL20": calc_vol20,
     "TURN20": calc_turn20,
     "SIZE": calc_size,
-    "RSI5": calc_rsi5,
-    "BOLL_POS": calc_boll_pos,
-    "VPCORR20": calc_vp_corr20,
-    # 第一批新增
-    "VOL5": calc_vol5,
+    # 波动率+流动性
     "VOL60": calc_vol60,
-    "VOL_RATIO": calc_vol_ratio,
-    "AMIHUD": calc_amihud,
-    "TURNOVER_CHANGE": calc_turnover_change,
     "VOLUME_RATIO": calc_volume_ratio,
-    # 第二批新增（涨停板/市场情绪策略缺失因子）
+    # 涨停板/市场情绪策略因子
     "TURNOVER_ANOMALY": calc_turnover_anomaly,
     "VOLUME_SURPRISE": calc_volume_surprise,
     "LIMIT_UP_COUNT": calc_limit_up_count,
@@ -631,50 +589,18 @@ def compute_finance_factors(fin_data, fin_factor_codes, start_date, end_date, ma
     start_t = time.time()
 
     # 财务字段映射: factor_code -> (提取函数, 描述)
+    # 已清理: 仅保留6个ACTIVE财务因子
     FIN_EXTRACTORS = {
         # 盈利能力
-        "FIN_GROSS_MARGIN":          (lambda r: _fval(r, "gross_profit_margin"),           "毛利率"),
-        "FIN_NET_MARGIN":            (lambda r: _fval(r, "net_profit_margin"),             "净利率"),
         "FIN_ROE":                   (lambda r: _fval(r, "roe"),                          "ROE"),
-        "FIN_ROA":                   (lambda r: _fval(r, "roa"),                          "ROA"),
-        "FIN_EBIT_MARGIN":           (lambda r: _calc_ebit_margin(r),                     "EBIT利润率"),
-        "FIN_TOTAL_COST_RATIO":      (lambda r: _calc_cost_ratio(r, "total_cost"),         "营业成本率"),
-        "FIN_PERIOD_EXPENSE_RATIO":  (lambda r: _calc_period_expense_ratio(r),             "期间费用率"),
-        "FIN_ROIC":                  (lambda r: _fval(r, "roic"),                       "ROIC"),
+        "FIN_EARNINGS_QUALITY":      (lambda r: _fval(r, "operating_cf_to_np"),           "盈余质量"),
         # 成长能力
         "FIN_REVENUE_YOY":           (lambda r: _fval(r, "revenue_yoy"),                  "营收增速"),
         "FIN_NET_PROFIT_YOY":        (lambda r: _fval(r, "net_profit_yoy"),               "净利润增速"),
-        "FIN_OPERATING_PROFIT_YOY":  (lambda r: _fval(r, "operating_profit_yoy"),          "营业利润增速"),
-        "FIN_TOTAL_ASSETS_YOY":      (lambda r: _fval(r, "total_assets_yoy"),            "总资产增速"),  # 字段名修正
-        "FIN_EPS_YOY":               (lambda r: _calc_eps_yoy(r),                         "EPS增速"),
-        # 偿债能力 (5)  — 新增 interest_coverage_ratio
-        "FIN_CURRENT_RATIO":         (lambda r: _fval(r, "current_ratio"),                "流动比率"),
-        "FIN_QUICK_RATIO":           (lambda r: _fval(r, "quick_ratio"),                  "速动比率"),
-        "FIN_DEBT_TO_ASSET":         (lambda r: _fval(r, "debt_to_asset_ratio"),          "资产负债率"),
-        "FIN_DEBT_TO_EQUITY":        (lambda r: _fval(r, "debt_to_equity_ratio"),         "产权比率"),
-        "FIN_INTEREST_COVERAGE":     (lambda r: _fval(r, "interest_coverage_ratio"),     "利息保障倍数"),
-        # 营运能力
-        "FIN_AR_TURNOVER":           (lambda r: _fval(r, "accounts_receivable_turnover"),  "应收周转率"),
-        "FIN_AR_TURNOVER_DAYS":      (lambda r: _fval(r, "ar_turnover_days"),             "应收周转天数"),
-        "FIN_ASSETS_TURNOVER":       (lambda r: _fval(r, "total_assets_turnover"),        "总资产周转率"),
-        "FIN_INVENTORY_TURNOVER":    (lambda r: _fval(r, "inventory_turnover"),           "存货周转率"),
-        "FIN_INVENTORY_TURNOVER_DAYS":(lambda r: _fval(r, "inventory_turnover_days"),     "存货周转天数"),
-        # 现金流 (8)  — 新增 operating_cf_to_debt / earnings_quality
-        "FIN_CF_TO_NP":              (lambda r: _fval(r, "operating_cf_to_np"),           "经营CF/净利润"),
-        "FIN_EARNINGS_QUALITY":      (lambda r: _fval(r, "operating_cf_to_np"),           "盈余质量"),
-        "FIN_CF_PER_SHARE":          (lambda r: _fval(r, "net_operate_cf") / _fval(r, "eps_basic") if _fval(r, "eps_basic") and _fval(r, "eps_basic") != 0 else None, "每股经营CF"),
-        "FIN_CF_TO_REVENUE":         (lambda r: _cf_div(r, "net_operate_cf", "total_revenue"), "经营CF/营收"),
-        "FIN_FCF":                   (lambda r: _fval(r, "free_cash_flow"),               "FCF"),
-        "FIN_FCF_TO_OPCF":           (lambda r: _cf_div(r, "free_cash_flow", "net_operate_cf"), "FCF/经营CF"),
-        "FIN_FCF_TO_NP":             (lambda r: _cf_div(r, "free_cash_flow", "net_profit") if _fval(r, "net_profit") is not None else None, "FCF/净利润"),
-        "FIN_OPERATING_CF_TO_DEBT":  (lambda r: _fval(r, "operating_cf_to_debt"),        "经营CF/总负债"),
-        # 每股指标
-        "FIN_BPS":                   (lambda r: _fval(r, "bps"),                          "每股净资产"),
         # TTM 指标
         "FIN_ROE_TTM":               (lambda r: _fval(r, "roe_ttm"),                       "ROE(TTM)"),
         "FIN_REVENUE_TTM_YOY":       (lambda r: _fval(r, "revenue_ttm_yoy"),               "营收增速(TTM)"),
-        "FIN_NET_PROFIT_TTM_YOY":    (lambda r: _fval(r, "net_profit_ttm_yoy"),            "净利增速(TTM)"),
-    }  # 共36个财务因子
+    }  # 共6个财务因子
 
     for code, reports in fin_data.items():
         for rpt in reports:

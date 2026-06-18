@@ -77,14 +77,12 @@ public class AnalysisChMapper {
             SELECT
                 '%s' as code,
                 MAX(calc_date) as trade_date,
-                argMax(CASE WHEN factor_code = 'CHAN_PEN_DIR' THEN factor_val END, calc_date) as pen_dir,
                 argMax(CASE WHEN factor_code = 'CHAN_TREND' THEN factor_val END, calc_date) as trend,
                 argMax(CASE WHEN factor_code = 'CHAN_BUY_SELL' THEN factor_val END, calc_date) as chan_signal,
-                argMax(CASE WHEN factor_code = 'CHAN_HUB_POS' THEN factor_val END, calc_date) as hub_pos,
-                argMax(CASE WHEN factor_code = 'CHAN_PEN_COUNT' THEN factor_val END, calc_date) as pen_count
+                argMax(CASE WHEN factor_code = 'CHAN_HUB_POS' THEN factor_val END, calc_date) as hub_pos
             FROM stock.factor_value FINAL
             WHERE (symbol = ? OR symbol = ?)
-              AND factor_code IN ('CHAN_PEN_DIR','CHAN_TREND','CHAN_BUY_SELL','CHAN_HUB_POS','CHAN_PEN_COUNT')
+              AND factor_code IN ('CHAN_TREND','CHAN_BUY_SELL','CHAN_HUB_POS')
             """.formatted(noSuffix);
 
         try {
@@ -99,17 +97,13 @@ public class AnalysisChMapper {
                     try { t.setTradeDate(java.time.LocalDate.parse(td.toString())); }
                     catch (Exception ignored) {}
                 }
-                // CH 返回 Float64 → 转 String（CHAN_PEN_DIR/CHAN_TREND 等）
-                Object pd = rs.getObject("pen_dir");
-                t.setPenDir(pd != null ? String.valueOf(Math.round(((Number) pd).doubleValue())) : null);
+                // CH 返回 Float64 → 转 String（CHAN_TREND 等）
                 Object tr = rs.getObject("trend");
                 t.setTrend(tr != null ? String.valueOf(Math.round(((Number) tr).doubleValue())) : null);
                 Object cs = rs.getObject("chan_signal");
                 t.setChanSignal(cs != null ? String.valueOf(Math.round(((Number) cs).doubleValue())) : null);
                 Object hp = rs.getObject("hub_pos");
                 t.setHubPos(hp != null ? String.valueOf(((Number) hp).doubleValue()) : null);
-                Object pc = rs.getObject("pen_count");
-                t.setPenCount(pc != null ? ((Number) pc).intValue() : null);
                 return t;
             }, withSuffix, noSuffix);
             if (!results.isEmpty()) {

@@ -52,7 +52,6 @@ public class FactorStyleAttributionService {
     private static final List<FactorDef> DEFAULT_FACTORS = List.of(
             new FactorDef("MOM20", "动量", "20日动量 — 追涨杀跌收益"),
             new FactorDef("VOL20", "波动率", "20日波动率 — 高波动股短期溢价"),
-            new FactorDef("SIZE", "市值", "总市值 — 小盘股溢价"),
             new FactorDef("TURN20", "换手率", "20日换手率 — 流动性溢价")
     );
 

@@ -1323,18 +1323,6 @@ public class TradingSignalEngine {
                 0, 0, "SMA5=过去5日收盘价算术平均，代表短期持仓成本。" +
                 "需结合MA10/MA20/MA60判断多头排列状态，单独看意义有限", true, "default"));
 
-        // === 笔方向/笔数（传统参考项） ===
-        String penDir = tech != null && tech.getPenDir() != null ? tech.getPenDir() : null;
-        boolean isPenUp = "1".equals(penDir) || "UP".equals(penDir);
-        boolean isPenDown = "-1".equals(penDir) || "DOWN".equals(penDir);
-        String penDirDisplay = isPenUp ? "向上" : isPenDown ? "向下" : "-";
-        items.add(buildItem("笔方向", penDirDisplay, 0, 0,
-                "当前笔的方向。向上笔=多方主导，向下笔=空方主导", true, isPenUp ? "red" : isPenDown ? "green" : "default"));
-
-        Integer penCount = tech != null ? tech.getPenCount() : null;
-        items.add(buildItem("笔数", penCount != null ? penCount.toString() : "-", 0, 0,
-                "近期笔的数量。笔数少=走势简洁趋势明确，笔数多=震荡频繁", true, "default"));
-
         return items;
     }
     

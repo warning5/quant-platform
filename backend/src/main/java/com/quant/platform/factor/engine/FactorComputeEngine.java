@@ -69,179 +69,44 @@ public class FactorComputeEngine {
     private FactorComputeEngine self;
 
     {
-        // 注册内置因子
+        // 注册内置技术因子（12个ACTIVE）
         registerBuiltin(new BuiltinFactors.Momentum5Calculator());
         registerBuiltin(new BuiltinFactors.Momentum20Calculator());
-        registerBuiltin(new BuiltinFactors.Momentum60Calculator());
-        registerBuiltin(new BuiltinFactors.Momentum120Calculator());
-        registerBuiltin(new BuiltinFactors.Reversal5Calculator());
-        registerBuiltin(new BuiltinFactors.Volatility5Calculator());
-        registerBuiltin(new BuiltinFactors.Volatility20Calculator());
-        registerBuiltin(new BuiltinFactors.Volatility60Calculator());
-        registerBuiltin(new BuiltinFactors.VolatilityRatioCalculator());
-        registerBuiltin(new BuiltinFactors.AmihudCalculator());
-        registerBuiltin(new BuiltinFactors.TurnoverChangeCalculator());
-        registerBuiltin(new BuiltinFactors.VolumeRatioCalculator());
-        registerBuiltin(new BuiltinFactors.Turnover20Calculator());
-        registerBuiltin(new BuiltinFactors.SizeCalculator());
-        registerBuiltin(new BuiltinFactors.Rsi5Calculator());
-        registerBuiltin(new BuiltinFactors.Rsi14Calculator());
-        registerBuiltin(new BuiltinFactors.MacdCalculator());
-        registerBuiltin(new BuiltinFactors.KdjKCalculator());
-        registerBuiltin(new BuiltinFactors.Atr20Calculator());
-        registerBuiltin(new BuiltinFactors.UpperShadowCalculator());
-        registerBuiltin(new BuiltinFactors.BollingerPositionCalculator());
-        registerBuiltin(new BuiltinFactors.VolPriceCorr20Calculator());
-        registerBuiltin(new BuiltinFactors.PriceMomAccCalculator());
-        // 新增经典技术指标
-        registerBuiltin(new BuiltinFactors.Psy12Calculator());
-        registerBuiltin(new BuiltinFactors.Srdm30Calculator());
-        registerBuiltin(new BuiltinFactors.BollMidCalculator());
-        registerBuiltin(new BuiltinFactors.Mfi14Calculator());
-        registerBuiltin(new BuiltinFactors.BbiCalculator());
-        registerBuiltin(new BuiltinFactors.Ma5Calculator());
-        registerBuiltin(new BuiltinFactors.Ema5Calculator());
-        registerBuiltin(new BuiltinFactors.Wr14Calculator());
-        registerBuiltin(new BuiltinFactors.ObvCalculator());
-        registerBuiltin(new BuiltinFactors.Vroc12Calculator());
-        registerBuiltin(new BuiltinFactors.PvtCalculator());
-        registerBuiltin(new BuiltinFactors.PriceOscCalculator());
-        registerBuiltin(new BuiltinFactors.Vr26Calculator());
-        registerBuiltin(new BuiltinFactors.Bias6Calculator());
-        registerBuiltin(new BuiltinFactors.Vstd10Calculator());
-        registerBuiltin(new BuiltinFactors.Roc12Calculator());
-        registerBuiltin(new BuiltinFactors.Cci14Calculator());
-        registerBuiltin(new BuiltinFactors.Trix12Calculator());
-        registerBuiltin(new BuiltinFactors.Vma5Calculator());
-        registerBuiltin(new BuiltinFactors.Atr14Calculator());
         registerBuiltin(new BuiltinFactors.Mtm6Calculator());
-        registerBuiltin(new BuiltinFactors.VoscCalculator());
-        // 新增26个技术因子 (2026-04-16)
-        registerBuiltin(new BuiltinFactors.ArbrCalculator());
-        registerBuiltin(new BuiltinFactors.BbibollCalculator());
-        registerBuiltin(new BuiltinFactors.CdpCalculator());
-        registerBuiltin(new BuiltinFactors.Env14Calculator());
-        registerBuiltin(new BuiltinFactors.DbcdCalculator());
-        registerBuiltin(new BuiltinFactors.CrCalculator());
-        registerBuiltin(new BuiltinFactors.DpoCalculator());
-        registerBuiltin(new BuiltinFactors.Wr12Calculator());
-        registerBuiltin(new BuiltinFactors.Vrsi6Calculator());
-        registerBuiltin(new BuiltinFactors.Bias12Calculator());
-        registerBuiltin(new BuiltinFactors.Bias24Calculator());
-        registerBuiltin(new BuiltinFactors.RccdCalculator());
-        registerBuiltin(new BuiltinFactors.DdiCalculator());
-        registerBuiltin(new BuiltinFactors.CvltCalculator());
-        registerBuiltin(new BuiltinFactors.VhfCalculator());
-        registerBuiltin(new BuiltinFactors.SiCalculator());
-        registerBuiltin(new BuiltinFactors.MassCalculator());
-        registerBuiltin(new BuiltinFactors.Srmi9Calculator());
-        registerBuiltin(new BuiltinFactors.VmacdCalculator());
-        registerBuiltin(new BuiltinFactors.LwrCalculator());
-        registerBuiltin(new BuiltinFactors.AdtmCalculator());
-        registerBuiltin(new BuiltinFactors.MicdCalculator());
-        registerBuiltin(new BuiltinFactors.DmaCalculator());
-        registerBuiltin(new BuiltinFactors.TapiCalculator());
-        registerBuiltin(new BuiltinFactors.Mi12Calculator());
-        registerBuiltin(new BuiltinFactors.MtmPctCalculator());
-        registerBuiltin(new BuiltinFactors.WadCalculator());
-        // 新增情绪因子 (2026-04-16)
-        registerBuiltin(new BuiltinFactors.LimitUpCountCalculator());
+        registerBuiltin(new BuiltinFactors.Volatility20Calculator());
+        registerBuiltin(new BuiltinFactors.Turnover20Calculator());
+        registerBuiltin(new BuiltinFactors.VolumeRatioCalculator2());
         registerBuiltin(new BuiltinFactors.TurnoverAnomalyCalculator());
         registerBuiltin(new BuiltinFactors.VolumeSurpriseCalculator());
+        registerBuiltin(new BuiltinFactors.Ma5Calculator());
+        registerBuiltin(new BuiltinFactors.Rsi14Calculator());
+        registerBuiltin(new BuiltinFactors.MacdCalculator());
+        registerBuiltin(new BuiltinFactors.LimitUpCountCalculator());
 
-        // 注册 DMI/ADX 趋势因子 (2026-05-17)
-        registerBuiltin(new BuiltinFactors.PlusDI14Calculator());
-        registerBuiltin(new BuiltinFactors.MinusDI14Calculator());
-        registerBuiltin(new BuiltinFactors.Dx14Calculator());
-        registerBuiltin(new BuiltinFactors.Adx14Calculator());
-        registerBuiltin(new BuiltinFactors.Adx20Calculator());
-
-        // 注册 SAR/KDJ扩展/BOLL扩展/均线排列/支撑阻力/量比 (2026-05-17)
-        registerBuiltin(new BuiltinFactors.SarCalculator());
-        registerBuiltin(new BuiltinFactors.KdjDCalculator());
-        registerBuiltin(new BuiltinFactors.KdjJCalculator());
-        registerBuiltin(new BuiltinFactors.BollUpperCalculator());
-        registerBuiltin(new BuiltinFactors.BollLowerCalculator());
-        registerBuiltin(new BuiltinFactors.BollWidthCalculator());
-        registerBuiltin(new BuiltinFactors.MaAlignmentCalculator());
-        registerBuiltin(new BuiltinFactors.NearResistanceCalculator());
-        registerBuiltin(new BuiltinFactors.NearSupportCalculator());
-        registerBuiltin(new BuiltinFactors.VolumeRatioCalculator2());
-        // 新增 Phase5 因子 (2026-06-03)
-        registerBuiltin(new BuiltinFactors.RsrsCalculator());
-        registerBuiltin(new BuiltinFactors.AcOscillatorCalculator());
-        registerBuiltin(new BuiltinFactors.UpDnVolCalculator());
-
-        // 注册缠论因子 (2026-04-29)
-        registerBuiltin(new ChanTheoryFactors.PenDirectionCalculator());
+        // 注册缠论因子（3个ACTIVE）
         registerBuiltin(new ChanTheoryFactors.TrendTypeCalculator());
         registerBuiltin(new ChanTheoryFactors.BuySellSignalCalculator());
         registerBuiltin(new ChanTheoryFactors.HubPositionCalculator());
-        registerBuiltin(new ChanTheoryFactors.PenCountCalculator());
 
-        // 注册财务因子（使用 FinancialFactorCalculator 接口）
-        registerFinancial(new FinancialFactors.GrossProfitMarginCalc());
-        registerFinancial(new FinancialFactors.NetProfitMarginCalc());
+        // 注册财务因子（静态内部类，8个ACTIVE）
         registerFinancial(new FinancialFactors.RoeCalc());
-        registerFinancial(new FinancialFactors.RoaCalc());
-        registerFinancial(new FinancialFactors.TotalCostRatioCalc());
-        registerFinancial(new FinancialFactors.PeriodExpenseRatioCalc());
-        registerFinancial(new FinancialFactors.EbitMarginCalc());
         registerFinancial(new FinancialFactors.RevenueYoyCalc());
         registerFinancial(new FinancialFactors.NetProfitYoyCalc());
-        registerFinancial(new FinancialFactors.OperatingProfitYoyCalc());
-        registerFinancial(new FinancialFactors.TotalAssetsYoyCalc());
-        registerFinancial(new FinancialFactors.EpsBasicYoyCalc());
-        registerFinancial(new FinancialFactors.CurrentRatioCalc());
-        registerFinancial(new FinancialFactors.QuickRatioCalc());
-        registerFinancial(new FinancialFactors.DebtToAssetRatioCalc());
-        registerFinancial(new FinancialFactors.DebtToEquityRatioCalc());
-        registerFinancial(new FinancialFactors.ArTurnoverCalc());
-        registerFinancial(new FinancialFactors.ArTurnoverDaysCalc());
-        registerFinancial(new FinancialFactors.TotalAssetsTurnoverCalc());
-        registerFinancial(new FinancialFactors.InventoryTurnoverCalc());
-        registerFinancial(new FinancialFactors.InventoryTurnoverDaysCalc());
-        registerFinancial(new FinancialFactors.OperatingCfToNpCalc());
-        registerFinancial(new FinancialFactors.OperatingCfPerShareCalc());
-        registerFinancial(new FinancialFactors.OperatingCfToRevenueCalc());
-        registerFinancial(new FinancialFactors.BpsCalc());
-        registerFinancial(new FinancialFactors.RoeStabilityCalc());
         registerFinancial(new FinancialFactors.EarningsQualitySimpleCalc());
-        registerFinancial(new FinancialFactors.GrossMarginQualityCalc());
-        registerFinancial(new FinancialFactors.OperatingLeverageCalc());
-        registerFinancial(new FinancialFactors.CashFlowQualityCalc());
-        registerFinancial(new FinancialFactors.EarningsYieldCalc());
-        registerFinancial(new FinancialFactors.BookValueCalc());
         registerFinancial(new FinancialFactors.RevenueQualityCalc());
-        // 自由现金流因子
-        registerFinancial(new FinancialFactors.FreeCashFlowCalc());
-        registerFinancial(new FinancialFactors.FreeCashFlowToOpCfCalc());
-        registerFinancial(new FinancialFactors.FreeCashFlowToNpCalc());
-        // 需联查原始表的财务因子（非静态内部类，延迟到@PostConstruct注册以确保bean已注入）
-        // RoicCalc / InterestCoverageCalc / OperatingCfToDebtCalc 在 registerDeferred() 中注册
+        registerFinancial(new FinancialFactors.RoeTtmCalc());
+        registerFinancial(new FinancialFactors.RevenueTtmYoyCalc());
+        registerFinancial(new FinancialFactors.NetProfitTtmYoyCalc());
         log.info("Registered {} financial factor calculators (static)", financialCalculators.size());
     }
 
     @jakarta.annotation.PostConstruct
     private void registerDeferred() {
-        // 非静态内部类需要外部类实例（Spring Bean），必须在注入完成后注册
-        registerFinancial(financialFactorsBean.new RoicCalc());
-        registerFinancial(financialFactorsBean.new InterestCoverageCalc());
-        registerFinancial(financialFactorsBean.new OperatingCfToDebtCalc());
-        // 估值因子 (2026-06-02)
+        // 估值因子（非静态内部类，需要Spring Bean，4个ACTIVE）
         registerFinancial(financialFactorsBean.new PeTtmCalc());
-        registerFinancial(financialFactorsBean.new PsTtmCalc());
         registerFinancial(financialFactorsBean.new PbCalc());
         registerFinancial(financialFactorsBean.new DividendYieldCalc());
         registerFinancial(financialFactorsBean.new FcfYieldCalc());
-        // 质量因子 (Phase 2.3)
-        registerFinancial(financialFactorsBean.new EarningsQualityCalc());
-        registerFinancial(financialFactorsBean.new FinancialHealthCalc());
-        registerFinancial(financialFactorsBean.new RevenueStabilityCalc());
-        // TTM 扩展因子 (2026-06-07)
-        registerFinancial(new FinancialFactors.RoeTtmCalc());
-        registerFinancial(new FinancialFactors.RevenueTtmYoyCalc());
-        registerFinancial(new FinancialFactors.NetProfitTtmYoyCalc());
         log.info("Registered {} financial factor calculators (total, after deferred)", financialCalculators.size());
     }
 
