@@ -106,40 +106,6 @@ public class ResearchController {
         }
     }
 
-    @GetMapping("/check/{code}")
-    @Operation(summary = "检查单只股票研报数据", description = "返回该股票的研报数量、最新研报日期及研报列表")
-    public ApiResponse<Map<String, Object>> checkStock(@PathVariable String code) {
-        try {
-            Map<String, Object> result = new LinkedHashMap<>();
-
-            String name = jdbcTemplate.queryForObject(
-                    "SELECT name FROM stock_info WHERE code = ?", String.class, code);
-            result.put("code", code);
-            result.put("name", name != null ? name : "");
-
-            Integer reportCount = jdbcTemplate.queryForObject(
-                    "SELECT COUNT(*) FROM stock_research_report WHERE code = ?", Integer.class, code);
-            result.put("reportCount", reportCount != null ? reportCount : 0);
-
-            String latestDate = jdbcTemplate.queryForObject(
-                    "SELECT MAX(report_date) FROM stock_research_report WHERE code = ?",
-                    String.class, code);
-            result.put("latestDate", latestDate != null ? latestDate : "");
-
-            List<Map<String, Object>> reports = jdbcTemplate.queryForList(
-                    "SELECT id, report_title AS reportTitle, rating AS rating, institution AS institution, " +
-                    "report_date AS reportDate, pdf_url AS pdfUrl " +
-                    "FROM stock_research_report WHERE code = ? ORDER BY report_date DESC LIMIT 10",
-                    code);
-            result.put("reports", reports);
-
-            return ApiResponse.success(result);
-        } catch (Exception e) {
-            log.error("检查股票研报数据失败: {}", code, e);
-            return ApiResponse.error("检查失败: " + e.getMessage());
-        }
-    }
-
     @DeleteMapping("/batch-delete")
     @Operation(summary = "批量删除研报", description = "从 MySQL 删除研报数据")
     public ApiResponse<Map<String, Object>> batchDelete(@RequestBody Map<String, Object> body) {

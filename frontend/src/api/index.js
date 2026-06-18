@@ -288,7 +288,7 @@ export const scheduleApi = {
 export const researchApi = {
   getOverview: (config) => api.get('/research/overview', config),
   getList: (params, config) => api.get('/research/list', { ...config, params }),
-  checkStock: (code, config) => api.get(`/research/check/${code}`, config),
+
 };
 
 // ===== 个股分析 API =====

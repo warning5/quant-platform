@@ -41,9 +41,6 @@ function ResearchData() {
   const [pageSize, setPageSize] = useState(10);
   const [keyword, setKeyword] = useState('');
   const [dateRange, setDateRange] = useState(null);
-  const [checkCode, setCheckCode] = useState('');
-  const [checkResult, setCheckResult] = useState(null);
-  const [checkLoading, setCheckLoading] = useState(false);
   const [selectedRowKeys, setSelectedRowKeys] = useState([]);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
@@ -94,23 +91,6 @@ function ResearchData() {
       .finally(() => setTableLoading(false));
   };
 
-  // 检查单只股票
-  const handleCheck = () => {
-    if (!checkCode.trim()) {
-      message.warning('请输入股票代码');
-      return;
-    }
-    setCheckLoading(true);
-    setCheckResult(null);
-    researchApi.checkStock(checkCode.trim(), silentConfig)
-      .then(data => {
-        if (data.reports) data.reports = data.reports.map(norm);
-        setCheckResult(data);
-      })
-      .catch(() => message.error('未找到该股票的研报数据'))
-      .finally(() => setCheckLoading(false));
-  };
-
   // 批量删除
   const handleBatchDelete = async () => {
     if (selectedRowKeys.length === 0) {
@@ -144,18 +124,6 @@ function ResearchData() {
     fetchOverview();
     fetchReports();
   }, []);
-
-  // 研报列表列定义（数据检查子表格用，无选择列和操作列）
-  const checkColumns = [
-    { title: '股票', dataIndex: 'code', width: 120,
-      render: (code, record) => <span><strong>{code}</strong> {record.name}</span> },
-    { title: '报告标题', dataIndex: 'reportTitle', width: 250, ellipsis: true,
-      render: (title) => title || '-' },
-    { title: '评级', dataIndex: 'rating', width: 80, align: 'center',
-      render: (rating) => rating ? <Tag color={RATING_COLORS[rating] || 'default'}>{rating}</Tag> : '-' },
-    { title: '机构', dataIndex: 'institution', width: 120, ellipsis: true },
-    { title: '报告日期', dataIndex: 'reportDate', width: 100 },
-  ];
 
   // 主列表列定义
   const reportColumns = [
@@ -281,34 +249,6 @@ function ResearchData() {
           }} />
       </Card>
 
-      {/* 数据检查 */}
-      <Card title="数据检查" size="small" style={{ marginTop: 16 }}>
-        <Space style={{ marginBottom: checkResult ? 12 : 0 }}>
-          <Input placeholder="输入股票代码，如 000001" value={checkCode}
-            onChange={e => setCheckCode(e.target.value)} onPressEnter={handleCheck} style={{ width: 200 }} />
-          <Button type="primary" icon={<SearchOutlined />} onClick={handleCheck} loading={checkLoading}>
-            查询
-          </Button>
-          {checkResult && (
-            <Button type="text" onClick={() => setCheckResult(null)}>清除结果</Button>
-          )}
-        </Space>
-        {checkResult && (
-          <Spin spinning={checkLoading}>
-            <Card size="small" style={{ marginTop: 8 }}>
-              <Row gutter={16} style={{ marginBottom: 12 }}>
-                <Col><Text><strong>股票代码：</strong>{checkResult.code} {checkResult.name}</Text></Col>
-                <Col><Text><strong>研报数量：</strong>{checkResult.reportCount || 0} 条</Text></Col>
-                <Col><Text><strong>最新研报日期：</strong>{checkResult.latestDate || '-'}</Text></Col>
-              </Row>
-              {checkResult.reports && checkResult.reports.length > 0 && (
-                <Table dataSource={checkResult.reports} columns={checkColumns}
-                  rowKey="id" size="small" pagination={false} scroll={{ x: 800 }} />
-              )}
-            </Card>
-          </Spin>
-        )}
-      </Card>
     </div>
   );
 }
