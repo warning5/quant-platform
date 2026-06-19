@@ -4,46 +4,10 @@ import { Card, Table, Button, Tag, Select, Space, Statistic, Row, Col, Typograph
 import { message } from '../../utils/messageUtil';
 import dayjs from 'dayjs';
 import { ThunderboltOutlined, ReloadOutlined, LineChartOutlined, StockOutlined, RiseOutlined, FallOutlined, MinusOutlined, QuestionCircleOutlined, RadarChartOutlined, StopOutlined, UnlockOutlined } from '@ant-design/icons';
-import { recommendationApi, blacklistApi, confidenceApi } from '../../api';
-import api from '../../api';
+import api, { recommendationApi, blacklistApi, confidenceApi, calendarApi } from '../../api';
 import ReactEcharts from 'echarts-for-react';
 
 const { Title, Text } = Typography;
-
-
-// ── 中国交易日判断（用于DatePicker disabledDate） ──
-const HOLIDAYS_2026 = [
-  '2026-01-01', '2026-01-02', '2026-01-03',
-  '2026-02-17', '2026-02-18', '2026-02-19', '2026-02-20',
-  '2026-02-21', '2026-02-22', '2026-02-23',
-  '2026-04-04', '2026-04-05', '2026-04-06',
-  '2026-05-01', '2026-05-02', '2026-05-03', '2026-05-04', '2026-05-05',
-  '2026-10-01', '2026-10-02', '2026-10-03', '2026-10-04',
-  '2026-10-05', '2026-10-06', '2026-10-07',
-];
-
-const MAKEUP_DAYS_2026 = [
-  '2026-02-14', '2026-02-15',
-  '2026-10-10',
-];
-
-function isNonTradingDay(current) {
-  if (!current) return false;
-  const dateStr = current.format('YYYY-MM-DD');
-  if (MAKEUP_DAYS_2026.includes(dateStr)) return false;
-  if (HOLIDAYS_2026.includes(dateStr)) return true;
-  if (current.day() === 0 || current.day() === 6) return true;
-  return false;
-}
-
-// 从今天往前找最近的交易日
-function getLatestTradingDay() {
-  let d = dayjs();
-  while (isNonTradingDay(d)) {
-    d = d.subtract(1, 'day');
-  }
-  return d.format('YYYY-MM-DD');
-}
 
 // ── 市场环境配色 ──
 const REGIME_CONFIG = {
@@ -128,7 +92,7 @@ export default function RecommendationList() {
   const [weightInfo, setWeightInfo] = useState(null); // Phase 2: 动态权重
   const [strategies, setStrategies] = useState([]);
   const [selectedStrategyId, setSelectedStrategyId] = useState(null);
-  const [screenDate, setScreenDate] = useState(() => getLatestTradingDay());
+  const [screenDate, setScreenDate] = useState(dayjs()); // 默认今天，日历加载后校正
   const [factorDiagnostics, setFactorDiagnostics] = useState(null); // IC加权诊断
   const [diagExpanded, setDiagExpanded] = useState(false); // 已剔除/异常面板默认收起
   const [weightMode, setWeightMode] = useState('STATIC'); // 权重模式: STATIC(固定) / IC(动态IC)
@@ -158,6 +122,48 @@ export default function RecommendationList() {
   const [confidenceData, setConfidenceData] = useState(null); // 当前策略的置信度
   const [allConfidence, setAllConfidence] = useState([]); // 所有策略的置信度列表（用于策略下拉展示）
   const [confidenceWarningVisible, setConfidenceWarningVisible] = useState(false); // 低置信度警告弹窗
+
+  // ── 交易日历状态 ──
+  const [calendarData, setCalendarData] = useState(null);
+
+  // 加载交易日历 + 校正 screenDate 到最近交易日
+  useEffect(() => {
+    const year = dayjs().year();
+    calendarApi.getByYear(year).then(data => {
+      const map = {};
+      data.forEach(item => { map[item.tradeDate] = item.isTrading; });
+      setCalendarData(map);
+      // 校正 screenDate 到最近交易日
+      let d = dayjs();
+      while (true) {
+        const ds = d.format('YYYY-MM-DD');
+        if (map[ds] !== undefined) {
+          if (map[ds]) break; // 是交易日
+          d = d.subtract(1, 'day');
+        } else {
+          // fallback: weekend
+          if (d.day() === 0 || d.day() === 6) { d = d.subtract(1, 'day'); continue; }
+          break;
+        }
+      }
+      setScreenDate(d);
+    }).catch(() => {
+      // fallback: 找最近的非周末
+      let d = dayjs();
+      while (d.day() === 0 || d.day() === 6) d = d.subtract(1, 'day');
+      setScreenDate(d);
+    });
+  }, []);
+
+  // 判断某天是否非交易日
+  function isNonTradingDay(current) {
+    if (!current || !calendarData) return false;
+    const ds = current.format('YYYY-MM-DD');
+    if (calendarData[ds] !== undefined) return !calendarData[ds];
+    // fallback: weekend
+    if (current.day() === 0 || current.day() === 6) return true;
+    return false;
+  }
 
   // 加载策略列表（含复盘筛选用）
   useEffect(() => {
@@ -758,8 +764,7 @@ export default function RecommendationList() {
           <Title level={4} style={{ margin: 0 }}>
             <ThunderboltOutlined /> 智能推荐
             <Tooltip
-              styles={{ root: {maxWidth: 480} }}
-              overlayInnerStyle={{ maxHeight: 420, overflowY: 'auto', padding: '8px 12px' }}
+              styles={{ root: {maxWidth: 480}, body: { maxHeight: 420, overflowY: 'auto', padding: '8px 12px' } }}
               title={
                 <div style={{ fontSize: 12, lineHeight: '20px' }}>
                   <div style={{ fontWeight: 'bold', marginBottom: 6, fontSize: 13 }}>推荐生成管线（6步）</div>

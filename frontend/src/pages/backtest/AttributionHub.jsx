@@ -438,7 +438,7 @@ function GeneralConclusion({ strategy, recommendation, tradeAnalysis }) {
   if (strategy.industryConcentration != null)
     metaTags.push(
       <Tooltip key="hhi-tip"
-        overlayInnerStyle={{ maxWidth: 420 }}
+        styles={{ body: { maxWidth: 420 } }}
         title={
           <div style={{ lineHeight: 1.8 }}>
             <p style={{ margin: 0, fontWeight: 600 }}>HHI（赫芬达尔指数）</p>

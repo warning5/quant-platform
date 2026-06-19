@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Link, useLocation, useParams } from 'react-router-dom';
 import { App as AntApp, Layout, Menu, Typography, Space, Badge, Button, Tooltip } from 'antd';
 import {
@@ -47,6 +47,7 @@ import ResearchData from './pages/datadetail/ResearchData';
 import DataUpdate from './pages/dataupdate/DataUpdate';
 import ScheduledTasks from './pages/dataupdate/ScheduledTasks';
 import StockAnalysis from './pages/analysis/StockAnalysis';
+import TradeCalendar from './pages/calendar/TradeCalendar';
 
 /** 滚动回测旧路由重定向到统一回测 */
 function OldRollingRedirect() {
@@ -102,6 +103,7 @@ function AppLayout() {
         { key: '/recommendation', label: <Link to="/recommendation">智能推荐</Link> },
         { key: '/llm', label: <Link to="/llm">AI推理分析</Link> },
         { key: '/monitor', label: <Link to="/monitor">盘中监控</Link> },
+        { key: '/calendar', label: <Link to="/calendar">交易日历</Link> },
       ],
     },
     {
@@ -136,12 +138,22 @@ function AppLayout() {
     const path = window.location.pathname;
     if (path.startsWith('/factor') || path === '/factor-weight-optimize') return ['factors'];
     if (path.startsWith('/strateg') || path.startsWith('/backtest') || path === '/paper-trading') return ['strategies'];
-    if (path.startsWith('/screen') || path.startsWith('/recommendation') || path.startsWith('/llm') || path.startsWith('/monitor')) return ['screen'];
+    if (path.startsWith('/screen') || path.startsWith('/recommendation') || path.startsWith('/llm') || path.startsWith('/monitor') || path.startsWith('/calendar')) return ['screen'];
     if (path.startsWith('/data-detail')) return ['data-info'];
     if (path === '/data-update' || path === '/scheduled-tasks' || path === '/sector-ranking') return ['data-info'];
     if (path.startsWith('/manual/')) return ['manual'];
     return [];
   });
+
+  useEffect(() => {
+    const path = location.pathname;
+    if (path.startsWith('/factor') || path === '/factor-weight-optimize') setOpenKeys(['factors']);
+    else if (path.startsWith('/strateg') || path.startsWith('/backtest') || path === '/paper-trading') setOpenKeys(['strategies']);
+    else if (path.startsWith('/screen') || path.startsWith('/recommendation') || path.startsWith('/llm') || path.startsWith('/monitor') || path.startsWith('/calendar')) setOpenKeys(['screen']);
+    else if (path.startsWith('/data-detail') || path === '/data-update' || path === '/scheduled-tasks' || path === '/sector-ranking') setOpenKeys(['data-info']);
+    else if (path.startsWith('/manual/')) setOpenKeys(['manual']);
+    else setOpenKeys([]);
+  }, [location.pathname]);
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -276,6 +288,7 @@ function AppLayout() {
             <Route path="/stock-analysis" element={<StockAnalysis />} />
             <Route path="/market-thermometer" element={<MarketThermometer />} />
             <Route path="/sector-ranking" element={<SectorRanking />} />
+            <Route path="/calendar" element={<TradeCalendar />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Content>

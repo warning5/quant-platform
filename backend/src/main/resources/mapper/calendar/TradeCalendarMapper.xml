@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.quant.platform.calendar.mapper.TradeCalendarMapper">
+
+    <resultMap id="TradeCalendarResultMap" type="com.quant.platform.calendar.domain.TradeCalendar">
+        <id property="tradeDate" column="trade_date"/>
+        <result property="isTrading" column="is_trading"/>
+        <result property="reason" column="reason"/>
+        <result property="source" column="source"/>
+    </resultMap>
+
+    <select id="selectByDate" resultMap="TradeCalendarResultMap">
+        SELECT trade_date, is_trading, reason, source
+        FROM trade_calendar
+        WHERE trade_date = #{tradeDate}
+    </select>
+
+    <select id="selectByYear" resultMap="TradeCalendarResultMap">
+        SELECT trade_date, is_trading, reason, source
+        FROM trade_calendar
+        WHERE YEAR(trade_date) = #{year}
+        ORDER BY trade_date
+    </select>
+
+    <select id="selectLatestTradingDay" resultType="java.time.LocalDate">
+        SELECT trade_date
+        FROM trade_calendar
+        WHERE trade_date &lt;= #{date} AND is_trading = 1
+        ORDER BY trade_date DESC
+        LIMIT 1
+    </select>
+
+    <select id="selectTradingDaysBetween" resultType="java.time.LocalDate">
+        SELECT trade_date
+        FROM trade_calendar
+        WHERE trade_date &gt;= #{startDate} AND trade_date &lt;= #{endDate}
+          AND is_trading = 1
+        ORDER BY trade_date
+    </select>
+
+    <!-- 手动标记：存在则更新，不存在则插入 -->
+    <insert id="upsertByDate">
+        INSERT INTO trade_calendar (trade_date, is_trading, reason, source)
+        VALUES (#{tradeDate}, #{isTrading}, #{reason}, #{source})
+        ON DUPLICATE KEY UPDATE is_trading = #{isTrading}, reason = #{reason}, source = #{source},
+                              updated_at = CURRENT_TIMESTAMP
+    </insert>
+
+    <delete id="deleteByDate">
+        DELETE FROM trade_calendar
+        WHERE trade_date = #{tradeDate}
+    </delete>
+
+</mapper>

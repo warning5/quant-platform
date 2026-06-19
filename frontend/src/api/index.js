@@ -408,4 +408,18 @@ export const llmApi = {
     api.post('/llm/analyze', null, { params: { strategyId, topN }, timeout: 300000 }),
 };
 
+/** 交易日历 API */
+export const calendarApi = {
+  /** 判断某天是否为交易日 */
+  isTradingDay: (date) => api.get('/calendar/is-trading', { params: { date } }),
+  /** 获取最近的交易日 */
+  getLatestTradingDay: (date) => api.get('/calendar/latest-trading-day', { params: date ? { date } : {} }),
+  /** 查询某天的日历记录 */
+  getByDate: (date) => api.get('/calendar/date', { params: { date } }),
+  /** 查询某年的所有记录 */
+  getByYear: (year) => api.get('/calendar/year', { params: { year } }),
+  /** 手动标记某天 */
+  markDay: (date, isTrading, reason) => api.post('/calendar/mark', { date, isTrading, reason }),
+};
+
 export default api;

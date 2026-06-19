@@ -4,11 +4,13 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.quant.platform.stock.entity.StockInfo;
 import com.quant.platform.stock.mapper.StockInfoMapper;
 import com.quant.platform.stock.service.ClickHouseStockService;
+import com.quant.platform.calendar.service.TradeCalendarService;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -50,6 +52,10 @@ public class DataUpdateService {
     private final StockInfoMapper stockInfoMapper;
     private final ClickHouseStockService clickHouseStockService;
     private final JdbcTemplate jdbcTemplate;
+
+    @Autowired(required = false)
+    private TradeCalendarService tradeCalendarService;
+
     /**
      * 正在运行的任务
      */
@@ -1674,20 +1680,20 @@ public class DataUpdateService {
             dateSuccessMap.put(d, cnt);
         }
 
-        // 2026年A股休市日（含周末补班调休为交易日）
-        Set<LocalDate> holidays = getHolidays(startDate.getYear());
-
         // 遍历日期范围，生成每一天的统计
         for (LocalDate d = startDate; !d.isAfter(endDate); d = d.plusDays(1)) {
             String dateStr = d.toString();
-            java.time.DayOfWeek dow = d.getDayOfWeek();
-            boolean isWeekend = dow == java.time.DayOfWeek.SATURDAY || dow == java.time.DayOfWeek.SUNDAY;
-            boolean isHoliday = !isWeekend && holidays.contains(d);
 
             Map<String, Object> stats = new LinkedHashMap<>();
 
-            if (isWeekend || isHoliday) {
+            // 使用交易日历判断（若服务不可用则默认为交易日，避免阻断统计）
+            boolean isTrading = tradeCalendarService == null
+                || tradeCalendarService.isTradingDay(d);
+
+            if (!isTrading) {
                 // 非交易日：标记为假日，不显示失败数和成功率
+                boolean isWeekend = d.getDayOfWeek() == java.time.DayOfWeek.SATURDAY
+                    || d.getDayOfWeek() == java.time.DayOfWeek.SUNDAY;
                 stats.put("total", total);
                 stats.put("success", 0);
                 stats.put("failed", null);
@@ -1706,36 +1712,6 @@ public class DataUpdateService {
             result.put(dateStr, stats);
         }
         return result;
-    }
-
-    /** 获取指定年份的A股节假日集合（周末休市由 isWeekend 判断，此处只列工作日休市） */
-    private Set<LocalDate> getHolidays(int year) {
-        Set<LocalDate> set = new java.util.HashSet<>();
-        if (year == 2026) {
-            // 元旦: 1月1日(周四) ~ 1月3日(周六)，工作日休市: 1月1日,1月2日
-            set.add(LocalDate.of(2026, 1, 1));
-            set.add(LocalDate.of(2026, 1, 2));
-            // 春节: 2月15日(周日) ~ 2月23日(周一)，工作日休市: 2月16~20日,2月23日
-            for (int d = 16; d <= 20; d++) set.add(LocalDate.of(2026, 2, d));
-            set.add(LocalDate.of(2026, 2, 23));
-            // 清明: 4月4日(周六) ~ 4月6日(周一)，工作日休市: 4月6日
-            set.add(LocalDate.of(2026, 4, 6));
-            // 劳动节: 5月1日(周五) ~ 5月5日(周二)，工作日休市: 5月1日,5月4日,5月5日
-            set.add(LocalDate.of(2026, 5, 1));
-            set.add(LocalDate.of(2026, 5, 4));
-            set.add(LocalDate.of(2026, 5, 5));
-            // 端午节: 6月19日(周五) ~ 6月21日(周日)，工作日休市: 6月19日
-            set.add(LocalDate.of(2026, 6, 19));
-            // 中秋节: 9月25日(周五) ~ 9月27日(周日)，工作日休市: 9月25日
-            set.add(LocalDate.of(2026, 9, 25));
-            // 国庆节: 10月1日(周四) ~ 10月7日(周三)，工作日休市: 10月1~3日,10月6~7日
-            set.add(LocalDate.of(2026, 10, 1));
-            set.add(LocalDate.of(2026, 10, 2));
-            set.add(LocalDate.of(2026, 10, 3));
-            set.add(LocalDate.of(2026, 10, 6));
-            set.add(LocalDate.of(2026, 10, 7));
-        }
-        return set;
     }
 
     @PreDestroy

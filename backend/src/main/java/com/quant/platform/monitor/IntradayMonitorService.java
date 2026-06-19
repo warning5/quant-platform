@@ -1,6 +1,7 @@
 package com.quant.platform.monitor;
 
 import com.quant.platform.notification.NotificationService;
+import com.quant.platform.calendar.service.TradeCalendarService;
 import lombok.Data;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
@@ -36,22 +37,10 @@ public class IntradayMonitorService {
 
     private static final String QUOTE_URL = "http://qt.gtimg.cn/q=%s";
 
-    private static final Set<String> HOLIDAYS_2026 = Set.of(
-            "2026-01-01", "2026-01-02", "2026-01-03",
-            "2026-02-17", "2026-02-18", "2026-02-19", "2026-02-20",
-            "2026-02-21", "2026-02-22", "2026-02-23",
-            "2026-04-04", "2026-04-05", "2026-04-06",
-            "2026-05-01", "2026-05-02", "2026-05-03", "2026-05-04", "2026-05-05",
-            "2026-10-01", "2026-10-02", "2026-10-03", "2026-10-04",
-            "2026-10-05", "2026-10-06", "2026-10-07"
-    );
-    private static final Set<String> MAKEUP_DAYS_2026 = Set.of(
-            "2026-02-14", "2026-02-15", "2026-10-10"
-    );
-
     private final JdbcTemplate jdbcTemplate;
     private final NotificationService notificationService;
     private final EntrySignalAnalyzer signalAnalyzer;
+    private final TradeCalendarService tradeCalendarService;
 
     /** K线并行拉取线程池 */
     private final ExecutorService klinePool;
@@ -87,11 +76,12 @@ public class IntradayMonitorService {
     private volatile LocalDate dataDate;
 
     public IntradayMonitorService(JdbcTemplate jdbcTemplate, NotificationService notificationService,
-                                  EntrySignalAnalyzer signalAnalyzer,
+                                  EntrySignalAnalyzer signalAnalyzer, TradeCalendarService tradeCalendarService,
                                   @Value("${quant.monitor.kline-thread-pool-size:4}") int klinePoolSize) {
         this.jdbcTemplate = jdbcTemplate;
         this.notificationService = notificationService;
         this.signalAnalyzer = signalAnalyzer;
+        this.tradeCalendarService = tradeCalendarService;
         this.klinePool = Executors.newFixedThreadPool(klinePoolSize,
                 r -> {
                     Thread t = new Thread(r, "kline-analyze");
@@ -103,14 +93,10 @@ public class IntradayMonitorService {
         loadCustomStocksFromDb();
     }
 
-    // ── 中国交易日判断 ──
+    // ── 交易日判断（使用数据库交易日历） ──
 
-    private static boolean isNonTradingDay(LocalDate date) {
-        String ds = date.toString();
-        if (MAKEUP_DAYS_2026.contains(ds)) return false;
-        if (HOLIDAYS_2026.contains(ds)) return true;
-        java.time.DayOfWeek dow = date.getDayOfWeek();
-        return dow == java.time.DayOfWeek.SATURDAY || dow == java.time.DayOfWeek.SUNDAY;
+    private boolean isNonTradingDay(LocalDate date) {
+        return !tradeCalendarService.isTradingDay(date);
     }
 
     /**
@@ -163,9 +149,14 @@ public class IntradayMonitorService {
      * 高频轮询入口，每10秒执行一次
      * 仅在交易时段（09:30~15:00）内运行
      */
-    @Scheduled(cron = "0/10 * 9-14 * * 1-5")  // 周一到周五，9:00~14:59每10秒
+    @Scheduled(cron = "0/10 * 9-14 * * MON-FRI")  // 周一到周五，9:00~14:59每10秒（MON-FRI 更安全）
     public void monitorLoop() {
         LocalDateTime now = LocalDateTime.now();
+        LocalDate today = now.toLocalDate();
+
+        // 节假日/周末跳过（调休补班遇周末仍为非交易日）
+        if (isNonTradingDay(today)) return;
+
         int hour = now.getHour();
         int minute = now.getMinute();
 

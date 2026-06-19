@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quant.platform.factor.service.FactorService;
 import com.quant.platform.stock.analysis.service.MarketThermometerService;
+import com.quant.platform.calendar.service.TradeCalendarService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -44,6 +45,9 @@ public class PaperTradingService {
 
     @Autowired(required = false)
     private MarketThermometerService marketThermometerService;
+
+    @Autowired(required = false)
+    private TradeCalendarService tradeCalendarService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -1039,29 +1043,15 @@ public class PaperTradingService {
      * 判断是否可以生成信号（允许最近3天内有交易日数据，覆盖周末/节假日补跑）
      */
     private boolean isTradingDay() {
-        if (clickHouseJdbcTemplate == null) {
-            log.warn("isTradingDay: clickHouseJdbcTemplate 为 null，拦截");
+        if (tradeCalendarService == null) {
+            log.warn("isTradingDay: tradeCalendarService 为 null，拦截");
             return false;
         }
-        try {
-            List<String> dates = clickHouseJdbcTemplate.query(
-                "SELECT MAX(trade_date) FROM stock.stock_daily FINAL",
-                (rs, rowNum) -> rs.getString(1));
-            if (dates.isEmpty() || dates.getFirst() == null) {
-                log.warn("isTradingDay: 查询结果为空，拦截");
-                return false;
-            }
-            LocalDate latest = LocalDate.parse(dates.getFirst());
-            // 宽松模式：最近3天内有交易日数据即可（允许周末/节假日补跑生成）
-            boolean result = !latest.isBefore(LocalDate.now().minusDays(3));
-            if (!result) {
-                log.info("isTradingDay: 最新交易日={}，距今超过3天，拦截", latest);
-            }
-            return result;
-        } catch (Exception e) {
-            log.warn("isTradingDay 查询失败，拦截: {}", e.getMessage());
-            return false;
+        boolean result = tradeCalendarService.isTradingDay(LocalDate.now());
+        if (!result) {
+            log.info("isTradingDay: 今天({})非交易日，拦截", LocalDate.now());
         }
+        return result;
     }
 
     /**

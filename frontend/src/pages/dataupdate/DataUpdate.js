@@ -800,7 +800,7 @@ function DataUpdate() {
   }, [dailyTask?.status, fetchCoverage]);
 
   // 判断今天是否为潜在交易日（工作日，排除周末）
-  // 注：不覆盖法定节假日调休（如国庆调休周末上班），需要时可对接后端交易日历接口
+  // 调休/补班遇周末仍为非交易日，节假日例外日由后端 trade_calendar 提供
   const isPotentialTradingDay = () => {
     const day = dayjs().day(); // 0=周日, 6=周六
     return day >= 1 && day <= 5;

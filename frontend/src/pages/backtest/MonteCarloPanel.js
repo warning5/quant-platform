@@ -223,7 +223,7 @@ export default function MonteCarloPanel({ taskId }) {
                 return metrics.map(m => (
                   <Col key={m.title} span={4}>
                     <Card size="small" style={{ textAlign: 'center', background: '#fafafa' }}>
-                      <Tooltip title={<div style={{ lineHeight: 1.7, maxWidth: 260 }}>{m.tip}</div>} overlayInnerStyle={{ maxWidth: 280 }}>
+                      <Tooltip title={<div style={{ lineHeight: 1.7, maxWidth: 260 }}>{m.tip}</div>} styles={{ body: { maxWidth: 280 } }}>
                         <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>{m.title} <InfoCircleOutlined style={{ fontSize: 10 }} /></div>
                       </Tooltip>
                       <div style={{ fontSize: 16, fontWeight: 700, color: m.color }}>{m.value}</div>
