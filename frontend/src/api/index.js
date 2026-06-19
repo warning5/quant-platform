@@ -208,6 +208,8 @@ export const backtestApi = {
     ? api.get('/backtests/param-optimize/list', { params: { strategyId } })
     : api.get('/backtests/param-optimize/list'),
   deleteParamOptimize: (jobId) => api.delete(`/backtests/param-optimize/${jobId}`),
+  // P2-3: Walk-Forward 验证
+  walkForward: (params) => api.post('/backtests/walk-forward', params, { timeout: 600000 }),
 };
 
 // ===== 行情 API =====

@@ -783,11 +783,14 @@ public class BacktestController {
      * POST /backtests/walk-forward
      * Body: {
      *   "factors": [{"factorCode":"MOM20","direction":1,"weight":1.0}, ...],
+     *   "startDate": "2024-01-01",
      *   "endDate": "2026-06-05",
      *   "trainDays": 60,
      *   "validateDays": 20,
      *   "stepDays": 10,
-     *   "maxRounds": 10
+     *   "maxRounds": 10,
+     *   "transactionCost": 0.0015,
+     *   "rebalanceInterval": 20
      * }
      */
     @PostMapping("/walk-forward")
@@ -807,6 +810,10 @@ public class BacktestController {
                 }
             }
 
+            LocalDate startDate = null;
+            if (params.containsKey("startDate")) {
+                startDate = LocalDate.parse((String) params.get("startDate"));
+            }
             LocalDate endDate = LocalDate.now();
             if (params.containsKey("endDate")) {
                 endDate = LocalDate.parse((String) params.get("endDate"));
@@ -815,9 +822,13 @@ public class BacktestController {
             int validateDays = params.containsKey("validateDays") ? ((Number) params.get("validateDays")).intValue() : 20;
             int stepDays = params.containsKey("stepDays") ? ((Number) params.get("stepDays")).intValue() : 10;
             int maxRounds = params.containsKey("maxRounds") ? ((Number) params.get("maxRounds")).intValue() : 10;
+            Double transactionCost = params.containsKey("transactionCost")
+                    ? ((Number) params.get("transactionCost")).doubleValue() : null;
+            Integer rebalanceInterval = params.containsKey("rebalanceInterval")
+                    ? ((Number) params.get("rebalanceInterval")).intValue() : null;
 
             List<WalkForwardResult> results = walkForwardService.runWalkForward(
-                    factors, endDate, trainDays, validateDays, stepDays, maxRounds);
+                    factors, startDate, endDate, trainDays, validateDays, stepDays, maxRounds, transactionCost, rebalanceInterval);
             Map<String, Object> summary = walkForwardService.summarize(results);
 
             Map<String, Object> response = new LinkedHashMap<>();

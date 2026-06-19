@@ -27,6 +27,7 @@ import BacktestCreate from './pages/backtest/BacktestCreate';
 import BacktestRunning from './pages/backtest/BacktestRunning';
 import BacktestCompare from './pages/backtest/BacktestCompare';
 import ParamOptimize from './pages/backtest/ParamOptimize';
+import WalkForward from './pages/backtest/WalkForward.jsx';
 import FactorWeightOptimize from './pages/factors/FactorWeightOptimize';
 import RecommendationList from './pages/recommendation/RecommendationList';
 import LlmAnalysisPage from './pages/llm/LlmAnalysisPage';
@@ -91,6 +92,7 @@ function AppLayout() {
         { key: '/backtests', label: <Link to="/backtests">回测列表</Link> },
         { key: '/backtests/compare', label: <Link to="/backtests/compare">策略对比</Link> },
         { key: '/backtests/param-optimize', label: <Link to="/backtests/param-optimize">参数优化</Link> },
+        { key: '/backtests/walk-forward', label: <Link to="/backtests/walk-forward">Walk-Forward验证</Link> },
         { key: '/paper-trading', label: <Link to="/paper-trading">模拟盘</Link> },
       ],
     },
@@ -267,6 +269,7 @@ function AppLayout() {
             <Route path="/backtests/new" element={<BacktestCreate />} />
             <Route path="/backtests/compare" element={<BacktestCompare />} />
             <Route path="/backtests/param-optimize" element={<ParamOptimize />} />
+            <Route path="/backtests/walk-forward" element={<WalkForward />} />
             <Route path="/backtests/:taskId/running" element={<BacktestRunning />} />
             <Route path="/backtests/:taskId/report" element={<BacktestReport />} />
             <Route path="/factor-weight-optimize" element={<FactorWeightOptimize defaultFactorCodes={[]} />} />
