@@ -686,6 +686,12 @@ public class IntradayMonitorService {
         return Collections.unmodifiableList(new ArrayList<>(signalHistory));
     }
 
+    /** 清除信号历史（内存 + 前端状态） */
+    public void clearSignalHistory() {
+        signalHistory.clear();
+        log.info("[IntradayMonitor] 信号历史已清除");
+    }
+
     // ── SSE 推送 ──
 
     public SseEmitter createSseEmitter() {
@@ -886,9 +892,34 @@ public class IntradayMonitorService {
             }
         }
 
-        result.setMessage(String.format("扫描完成: %d只触发信号, %d只观察中, %d只跳过",
+        result.setMessage(String.format("扫描完成: %d只触发信号, %d只观察中, %d只区间外",
                 result.getSignalCount(), result.getWatchCount(), result.getSkippedCount()));
         return result;
+    }
+
+    /**
+     * 模拟执行一个完整的盘中监控周期
+     * 不校验是否交易日/交易时段，用于非交易日测试推送效果
+     *
+     * @param force 是否强制清除推送冷却期，确保本次能真正触发 SSE 推送
+     */
+    public void simulateOneCycle(boolean force) {
+        log.info("[IntradayMonitor] 模拟盘中周期开始, force={}", force);
+        if (force) {
+            pushedWithTime.clear();
+            log.info("[IntradayMonitor] 已清除推送冷却记录");
+        }
+        loadTargetPrices();
+        if (targetPriceCache.isEmpty()) {
+            log.warn("[IntradayMonitor] 模拟周期：无监控股票，请先确保有BUY推荐");
+            return;
+        }
+        monitoring = true;
+        Map<String, Double> prices = fetchRealtimePrices(new ArrayList<>(targetPriceCache.keySet()));
+        latestPrices.putAll(prices);
+        broadcastPriceUpdate(prices);
+        analyzePricesParallel(prices, false);
+        log.info("[IntradayMonitor] 模拟盘中周期结束");
     }
 
     // ── 内部数据类 ──

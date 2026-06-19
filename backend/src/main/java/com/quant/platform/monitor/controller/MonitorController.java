@@ -161,6 +161,16 @@ public class MonitorController {
         return intradayMonitorService.createSseEmitter();
     }
 
+    /** 清除信号历史 */
+    @PostMapping("/clear-signals")
+    public ResponseEntity<Map<String, Object>> clearSignals() {
+        intradayMonitorService.clearSignalHistory();
+        Map<String, Object> result = new HashMap<>();
+        result.put("code", 200);
+        result.put("message", "信号历史已清除");
+        return ResponseEntity.ok(result);
+    }
+
     /** 手动刷新监控目标价 */
     @PostMapping("/refresh-targets")
     public ResponseEntity<Map<String, Object>> refreshTargets() {
@@ -225,6 +235,24 @@ public class MonitorController {
         Map<String, Object> result = new HashMap<>();
         result.put("code", 200);
         result.put("data", scanResult);
+        return ResponseEntity.ok(result);
+    }
+
+    /**
+     * 模拟执行一个完整盘中周期（非交易日/非交易时段测试推送用）
+     * POST /api/monitor/simulate-cycle
+     * POST /api/monitor/simulate-cycle?force=true
+     */
+    @PostMapping("/simulate-cycle")
+    public ResponseEntity<Map<String, Object>> simulateCycle(
+            @RequestParam(defaultValue = "false") boolean force) {
+
+        intradayMonitorService.simulateOneCycle(force);
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("code", 200);
+        result.put("data", Map.of("simulated", true, "force", force));
+        result.put("message", "模拟盘中周期已执行，SSE信号已推送");
         return ResponseEntity.ok(result);
     }
 

@@ -6,10 +6,42 @@ import api, { silentConfig } from '../../api';
 
 const { Text } = Typography;
 
+/** 播放信号提示音（Web Audio API，无需外部文件） */
+const playAlertSound = (type) => {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    // 买入信号：高音上升 | 止损：低音下降 | 观察：中音
+    if (type === 'BUY') {
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(1320, ctx.currentTime + 0.15);
+    } else if (type === 'STOP') {
+      osc.frequency.setValueAtTime(660, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.25);
+      gain.gain.setValueAtTime(0.3, ctx.currentTime);
+    } else {
+      osc.frequency.setValueAtTime(770, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(990, ctx.currentTime + 0.12);
+    }
+
+    if (type !== 'STOP') gain.gain.setValueAtTime(0.25, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+
+    osc.type = 'sine';
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.3);
+  } catch (_) {}
+};
+
 export default function MonitorPage() {
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(false);
   const [scanLoading, setScanLoading] = useState(false);
+  const [simulateLoading, setSimulateLoading] = useState(false);
   const [scanResult, setScanResult] = useState(null);
   const [realtimePrices, setRealtimePrices] = useState({});
   const [realtimeChangePct, setRealtimeChangePct] = useState({});
@@ -101,7 +133,8 @@ export default function MonitorPage() {
             // 添加到信号历史
             setSseSignals(prev => [data, ...prev].slice(0, 50));
 
-            // 弹出通知
+            // 弹出通知 + 播放声音
+            playAlertSound(isBuy ? 'BUY' : isStop ? 'STOP' : 'WATCH');
             notification.open({
               message: isBuy ? '🟢 买入信号' : isStop ? '🔴 止损警告' : '信号通知',
               description: data.message,
@@ -155,6 +188,33 @@ export default function MonitorPage() {
       message.error('触发扫描失败: ' + msg);
     } finally {
       setScanLoading(false);
+    }
+  };
+
+  // 模拟交易周期（非交易日/非交易时段测试推送）
+  const handleSimulateCycle = async () => {
+    setSimulateLoading(true);
+    try {
+      const data = await api.post('/monitor/simulate-cycle?force=true');
+      message.success(data?.message || '模拟交易周期已执行');
+      fetchStatus();
+    } catch (err) {
+      const msg = err.response?.data?.message || err.message || '请求失败';
+      message.error('模拟交易周期失败: ' + msg);
+    } finally {
+      setSimulateLoading(false);
+    }
+  };
+
+  // 清除信号历史
+  const handleClearSignals = async () => {
+    try {
+      await api.post('/monitor/clear-signals');
+      setSseSignals([]);
+      message.success('信号历史已清除');
+      fetchStatus();
+    } catch (err) {
+      message.error('清除失败: ' + (err.response?.data?.message || err.message));
     }
   };
 
@@ -269,22 +329,46 @@ export default function MonitorPage() {
     setCustomModalOpen(true);
   };
 
-  /** 从后端status/SSE/扫描结果中查找某只股票的信号状态 */
+  /** 从后端status/SSE/扫描结果中查找某只股票的信号状态
+   * 优先级：SSE推送 > 手动扫描结果 > 后端实时价格快速状态
+   */
   const getSignalInfo = (record) => {
-    // 1. 优先用后端status返回的快速信号状态（基于实时价格计算，永远有值）
-    if (record.signalStatus) {
-      return { signalType: record.signalStatus, message: record.signalMessage || '' };
-    }
-    // 2. SSE信号（买入/止损推送）
+    // 1. SSE信号（买入/止损推送）优先级最高
     const sseSignal = sseSignals.find(s => s.stockCode === record.stockCode);
     if (sseSignal) {
       return { signalType: sseSignal.signalType, message: sseSignal.message, score: sseSignal.score };
     }
-    // 3. 手动扫描结果
-    if (!scanResult) return null;
-    const all = [...(scanResult.signals || []), ...(scanResult.watches || []), ...(scanResult.skipped || [])];
-    const found = all.find(s => s.stockCode === record.stockCode);
-    return found ? { signalType: found.signalType, message: found.message, score: found.score } : null;
+    // 2. 手动扫描结果（含K线4维评分）
+    if (scanResult) {
+      const found = [...(scanResult.signals || []), ...(scanResult.watches || []), ...(scanResult.skipped || [])]
+        .find(s => s.stockCode === record.stockCode);
+      if (found) {
+        const isSkipped = scanResult.skipped?.some(s => s.stockCode === record.stockCode);
+        return {
+          signalType: found.signalType,
+          message: found.message,
+          score: found.score,
+          fromScan: true,
+          isSkipped,
+          currentPrice: found.currentPrice,
+        };
+      }
+    }
+    // 3. 后端status返回的快速信号状态（基于实时价格计算）
+    if (record.signalStatus) {
+      return { signalType: record.signalStatus, message: record.signalMessage || '' };
+    }
+    return null;
+  };
+
+  /** 根据当前价和买入区间判断价格位置（用于扫描结果skipped/无signalType时的兜底） */
+  const getPricePosition = (record, price) => {
+    const low = record.buyPriceLow ? Number(record.buyPriceLow) : 0;
+    const high = record.buyPriceHigh ? Number(record.buyPriceHigh) : 0;
+    if (!low || !high || price == null) return null;
+    if (price >= low && price <= high) return 'IN_RANGE';
+    if (price > high) return 'ABOVE';
+    return 'BELOW';
   };
 
   // 价格涨跌色（中国惯例：红涨绿跌）
@@ -400,10 +484,22 @@ export default function MonitorPage() {
         const sig = getSignalInfo(r);
         if (!sig) return <Tag color="#999" size="small">未扫描</Tag>;
         const t = sig.signalType;
+        // SSE / 扫描触发的买入信号
         if (t === 'BUY' || t === 'STRONG_BUY' || t === 'BUY_FALLBACK') return <Tooltip title={sig.message}><Tag color="red" size="small">买入信号</Tag></Tooltip>;
+        // 止损警告
         if (t === 'STOP') return <Tooltip title={sig.message}><Tag color="orange" size="small">止损警告</Tag></Tooltip>;
+        // 后端价格快速判断：精确区间内
         if (t === 'IN_RANGE') return <Tooltip title={sig.message}><Tag color="red" size="small">区间内</Tag></Tooltip>;
-        if (t === 'WATCH') return <Tooltip title={sig.message}><Tag color="blue" size="small">观察中</Tag></Tooltip>;
+        // 扫描后未触发买入的，统一显示为观察中（含 WATCH / WATCH_FALLBACK / NONE / ERROR / 无signalType）
+        if (t === 'WATCH' || t === 'WATCH_FALLBACK' || t === 'NONE' || t === 'ERROR' ||
+            (sig.fromScan && !sig.isSkipped && !['BUY', 'STRONG_BUY', 'BUY_FALLBACK', 'STOP'].includes(t))) {
+          return <Tooltip title={sig.message}><Tag color="blue" size="small">观察中</Tag></Tooltip>;
+        }
+        // 价格位置判断：下方 / 上方（含扫描 skipped 和无 price-based 状态）
+        const price = sig.currentPrice || realtimePrices[r.stockCode] || r.currentPrice;
+        const pos = getPricePosition(r, price);
+        if (pos === 'BELOW') return <Tooltip title={sig.message}><Tag color="green" size="small">区间下方</Tag></Tooltip>;
+        if (pos === 'ABOVE') return <Tooltip title={sig.message}><Tag color="default" size="small">区间上方</Tag></Tooltip>;
         if (t === 'BELOW') return <Tooltip title={sig.message}><Tag color="green" size="small">区间下方</Tag></Tooltip>;
         if (t === 'ABOVE') return <Tooltip title={sig.message}><Tag color="default" size="small">区间上方</Tag></Tooltip>;
         if (t === 'NO_PRICE') return <Tag color="#999" size="small">无价格</Tag>;
@@ -432,12 +528,16 @@ export default function MonitorPage() {
             title={
               <div style={{ padding: '4px 0', lineHeight: '1.8', fontSize: 13 }}>
                 <div style={{ marginBottom: 6, fontWeight: 600 }}>信号含义</div>
-                <div style={{ marginBottom: 4 }}><Tag color="red" size="small">区间内</Tag> 实时价在买入区间内，可关注入场时机</div>
-                <div style={{ marginBottom: 4 }}><Tag color="red" size="small">买入信号</Tag> 进入买入区间 + 4维评分通过 → 推送买入通知</div>
-                <div style={{ marginBottom: 4 }}><Tag color="orange" size="small">止损警告</Tag> 跌破止损价 → 立即推送止损警告</div>
-                <div style={{ marginBottom: 4 }}><Tag color="blue" size="small">观察中</Tag> 接近触发区间(±2%)，但还未完全满足条件</div>
-                <div style={{ marginBottom: 4 }}><Tag color="green" size="small">区间下方</Tag> 低于买入区间下沿，等待回调到位（悬停看距离）</div>
-                <div style={{ marginBottom: 4 }}><Tag color="default" size="small">区间上方</Tag> 高于买入区间上沿，已错过最佳入场点，追高风险大（悬停看距离）</div>
+                <div style={{ marginBottom: 4 }}><Tag color="red" size="small">区间内</Tag> 未扫描：仅实时价在买入区间内，未拉K线评分</div>
+                <div style={{ marginBottom: 4 }}><Tag color="red" size="small">买入信号</Tag> 扫描后：进入触发区间 + m5 K线4维评分≥80</div>
+                <div style={{ marginBottom: 4 }}><Tag color="orange" size="small">止损警告</Tag> 实时判断：实时价跌破止损价</div>
+                <div style={{ marginBottom: 4 }}><Tag color="blue" size="small">观察中</Tag> 扫描后：进入触发区间但4维评分未通过</div>
+                <div style={{ marginBottom: 4 }}><Tag color="green" size="small">区间下方</Tag> 未扫描/扫描后：实时价低于买入区间下沿</div>
+                <div style={{ marginBottom: 4 }}><Tag color="default" size="small">区间上方</Tag> 未扫描/扫描后：实时价高于买入区间上沿</div>
+
+                <div style={{ marginTop: 8, borderTop: '1px solid #e8e8e8', paddingTop: 6, fontWeight: 600 }}>价格判断 vs K线扫描</div>
+                <div>未点击「手动扫描」时，列表只根据<b>实时价</b>判断位置：区间内 / 区间上方 / 区间下方 / 止损警告。</div>
+                <div style={{ marginBottom: 6 }}>点击「手动扫描」后，对进入触发区间(±2%)的股票拉取<b>m5分钟K线</b>做4维评分，进一步细分为：买入信号 / 观察中 / 区间外。</div>
 
                 <div style={{ marginTop: 8, borderTop: '1px solid #e8e8e8', paddingTop: 6, fontWeight: 600 }}>分钟K线作用</div>
                 <div>价格进入买入区间(±2%)时，自动拉取m5分钟K线做4维评分：</div>
@@ -449,13 +549,6 @@ export default function MonitorPage() {
                 <div style={{ marginTop: 8, borderTop: '1px solid #e8e8e8', paddingTop: 6, fontWeight: 600 }}>实时推送机制</div>
                 <div>后端每10秒轮询行情，价格变动通过SSE实时推送到页面，无需手动刷新。</div>
                 <div style={{ marginBottom: 6 }}>K线拉取已改为并行（线程池），多只股同时分析不叠加延迟。</div>
-
-                <div style={{ marginTop: 8, borderTop: '1px solid #e8e8e8', paddingTop: 6, fontWeight: 600 }}>与分钟K线的关系</div>
-                <div><Tag color="red" size="small">买入信号</Tag> 有关 — 需m5 K线4维评分≥80</div>
-                <div><Tag color="orange" size="small">止损警告</Tag> 无关 — 直接比较实时价与止损价</div>
-                <div><Tag color="blue" size="small">观察中</Tag> 有关 — 进入区间后即拉K线评分</div>
-                <div><Tag color="green" size="small">区间下方</Tag> 无关 — 纯价格判断</div>
-                <div><Tag color="default" size="small">区间上方</Tag> 无关 — 纯价格判断</div>
               </div>
             }>
             <QuestionCircleOutlined style={{ color: '#8c8c8c', fontSize: 16, cursor: 'pointer' }} />
@@ -477,6 +570,9 @@ export default function MonitorPage() {
           <Button icon={<ReloadOutlined />} onClick={handleRefreshTargets}>刷新目标价</Button>
           <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleTriggerScan} loading={scanLoading}>
             手动触发扫描
+          </Button>
+          <Button icon={<ThunderboltOutlined />} onClick={handleSimulateCycle} loading={simulateLoading}>
+            模拟交易周期
           </Button>
           <Button icon={<EyeOutlined />} onClick={handleShowRealtime}>手动查价</Button>
           <Button type="dashed" icon={<PlusOutlined />} onClick={() => { setEditingStock(null); setCustomModalOpen(true); }}>
@@ -513,9 +609,7 @@ export default function MonitorPage() {
                     {(scanResult.watchCount ?? 0) > 0
                       ? <Tag color="blue">{scanResult.watchCount} 只观察中</Tag>
                       : null}
-                    <Tag>{scanResult.skippedCount ?? 0} 只未触发</Tag>
-                    &nbsp;&nbsp;
-                    <Text type="secondary">{scanResult.message}</Text>
+                    <Tag>{scanResult.skippedCount ?? 0} 只区间外</Tag>
                   </td>
                 </tr>
               )}
@@ -525,7 +619,16 @@ export default function MonitorPage() {
 
       {/* SSE实时信号历史 */}
       {sseSignals.length > 0 && (
-        <Card title={`实时信号 (${sseSignals.length})`} size="small" style={{ marginTop: 12 }}>
+        <Card
+          title={`实时信号 (${sseSignals.length})`}
+          size="small"
+          style={{ marginTop: 12 }}
+          extra={
+            <Button type="text" size="small" danger onClick={handleClearSignals}>
+              清除
+            </Button>
+          }
+        >
           <div style={{ maxHeight: 200, overflowY: 'auto' }}>
             {sseSignals.map((sig, i) => {
               const isBuy = sig.signalType === 'BUY' || sig.signalType === 'STRONG_BUY';

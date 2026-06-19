@@ -2919,8 +2919,8 @@ public class AnalysisService {
                 "SELECT close_price FROM stock.stock_daily FINAL WHERE code = '%s' AND trade_date = '%s' LIMIT 1",
                 normalized, endDate);
             List<Map<String, Object>> endRows = clickHouseJdbcTemplate.queryForList(endSql);
-            if (!endRows.isEmpty() && endRows.get(0).get("close_price") != null) {
-                endPrice = new BigDecimal(endRows.get(0).get("close_price").toString());
+            if (!endRows.isEmpty() && endRows.getFirst().get("close_price") != null) {
+                endPrice = new BigDecimal(endRows.getFirst().get("close_price").toString());
             }
 
             if (startPrice == null || endPrice == null || startPrice.doubleValue() == 0) {
@@ -3017,8 +3017,7 @@ public class AnalysisService {
                 SELECT countIf(ret_20d > ?) + 1 as rank
                 FROM ret20
                 """;
-            Integer rank = clickHouseJdbcTemplate.queryForObject(rankSql, Integer.class, industry, targetRet);
-            return rank != null ? rank : 0;
+            return clickHouseJdbcTemplate.queryForObject(rankSql, Integer.class, industry, targetRet);
         } catch (Exception e) {
             log.warn("计算行业内排名失败: industry={}, {}", industry, e.getMessage());
             return 0;
@@ -3038,8 +3037,7 @@ public class AnalysisService {
                   AND si.market NOT IN ('BJ','北交所')
                   AND sd.trade_date >= subtractDays(today(), 25)
                 """;
-            Integer cnt = clickHouseJdbcTemplate.queryForObject(sql, Integer.class, industry);
-            return cnt != null ? cnt : 0;
+            return clickHouseJdbcTemplate.queryForObject(sql, Integer.class, industry);
         } catch (Exception e) {
             log.warn("计算行业内总数失败: industry={}, {}", industry, e.getMessage());
             return 0;
