@@ -304,19 +304,19 @@ public class FactorComputeEngine {
      * @return 最新日期，无数据时返回 null
      */
     public LocalDate findLatestDate(String factorCode) {
-        // 优先从 ClickHouse 读取
+        // 优先从 ClickHouse 读取（直接用 MAX(calc_date) 查询，避免全量扫描）
         if (clickHouseConfig.isEnabled()) {
             try {
-                List<FactorValue> values = clickHouseFactorValueService.findByFactorCodeAndDateRange(factorCode, LocalDate.of(2000, 1, 1), LocalDate.now());
-                if (!values.isEmpty()) {
-                    return values.stream().map(FactorValue::getCalcDate).max(LocalDate::compareTo).orElse(null);
+                LocalDate latest = clickHouseFactorValueService.getLatestDate(factorCode);
+                if (latest != null) {
+                    return latest;
                 }
             } catch (Exception e) {
                 log.warn("[ClickHouse] findLatestDate 查询失败，回退 MySQL: {}", e.getMessage());
             }
         }
 
-        // MySQL 回退
+        // MySQL 回退（仅在 ClickHouse 不可用时触发）
         LambdaQueryWrapper<FactorValue> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(FactorValue::getFactorCode, factorCode).orderByDesc(FactorValue::getCalcDate).last("LIMIT 1");
         FactorValue latest = factorValueMapper.selectOne(wrapper);

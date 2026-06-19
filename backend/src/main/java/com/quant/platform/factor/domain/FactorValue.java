@@ -55,8 +55,10 @@ public class FactorValue implements Serializable {
     /**
      * 财报发布日期（仅季度财务因子有意义，日频因子为 null）
      * 用于判断因子数据新鲜度：筛选时只用已发布的财报数据
+     * 注意：此字段只存在于 ClickHouse，MySQL factor_value 表无此列
+     * exist = false 让 MyBatis-Plus 跳过它，避免 MySQL 查询报错
      */
-    @TableField("announce_date")
+    @TableField(exist = false)
     private LocalDate announceDate;
 
     /**
