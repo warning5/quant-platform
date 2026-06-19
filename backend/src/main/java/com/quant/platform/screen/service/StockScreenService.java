@@ -276,25 +276,23 @@ public class StockScreenService {
                 log.info("[Screen] Multi-day factor {} avg: {} stocks, range={} ~ {}",
                         code, crossSection.size(), screenStartDate, screenEndDate);
             } else {
-                // ── 单日模式：日频因子回退 5 日，财务因子回退 120 日(P1-5优化) ──
-                crossSection = Collections.emptyList();
-                LocalDate searchDate = screenDate;
-                // P1-5: 根据因子频率决定回退策略
+                // ── 单日模式 ──
+                // P1-5: 季度因子按 announce_date 过滤，只用已发布的财报数据
                 boolean isQuarterly = factorDef != null && "QUARTERLY".equalsIgnoreCase(factorDef.getDataFrequency());
-                int maxLookback;
-                if (isQuarterly) {
-                    // 季度因子：回退120天（约一个季度），而非400天
-                    maxLookback = 120;
-                } else if (code.startsWith("FIN_")) {
-                    // 兼容：无 data_frequency 配置的 FIN_ 前缀因子
-                    maxLookback = 120;
+                if (isQuarterly || code.startsWith("FIN_")) {
+                    // 季度财务因子：用 announce_date 过滤，只取已发布数据
+                    crossSection = clickHouseFactorValueService.findQuarterlyByScreenDate(code, screenDate);
+                    log.info("[Screen] 季度因子 {} screenDate={}: {} 条 (announce_date <= {})",
+                            code, screenDate, crossSection.size(), screenDate);
                 } else {
-                    maxLookback = 5;
-                }
-                for (int i = 0; i <= maxLookback; i++) {
-                    crossSection = clickHouseFactorValueService.findByFactorCodeAndDate(code, searchDate);
-                    if (!crossSection.isEmpty()) break;
-                    searchDate = searchDate.minusDays(1);
+                    // 日频因子：回退 5 日
+                    crossSection = Collections.emptyList();
+                    LocalDate searchDate = screenDate;
+                    for (int i = 0; i <= 5; i++) {
+                        crossSection = clickHouseFactorValueService.findByFactorCodeAndDate(code, searchDate);
+                        if (!crossSection.isEmpty()) break;
+                        searchDate = searchDate.minusDays(1);
+                    }
                 }
             }
 

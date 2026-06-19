@@ -389,7 +389,22 @@ function FactorMonitor() {
     const isRunning = runningFactorCodes.has(f.code);
     // 进度：正在计算用 WebSocket 实时进度；已完成显示100%；否则按天数比例
     const displayPct = isRunning ? (wsProgress[f.code] ?? pct) : (isDone ? 100 : pct);
-    return { ...f, cnt, days, stocks, minDate: s.min_date || null, maxDate: s.max_date || null, pct: displayPct, isDone, isRunning };
+    const latestAnnounce = s.latestAnnounceDate || s.latest_announce || s.latestAnnounce_date || null;
+    let announceDisplay = null;
+    if (latestAnnounce) {
+      const d = String(latestAnnounce).slice(0, 10); // 取 YYYY-MM-DD 部分
+      const match = d.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (match) {
+        const month = parseInt(match[2], 10);
+        const quarter = month <= 3 ? 'Q1' : month <= 6 ? 'Q2' : month <= 9 ? 'Q3' : 'Q4';
+        announceDisplay = `${match[1]}${quarter} (发布: ${d})`;
+      } else {
+        announceDisplay = String(latestAnnounce);
+      }
+    }
+    return { ...f, cnt, days, stocks, minDate: s.min_date || null, maxDate: s.max_date || null,
+             latestAnnounceDate: latestAnnounce, announceDisplay,
+             pct: displayPct, isDone, isRunning };
   });
 
   const totalRecords = monitorData?.totalRecords || 0;
@@ -528,6 +543,22 @@ function FactorMonitor() {
         }
         // 只有其中一个日期
         return <span style={{ fontFamily: 'monospace', color: '#94a3b8', fontSize: 12 }}>{minDate || '--'} ~ {maxDate || '--'}</span>;
+      },
+    },
+    {
+      title: '数据新鲜度',
+      key: 'announce',
+      width: 180,
+      render: (_, row) => {
+        // 只有季度财务因子（FIN_）才有 announce_date，其余全部显示 --
+        if (!row.code.startsWith('FIN_') || !row.announceDisplay) {
+          return <Text type="secondary">--</Text>;
+        }
+        return (
+          <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#fa8c16' }}>
+            📅 {row.announceDisplay}
+          </span>
+        );
       },
     },
     {

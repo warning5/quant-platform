@@ -186,6 +186,7 @@ def load_financial_data():
         # 主表: financial indicator
         # report_type: 1=Q1, 2=中报, 3=三季报, 4=年报
         # 取所有报告期，保证财务因子覆盖最新财报（含2026Q1）
+        # 2026-06-19 P1-5: announce_date 优先用真实公告日期，fallback 到 create_time
         cur.execute("""
             SELECT fi.code, fi.report_date, fi.report_type, fi.end_date,
                    fi.gross_profit_margin, fi.net_profit_margin, fi.roe, fi.roa,
@@ -203,7 +204,9 @@ def load_financial_data():
                    si.total_revenue, si.total_cost, si.operating_cost,
                    si.operating_profit, si.selling_expense,
                    si.admin_expense, si.finance_expense, si.rd_expense,
-                   si.net_profit
+                   si.net_profit,
+                   fi.announce_date,
+                   fi.create_time
             FROM stock_financial_indicator fi
             LEFT JOIN stock_income si ON fi.code = si.code
                 AND fi.report_date = si.report_date
@@ -617,6 +620,16 @@ def compute_finance_factors(fin_data, fin_factor_codes, start_date, end_date, ma
             if calc_d < start_date or calc_d > end_date:
                 continue
 
+            # announce_date: 优先用真实公告日期，fallback 到 create_time
+            announce_d = rpt.get("announce_date") or rpt.get("create_time")
+            if announce_d is not None:
+                if isinstance(announce_d, date):
+                    pass
+                elif isinstance(announce_d, str):
+                    announce_d = date.fromisoformat(str(announce_d)[:10])
+                else:
+                    announce_d = None
+
             for fc in fin_factor_codes:
                 if fc not in FIN_EXTRACTORS:
                     continue
@@ -624,7 +637,7 @@ def compute_finance_factors(fin_data, fin_factor_codes, start_date, end_date, ma
                 try:
                     val = extractor(rpt)
                     if val is not None and not (math.isnan(val) if isinstance(val, float) else False):
-                        results[fc].append((code, calc_d, val))
+                        results[fc].append((code, calc_d, val, announce_d))
                 except Exception:
                     pass
 
@@ -714,7 +727,7 @@ def compute_tech_factors(stock_data, tech_factors, start_date, end_date):
                     continue
                 val = func(hist_slice)
                 if val is not None and not (math.isnan(val) or math.isinf(val)):
-                    results[fc].append((code, td, val))
+                    results[fc].append((code, td, val, None))  # 日频因子无 announce_date
 
         processed += 1
         if processed % 500 == 0:
@@ -734,6 +747,7 @@ def normalize_and_write(factor_data, code_market_map, batch_size=5000):
     """
     横截面归一化: Z-Score + 百分位排名
     写入 ClickHouse factor_value 表
+    2026-06-19 P1-5: 支持 announce_date（第4个元素，日频因子为 None）
     """
     print("[4/5] 横截面归一化并写入数据库...")
     ch_client = clickhouse_connect.get_client(**CLICKHOUSE_CONFIG)
@@ -746,21 +760,29 @@ def normalize_and_write(factor_data, code_market_map, batch_size=5000):
 
             # 按日期分组
             date_groups = defaultdict(list)
-            for code, td, val in values:
-                date_groups[td].append((code, val))
+            # 每个 (code, td) 对应的 announce_date
+            announce_map = {}
+            for item in values:
+                if len(item) == 4:
+                    code, td, val, announce_d = item
+                else:
+                    code, td, val = item
+                    announce_d = None
+                date_groups[td].append((code, val, announce_d))
+                announce_map[(code, td)] = announce_d
 
             batch = []
             total_written = 0
 
             for td in sorted(date_groups.keys()):
                 items = date_groups[td]
-                raw_vals = [v for _, v in items]
+                raw_vals = [v for _, v, _ in items]
 
                 mean = sum(raw_vals) / len(raw_vals)
                 std = math.sqrt(sum((v - mean) ** 2 for v in raw_vals) / len(raw_vals)) if len(raw_vals) > 1 else 0
                 sorted_vals = sorted(raw_vals)
 
-                for code, val in items:
+                for code, val, announce_d in items:
                     z = 0.0 if std == 0 else (val - mean) / std
                     rank = sorted_vals.index(val)
                     pct = rank / (len(sorted_vals) - 1) if len(sorted_vals) > 1 else 0.5
@@ -768,7 +790,7 @@ def normalize_and_write(factor_data, code_market_map, batch_size=5000):
                     market = code_market_map.get(code, "")
                     symbol = f"{code}.{market}" if market else code
 
-                    batch.append((fc, symbol, td, round(val, 8), round(pct, 6), round(z, 6)))
+                    batch.append((fc, symbol, td, round(val, 8), round(pct, 6), round(z, 6), announce_d))
 
                     if len(batch) >= batch_size:
                         _insert_batch(ch_client, batch)
@@ -785,7 +807,21 @@ def normalize_and_write(factor_data, code_market_map, batch_size=5000):
 
 
 def _insert_batch(ch_client, batch):
-    ch_client.insert("factor_value", batch, column_names=["factor_code", "symbol", "calc_date", "factor_val", "rank_value", "z_score"])
+    """写入一批因子值到 ClickHouse，含 announce_date（第7列，可 None）"""
+    rows = []
+    for item in batch:
+        fc, symbol, td, val, pct, z, announce_d = item
+        row = {
+            "factor_code": fc,
+            "symbol": symbol,
+            "calc_date": td.isoformat() if hasattr(td, 'isoformat') else str(td),
+            "factor_val": val,
+            "rank_value": pct,
+            "z_score": z,
+            "announce_date": announce_d.isoformat() if announce_d and hasattr(announce_d, 'isoformat') else None,
+        }
+        rows.append(row)
+    ch_client.insert("factor_value", rows, column_names=["factor_code", "symbol", "calc_date", "factor_val", "rank_value", "z_score", "announce_date"])
 
 
 def clear_old_factors(factor_codes):

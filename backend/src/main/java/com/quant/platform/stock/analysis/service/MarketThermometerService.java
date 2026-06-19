@@ -3,6 +3,7 @@ package com.quant.platform.stock.analysis.service;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
@@ -44,6 +45,11 @@ public class MarketThermometerService {
     @Autowired(required = false)
     @Qualifier("clickHouseJdbcTemplate")
     private JdbcTemplate chJdbc;
+
+    @Value("${quant.data-update.script-dir:scripts}")
+    private String scriptDir;
+
+    private String resolvedScriptDir;
 
     /**
      * 获取大盘温度计全量数据（5分钟缓存）
@@ -384,8 +390,11 @@ public class MarketThermometerService {
         }
         try {
             // 调用专用脚本，完全规避命令行列名编码问题
-            String scriptPath = "C:\\Users\\warning5\\WorkBuddy\\Claw\\quant-platform\\scripts\\get_bond_yield_10y.py";
-            ProcessBuilder pb = new ProcessBuilder("python", scriptPath);
+            java.io.File scriptFile = new java.io.File(scriptDir, "get_bond_yield_10y.py");
+            if (!scriptFile.isAbsolute()) {
+                scriptFile = java.nio.file.Paths.get(System.getProperty("user.dir"), scriptDir, "get_bond_yield_10y.py").toFile();
+            }
+            ProcessBuilder pb = new ProcessBuilder("python", scriptFile.getAbsolutePath());
             pb.environment().put("PYTHONIOENCODING", "utf-8");
             pb.redirectErrorStream(true);
             Process p = pb.start();

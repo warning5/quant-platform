@@ -574,8 +574,129 @@ def save_sina_to_table(df, code, table_name, col_map, conn, force=False):
 
 
 # ─────────────────────────────────────────────
-# 主流程
+# 财报公告日期（announce_date）
 # ─────────────────────────────────────────────
+
+# end_date → akshare stock_report_disclosure 的 period 参数
+def _end_date_to_ak_period(end_date_str: str) -> str:
+    """将财报 end_date (YYYY-MM-DD) 转为 akshare period 参数"""
+    year, month = end_date_str[:4], int(end_date_str[5:7])
+    if month <= 3:
+        return f"{year}一季"
+    elif month <= 6:
+        return f"{year}半年报"
+    elif month <= 9:
+        return f"{year}三季"
+    else:
+        return f"{year}年报"
+
+
+def fetch_and_update_announce_dates(conn, years):
+    """
+    从 akshare stock_report_disclosure 爬取财报公告日期，
+    更新 MySQL stock_financial_indicator.announce_date
+
+    years: 要处理的年份列表，如 [2023, 2024, 2025]
+    """
+    import math
+
+    cursor = conn.cursor()
+
+    # 1. 查出 stock_financial_indicator 中已有的 (code, end_date) 组合
+    cursor.execute("SELECT DISTINCT end_date FROM stock_financial_indicator ORDER BY end_date")
+    all_end_dates = [str(r[0]) for r in cursor.fetchall() if r[0]]
+
+    # 2. 过滤出在 years 范围内的 end_date
+    target_dates = []
+    for ed in all_end_dates:
+        try:
+            y = int(ed[:4])
+            if y in years:
+                target_dates.append(ed)
+        except (ValueError, IndexError):
+            continue
+
+    if not target_dates:
+        print("  没有匹配的报告期，跳过")
+        return
+
+    # 3. 去重 period（同年同季的 end_date 可能有多条，但 period 相同）
+    periods = {}
+    for ed in target_dates:
+        ak_period = _end_date_to_ak_period(ed)
+        if ak_period not in periods:
+            periods[ak_period] = ed
+
+    print(f"  目标报告期: {sorted(periods.keys())}")
+    print()
+
+    total_updated = 0
+
+    for ak_period, end_date in sorted(periods.items()):
+        print(f"  爬取 {ak_period} (end_date={end_date}) ...", end=" ")
+        sys.stdout.flush()
+
+        try:
+            df = ak.stock_report_disclosure(market="沪深京", period=ak_period)
+            time.sleep(1)
+        except Exception as e:
+            print(f"✗ 失败: {e}")
+            continue
+
+        if df is None or df.empty:
+            print("0 条（空数据）")
+            continue
+
+        # 解析 (code → announce_date)
+        code_ad_map = {}
+        for _, row in df.iterrows():
+            try:
+                code = str(row["股票代码"]).zfill(6)
+                ann_val = row["实际披露"]
+                if ann_val is None:
+                    continue
+                if isinstance(ann_val, float) and math.isnan(ann_val):
+                    continue
+                ann_str = str(ann_val)[:10]
+                if len(ann_str) < 8 or ann_str[4] != "-":
+                    continue
+                code_ad_map[code] = ann_str
+            except Exception:
+                continue
+
+        print(f"获取 {len(code_ad_map):,} 条")
+
+        if not code_ad_map:
+            continue
+
+        # 4. 批量更新 MySQL stock_financial_indicator.announce_date
+        #    只更新 announce_date IS NULL 的行（不覆盖已有值）
+        updated = 0
+        batch_codes = list(code_ad_map.items())
+        batch_size = 500
+        for i in range(0, len(batch_codes), batch_size):
+            batch = batch_codes[i:i + batch_size]
+            cases = []
+            codes = []
+            for code, ad in batch:
+                cases.append(f"WHEN '{code}' THEN '{ad}'")
+                codes.append(f"'{code}'")
+            sql = (
+                f"UPDATE stock_financial_indicator "
+                f"SET announce_date = CASE code {' '.join(cases)} END "
+                f"WHERE code IN ({','.join(codes)}) "
+                f"AND end_date = '{end_date}' "
+                f"AND announce_date IS NULL"
+            )
+            cursor.execute(sql)
+            updated += cursor.rowcount
+            conn.commit()
+
+        print(f"  ✓ MySQL 更新 {updated:,} 条 (end_date={end_date})")
+        total_updated += updated
+
+    print(f"\n  公告日期合计更新: {total_updated:,} 条")
+
 
 def main():
     parser = argparse.ArgumentParser(description='财务数据采集')
@@ -583,7 +704,7 @@ def main():
     parser.add_argument('--year-start', type=int, default=None, help='采集起始年份')
     parser.add_argument('--year-end', type=int, default=None, help='采集结束年份')
     parser.add_argument('--force', action='store_true', help='强制重新采集')
-    parser.add_argument('--step', choices=['yjbb', 'ths', 'sina'], default=None,
+    parser.add_argument('--step', choices=['yjbb', 'ths', 'sina', 'announce'], default=None,
                         help='只执行指定步骤')
     parser.add_argument('--code', type=str, default=None, help='指定股票代码（仅 ths/sina 步骤有效）')
     parser.add_argument('--start-code', type=str, default=None, help='从指定代码开始（仅 sina 步骤有效，跳过此代码之前的股票）')
@@ -734,6 +855,14 @@ def main():
                 total_inserted += n
 
         print(f"  新浪三大表完成: 共新增/更新 {total_inserted} 条")
+
+    # ─── Step 4: 财报公告日期（akshare stock_report_disclosure） ───
+    if args.step is None or args.step == 'announce':
+        print()
+        print("=" * 60)
+        print("Step 4: 财报公告日期（akshare stock_report_disclosure）")
+        print("=" * 60)
+        fetch_and_update_announce_dates(conn, years)
 
     conn.close()
     print("\n全部完成！")

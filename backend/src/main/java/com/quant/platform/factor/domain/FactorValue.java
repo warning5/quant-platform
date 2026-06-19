@@ -53,6 +53,13 @@ public class FactorValue implements Serializable {
     private BigDecimal factorVal;
 
     /**
+     * 财报发布日期（仅季度财务因子有意义，日频因子为 null）
+     * 用于判断因子数据新鲜度：筛选时只用已发布的财报数据
+     */
+    @TableField("announce_date")
+    private LocalDate announceDate;
+
+    /**
      * 横截面排名（百分位）
      */
     @TableField("rank_value")

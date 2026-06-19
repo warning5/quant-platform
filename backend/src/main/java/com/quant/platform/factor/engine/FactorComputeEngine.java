@@ -679,6 +679,7 @@ public class FactorComputeEngine {
                             .symbol(code)
                             .calcDate(reportDate)  // 使用财报报告期作为 calcDate
                             .factorVal(value)
+                            .announceDate(indicator.getAnnounceDate())  // 真实公告日期
                             .createdAt(now)
                             .build();
                     results.add(fv);
@@ -939,7 +940,14 @@ public class FactorComputeEngine {
 
                 BigDecimal value = calculator.calculate(symbol, indicator);
                 if (value != null) {
-                    FactorValue fv = FactorValue.builder().factorCode(factorCode).symbol(code).calcDate(date).factorVal(value).createdAt(now).build();
+                    FactorValue fv = FactorValue.builder()
+                            .factorCode(factorCode)
+                            .symbol(code)
+                            .calcDate(date)
+                            .factorVal(value)
+                            .announceDate(indicator.getAnnounceDate())
+                            .createdAt(now)
+                            .build();
                     results.add(fv);
                 }
             } catch (Exception e) {

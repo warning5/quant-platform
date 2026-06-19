@@ -109,11 +109,6 @@ const TradeCalendar = () => {
         <Divider type="vertical" />
         <Button size="small" onClick={(e) => { e.stopPropagation(); onChange(dayjs()); }}>今天</Button>
       </div>
-      <div style={{ display: 'flex', gap: 16, fontSize: 12, alignItems: 'center' }}>
-        <span><span style={{ display:'inline-block',width:14,height:14,borderRadius:3,background:'#fff1f0' }}/> 节假日</span>
-        <span><span style={{ display:'inline-block',width:14,height:14,borderRadius:3,background:'#fafafa' }}/> 周末</span>
-        <span><span style={{ display:'inline-block',width:14,height:14,borderRadius:3,border:'1px solid #d9d9d9' }}/> 交易日</span>
-      </div>
     </div>
   );
 

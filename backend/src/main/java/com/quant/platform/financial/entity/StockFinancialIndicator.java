@@ -105,6 +105,9 @@ public class StockFinancialIndicator implements Serializable {
     @TableField("net_profit_ttm_yoy")
     private BigDecimal netProfitTtmYoy;
 
+    @TableField("announce_date")
+    private LocalDate announceDate;
+
     @TableField(value = "create_time", fill = FieldFill.INSERT)
     private LocalDateTime createTime;
 

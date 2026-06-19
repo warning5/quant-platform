@@ -81,6 +81,74 @@ public class ClickHouseFactorValueService {
     }
 
     /**
+     * 2026-06-19 P1-5: 季度因子专用查询
+     * 按 announce_date 过滤：只取已发布（announce_date <= screenDate）的因子值，
+     * 每个 symbol 取 announce_date 最大（即最新财报）的那条。
+     * 日频因子 announce_date 为 NULL，用 IS NULL 兼容。
+     */
+    public java.util.List<com.quant.platform.factor.domain.FactorValue> findQuarterlyByScreenDate(
+            String factorCode, java.time.LocalDate screenDate) {
+        if (!clickHouseConfig.isEnabled()) {
+            log.warn("[ClickHouse] CH disabled, returning empty for quarterly query. factorCode={}, screenDate={}",
+                    factorCode, screenDate);
+            return List.of();
+        }
+
+        // 用 argMax 按 announce_date 取最新一条（announce_date NULL 时退而用 calc_date）
+        String sql = String.format("""
+                SELECT symbol,
+                       argMax(id, COALESCE(announce_date, calc_date))         AS fv_id,
+                       argMax(calc_date, COALESCE(announce_date, calc_date)) AS fv_calc_date,
+                       argMax(factor_val, COALESCE(announce_date, calc_date)) AS fv_val,
+                       argMax(rank_value, COALESCE(announce_date, calc_date)) AS fv_rank,
+                       argMax(z_score, COALESCE(announce_date, calc_date))    AS fv_zscore,
+                       argMax(announce_date, COALESCE(announce_date, calc_date)) AS fv_announce
+                FROM stock.factor_value
+                WHERE factor_code = '%s'
+                  AND (announce_date <= '%s' OR announce_date IS NULL)
+                GROUP BY symbol
+                ORDER BY symbol
+                """, factorCode.replace("'", "''"), screenDate);
+
+        java.util.List<com.quant.platform.factor.domain.FactorValue> result = new ArrayList<>();
+        try (java.sql.Connection conn = getConnection();
+             java.sql.Statement stmt = conn.createStatement();
+             java.sql.ResultSet rs = stmt.executeQuery(sql)) {
+
+            while (rs.next()) {
+                com.quant.platform.factor.domain.FactorValue fv = new com.quant.platform.factor.domain.FactorValue();
+                fv.setId(rs.getLong("fv_id"));
+                fv.setFactorCode(factorCode);
+                fv.setSymbol(rs.getString("symbol"));
+
+                java.sql.Date calcDate = rs.getDate("fv_calc_date");
+                fv.setCalcDate(calcDate != null ? calcDate.toLocalDate() : null);
+
+                double val = rs.getDouble("fv_val");
+                fv.setFactorVal(rs.wasNull() ? null : java.math.BigDecimal.valueOf(val));
+
+                double rank = rs.getDouble("fv_rank");
+                fv.setRankValue(rs.wasNull() ? null : java.math.BigDecimal.valueOf(rank));
+
+                double z = rs.getDouble("fv_zscore");
+                fv.setZScore(rs.wasNull() ? null : java.math.BigDecimal.valueOf(z));
+
+                java.sql.Date ad = rs.getDate("fv_announce");
+                fv.setAnnounceDate(ad != null ? ad.toLocalDate() : null);
+
+                result.add(fv);
+            }
+            log.info("[ClickHouse] 季度因子查询命中: {} screenDate={} size={}",
+                    factorCode, screenDate, result.size());
+        } catch (Exception e) {
+            log.error("[ClickHouse] 季度因子查询异常: code={}, screenDate={}, error={}",
+                    factorCode, screenDate, e.getMessage());
+            return List.of();
+        }
+        return result;
+    }
+
+    /**
      * 聚合统计查询（CH 优先）
      */
     public List<Map<String, Object>> selectFactorStats() {
@@ -112,7 +180,8 @@ public class ClickHouseFactorValueService {
                 SELECT factor_code,
                        count() AS value_count,
                        min(calc_date) AS min_date,
-                       max(calc_date) AS max_date
+                       max(calc_date) AS max_date,
+                       max(announce_date) AS latest_announce
                 FROM stock.factor_value FINAL
                 WHERE factor_code IN (%s)
                 GROUP BY factor_code
@@ -129,8 +198,10 @@ public class ClickHouseFactorValueService {
                 entry.put("valueCount", rs.getLong("value_count"));
                 java.sql.Date minDate = rs.getDate("min_date");
                 java.sql.Date maxDate = rs.getDate("max_date");
+                java.sql.Date latestAnnounce = rs.getDate("latest_announce");
                 if (minDate != null) entry.put("minDate", minDate.toString());
                 if (maxDate != null) entry.put("maxDate", maxDate.toString());
+                if (latestAnnounce != null) entry.put("latestAnnounceDate", latestAnnounce.toString());
                 result.put(code, entry);
             }
         } catch (Exception e) {
@@ -485,7 +556,7 @@ public class ClickHouseFactorValueService {
                 int end = Math.min(i + BATCH_SIZE, values.size());
                 StringBuilder sql = new StringBuilder(
                         "INSERT INTO stock.factor_value " +
-                        "(factor_code, symbol, calc_date, factor_val, rank_value, z_score, created_at, update_time) VALUES ");
+                        "(factor_code, symbol, calc_date, factor_val, rank_value, z_score, announce_date, created_at, update_time) VALUES ");
                 for (int j = i; j < end; j++) {
                     if (j > i) sql.append(',');
                     com.quant.platform.factor.domain.FactorValue fv = values.get(j);
@@ -496,6 +567,7 @@ public class ClickHouseFactorValueService {
                        .append(toSqlNullable(fv.getFactorVal())).append(',')
                        .append(toSqlNullable(fv.getRankValue())).append(',')
                        .append(toSqlNullable(fv.getZScore())).append(',')
+                       .append(toSqlNullableDate(fv.getAnnounceDate())).append(',')
                        .append("now(),now())");
                 }
                 try (java.sql.Statement stmt = conn.createStatement()) {
@@ -520,6 +592,11 @@ public class ClickHouseFactorValueService {
         return v == null ? "NULL" : v.toPlainString();
     }
 
+    /** LocalDate -> SQL 日期（null -> NULL） */
+    private String toSqlNullableDate(java.time.LocalDate d) {
+        return d == null ? "NULL" : ("'" + d + "'");
+    }
+
     // ==================== ClickHouse 查询实现 ====================
 
     private java.util.List<com.quant.platform.factor.domain.FactorValue> queryByFactorCodeAndDateFromCH(
@@ -537,6 +614,7 @@ public class ClickHouseFactorValueService {
                     argMax(factor_val, calc_date) as fv_val,
                     argMax(rank_value, calc_date) as fv_rank,
                     argMax(z_score, calc_date) as fv_zscore,
+                    argMax(announce_date, calc_date) as fv_announce,
                     now() as fv_created
                 FROM stock.factor_value
                 WHERE factor_code = '%s' AND calc_date <= '%s'
@@ -590,6 +668,7 @@ public class ClickHouseFactorValueService {
                        count() AS cnt,
                        min(calc_date) AS min_date,
                        max(calc_date) AS max_date,
+                       max(announce_date) AS latest_announce,
                        count(DISTINCT calc_date) AS days,
                        count(DISTINCT symbol) AS stocks
                 FROM stock.factor_value FINAL
@@ -607,6 +686,8 @@ public class ClickHouseFactorValueService {
                 row.put("cnt", rs.getLong("cnt"));
                 row.put("min_date", rs.getDate("min_date"));
                 row.put("max_date", rs.getDate("max_date"));
+                // 2026-06-19 P1-5: 返回最新 announce_date
+                row.put("latest_announce", rs.getDate("latest_announce"));
                 row.put("days", rs.getLong("days"));
                 row.put("stocks", rs.getLong("stocks"));
                 result.add(row);
@@ -950,6 +1031,10 @@ public class ClickHouseFactorValueService {
         Timestamp createdAt = rs.getTimestamp("created_at");
         fv.setCreatedAt(createdAt != null ? createdAt.toLocalDateTime() : null);
 
+        // 2026-06-19 P1-5: 读取 announce_date
+        java.sql.Date announceDate = rs.getDate("announce_date");
+        fv.setAnnounceDate(announceDate != null ? announceDate.toLocalDate() : null);
+
         return fv;
     }
 
@@ -976,6 +1061,10 @@ public class ClickHouseFactorValueService {
 
         Timestamp createdAt = rs.getTimestamp("fv_created");
         fv.setCreatedAt(createdAt != null ? createdAt.toLocalDateTime() : null);
+
+        // 2026-06-19 P1-5: 读取 announce_date
+        java.sql.Date announceDate = rs.getDate("fv_announce");
+        fv.setAnnounceDate(announceDate != null ? announceDate.toLocalDate() : null);
 
         return fv;
     }
