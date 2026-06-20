@@ -133,6 +133,12 @@ export const factorApi = {
       params: { startDate, endDate, forwardDays },
       timeout: 120000,
     }),
+  // 分段IC/IR对比分析（按splitDate拆分前后段+全量）
+  batchIcIrSegmented: (factorCodes, startDate, endDate, splitDate, forwardDays = 5) =>
+    api.post('/factors/ic-ir-analysis/segmented', null, {
+      params: { factorCodes: factorCodes.join(','), startDate, endDate, splitDate, forwardDays },
+      timeout: 300000,
+    }),
   // 按日期筛选缺失因子值的因子
   missingByDate: (date) => api.get('/factors/missing-by-date', { params: { date } }),
 };

@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { Table, Tag, Button, Space, Card, Typography, Popconfirm, Progress, Tooltip, Select } from 'antd';
+import { Table, Tag, Button, Space, Card, Typography, Popconfirm, Progress, Tooltip, Select, Modal, DatePicker } from 'antd';
 import { message } from '../../utils/messageUtil';
-import { PlusOutlined, EyeOutlined, DeleteOutlined, ReloadOutlined, StopOutlined, LoadingOutlined, RedoOutlined } from '@ant-design/icons';
+import { PlusOutlined, EyeOutlined, DeleteOutlined, ReloadOutlined, StopOutlined, LoadingOutlined, RedoOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { backtestApi } from '../../api';
+import { backtestApi, strategyApi } from '../../api';
+import dayjs from 'dayjs';
 
 const { Title, Text } = Typography;
 
@@ -28,6 +29,13 @@ export default function BacktestList() {
   const [params, setParams] = useState({ page: 0, size: 15 });
   const [selectedRowKeys, setSelectedRowKeys] = useState([]);
   const [signalFilter, setSignalFilter] = useState(null); // null=全部, 'STRATEGY', 'SCREEN'
+
+  // 批量回测
+  const [batchModalOpen, setBatchModalOpen] = useState(false);
+  const [batchDateRange, setBatchDateRange] = useState([dayjs().subtract(1, 'year'), dayjs()]);
+  const [strategyList, setStrategyList] = useState([]);
+  const [batchStrategyIds, setBatchStrategyIds] = useState([]);
+  const [batchLoading, setBatchLoading] = useState(false);
 
   const fetchData = (p = params) => {
     setLoading(true);
@@ -71,6 +79,61 @@ export default function BacktestList() {
       message.success('已重新提交，回测正在执行...');
       fetchData();
     }).catch(() => message.error('重跑失败，请稍后重试'));
+  };
+
+  // 打开批量回测弹窗
+  const openBatchModal = () => {
+    strategyApi.list({ page: 0, size: 200 }).then(res => {
+      const content = res?.records || res?.content || res || [];
+      setStrategyList(Array.isArray(content) ? content : []);
+      setBatchStrategyIds((Array.isArray(content) ? content : []).map(s => s.id ?? s.strategyId));
+      setBatchModalOpen(true);
+    }).catch(() => message.error('获取策略列表失败'));
+  };
+
+  // 批量回测提交
+  const handleBatchBacktest = async () => {
+    if (batchStrategyIds.length === 0) {
+      message.warning('请选择至少1个策略');
+      return;
+    }
+    if (!batchDateRange[0] || !batchDateRange[1]) {
+      message.warning('请选择日期范围');
+      return;
+    }
+    setBatchLoading(true);
+    const startDate = batchDateRange[0].format('YYYY-MM-DD');
+    const endDate = batchDateRange[1].format('YYYY-MM-DD');
+    let successCount = 0;
+    let failCount = 0;
+    for (const sid of batchStrategyIds) {
+      const s = strategyList.find(x => (x.id ?? x.strategyId) === sid);
+      const taskName = `批量回测-${s?.strategyName || s?.name || sid}`;
+      try {
+        await backtestApi.create({
+          signalSource: 'STRATEGY',
+          strategyId: sid,
+          taskName,
+          startDate,
+          endDate,
+          initialCapital: 1000000,
+          commissionRate: 0.0003,
+          slippage: 0.001,
+          benchmark: 'CSI300',
+        });
+        successCount++;
+      } catch {
+        failCount++;
+      }
+    }
+    setBatchLoading(false);
+    setBatchModalOpen(false);
+    if (successCount > 0) {
+      message.success(`已提交 ${successCount} 个策略回测${failCount > 0 ? `，${failCount} 个失败` : ''}`);
+      fetchData();
+    } else {
+      message.error('全部策略回测提交失败');
+    }
   };
 
   const columns = [
@@ -179,6 +242,7 @@ export default function BacktestList() {
             </Button>
           )}
           <Button icon={<ReloadOutlined />} onClick={() => fetchData()}>刷新</Button>
+          <Button icon={<ThunderboltOutlined />} onClick={openBatchModal}>批量回测</Button>
           <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/backtests/new')}>
             新建回测
           </Button>
@@ -223,6 +287,55 @@ export default function BacktestList() {
           }}
         />
       </Card>
+
+      <Modal
+        title="批量回测全部策略"
+        open={batchModalOpen}
+        onCancel={() => setBatchModalOpen(false)}
+        onOk={handleBatchBacktest}
+        confirmLoading={batchLoading}
+        width={520}
+        okText={`开始回测 (${batchStrategyIds.length}个策略)`}
+        cancelText="取消"
+      >
+        <Space direction="vertical" size={16} style={{ width: '100%' }}>
+          <div>
+            <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
+              日期范围
+            </Typography.Text>
+            <DatePicker.RangePicker
+              value={batchDateRange}
+              onChange={setBatchDateRange}
+              style={{ width: '100%' }}
+              presets={[
+                { label: '近1年', value: [dayjs().subtract(1, 'year'), dayjs()] },
+                { label: '近6个月', value: [dayjs().subtract(6, 'month'), dayjs()] },
+                { label: '近2年', value: [dayjs().subtract(2, 'year'), dayjs()] },
+              ]}
+            />
+          </div>
+          <div>
+            <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
+              选择策略（已默认全选，可取消不需要的）
+            </Typography.Text>
+            <Select
+              mode="multiple"
+              value={batchStrategyIds}
+              onChange={setBatchStrategyIds}
+              style={{ width: '100%' }}
+              maxTagCount="responsive"
+              options={strategyList.map(s => ({
+                label: `${s.strategyName || s.name || '未命名'} (${s.strategyCode || s.code || ''})`,
+                value: s.id ?? s.strategyId,
+              }))}
+            />
+          </div>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            每个策略将创建独立的回测任务，使用相同日期范围和参数（初始资金100万、佣金0.03%、滑点0.1%、沪深300基准）。
+            提交后可在列表中查看进度，每个策略约需5~10分钟。
+          </Typography.Text>
+        </Space>
+      </Modal>
     </div>
   );
 }

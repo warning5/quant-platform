@@ -328,11 +328,38 @@ public class FactorController {
             throw new IllegalArgumentException("forwardDays须在1~60之间");
         }
         List<String> codes = Arrays.asList(factorCodes.split(","));
-        if (codes.size() > 20) {
-            throw new IllegalArgumentException("单次最多分析20个因子");
+        if (codes.size() > 50) {
+            throw new IllegalArgumentException("单次最多分析50个因子");
         }
         return ApiResponse.success(
                 factorAnalysisService.batchCalcIcIr(codes, startDate.toString(), endDate.toString(), forwardDays));
+    }
+
+    /**
+     * 分段 IC/IR 对比分析
+     * POST /factors/ic-ir-analysis/segmented?factorCodes=MOM20,...&startDate=...&endDate=...&splitDate=...&forwardDays=5
+     */
+    @PostMapping("/ic-ir-analysis/segmented")
+    @Operation(summary = "分段IC/IR对比：按splitDate拆分前后两段+全量，对比因子时效性")
+    public ApiResponse<Map<String, Object>> segmentedIcIrAnalysis(
+            @RequestParam String factorCodes,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate splitDate,
+            @RequestParam(defaultValue = "5") int forwardDays) {
+        if (forwardDays < 1 || forwardDays > 60) {
+            throw new IllegalArgumentException("forwardDays须在1~60之间");
+        }
+        if (!splitDate.isAfter(startDate) || !splitDate.isBefore(endDate)) {
+            throw new IllegalArgumentException("splitDate必须在startDate和endDate之间");
+        }
+        List<String> codes = Arrays.asList(factorCodes.split(","));
+        if (codes.size() > 50) {
+            throw new IllegalArgumentException("单次最多分析50个因子");
+        }
+        return ApiResponse.success(
+                factorAnalysisService.batchCalcIcIrSegmented(
+                        codes, startDate.toString(), endDate.toString(), splitDate.toString(), forwardDays));
     }
 
     /**

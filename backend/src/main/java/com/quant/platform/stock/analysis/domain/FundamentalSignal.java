@@ -146,4 +146,9 @@ public class FundamentalSignal {
      * 财务数据报告期（如 2025-09-30）
      */
     private String endDate;
+
+    /**
+     * 所属行业（来自 stock_info，用于判断金融/非金融）
+     */
+    private String industry;
 }

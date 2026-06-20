@@ -84,24 +84,29 @@ public class FactorAnalysisService {
         result.put("factorCode", factorCode);
         result.put("forwardDays", forwardDays);
 
-        // 1. 从 ClickHouse 获取因子值（按日期×股票），CH 优先，无数据时回退 MySQL
+        // 1. 从 ClickHouse 获取因子值（直接用 clickHouseJdbcTemplate，避免 FINAL 导致的超时）
         List<Map<String, Object>> factorRows = new ArrayList<>();
-        if (clickHouseFactorValueService != null) {
+        if (clickHouseJdbcTemplate != null) {
             try {
-                List<FactorValue> chRows = clickHouseFactorValueService.findByFactorCodeAndDateRange(
-                        factorCode, LocalDate.parse(startDate), LocalDate.parse(endDate));
-                factorRows = chRows.stream()
-                    .filter(fv -> fv.getFactorVal() != null)
-                    .map(fv -> {
+                // 不用 FINAL：ReplacingMergeTree 的 FINAL 对190万行做合并极慢，
+                // IC 计算对少量重复行不敏感，直接查更快
+                String factorSql = String.format("""
+                    SELECT symbol, toString(calc_date) AS calc_date, factor_val
+                    FROM stock.factor_value
+                    WHERE factor_code = '%s' AND calc_date >= '%s' AND calc_date <= '%s'
+                      AND factor_val IS NOT NULL
+                    ORDER BY calc_date, symbol
+                    """, factorCode.replace("'", "''"), startDate, endDate);
+                factorRows = clickHouseJdbcTemplate.query(factorSql,
+                    (rs, rowNum) -> {
                         Map<String, Object> m = new HashMap<>();
-                        String symbol = fv.getSymbol();
+                        String symbol = rs.getString("symbol");
                         if (symbol != null && symbol.contains(".")) symbol = symbol.split("\\.")[0];
                         m.put("symbol", symbol);
-                        m.put("calcDate", fv.getCalcDate().toString());
-                        m.put("factorVal", fv.getFactorVal());
+                        m.put("calcDate", rs.getString("calc_date"));
+                        m.put("factorVal", rs.getBigDecimal("factor_val"));
                         return m;
-                    })
-                    .collect(Collectors.toList());
+                    });
             } catch (Exception e) {
                 log.warn("[IC/IR] ClickHouse 因子值查询失败，尝试回退 MySQL: {}", e.getMessage());
             }
@@ -261,7 +266,7 @@ public class FactorAnalysisService {
 
         String sql = String.format("""
             SELECT code, trade_date, close_price
-            FROM stock.stock_daily FINAL
+            FROM stock.stock_daily
             WHERE code IN (%s) AND trade_date BETWEEN ? AND ?
             ORDER BY code, trade_date
             """, inClause);
@@ -283,7 +288,7 @@ public class FactorAnalysisService {
         if (clickHouseJdbcTemplate == null) return result;
 
         String sql = """
-            SELECT DISTINCT trade_date FROM stock.stock_daily FINAL
+            SELECT DISTINCT trade_date FROM stock.stock_daily
             WHERE trade_date BETWEEN ? AND ?
             ORDER BY trade_date
             """;
@@ -342,6 +347,305 @@ public class FactorAnalysisService {
             ranks[indices[i]] = i + 1;
         }
         return ranks;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  分段对比 IC 分析
+    // ══════════════════════════════════════════════════════════════════════
+
+    /**
+     * 批量分段 IC/IR 分析：按 splitDate 将时间窗口分为前段/后段/全量三组
+     */
+    public Map<String, Object> batchCalcIcIrSegmented(
+            List<String> factorCodes, String startDate, String endDate,
+            String splitDate, int forwardDays) {
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("segmented", true);
+        result.put("splitDate", splitDate);
+        result.put("forwardDays", forwardDays);
+
+        List<Map<String, Object>> beforeResults = new ArrayList<>();
+        List<Map<String, Object>> afterResults = new ArrayList<>();
+        List<Map<String, Object>> fullResults = new ArrayList<>();
+
+        for (String factorCode : factorCodes) {
+            try {
+                Map<String, Object> seg = calcSingleFactorIcIrSegmented(
+                        factorCode, startDate, endDate, splitDate, forwardDays);
+
+                @SuppressWarnings("unchecked")
+                Map<String, Object> before = (Map<String, Object>) seg.get("before");
+                @SuppressWarnings("unchecked")
+                Map<String, Object> after = (Map<String, Object>) seg.get("after");
+                @SuppressWarnings("unchecked")
+                Map<String, Object> full = (Map<String, Object>) seg.get("full");
+
+                if (before != null) {
+                    before.put("factorCode", factorCode);
+                    beforeResults.add(before);
+                }
+                if (after != null) {
+                    after.put("factorCode", factorCode);
+                    afterResults.add(after);
+                }
+                if (full != null) {
+                    full.put("factorCode", factorCode);
+                    fullResults.add(full);
+                }
+            } catch (Exception e) {
+                log.error("分段IC失败: factorCode={}, error={}", factorCode, e.getMessage());
+            }
+        }
+
+        // 按 |IC| 绝对值降序（全量排序）
+        Comparator<Map<String, Object>> byAbsIc = (a, b) -> {
+            double ia = Math.abs(((Number) a.getOrDefault("icMean", 0)).doubleValue());
+            double ib = Math.abs(((Number) b.getOrDefault("icMean", 0)).doubleValue());
+            return Double.compare(ib, ia);
+        };
+        beforeResults.sort(byAbsIc);
+        afterResults.sort(byAbsIc);
+        fullResults.sort(byAbsIc);
+
+        Map<String, Object> segments = new LinkedHashMap<>();
+
+        Map<String, Object> beforeSeg = new LinkedHashMap<>();
+        beforeSeg.put("label", startDate + " ~ " + splitDate);
+        beforeSeg.put("startDate", startDate);
+        beforeSeg.put("endDate", splitDate);
+        beforeSeg.put("results", beforeResults);
+        segments.put("before", beforeSeg);
+
+        // after 段的 startDate 取 splitDate 的下一个自然日（显示用）
+        LocalDate afterStart = LocalDate.parse(splitDate);
+        Map<String, Object> afterSeg = new LinkedHashMap<>();
+        afterSeg.put("label", splitDate + " ~ " + endDate);
+        afterSeg.put("startDate", splitDate);
+        afterSeg.put("endDate", endDate);
+        afterSeg.put("results", afterResults);
+        segments.put("after", afterSeg);
+
+        Map<String, Object> fullSeg = new LinkedHashMap<>();
+        fullSeg.put("label", startDate + " ~ " + endDate + " (全量)");
+        fullSeg.put("startDate", startDate);
+        fullSeg.put("endDate", endDate);
+        fullSeg.put("results", fullResults);
+        segments.put("full", fullSeg);
+
+        result.put("segments", segments);
+        return result;
+    }
+
+    /**
+     * 单因子分段 IC 计算 — 核心优化：查一次 CH，按日期拆分 IC 序列
+     * @return { before: {icMean,ir,...}, after: {...}, full: {...} }
+     */
+    private Map<String, Object> calcSingleFactorIcIrSegmented(
+            String factorCode, String startDate, String endDate,
+            String splitDate, int forwardDays) {
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("factorCode", factorCode);
+
+        // ── 1. 获取因子值（一次CH查询，全量范围） ──
+        List<Map<String, Object>> factorRows = new ArrayList<>();
+        if (clickHouseJdbcTemplate != null) {
+            try {
+                String factorSql = String.format("""
+                    SELECT symbol, toString(calc_date) AS calc_date, factor_val
+                    FROM stock.factor_value
+                    WHERE factor_code = '%s' AND calc_date >= '%s' AND calc_date <= '%s'
+                      AND factor_val IS NOT NULL
+                    ORDER BY calc_date, symbol
+                    """, factorCode.replace("'", "''"), startDate, endDate);
+                factorRows = clickHouseJdbcTemplate.query(factorSql,
+                    (rs, rowNum) -> {
+                        Map<String, Object> m = new HashMap<>();
+                        String symbol = rs.getString("symbol");
+                        if (symbol != null && symbol.contains(".")) symbol = symbol.split("\\.")[0];
+                        m.put("symbol", symbol);
+                        m.put("calcDate", rs.getString("calc_date"));
+                        m.put("factorVal", rs.getBigDecimal("factor_val"));
+                        return m;
+                    });
+            } catch (Exception e) {
+                log.warn("[分段IC] CH 因子值查询失败: {}", e.getMessage());
+            }
+        }
+        if (factorRows.isEmpty()) {
+            factorRows = jdbcTemplate.query("""
+                SELECT symbol, calc_date, factor_val FROM factor_value
+                WHERE factor_code = ? AND calc_date BETWEEN ? AND ?
+                  AND factor_val IS NOT NULL ORDER BY calc_date, symbol
+                """, (rs, rowNum) -> {
+                    Map<String, Object> m = new HashMap<>();
+                    String symbol = rs.getString("symbol");
+                    if (symbol != null && symbol.contains(".")) symbol = symbol.split("\\.")[0];
+                    m.put("symbol", symbol);
+                    m.put("calcDate", rs.getDate("calc_date").toLocalDate().toString());
+                    m.put("factorVal", rs.getBigDecimal("factor_val"));
+                    return m;
+                }, factorCode, startDate, endDate);
+        }
+        if (factorRows.isEmpty()) {
+            result.put("before", emptyIcResult("无因子数据"));
+            result.put("after", emptyIcResult("无因子数据"));
+            result.put("full", emptyIcResult("无因子数据"));
+            return result;
+        }
+
+        // ── 2. 批量获取价格（一次CH查询） ──
+        Set<String> allSymbols = factorRows.stream()
+                .map(r -> (String) r.get("symbol"))
+                .filter(Objects::nonNull)
+                .filter(s -> s.matches("\\d{6}"))
+                .collect(Collectors.toSet());
+        LocalDate priceEnd = LocalDate.parse(endDate).plusDays(forwardDays * 3L);
+        Map<String, Map<String, Double>> codeDatePrice =
+                queryBulkClosePrices(allSymbols, startDate, priceEnd.toString());
+        Map<String, String> forwardDateMap =
+                buildForwardDateMap(startDate, priceEnd.toString(), forwardDays);
+
+        // ── 3. 按日期分组，计算每日期 IC ──
+        Map<String, List<Map<String, Object>>> byDate = factorRows.stream()
+                .collect(Collectors.groupingBy(
+                        r -> (String) r.get("calcDate"),
+                        LinkedHashMap::new, Collectors.toList()));
+
+        List<Double> fullIcSeries = new ArrayList<>();
+        List<Map<String, Object>> fullTimeline = new ArrayList<>();
+
+        for (Map.Entry<String, List<Map<String, Object>>> entry : byDate.entrySet()) {
+            String calcDate = entry.getKey();
+            List<Map<String, Object>> dayFactors = entry.getValue();
+
+            if (dayFactors.size() < 10) continue;
+            String fwdDate = forwardDateMap.get(calcDate);
+            if (fwdDate == null) continue;
+
+            List<Double> factorVals = new ArrayList<>();
+            List<Double> forwardReturns = new ArrayList<>();
+
+            for (Map<String, Object> f : dayFactors) {
+                String sym = (String) f.get("symbol");
+                BigDecimal fval = (BigDecimal) f.get("factorVal");
+                if (sym == null || fval == null) continue;
+
+                Map<String, Double> symPrices = codeDatePrice.get(sym);
+                if (symPrices == null) continue;
+                Double currP = symPrices.get(calcDate);
+                Double fwdP = symPrices.get(fwdDate);
+                if (currP == null || fwdP == null || currP <= 0) continue;
+
+                factorVals.add(fval.doubleValue());
+                forwardReturns.add((fwdP - currP) / currP);
+            }
+
+            if (factorVals.size() < 10) continue;
+
+            double ic = calcSpearmanCorrelation(factorVals, forwardReturns);
+            if (!Double.isNaN(ic)) {
+                fullIcSeries.add(ic);
+                Map<String, Object> tl = new LinkedHashMap<>();
+                tl.put("date", calcDate);
+                tl.put("ic", Math.round(ic * 10000.0) / 10000.0);
+                tl.put("sampleSize", factorVals.size());
+                fullTimeline.add(tl);
+            }
+        }
+
+        if (fullIcSeries.isEmpty()) {
+            result.put("before", emptyIcResult("IC序列为空"));
+            result.put("after", emptyIcResult("IC序列为空"));
+            result.put("full", emptyIcResult("IC序列为空"));
+            return result;
+        }
+
+        // ── 4. 按 splitDate 拆分 IC 序列 ──
+        List<Double> beforeIcSeries = new ArrayList<>();
+        List<Double> afterIcSeries = new ArrayList<>();
+        List<Map<String, Object>> beforeTimeline = new ArrayList<>();
+        List<Map<String, Object>> afterTimeline = new ArrayList<>();
+
+        for (int i = 0; i < fullTimeline.size(); i++) {
+            String date = (String) fullTimeline.get(i).get("date");
+            if (date.compareTo(splitDate) < 0) {
+                beforeIcSeries.add(fullIcSeries.get(i));
+                beforeTimeline.add(fullTimeline.get(i));
+            } else {
+                afterIcSeries.add(fullIcSeries.get(i));
+                afterTimeline.add(fullTimeline.get(i));
+            }
+        }
+
+        // ── 5. 分别聚合统计 ──
+        result.put("before", aggregateIcSegment(beforeIcSeries, beforeTimeline, factorRows.size(), forwardDays));
+        result.put("after", aggregateIcSegment(afterIcSeries, afterTimeline, factorRows.size(), forwardDays));
+        result.put("full", aggregateIcSegment(fullIcSeries, fullTimeline, factorRows.size(), forwardDays));
+
+        return result;
+    }
+
+    /** 从 IC 序列聚合统计 */
+    private Map<String, Object> aggregateIcSegment(
+            List<Double> icSeries, List<Map<String, Object>> icTimeline,
+            int totalFactorRows, int forwardDays) {
+
+        Map<String, Object> stat = new LinkedHashMap<>();
+        if (icSeries.isEmpty()) {
+            stat.put("icMean", 0);
+            stat.put("ir", 0);
+            stat.put("sampleDays", 0);
+            stat.put("error", "IC序列为空");
+            return stat;
+        }
+
+        double icMean = icSeries.stream().mapToDouble(Double::doubleValue).average().orElse(0);
+        double icStd = calcStd(icSeries);
+        double ir = icStd > 0 ? icMean / icStd : 0;
+        long icPositiveCount = icSeries.stream().filter(v -> v > 0).count();
+        double icWinRate = (double) icPositiveCount / icSeries.size() * 100;
+
+        stat.put("icMean", Math.round(icMean * 10000.0) / 10000.0);
+        stat.put("icStd", Math.round(icStd * 10000.0) / 10000.0);
+        stat.put("ir", Math.round(ir * 100.0) / 100.0);
+
+        int n = icSeries.size();
+        double tStat = icStd > 0 ? icMean / (icStd / Math.sqrt(n)) : 0;
+        stat.put("tStat", Math.round(tStat * 100.0) / 100.0);
+
+        double pValue = 1.0;
+        if (n > 1 && icStd > 0) {
+            try {
+                TDistribution tDist = new TDistribution(n - 1);
+                pValue = 2.0 * (1.0 - tDist.cumulativeProbability(Math.abs(tStat)));
+            } catch (Exception e) { pValue = 1.0; }
+        }
+        stat.put("pValue", Math.round(pValue * 10000.0) / 10000.0);
+        stat.put("icWinRate", Math.round(icWinRate * 10.0) / 10.0);
+        stat.put("sampleDays", n);
+        stat.put("totalFactorRows", totalFactorRows);
+        stat.put("icTimeline", icTimeline);
+        stat.put("forwardDays", forwardDays);
+
+        // 有效性判断
+        String assessment;
+        if (Math.abs(icMean) >= 0.05 && Math.abs(ir) >= 0.5) assessment = "有效因子";
+        else if (Math.abs(icMean) >= 0.03 && Math.abs(ir) >= 0.3) assessment = "弱有效";
+        else assessment = "无效因子";
+        stat.put("assessment", assessment);
+
+        return stat;
+    }
+
+    private Map<String, Object> emptyIcResult(String error) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("icMean", 0);
+        m.put("ir", 0);
+        m.put("sampleDays", 0);
+        m.put("error", error);
+        return m;
     }
 
     private double calcStd(List<Double> values) {

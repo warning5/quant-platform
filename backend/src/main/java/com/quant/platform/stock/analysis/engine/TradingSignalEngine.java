@@ -8,6 +8,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 交易信号引擎（四维度评分 + 规则生成操作建议）
@@ -66,6 +67,19 @@ public class TradingSignalEngine {
     private static final int MONEY_WEIGHT = 25;
     private static final int SENTIMENT_WEIGHT = 25;
     private static final int FUNDAMENTAL_WEIGHT = 30;
+
+    /** 金融行业列表（这些行业不适用毛利率/存货/流动比率等工商企业指标） */
+    private static final java.util.Set<String> FINANCIAL_INDUSTRIES = Set.of(
+            "银行", "证券", "保险", "多元金融"
+    );
+
+    /**
+     * 判断是否为金融行业股票
+     */
+    private boolean isFinancialStock(FundamentalSignal fundamental) {
+        if (fundamental == null || fundamental.getIndustry() == null) return false;
+        return FINANCIAL_INDUSTRIES.contains(fundamental.getIndustry().trim());
+    }
     
     /**
      * 综合评分入口（兼容旧调用，isBlueChip默认false）
@@ -1923,14 +1937,23 @@ public class TradingSignalEngine {
         BigDecimal gm = fundamental != null ? fundamental.getGrossMargin() : null;
         double gmVal = gm != null ? gm.doubleValue() : 0;
         int gmScore = 0;
-        if (gm != null) {
+        boolean isFin = isFinancialStock(fundamental);
+        if (isFin) {
+            // 金融股不适用毛利率（银行用净息差，保险用综合成本率）
+            gmScore = 1; // 不扣分，给基础分
+            items.add(buildItem("毛利率", "不适用", gmScore, 3,
+                    "金融行业不适用毛利率指标（银行看净息差/利差，保险看综合成本率）", true, "default"));
+        } else if (gm != null) {
             if (gmVal >= 40.0) gmScore = 3;
             else if (gmVal >= 20.0) gmScore = 2;
             else if (gmVal > 0) gmScore = 1;
+            items.add(buildItem("毛利率", gm.setScale(2, RoundingMode.HALF_UP) + "%",
+                    gmScore, 3, "毛利率≥40%=3分，≥20%=2分；高毛利率说明定价权强（消费/医药特征）", false,
+                    gmVal >= 40 ? "green" : "default"));
+        } else {
+            items.add(buildItem("毛利率", "-", 0, 3,
+                    "毛利率≥40%=3分，≥20%=2分；高毛利率说明定价权强（消费/医药特征）", false, "default"));
         }
-        items.add(buildItem("毛利率", gm != null ? gm.setScale(2, RoundingMode.HALF_UP) + "%" : "-",
-                gmScore, 3, "毛利率≥40%=3分，≥20%=2分；高毛利率说明定价权强（消费/医药特征）", false,
-                gmVal >= 40 ? "green" : "default"));
 
         // === 8. 资产负债率（2分）— 新增风险控制 ===
         BigDecimal dr = fundamental != null ? fundamental.getDebtRatio() : null;
@@ -1966,13 +1989,20 @@ public class TradingSignalEngine {
         double crVal = cr != null ? cr.doubleValue() : 0;
         double qrVal = qr != null ? qr.doubleValue() : 0;
         int crScore = 0, qrScore = 0;
-        if (cr != null && crVal >= 1.5) crScore = 1;
-        if (qr != null && qrVal >= 1.0) qrScore = 1;
-        String debtDisplay = (cr != null ? "流动=" + cr.setScale(2, RoundingMode.HALF_UP) : "-") +
-                " | " + (qr != null ? "速动=" + qr.setScale(2, RoundingMode.HALF_UP) : "-");
-        items.add(buildItem("偿债能力", debtDisplay, crScore + qrScore, 2,
-                "流动比率≥1.5=1分(短期偿债强)，速动比率≥1.0=1分(剔除存货后仍有偿债能力)；两者均低=资金紧张风险", false,
-                (crScore + qrScore) >= 2 ? "green" : (crScore + qrScore) >= 1 ? "default" : "red"));
+        if (isFin) {
+            // 金融股不适用流动/速动比率（银行受资本充足率监管，证券看净资本）
+            crScore = 1; qrScore = 1; // 不扣分
+            items.add(buildItem("偿债能力", "监管指标(不适用)", crScore + qrScore, 2,
+                    "金融行业适用监管指标（银行:资本充足率/杠杆率，证券:净资本/风险覆盖率），不使用流动比率", true, "default"));
+        } else {
+            if (cr != null && crVal >= 1.5) crScore = 1;
+            if (qr != null && qrVal >= 1.0) qrScore = 1;
+            String debtDisplay = (cr != null ? "流动=" + cr.setScale(2, RoundingMode.HALF_UP) : "-") +
+                    " | " + (qr != null ? "速动=" + qr.setScale(2, RoundingMode.HALF_UP) : "-");
+            items.add(buildItem("偿债能力", debtDisplay, crScore + qrScore, 2,
+                    "流动比率≥1.5=1分(短期偿债强)，速动比率≥1.0=1分(剔除存货后仍有偿债能力)；两者均低=资金紧张风险", false,
+                    (crScore + qrScore) >= 2 ? "green" : (crScore + qrScore) >= 1 ? "default" : "red"));
+        }
 
         // === 11. 研报评级（3分，从5分降至3分） ===
         int rScore = fundamental != null ? fundamental.getResearchScore() : 0;
@@ -2016,31 +2046,44 @@ public class TradingSignalEngine {
 
         // 回款质量（展示）
         BigDecimal arDays = fundamental != null ? fundamental.getArTurnoverDays() : null;
-        items.add(buildItem("回款天数",
-                arDays != null && arDays.doubleValue() > 0 ? arDays.setScale(0, RoundingMode.HALF_UP) + "天" : "-",
-                0, 0,
-                "应收账款周转天数：越低=回款越快；>120天需警惕坏账风险；同行业横向对比更准确", true,
-                arDays != null && arDays.doubleValue() <= 60 ? "green" : arDays != null && arDays.doubleValue() > 120 ? "red" : "default"));
+        if (isFin) {
+            items.add(buildItem("回款天数", "不适用", 0, 0,
+                    "金融行业无应收账款周转概念（银行看不良贷款率，证券看自营资产质量）", true, "default"));
+        } else {
+            items.add(buildItem("回款天数",
+                    arDays != null && arDays.doubleValue() > 0 ? arDays.setScale(0, RoundingMode.HALF_UP) + "天" : "-",
+                    0, 0,
+                    "应收账款周转天数：越低=回款越快；>120天需警惕坏账风险；同行业横向对比更准确", true,
+                    arDays != null && arDays.doubleValue() <= 60 ? "green" : arDays != null && arDays.doubleValue() > 120 ? "red" : "default"));
+        }
 
         // 商誉（展示）
         BigDecimal goodwill = fundamental != null ? fundamental.getGoodwill() : null;
-        String gwDisplay = "-";
-        if (goodwill != null && fundamental.getNetProfitAbs() != null && fundamental.getNetProfitAbs().doubleValue() != 0) {
+        String gwDisplay;
+        if (isFin) {
+            gwDisplay = "不适用";
+        } else if (goodwill != null && fundamental.getNetProfitAbs() != null && fundamental.getNetProfitAbs().doubleValue() != 0) {
             double gwRatio = goodwill.doubleValue() / Math.abs(fundamental.getNetProfitAbs().doubleValue());
             gwDisplay = String.format("%.2f亿(占净利%.1f倍)", goodwill.doubleValue() / 1e8, gwRatio);
         } else if (goodwill != null) {
             gwDisplay = String.format("%.2f亿", goodwill.doubleValue() / 1e8);
+        } else {
+            gwDisplay = "-";
         }
-        items.add(buildItem("商誉", gwDisplay, 0, 0,
-                "商誉占净利润倍数过高（>10倍）说明并购溢价高，减值风险大；每年末需关注商誉减值测试", true,
-                goodwill != null && fundamental != null && fundamental.getNetProfitAbs() != null &&
-                goodwill.doubleValue() / Math.abs(fundamental.getNetProfitAbs().doubleValue()) > 10 ? "red" : "default"));
+        items.add(buildItem("商誉", isFin ? gwDisplay : gwDisplay, 0, 0,
+                isFin ? "金融行业通常无商誉（适用金融资产公允价值评估）" : "商誉占净利润倍数过高（>10倍）说明并购溢价高，减值风险大；每年末需关注商誉减值测试",
+                true, "default"));
 
         // 存货（展示）
         BigDecimal inventory = fundamental != null ? fundamental.getInventory() : null;
-        String invDisplay = inventory != null ? String.format("%.2f亿", inventory.doubleValue() / 1e8) : "-";
-        items.add(buildItem("存货", invDisplay, 0, 0,
-                "存货金额（最新一期资产负债表）。存货过高且周转慢可能意味着滞销风险；需结合行业特点判断", true, null));
+        if (isFin) {
+            items.add(buildItem("存货", "不适用", 0, 0,
+                    "金融行业无存货概念（银行看生息资产，证券看自营投资）", true, "default"));
+        } else {
+            String invDisplay = inventory != null ? String.format("%.2f亿", inventory.doubleValue() / 1e8) : "-";
+            items.add(buildItem("存货", invDisplay, 0, 0,
+                    "存货金额（最新一期资产负债表）。存货过高且周转慢可能意味着滞销风险；需结合行业特点判断", true, null));
+        }
 
         // 货币资金（展示）
         BigDecimal monetary = fundamental != null ? fundamental.getMonetaryCapital() : null;

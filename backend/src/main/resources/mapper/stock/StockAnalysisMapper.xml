@@ -53,8 +53,11 @@
             -- 现金流量表展示字段
             scf.free_cash_flow as freeCashFlow,
             -- 报告期
-            DATE_FORMAT(fi.end_date, '%Y-%m-%d') as endDate
+            DATE_FORMAT(fi.end_date, '%Y-%m-%d') as endDate,
+            -- 行业（用于判断金融股特殊处理）
+            si.industry as industry
         FROM stock_financial_indicator fi
+        LEFT JOIN stock_info si ON si.code = fi.code
         LEFT JOIN stock_income inc
             ON inc.code = fi.code
            AND inc.end_date = fi.end_date

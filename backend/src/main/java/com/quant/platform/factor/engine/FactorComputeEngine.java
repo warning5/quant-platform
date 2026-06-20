@@ -42,6 +42,18 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class FactorComputeEngine {
 
+    /**
+     * 判断是否为财务因子：按 FIN_ 前缀或已注册的财务计算器
+     * 优先用前缀判断，确保新增 FIN_ 因子无需修改代码也能正确识别
+     * <p>
+     * 注意：以下 VAL_ 因子虽然是估值类，但依赖日频行情数据（stock_daily 的 pe_ttm/pb 等），
+     * 已改为日频计算（有 Java Calculator），不在此列：
+     * VAL_PE_TTM, VAL_PB, VAL_PE_PERCENTILE, VAL_PB_PERCENTILE, VAL_DIVIDEND_YIELD, VAL_FCF_YIELD
+     */
+    private static final Set<String> DAILY_VAL_FACTORS = Set.of(
+            "VAL_PE_TTM", "VAL_PB",
+            "VAL_PE_PERCENTILE", "VAL_PB_PERCENTILE", "VAL_DIVIDEND_YIELD", "VAL_FCF_YIELD"
+    );
     private final MarketDataService marketDataService;
     private final FactorValueMapper factorValueMapper;
     private final ClickHouseFactorValueService clickHouseFactorValueService;
@@ -135,19 +147,6 @@ public class FactorComputeEngine {
     private void registerFinancial(FinancialFactorCalculator calc) {
         financialCalculators.put(calc.getFactorCode(), calc);
     }
-
-    /**
-     * 判断是否为财务因子：按 FIN_ 前缀或已注册的财务计算器
-     * 优先用前缀判断，确保新增 FIN_ 因子无需修改代码也能正确识别
-     *
-     * 注意：以下 VAL_ 因子虽然是估值类，但依赖日频行情数据（stock_daily 的 pe_ttm/pb 等），
-     * 已改为日频计算（有 Java Calculator），不在此列：
-     *   VAL_PE_TTM, VAL_PB, VAL_PE_PERCENTILE, VAL_PB_PERCENTILE, VAL_DIVIDEND_YIELD, VAL_FCF_YIELD
-     */
-    private static final Set<String> DAILY_VAL_FACTORS = Set.of(
-            "VAL_PE_TTM", "VAL_PB",
-            "VAL_PE_PERCENTILE", "VAL_PB_PERCENTILE", "VAL_DIVIDEND_YIELD", "VAL_FCF_YIELD"
-    );
 
     private boolean isFinancialFactor(String code) {
         if (code == null) return false;
@@ -717,7 +716,7 @@ public class FactorComputeEngine {
                 failCount.incrementAndGet();
                 if (!logged[0]) {
                     logged[0] = true;
-                    log.warn("[{}] computeOneDateFinancial {} {}: 首个异常 code={}, ex={}, msg={}", factorCode, reportDate, e.getClass().getSimpleName(), code, e.getMessage());
+                    log.warn("[{}] computeOneDateFinancial {} {}: 首个异常 code={}, msg={}", factorCode, reportDate, e.getClass().getSimpleName(), code, e.getMessage());
                 }
             }
         }

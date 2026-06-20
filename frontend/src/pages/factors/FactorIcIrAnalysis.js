@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import dayjs from 'dayjs';
 import {
-  Card, Row, Col, Select, Button, Tag, Spin, Alert, Space,
+  Card, Row, Col, Select, Button, Tag, Spin, Alert, Space, Switch,
   Typography, Table, Tooltip, Popover, Divider, Statistic, DatePicker, InputNumber, App,
 } from 'antd';
 import {
   BarChartOutlined, LineChartOutlined, ReloadOutlined, InfoCircleOutlined,
   CheckCircleOutlined, WarningOutlined, CloseCircleOutlined, QuestionCircleOutlined,
+  ArrowUpOutlined, ArrowDownOutlined, MinusOutlined,
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import { factorApi, strategyApi, recommendationApi } from '../../api';
@@ -96,19 +97,147 @@ function buildFactorAnalysis(record) {
   return lines;
 }
 
+// ─── 分段对比结果渲染 ───────────────────────────────────────────────────────
+function renderSegmentedResults(segmentedResults, segPageSize, setSegPageSize, handleViewTrend) {
+  if (!segmentedResults || !segmentedResults.segments) return null;
+  const segs = segmentedResults.segments;
+  
+  // 将三个段的因子结果合并为一行
+  const factorMap = {};
+  ['before', 'after', 'full'].forEach(seg => {
+    (segs[seg]?.results || []).forEach(r => {
+      if (!r.factorCode) return;
+      if (!factorMap[r.factorCode]) factorMap[r.factorCode] = { factorCode: r.factorCode };
+      factorMap[r.factorCode][seg] = r;
+    });
+  });
+  const mergedData = Object.values(factorMap);
+  
+  // 计算IC变化方向
+  mergedData.forEach(r => {
+    const bIc = r.before?.icMean || 0;
+    const aIc = r.after?.icMean || 0;
+    r.icDelta = Math.round((aIc - bIc) * 10000) / 10000;
+    r.icFlipped = (bIc > 0 && aIc < 0) || (bIc < 0 && aIc > 0);
+    r.icDecayed = Math.abs(aIc) < Math.abs(bIc) * 0.5;
+  });
+
+  // 构建分段子列（每段5列：IC/IR/胜率/评估/样本）
+  const segColSimple = (segKey) => [
+    { title: 'IC', dataIndex: [segKey, 'icMean'], key: segKey + '_ic', width: 72,
+      render: (_, r) => {
+        const v = r[segKey]?.icMean;
+        return v != null ? <Text style={{ color: v >= 0 ? '#ef5350' : '#26a69a', fontWeight: 600, fontSize: 12 }}>{(+v).toFixed(2)}</Text> : '-';
+      },
+    },
+    { title: 'IR', dataIndex: [segKey, 'ir'], key: segKey + '_ir', width: 64,
+      render: (_, r) => {
+        const v = r[segKey]?.ir;
+        return v != null ? <Text strong style={{ fontSize: 12 }}>{(+v).toFixed(2)}</Text> : '-';
+      },
+    },
+    { title: '胜率', dataIndex: [segKey, 'icWinRate'], key: segKey + '_wr', width: 64,
+      render: (_, r) => {
+        const v = r[segKey]?.icWinRate;
+        return v != null ? v.toFixed(0) + '%' : '-';
+      },
+    },
+    { title: '评估', dataIndex: [segKey, 'assessment'], key: segKey + '_as', width: 130,
+      render: (_, r) => <AssessmentTag assessment={r[segKey]?.assessment} subType={r[segKey]?.assessment === '无效因子' ? getInvalidSubtype(r[segKey]) : null} />,
+    },
+    { title: '样本', dataIndex: [segKey, 'sampleDays'], key: segKey + '_sd', width: 64,
+      render: (_, r) => r[segKey]?.sampleDays ?? '-',
+    },
+  ];
+
+  // 分组表头颜色区分
+  const groupHeaderStyle = (color) => ({ background: color, fontWeight: 600, textAlign: 'center', fontSize: 13 });
+
+  const segColumns = [
+    {
+      title: '因子代码',
+      dataIndex: 'factorCode',
+      key: 'factorCode',
+      width: 160,
+      fixed: 'left',
+      ellipsis: false,
+      render: (v, r) => {
+        const err = r.before?.error || r.after?.error || r.full?.error;
+        if (err) return <Tooltip title={err}><Text type="danger" style={{ cursor: 'not-allowed' }}>{v}</Text></Tooltip>;
+        return <a onClick={() => handleViewTrend(v)}>{v}</a>;
+      },
+    },
+    {
+      title: <span style={groupHeaderStyle('#e3f2fd')}>📅 前段</span>,
+      key: 'grp_before',
+      children: segColSimple('before'),
+    },
+    {
+      title: <span style={groupHeaderStyle('#fff3e0')}>📊 后段</span>,
+      key: 'grp_after',
+      children: segColSimple('after'),
+    },
+    {
+      title: <span style={groupHeaderStyle('#e8f5e9')}>📈 全量</span>,
+      key: 'grp_full',
+      children: segColSimple('full'),
+    },
+    {
+      title: <span>IC变化 <InfoCircleOutlined style={{ color: '#bbb', fontSize: 10 }} /></span>,
+      key: 'icDelta',
+      width: 115,
+      fixed: 'right',
+      render: (_, r) => {
+        if (r.before?.error || r.after?.error) return '-';
+        const delta = r.icDelta;
+        const icon = delta > 0.005 ? <ArrowUpOutlined style={{ color: '#ef5350', fontSize: 10 }} /> :
+                       delta < -0.005 ? <ArrowDownOutlined style={{ color: '#26a69a', fontSize: 10 }} /> :
+                       <MinusOutlined style={{ color: '#999', fontSize: 10 }} />;
+        const bgColor = r.icFlipped ? '#fff7e6' : 'transparent';
+        return <span style={{ background: bgColor, padding: '2px 6px', borderRadius: 4, fontSize: 12 }}>{icon}<Text style={{ color: delta >= 0 ? '#ef5350' : '#26a69a', fontWeight: r.icFlipped ? 700 : 400, marginLeft: 4, fontSize: 12 }}>{delta >= 0 ? '+' : ''}{(+delta).toFixed(2)}</Text></span>;
+      },
+    },
+  ];
+  
+  const bLabel = segs.before?.label || '前段';
+  const aLabel = segs.after?.label || '后段';
+  const fLabel = segs.full?.label || '全量';
+  
+  return (
+    <Card title={<span>分段对比结果
+      <Tag color="blue" style={{ marginLeft: 8, fontSize: 11 }}>{bLabel}</Tag>
+      <span style={{ margin: '0 4px', color: '#999' }}>→</span>
+      <Tag color="orange" style={{ fontSize: 11 }}>{aLabel}</Tag>
+      <Tag style={{ marginLeft: 8, fontSize: 11 }}>{fLabel}</Tag>
+    </span>} size="small" style={{ marginBottom: 16 }}>
+      {mergedData.some(r => r.icFlipped) && (
+        <Alert type="warning" showIcon message={`${mergedData.filter(r => r.icFlipped).length} 个因子IC方向发生反转（前后段符号相反），可能因市场环境切换导致因子失效`} style={{ marginBottom: 12 }} />
+      )}
+      <Table dataSource={mergedData} columns={segColumns} rowKey="factorCode" size="small"
+        pagination={mergedData.length > segPageSize ? {
+          pageSize: segPageSize, showSizeChanger: true, pageSizeOptions: ['8', '15', '30', '50'],
+          showTotal: t => `共 ${t} 条`, onShowSizeChange: (current, size) => setSegPageSize(size),
+        } : false}
+        onChange={(pagination) => setSegPageSize(pagination.pageSize)}
+        scroll={{ x: 1500 }}
+      />
+    </Card>
+  );
+}
+
 // ─── 评估标签 ─────────────────────────────────────────────────────────────────
 function AssessmentTag({ assessment, subType }) {
-  if (!assessment) return null;
-  const map = {
-    '有效因子': { color: 'green', icon: <CheckCircleOutlined /> },
-    '弱有效': { color: 'orange', icon: <WarningOutlined /> },
-    '无效因子': { color: 'red', icon: <CloseCircleOutlined /> },
-  };
-  const cfg = map[assessment] || { color: 'default', icon: null };
+  if (!assessment) return '-';
+  const bgMap = { '有效因子': '#f6ffed', '弱有效': '#fff7e6', '无效因子': '#fff2f0' };
+  const borderMap = { '有效因子': '#b7eb8f', '弱有效': '#ffd591', '无效因子': '#ffccc7' };
+  const textMap = { '有效因子': '#389e0d', '弱有效': '#d48806', '无效因子': '#cf1322' };
+  const bg = bgMap[assessment] || '#f5f5f5';
+  const border = borderMap[assessment] || '#d9d9d9';
+  const color = textMap[assessment] || '#333';
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center' }}>
-      <Tag color={cfg.color} icon={cfg.icon}>{assessment}</Tag>
-      {subType && <Tag style={{ marginLeft: 4 }} color="default">{subType}</Tag>}
+    <span>
+      <span style={{ display: 'inline-block', background: bg, border: `1px solid ${border}`, borderRadius: 4, color, fontSize: 11, padding: '1px 6px', marginRight: subType ? 3 : 0, whiteSpace: 'nowrap' }}>{assessment}</span>
+      {subType && <span style={{ display: 'inline-block', background: '#fafafa', border: '1px solid #d9d9d9', borderRadius: 4, color: '#666', fontSize: 10, padding: '1px 5px', whiteSpace: 'nowrap' }}>{subType}</span>}
     </span>
   );
 }
@@ -202,9 +331,16 @@ export default function FactorIcIrAnalysis() {
   const [dateRange, setDateRange] = useState([dayjs().subtract(1, 'year'), dayjs()]);
   const [forwardDays, setForwardDays] = useState(5);
   const [loading, setLoading] = useState(false);
+  const [analyzeProgress, setAnalyzeProgress] = useState(0);
   const [results, setResults] = useState(null);
+  const [segmentedMode, setSegmentedMode] = useState(false);
+  const [splitDate, setSplitDate] = useState(dayjs('2026-01-01'));
+  const [segmentedResults, setSegmentedResults] = useState(null);
   const [savingIc, setSavingIc] = useState(false);
   const [saveLogs, setSaveLogs] = useState([]);
+  // 分页受控状态
+  const [resultsPageSize, setResultsPageSize] = useState(10);
+  const [segPageSize, setSegPageSize] = useState(8);
 
   // 策略批量选择
   const [strategies, setStrategies] = useState([]);
@@ -275,7 +411,7 @@ export default function FactorIcIrAnalysis() {
     }));
   }, [factorList]);
 
-  // 批量 IC/IR 分析
+  // 批量 IC/IR 分析（分批调用，真实进度）
   const handleAnalyze = async () => {
     if (selectedCodes.length === 0) {
       message.warning('请选择至少1个因子');
@@ -285,24 +421,98 @@ export default function FactorIcIrAnalysis() {
       message.warning('请选择日期范围');
       return;
     }
+    // 固定因子列表和总数，避免 await 期间 state 变化导致进度计算错误
+    const codes = [...selectedCodes];
+    const total = codes.length;
     setLoading(true);
+    setAnalyzeProgress(0);
     setResults(null);
+    setSegmentedResults(null);
     setTrendData(null);
     setTrendFactor(null);
     setSaveLogs([]);
+
+    const BATCH_SIZE = 5;
+    const allResults = [];
+    // 分段模式需要跨批次累积 results
+    const accSegBefore = [];
+    const accSegAfter = [];
+    const accSegFull = [];
+    let completed = 0;
+
     try {
-      const data = await factorApi.batchIcIrAnalysis(
-        selectedCodes,
-        dateRange[0].format('YYYY-MM-DD'),
-        dateRange[1].format('YYYY-MM-DD'),
-        forwardDays,
-      );
-      setResults(data || []);
+      for (let i = 0; i < total; i += BATCH_SIZE) {
+        const batch = codes.slice(i, i + BATCH_SIZE);
+        if (segmentedMode) {
+          if (!splitDate) { message.warning('请选择分段日期'); setLoading(false); setAnalyzeProgress(0); return; }
+          const batchData = await factorApi.batchIcIrSegmented(
+            batch,
+            dateRange[0].format('YYYY-MM-DD'),
+            dateRange[1].format('YYYY-MM-DD'),
+            splitDate.format('YYYY-MM-DD'),
+            forwardDays,
+          );
+          if (batchData?.segments) {
+            if (batchData.segments.before?.results) accSegBefore.push(...batchData.segments.before.results);
+            if (batchData.segments.after?.results) accSegAfter.push(...batchData.segments.after.results);
+            if (batchData.segments.full?.results) {
+              accSegFull.push(...batchData.segments.full.results);
+              allResults.push(...batchData.segments.full.results);
+            }
+          }
+        } else {
+          const batchData = await factorApi.batchIcIrAnalysis(
+            batch,
+            dateRange[0].format('YYYY-MM-DD'),
+            dateRange[1].format('YYYY-MM-DD'),
+            forwardDays,
+          );
+          if (Array.isArray(batchData)) {
+            allResults.push(...batchData);
+          } else if (batchData) {
+            allResults.push(batchData);
+          }
+        }
+        completed += batch.length;
+        setAnalyzeProgress(Math.min(Math.round((completed / total) * 100), 100));
+      }
+      if (segmentedMode) {
+        // 将累积的全部分段结果组装成与单次调用相同的结构
+        const assembled = {
+          segmented: true,
+          splitDate: splitDate?.format('YYYY-MM-DD'),
+          forwardDays,
+          segments: {
+            before: {
+              label: `${dateRange[0].format('YYYY-MM-DD')} ~ ${splitDate?.format('YYYY-MM-DD')}`,
+              startDate: dateRange[0].format('YYYY-MM-DD'),
+              endDate: splitDate?.format('YYYY-MM-DD'),
+              results: accSegBefore,
+            },
+            after: {
+              label: `${splitDate?.format('YYYY-MM-DD')} ~ ${dateRange[1].format('YYYY-MM-DD')}`,
+              startDate: splitDate?.format('YYYY-MM-DD'),
+              endDate: dateRange[1].format('YYYY-MM-DD'),
+              results: accSegAfter,
+            },
+            full: {
+              label: `${dateRange[0].format('YYYY-MM-DD')} ~ ${dateRange[1].format('YYYY-MM-DD')} (全量)`,
+              startDate: dateRange[0].format('YYYY-MM-DD'),
+              endDate: dateRange[1].format('YYYY-MM-DD'),
+              results: accSegFull,
+            },
+          },
+        };
+        setSegmentedResults(assembled);
+      } else {
+        setResults(allResults);
+      }
     } catch (e) {
-      message.error('IC/IR 分析失败，请稍后重试');
-    } finally {
-      setLoading(false);
+      message.error(segmentedMode ? '分段IC/IR 分析失败' : 'IC/IR 分析失败，请稍后重试');
     }
+    setAnalyzeProgress(100);
+    setLoading(false);
+    setTimeout(() => setAnalyzeProgress(0), 1200);
   };
 
   // 批量保存 IC 到数据库（分片请求，实时滚动日志）
@@ -843,11 +1053,32 @@ export default function FactorIcIrAnalysis() {
             </Space>
           </Col>
         </Row>
+        <Row gutter={[16, 16]} justify="start" style={{ marginTop: 8, marginBottom: 8 }}>
+          <Col>
+            <Space>
+              <Text type="secondary" style={{ fontSize: 12 }}>分段对比</Text>
+              <Switch
+                checked={segmentedMode}
+                onChange={(v) => { setSegmentedMode(v); setResults(null); setSegmentedResults(null); }}
+                checkedChildren="开"
+                unCheckedChildren="关"
+              />
+              {segmentedMode && (
+                <DatePicker
+                  value={splitDate}
+                  onChange={setSplitDate}
+                  style={{ width: 140 }}
+                  placeholder="切分日期"
+                />
+              )}
+            </Space>
+          </Col>
+        </Row>
         <Row gutter={[16, 16]} justify="start" style={{ marginTop: 16 }}>
           <Col>
             <Space>
-              <Button type="primary" icon={<BarChartOutlined />} onClick={handleAnalyze} loading={loading}>
-                分析
+              <Button type="primary" icon={loading ? <ReloadOutlined spin /> : <BarChartOutlined />} onClick={handleAnalyze} loading={loading}>
+                {loading ? (analyzeProgress > 0 ? `分析中 ${analyzeProgress}%` : '分析中...') : '分析'}
               </Button>
               <Button
                 icon={<LineChartOutlined />}
@@ -893,11 +1124,20 @@ export default function FactorIcIrAnalysis() {
             columns={columns}
             rowKey="factorCode"
             size="small"
-            pagination={results.length > 10 ? { pageSize: 10 } : false}
+            pagination={results.length > 10 ? {
+              pageSize: resultsPageSize,
+              showSizeChanger: true,
+              pageSizeOptions: ['10', '20', '50'],
+              showTotal: t => `共 ${t} 条`,
+              onShowSizeChange: (current, size) => setResultsPageSize(size),
+            } : false}
+            onChange={(pagination) => setResultsPageSize(pagination.pageSize)}
             scroll={{ x: 900 }}
           />
         </Card>
       )}
+      {/* ─── 分段对比结果 ─── */}
+      {segmentedResults && renderSegmentedResults(segmentedResults, segPageSize, setSegPageSize, handleViewTrend)}
 
       {/* IC 趋势详情 */}
       {trendFactor && (
