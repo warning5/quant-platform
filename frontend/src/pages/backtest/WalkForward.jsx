@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import {
   Card, Row, Col, Typography, Tag, Table, Alert, Spin, Button, Form,
-  InputNumber, DatePicker, Select, message, Statistic, Space, Empty, Tooltip,
+  InputNumber, DatePicker, Select, message, Statistic, Space, Empty, Tooltip, Divider,
 } from 'antd';
 import {
   PlayCircleOutlined, WarningOutlined, CheckCircleOutlined,
@@ -176,20 +176,49 @@ export default function WalkForward() {
           <Title level={4} style={{ margin: 0 }}><LineChartOutlined /> Walk-Forward 验证</Title>
           <Tooltip
             title={
-              <div style={{ fontSize: 13, lineHeight: 1.8 }}>
-                <div style={{ fontWeight: 600, marginBottom: 4 }}>目标</div>
-                <div>模拟实盘：用滚动窗口验证策略的样本外有效性，避免过拟合。</div>
-                <div style={{ fontWeight: 600, marginTop: 8, marginBottom: 4 }}>使用方法</div>
-                <div>1. 选择因子（至少1个）→ 2. 设置日期范围和窗口参数 → 3. 点击「运行」→ 4. 查看各轮收益和IC衰减</div>
-                <div style={{ fontWeight: 600, marginTop: 8, marginBottom: 4 }}>价值</div>
-                <div>• IC半衰期：因子预测力衰减速度，越长越好</div>
-                <div>• 胜率：超额收益为正的轮次占比，&gt;50%说明策略稳健</div>
-                <div>• 失效预警：连续3轮负收益或IC衰减&gt;50%时触发</div>
-                <div style={{ marginTop: 8, color: '#999', fontSize: 12 }}>⚠️ 运行前请先通过「IC管理」计算因子IC数据</div>
+              <div style={{ fontSize: 13, lineHeight: 1.9, maxWidth: 560, maxHeight: 400, overflowY: 'auto' }}>
+                <div style={{ fontWeight: 600, marginBottom: 6 }}>目标</div>
+                <div style={{ marginBottom: 8 }}>验证策略的<b>样本外有效性</b>，避免过拟合。"样本外"不是指非历史数据，而是指<b>参数优化时没碰过的数据</b>。</div>
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>样本外是什么意思？</div>
+                <div style={{ marginBottom: 4 }}>传统回测：用同一段历史数据既调参又验证 → 相当于"看答案做题"，结果不可信。</div>
+                <div style={{ background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 6, padding: '8px 10px', marginBottom: 8, fontSize: 12, lineHeight: 1.8 }}>
+                  <div style={{ fontWeight: 600, marginBottom: 2 }}>Walk-Forward 的做法：</div>
+                  <div>第1轮：用过去60天算IC定权重 → 用接下来20天算收益（这段数据训练时没见过 → 样本外）</div>
+                  <div>第2轮：窗口向前滚10天 → 再用新的60天定权重 → 再用新的20天算收益（又是样本外）</div>
+                  <div>重复多轮，看是不是每轮都赚钱。</div>
+                </div>
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>与回测的区别</div>
+                <div style={{ marginBottom: 8 }}>
+                  <div>• <b>回测</b>：用全部历史数据调参+验证，容易过拟合，结果偏乐观</div>
+                  <div>• <b>Walk-Forward</b>：每一步只用训练期数据决策，验证期完全没见过，模拟实盘，结果更可信</div>
+                </div>
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>正确使用顺序</div>
+                <div style={{ background: '#fffbe6', border: '1px solid #ffe58f', borderRadius: 6, padding: '8px 10px', marginBottom: 8, fontSize: 12, lineHeight: 1.85 }}>
+                  <div><b>Step 1：回测（快速筛选）</b></div>
+                  <div style={{ marginLeft: 16 }}>跑一遍，看策略大致表现。如果回测收益都很差 → 直接放弃，不用跑 Walk-Forward</div>
+                  <div><b>Step 2：Walk-Forward（严肃验证）</b></div>
+                  <div style={{ marginLeft: 16 }}>确认策略是不是真的有效。如果胜率低 / IC衰减快 → 策略不可信</div>
+                  <div><b>Step 3：模拟盘（实盘前最后一步）</b></div>
+                  <div style={{ marginLeft: 16 }}>用小资金跑一段时间，确认没 bug</div>
+                  <div><b>Step 4：实盘</b></div>
+                </div>
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>使用方法（本页面）</div>
+                <div style={{ marginBottom: 4 }}>① 选择因子 → ② 设置日期范围和窗口参数 → ③ 点击「运行」→ ④ 查看各轮收益和IC衰减</div>
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>结果怎么看</div>
+                <div style={{ marginBottom: 4 }}>
+                  <div>• <b>IC半衰期</b>：因子预测力衰减速度，越长越好</div>
+                  <div>• <b>胜率</b>：超额收益为正的轮次占比，&gt;50%说明策略稳健</div>
+                  <div>• <b>失效预警</b>：连续3轮负收益或IC衰减&gt;50%时触发</div>
+                </div>
+                <Divider style={{ margin: '8px 0' }} />
+                <div style={{ fontSize: 12, color: '#666' }}>
+                  回测是<b>"粗筛"</b>，Walk-Forward 是<b>"严考"</b>。两者互补，不是替代关系。
+                </div>
+                <div style={{ marginTop: 8, color: '#faad14', fontSize: 12 }}>⚠️ 运行前请先通过「IC管理」计算因子IC数据</div>
               </div>
             }
             placement="right"
-            overlayStyle={{ maxWidth: 420 }}
+            overlayStyle={{ maxWidth: 580 }}
           >
             <QuestionCircleOutlined style={{ color: '#999', cursor: 'pointer', fontSize: 16 }} />
           </Tooltip>
