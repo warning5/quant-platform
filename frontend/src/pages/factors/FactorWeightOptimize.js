@@ -7,6 +7,7 @@ import {
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import { factorApi } from '../../api';
+import { CATEGORY_LABELS as categoryNames } from './constants';
 
 const { Text, Title } = Typography;
 const fmtPct = (v, d = 2) => v != null ? `${(+v * 100).toFixed(d)}%` : '-';
@@ -210,20 +211,7 @@ function EfficientFrontierChart({ frontier }) {
 }
 
 // ─── 主面板 ────────────────────────────────────────────────────────────────────
-// 分类中文名称（与后端 FactorDefinition.FactorCategory 枚举对应）
-const categoryNames = {
-  MOMENTUM: '动量',
-  VALUE: '价值',
-  QUALITY: '质量',
-  VOLATILITY: '波动率',
-  TECHNICAL: '技术',
-  FINANCIAL: '财务',
-  SENTIMENT: '情绪',
-  LIQUIDITY: '流动性',
-  VOLUME_PRICE: '量价',
-  CHANTHEORY: '缠论',
-  CUSTOM: '自定义',
-};
+// 分类中文名称统一从 constants.js 导入（别名 categoryNames）
 
 // 通过因子列表获取因子的 DB 分类
 const getFactorCategory = (code, factorList) => {

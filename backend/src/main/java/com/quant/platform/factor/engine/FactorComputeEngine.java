@@ -83,10 +83,32 @@ public class FactorComputeEngine {
         registerBuiltin(new BuiltinFactors.MacdCalculator());
         registerBuiltin(new BuiltinFactors.LimitUpCountCalculator());
 
-        // 注册缠论因子（3个ACTIVE）
+        // 注册其他技术因子（ATR20/SAR/SIZE，2026-06-20 补充）
+        registerBuiltin(new BuiltinFactors.Atr20Calculator());
+        registerBuiltin(new BuiltinFactors.SarCalculator());
+        registerBuiltin(new BuiltinFactors.SizeCalculator());
+        registerBuiltin(new BuiltinFactors.Price52wHighPctCalculator());
+
+        // MOM60 / VOL60（2026-06-20 补充：因子清理时遗漏）
+        registerBuiltin(new BuiltinFactors.Momentum60Calculator());
+        registerBuiltin(new BuiltinFactors.Volatility60Calculator());
+
+        // 估值分位因子（2026-06-20 补充：依赖 pe_ttm/pb 字段）
+        registerBuiltin(new BuiltinFactors.PePercentileCalculator());
+        registerBuiltin(new BuiltinFactors.PbPercentileCalculator());
+
+        // 日频估值因子（2026-06-20 补充：依赖 pe_ttm/pb/dividend/fcf/marketCap 字段）
+        registerBuiltin(new BuiltinFactors.PeTtmCalculator());
+        registerBuiltin(new BuiltinFactors.PbCalculator());
+        registerBuiltin(new BuiltinFactors.DividendYieldCalculator());
+        registerBuiltin(new BuiltinFactors.FcfYieldCalculator());
+
+        // 注册缠论因子（5个ACTIVE）
         registerBuiltin(new ChanTheoryFactors.TrendTypeCalculator());
         registerBuiltin(new ChanTheoryFactors.BuySellSignalCalculator());
         registerBuiltin(new ChanTheoryFactors.HubPositionCalculator());
+        registerBuiltin(new ChanTheoryFactors.PenCountCalculator());
+        registerBuiltin(new ChanTheoryFactors.PenDirCalculator());
 
         // 注册财务因子（静态内部类，8个ACTIVE）
         registerFinancial(new FinancialFactors.RoeCalc());
@@ -102,11 +124,7 @@ public class FactorComputeEngine {
 
     @jakarta.annotation.PostConstruct
     private void registerDeferred() {
-        // 估值因子（非静态内部类，需要Spring Bean，4个ACTIVE）
-        registerFinancial(financialFactorsBean.new PeTtmCalc());
-        registerFinancial(financialFactorsBean.new PbCalc());
-        registerFinancial(financialFactorsBean.new DividendYieldCalc());
-        registerFinancial(financialFactorsBean.new FcfYieldCalc());
+        // VAL_PE_TTM / VAL_PB / VAL_DIVIDEND_YIELD / VAL_FCF_YIELD 已全部改为日频 builtin
         log.info("Registered {} financial factor calculators (total, after deferred)", financialCalculators.size());
     }
 
@@ -121,9 +139,20 @@ public class FactorComputeEngine {
     /**
      * 判断是否为财务因子：按 FIN_ 前缀或已注册的财务计算器
      * 优先用前缀判断，确保新增 FIN_ 因子无需修改代码也能正确识别
+     *
+     * 注意：以下 VAL_ 因子虽然是估值类，但依赖日频行情数据（stock_daily 的 pe_ttm/pb 等），
+     * 已改为日频计算（有 Java Calculator），不在此列：
+     *   VAL_PE_TTM, VAL_PB, VAL_PE_PERCENTILE, VAL_PB_PERCENTILE, VAL_DIVIDEND_YIELD, VAL_FCF_YIELD
      */
+    private static final Set<String> DAILY_VAL_FACTORS = Set.of(
+            "VAL_PE_TTM", "VAL_PB",
+            "VAL_PE_PERCENTILE", "VAL_PB_PERCENTILE", "VAL_DIVIDEND_YIELD", "VAL_FCF_YIELD"
+    );
+
     private boolean isFinancialFactor(String code) {
         if (code == null) return false;
+        // 日频估值因子优先排除（它们有 builtin Calculator，走日频路径）
+        if (DAILY_VAL_FACTORS.contains(code)) return false;
         if (code.startsWith("FIN_")) return true;
         if (code.startsWith("VAL_") || code.startsWith("QUAL_")) return true;
         return financialCalculators.containsKey(code);

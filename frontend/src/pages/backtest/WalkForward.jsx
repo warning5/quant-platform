@@ -9,6 +9,7 @@ import {
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import { backtestApi } from '../../api';
+import { useFactorMeta } from '../../hooks/useFactorMeta';
 import dayjs from 'dayjs';
 
 const { Title, Text } = Typography;
@@ -29,29 +30,10 @@ const icBarColor = (v) => {
   return v >= 0 ? COLOR_UP : COLOR_DOWN;
 };
 
-// ── 可用因子列表（与后端FactorIcIrAnalysis保持一致）──
-const AVAILABLE_FACTORS = [
-  { code: 'MOM5',  name: '5日动量' },
-  { code: 'MOM10', name: '10日动量' },
-  { code: 'MOM20', name: '20日动量' },
-  { code: 'MOM60', name: '60日动量' },
-  { code: 'VOLATILITY', name: '波动率' },
-  { code: 'RSI', name: 'RSI' },
-  { code: 'VOLUME_CHANGE', name: '成交量变化' },
-  { code: 'TURNOVER', name: '换手率' },
-  { code: 'MARKET_CAP', name: '市值' },
-  { code: 'VAL_PE_PERCENTILE', name: 'PE分位' },
-  { code: 'VAL_PB_PERCENTILE', name: 'PB分位' },
-  { code: 'VAL_FCF_YIELD', name: '自由现金流收益率' },
-  { code: 'VAL_DIVIDEND_YIELD', name: '股息率' },
-  { code: 'QUAL_ROE', name: 'ROE' },
-  { code: 'QUAL_DEBT_TO_EQUITY', name: '资产负债率' },
-  { code: 'LIMIT_UP_COUNT', name: '涨停次数' },
-  { code: 'TURNOVER_ANOMALY', name: '换手率异常' },
-  { code: 'VOLUME_SURPRISE', name: '成交量惊喜' },
-];
+// 可用因子列表从后端动态加载（见 useFactorMeta hook）
 
 export default function WalkForward() {
+  const { factorList } = useFactorMeta();
   const [running, setRunning] = useState(false);
   const [results, setResults] = useState(null);
   const [summary, setSummary] = useState(null);
@@ -67,6 +49,11 @@ export default function WalkForward() {
   const [maxRounds, setMaxRounds] = useState(10);
   const [transactionCost, setTransactionCost] = useState(0.15);
   const [rebalanceInterval, setRebalanceInterval] = useState(20);
+
+  // 动态构建可用因子选项（仅 ACTIVE 因子）
+  const factorOptions = factorList
+    .filter(f => f.status === 'ACTIVE')
+    .map(f => ({ label: `${f.factorCode}（${f.factorName || f.factorCode}）`, value: f.factorCode }));
 
   const handleRun = useCallback(() => {
     if (!factors || factors.length === 0) {
@@ -236,7 +223,7 @@ export default function WalkForward() {
               placeholder="选择因子（至少1个）"
               value={factors}
               onChange={setFactors}
-              options={AVAILABLE_FACTORS.map(f => ({ label: `${f.code}（${f.name}）`, value: f.code }))}
+              options={factorOptions}
             />
           </Col>
           <Col span={8}>

@@ -12,6 +12,7 @@ import {
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import { backtestApi } from '../../api';
+import { useFactorMeta } from '../../hooks/useFactorMeta';
 
 const { Title, Text } = Typography;
 
@@ -1644,17 +1645,10 @@ function BrinsonConclusion({ summary, industrySummary, periods }) {
 // 6. 因子归因详情（含结论组件）
 // ══════════════════════════════════════════════════════════════════════════════
 
-// 已知因子描述映射（当后端返回的 description 为空时兜底）
-const KNOWN_FACTOR_DESC = {
-  MOM20: '20日动量 — 追涨杀跌收益',
-  VOL20: '20日波动率 — 高波动股短期溢价',
-  SIZE: '总市值 — 小盘股溢价',
-  TURN20: '20日换手率 — 流动性溢价',
-  MOM60: '60日动量 — 中期趋势跟随',
-  VOL60: '60日波动率 — 中长期波动溢价',
-};
+// 因子描述从后端动态加载（见 useFactorMeta hook），不再硬编码
 
 function FactorDetail({ taskId }) {
+  const { factorMeta } = useFactorMeta();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -1681,12 +1675,12 @@ function FactorDetail({ taskId }) {
     const absTotal = Math.abs(totalContrib);
     return rawBetas.map(b => ({
       ...b,
-      // 描述 fallback：后端返回 → 前端映射 → factorName → factorCode
-      description: b.description || KNOWN_FACTOR_DESC[b.factorCode] || b.factorName || '',
+      // 描述 fallback：后端返回 → 动态因子元信息 → factorName → factorCode
+      description: b.description || factorMeta[b.factorCode]?.desc || b.factorName || '',
       annualizedContribution: (b.contribution || 0) / Math.max(observationDays, 1) * 252,
       contributionRatio: absTotal > 1e-8 ? (b.contribution || 0) / totalContrib : 0,
     }));
-  }, [rawBetas, summary.totalFactorContribution, observationDays]);
+  }, [rawBetas, summary.totalFactorContribution, observationDays, factorMeta]);
 
   // Beta 暴露柱状图
   const betaChartOption = useMemo(() => {

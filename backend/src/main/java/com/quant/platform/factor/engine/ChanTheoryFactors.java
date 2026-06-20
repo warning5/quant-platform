@@ -110,4 +110,53 @@ public class ChanTheoryFactors {
         }
     }
 
+    /**
+     * CHAN_PEN_COUNT — 笔数量因子
+     * 值: 近期K线中识别出的笔数量（整数）
+     * 用途: 衡量市场活跃度/波动率，笔多=震荡频繁，笔少=趋势明确
+     */
+    public static class PenCountCalculator implements FactorCalculator {
+        @Override
+        public String getFactorCode() {
+            return "CHAN_PEN_COUNT";
+        }
+
+        @Override
+        public BigDecimal calculate(String symbol, LocalDate calcDate,
+                                    List<MarketDailyBar> history, Map<String, Object> context) {
+            if (history == null || history.size() < 30) return null;
+
+            ChanTheoryResult result = ChanTheoryCalculator.calculate(history);
+            List<com.quant.platform.factor.engine.chan.Pen> pens = result.getPens();
+            if (pens == null || pens.isEmpty()) return null;
+
+            return BigDecimal.valueOf(pens.size());
+        }
+    }
+
+    /**
+     * CHAN_PEN_DIR — 最后一笔方向因子
+     * 值: +1=上升笔(底到顶), -1=下降笔(顶到底)
+     * 用途: 判断当前短期方向，配合中枢位置使用
+     */
+    public static class PenDirCalculator implements FactorCalculator {
+        @Override
+        public String getFactorCode() {
+            return "CHAN_PEN_DIR";
+        }
+
+        @Override
+        public BigDecimal calculate(String symbol, LocalDate calcDate,
+                                    List<MarketDailyBar> history, Map<String, Object> context) {
+            if (history == null || history.size() < 30) return null;
+
+            ChanTheoryResult result = ChanTheoryCalculator.calculate(history);
+            com.quant.platform.factor.engine.chan.Pen lastPen = result.lastPen();
+            if (lastPen == null) return null;
+
+            return BigDecimal.valueOf(lastPen.getDirection().getValue())
+                    .setScale(0, RoundingMode.HALF_UP);
+        }
+    }
+
 }

@@ -99,4 +99,32 @@ public class MarketDailyBar implements Serializable {
      * stock_info 没有单独的流通市值，用总市值近似。
      */
     private BigDecimal circMarketCap;
+
+    // ---- 估值字段（供 VAL_PE_PERCENTILE / VAL_PB_PERCENTILE 计算使用）----
+
+    /**
+     * 滚动市盈率 (TTM)，来自 ClickHouse stock_daily.pe_ttm。
+     * NULL 表示亏损股或数据缺失。
+     */
+    private BigDecimal peTtm;
+
+    /**
+     * 市净率，来自 ClickHouse stock_daily.pb。
+     * NULL 表示数据缺失。
+     */
+    private BigDecimal pb;
+
+    // ---- 分红 / FCF 字段（供 VAL_DIVIDEND_YIELD / VAL_FCF_YIELD 日频计算使用）----
+
+    /**
+     * 最近 12 个月每股派息（元），从 MySQL stock_dividend 聚合，
+     * 由 MarketDataService 统一注入，计算期间不变。
+     */
+    private BigDecimal dividendPerShare12m;
+
+    /**
+     * 自由现金流（元），来自 MySQL stock_financial_indicator.free_cash_flow 最新值，
+     * 由 MarketDataService 统一注入，计算期间不变（季频更新）。
+     */
+    private BigDecimal fcf;
 }

@@ -5,6 +5,7 @@ import { message } from '../../utils/messageUtil';
 import dayjs from 'dayjs';
 import { ThunderboltOutlined, ReloadOutlined, LineChartOutlined, StockOutlined, RiseOutlined, FallOutlined, MinusOutlined, QuestionCircleOutlined, RadarChartOutlined, StopOutlined, UnlockOutlined } from '@ant-design/icons';
 import api, { recommendationApi, blacklistApi, confidenceApi, calendarApi } from '../../api';
+import { useFactorMeta } from '../../hooks/useFactorMeta';
 import ReactEcharts from 'echarts-for-react';
 
 const { Title, Text } = Typography;
@@ -55,25 +56,7 @@ function formatMarketCap(val) {
   return val.toFixed(0);
 }
 
-// ── 因子元信息 ──
-const factorMeta = {
-  MOM20: { cat: '动量', desc: '20日涨幅' },
-  MOM5: { cat: '动量', desc: '5日涨幅' },
-  MTM6: { cat: '动量', desc: '6日动量' },
-  VOL20: { cat: '波动', desc: '年化波动率' },
-  VAL_PE_TTM: { cat: '价值', desc: '市盈率TTM' },
-  VAL_PB: { cat: '价值', desc: '市净率' },
-  VAL_PS_TTM: { cat: '价值', desc: '市销率TTM' },
-  VAL_DIVIDEND_YIELD: { cat: '价值', desc: '股息率' },
-  RSI14: { cat: '技术', desc: '14日RSI' },
-  MACD: { cat: '技术', desc: 'MACD离差值' },
-  TURN20: { cat: '流动性', desc: '20日换手率' },
-  FIN_EARNINGS_QUALITY: { cat: '财务', desc: '盈利质量' },
-  FIN_DEBT_TO_ASSET: { cat: '财务', desc: '资产负债率' },
-  FIN_REVENUE_QUALITY: { cat: '财务', desc: '营收质量' },
-  FIN_NET_PROFIT_YOY: { cat: '成长', desc: '净利润同比增长率' },
-  FIN_REVENUE_TTM_YOY: { cat: '成长', desc: '营收同比增长率' },
-};
+// ── 因子元信息（从后端动态加载，见 useFactorMeta hook）──
 
 // ── IC 诊断动作配色 ──
 const DIAG_CONFIG = {
@@ -84,6 +67,7 @@ const DIAG_CONFIG = {
 };
 
 export default function RecommendationList() {
+  const { factorMeta } = useFactorMeta();
   const [recommendations, setRecommendations] = useState([]);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);

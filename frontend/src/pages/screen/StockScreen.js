@@ -17,6 +17,7 @@ import dayjs from 'dayjs';
 import api, { factorApi } from '../../api';
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { useMarketThermometer } from '../../hooks/useMarketThermometer';
+import { CATEGORY_LABELS as CATEGORY_LABEL } from '../factors/constants';
 import RollingBacktestModal from './RollingBacktestModal';
 
 const { Title, Text, Paragraph } = Typography;
@@ -29,11 +30,7 @@ const CATEGORY_COLOR = {
   TECHNICAL: 'purple', FINANCIAL: 'green', SENTIMENT: 'magenta',
   LIQUIDITY: 'volcano', VOLUME_PRICE: 'geekblue', CUSTOM: 'default',
 };
-const CATEGORY_LABEL = {
-  MOMENTUM: '动量', VALUE: '价值', QUALITY: '质量', VOLATILITY: '波动率',
-  TECHNICAL: '技术', FINANCIAL: '财务', SENTIMENT: '情绪',
-  LIQUIDITY: '流动性', VOLUME_PRICE: '量价', CUSTOM: '自定义',
-};
+// 分类中文标签统一从 constants.js 导入（别名 CATEGORY_LABEL）
 
 const OUTLIER_OPTIONS = [
   { value: 'NONE', label: '不处理' },

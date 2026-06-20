@@ -9,6 +9,7 @@ import {
 import ReactECharts from 'echarts-for-react';
 import dayjs from 'dayjs';
 import { factorApi } from '../../api/index';
+import { CATEGORY_LABELS } from './constants';
 
 // WebSocket 连接地址（Vite 代理转发到后端 /api/ws-native）
 // 注意：运算符优先级，必须用括号保证 protocol 完整拼接
@@ -17,7 +18,7 @@ const WS_URL = (window.location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' +
 const { Text, Title } = Typography;
 const { RangePicker } = DatePicker;
 
-// 分类颜色 & 中文标签（保留用于 UI 展示）
+// 分类颜色（保留用于 UI 展示），中文标签统一从 constants.js 导入
 const CATEGORY_COLORS = {
   TECHNICAL: '#38bdf8',
   MOMENTUM: '#fb923c',
@@ -28,18 +29,6 @@ const CATEGORY_COLORS = {
   QUALITY: '#facc15',
   SENTIMENT: '#ef4444',
   LIQUIDITY: '#94a3b8',
-};
-const CATEGORY_LABELS = {
-  TECHNICAL: '技术',
-  MOMENTUM: '动量',
-  VOLATILITY: '波动率',
-  VOLUME_PRICE: '量价',
-  VALUE:      '价值',
-  FINANCIAL:   '财务',
-  QUALITY:     '质量',
-  SENTIMENT:   '情绪',
-  LIQUIDITY:   '流动性',
-  CHANTHEORY:  '缠论',
 };
 
 const TARGET_DAYS = 310;

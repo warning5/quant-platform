@@ -7,6 +7,7 @@ import com.quant.platform.stock.mapper.StockInfoMapper;
 import com.quant.platform.stock.service.ClickHouseStockService;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -17,6 +18,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
@@ -29,6 +31,7 @@ public class MarketDataService {
 
     private final ClickHouseStockService clickHouseStockService;
     private final StockInfoMapper stockInfoMapper;
+    private final JdbcTemplate jdbcTemplate;
 
     /**
      * code → market (SH/SZ/BJ)
@@ -39,6 +42,16 @@ public class MarketDataService {
      * code → totalMarketCap (来自 stock_info 的最新市值，万元)
      */
     private Map<String, BigDecimal> codeMarketCapMap;
+
+    /**
+     * code → 近12月每股派息合计（元），用于 VAL_DIVIDEND_YIELD 日频计算
+     */
+    private volatile Map<String, BigDecimal> codeDividend12mMap = new ConcurrentHashMap<>();
+
+    /**
+     * code → 最新FCF（元），用于 VAL_FCF_YIELD 日频计算
+     */
+    private volatile Map<String, BigDecimal> codeFcfMap = new ConcurrentHashMap<>();
 
     /**
      * 指数代码 → 指数名称（用于区分指数和同代码个股，如 000001=上证指数 vs 平安银行）
@@ -56,9 +69,12 @@ public class MarketDataService {
             Map.entry("399303", "国证2000")
     );
 
-    public MarketDataService(ClickHouseStockService clickHouseStockService, StockInfoMapper stockInfoMapper) {
+    public MarketDataService(ClickHouseStockService clickHouseStockService,
+                             StockInfoMapper stockInfoMapper,
+                             JdbcTemplate jdbcTemplate) {
         this.clickHouseStockService = clickHouseStockService;
         this.stockInfoMapper = stockInfoMapper;
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     @PostConstruct
@@ -78,6 +94,65 @@ public class MarketDataService {
                         (v1, v2) -> v1  // 处理重复 key
                 ));
         log.info("[MarketDataService] 已加载 {} 只股票的最新市值", codeMarketCapMap.size());
+
+        // 预加载近12月派息数据（VAL_DIVIDEND_YIELD 因子使用）
+        loadDividendAndFcf();
+    }
+
+    /**
+     * 预加载/刷新 dividend / FCF 映射。
+     * 可在因子计算前手动调用以获取最新数据，不影响因子计算的正确性（计算时从此Map取值）。
+     */
+    public void loadDividendAndFcf() {
+        try {
+            // 近 12 个月每股派息合计（元）
+            List<Map<String, Object>> divRows = jdbcTemplate.queryForList(
+                    "SELECT code, SUM(cash_dividend) as total_dps " +
+                    "FROM stock_dividend " +
+                    "WHERE cash_dividend > 0 AND ex_dividend_date >= DATE_SUB(CURDATE(), INTERVAL 13 MONTH) " +
+                    "GROUP BY code");
+            Map<String, BigDecimal> divMap = new ConcurrentHashMap<>();
+            for (Map<String, Object> row : divRows) {
+                String code = (String) row.get("code");
+                Object dps = row.get("total_dps");
+                if (code != null && dps != null) {
+                    divMap.put(code, new BigDecimal(dps.toString()));
+                }
+            }
+            codeDividend12mMap = divMap;
+            log.info("[MarketDataService] 已加载 {} 只股票的近12月派息", divMap.size());
+        } catch (Exception e) {
+            log.warn("[MarketDataService] 加载派息数据失败（不影响其他因子）: {}", e.getMessage());
+        }
+
+        try {
+            // 最新 FCF（元），取每只股票最新报告期的 free_cash_flow
+            List<Map<String, Object>> fcfRows = jdbcTemplate.queryForList(
+                    "SELECT fi.code, fi.free_cash_flow " +
+                    "FROM stock_financial_indicator fi " +
+                    "INNER JOIN (" +
+                    "  SELECT code, MAX(end_date) as max_end " +
+                    "  FROM stock_financial_indicator " +
+                    "  WHERE free_cash_flow IS NOT NULL AND report_type IN (1,2,3,4) " +
+                    "  GROUP BY code" +
+                    ") latest ON fi.code = latest.code AND fi.end_date = latest.max_end " +
+                    "WHERE fi.free_cash_flow IS NOT NULL");
+            Map<String, BigDecimal> fcfMap = new ConcurrentHashMap<>();
+            for (Map<String, Object> row : fcfRows) {
+                String code = (String) row.get("code");
+                Object fcf = row.get("free_cash_flow");
+                if (code != null && fcf != null) {
+                    BigDecimal v = new BigDecimal(fcf.toString());
+                    if (v.compareTo(BigDecimal.ZERO) != 0) {
+                        fcfMap.put(code, v);
+                    }
+                }
+            }
+            codeFcfMap = fcfMap;
+            log.info("[MarketDataService] 已加载 {} 只股票的最新FCF", fcfMap.size());
+        } catch (Exception e) {
+            log.warn("[MarketDataService] 加载FCF数据失败（不影响其他因子）: {}", e.getMessage());
+        }
     }
 
     // ==================== 概览（轻量） ====================
@@ -350,6 +425,12 @@ public class MarketDataService {
                 .marketCap(marketCap)
                 .circMarketCap(circMarketCap)
                 .turnoverRate(sd.getTurnoverRate())
+                // 估值字段：pe_ttm / pb 直接来自 stock_daily
+                .peTtm(sd.getPeTtm())
+                .pb(sd.getPb())
+                // 分红 / FCF：预加载的静态 Map（季频更新，按代码索引）
+                .dividendPerShare12m(codeDividend12mMap.get(sd.getCode()))
+                .fcf(codeFcfMap.get(sd.getCode()))
                 .build();
     }
 
