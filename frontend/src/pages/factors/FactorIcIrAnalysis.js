@@ -7,13 +7,75 @@ import {
 import {
   BarChartOutlined, LineChartOutlined, ReloadOutlined, InfoCircleOutlined,
   CheckCircleOutlined, WarningOutlined, CloseCircleOutlined, QuestionCircleOutlined,
-  ArrowUpOutlined, ArrowDownOutlined, MinusOutlined,
+  ArrowUpOutlined, ArrowDownOutlined, MinusOutlined, DownloadOutlined,
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import { factorApi, strategyApi, recommendationApi } from '../../api';
 
 const { Text, Title } = Typography;
 const { RangePicker } = DatePicker;
+
+// ─── CSV 导出工具 ──────────────────────────────────────────────────────────
+function downloadCsv(headers, rows, filename) {
+  const BOM = '\uFEFF';
+  const escapeCsv = (v) => {
+    if (v == null) return '';
+    const s = String(v);
+    return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const csvContent = BOM + headers.map(h => escapeCsv(h)).join(',') + '\n'
+    + rows.map(r => r.map(c => escapeCsv(c)).join(',')).join('\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportResultsCsv(results) {
+  const headers = ['因子代码', 'IC均值', 'IR', 'IC胜率(%)', 'p值', 't统计量', '样本天数', '评估'];
+  const rows = results.filter(r => !r.error).map(r => [
+    r.factorCode,
+    r.icMean?.toFixed(4) ?? '',
+    r.ir?.toFixed(4) ?? '',
+    r.icWinRate?.toFixed(1) ?? '',
+    r.pValue?.toFixed(4) ?? '',
+    r.tStat?.toFixed(4) ?? '',
+    r.sampleDays ?? '',
+    r.assessment ?? '',
+  ]);
+  downloadCsv(headers, rows, `因子IC分析结果_${dayjs().format('YYYYMMDD_HHmmss')}.csv`);
+}
+
+function exportSegmentedCsv(mergedData, segLabels) {
+  const [beforeLbl, afterLbl, fullLbl] = segLabels || ['前段', '后段', '全量'];
+  const headers = [
+    '因子代码',
+    `${beforeLbl}_IC`, `${beforeLbl}_IR`, `${beforeLbl}_胜率(%)`, `${beforeLbl}_评估`, `${beforeLbl}_样本`,
+    `${afterLbl}_IC`, `${afterLbl}_IR`, `${afterLbl}_胜率(%)`, `${afterLbl}_评估`, `${afterLbl}_样本`,
+    `${fullLbl}_IC`, `${fullLbl}_IR`, `${fullLbl}_胜率(%)`, `${fullLbl}_评估`, `${fullLbl}_样本`,
+    'IC变化',
+  ];
+  const getSubType = (r, seg) => {
+    if (!r[seg]?.assessment) return '';
+    if (r[seg].assessment !== '无效因子') return r[seg].assessment;
+    // 无效因子附带子类型
+    const { icMean, pValue, icStd } = r[seg];
+    if (pValue > 0.05) return '无效因子(噪声型)';
+    if (icMean < 0 && Math.abs(icMean) < 0.05) return '无效因子(弱负向型)';
+    return '无效因子(不稳定型)';
+  };
+  const rows = mergedData.map(r => [
+    r.factorCode,
+    r.before?.icMean?.toFixed(4) ?? '', r.before?.ir?.toFixed(4) ?? '', r.before?.icWinRate?.toFixed(1) ?? '', r.before?.assessment ?? '', r.before?.sampleDays ?? '',
+    r.after?.icMean?.toFixed(4) ?? '', r.after?.ir?.toFixed(4) ?? '', r.after?.icWinRate?.toFixed(1) ?? '', r.after?.assessment ?? '', r.after?.sampleDays ?? '',
+    r.full?.icMean?.toFixed(4) ?? '', r.full?.ir?.toFixed(4) ?? '', r.full?.icWinRate?.toFixed(1) ?? '', r.full?.assessment ?? '', r.full?.sampleDays ?? '',
+    r.icDelta?.toFixed(4) ?? '',
+  ]);
+  downloadCsv(headers, rows, `因子IC分段对比_${dayjs().format('YYYYMMDD_HHmmss')}.csv`);
+}
 
 // ─── 无效因子子类型判断 ──────────────────────────────────────────────────────────
 function getInvalidSubtype(record) {
@@ -201,15 +263,21 @@ function renderSegmentedResults(segmentedResults, segPageSize, setSegPageSize, h
   
   const bLabel = segs.before?.label || '前段';
   const aLabel = segs.after?.label || '后段';
-  const fLabel = segs.full?.label || '全量';
+  const fLabel = segs.full?.label || "全量";
   
-  return (
-    <Card title={<span>分段对比结果
+  const cardTitle = (
+    <span>分段对比结果
       <Tag color="blue" style={{ marginLeft: 8, fontSize: 11 }}>{bLabel}</Tag>
-      <span style={{ margin: '0 4px', color: '#999' }}>→</span>
+      <span style={{ margin: "0 4px", color: "#999" }}>→</span>
       <Tag color="orange" style={{ fontSize: 11 }}>{aLabel}</Tag>
       <Tag style={{ marginLeft: 8, fontSize: 11 }}>{fLabel}</Tag>
-    </span>} size="small" style={{ marginBottom: 16 }}>
+    </span>
+  );
+  
+  return (
+    <Card title={cardTitle} size="small" style={{ marginBottom: 16 }}
+      extra={<Button size="small" icon={<DownloadOutlined />} onClick={() => exportSegmentedCsv(mergedData, [bLabel, aLabel, fLabel])} disabled={!mergedData || mergedData.length === 0}>导出CSV</Button>}
+    >
       {mergedData.some(r => r.icFlipped) && (
         <Alert type="warning" showIcon message={`${mergedData.filter(r => r.icFlipped).length} 个因子IC方向发生反转（前后段符号相反），可能因市场环境切换导致因子失效`} style={{ marginBottom: 12 }} />
       )}
@@ -994,12 +1062,22 @@ export default function FactorIcIrAnalysis() {
           </Col>
           <Col span={8}>
             <Space direction="vertical" size={4} style={{ width: '100%' }}>
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                选择因子
-                <Tooltip title="支持批量选择，最多20个因子同时分析">
-                  <InfoCircleOutlined style={{ marginLeft: 4, color: '#bbb' }} />
-                </Tooltip>
-              </Text>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  选择因子
+                  <Tooltip title={`已选 ${selectedCodes.length} / ${factorList.filter(f => f.status === 'ACTIVE').length} 个ACTIVE因子`}>
+                    <InfoCircleOutlined style={{ marginLeft: 4, color: '#bbb' }} />
+                  </Tooltip>
+                </Text>
+                <Button size="small" type="link" onClick={() => {
+                  const activeCodes = factorList.filter(f => f.status === 'ACTIVE').map(f => f.factorCode);
+                  setSelectedCodes(activeCodes);
+                  setSelectedStrategyId(null);
+                  message.success(`已全选 ${activeCodes.length} 个因子`);
+                }} style={{ fontSize: 11, padding: 0, height: 22 }}>
+                  全选
+                </Button>
+              </div>
               <Select
                 mode="multiple"
                 placeholder="搜索或选择因子"
@@ -1010,7 +1088,7 @@ export default function FactorIcIrAnalysis() {
                 }}
                 options={factorOptions}
                 style={{ width: '100%' }}
-                maxCount={20}
+                maxCount={50}
                 showSearch
                 allowClear
                 filterOption={(input, option) => (option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
@@ -1118,7 +1196,9 @@ export default function FactorIcIrAnalysis() {
 
       {/* 结果表格 */}
       {results && (
-        <Card title="分析结果（点击因子代码查看IC趋势）" size="small" style={{ marginBottom: 16 }}>
+        <Card title="分析结果（点击因子代码查看IC趋势）" size="small" style={{ marginBottom: 16 }}
+          extra={<Button size="small" icon={<DownloadOutlined />} onClick={() => exportResultsCsv(results)} disabled={!results || results.length === 0}>导出CSV</Button>}
+        >
           <Table
             dataSource={results}
             columns={columns}
