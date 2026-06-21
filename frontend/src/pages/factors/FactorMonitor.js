@@ -825,11 +825,17 @@ function FactorMonitor() {
                 加载因子定义中...
               </div>
             ) : (
-              Object.entries(CATEGORY_LABELS).map(([cat, label]) => {
-                const total = factorsWithStats.filter(f => f.category === cat).length;
-                const done = factorsWithStats.filter(f => f.category === cat && f.isDone).length;
-                const pct = total > 0 ? Math.round(done / total * 100) : 0;
-                return (
+              Object.entries(CATEGORY_LABELS)
+                .map(([cat, label]) => {
+                  const total = factorsWithStats.filter(f => f.category === cat).length;
+                  const done = factorsWithStats.filter(f => f.category === cat && f.isDone).length;
+                  return { cat, label, total, done };
+                })
+                .filter(item => item.total > 0)
+                .sort((a, b) => b.total - a.total)
+                .map(({ cat, label, total, done }) => {
+                  const pct = Math.round(done / total * 100);
+                  return (
                   <div key={cat} style={{ marginBottom: 8 }}>
                     <Row justify="space-between" style={{ marginBottom: 2 }}>
                       <Col>
@@ -894,7 +900,7 @@ function FactorMonitor() {
         />
         <Form form={form} layout="vertical" initialValues={{
           incremental: true,
-          dateRange: [dayjs('2025-01-01'), dayjs()],
+          dateRange: [dayjs().subtract(1, 'year').startOf('year'), dayjs()],
           factorCodes: pendingFactors.slice(0, 8).map(f => f.code),
         }}>
           <Form.Item label="选择因子" name="factorCodes" rules={[
@@ -972,9 +978,19 @@ function FactorMonitor() {
           <Form.Item label="计算日期范围" name="dateRange" rules={[{ required: true }]}>
             <RangePicker
               style={{ width: '100%' }}
-              disabledDate={(current) => current && (current.isBefore(dayjs('2025-01-01')) || current.isAfter(dayjs()))}
+              disabledDate={(current) => current && current.isAfter(dayjs())}
             />
           </Form.Item>
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message={
+              <span>
+                <b>增量模式</b>：只计算尚未有数据的日期，已有数据的因子会被自动跳过。若因子数据已存在且你希望补算历史，请切换为<b>全量模式</b>，或开启<b>强制重算</b>。
+              </span>
+            }
+          />
           <Form.Item
             label="增量计算（跳过已有数据的日期）"
             name="incremental"

@@ -107,8 +107,8 @@ export default function FactorList() {
       message.warning('请先选择因子');
       return;
     }
-    // 默认范围：2025-01-01 到今天（后端增量计算会自动跳过已有数据的日期）
-    const defaultStart = dayjs('2025-01-01');
+    // 默认范围：去年年初 到今天（后端增量计算会自动跳过已有数据的日期）
+    const defaultStart = dayjs().subtract(1, 'year').startOf('year');
     const defaultEnd = dayjs();
     setComputeDateRange([defaultStart, defaultEnd]);
     setComputeModalVisible(true);
