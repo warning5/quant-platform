@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import dayjs from 'dayjs';
 import {
   Card, Row, Col, Select, Button, Tag, Spin, Alert, Space, Switch,
-  Typography, Table, Tooltip, Popover, Divider, Statistic, DatePicker, InputNumber, App,
+  Typography, Table, Tooltip, Popover, Divider, Statistic, DatePicker, InputNumber, App, Radio,
 } from 'antd';
 import {
   BarChartOutlined, LineChartOutlined, ReloadOutlined, InfoCircleOutlined,
@@ -282,6 +282,7 @@ function renderSegmentedResults(segmentedResults, segPageSize, setSegPageSize, h
         <Alert type="warning" showIcon message={`${mergedData.filter(r => r.icFlipped).length} 个因子IC方向发生反转（前后段符号相反），可能因市场环境切换导致因子失效`} style={{ marginBottom: 12 }} />
       )}
       <Table dataSource={mergedData} columns={segColumns} rowKey="factorCode" size="small"
+        sticky={{ offsetHeader: 0 }}
         pagination={mergedData.length > segPageSize ? {
           pageSize: segPageSize, showSizeChanger: true, pageSizeOptions: ['8', '15', '30', '50'],
           showTotal: t => `共 ${t} 条`, onShowSizeChange: (current, size) => setSegPageSize(size),
@@ -303,9 +304,9 @@ function AssessmentTag({ assessment, subType }) {
   const border = borderMap[assessment] || '#d9d9d9';
   const color = textMap[assessment] || '#333';
   return (
-    <span>
-      <span style={{ display: 'inline-block', background: bg, border: `1px solid ${border}`, borderRadius: 4, color, fontSize: 11, padding: '1px 6px', marginRight: subType ? 3 : 0, whiteSpace: 'nowrap' }}>{assessment}</span>
-      {subType && <span style={{ display: 'inline-block', background: '#fafafa', border: '1px solid #d9d9d9', borderRadius: 4, color: '#666', fontSize: 10, padding: '1px 5px', whiteSpace: 'nowrap' }}>{subType}</span>}
+    <span style={{ display: 'inline-flex', alignItems: 'center', flexWrap: 'nowrap', gap: 3 }}>
+      <span style={{ display: 'inline-flex', alignItems: 'center', background: bg, border: `1px solid ${border}`, borderRadius: 4, color, fontSize: 11, padding: '1px 6px', whiteSpace: 'nowrap', lineHeight: '18px', height: 20 }}>{assessment}</span>
+      {subType && <span style={{ display: 'inline-flex', alignItems: 'center', background: '#fafafa', border: '1px solid #d9d9d9', borderRadius: 4, color: '#666', fontSize: 10, padding: '1px 4px', whiteSpace: 'nowrap', lineHeight: '16px', height: 18 }}>{subType}</span>}
     </span>
   );
 }
@@ -404,6 +405,9 @@ export default function FactorIcIrAnalysis() {
   const [segmentedMode, setSegmentedMode] = useState(false);
   const [splitDate, setSplitDate] = useState(dayjs('2026-01-01'));
   const [segmentedResults, setSegmentedResults] = useState(null);
+  const [neutralizeByIndustry, setNeutralizeByIndustry] = useState(false);
+  const [correlationType, setCorrelationType] = useState('spearman'); // 'spearman' | 'pearson'
+  const [icThreshold, setIcThreshold] = useState(0.03); // 复合IC因子预筛选阈值
   const [savingIc, setSavingIc] = useState(false);
   const [saveLogs, setSaveLogs] = useState([]);
   // 分页受控状态
@@ -519,6 +523,9 @@ export default function FactorIcIrAnalysis() {
             dateRange[1].format('YYYY-MM-DD'),
             splitDate.format('YYYY-MM-DD'),
             forwardDays,
+            neutralizeByIndustry,
+            correlationType,
+            icThreshold,
           );
           if (batchData?.segments) {
             if (batchData.segments.before?.results) accSegBefore.push(...batchData.segments.before.results);
@@ -534,6 +541,9 @@ export default function FactorIcIrAnalysis() {
             dateRange[0].format('YYYY-MM-DD'),
             dateRange[1].format('YYYY-MM-DD'),
             forwardDays,
+            neutralizeByIndustry,
+            correlationType,
+            icThreshold,
           );
           if (Array.isArray(batchData)) {
             allResults.push(...batchData);
@@ -734,13 +744,144 @@ export default function FactorIcIrAnalysis() {
       title: '因子代码',
       dataIndex: 'factorCode',
       key: 'factorCode',
-      width: 120,
+      width: 160,
       render: (v, r) => {
         if (r.error) {
           return (
             <Tooltip title={r.error || '无因子数据，无法查看IC趋势'}>
               <Text type="danger" style={{ cursor: 'not-allowed' }}>{v}</Text>
             </Tooltip>
+          );
+        }
+        // 复合因子特殊展示
+        if (r.composite) {
+          const ff = r.filteredFactors || [];
+          // 以 compositeSize 为权威数据源（后端 usedCount），filteredFactors 可能因旧版本缺失
+          const keptCount = ff.length > 0 ? ff.length : (r.compositeSize || 0);
+          const excludedCount = selectedCodes.length - keptCount;
+          // 根据 factorCode 判断权重类型
+          const weightKey = r.factorCode?.includes('EQW') ? 'weightEqw'
+            : r.factorCode?.includes('ICW') ? 'weightIcw' : 'weightOpt';
+          return (
+            <span>
+              <Popover
+                trigger="click"
+                content={
+                  <div style={{ fontSize: 12, lineHeight: '20px', maxWidth: 440, maxHeight: 340, overflowY: 'auto' }}>
+                    <div style={{ fontWeight: 'bold', marginBottom: 6, fontSize: 13 }}>{r.factorName || v} — 组合详情</div>
+
+                    {/* 预筛选摘要 */}
+                    <div style={{ marginBottom: 6, display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <Tag color="green" style={{ fontSize: 11 }}>✓ 保留 {keptCount} 个</Tag>
+                      {excludedCount > 0 && <Tag color="default" style={{ fontSize: 11 }}>✗ 剔除 {excludedCount} 个</Tag>}
+                      <Text type="secondary" style={{ fontSize: 10 }}>(阈值 |IC| ≥ {(icThreshold * 100).toFixed(0)}%)</Text>
+                    </div>
+
+                    <Divider style={{ margin: '4px 0' }} />
+
+                    {/* 组合方式说明 */}
+                    <div style={{ fontWeight: 'bold', marginBottom: 4, fontSize: 12 }}>组合方式说明</div>
+                    {r.factorCode?.includes('EQW') && (
+                      <div style={{ marginBottom: 4 }}><Tag color="gold" style={{ fontSize: 10 }}>等权</Tag> 每个因子权重 = 1/N，简单平均</div>
+                    )}
+                    {r.factorCode?.includes('ICW') && (
+                      <div style={{ marginBottom: 4 }}><Tag color="gold" style={{ fontSize: 10 }}>|IC|加权</Tag> 权重 ∝ 各因子|IC|，强因子权重大</div>
+                    )}
+                    {r.factorCode?.includes('OPT') && (
+                      <div style={{ marginBottom: 4 }}><Tag color="gold" style={{ fontSize: 10 }}>逆方差</Tag> 权重 ∝ 1/σ²(IC)，稳定因子权重大</div>
+                    )}
+                    <div style={{ marginBottom: 4, color: '#52c41a' }}>信号方向：负IC因子自动取反（z-score × sign），避免抵消 ✓</div>
+
+                    <Divider style={{ margin: '8px 0' }} />
+
+                    {/* 实际参与因子列表 */}
+                    <div style={{ fontWeight: 'bold', marginBottom: 6, fontSize: 12 }}>
+                      实际参与组合的因子（{keptCount}个）
+                      <Text type="secondary" style={{ fontWeight: 'normal' }}> — 按权重排序</Text>
+                    </div>
+                    {ff.length > 0 ? (
+                      <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse' }}>
+                        <thead>
+                          <tr style={{ borderBottom: '1px solid #eee' }}>
+                            <th style={{ textAlign: 'left', padding: '2px 4px', width: '35%' }}>因子代码</th>
+                            <th style={{ textAlign: 'right', padding: '2px 4px', width: '20%' }}>原始 IC</th>
+                            <th style={{ textAlign: 'center', padding: '2px 4px', width: '12%' }}>方向</th>
+                            <th style={{ textAlign: 'right', padding: '2px 4px', width: '33%' }}>本方案权重</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {[...ff].sort((a, b) => (b[weightKey] || 0) - (a[weightKey] || 0)).map((f, idx) => {
+                            const w = f[weightKey];
+                            return (
+                              <tr key={f.code} style={{ borderBottom: idx < ff.length - 1 ? '1px solid #f5f5f5' : 'none' }}>
+                                <td style={{ padding: '3px 4px' }}>
+                                  <Tag color="blue" style={{ fontSize: 10, margin: 0 }}>{f.code}</Tag>
+                                </td>
+                                <td style={{
+                                  textAlign: 'right', padding: '3px 4px',
+                                  color: (f.ic || 0) >= 0 ? '#cf1322' : '#3f8600',
+                                  fontWeight: Math.abs(f.ic || 0) >= 0.05 ? 'bold' : 'normal',
+                                }}>
+                                  {(f.ic != null ? (f.ic * 100).toFixed(2) : '-') + '%'}
+                                </td>
+                                <td style={{ textAlign: 'center', padding: '3px 4px' }}>
+                                  <span style={{
+                                    color: f.sign > 0 ? '#3f8600' : '#cf1322',
+                                    fontWeight: 'bold',
+                                    fontSize: 12,
+                                  }}>
+                                    {f.sign > 0 ? '↑正向' : '↓取反'}
+                                  </span>
+                                </td>
+                                <td style={{ textAlign: 'right', padding: '3px 4px' }}>
+                                  <span style={{ fontWeight: 'bold', color: '#d48806' }}>
+                                    {w != null ? (w * 100).toFixed(1) + '%' : '-'}
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    ) : (
+                      keptCount > 0 ? (
+                        <Alert type="warning" showIcon
+                          message={`参与组合的 ${keptCount} 个因子详情不可用，请确认后端已重启至最新版本`}
+                          style={{ fontSize: 11, padding: '4px 8px' }} />
+                      ) : (
+                        <Alert type="error" showIcon message="无因子通过预筛选阈值" style={{ fontSize: 11, padding: '4px 8px' }} />
+                      )
+                    )}
+
+                    {excludedCount > 0 && (
+                      <>
+                        <Divider style={{ margin: '8px 0' }} />
+                        <div style={{ fontWeight: 'bold', marginBottom: 4, fontSize: 12, color: '#999' }}>
+                          被剔除的因子 ({excludedCount}个，|IC| &lt; {(icThreshold * 100).toFixed(0)}%)
+                        </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
+                          {selectedCodes.filter(c => !ff.some(f => f.code === c)).map(code => {
+                            const icRow = (results || []).find(row => row.factorCode === code && !row.composite);
+                            return (
+                              <Tag key={code} style={{ fontSize: 10, opacity: 0.5, cursor: 'default' }}>
+                                {code}
+                                <Text type="secondary" style={{ fontSize: 9, marginLeft: 2 }}>
+                                  IC={icRow ? ((icRow.icMean ?? 0) * 100).toFixed(2) + '%' : '?'}
+                                </Text>
+                              </Tag>
+                            );
+                          })}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                }
+              >
+                <Tag color="gold" style={{ fontSize: 11, cursor: 'pointer' }}>{r.factorName || v}</Tag>
+                <QuestionCircleOutlined style={{ color: '#d48806', fontSize: 11, marginLeft: 3, cursor: 'pointer' }} />
+              </Popover>
+              <Text type="secondary" style={{ fontSize: 10, marginLeft: 4 }}>({r.compositeSize}因子)</Text>
+            </span>
           );
         }
         const analysis = buildFactorAnalysis(r);
@@ -865,13 +1006,6 @@ export default function FactorIcIrAnalysis() {
       onFilter: (value, record) => record.assessment === value,
       render: (v, record) => <AssessmentTag assessment={v} subType={v === '无效因子' ? getInvalidSubtype(record) : null} />,
     },
-    {
-      title: '错误',
-      dataIndex: 'error',
-      key: 'error',
-      width: 120,
-      render: v => v ? <Text type="danger" style={{ fontSize: 12 }}>{v}</Text> : '-',
-    },
   ];
 
   // 统计汇总
@@ -887,7 +1021,8 @@ export default function FactorIcIrAnalysis() {
     const weak = valid.filter(r => r.assessment === '弱有效').length;
     const positiveIcCount = valid.filter(r => (r.icMean || 0) > 0).length;
     const negativeIcCount = valid.filter(r => (r.icMean || 0) < 0).length;
-    return { total: valid.length, avgIc, avgIr, avgWin, effective, weak, positiveIcCount, negativeIcCount };
+    const compositeCount = valid.filter(r => r.composite).length;
+    return { total: valid.length, avgIc, avgIr, avgWin, effective, weak, positiveIcCount, negativeIcCount, compositeCount };
   }, [results]);
 
   return (
@@ -1149,6 +1284,63 @@ export default function FactorIcIrAnalysis() {
                   placeholder="切分日期"
                 />
               )}
+              <Text type="secondary" style={{ fontSize: 12, marginLeft: 16 }}>行业中性化</Text>
+              <Switch
+                checked={neutralizeByIndustry}
+                onChange={setNeutralizeByIndustry}
+                checkedChildren="开"
+                unCheckedChildren="关"
+              />
+              <Tooltip title="对每个交易日的因子值按行业分组做z-score标准化，消除行业beta对IC的影响">
+                <InfoCircleOutlined style={{ color: '#bbb', fontSize: 10 }} />
+              </Tooltip>
+              <Divider type="vertical" />
+              <Text type="secondary" style={{ fontSize: 12 }}>IC方法</Text>
+              <Radio.Group
+                value={correlationType}
+                onChange={e => setCorrelationType(e.target.value)}
+                size="small"
+                buttonStyle="solid"
+              >
+                <Radio.Button value="spearman">Spearman</Radio.Button>
+                <Radio.Button value="pearson">Pearson</Radio.Button>
+              </Radio.Group>
+              <Popover
+                trigger="click"
+                content={
+                  <div style={{ fontSize: 12, lineHeight: '20px', maxWidth: 360 }}>
+                    <div style={{ fontWeight: 'bold', marginBottom: 6, fontSize: 13 }}>Spearman vs Pearson 区别</div>
+                    <div style={{ marginBottom: 8 }}>
+                      <Tag color="default" style={{ fontSize: 11, marginBottom: 2 }}>Spearman 秩相关</Tag>
+                      <div>• 基于<b>排名</b>计算，非参数方法</div>
+                      <div>• 对异常值和分布形态<b>不敏感</b></div>
+                      <div>• 适合捕捉任意<b>单调关系</b>（不限于线性）</div>
+                      <div>• <b>A股市场最常用</b>，适合因子值分布偏态的场景</div>
+                    </div>
+                    <div>
+                      <Tag color="cyan" style={{ fontSize: 11, marginBottom: 2 }}>Pearson 线性相关</Tag>
+                      <div>• 基于<b>原始值</b>计算，参数方法</div>
+                      <div>• 对异常值<b>敏感</b>，受极端值影响大</div>
+                      <div>• 只适合<b>严格线性关系</b></div>
+                      <div>• 假设因子值和收益率服从正态分布</div>
+                    </div>
+                  </div>
+                }
+              >
+                <QuestionCircleOutlined style={{ color: '#bbb', fontSize: 12, cursor: 'help' }} />
+              </Popover>
+              <Divider type="vertical" />
+              <Text type="secondary" style={{ fontSize: 12 }}>复合IC阈值</Text>
+              <InputNumber
+                min={0} max={0.20} step={0.01}
+                value={icThreshold}
+                onChange={v => setIcThreshold(v ?? 0.03)}
+                style={{ width: 80 }}
+                size="small"
+              />
+              <Tooltip title="预筛选：只有|IC|≥此阈值的因子才参与多因子组合；同时自动对齐信号方向（负IC因子取反），避免信号抵消">
+                <InfoCircleOutlined style={{ color: '#bbb', fontSize: 10 }} />
+              </Tooltip>
             </Space>
           </Col>
         </Row>
@@ -1172,31 +1364,25 @@ export default function FactorIcIrAnalysis() {
 
       {/* 汇总统计 */}
       {summary && (
-        <Row gutter={16} style={{ marginBottom: 16 }}>
-          <Col span={4}>
-            <Card size="small"><Statistic title="分析因子数" value={summary.total} /></Card>
-          </Col>
-          <Col span={4}>
-            <Card size="small"><Statistic title="平均 IC" value={summary.avgIc} precision={2} /></Card>
-          </Col>
-          <Col span={4}>
-            <Card size="small"><Statistic title="平均 IR" value={summary.avgIr} precision={2} /></Card>
-          </Col>
-          <Col span={4}>
-            <Card size="small"><Statistic title="正 IC（参与加权）" value={summary.positiveIcCount} valueStyle={{ color: '#1890ff' }} /></Card>
-          </Col>
-          <Col span={4}>
-            <Card size="small"><Statistic title="负 IC（权重置零）" value={summary.negativeIcCount} valueStyle={{ color: '#ff4d4f' }} /></Card>
-          </Col>
-          <Col span={4}>
-            <Card size="small"><Statistic title="有效因子" value={summary.effective} valueStyle={{ color: '#52c41a' }} /></Card>
-          </Col>
-        </Row>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+          <Card size="small" style={{ flex: '1 1 0', minWidth: 100 }}><Statistic title="分析因子数" value={summary.total} /></Card>
+          <Card size="small" style={{ flex: '1 1 0', minWidth: 100 }}><Statistic title="平均 IC" value={summary.avgIc} precision={2} /></Card>
+          <Card size="small" style={{ flex: '1 1 0', minWidth: 100 }}><Statistic title="平均 IR" value={summary.avgIr} precision={2} /></Card>
+          <Card size="small" style={{ flex: '1 1 0', minWidth: 110 }}><Statistic title="正 IC（参与加权）" value={summary.positiveIcCount} valueStyle={{ color: '#1890ff' }} /></Card>
+          <Card size="small" style={{ flex: '1 1 0', minWidth: 115 }}><Statistic title="负 IC（权重置零）" value={summary.negativeIcCount} valueStyle={{ color: '#ff4d4f' }} /></Card>
+          <Card size="small" style={{ flex: '1 1 0', minWidth: 100 }}><Statistic title="有效因子" value={summary.effective} valueStyle={{ color: '#52c41a' }} /></Card>
+          {summary.compositeCount > 0 && (
+            <Card size="small" style={{ flex: '1 1 0', minWidth: 100 }}><Statistic title="复合因子" value={summary.compositeCount} valueStyle={{ color: '#faad14' }} /></Card>
+          )}
+        </div>
       )}
 
       {/* 结果表格 */}
       {results && (
-        <Card title="分析结果（点击因子代码查看IC趋势）" size="small" style={{ marginBottom: 16 }}
+        <Card title={<Space>分析结果{neutralizeByIndustry ? <Tag color="purple" style={{ fontSize: 11 }}>行业中性化(百分位秩)</Tag> : null}{correlationType === 'pearson'
+                    ? <Tooltip title="Pearson线性相关系数：基于原始值计算，对异常值敏感，需假设正态分布"><Tag color="cyan" style={{ fontSize: 11 }}>Pearson <QuestionCircleOutlined style={{ fontSize: 10 }} /></Tag></Tooltip>
+                    : <Tooltip title="Spearman秩相关系数：基于排名计算，对异常值不敏感，A股最常用"><Tag color="default" style={{ fontSize: 11 }}>Spearman <QuestionCircleOutlined style={{ fontSize: 10 }} /></Tag></Tooltip>
+                  }<Text type="secondary" style={{ fontSize: 12 }}>（点击因子代码查看IC趋势）</Text></Space>} size="small" style={{ marginBottom: 16 }}
           extra={<Button size="small" icon={<DownloadOutlined />} onClick={() => exportResultsCsv(results)} disabled={!results || results.length === 0}>导出CSV</Button>}
         >
           <Table
@@ -1204,6 +1390,7 @@ export default function FactorIcIrAnalysis() {
             columns={columns}
             rowKey="factorCode"
             size="small"
+            sticky={{ offsetHeader: 0 }}
             pagination={results.length > 10 ? {
               pageSize: resultsPageSize,
               showSizeChanger: true,

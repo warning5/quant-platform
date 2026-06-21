@@ -318,12 +318,15 @@ public class FactorController {
      * POST /factors/ic-ir-analysis?factorCodes=MOM20,VOL20,SIZE&startDate=2024-01-01&endDate=2025-01-01&forwardDays=5
      */
     @PostMapping("/ic-ir-analysis")
-    @Operation(summary = "批量计算因子IC/IR（P1）：Spearman秩相关 + 信息比率")
+    @Operation(summary = "批量计算因子IC/IR：支持Spearman秩相关 / Pearson线性相关")
     public ApiResponse<List<Map<String, Object>>> batchIcIrAnalysis(
             @RequestParam String factorCodes,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
-            @RequestParam(defaultValue = "5") int forwardDays) {
+            @RequestParam(defaultValue = "5") int forwardDays,
+            @RequestParam(defaultValue = "false") boolean neutralizeByIndustry,
+            @RequestParam(defaultValue = "spearman") String correlationType,
+            @RequestParam(defaultValue = "0.03") double icThreshold) {
         if (forwardDays < 1 || forwardDays > 60) {
             throw new IllegalArgumentException("forwardDays须在1~60之间");
         }
@@ -332,7 +335,7 @@ public class FactorController {
             throw new IllegalArgumentException("单次最多分析50个因子");
         }
         return ApiResponse.success(
-                factorAnalysisService.batchCalcIcIr(codes, startDate.toString(), endDate.toString(), forwardDays));
+                factorAnalysisService.batchCalcIcIr(codes, startDate.toString(), endDate.toString(), forwardDays, neutralizeByIndustry, correlationType, icThreshold));
     }
 
     /**
@@ -346,7 +349,9 @@ public class FactorController {
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate splitDate,
-            @RequestParam(defaultValue = "5") int forwardDays) {
+            @RequestParam(defaultValue = "5") int forwardDays,
+            @RequestParam(defaultValue = "false") boolean neutralizeByIndustry,
+            @RequestParam(defaultValue = "spearman") String correlationType) {
         if (forwardDays < 1 || forwardDays > 60) {
             throw new IllegalArgumentException("forwardDays须在1~60之间");
         }
@@ -359,7 +364,7 @@ public class FactorController {
         }
         return ApiResponse.success(
                 factorAnalysisService.batchCalcIcIrSegmented(
-                        codes, startDate.toString(), endDate.toString(), splitDate.toString(), forwardDays));
+                        codes, startDate.toString(), endDate.toString(), splitDate.toString(), forwardDays, neutralizeByIndustry, correlationType));
     }
 
     /**

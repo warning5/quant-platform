@@ -15,6 +15,11 @@ import java.util.stream.Collectors;
 import org.apache.commons.math3.distribution.TDistribution;
 
 /**
+ * 行业映射缓存：code → industry
+ * 从 ClickHouse stock_info.industry 加载，启动时初始化 + 每日刷新
+ */
+
+/**
  * 因子有效性分析服务
  * 计算 IC (Information Coefficient) / IR (Information Ratio) 等指标
  * IC = Spearman秩相关系数(因子值, 下期收益率)
@@ -35,6 +40,14 @@ public class FactorAnalysisService {
     private ClickHouseFactorValueService clickHouseFactorValueService;
 
     /**
+     * 行业映射缓存：symbol → industry
+     * 从 ClickHouse stock_info.industry 加载
+     */
+    private volatile Map<String, String> stockIndustryMap = new HashMap<>();
+    private volatile long industryMapLoadTime = 0;
+    private static final long INDUSTRY_CACHE_MS = 3600_000L; // 1小时刷新一次
+
+    /**
      * 批量计算多因子 IC/IR
      * @param factorCodes 因子代码列表
      * @param startDate 开始日期
@@ -42,12 +55,12 @@ public class FactorAnalysisService {
      * @param forwardDays 前瞻天数（默认5日）
      * @return 每个因子的 IC/IR 统计
      */
-    public List<Map<String, Object>> batchCalcIcIr(List<String> factorCodes, String startDate, String endDate, int forwardDays) {
+    public List<Map<String, Object>> batchCalcIcIr(List<String> factorCodes, String startDate, String endDate, int forwardDays, boolean neutralizeByIndustry, String correlationType, double icThreshold) {
         List<Map<String, Object>> results = new ArrayList<>();
 
         for (String factorCode : factorCodes) {
             try {
-                Map<String, Object> stat = calcSingleFactorIcIr(factorCode, startDate, endDate, forwardDays);
+                Map<String, Object> stat = calcSingleFactorIcIr(factorCode, startDate, endDate, forwardDays, neutralizeByIndustry, correlationType);
                 results.add(stat);
             } catch (Exception e) {
                 log.error("因子IC/IR计算失败: factorCode={}, error={}", factorCode, e.getMessage());
@@ -55,6 +68,24 @@ public class FactorAnalysisService {
                 err.put("factorCode", factorCode);
                 err.put("error", e.getMessage());
                 results.add(err);
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════════════
+        //  多因子复合 IC（至少 2 个有效因子才计算）
+        // ══════════════════════════════════════════════════════════════════
+        List<Map<String, Object>> validResults = results.stream()
+            .filter(r -> !r.containsKey("error"))
+            .collect(Collectors.toList());
+        if (validResults.size() >= 2) {
+            try {
+                List<Map<String, Object>> composites = computeCompositeIcResults(
+                    factorCodes, startDate, endDate, forwardDays,
+                    neutralizeByIndustry, correlationType, validResults,
+                    icThreshold);
+                results.addAll(composites);
+            } catch (Exception e) {
+                log.warn("[复合IC] 计算失败: {}", e.getMessage());
             }
         }
 
@@ -76,10 +107,463 @@ public class FactorAnalysisService {
         return calcSingleFactorIcIr(factorCode, startDate, endDate, forwardDays);
     }
 
+    // ======== 行业中性化辅助方法 ========
+    
+    
     /**
-     * 单因子 IC/IR 详细计算
+     * 行业中性化（百分位秩法 → 标准正态映射）
+     * 
+     * 原理：z-score 是行业内单调变换，与 Spearman 秩相关天然冲突。
+     * 百分位秩法先将行业内因子值映射到 [0,1] 均匀分布，
+     * 再通过 probit 映射到标准正态 N(0,1)，打破行业内单调性。
+     * 
+     * @param dayFactors 当日因子值列表
+     * @param industryMap code → industry 映射
+     * @return 中性化后的因子值列表（与输入顺序一致，probit 映射到 N(0,1)）
+     */
+    private List<Double> neutralizeByIndustry(
+            java.util.List<java.util.Map<String, Object>> dayFactors,
+            java.util.Map<String, String> industryMap) {
+
+        final int MIN_INDUSTRY_SIZE = 5;
+        final double ZSCORE_CAP = 3.0;
+        final org.apache.commons.math3.distribution.NormalDistribution normalDist
+            = new org.apache.commons.math3.distribution.NormalDistribution();
+
+        // 1. 按行业分组
+        Map<String, List<Integer>> indIndices = new LinkedHashMap<>();
+        List<Integer> marketIndices = new ArrayList<>();
+
+        for (int i = 0; i < dayFactors.size(); i++) {
+            Map<String, Object> f = dayFactors.get(i);
+            String sym = (String) f.get("symbol");
+            BigDecimal fv = (BigDecimal) f.get("factorVal");
+            if (sym == null || fv == null) continue;
+            String ind = industryMap.get(sym);
+            if (ind != null && !ind.isEmpty()) {
+                indIndices.computeIfAbsent(ind, k -> new ArrayList<>()).add(i);
+            } else {
+                marketIndices.add(i);
+            }
+        }
+
+        // 2. 小行业（< MIN_INDUSTRY_SIZE）合并到全市场
+        for (Iterator<Map.Entry<String, List<Integer>>> it = indIndices.entrySet().iterator(); it.hasNext(); ) {
+            Map.Entry<String, List<Integer>> e = it.next();
+            if (e.getValue().size() < MIN_INDUSTRY_SIZE) {
+                marketIndices.addAll(e.getValue());
+                it.remove();
+            }
+        }
+
+        // 3. 初始化结果数组（先填入原始值作为 fallback）
+        double[] result = new double[dayFactors.size()];
+        for (int i = 0; i < dayFactors.size(); i++) {
+            Map<String, Object> f = dayFactors.get(i);
+            BigDecimal fv = (BigDecimal) f.get("factorVal");
+            result[i] = (fv != null) ? fv.doubleValue() : 0.0;
+        }
+
+        // 4. 行业内百分位秩 → probit
+        for (Map.Entry<String, List<Integer>> e : indIndices.entrySet()) {
+            List<Integer> indices = e.getValue();
+            Integer[] sorted = indices.toArray(new Integer[0]);
+            Arrays.sort(sorted, (a, b) -> Double.compare(
+                ((BigDecimal) dayFactors.get(a).get("factorVal")).doubleValue(),
+                ((BigDecimal) dayFactors.get(b).get("factorVal")).doubleValue()
+            ));
+            int n = sorted.length;
+            for (int rank = 0; rank < n; rank++) {
+                int idx = sorted[rank];
+                // mid-rank percentile: (rank + 0.5) / n，避免 0 和 1
+                double p = (rank + 0.5) / n;
+                // 钳制 p 到 [1e-9, 1-1e-9] 防止 probit 溢出
+                p = Math.max(1e-9, Math.min(1.0 - 1e-9, p));
+                double z = normalDist.inverseCumulativeProbability(p);
+                result[idx] = Math.max(-ZSCORE_CAP, Math.min(ZSCORE_CAP, z));
+            }
+        }
+
+        // 5. 全市场百分位秩 → probit（小行业 / 无行业股票）
+        if (!marketIndices.isEmpty()) {
+            Integer[] mSorted = marketIndices.toArray(new Integer[0]);
+            Arrays.sort(mSorted, (a, b) -> Double.compare(
+                ((BigDecimal) dayFactors.get(a).get("factorVal")).doubleValue(),
+                ((BigDecimal) dayFactors.get(b).get("factorVal")).doubleValue()
+            ));
+            int n = mSorted.length;
+            for (int rank = 0; rank < n; rank++) {
+                int idx = mSorted[rank];
+                double p = (rank + 0.5) / n;
+                p = Math.max(1e-9, Math.min(1.0 - 1e-9, p));
+                double z = normalDist.inverseCumulativeProbability(p);
+                result[idx] = Math.max(-ZSCORE_CAP, Math.min(ZSCORE_CAP, z));
+            }
+        }
+
+        List<Double> out = new ArrayList<>(dayFactors.size());
+        for (double v : result) out.add(v);
+        return out;
+    }
+
+    /**
+     * 加载行业映射缓存（从 CH stock_info.industry）
+     * 缓存 1 小时，避免每次查询都访问 CH
+     */
+    private synchronized java.util.Map<String, String> loadIndustryMap() {
+        long now = System.currentTimeMillis();
+        if (!stockIndustryMap.isEmpty() && (now - industryMapLoadTime) < 3600000L) {
+            return stockIndustryMap;
+        }
+        java.util.Map<String, String> newMap = new java.util.HashMap<>();
+        if (clickHouseJdbcTemplate != null) {
+            try {
+                String sql = "SELECT code, industry FROM stock.stock_info WHERE industry IS NOT NULL AND industry != ''";
+                clickHouseJdbcTemplate.query(sql, (rs) -> {
+                    String code = rs.getString("code");
+                    String ind = rs.getString("industry");
+                    if (code != null && ind != null && !ind.isEmpty()) {
+                        String c = code.contains(".") ? code.split("\\.")[0] : code;
+                        newMap.put(c, ind);
+                    }
+                });
+                log.info("[行业中性化] 加载行业映射完成：{} 只股票有行业分类", newMap.size());
+            } catch (Exception e) {
+                log.warn("[行业中性化] 加载行业映射失败：{}，将跳过中性化", e.getMessage());
+            }
+        }
+        stockIndustryMap = newMap;
+        industryMapLoadTime = now;
+        return stockIndustryMap;
+    }
+
+    /**
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  多因子复合 IC 计算（P0）
+    // ══════════════════════════════════════════════════════════════════════
+
+    /**
+     * 多因子复合 IC：将多个因子按不同权重方案组合为单一信号，计算其预测力
+     * 三种方案：EQW（等权）、ICW（IC绝对值加权）、OPT（逆方差加权）
+     */
+    private List<Map<String, Object>> computeCompositeIcResults(
+            List<String> factorCodes, String startDate, String endDate,
+            int forwardDays, boolean neutralizeByIndustry,
+            String correlationType, List<Map<String, Object>> individualResults,
+            double icThreshold) {
+
+        // ════════════════════════════════════════════════════════════════
+        //  Step 0: 因子预筛选 + 信号方向对齐准备
+        //  ════════════════════════════════════════════════════════════════
+        // 提取各因子 IC 值和方向（sign）
+        Map<String, Double> factorIcMap = new LinkedHashMap<>();
+        Map<String, Integer> factorSignMap = new LinkedHashMap<>();
+        for (Map<String, Object> r : individualResults) {
+            String fc = (String) r.get("factorCode");
+            double ic = ((Number) r.getOrDefault("icMean", 0)).doubleValue();
+            factorIcMap.put(fc, ic);
+            factorSignMap.put(fc, ic >= 0 ? 1 : -1); // 信号方向：+1 或 -1
+        }
+
+        // 预筛选：只保留 |IC| >= threshold 的因子
+        List<String> filteredCodes = factorCodes.stream()
+            .filter(fc -> Math.abs(factorIcMap.getOrDefault(fc, 0.0)) >= icThreshold)
+            .collect(Collectors.toList());
+
+        if (filteredCodes.size() < 2) {
+            log.info("[复合IC] 预筛选后因子数={}，不足2个，跳过复合计算 (threshold={})",
+                     filteredCodes.size(), icThreshold);
+            return new ArrayList<>();
+        }
+
+        log.info("[复合IC] 预筛选: {}/{} 个因子保留 (|IC|>={}), 剔除: {}",
+                 filteredCodes.size(), factorCodes.size(), icThreshold,
+                 factorCodes.stream()
+                     .filter(fc -> Math.abs(factorIcMap.getOrDefault(fc, 0.0)) < icThreshold)
+                     .collect(Collectors.toList()));
+
+        // 用筛选后的因子列表替换原始列表
+        factorCodes = filteredCodes;
+        int nFactorsFinal = factorCodes.size();
+
+        // 各因子信号方向（+1 或 -1），用于复合时对齐
+        int[] signs = new int[nFactorsFinal];
+        for (int j = 0; j < nFactorsFinal; j++) {
+            signs[j] = factorSignMap.getOrDefault(factorCodes.get(j), 1);
+        }
+
+        List<Map<String, Object>> composites = new ArrayList<>();
+        String inClause = factorCodes.stream()
+            .map(c -> "'" + c.replace("'", "''") + "'")
+            .collect(Collectors.joining(","));
+
+        // 1. 批量查询所有因子值（一次 CH 查询）
+        List<Map<String, Object>> allRows = new ArrayList<>();
+        if (clickHouseJdbcTemplate != null) {
+            try {
+                String sql = String.format("""
+                    SELECT symbol, toString(calc_date) AS calc_date, factor_code, factor_val
+                    FROM stock.factor_value
+                    WHERE factor_code IN (%s) AND calc_date >= '%s' AND calc_date <= '%s'
+                      AND factor_val IS NOT NULL
+                    ORDER BY calc_date, symbol
+                    """, inClause, startDate, endDate);
+                allRows = clickHouseJdbcTemplate.query(sql, (rs, rowNum) -> {
+                    Map<String, Object> m = new HashMap<>();
+                    String symbol = rs.getString("symbol");
+                    if (symbol != null && symbol.contains(".")) symbol = symbol.split("\\.")[0];
+                    m.put("symbol", symbol);
+                    m.put("calcDate", rs.getString("calc_date"));
+                    m.put("factorCode", rs.getString("factor_code"));
+                    m.put("factorVal", rs.getBigDecimal("factor_val"));
+                    return m;
+                });
+            } catch (Exception e) {
+                log.warn("[复合IC] CH 查询失败: {}", e.getMessage());
+                return composites;
+            }
+        }
+        if (allRows.isEmpty()) return composites;
+
+        // 2. 分组：date → symbol → (factor → value)
+        Map<String, Map<String, Map<String, Double>>> dateSymFactor = new LinkedHashMap<>();
+        for (Map<String, Object> row : allRows) {
+            String date = (String) row.get("calcDate");
+            String sym = (String) row.get("symbol");
+            String fc = (String) row.get("factorCode");
+            BigDecimal fv = (BigDecimal) row.get("factorVal");
+            if (date == null || sym == null || fc == null || fv == null) continue;
+            dateSymFactor
+                .computeIfAbsent(date, k -> new LinkedHashMap<>())
+                .computeIfAbsent(sym, k -> new LinkedHashMap<>())
+                .put(fc, fv.doubleValue());
+        }
+
+        // 3. 权重：从 individualResults 中提取各因子 IC，用于 ICW / OPT
+        //    注意：此处使用 filteredCodes（已筛选）
+        Map<String, Double> factorAbsIc = new LinkedHashMap<>();
+        Map<String, Double> factorIcStd = new LinkedHashMap<>();
+        for (Map<String, Object> r : individualResults) {
+            String fc = (String) r.get("factorCode");
+            // 只处理被保留的因子
+            if (!factorCodes.contains(fc)) continue;
+            double ic = ((Number) r.getOrDefault("icMean", 0)).doubleValue();
+            double std = ((Number) r.getOrDefault("icStd", 0)).doubleValue();
+            factorAbsIc.put(fc, Math.abs(ic));
+            factorIcStd.put(fc, Math.max(std, 1e-9));
+        }
+        double absIcSum = factorAbsIc.values().stream().mapToDouble(d -> d).sum();
+
+        // 三种权重方案（数组长度 = 筛选后因子数）
+        double[] weightsEqw = new double[nFactorsFinal];
+        double[] weightsIcw = new double[nFactorsFinal];
+        double[] weightsOpt = new double[nFactorsFinal];
+        double optSum = 0;
+        for (int i = 0; i < nFactorsFinal; i++) {
+            String fc = factorCodes.get(i);
+            weightsEqw[i] = 1.0 / nFactorsFinal;
+            weightsIcw[i] = absIcSum > 1e-9 ? factorAbsIc.getOrDefault(fc, 0.0) / absIcSum : 1.0 / nFactorsFinal;
+            double invVar = 1.0 / Math.pow(factorIcStd.getOrDefault(fc, 1.0), 2);
+            weightsOpt[i] = invVar;
+            optSum += invVar;
+        }
+        for (int i = 0; i < nFactorsFinal; i++) {
+            weightsOpt[i] /= Math.max(optSum, 1e-9);
+        }
+
+        // 4. 获取价格数据和 forward date map
+        Set<String> allSymbols = allRows.stream()
+            .map(r -> (String) r.get("symbol")).filter(Objects::nonNull)
+            .filter(s -> s.matches("\\d{6}")).collect(Collectors.toSet());
+        LocalDate priceEnd = LocalDate.parse(endDate).plusDays(forwardDays * 3L);
+        Map<String, Map<String, Double>> codeDatePrice = queryBulkClosePrices(allSymbols, startDate, priceEnd.toString());
+        Map<String, String> forwardDateMap = buildForwardDateMap(startDate, priceEnd.toString(), forwardDays);
+
+        // 5. 日度 IC 序列（三种方案）
+        List<Double> icEqw = new ArrayList<>();
+        List<Double> icIcw = new ArrayList<>();
+        List<Double> icOpt = new ArrayList<>();
+
+        for (Map.Entry<String, Map<String, Map<String, Double>>> dateEntry : dateSymFactor.entrySet()) {
+            String calcDate = dateEntry.getKey();
+            String fwdDate = forwardDateMap.get(calcDate);
+            if (fwdDate == null) continue;
+
+            Map<String, Map<String, Double>> symFactors = dateEntry.getValue();
+            List<String> validSyms = new ArrayList<>();
+            List<double[]> factorVecs = new ArrayList<>();
+            List<Double> returns = new ArrayList<>();
+
+            for (Map.Entry<String, Map<String, Double>> se : symFactors.entrySet()) {
+                String sym = se.getKey();
+                Map<String, Double> facs = se.getValue();
+                Map<String, Double> prices = codeDatePrice.get(sym);
+                if (prices == null) continue;
+                Double currP = prices.get(calcDate);
+                Double fwdP = prices.get(fwdDate);
+                if (currP == null || fwdP == null || currP <= 0) continue;
+
+                double[] vec = new double[nFactorsFinal];
+                int present = 0;
+                for (int j = 0; j < nFactorsFinal; j++) {
+                    Double v = facs.get(factorCodes.get(j));
+                    if (v != null) { vec[j] = v; present++; }
+                    else vec[j] = Double.NaN;
+                }
+                if (present < 2) continue;
+
+                validSyms.add(sym);
+                factorVecs.add(vec);
+                returns.add((fwdP - currP) / currP);
+            }
+            if (validSyms.size() < 10) continue;
+
+            // 截面 z-score 标准化（每列独立），并对齐信号方向
+            int nStocks = factorVecs.size();
+            double[][] zScores = new double[nStocks][nFactorsFinal];
+            for (int j = 0; j < nFactorsFinal; j++) {
+                double sum = 0; int cnt = 0;
+                for (int i = 0; i < nStocks; i++) {
+                    if (!Double.isNaN(factorVecs.get(i)[j])) { sum += factorVecs.get(i)[j]; cnt++; }
+                }
+                if (cnt < 5) { for (int i = 0; i < nStocks; i++) zScores[i][j] = 0; continue; }
+                double mean = sum / cnt;
+                double var = 0;
+                for (int i = 0; i < nStocks; i++) {
+                    if (!Double.isNaN(factorVecs.get(i)[j])) {
+                        double d = factorVecs.get(i)[j] - mean;
+                        var += d * d;
+                    }
+                }
+                double stdv = Math.sqrt(var / (cnt - 1));
+                if (stdv < 1e-9) stdv = 1.0;
+                int sign = signs[j]; // 信号方向：+1 或 -1
+                for (int i = 0; i < nStocks; i++) {
+                    if (!Double.isNaN(factorVecs.get(i)[j])) {
+                        // z-score 乘以 sign：让所有因子"高值=好股票"方向一致
+                        zScores[i][j] = sign * (factorVecs.get(i)[j] - mean) / stdv;
+                    } else zScores[i][j] = 0;
+                }
+            }
+
+            // 三种方案的复合值
+            double[] compEqw = new double[nStocks];
+            double[] compIcw = new double[nStocks];
+            double[] compOpt = new double[nStocks];
+            for (int i = 0; i < nStocks; i++) {
+                for (int j = 0; j < nFactorsFinal; j++) {
+                    compEqw[i] += zScores[i][j] * weightsEqw[j];
+                    compIcw[i] += zScores[i][j] * weightsIcw[j];
+                    compOpt[i] += zScores[i][j] * weightsOpt[j];
+                }
+            }
+
+            // 计算 IC
+            List<Double> rets = Collections.unmodifiableList(returns);
+            double icEqwVal = computeIc(toList(compEqw), rets, correlationType);
+            double icIcwVal = computeIc(toList(compIcw), rets, correlationType);
+            double icOptVal = computeIc(toList(compOpt), rets, correlationType);
+            if (!Double.isNaN(icEqwVal)) icEqw.add(icEqwVal);
+            if (!Double.isNaN(icIcwVal)) icIcw.add(icIcwVal);
+            if (!Double.isNaN(icOptVal)) icOpt.add(icOptVal);
+        }
+
+        // 6. 构建结果（名称加"对齐"标记，表示已做信号方向对齐）
+        int usedCount = factorCodes.size(); // 已是筛选后数量
+        // 构建实际参与因子详情列表
+        List<Map<String, Object>> factorDetailList = new ArrayList<>();
+        for (int i = 0; i < nFactorsFinal; i++) {
+            String fc = factorCodes.get(i);
+            Map<String, Object> fd = new LinkedHashMap<>();
+            fd.put("code", fc);
+            fd.put("ic", factorIcMap.getOrDefault(fc, 0.0));
+            fd.put("sign", signs[i]);
+            fd.put("weightEqw", weightsEqw[i]);
+            fd.put("weightIcw", weightsIcw[i]);
+            fd.put("weightOpt", weightsOpt[i]);
+            factorDetailList.add(fd);
+        }
+        if (!icEqw.isEmpty()) composites.add(buildCompositeResult("COMPOSITE_EQW", "多因子等权✓", icEqw, usedCount, correlationType, factorDetailList));
+        if (!icIcw.isEmpty()) composites.add(buildCompositeResult("COMPOSITE_ICW", "多因子|IC|加权✓", icIcw, usedCount, correlationType, factorDetailList));
+        if (!icOpt.isEmpty()) composites.add(buildCompositeResult("COMPOSITE_OPT", "多因子逆方差✓", icOpt, usedCount, correlationType, factorDetailList));
+
+        log.info("[复合IC] 计算完成，生成 {} 个复合因子结果", composites.size());
+        return composites;
+    }
+
+    /** 工具：double[] → List<Double> */
+    private static List<Double> toList(double[] arr) {
+        List<Double> out = new ArrayList<>(arr.length);
+        for (double v : arr) out.add(v);
+        return out;
+    }
+
+    /** 根据 correlationType 选择 IC 计算方法 */
+    private double computeIc(List<Double> x, List<Double> y, String correlationType) {
+        return "pearson".equals(correlationType) ? calcPearsonCorrelation(x, y) : calcSpearmanCorrelation(x, y);
+    }
+
+    /** 构建复合因子 IC 结果
+     *  @param filteredFactors 实际参与组合的因子列表（已通过预筛选），含 code/ic/weight/sign */
+    private Map<String, Object> buildCompositeResult(String code, String name, List<Double> icSeries,
+            int k, String correlationType, List<Map<String, Object>> filteredFactors) {
+        double icMean = icSeries.stream().mapToDouble(Double::doubleValue).average().orElse(0);
+        double icStd = calcStd(icSeries);
+        double ir = icStd > 0 ? icMean / icStd : 0;
+        long icPos = icSeries.stream().filter(v -> v > 0).count();
+        double wr = 100.0 * icPos / icSeries.size();
+        int n = icSeries.size();
+        double tStat = icStd > 0 ? icMean / (icStd / Math.sqrt(n)) : 0;
+        double pValue = 1.0;
+        if (n > 1 && icStd > 0) {
+            try {
+                TDistribution tDist = new TDistribution(n - 1);
+                pValue = 2.0 * (1.0 - tDist.cumulativeProbability(Math.abs(tStat)));
+            } catch (Exception e) { pValue = 1.0; }
+        }
+
+        Map<String, Object> r = new LinkedHashMap<>();
+        r.put("factorCode", code);
+        r.put("factorName", name);
+        r.put("composite", true);
+        r.put("compositeSize", k);
+        r.put("forwardDays", 5);
+        r.put("icMean", Math.round(icMean * 10000.0) / 10000.0);
+        r.put("icStd", Math.round(icStd * 10000.0) / 10000.0);
+        r.put("ir", Math.round(ir * 100.0) / 100.0);
+        r.put("tStat", Math.round(tStat * 100.0) / 100.0);
+        r.put("pValue", Math.round(pValue * 10000.0) / 10000.0);
+        r.put("icWinRate", Math.round(wr * 10.0) / 10.0);
+        r.put("sampleDays", icSeries.size());
+        r.put("assessment", assessIcIr(icMean, ir));
+        r.put("correlationType", correlationType);
+        // 实际参与组合的因子详情（含IC、权重、方向）
+        r.put("filteredFactors", filteredFactors);
+        return r;
+    }
+
+    /** IC 有效性评估 */
+    private String assessIcIr(double icMean, double ir) {
+        if (Math.abs(icMean) >= 0.05 && Math.abs(ir) >= 0.5) return "有效因子";
+        if (Math.abs(icMean) >= 0.03 && Math.abs(ir) >= 0.3) return "弱有效";
+        return "无效因子";
+    }
+
+    /**
+     * 单因子 IC/IR 详细计算（原始值，不含中性化）
+     * 重载方法，默认 neutralizeByIndustry=false
      */
     private Map<String, Object> calcSingleFactorIcIr(String factorCode, String startDate, String endDate, int forwardDays) {
+        return calcSingleFactorIcIr(factorCode, startDate, endDate, forwardDays, false, "spearman");
+    }
+
+    /**
+     * 单因子 IC/IR 详细计算
+     * @param neutralizeByIndustry 是否做行业中性化
+     * @param correlationType spearman | pearson
+     */
+    private Map<String, Object> calcSingleFactorIcIr(String factorCode, String startDate, String endDate, int forwardDays, boolean neutralizeByIndustry, String correlationType) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("factorCode", factorCode);
         result.put("forwardDays", forwardDays);
@@ -170,27 +654,50 @@ public class FactorAnalysisService {
             String fwdDate = forwardDateMap.get(calcDate);
             if (fwdDate == null) continue;
 
-            List<Double> factorVals = new ArrayList<>();
+            // 1. 先过滤出有价格数据的股票
+            List<Map<String, Object>> validDayFactors = new ArrayList<>();
             List<Double> forwardReturns = new ArrayList<>();
-
             for (Map<String, Object> f : dayFactors) {
                 String sym = (String) f.get("symbol");
                 BigDecimal fval = (BigDecimal) f.get("factorVal");
                 if (sym == null || fval == null) continue;
-
                 Map<String, Double> symPrices = codeDatePrice.get(sym);
                 if (symPrices == null) continue;
                 Double currP = symPrices.get(calcDate);
                 Double fwdP = symPrices.get(fwdDate);
                 if (currP == null || fwdP == null || currP <= 0) continue;
-
-                factorVals.add(fval.doubleValue());
+                validDayFactors.add(f);
                 forwardReturns.add((fwdP - currP) / currP);
+            }
+            if (validDayFactors.size() < 10) continue;
+
+            // 2. 行业中性化（百分位秩法 → probit，打破行业内单调性）
+            List<Double> factorVals;
+            if (neutralizeByIndustry) {
+                Map<String, String> indMap = loadIndustryMap();
+                if (!indMap.isEmpty()) {
+                    factorVals = neutralizeByIndustry(validDayFactors, indMap);
+                } else {
+                    log.warn("[IC/IR] 行业映射为空，行业中性化退化为原始值");
+                    factorVals = new ArrayList<>();
+                    for (Map<String, Object> f : validDayFactors) {
+                        BigDecimal fv = (BigDecimal) f.get("factorVal");
+                        factorVals.add(fv != null ? fv.doubleValue() : 0.0);
+                    }
+                }
+            } else {
+                factorVals = new ArrayList<>();
+                for (Map<String, Object> f : validDayFactors) {
+                    BigDecimal fv = (BigDecimal) f.get("factorVal");
+                    factorVals.add(fv != null ? fv.doubleValue() : 0.0);
+                }
             }
 
             if (factorVals.size() < 10) continue;
 
-            double ic = calcSpearmanCorrelation(factorVals, forwardReturns);
+            double ic = "pearson".equals(correlationType)
+                    ? calcPearsonCorrelation(factorVals, forwardReturns)
+                    : calcSpearmanCorrelation(factorVals, forwardReturns);
             if (!Double.isNaN(ic)) {
                 icSeries.add(ic);
                 Map<String, Object> timelineEntry = new LinkedHashMap<>();
@@ -239,6 +746,7 @@ public class FactorAnalysisService {
         result.put("sampleDays", icSeries.size());
         result.put("totalFactorRows", factorRows.size());
         result.put("icTimeline", icTimeline);
+        result.put("neutralized", neutralizeByIndustry);
 
         // IC 有效性判断
         String assessment;
@@ -335,6 +843,34 @@ public class FactorAnalysisService {
         return cov / Math.sqrt(varX * varY);
     }
 
+    /**
+     * Pearson 相关系数 —— 对量值敏感，适合行业中性化后的分析
+     */
+    private double calcPearsonCorrelation(List<Double> x, List<Double> y) {
+        int n = x.size();
+        if (n != y.size() || n < 3) return Double.NaN;
+
+        double meanX = 0, meanY = 0;
+        for (int i = 0; i < n; i++) {
+            meanX += x.get(i);
+            meanY += y.get(i);
+        }
+        meanX /= n;
+        meanY /= n;
+
+        double cov = 0, varX = 0, varY = 0;
+        for (int i = 0; i < n; i++) {
+            double dx = x.get(i) - meanX;
+            double dy = y.get(i) - meanY;
+            cov += dx * dy;
+            varX += dx * dx;
+            varY += dy * dy;
+        }
+
+        if (varX == 0 || varY == 0) return Double.NaN;
+        return cov / Math.sqrt(varX * varY);
+    }
+
     private int[] calcRank(List<Double> values) {
         int n = values.size();
         Integer[] indices = new Integer[n];
@@ -358,7 +894,7 @@ public class FactorAnalysisService {
      */
     public Map<String, Object> batchCalcIcIrSegmented(
             List<String> factorCodes, String startDate, String endDate,
-            String splitDate, int forwardDays) {
+            String splitDate, int forwardDays, boolean neutralizeByIndustry, String correlationType) {
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("segmented", true);
@@ -372,7 +908,7 @@ public class FactorAnalysisService {
         for (String factorCode : factorCodes) {
             try {
                 Map<String, Object> seg = calcSingleFactorIcIrSegmented(
-                        factorCode, startDate, endDate, splitDate, forwardDays);
+                        factorCode, startDate, endDate, splitDate, forwardDays, neutralizeByIndustry, correlationType);
 
                 @SuppressWarnings("unchecked")
                 Map<String, Object> before = (Map<String, Object>) seg.get("before");
@@ -443,7 +979,7 @@ public class FactorAnalysisService {
      */
     private Map<String, Object> calcSingleFactorIcIrSegmented(
             String factorCode, String startDate, String endDate,
-            String splitDate, int forwardDays) {
+            String splitDate, int forwardDays, boolean neutralizeByIndustry, String correlationType) {
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("factorCode", factorCode);
@@ -524,27 +1060,50 @@ public class FactorAnalysisService {
             String fwdDate = forwardDateMap.get(calcDate);
             if (fwdDate == null) continue;
 
-            List<Double> factorVals = new ArrayList<>();
+            // 1. 先过滤出有价格数据的股票
+            List<Map<String, Object>> validDayFactors = new ArrayList<>();
             List<Double> forwardReturns = new ArrayList<>();
-
             for (Map<String, Object> f : dayFactors) {
                 String sym = (String) f.get("symbol");
                 BigDecimal fval = (BigDecimal) f.get("factorVal");
                 if (sym == null || fval == null) continue;
-
                 Map<String, Double> symPrices = codeDatePrice.get(sym);
                 if (symPrices == null) continue;
                 Double currP = symPrices.get(calcDate);
                 Double fwdP = symPrices.get(fwdDate);
                 if (currP == null || fwdP == null || currP <= 0) continue;
-
-                factorVals.add(fval.doubleValue());
+                validDayFactors.add(f);
                 forwardReturns.add((fwdP - currP) / currP);
+            }
+            if (validDayFactors.size() < 10) continue;
+
+            // 2. 行业中性化（百分位秩法 → probit，打破行业内单调性）
+            List<Double> factorVals;
+            if (neutralizeByIndustry) {
+                Map<String, String> indMap = loadIndustryMap();
+                if (!indMap.isEmpty()) {
+                    factorVals = neutralizeByIndustry(validDayFactors, indMap);
+                } else {
+                    log.warn("[分段IC] 行业映射为空，行业中性化退化为原始值");
+                    factorVals = new ArrayList<>();
+                    for (Map<String, Object> f : validDayFactors) {
+                        BigDecimal fv = (BigDecimal) f.get("factorVal");
+                        factorVals.add(fv != null ? fv.doubleValue() : 0.0);
+                    }
+                }
+            } else {
+                factorVals = new ArrayList<>();
+                for (Map<String, Object> f : validDayFactors) {
+                    BigDecimal fv = (BigDecimal) f.get("factorVal");
+                    factorVals.add(fv != null ? fv.doubleValue() : 0.0);
+                }
             }
 
             if (factorVals.size() < 10) continue;
 
-            double ic = calcSpearmanCorrelation(factorVals, forwardReturns);
+            double ic = "pearson".equals(correlationType)
+                    ? calcPearsonCorrelation(factorVals, forwardReturns)
+                    : calcSpearmanCorrelation(factorVals, forwardReturns);
             if (!Double.isNaN(ic)) {
                 fullIcSeries.add(ic);
                 Map<String, Object> tl = new LinkedHashMap<>();
