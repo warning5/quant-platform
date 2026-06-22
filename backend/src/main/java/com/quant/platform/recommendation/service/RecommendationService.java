@@ -20,6 +20,8 @@ import com.quant.platform.stock.entity.StockInfo;
 import com.quant.platform.stock.mapper.StockInfoMapper;
 import com.quant.platform.stock.service.ClickHouseStockService;
 import com.quant.platform.stock.service.DividendService;
+import com.quant.platform.factor.service.FactorCorrelationService;
+import com.quant.platform.factor.service.QuarterlyFactorAnalysisService;
 import com.quant.platform.strategy.domain.StrategyDefinition;
 import com.quant.platform.strategy.mapper.StrategyDefinitionMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -158,6 +160,8 @@ public class RecommendationService {
     private final NewsEventParser newsEventParser;
     private final EventSignalService eventSignalService;
     private final com.quant.platform.market.MarketSentimentService marketSentimentService;
+    private final FactorCorrelationService factorCorrelationService;
+    private final QuarterlyFactorAnalysisService quarterlyFactorAnalysisService;
     private final javax.sql.DataSource dataSource;
 
     public RecommendationService(StockScreenService stockScreenService,
@@ -176,6 +180,8 @@ public class RecommendationService {
                                  NewsEventParser newsEventParser,
                                  EventSignalService eventSignalService,
                                  com.quant.platform.market.MarketSentimentService marketSentimentService,
+                                 FactorCorrelationService factorCorrelationService,
+                                 QuarterlyFactorAnalysisService quarterlyFactorAnalysisService,
                                  javax.sql.DataSource dataSource) {
         this.stockScreenService = stockScreenService;
         this.analysisService = analysisService;
@@ -193,6 +199,8 @@ public class RecommendationService {
         this.newsEventParser = newsEventParser;
         this.eventSignalService = eventSignalService;
         this.marketSentimentService = marketSentimentService;
+        this.factorCorrelationService = factorCorrelationService;
+        this.quarterlyFactorAnalysisService = quarterlyFactorAnalysisService;
         this.dataSource = dataSource;
     }
 
@@ -2040,11 +2048,16 @@ public class RecommendationService {
         }
 
         // P1+P2: 使用衰减加权IC快照
-        // 动态半衰期：直接使用默认20天（后续可基于波动率动态调整）
-        int halflife = DEFAULT_HALFLIFE_DAYS;
-        Map<String, FactorAnalysisService.FactorIcSnapshot> snapshots =
+        // P2: 动态半衰期（基于市场波动率分位数自适应调整）
+        int halflife = computeAdaptiveHalflife(refDate);
+        Map<String, com.quant.platform.factor.service.FactorAnalysisService.FactorIcSnapshot> snapshots =
                 factorAnalysisService.quickFactorIcSnapshot(
                         factorCodes, refDate, 60, DEFAULT_IC_THRESHOLD, halflife);
+
+        // P3: 因子拥挤度检测与去重
+        Set<String> crowdingDropped = applyCrowdingFilter(factorCodes, refDate, snapshots);
+        // P4: 财务因子季频IC校正（返回校正数量，snapshots 被原地修改）
+        int quarterlyCorrected = applyQuarterlyIcCorrection(factorCodes, refDate, snapshots);
 
         log.info("[DynamicWeight] IC快照完成: mode={}, {}个因子, 阈值={}, 半衰={}天, 保留{}个",
                 weightMode, factorCodes.size(), DEFAULT_IC_THRESHOLD, halflife,
@@ -2053,7 +2066,7 @@ public class RecommendationService {
         // 筛选保留的因子
         List<FactorAnalysisService.FactorIcSnapshot> keptSnapshots = snapshots.values().stream()
                 .filter(s -> "KEPT".equals(s.status))
-                .collect(Collectors.toList());
+                .toList();
 
         // 计算|IC|总和（用于ICW权重分配）
         double sumAbsIc = keptSnapshots.stream()
@@ -2108,7 +2121,17 @@ public class RecommendationService {
                 diag.adjustedWeight = 0;
                 diag.reason = String.format("|IC|=%.4f < 阈值%.2f，预筛选剔除（衰减加权IC=%.4f，半衰=%d天）",
                         Math.abs(snap.icMean), DEFAULT_IC_THRESHOLD, snap.icMean, halflife);
-                log.info("[DynamicWeight] 因子 {} |IC|={:.4f} < {}, 剔除", fc, Math.abs(snap.icMean), DEFAULT_IC_THRESHOLD);
+                log.info("[DynamicWeight] 因子 {} |IC|={} < {}, 剔除", fc, Math.abs(snap.icMean), DEFAULT_IC_THRESHOLD);
+                droppedCount++;
+            } else if ("CROWDING_DROPPED".equals(snap.status)) {
+                // P3: 因子拥挤度剔除（相关性过高，保留IC更高的同类因子）
+                adjustedFw.setWeight(0.0);
+                adjustedFw.setDirection(originalDirection);
+                diag.action = "CROWDING_DROPPED";
+                diag.icMean = snap.icMean;
+                diag.adjustedWeight = 0;
+                diag.reason = snap.assessment != null ? snap.assessment : "因子拥挤度过高，被同类高IC因子替代";
+                log.info("[DynamicWeight] 因子 {} 拥挤度剔除: {}", fc, diag.reason);
                 droppedCount++;
             } else {
                 // KEPT: 方向对齐 + |IC|加权
@@ -2119,32 +2142,31 @@ public class RecommendationService {
                 // 权重按 weightMode 分配
                 double absIc = snap.absIc();
                 double newWeight;
-                String action;
-                switch (weightMode) {
-                    case "EQW":
+                String action = switch (weightMode) {
+                    case "EQW" -> {
                         // 等权：保留的因子平均分配
                         newWeight = originalWeight / Math.max(keptSnapshots.size(), 1);
-                        action = "KEPT_EQW";
-                        break;
-                    case "OPT":
+                        yield "KEPT_EQW";
+                    }
+                    case "OPT" -> {
                         // 逆方差：按 1/σ²(IC) 分配（稳定性越高权重越大）
                         if (optSum > 1e-9) {
                             newWeight = originalWeight * (1.0 / Math.max(snap.icStd * snap.icStd, 1e-9) / optSum);
                         } else {
                             newWeight = originalWeight / Math.max(keptSnapshots.size(), 1);
                         }
-                        action = "KEPT_OPT";
-                        break;
-                    default:
+                        yield "KEPT_OPT";
+                    }
+                    default -> {
                         // ICW: |IC|加权
                         if (sumAbsIc > 1e-9) {
                             newWeight = originalWeight * (absIc / sumAbsIc);
                         } else {
                             newWeight = originalWeight / Math.max(keptSnapshots.size(), 1);
                         }
-                        action = "KEPT_ICW";
-                        break;
-                }
+                        yield "KEPT_ICW";
+                    }
+                };
                 adjustedFw.setWeight(newWeight);
                 diag.action = action;
 
@@ -2155,7 +2177,7 @@ public class RecommendationService {
                         weightMode, snap.icMean, halflife, absIc,
                         snap.icSign < 0 ? "↓取反(对齐)" : "↑正向",
                         newWeight);
-                log.info("[DynamicWeight] 因子 {} {} IC={:.4f} (|IC|={:.4f}) 方向={} 权重: {}->{}",
+                log.info("[DynamicWeight] 因子 {} {} IC={} (|IC|={}) 方向={} 权重: {}->{}",
                         fc, weightMode, snap.icMean, absIc,
                         snap.icSign < 0 ? "取反" : "正向",
                         originalWeight, newWeight);
@@ -2166,7 +2188,7 @@ public class RecommendationService {
             adjusted.add(adjustedFw);
         }
 
-        log.info("[DynamicWeight] 完成: mode={}, 保留{}/剔除{}/无数据{}, |IC|和={:.4f}, 半衰={}天",
+        log.info("[DynamicWeight] 完成: mode={}, 保留{}/剔除{}/无数据{}, |IC|和={}, 半衰={}天",
                 weightMode, keptCount, droppedCount, noDataCount, sumAbsIc, halflife);
 
         return adjusted;
@@ -2512,7 +2534,7 @@ public class RecommendationService {
 
         // c) ATR/价格比扣分（0-5分，低波动=高分）
         if (overview.getAtr() != null && currentPrice != null && currentPrice.doubleValue() > 0) {
-            double atrPct = overview.getAtr().doubleValue() / currentPrice.doubleValue();
+            double atrPct = overview.getAtr() / currentPrice.doubleValue();
             if (atrPct > 0.04) riskScore += 0;      // ATR/价格>4%，0分
             else if (atrPct > 0.03) riskScore += 2;  // 3-4%，2分
             else if (atrPct > 0.02) riskScore += 4;  // 2-3%，4分
@@ -2628,5 +2650,121 @@ public class RecommendationService {
         double momentum20d;        // 行业近20日动量（累计涨跌幅%）
         double momentumScore;      // 动量综合评分（0~1）
         String momentumTrend;      // 动量趋势: ACCELERATING / DECELERATING / FLAT
+    }
+
+    // ==================== P2/P3/P4 辅助方法 ====================
+
+    /**
+     * P2: 动态半衰期计算
+     * 基于沪深300收益率波动率分位数，调用 FactorAnalysisService.adaptiveHalflife()
+     */
+    private int computeAdaptiveHalflife(LocalDate refDate) {
+        try {
+            List<com.quant.platform.market.domain.MarketDailyBar> hist =
+                    marketDataService.getBarsBySymbol(SSE300_CODE, refDate.minusDays(60), refDate);
+            if (hist == null || hist.size() < 20) {
+                log.warn("[DynamicWeight] P2 沪深300历史数据不足({}), 使用默认半衰期{}天",
+                        hist == null ? "null" : hist.size(), DEFAULT_HALFLIFE_DAYS);
+                return DEFAULT_HALFLIFE_DAYS;
+            }
+            // 计算20日收益率(seq: close[t]/close[t-1] - 1)
+            double[] returns = new double[hist.size() - 1];
+            for (int i = 1; i < hist.size(); i++) {
+                double prev = hist.get(i - 1).getClose().doubleValue();
+                double curr = hist.get(i).getClose().doubleValue();
+                returns[i - 1] = (prev > 0) ? (curr / prev - 1) : 0;
+            }
+            double vol = std(returns);
+            // 波动率分位数估算（假设市场波动率中值~12%，范围5%~25%）
+            double volatilityPercentile = Math.max(0, Math.min(1, (vol - 0.05) / 0.20 + 0.375));
+            int halflife = com.quant.platform.factor.service.FactorAnalysisService.adaptiveHalflife(volatilityPercentile);
+            log.info("[DynamicWeight] P2 动态半衰期: 20日波动率={:.4f}, 分位数~{:.2f}, 半衰期={}天",
+                    vol, volatilityPercentile, halflife);
+            return halflife;
+        } catch (Exception e) {
+            log.warn("[DynamicWeight] P2 动态半衰期计算失败: {}, 使用默认值", e.getMessage());
+            return DEFAULT_HALFLIFE_DAYS;
+        }
+    }
+
+    /**
+     * P3: 因子拥挤度过滤
+     * 调用 FactorCorrelationService.detectCrowding()，将冗余因子的 status 设为 CROWDING_DROPPED
+     */
+    private Set<String> applyCrowdingFilter(
+            List<String> factorCodes, LocalDate refDate,
+            Map<String, com.quant.platform.factor.service.FactorAnalysisService.FactorIcSnapshot> snapshots) {
+        Set<String> dropped = new HashSet<>();
+        try {
+            LocalDate startDate = refDate.minusDays(60);
+            // 构建 icSnapshot Map（只传 KEPT 因子）
+            Map<String, Double> icMap = new HashMap<>();
+            for (Map.Entry<String, com.quant.platform.factor.service.FactorAnalysisService.FactorIcSnapshot> e : snapshots.entrySet()) {
+                if ("KEPT".equals(e.getValue().status)) {
+                    icMap.put(e.getKey(), e.getValue().icMean);
+                }
+            }
+            List<com.quant.platform.factor.service.FactorCorrelationService.FactorCluster> clusters =
+                    factorCorrelationService.detectCrowding(factorCodes, startDate, refDate, 0.70, icMap);
+            for (com.quant.platform.factor.service.FactorCorrelationService.FactorCluster cluster : clusters) {
+                for (String redundant : cluster.redundantFactors) {
+                    com.quant.platform.factor.service.FactorAnalysisService.FactorIcSnapshot snap = snapshots.get(redundant);
+                    if (snap != null && "KEPT".equals(snap.status)) {
+                        snap.status = "CROWDING_DROPPED";
+                        snap.assessment = "拥挤度剔除: 与" + cluster.representative + "相关性过高(corr≥" + String.format("%.2f", cluster.maxCorrelation) + ")";
+                        dropped.add(redundant);
+                    }
+                }
+            }
+            log.info("[DynamicWeight] P3 拥挤度过滤: {}个簇, 剔除{}个冗余因子", clusters.size(), dropped.size());
+        } catch (Exception e) {
+            log.warn("[DynamicWeight] P3 拥挤度过滤失败: {}", e.getMessage());
+        }
+        return dropped;
+    }
+
+    /**
+     * P4: 财务因子季频IC校正
+     * 对 FIN_* 前缀的因子，用季频IC替换日频IC（更符合财务数据公告节奏）
+     * @return 被校正的因子数量
+     */
+    private int applyQuarterlyIcCorrection(
+            List<String> factorCodes, LocalDate refDate,
+            Map<String, com.quant.platform.factor.service.FactorAnalysisService.FactorIcSnapshot> snapshots) {
+        int corrected = 0;
+        for (String fc : factorCodes) {
+            if (!fc.startsWith("FIN_")) continue;
+            try {
+                com.quant.platform.factor.service.QuarterlyFactorAnalysisService.QuarterlyIcResult qr =
+                        quarterlyFactorAnalysisService.computeQuarterlyIc(fc, refDate.minusMonths(18), refDate, 5, true);
+                if (qr != null && qr.quarterCount >= 3) {
+                    com.quant.platform.factor.service.FactorAnalysisService.FactorIcSnapshot snap = snapshots.get(fc);
+                    if (snap != null && Math.abs(qr.icMean) > Math.abs(snap.icMean) * 0.5) {
+                        // 用季频IC替换（要求季频IC信号不能太弱）
+                        double oldIc = snap.icMean;
+                        snap.icMean = qr.icMean;
+                        snap.icStd = qr.icStd;
+                        snap.assessment = (snap.assessment != null ? snap.assessment + "; " : "") + "季频IC校正(" + String.format("%.4f", oldIc) + "→" + String.format("%.4f", qr.icMean) + ")";
+                        corrected++;
+                        log.info("[DynamicWeight] P4 季频IC校正: {} 日频IC={} → 季频IC={} ({}个季度)",
+                                fc, oldIc, qr.icMean, qr.quarterCount);
+                    }
+                }
+            } catch (Exception e) {
+                log.debug("[DynamicWeight] P4 季频IC校正跳过: {} error={}", fc, e.getMessage());
+            }
+        }
+        if (corrected > 0) {
+            log.info("[DynamicWeight] P4 季频IC校正完成: {}/{}个FIN因子已校正", corrected, factorCodes.stream().filter(fc -> fc.startsWith("FIN_")).count());
+        }
+        return corrected;
+    }
+
+    /** 计算数组标准差 */
+    private static double std(double[] values) {
+        if (values.length == 0) return 0;
+        double mean = Arrays.stream(values).average().orElse(0);
+        double variance = Arrays.stream(values).map(x -> (x - mean) * (x - mean)).average().orElse(0);
+        return Math.sqrt(variance);
     }
 }

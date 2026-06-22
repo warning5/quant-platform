@@ -60,12 +60,13 @@ function formatMarketCap(val) {
 
 // ── IC 诊断动作配色 ──
 const DIAG_CONFIG = {
-  KEPT:      { color: '#52c41a', text: '参与加权', bg: '#f6ffed' },
-  KEPT_ICW:  { color: '#1890ff', text: 'IC加权', bg: '#e6f7ff' },
-  KEPT_EQW:  { color: '#52c41a', text: '等权(IC)', bg: '#f6ffed' },
-  DROPPED:   { color: '#ff4d4f', text: '已剔除',   bg: '#fff1f0' },
-  REVERSED:  { color: '#fa8c16', text: '方向反转', bg: '#fff7e6' },
-  NO_DATA:   { color: '#d9d9d9', text: '无数据',   bg: '#fafafa' },
+  KEPT:            { color: '#52c41a', text: '参与加权',     bg: '#f6ffed' },
+  KEPT_ICW:        { color: '#1890ff', text: 'IC加权',       bg: '#e6f7ff' },
+  KEPT_EQW:        { color: '#52c41a', text: '等权(IC)',     bg: '#f6ffed' },
+  DROPPED:         { color: '#ff4d4f', text: 'IC不足剔除',   bg: '#fff1f0' },
+  CROWDING_DROPPED: { color: '#ff4d4f', text: '拥挤度剔除',   bg: '#fff1f0' },
+  REVERSED:         { color: '#fa8c16', text: '方向反转',     bg: '#fff7e6' },
+  NO_DATA:          { color: '#d9d9d9', text: '无数据',       bg: '#fafafa' },
 };
 
 export default function RecommendationList() {
@@ -1074,7 +1075,7 @@ export default function RecommendationList() {
       {/* IC 加权因子诊断 */}
       {factorDiagnostics && factorDiagnostics.length > 0 && (() => {
         const kept = factorDiagnostics.filter(d => d.action === 'KEPT' || d.action === 'KEPT_ICW' || d.action === 'KEPT_EQW');
-        const dropped = factorDiagnostics.filter(d => d.action === 'DROPPED');
+        const dropped = factorDiagnostics.filter(d => d.action === 'DROPPED' || d.action === 'CROWDING_DROPPED');
         const reversed = factorDiagnostics.filter(d => d.action === 'REVERSED');
         const noData = factorDiagnostics.filter(d => d.action === 'NO_DATA');
         const abnormalCount = dropped.length + reversed.length + noData.length;
@@ -1121,6 +1122,29 @@ export default function RecommendationList() {
                   📅 IC 数据截止日期: <b>{icDataDate}</b>（近5个交易日因缺少前瞻价格数据，IC不可用，已自动回退至最近可用IC日期）
                 </div>
               )}
+              {/* IC衰减加权 / 拥挤度过滤 / 季频校正 摘要 */}
+              {(() => {
+                // IC衰减加权: 从 KEPT 条目的 reason 解析半衰期
+                const halflifeMatch = (kept[0]?.reason || '').match(/半衰(\d+)天/);
+                const halflifeDays = halflifeMatch ? halflifeMatch[1] : null;
+                // 拥挤度剔除数（只算 CROWDING_DROPPED，不含 IC不足剔除）
+                const crowdingCount = factorDiagnostics.filter(d => d.action === 'CROWDING_DROPPED').length;
+                // 季频IC校正: reason 含"季频IC校正"的条目数
+                const quarterlyCount = factorDiagnostics.filter(d => (d.reason || '').includes('季频IC校正')).length;
+                if (!halflifeDays && crowdingCount === 0 && quarterlyCount === 0) return null;
+                return (
+                  <div style={{
+                    background: '#f6ffed', border: '1px solid #b7eb8f',
+                    borderRadius: 4, padding: '8px 12px', marginBottom: 12,
+                    fontSize: 12, color: '#389e0d',
+                  }}>
+                    <span style={{ fontWeight: 600 }}>因子加权增强：</span>
+                    {halflifeDays && <span style={{ marginRight: 16 }}>IC衰减半衰期 <b>{halflifeDays}天</b></span>}
+                    {crowdingCount > 0 && <span style={{ marginRight: 16 }}>拥挤度剔除 <b>{crowdingCount}个</b></span>}
+                    {quarterlyCount > 0 && <span>财务因子季频校正 <b>{quarterlyCount}个</b></span>}
+                  </div>
+                );
+              })()}
               {/* 参与加权的因子 */}
               {kept.length > 0 && (
                 <div style={{ marginBottom: abnormalCount > 0 ? 16 : 0 }}>
