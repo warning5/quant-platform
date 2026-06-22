@@ -1215,4 +1215,184 @@ public class FactorAnalysisService {
         }
         return Math.sqrt(sumSq / (values.size() - 1));
     }
+
+    // ================================================================
+    //  P1+P2: 推荐引擎因子IC快照 + 衰减加权
+    // ================================================================
+
+    /**
+     * 因子IC快照（供推荐引擎使用）
+     */
+    public static class FactorIcSnapshot {
+        public String factorCode;
+        public double icMean;         // 衰减加权IC均值
+        public double icMeanRaw;      // 原始等权IC均值（用于诊断）
+        public double icStd;          // IC标准差
+        public double icSign;         // IC符号：+1正向，-1反向（用于方向对齐）
+        public int sampleDays;        // 有效样本日数
+        public String status;         // KEPT: 保留, DROPPED: |IC|不足, NO_DATA: 无数据
+        public String assessment;     // 有效因子/弱有效/无效因子
+        public List<Double> icTimeline; // IC时序
+        public int halflifeUsed;      // 使用的半衰期
+
+        /** |IC|绝对值（方向对齐后的权重基准） */
+        public double absIc() { return Math.abs(icMean); }
+    }
+
+    /**
+     * 快速因子IC快照 — 供每日推荐前校准因子权重使用
+     *
+     * @param factorCodes    因子代码列表
+     * @param referenceDate  参考日期（推荐日期）
+     * @param lookbackDays   回溯天数（默认60）
+     * @param icThreshold    IC阈值（|IC|低于此值的因子被剔除）
+     * @param halflifeDays   半衰期天数（默认20，0表示等权）
+     * @return 因子IC快照映射
+     */
+    public Map<String, FactorIcSnapshot> quickFactorIcSnapshot(
+            List<String> factorCodes, LocalDate referenceDate,
+            int lookbackDays, double icThreshold, int halflifeDays) {
+
+        Map<String, FactorIcSnapshot> snapshots = new LinkedHashMap<>();
+        if (factorCodes == null || factorCodes.isEmpty()) return snapshots;
+
+        // 计算起始日期
+        LocalDate startDate = referenceDate.minusDays(lookbackDays * 2); // buffer
+        String startDateStr = startDate.toString();
+        String endDateStr = referenceDate.toString();
+
+        for (String fc : factorCodes) {
+            try {
+                FactorIcSnapshot snapshot = computeSnapshot(fc, startDateStr, endDateStr,
+                        5, false, "spearman", halflifeDays, icThreshold);
+                if (snapshot != null) {
+                    snapshots.put(fc, snapshot);
+                }
+            } catch (Exception e) {
+                log.warn("[IC快照] 因子 {} 计算失败: {}", fc, e.getMessage());
+                FactorIcSnapshot err = new FactorIcSnapshot();
+                err.factorCode = fc;
+                err.status = "NO_DATA";
+                err.icMean = 0;
+                err.icSign = 0;
+                snapshots.put(fc, err);
+            }
+        }
+
+        return snapshots;
+    }
+
+    /**
+     * 计算单个因子IC快照（含衰减加权）
+     */
+    private FactorIcSnapshot computeSnapshot(String factorCode, String startDate, String endDate,
+                                              int forwardDays, boolean neutralizeByIndustry,
+                                              String correlationType, int halflifeDays, double icThreshold) {
+
+        // 1. 获取IC时序
+        List<Double> icTimeline = getIcTimeline(factorCode, startDate, endDate, forwardDays,
+                neutralizeByIndustry, correlationType);
+        if (icTimeline == null || icTimeline.isEmpty()) {
+            FactorIcSnapshot s = new FactorIcSnapshot();
+            s.factorCode = factorCode;
+            s.status = "NO_DATA";
+            s.icMean = 0;
+            s.icSign = 0;
+            return s;
+        }
+
+        // 2. 计算衰减加权IC均值
+        double decayIcMean;
+        if (halflifeDays > 0) {
+            decayIcMean = decayWeightedMean(icTimeline, halflifeDays);
+        } else {
+            decayIcMean = icTimeline.stream().mapToDouble(d -> d).average().orElse(0);
+        }
+        double rawIcMean = icTimeline.stream().mapToDouble(d -> d).average().orElse(0);
+
+        // 3. 计算标准差
+        double icStd = calcStd(icTimeline);
+
+        // 4. 阈值判断
+        FactorIcSnapshot s = new FactorIcSnapshot();
+        s.factorCode = factorCode;
+        s.icMean = decayIcMean;
+        s.icMeanRaw = rawIcMean;
+        s.icStd = icStd;
+        s.sampleDays = icTimeline.size();
+        s.icTimeline = icTimeline;
+        s.halflifeUsed = halflifeDays;
+
+        if (Math.abs(decayIcMean) < icThreshold) {
+            s.status = "DROPPED";
+            s.icSign = decayIcMean >= 0 ? 1 : -1;
+        } else {
+            s.status = "KEPT";
+            s.icSign = decayIcMean >= 0 ? 1 : -1;
+        }
+
+        // 5. 评估
+        s.assessment = assessIcIr(Math.abs(decayIcMean),
+                icStd > 1e-9 ? Math.abs(decayIcMean) / icStd : 0);
+
+        return s;
+    }
+
+    /**
+     * 获取IC时间序列（单因子，简化版，不返回完整统计）
+     * 复用 clickHouseFactorValueService 和收益数据
+     */
+    private List<Double> getIcTimeline(String factorCode, String startDate, String endDate,
+                                        int forwardDays, boolean neutralizeByIndustry,
+                                        String correlationType) {
+        // 复用 calcSingleFactorIcIr，提取 icTimeline
+        try {
+            Map<String, Object> result = calcSingleFactorIcIr(factorCode, startDate, endDate,
+                    forwardDays, neutralizeByIndustry, correlationType);
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> timeline = (List<Map<String, Object>>) result.get("icTimeline");
+            if (timeline == null) return Collections.emptyList();
+
+            List<Double> ics = new ArrayList<>();
+            for (Map<String, Object> pt : timeline) {
+                Object icVal = pt.get("ic");
+                if (icVal instanceof Number) {
+                    ics.add(((Number) icVal).doubleValue());
+                }
+            }
+            return ics;
+        } catch (Exception e) {
+            log.debug("[IC时序] 因子{}获取失败: {}", factorCode, e.getMessage());
+            return Collections.emptyList();
+        }
+    }
+
+    /**
+     * 衰减加权均值：Σ(IC_t × 2^(-t/halflife)) / Σ(2^(-t/halflife))
+     * t=0 是最新（最后一个），t=N-1 是最远（第一个）
+     */
+    public static double decayWeightedMean(List<Double> values, int halflifeDays) {
+        if (values == null || values.isEmpty()) return 0;
+        int n = values.size();
+        double sumWeighted = 0, sumWeights = 0;
+        for (int i = 0; i < n; i++) {
+            // offset: 0=latest, n-1=oldest
+            int offset = n - 1 - i;
+            double weight = Math.pow(2, -offset / (double) halflifeDays);
+            sumWeighted += values.get(i) * weight;
+            sumWeights += weight;
+        }
+        return sumWeights > 0 ? sumWeighted / sumWeights : 0;
+    }
+
+    /**
+     * 动态半衰期：根据市场波动率自适应
+     * HIGH vol → 短半衰(10天) 更快适应
+     * LOW vol  → 长半衰(30天) 更稳定
+     */
+    public static int adaptiveHalflife(double volatilityPercentile) {
+        if (volatilityPercentile >= 0.7) return 10;  // 高波动：快适应
+        if (volatilityPercentile >= 0.4) return 20;  // 中波动：默认
+        return 30;  // 低波动：稳定
+    }
 }

@@ -141,6 +141,27 @@ export const factorApi = {
     }),
   // 按日期筛选缺失因子值的因子
   missingByDate: (date) => api.get('/factors/missing-by-date', { params: { date } }),
+  // P3: 因子拥挤度检测
+  crowdingDetection: (factorCodes, startDate, endDate, corrThreshold = 0.7) =>
+    api.post('/factors/crowding-detection', null, {
+      params: { factorCodes: factorCodes.join(','), startDate, endDate, corrThreshold },
+      timeout: 120000,
+    }),
+  // P3: 因子拥挤度去重
+  crowdingDedup: (factorCodes, startDate, endDate, corrThreshold = 0.7) =>
+    api.post('/factors/crowding-dedup', null, {
+      params: { factorCodes: factorCodes.join(','), startDate, endDate, corrThreshold },
+      timeout: 120000,
+    }),
+  // P4: 财务因子季频IC
+  quarterlyIc: (factorCodes, startDate, endDate, forwardDays = 20, useAnnouncementDrift = false) =>
+    api.post('/factors/quarterly-ic', null, {
+      params: { factorCodes: factorCodes.join(','), startDate, endDate, forwardDays, useAnnouncementDrift },
+      timeout: 120000,
+    }),
+  // P4: 季末日期列表
+  quarterlyDates: (startDate, endDate) =>
+    api.get('/factors/quarterly-dates', { params: { startDate, endDate } }),
 };
 
 // ===== 策略 API =====

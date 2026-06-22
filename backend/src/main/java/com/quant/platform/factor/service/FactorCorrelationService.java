@@ -140,4 +140,218 @@ public class FactorCorrelationService {
         if (denominator == 0) return 0;
         return numerator / denominator;
     }
+
+    // ================================================================
+    //  P3: 因子拥挤度检测
+    // ================================================================
+
+    /** 因子组（聚类结果） */
+    public static class FactorCluster {
+        public String representative;         // 组代表（IC最高的因子）
+        public List<String> members;          // 所有成员
+        public double maxCorrelation;         // 组内最大相关性
+        public List<String> redundantFactors; // 被标记为冗余的因子（不含代表）
+    }
+
+    /**
+     * P3: 因子拥挤度检测 + 聚类去重
+     *
+     * @param factorCodes    因子代码列表
+     * @param startDate      开始日期
+     * @param endDate        结束日期
+     * @param corrThreshold  相关性阈值（默认0.7）
+     * @param icSnapshot     因子IC快照（用于选组内代表），可为null（用等权策略仅聚类）
+     * @return 拥挤度分析报告
+     */
+    public List<FactorCluster> detectCrowding(
+            List<String> factorCodes, LocalDate startDate, LocalDate endDate,
+            double corrThreshold,
+            Map<String, ?> icSnapshot) {
+
+        if (factorCodes == null || factorCodes.size() < 2) {
+            return Collections.emptyList();
+        }
+
+        // 1. 获取相关性矩阵
+        List<Map<String, Object>> corrMatrix;
+        try {
+            corrMatrix = computeCorrelationMatrix(factorCodes, startDate, endDate);
+        } catch (Exception e) {
+            log.warn("[Crowding] 相关性矩阵计算失败: {}", e.getMessage());
+            return Collections.emptyList();
+        }
+
+        if (corrMatrix.isEmpty()) {
+            log.info("[Crowding] 无相关性数据，跳过拥挤度分析");
+            return Collections.emptyList();
+        }
+
+        // 2. 构建邻接表（只保留相关性 >= 阈值且非自相关的边）
+        Map<String, Set<String>> adjacency = new LinkedHashMap<>();
+        for (String fc : factorCodes) {
+            adjacency.put(fc, new HashSet<>());
+        }
+        for (Map<String, Object> pair : corrMatrix) {
+            String c1 = (String) pair.get("factorCode1");
+            String c2 = (String) pair.get("factorCode2");
+            if (c1.equals(c2)) continue;
+            double corr = ((Number) pair.get("correlation")).doubleValue();
+            if (Math.abs(corr) >= corrThreshold) {
+                adjacency.get(c1).add(c2);
+                adjacency.get(c2).add(c1);
+            }
+        }
+
+        // 3. 并查集聚类
+        Map<String, String> parent = new HashMap<>();
+        for (String fc : factorCodes) parent.put(fc, fc);
+
+        for (Map<String, Object> pair : corrMatrix) {
+            String c1 = (String) pair.get("factorCode1");
+            String c2 = (String) pair.get("factorCode2");
+            if (c1.equals(c2)) continue;
+            double corr = ((Number) pair.get("correlation")).doubleValue();
+            if (Math.abs(corr) >= corrThreshold) {
+                union(parent, c1, c2);
+            }
+        }
+
+        // 4. 构建聚类组
+        Map<String, List<String>> groups = new LinkedHashMap<>();
+        for (String fc : factorCodes) {
+            String root = find(parent, fc);
+            groups.computeIfAbsent(root, k -> new ArrayList<>()).add(fc);
+        }
+
+        // 5. 构建报告：每组选IC最高为代表
+        List<FactorCluster> clusters = new ArrayList<>();
+        for (Map.Entry<String, List<String>> entry : groups.entrySet()) {
+            List<String> members = entry.getValue();
+            if (members.size() <= 1) continue; // 孤立因子，无拥挤
+
+            // 选代表：IC最高的因子
+            String representative = members.get(0);
+            if (icSnapshot != null && !icSnapshot.isEmpty()) {
+                double bestIc = -Double.MAX_VALUE;
+                for (String fc : members) {
+                    Object icObj = icSnapshot.get(fc);
+                    double ic = 0;
+                    if (icObj instanceof FactorAnalysisService.FactorIcSnapshot) {
+                        ic = Math.abs(((FactorAnalysisService.FactorIcSnapshot) icObj).icMean);
+                    } else if (icObj instanceof Number) {
+                        ic = Math.abs(((Number) icObj).doubleValue());
+                    }
+                    if (ic > bestIc) {
+                        bestIc = ic;
+                        representative = fc;
+                    }
+                }
+            }
+
+            // 找到组内最大相关性
+            double maxCorr = 0;
+            for (int i = 0; i < members.size(); i++) {
+                for (int j = i + 1; j < members.size(); j++) {
+                    for (Map<String, Object> pair : corrMatrix) {
+                        String c1 = (String) pair.get("factorCode1");
+                        String c2 = (String) pair.get("factorCode2");
+                        if ((c1.equals(members.get(i)) && c2.equals(members.get(j))) ||
+                            (c1.equals(members.get(j)) && c2.equals(members.get(i)))) {
+                            double corr = Math.abs(((Number) pair.get("correlation")).doubleValue());
+                            if (corr > maxCorr) maxCorr = corr;
+                        }
+                    }
+                }
+            }
+
+            List<String> redundant = new ArrayList<>(members);
+            redundant.remove(representative);
+
+            FactorCluster cluster = new FactorCluster();
+            cluster.representative = representative;
+            cluster.members = members;
+            cluster.maxCorrelation = maxCorr;
+            cluster.redundantFactors = redundant;
+
+            clusters.add(cluster);
+
+            log.info("[Crowding] 拥挤组: {} 成员={}, 代表={}, maxCorr={:.3f}",
+                    members.size(), members, representative, maxCorr);
+        }
+
+        log.info("[Crowding] 拥挤度分析完成: {}个因子, {}个聚类组, 阈值={}",
+                factorCodes.size(), clusters.size(), corrThreshold);
+
+        return clusters;
+    }
+
+    /** 并查集：查找 */
+    private String find(Map<String, String> parent, String x) {
+        if (!parent.get(x).equals(x)) {
+            parent.put(x, find(parent, parent.get(x)));
+        }
+        return parent.get(x);
+    }
+
+    /** 并查集：合并 */
+    private void union(Map<String, String> parent, String a, String b) {
+        String ra = find(parent, a);
+        String rb = find(parent, b);
+        if (!ra.equals(rb)) parent.put(ra, rb);
+    }
+
+    /**
+     * P3: 生成拥挤度报告摘要（供前端展示）
+     */
+    public Map<String, Object> getCrowdingReport(
+            List<String> factorCodes, LocalDate startDate, LocalDate endDate,
+            double corrThreshold,
+            Map<String, FactorAnalysisService.FactorIcSnapshot> icSnapshots) {
+
+        Map<String, Object> report = new LinkedHashMap<>();
+
+        List<FactorCluster> clusters = detectCrowding(factorCodes, startDate, endDate,
+                corrThreshold, icSnapshots);
+
+        report.put("totalFactors", factorCodes.size());
+        report.put("clusterCount", clusters.size());
+        report.put("correlationThreshold", corrThreshold);
+        report.put("startDate", startDate.toString());
+        report.put("endDate", endDate.toString());
+
+        int redundantCount = clusters.stream()
+                .mapToInt(c -> c.redundantFactors.size()).sum();
+        report.put("redundantCount", redundantCount);
+        report.put("efficiencyGain", factorCodes.size() > 0 ?
+                (double) redundantCount / factorCodes.size() : 0);
+
+        // 详细集群信息
+        List<Map<String, Object>> clusterDetails = new ArrayList<>();
+        for (FactorCluster c : clusters) {
+            Map<String, Object> detail = new LinkedHashMap<>();
+            detail.put("representative", c.representative);
+            detail.put("members", c.members);
+            detail.put("clusterSize", c.members.size());
+            detail.put("maxCorrelation", Math.round(c.maxCorrelation * 1000.0) / 1000.0);
+
+            List<String> dropped = c.redundantFactors;
+            detail.put("dropped", dropped);
+            detail.put("droppedCount", dropped.size());
+
+            clusterDetails.add(detail);
+        }
+        report.put("clusters", clusterDetails);
+
+        // 去重后的因子列表
+        Set<String> deduped = new LinkedHashSet<>(factorCodes);
+        for (FactorCluster c : clusters) {
+            for (String d : c.redundantFactors) {
+                deduped.remove(d);
+            }
+        }
+        report.put("dedupedFactorCodes", new ArrayList<>(deduped));
+        report.put("dedupedCount", deduped.size());
+
+        return report;
+    }
 }

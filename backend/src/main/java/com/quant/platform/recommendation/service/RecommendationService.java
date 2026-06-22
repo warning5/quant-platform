@@ -2,6 +2,7 @@ package com.quant.platform.recommendation.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quant.platform.factor.ic.service.FactorIcService;
+import com.quant.platform.factor.service.FactorAnalysisService;
 import com.quant.platform.market.domain.MarketDailyBar;
 import com.quant.platform.market.service.MarketDataService;
 import com.quant.platform.recommendation.domain.StockRecommendation;
@@ -119,6 +120,10 @@ public class RecommendationService {
      * ATR 历史分位数回溯天数
      */
     private static final int ATR_LOOKBACK_DAYS = 250;
+    /** P1: 默认IC预筛选阈值 */
+    private static final double DEFAULT_IC_THRESHOLD = 0.03;
+    /** P2: 默认半衰期（交易日） */
+    private static final int DEFAULT_HALFLIFE_DAYS = 20;
     /**
      * 沪深300指数代码
      */
@@ -146,6 +151,7 @@ public class RecommendationService {
     private final StrategyDefinitionMapper strategyDefinitionMapper;
     private final ObjectMapper objectMapper;
     private final FactorIcService factorIcService;
+    private final FactorAnalysisService factorAnalysisService;
     private final DividendService dividendService;
     private final StockBlacklistService stockBlacklistService;
     private final StrategyConfidenceService strategyConfidenceService;
@@ -163,6 +169,7 @@ public class RecommendationService {
                                  StrategyDefinitionMapper strategyDefinitionMapper,
                                  ObjectMapper objectMapper,
                                  FactorIcService factorIcService,
+                                 FactorAnalysisService factorAnalysisService,
                                  DividendService dividendService,
                                  StockBlacklistService stockBlacklistService,
                                  StrategyConfidenceService strategyConfidenceService,
@@ -179,6 +186,7 @@ public class RecommendationService {
         this.strategyDefinitionMapper = strategyDefinitionMapper;
         this.objectMapper = objectMapper;
         this.factorIcService = factorIcService;
+        this.factorAnalysisService = factorAnalysisService;
         this.dividendService = dividendService;
         this.stockBlacklistService = stockBlacklistService;
         this.strategyConfidenceService = strategyConfidenceService;
@@ -239,6 +247,9 @@ public class RecommendationService {
     /**
      * 生成推荐列表
      *
+     * P1: 默认启用IC动态权重（不再需要weightMode="IC"）
+     *     自动预筛选+方向对齐+衰减加权
+     *
      * @param date        推荐日期（null 则使用最新可用日期）
      * @param topN        最终推荐数量（默认20）
      * @param diagnostics 输出参数，因子诊断信息（调用方传入空List来收集）
@@ -251,7 +262,8 @@ public class RecommendationService {
         if (topN == null || topN <= 0) {
             topN = ANALYSIS_TOP_N;
         }
-        boolean useDynamicIc = "IC".equalsIgnoreCase(weightMode);
+        // P1: 默认启用IC动态权重（STATIC模式手动关闭）
+        boolean useDynamicIc = !"STATIC".equalsIgnoreCase(weightMode);
 
         log.info("[Recommendation] 开始生成推荐列表: date={}, topN={}, strategyId={}, weightMode={}, confidenceControl={}",
                 date, topN, strategyId, weightMode, enableConfidenceControl);
@@ -1986,19 +1998,17 @@ public class RecommendationService {
     }
 
     /**
-     * 动态调整因子权重（基于IC历史表现）—— IC加权综合得分（P0需求）
+     * P1+P2: 动态调整因子权重（基于IC历史表现 + 衰减加权 + 预筛选 + 方向对齐）
      * <p>
      * 规则：
-     * - 获取每个因子最近60天的IC序列，计算IC均值（保留正负号）
-     * - 只取IC均值 > 0的因子参与加权（有正向预测能力的因子）
-     * - 归一化：adjustedWeight = originalWeight * (factorIC / sum(all positive ICs))
-     * - IC <= 0的因子：权重置零
-     * - IC < 0的因子：自动反转direction
-     * - 所有IC均<=0时回退到等权，但IC<0的仍反转direction
+     * - 使用 FactorAnalysisService.quickFactorIcSnapshot() 计算衰减加权IC
+     * - 预筛选：|IC| &lt; icThreshold 的因子被剔除
+     * - 方向对齐：负IC因子自动反转direction，使用|IC|参与加权
+     * - 权重分配：按|IC|比例分配（ICW模式），或等权（EQW模式），或逆方差（OPT模式）
      *
      * @param factors     原始因子配置
      * @param date        选股日期
-     * @param diagnostics 输出参数，因子诊断信息（调用方传入空List来收集）
+     * @param diagnostics 输出参数，因子诊断信息
      * @return 调整后的因子配置
      */
     private List<ScreenRequest.FactorWeight> applyDynamicFactorWeights(
@@ -2006,94 +2016,55 @@ public class RecommendationService {
             List<FactorDiagnostic> diagnostics) {
         if (factors == null || factors.isEmpty()) return factors;
 
-        List<ScreenRequest.FactorWeight> adjusted = new ArrayList<>();
-        Map<String, Double> icScores = new HashMap<>();
+        List<String> factorCodes = factors.stream()
+                .map(ScreenRequest.FactorWeight::getFactorCode)
+                .collect(Collectors.toList());
 
-        // 0. 获取所有因子共有IC数据的最新日期，自动回退（解决近5天无IC的问题）
-        List<String> factorCodes = factors.stream().map(ScreenRequest.FactorWeight::getFactorCode).collect(Collectors.toList());
+        // Resolve reference date
+        LocalDate refDate = date != null ? date : LocalDate.now();
         LocalDate effectiveIcDate = factorIcService.getLatestCommonIcDate(factorCodes);
-        if (effectiveIcDate == null) {
-            effectiveIcDate = date; // 无数据时回退到推荐日期
-        } else if (date != null && effectiveIcDate.isAfter(date)) {
-            effectiveIcDate = date; // 不超前于推荐日期
-        }
-        String icDateLabel = effectiveIcDate != null ? effectiveIcDate.toString() : "无";
-
-        // 1. 获取每个因子的IC历史
-        for (ScreenRequest.FactorWeight fw : factors) {
-            String fc = fw.getFactorCode();
-            try {
-                // 使用回退后的IC日期查询，而非推荐日期
-                List<Double> icValues = factorIcService.getIcHistory(fc, effectiveIcDate, 60);
-                if (icValues == null || icValues.isEmpty()) {
-                    log.warn("[DynamicWeight] 因子 {} 无IC历史数据，保持原始权重", fc);
-                    icScores.put(fc, null); // null 表示无数据
-                    continue;
-                }
-
-                // 计算IC均值（保留正负号）
-                double avgIc = icValues.stream().mapToDouble(Double::doubleValue).average().orElse(0);
-                icScores.put(fc, avgIc);
-
-                log.debug("[DynamicWeight] 因子 {} 近60日IC均值={} (IC数据日期={})", fc, avgIc, icDateLabel);
-            } catch (Exception e) {
-                log.warn("[DynamicWeight] 获取因子 {} IC数据失败: {}", fc, e.getMessage());
-                icScores.put(fc, null);
-            }
+        if (effectiveIcDate != null && effectiveIcDate.isBefore(refDate)) {
+            refDate = effectiveIcDate;
         }
 
-        // 2. 计算IC>0的因子的IC之和
-        double sumPositiveIc = icScores.values().stream()
-                .filter(v -> v != null && v > 0)
-                .mapToDouble(Double::doubleValue)
+        // P1+P2: 使用衰减加权IC快照
+        // 动态半衰期：直接使用默认20天（后续可基于波动率动态调整）
+        int halflife = DEFAULT_HALFLIFE_DAYS;
+        Map<String, FactorAnalysisService.FactorIcSnapshot> snapshots =
+                factorAnalysisService.quickFactorIcSnapshot(
+                        factorCodes, refDate, 60, DEFAULT_IC_THRESHOLD, halflife);
+
+        log.info("[DynamicWeight] IC快照完成: {}个因子, 阈值={}, 半衰={}天, 保留{}个",
+                factorCodes.size(), DEFAULT_IC_THRESHOLD, halflife,
+                snapshots.values().stream().filter(s -> "KEPT".equals(s.status)).count());
+
+        // 筛选保留的因子
+        List<FactorAnalysisService.FactorIcSnapshot> keptSnapshots = snapshots.values().stream()
+                .filter(s -> "KEPT".equals(s.status))
+                .collect(Collectors.toList());
+
+        // 计算|IC|总和（用于ICW权重分配）
+        double sumAbsIc = keptSnapshots.stream()
+                .mapToDouble(FactorAnalysisService.FactorIcSnapshot::absIc)
                 .sum();
 
-        if (sumPositiveIc <= 0) {
-            log.info("[DynamicWeight] 无有效正IC数据，保持原始权重");
-            // 但仍反转IC<0的direction
-            for (ScreenRequest.FactorWeight fw : factors) {
-                String fc = fw.getFactorCode();
-                Double avgIcObj = icScores.get(fc);
-                ScreenRequest.FactorWeight adjustedFw = new ScreenRequest.FactorWeight();
-                adjustedFw.setFactorCode(fc);
-                adjustedFw.setFilterOp(fw.getFilterOp());
-                adjustedFw.setFilterValue(fw.getFilterValue());
-                adjustedFw.setWeight(fw.getWeight());
+        // 计算逆方差总和（用于OPT权重分配）
+        double optSum = keptSnapshots.stream()
+                .mapToDouble(s -> 1.0 / Math.max(s.icStd * s.icStd, 1e-9))
+                .sum();
 
-                FactorDiagnostic diag = new FactorDiagnostic();
-                diag.factorCode = fc;
-                diag.originalWeight = fw.getWeight();
-                diag.adjustedWeight = fw.getWeight();
-
-                if (avgIcObj == null) {
-                    adjustedFw.setDirection(fw.getDirection());
-                    diag.action = "NO_DATA";
-                    diag.icMean = 0;
-                    diag.reason = "无IC历史数据，保持原始配置";
-                } else if (avgIcObj < 0) {
-                    adjustedFw.setDirection(-fw.getDirection());
-                    diag.action = "REVERSED";
-                    diag.icMean = avgIcObj;
-                    diag.reason = String.format("IC均值为负(%.4f)，方向已自动反转，权重保持不变（无正向因子可参与加权）", avgIcObj);
-                    log.info("[DynamicWeight] 因子 {} IC为负({:.4f})，反转方向: {} -> {}",
-                            fc, avgIcObj, fw.getDirection(), adjustedFw.getDirection());
-                } else {
-                    adjustedFw.setDirection(fw.getDirection());
-                    diag.action = "KEPT";
-                    diag.icMean = avgIcObj;
-                    diag.reason = String.format("IC均值=%.4f，无其他正向因子，保持等权", avgIcObj);
-                }
-                diagnostics.add(diag);
-                adjusted.add(adjustedFw);
-            }
-            return adjusted;
+        // 构建原始因子查找表
+        Map<String, ScreenRequest.FactorWeight> originalMap = new LinkedHashMap<>();
+        for (ScreenRequest.FactorWeight fw : factors) {
+            originalMap.put(fw.getFactorCode(), fw);
         }
 
-        // 3. 调整权重：IC>0的按IC占比分配，IC<=0的剔除
+        List<ScreenRequest.FactorWeight> adjusted = new ArrayList<>();
+        int keptCount = 0, droppedCount = 0, noDataCount = 0;
+
         for (ScreenRequest.FactorWeight fw : factors) {
             String fc = fw.getFactorCode();
-            Double avgIcObj = icScores.get(fc);
-            double avgIc = avgIcObj != null ? avgIcObj : 0;
+            FactorAnalysisService.FactorIcSnapshot snap = snapshots.get(fc);
             double originalWeight = fw.getWeight();
             int originalDirection = fw.getDirection();
 
@@ -2105,49 +2076,68 @@ public class RecommendationService {
             FactorDiagnostic diag = new FactorDiagnostic();
             diag.factorCode = fc;
             diag.originalWeight = originalWeight;
-            diag.icMean = avgIc;
 
-            if (avgIcObj == null) {
+            if (snap == null || "NO_DATA".equals(snap.status)) {
                 // 无IC数据，保持原样
                 adjustedFw.setWeight(originalWeight);
                 adjustedFw.setDirection(originalDirection);
                 diag.action = "NO_DATA";
                 diag.adjustedWeight = originalWeight;
+                diag.icMean = 0;
                 diag.reason = "无IC历史数据，保持原始配置";
-                log.warn("[DynamicWeight] 因子 {} 无IC历史数据，保持原始权重", fc);
-            } else if (avgIc > 0) {
-                double weightMultiplier = avgIc / sumPositiveIc;
-                adjustedFw.setWeight(originalWeight * weightMultiplier);
-                adjustedFw.setDirection(originalDirection);
-                diag.action = "KEPT";
-                diag.adjustedWeight = adjustedFw.getWeight();
-                diag.reason = String.format("IC=%.4f > 0，参与加权，新权重=%.4f × %.4f/%.4f=%.4f",
-                        avgIc, originalWeight, avgIc, sumPositiveIc, adjustedFw.getWeight());
-                log.info("[DynamicWeight] 因子 {} IC={} 权重: {} -> {} ({})",
-                        fc, avgIc, originalWeight, adjustedFw.getWeight(), weightMultiplier);
-            } else if (avgIc < 0) {
-                // IC < 0，权重置零，方向反转
+                log.warn("[DynamicWeight] 因子 {} 无IC历史数据", fc);
+                noDataCount++;
+            } else if ("DROPPED".equals(snap.status)) {
+                // |IC| < 阈值，剔除
                 adjustedFw.setWeight(0.0);
-                adjustedFw.setDirection(-originalDirection);
+                adjustedFw.setDirection(originalDirection);
                 diag.action = "DROPPED";
+                diag.icMean = snap.icMean;
                 diag.adjustedWeight = 0;
-                diag.reason = String.format("IC=%.4f < 0，权重置零，方向自动反转（原始方向=%d→%d），不参与本次选股",
-                        avgIc, originalDirection, adjustedFw.getDirection());
-                log.info("[DynamicWeight] 因子 {} IC为负({:.4f})，权重置零，反转方向: {} -> {}",
-                        fc, avgIc, originalDirection, adjustedFw.getDirection());
+                diag.reason = String.format("|IC|=%.4f < 阈值%.2f，预筛选剔除（衰减加权IC=%.4f，半衰=%d天）",
+                        Math.abs(snap.icMean), DEFAULT_IC_THRESHOLD, snap.icMean, halflife);
+                log.info("[DynamicWeight] 因子 {} |IC|={:.4f} < {}, 剔除", fc, Math.abs(snap.icMean), DEFAULT_IC_THRESHOLD);
+                droppedCount++;
             } else {
-                // IC = 0，权重置零
-                adjustedFw.setWeight(0.0);
-                adjustedFw.setDirection(originalDirection);
-                diag.action = "DROPPED";
-                diag.adjustedWeight = 0;
-                diag.reason = "IC均值=0，无预测能力，权重置零，不参与本次选股";
-                log.info("[DynamicWeight] 因子 {} IC为零，权重置零", fc);
+                // KEPT: 方向对齐 + |IC|加权
+                // 方向对齐：负IC → 反转direction
+                int alignedDirection = snap.icSign < 0 ? -originalDirection : originalDirection;
+                adjustedFw.setDirection(alignedDirection);
+
+                // 权重按|IC|比例分配
+                double absIc = snap.absIc();
+                double newWeight;
+                if (sumAbsIc > 1e-9) {
+                    // ICW: |IC|加权
+                    newWeight = originalWeight * (absIc / sumAbsIc);
+                    diag.action = "KEPT_ICW";
+                } else {
+                    // EQW fallback
+                    newWeight = originalWeight / Math.max(keptSnapshots.size(), 1);
+                    diag.action = "KEPT_EQW";
+                }
+                adjustedFw.setWeight(newWeight);
+
+                diag.icMean = snap.icMean;
+                diag.adjustedWeight = newWeight;
+                diag.reason = String.format(
+                        "IC=%.4f (衰减加权,半衰%d天), |IC|=%.4f, 方向%s, 新权重=%.4f",
+                        snap.icMean, halflife, absIc,
+                        snap.icSign < 0 ? "↓取反(对齐)" : "↑正向",
+                        newWeight);
+                log.info("[DynamicWeight] 因子 {} IC={:.4f} (|IC|={:.4f}) 方向={} 权重: {}->{}",
+                        fc, snap.icMean, absIc,
+                        snap.icSign < 0 ? "取反" : "正向",
+                        originalWeight, newWeight);
+                keptCount++;
             }
 
             diagnostics.add(diag);
             adjusted.add(adjustedFw);
         }
+
+        log.info("[DynamicWeight] 完成: 保留{}/剔除{}/无数据{}, |IC|和={:.4f}, 半衰={}天",
+                keptCount, droppedCount, noDataCount, sumAbsIc, halflife);
 
         return adjusted;
     }

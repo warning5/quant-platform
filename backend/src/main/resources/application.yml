@@ -96,6 +96,8 @@ quant:
   factor:
     script-timeout-seconds: 30
     cache-size: 1000
+    ic:
+      forward-return-days: 5   # IC 计算用的未来收益交易日数（默认5，改完需重启）
   aktools:
     enabled: true  # 设置为true启用AKTools数据获取
     domain: http://127.0.0.1:9090

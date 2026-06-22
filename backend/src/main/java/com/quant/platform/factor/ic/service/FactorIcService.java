@@ -4,6 +4,7 @@ import com.quant.platform.factor.ic.domain.FactorIcRecord;
 import com.quant.platform.factor.ic.mapper.FactorIcRecordMapper;
 import com.quant.platform.stock.service.ClickHouseStockService;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -25,8 +26,9 @@ public class FactorIcService {
     private final FactorIcRecordMapper icRecordMapper;
     private final ClickHouseStockService clickHouseStockService;
 
-    /** IC 计算用的未来收益天数 */
-    private static final int FORWARD_RETURN_DAYS = 5;
+    /** IC 计算用的未来收益天数（可通过 factor.ic.forward-return-days 配置，默认5） */
+    @Value("${quant.factor.ic.forward-return-days:5}")
+    private int forwardReturnDays;
 
     public FactorIcService(FactorIcRecordMapper icRecordMapper, ClickHouseStockService clickHouseStockService) {
         this.icRecordMapper = icRecordMapper;
@@ -54,9 +56,9 @@ public class FactorIcService {
 
         // 获取实际的前瞻交易日（第N个交易日，而非N个日历日）
         // 近期日期可能没有足够的前瞻数据，属于正常情况
-        LocalDate forwardDate = findForwardTradingDate(date, FORWARD_RETURN_DAYS);
+        LocalDate forwardDate = findForwardTradingDate(date, forwardReturnDays);
         if (forwardDate == null) {
-            log.debug("[FactorIC] 前瞻交易日不足: date={} forwardDays={}", date, FORWARD_RETURN_DAYS);
+            log.debug("[FactorIC] 前瞻交易日不足: date={} forwardDays={}", date, forwardReturnDays);
             return Collections.emptyMap();
         }
 
@@ -131,7 +133,7 @@ public class FactorIcService {
         LocalDate latestAvailable = null;
         if (!tradingDates.isEmpty()) {
             for (int i = tradingDates.size() - 1; i >= 0; i--) {
-                if (findForwardTradingDate(tradingDates.get(i), FORWARD_RETURN_DAYS) != null) {
+                if (findForwardTradingDate(tradingDates.get(i), forwardReturnDays) != null) {
                     latestAvailable = tradingDates.get(i);
                     break;
                 }
@@ -140,7 +142,7 @@ public class FactorIcService {
 
         log.info("[FactorIC] 批量计算完成: range=[{}, {}] tradingDays={} calculated={} skipped={} totalRecords={}{}",
                 startDate, endDate, tradingDates.size(), allResults.size(), skipped, totalRecords,
-                latestAvailable != null ? String.format(" (最近可计算日期=%s, 需往前%d交易日才有前瞻数据)", latestAvailable, FORWARD_RETURN_DAYS)
+                latestAvailable != null ? String.format(" (最近可计算日期=%s, 需往前%d交易日才有前瞻数据)", latestAvailable, forwardReturnDays)
                         : " (数据不足，无法计算任何日期的IC)");
         return allResults;
     }
@@ -262,11 +264,11 @@ public class FactorIcService {
                         f.symbol,
                         f.factor_val,
                         (d2.close_price - d1.close_price) / d1.close_price * 100 as fwd_return
-                    FROM stock.factor_value f FINAL
-                    INNER JOIN stock.stock_daily d1 FINAL
+                    FROM stock.factor_value f
+                    INNER JOIN stock.stock_daily d1
                         ON replaceRegexpOne(f.symbol, '\\.[A-Z]+$', '') = d1.code
                         AND d1.trade_date = '%s'
-                    INNER JOIN stock.stock_daily d2 FINAL
+                    INNER JOIN stock.stock_daily d2
                         ON replaceRegexpOne(f.symbol, '\\.[A-Z]+$', '') = d2.code
                         AND d2.trade_date = '%s'
                     WHERE f.factor_code = '%s'

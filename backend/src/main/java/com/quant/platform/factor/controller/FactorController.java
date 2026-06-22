@@ -10,6 +10,7 @@ import com.quant.platform.factor.service.FactorAnalysisService;
 import com.quant.platform.factor.service.FactorCorrelationService;
 import com.quant.platform.factor.service.FactorService;
 import com.quant.platform.factor.service.FactorWeightOptimizeService;
+import com.quant.platform.factor.service.QuarterlyFactorAnalysisService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -22,6 +23,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * 因子管理API
@@ -36,6 +38,7 @@ public class FactorController {
     private final FactorCorrelationService correlationService;
     private final FactorWeightOptimizeService factorWeightOptimizeService;
     private final FactorAnalysisService factorAnalysisService;
+    private final QuarterlyFactorAnalysisService quarterlyFactorAnalysisService;
     private final SimpMessagingTemplate messagingTemplate;
     private final FactorComputeEngine computeEngine;
 
@@ -383,5 +386,98 @@ public class FactorController {
         }
         return ApiResponse.success(
                 factorAnalysisService.getFactorIcTrend(factorCode, startDate.toString(), endDate.toString(), forwardDays));
+    }
+
+    // ================================================================
+    //  P3: 因子拥挤度检测
+    // ================================================================
+
+    @PostMapping("/crowding-detection")
+    @Operation(summary = "P3: 因子拥挤度检测 — 相关性聚类+去重建议")
+    public ApiResponse<Map<String, Object>> crowdingDetection(
+            @RequestParam String factorCodes,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @RequestParam(defaultValue = "0.7") double corrThreshold) {
+
+        List<String> codes = Arrays.asList(factorCodes.split(","));
+        if (codes.size() < 2) {
+            throw new IllegalArgumentException("至少需要2个因子进行拥挤度分析");
+        }
+
+        // 获取IC快照用于选代表
+        Map<String, FactorAnalysisService.FactorIcSnapshot> icSnapshots =
+                factorAnalysisService.quickFactorIcSnapshot(codes, endDate, 60, 0.02, 20);
+
+        Map<String, Object> report = correlationService.getCrowdingReport(
+                codes, startDate, endDate, corrThreshold, icSnapshots);
+
+        return ApiResponse.success(report);
+    }
+
+    @PostMapping("/crowding-dedup")
+    @Operation(summary = "P3: 因子拥挤度去重 — 返回去重后的因子列表")
+    public ApiResponse<Map<String, Object>> crowdingDedup(
+            @RequestParam String factorCodes,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @RequestParam(defaultValue = "0.7") double corrThreshold) {
+
+        List<String> codes = Arrays.asList(factorCodes.split(","));
+        if (codes.size() < 2) {
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("originalCount", codes.size());
+            result.put("dedupedCodes", codes);
+            result.put("removedCount", 0);
+            result.put("clusters", Collections.emptyList());
+            return ApiResponse.success(result);
+        }
+
+        Map<String, FactorAnalysisService.FactorIcSnapshot> icSnapshots =
+                factorAnalysisService.quickFactorIcSnapshot(codes, endDate, 60, 0.02, 20);
+
+        Map<String, Object> report = correlationService.getCrowdingReport(
+                codes, startDate, endDate, corrThreshold, icSnapshots);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("originalCount", codes.size());
+        result.put("dedupedCodes", report.get("dedupedFactorCodes"));
+        result.put("removedCount", report.get("redundantCount"));
+        result.put("clusters", report.get("clusters"));
+
+        return ApiResponse.success(result);
+    }
+
+    // ================================================================
+    //  P4: 财务因子季频评估
+    // ================================================================
+
+    @PostMapping("/quarterly-ic")
+    @Operation(summary = "P4: 财务因子季频IC分析 — 只在季末日期评估，避免日频虚高")
+    public ApiResponse<List<QuarterlyFactorAnalysisService.QuarterlyIcResult>> quarterlyIc(
+            @RequestParam String factorCodes,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @RequestParam(defaultValue = "20") int forwardDays,
+            @RequestParam(defaultValue = "false") boolean useAnnouncementDrift) {
+
+        List<String> codes = Arrays.asList(factorCodes.split(","));
+
+        List<QuarterlyFactorAnalysisService.QuarterlyIcResult> results =
+                quarterlyFactorAnalysisService.batchComputeQuarterlyIc(
+                        codes, startDate, endDate, forwardDays, useAnnouncementDrift);
+
+        return ApiResponse.success(results);
+    }
+
+    @GetMapping("/quarterly-dates")
+    @Operation(summary = "P4: 获取指定范围内的季末日期列表")
+    public ApiResponse<List<String>> quarterlyDates(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+
+        List<LocalDate> dates = quarterlyFactorAnalysisService.getQuarterEndDates(startDate, endDate);
+        List<String> result = dates.stream().map(LocalDate::toString).collect(Collectors.toList());
+        return ApiResponse.success(result);
     }
 }

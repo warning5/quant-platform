@@ -60,10 +60,12 @@ function formatMarketCap(val) {
 
 // ── IC 诊断动作配色 ──
 const DIAG_CONFIG = {
-  KEPT:    { color: '#52c41a', text: '参与加权', bg: '#f6ffed' },
-  DROPPED: { color: '#ff4d4f', text: '已剔除',   bg: '#fff1f0' },
-  REVERSED:{ color: '#fa8c16', text: '方向反转', bg: '#fff7e6' },
-  NO_DATA: { color: '#d9d9d9', text: '无数据',   bg: '#fafafa' },
+  KEPT:      { color: '#52c41a', text: '参与加权', bg: '#f6ffed' },
+  KEPT_ICW:  { color: '#1890ff', text: 'IC加权', bg: '#e6f7ff' },
+  KEPT_EQW:  { color: '#52c41a', text: '等权(IC)', bg: '#f6ffed' },
+  DROPPED:   { color: '#ff4d4f', text: '已剔除',   bg: '#fff1f0' },
+  REVERSED:  { color: '#fa8c16', text: '方向反转', bg: '#fff7e6' },
+  NO_DATA:   { color: '#d9d9d9', text: '无数据',   bg: '#fafafa' },
 };
 
 export default function RecommendationList() {
@@ -1071,7 +1073,7 @@ export default function RecommendationList() {
 
       {/* IC 加权因子诊断 */}
       {factorDiagnostics && factorDiagnostics.length > 0 && (() => {
-        const kept = factorDiagnostics.filter(d => d.action === 'KEPT');
+        const kept = factorDiagnostics.filter(d => d.action === 'KEPT' || d.action === 'KEPT_ICW' || d.action === 'KEPT_EQW');
         const dropped = factorDiagnostics.filter(d => d.action === 'DROPPED');
         const reversed = factorDiagnostics.filter(d => d.action === 'REVERSED');
         const noData = factorDiagnostics.filter(d => d.action === 'NO_DATA');

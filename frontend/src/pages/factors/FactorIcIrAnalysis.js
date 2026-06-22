@@ -189,7 +189,7 @@ function renderSegmentedResults(segmentedResults, segPageSize, setSegPageSize, h
     { title: 'IC', dataIndex: [segKey, 'icMean'], key: segKey + '_ic', width: 72,
       render: (_, r) => {
         const v = r[segKey]?.icMean;
-        return v != null ? <Text style={{ color: v >= 0 ? '#ef5350' : '#26a69a', fontWeight: 600, fontSize: 12 }}>{(+v).toFixed(2)}</Text> : '-';
+        return v != null ? <Text style={{ color: v >= 0 ? '#ef5350' : '#26a69a', fontWeight: 600, fontSize: 12 }}>{(+v * 100).toFixed(2)}%</Text> : '-';
       },
     },
     { title: 'IR', dataIndex: [segKey, 'ir'], key: segKey + '_ir', width: 64,
@@ -204,16 +204,20 @@ function renderSegmentedResults(segmentedResults, segPageSize, setSegPageSize, h
         return v != null ? v.toFixed(0) + '%' : '-';
       },
     },
-    { title: '评估', dataIndex: [segKey, 'assessment'], key: segKey + '_as', width: 130,
+    { title: '评估', dataIndex: [segKey, 'assessment'], key: segKey + '_as', width: 180,
       render: (_, r) => <AssessmentTag assessment={r[segKey]?.assessment} subType={r[segKey]?.assessment === '无效因子' ? getInvalidSubtype(r[segKey]) : null} />,
     },
-    { title: '样本', dataIndex: [segKey, 'sampleDays'], key: segKey + '_sd', width: 64,
+    { title: '样本', dataIndex: [segKey, 'sampleDays'], key: segKey + '_sd', width: 80,
       render: (_, r) => r[segKey]?.sampleDays ?? '-',
     },
   ];
 
-  // 分组表头颜色区分
-  const groupHeaderStyle = (color) => ({ background: color, fontWeight: 600, textAlign: 'center', fontSize: 13 });
+  // 分组表头颜色区分（前段蓝色/后段橙色/全量绿色，加粗+图标）
+  const groupHeaderStyle = (color, icon) => ({
+    background: color, fontWeight: 700, textAlign: 'center', fontSize: 13,
+    borderRadius: '4px 4px 0 0', padding: '4px 8px',
+    border: `2px solid ${color}`, borderBottom: 'none',
+  });
 
   const segColumns = [
     {
@@ -230,17 +234,17 @@ function renderSegmentedResults(segmentedResults, segPageSize, setSegPageSize, h
       },
     },
     {
-      title: <span style={groupHeaderStyle('#e3f2fd')}>📅 前段</span>,
+      title: <span style={groupHeaderStyle('#dbeafe', '#1890ff')}>📅 前段</span>,
       key: 'grp_before',
       children: segColSimple('before'),
     },
     {
-      title: <span style={groupHeaderStyle('#fff3e0')}>📊 后段</span>,
+      title: <span style={groupHeaderStyle('#ffedd5', '#fa8c16')}>📊 后段</span>,
       key: 'grp_after',
       children: segColSimple('after'),
     },
     {
-      title: <span style={groupHeaderStyle('#e8f5e9')}>📈 全量</span>,
+      title: <span style={groupHeaderStyle('#d1f7c4', '#52c41a')}>📈 全量</span>,
       key: 'grp_full',
       children: segColSimple('full'),
     },
@@ -325,7 +329,7 @@ function IcBarChart({ icTimeline, factorCode }) {
       trigger: 'axis',
       formatter: params => {
         const p = params[0];
-        return `${p.axisValue}<br/>IC: <b>${(+p.value).toFixed(2)}</b>`;
+        return `${p.axisValue}<br/>IC: <b>${(+p.value * 100).toFixed(2)}%</b>`;
       },
     },
     grid: { left: 50, right: 20, top: 30, bottom: 40 },
@@ -913,7 +917,7 @@ export default function FactorIcIrAnalysis() {
       key: 'icMean',
       width: 90,
       sorter: (a, b) => (a.icMean || 0) - (b.icMean || 0),
-      render: v => v != null ? <Text style={{ color: v >= 0 ? '#ef5350' : '#26a69a', fontWeight: 600 }}>{(+v).toFixed(2)}</Text> : '-',
+      render: v => v != null ? <Text style={{ color: v >= 0 ? '#ef5350' : '#26a69a', fontWeight: 600 }}>{(+v * 100).toFixed(2)}%</Text> : '-',
     },
     {
       title: 'IC 标准差',
