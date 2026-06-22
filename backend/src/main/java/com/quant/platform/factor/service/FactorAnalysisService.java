@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import com.quant.platform.factor.domain.FactorValue;
@@ -38,6 +39,10 @@ public class FactorAnalysisService {
 
     @Autowired(required = false)
     private ClickHouseFactorValueService clickHouseFactorValueService;
+
+    /** IC 计算用的未来收益天数（与 FactorIcService 共用配置，默认5） */
+    @Value("${quant.factor.ic.forward-return-days:5}")
+    private int forwardReturnDays;
 
     /**
      * 行业映射缓存：symbol → industry
@@ -1264,7 +1269,7 @@ public class FactorAnalysisService {
         for (String fc : factorCodes) {
             try {
                 FactorIcSnapshot snapshot = computeSnapshot(fc, startDateStr, endDateStr,
-                        5, false, "spearman", halflifeDays, icThreshold);
+                        forwardReturnDays, false, "spearman", halflifeDays, icThreshold);
                 if (snapshot != null) {
                     snapshots.put(fc, snapshot);
                 }

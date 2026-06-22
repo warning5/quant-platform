@@ -1437,8 +1437,8 @@ def run_westock_moneyflow(args):
     # CH 客户端用于回填 close/pct_change
     ch_client = clickhouse_connect.get_client(**CLICKHOUSE_CONFIG)
 
-    BATCH_SIZE = 20  # 每批 20 只，减少 API 调用次数
-    PARALLEL = 3     # 并行 API 调用数（降低避免 westock 限流）
+    BATCH_SIZE = 10  # 每批 10 只（westock 单次最多 10 只）
+    PARALLEL = 5     # 并行 API 调用数
     batches = [target[i:i + BATCH_SIZE] for i in range(0, len(target), BATCH_SIZE)]
     total_batches = len(batches)
     grand_start = datetime.datetime.now()
@@ -1485,17 +1485,28 @@ def run_westock_moneyflow(args):
     all_results = {}  # batch_idx -> {code: rows_list}
     query_start = datetime.datetime.now()
     failed_batch_indices = []  # 重试仍失败的批次
+    _completed_count = 0
+    _total_to_query = total_batches
     with ThreadPoolExecutor(max_workers=PARALLEL) as executor:
         futures = {executor.submit(_query_batch, batch, date_label, idx): idx
                    for idx, batch in enumerate(batches)}
         for f in as_completed(futures):
             idx = futures[f]
+            _completed_count += 1
             try:
                 all_results[idx] = f.result()
             except Exception as e:
                 print(f"  [ERROR] 第 {idx+1} 批查询失败: {e}")
                 all_results[idx] = {}
                 failed_batch_indices.append(idx)
+            # 每 10 批或最后一批打印进度
+            if _completed_count % 10 == 0 or _completed_count == _total_to_query:
+                elapsed = (datetime.datetime.now() - query_start).total_seconds()
+                speed = _completed_count / elapsed if elapsed > 0 else 0
+                eta = (_total_to_query - _completed_count) / speed if speed > 0 else 0
+                print(f"  [查询进度] {_completed_count}/{_total_to_query} 批完成"
+                      f"  已用 {elapsed:.0f}s  预计剩余 {eta:.0f}s"
+                      f"  失败 {len(failed_batch_indices)}")
     query_elapsed = (datetime.datetime.now() - query_start).total_seconds()
     failed_batch_count = len(failed_batch_indices)
     print(f"  并行查询完成，耗时 {query_elapsed:.1f}s（失败批次: {failed_batch_count}, 重试救回: {retry_rescued}）")

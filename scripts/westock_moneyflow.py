@@ -9,11 +9,22 @@ import sys
 from pathlib import Path
 
 
+# 模块级缓存：_find_westock() 只执行一次
+_westock_cache = None
+_westock_looked_up = False
+
+
 def _find_westock():
     """
     搜索 westock-data skill 的根目录（含 package.json 的目录）
     返回 (node_exe, script_path, cwd_dir) 或 (None, None, None)
+    结果缓存到模块级变量，后续调用直接返回，不再重复搜索/打印
     """
+    global _westock_cache, _westock_looked_up
+    if _westock_looked_up:
+        return _westock_cache if _westock_cache else (None, None, None)
+
+    _westock_looked_up = True
     wb_dir = Path.home() / ".workbuddy"
 
     # 找 westock-data 根目录（包含 package.json）
@@ -32,11 +43,13 @@ def _find_westock():
 
     if not skill_root:
         print("  [westock ERROR] 找不到 westock-data skill（无 package.json），请先安装 westock-data skill")
+        _westock_cache = None
         return None, None, None
 
     script_path = skill_root / "scripts" / "index.js"
     if not script_path.exists():
         print(f"  [westock ERROR] 找不到 index.js: {script_path}")
+        _westock_cache = None
         return None, None, None
 
     cwd_dir = str(skill_root)   # cwd = skill 根目录（有 package.json）
@@ -56,10 +69,11 @@ def _find_westock():
         node_exe = "node"
         print("  [westock WARN] 找不到 managed node.exe，尝试系统 node")
 
-    print(f"  [westock DEBUG] node={node_exe}")
-    print(f"  [westock DEBUG] script={script_str}")
-    print(f"  [westock DEBUG] cwd={cwd_dir}")
-    return node_exe, script_str, cwd_dir
+    # 只在首次查找时打印一次
+    print(f"  [westock] node={node_exe}, script={script_str}")
+
+    _westock_cache = (node_exe, script_str, cwd_dir)
+    return _westock_cache
 
 
 def to_float(v) -> float:
@@ -93,7 +107,7 @@ def query_westock(codes: list, start_date: str, end_date: str) -> str | None:
         r = subprocess.run(
             [node_exe, script_path, "asfund", code_arg,
              "--start", start_date, "--end", end_date],
-            capture_output=True, timeout=180,
+            capture_output=True, timeout=60,
             cwd=cwd_dir,
         )
         if r.returncode != 0:

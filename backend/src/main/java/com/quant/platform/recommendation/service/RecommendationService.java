@@ -263,10 +263,12 @@ public class RecommendationService {
             topN = ANALYSIS_TOP_N;
         }
         // P1: 默认启用IC动态权重（STATIC模式手动关闭）
-        boolean useDynamicIc = !"STATIC".equalsIgnoreCase(weightMode);
+        // weightMode 优先级：请求参数 > 策略factorConfigJson > 默认ICW
+        String effectiveWeightMode = resolveWeightMode(strategyId, weightMode);
+        boolean useDynamicIc = !"STATIC".equalsIgnoreCase(effectiveWeightMode);
 
-        log.info("[Recommendation] 开始生成推荐列表: date={}, topN={}, strategyId={}, weightMode={}, confidenceControl={}",
-                date, topN, strategyId, weightMode, enableConfidenceControl);
+        log.info("[Recommendation] 开始生成推荐列表: date={}, topN={}, strategyId={}, weightMode={} (resolved={}), confidenceControl={}",
+                date, topN, strategyId, weightMode, effectiveWeightMode, enableConfidenceControl);
 
         // 诊断：加载策略详情
         if (strategyId != null) {
@@ -331,7 +333,7 @@ public class RecommendationService {
 
         // Step 1: 多因子选股（广筛 Top 50）
         // date=null 时 StockScreenService.screen() 内部自动 resolveLatestDate()
-        ScreenResult screenResult = screenStocks(date, strategyId, useDynamicIc, diagnostics);
+        ScreenResult screenResult = screenStocks(date, strategyId, useDynamicIc, effectiveWeightMode, diagnostics);
         List<ScreenResult.StockScore> candidates = screenResult.getStocks();
         if (candidates == null || candidates.isEmpty()) {
             log.warn("[Recommendation] 因子选股结果为空，无法生成推荐");
@@ -1974,13 +1976,14 @@ public class RecommendationService {
      * @param strategyId 策略ID（必须）
      */
     private ScreenResult screenStocks(LocalDate date, Long strategyId,
-                                      boolean useDynamicIc, List<FactorDiagnostic> diagnostics) {
+                                      boolean useDynamicIc, String effectiveWeightMode,
+                                      List<FactorDiagnostic> diagnostics) {
         // 从策略因子配置获取因子列表
         List<ScreenRequest.FactorWeight> factors = getFactorConfig(strategyId);
 
         // 动态调整因子权重（基于IC），同时收集诊断信息
         if (useDynamicIc) {
-            factors = applyDynamicFactorWeights(factors, date, diagnostics);
+            factors = applyDynamicFactorWeights(factors, date, effectiveWeightMode, diagnostics);
         }
 
         ScreenRequest req = new ScreenRequest();
@@ -1993,7 +1996,11 @@ public class RecommendationService {
         req.setGlobalOutlierMethod("MAD");
         req.setGlobalNormalizeMethod("ZSCORE");
         // 智能推荐使用IC加权或等权
-        req.setWeightMode(useDynamicIc ? "IC" : "EQUAL");
+        String screenWeightMode = switch (effectiveWeightMode) {
+            case "EQW", "STATIC" -> "EQUAL";
+            default -> "IC";
+        };
+        req.setWeightMode(screenWeightMode);
         return stockScreenService.screen(req);
     }
 
@@ -2004,16 +2011,21 @@ public class RecommendationService {
      * - 使用 FactorAnalysisService.quickFactorIcSnapshot() 计算衰减加权IC
      * - 预筛选：|IC| &lt; icThreshold 的因子被剔除
      * - 方向对齐：负IC因子自动反转direction，使用|IC|参与加权
-     * - 权重分配：按|IC|比例分配（ICW模式），或等权（EQW模式），或逆方差（OPT模式）
+     * - 权重分配（由 weightMode 决定）：
+     *   EQW  = 等权分配
+     *   ICW  = 按|IC|比例分配
+     *   OPT  = 按 1/σ²(IC) 分配（稳定性越高权重越大）
+     *   STATIC = 不调整（由调用方处理，不会进入此方法）
      *
      * @param factors     原始因子配置
      * @param date        选股日期
+     * @param weightMode  权重模式（EQW/ICW/OPT）
      * @param diagnostics 输出参数，因子诊断信息
      * @return 调整后的因子配置
      */
     private List<ScreenRequest.FactorWeight> applyDynamicFactorWeights(
             List<ScreenRequest.FactorWeight> factors, LocalDate date,
-            List<FactorDiagnostic> diagnostics) {
+            String weightMode, List<FactorDiagnostic> diagnostics) {
         if (factors == null || factors.isEmpty()) return factors;
 
         List<String> factorCodes = factors.stream()
@@ -2034,8 +2046,8 @@ public class RecommendationService {
                 factorAnalysisService.quickFactorIcSnapshot(
                         factorCodes, refDate, 60, DEFAULT_IC_THRESHOLD, halflife);
 
-        log.info("[DynamicWeight] IC快照完成: {}个因子, 阈值={}, 半衰={}天, 保留{}个",
-                factorCodes.size(), DEFAULT_IC_THRESHOLD, halflife,
+        log.info("[DynamicWeight] IC快照完成: mode={}, {}个因子, 阈值={}, 半衰={}天, 保留{}个",
+                weightMode, factorCodes.size(), DEFAULT_IC_THRESHOLD, halflife,
                 snapshots.values().stream().filter(s -> "KEPT".equals(s.status)).count());
 
         // 筛选保留的因子
@@ -2104,29 +2116,47 @@ public class RecommendationService {
                 int alignedDirection = snap.icSign < 0 ? -originalDirection : originalDirection;
                 adjustedFw.setDirection(alignedDirection);
 
-                // 权重按|IC|比例分配
+                // 权重按 weightMode 分配
                 double absIc = snap.absIc();
                 double newWeight;
-                if (sumAbsIc > 1e-9) {
-                    // ICW: |IC|加权
-                    newWeight = originalWeight * (absIc / sumAbsIc);
-                    diag.action = "KEPT_ICW";
-                } else {
-                    // EQW fallback
-                    newWeight = originalWeight / Math.max(keptSnapshots.size(), 1);
-                    diag.action = "KEPT_EQW";
+                String action;
+                switch (weightMode) {
+                    case "EQW":
+                        // 等权：保留的因子平均分配
+                        newWeight = originalWeight / Math.max(keptSnapshots.size(), 1);
+                        action = "KEPT_EQW";
+                        break;
+                    case "OPT":
+                        // 逆方差：按 1/σ²(IC) 分配（稳定性越高权重越大）
+                        if (optSum > 1e-9) {
+                            newWeight = originalWeight * (1.0 / Math.max(snap.icStd * snap.icStd, 1e-9) / optSum);
+                        } else {
+                            newWeight = originalWeight / Math.max(keptSnapshots.size(), 1);
+                        }
+                        action = "KEPT_OPT";
+                        break;
+                    default:
+                        // ICW: |IC|加权
+                        if (sumAbsIc > 1e-9) {
+                            newWeight = originalWeight * (absIc / sumAbsIc);
+                        } else {
+                            newWeight = originalWeight / Math.max(keptSnapshots.size(), 1);
+                        }
+                        action = "KEPT_ICW";
+                        break;
                 }
                 adjustedFw.setWeight(newWeight);
+                diag.action = action;
 
                 diag.icMean = snap.icMean;
                 diag.adjustedWeight = newWeight;
                 diag.reason = String.format(
-                        "IC=%.4f (衰减加权,半衰%d天), |IC|=%.4f, 方向%s, 新权重=%.4f",
-                        snap.icMean, halflife, absIc,
+                        "%s: IC=%.4f (半衰%d天), |IC|=%.4f, 方向%s, 新权重=%.4f",
+                        weightMode, snap.icMean, halflife, absIc,
                         snap.icSign < 0 ? "↓取反(对齐)" : "↑正向",
                         newWeight);
-                log.info("[DynamicWeight] 因子 {} IC={:.4f} (|IC|={:.4f}) 方向={} 权重: {}->{}",
-                        fc, snap.icMean, absIc,
+                log.info("[DynamicWeight] 因子 {} {} IC={:.4f} (|IC|={:.4f}) 方向={} 权重: {}->{}",
+                        fc, weightMode, snap.icMean, absIc,
                         snap.icSign < 0 ? "取反" : "正向",
                         originalWeight, newWeight);
                 keptCount++;
@@ -2136,10 +2166,42 @@ public class RecommendationService {
             adjusted.add(adjustedFw);
         }
 
-        log.info("[DynamicWeight] 完成: 保留{}/剔除{}/无数据{}, |IC|和={:.4f}, 半衰={}天",
-                keptCount, droppedCount, noDataCount, sumAbsIc, halflife);
+        log.info("[DynamicWeight] 完成: mode={}, 保留{}/剔除{}/无数据{}, |IC|和={:.4f}, 半衰={}天",
+                weightMode, keptCount, droppedCount, noDataCount, sumAbsIc, halflife);
 
         return adjusted;
+    }
+
+    /**
+     * 解析策略级 weightMode（优先级：请求参数 > 策略配置 > 默认ICW）
+     * 支持：EQW(等权) / ICW(IC加权) / OPT(逆方差) / STATIC(原始配置不调整)
+     */
+    private String resolveWeightMode(Long strategyId, String requestWeightMode) {
+        // 1. 请求显式指定 → 用请求的
+        if (requestWeightMode != null && !requestWeightMode.isEmpty()) {
+            return requestWeightMode.toUpperCase();
+        }
+        // 2. 策略配置了 → 用策略的
+        if (strategyId != null) {
+            try {
+                StrategyDefinition strategy = strategyDefinitionMapper.selectById(strategyId);
+                if (strategy != null && strategy.getFactorConfigJson() != null) {
+                    Object raw = objectMapper.readValue(strategy.getFactorConfigJson(), Object.class);
+                    if (raw instanceof Map) {
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> map = (Map<String, Object>) raw;
+                        Object wm = map.get("weightMode");
+                        if (wm != null && !wm.toString().isEmpty()) {
+                            return wm.toString().toUpperCase();
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("[Recommendation] 解析策略weightMode失败: strategyId={} error={}", strategyId, e.getMessage());
+            }
+        }
+        // 3. 默认 ICW
+        return "ICW";
     }
 
     /**

@@ -149,7 +149,9 @@ export default function StrategyDetail() {
           label: '基本信息',
           children: (
             <Card>
-              <Descriptions bordered column={2}>
+              <Descriptions bordered column={2} size="middle"
+                labelStyle={{ whiteSpace: 'nowrap', width: 100 }}
+                contentStyle={{ minWidth: 200 }}>
                 <Descriptions.Item label="策略代码">{strategy.strategyCode}</Descriptions.Item>
                 <Descriptions.Item label="策略名称">{strategy.strategyName}</Descriptions.Item>
                 <Descriptions.Item label="策略类型">{TYPE_LABELS[strategy.strategyType] || strategy.strategyType}</Descriptions.Item>

@@ -22,10 +22,34 @@ export default function StrategyEditor() {
   const [loading, setLoading] = useState(!!id);
   const [saving, setSaving] = useState(false);
   const [scriptCode, setScriptCode] = useState('');
-  const [factorConfig, setFactorConfig] = useState('{"factors":[{"code":"MOM20","weight":0.5},{"code":"VOL20","weight":-0.3},{"code":"SIZE","weight":-0.2}]}');
+  const [factorConfig, setFactorConfig] = useState('{"weightMode":"ICW","factors":[{"code":"MOM20","weight":0.5},{"code":"VOL20","weight":-0.3},{"code":"SIZE","weight":-0.2}]}');
   const [allFactors, setAllFactors] = useState([]);
   const [jsonModalVisible, setJsonModalVisible] = useState(false);
   const isEdit = !!id;
+
+  // 从 factorConfig JSON 中解析 weightMode
+  const parseWeightMode = useCallback((json) => {
+    try {
+      const obj = JSON.parse(json);
+      return obj.weightMode || 'ICW';
+    } catch {
+      return 'ICW';
+    }
+  }, []);
+
+  const weightMode = parseWeightMode(factorConfig);
+
+  // 更新 weightMode 并写回 factorConfig
+  const updateWeightMode = useCallback((mode) => {
+    try {
+      const obj = JSON.parse(factorConfig);
+      obj.weightMode = mode;
+      setFactorConfig(JSON.stringify(obj, null, 2));
+    } catch {
+      // 如果现有JSON解析失败，构造新的
+      setFactorConfig(JSON.stringify({ weightMode: mode, factors: [] }, null, 2));
+    }
+  }, [factorConfig]);
 
   const parseFactorConfig = useCallback((json) => {
     try {
@@ -55,8 +79,14 @@ export default function StrategyEditor() {
       }
       return entry;
     });
-    return JSON.stringify({ factors }, null, 2);
-  }, []);
+    // 保留现有的 weightMode（如果有）
+    let existingWeightMode = 'ICW';
+    try {
+      const obj = JSON.parse(factorConfig);
+      if (obj.weightMode) existingWeightMode = obj.weightMode;
+    } catch { /* ignore */ }
+    return JSON.stringify({ weightMode: existingWeightMode, factors }, null, 2);
+  }, [factorConfig]);
 
   useEffect(() => {
     factorApi.list({ page: 0, size: 200 }).then(res => {
@@ -146,6 +176,8 @@ export default function StrategyEditor() {
     try {
       const obj = JSON.parse(value);
       if (obj.factors && Array.isArray(obj.factors)) {
+        // 确保有 weightMode
+        if (!obj.weightMode) obj.weightMode = 'ICW';
         setFactorConfig(JSON.stringify(obj, null, 2));
         setJsonModalVisible(false);
         message.success('JSON 导入成功');
@@ -413,6 +445,75 @@ export default function StrategyEditor() {
                     JSON 预览
                   </Button>
                 </Space>
+              </div>
+              <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 12 }}>
+                <Text type="secondary" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>权重模式</Text>
+                <Select
+                  size="small"
+                  value={weightMode}
+                  onChange={updateWeightMode}
+                  style={{ width: 200 }}
+                  options={[
+                    { value: 'ICW', label: 'ICW - IC加权（|IC|比例分配）' },
+                    { value: 'EQW', label: 'EQW - 等权（平均分配）' },
+                    { value: 'OPT', label: 'OPT - 逆方差（稳定性加权）' },
+                    { value: 'STATIC', label: 'STATIC - 原始配置（不读IC）' },
+                  ]}
+                />
+                <Tooltip
+                  title={
+                    <div>
+                      <div style={{ fontWeight: 600, marginBottom: 8, color: '#1677ff', fontSize: 13 }}>权重模式说明</div>
+                      <div style={{ marginBottom: 10, fontSize: 12, lineHeight: '18px', color: '#555' }}>
+                        <div><strong>ICW</strong> — 按 |IC| 比例分配，IC高的因子权重更大</div>
+                        <div><strong>EQW</strong> — 等权平均分配，不区分IC高低</div>
+                        <div><strong>OPT</strong> — 按 1/σ²(IC) 分配，IC稳定的因子权重更大</div>
+                        <div><strong>STATIC</strong> — 使用原始配置权重，不做动态调整</div>
+                      </div>
+                      <table style={{ borderCollapse: 'collapse', fontSize: 12, color: '#444' }} cellPadding={7}>
+                        <thead>
+                          <tr style={{ background: '#f0f2f5' }}>
+                            <th style={{ border: '1px solid #e8e8e8', textAlign: 'left', whiteSpace: 'nowrap' }}>场景</th>
+                            <th style={{ border: '1px solid #e8e8e8', textAlign: 'center', whiteSpace: 'nowrap', paddingLeft: 16, paddingRight: 16 }}>推荐模式</th>
+                            <th style={{ border: '1px solid #e8e8e8', textAlign: 'left', whiteSpace: 'nowrap' }}>原因</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr>
+                            <td style={{ border: '1px solid #e8e8e8', whiteSpace: 'nowrap' }}>因子 IC 差异大（有的0.08，有的0.01）</td>
+                            <td style={{ border: '1px solid #e8e8e8', textAlign: 'center', fontWeight: 600, color: '#1677ff', whiteSpace: 'nowrap' }}>ICW</td>
+                            <td style={{ border: '1px solid #e8e8e8', whiteSpace: 'nowrap' }}>让强因子主导选股</td>
+                          </tr>
+                          <tr style={{ background: '#fafafa' }}>
+                            <td style={{ border: '1px solid #e8e8e8', whiteSpace: 'nowrap' }}>因子 IC 均匀（都在 0.03~0.05）</td>
+                            <td style={{ border: '1px solid #e8e8e8', textAlign: 'center', fontWeight: 600, color: '#52c41a', whiteSpace: 'nowrap' }}>EQW</td>
+                            <td style={{ border: '1px solid #e8e8e8', whiteSpace: 'nowrap' }}>等权更稳健，避免过度拟合历史IC</td>
+                          </tr>
+                          <tr>
+                            <td style={{ border: '1px solid #e8e8e8', whiteSpace: 'nowrap' }}>IC均值差不多但稳定性差异大</td>
+                            <td style={{ border: '1px solid #e8e8e8', textAlign: 'center', fontWeight: 600, color: '#faad14', whiteSpace: 'nowrap' }}>OPT</td>
+                            <td style={{ border: '1px solid #e8e8e8', whiteSpace: 'nowrap' }}>给IC波动小的因子更多权重</td>
+                          </tr>
+                          <tr style={{ background: '#fafafa' }}>
+                            <td style={{ border: '1px solid #e8e8e8', whiteSpace: 'nowrap' }}>因子少于3个，或 IC 数据不足</td>
+                            <td style={{ border: '1px solid #e8e8e8', textAlign: 'center', fontWeight: 600, color: '#999', whiteSpace: 'nowrap' }}>STATIC</td>
+                            <td style={{ border: '1px solid #e8e8e8', whiteSpace: 'nowrap' }}>样本太少不可靠，用原始配置</td>
+                          </tr>
+                          <tr>
+                            <td style={{ border: '1px solid #e8e8e8', whiteSpace: 'nowrap' }}>不确定，先用默认</td>
+                            <td style={{ border: '1px solid #e8e8e8', textAlign: 'center', fontWeight: 600, color: '#1677ff', whiteSpace: 'nowrap' }}>ICW</td>
+                            <td style={{ border: '1px solid #e8e8e8', whiteSpace: 'nowrap' }}>和改之前行为一致</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  }
+                  overlayInnerStyle={{ padding: '12px 14px', width: 580 }}
+                >
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    💡 推荐引擎按此模式动态调整因子权重
+                  </Text>
+                </Tooltip>
               </div>
               <Table
                 dataSource={factorList}

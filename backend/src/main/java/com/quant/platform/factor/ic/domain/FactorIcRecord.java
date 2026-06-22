@@ -35,5 +35,8 @@ public class FactorIcRecord {
     /** 截面股票数量 */
     private Integer stockCount;
 
+    /** IC前瞻天数（计算IC时使用的未来收益天数） */
+    private Integer forwardDays;
+
     private LocalDateTime createdAt;
 }

@@ -71,6 +71,7 @@ public class FactorIcService {
             try {
                 FactorIcRecord record = computeSingleFactorIc(factorCode, date, forwardDate);
                 if (record != null) {
+                    record.setForwardDays(forwardReturnDays);
                     // 计算滚动均值/IR
                     computeRollingStats(record);
                     // 保存
@@ -161,7 +162,7 @@ public class FactorIcService {
     public Map<String, Double> getAdaptiveWeights() {
         Map<String, Double> weights = new HashMap<>();
         // 从 DB 查询所有已有 IC 记录的因子（不再硬编码）
-        List<FactorIcRecord> allLatest = icRecordMapper.findAllLatest();
+        List<FactorIcRecord> allLatest = icRecordMapper.findAllLatest(forwardReturnDays);
         for (FactorIcRecord latest : allLatest) {
             String factorCode = latest.getFactorCode();
             double weight = 1.0;
@@ -181,7 +182,7 @@ public class FactorIcService {
      * 获取所有因子的最新 IR 摘要
      */
     public List<FactorIcRecord> getLatestIcSummary() {
-        return icRecordMapper.findAllLatest();
+        return icRecordMapper.findAllLatest(forwardReturnDays);
     }
 
     /**
@@ -193,7 +194,7 @@ public class FactorIcService {
      * @return IC值列表（按日期倒序）
      */
     public List<Double> getIcHistory(String factorCode, LocalDate endDate, int days) {
-        return icRecordMapper.findRecentIcValues(factorCode, endDate, days);
+        return icRecordMapper.findRecentIcValues(factorCode, endDate, days, forwardReturnDays);
     }
 
     /**
@@ -210,7 +211,7 @@ public class FactorIcService {
         LocalDate latestCommon = null;
         int validCount = 0;
         for (String fc : factorCodes) {
-            FactorIcRecord record = icRecordMapper.findLatest(fc);
+            FactorIcRecord record = icRecordMapper.findLatest(fc, forwardReturnDays);
             if (record == null || record.getTradeDate() == null) {
                 continue; // 跳过无IC数据的因子
             }
@@ -314,7 +315,8 @@ public class FactorIcService {
         if (record.getIcValue() == null) return;
 
         // 20日滚动
-        List<Double> ic20 = icRecordMapper.findRecentIcValues(record.getFactorCode(), record.getTradeDate(), 19);
+        int fwdDays = record.getForwardDays() != null ? record.getForwardDays() : forwardReturnDays;
+        List<Double> ic20 = icRecordMapper.findRecentIcValues(record.getFactorCode(), record.getTradeDate(), 19, fwdDays);
         ic20.addFirst(record.getIcValue()); // 加上当天
 
         if (ic20.size() >= 10) {
@@ -325,7 +327,7 @@ public class FactorIcService {
         }
 
         // 60日滚动
-        List<Double> ic60 = icRecordMapper.findRecentIcValues(record.getFactorCode(), record.getTradeDate(), 59);
+        List<Double> ic60 = icRecordMapper.findRecentIcValues(record.getFactorCode(), record.getTradeDate(), 59, fwdDays);
         ic60.addFirst(record.getIcValue());
 
         if (ic60.size() >= 30) {
