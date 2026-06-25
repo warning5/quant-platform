@@ -296,6 +296,7 @@ export const dataUpdateApi = {
   validateResearch: () => api.get('/data-update/research/validate'),
   // 退市清理
   getDelistedStocks: (inactiveDays = 30) => api.get('/data-update/delisted/list', { params: { inactiveDays } }),
+  markDelistedStocks: () => api.post('/data-update/delisted/mark'),
   cleanDelistedStocks: (codes) => api.post('/data-update/delisted/clean', codes),
   // 内外盘数据
   getBidaskCoverage: () => api.get('/data-update/coverage/bidask'),

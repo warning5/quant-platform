@@ -665,13 +665,15 @@ public class PaperTradingService {
             // 计算分配金额
             BigDecimal perStock;
             if ("kelly".equals(allocationMode)) {
-                // 凯利公式：f = (winRate * avgWin - avgLoss) / (avgWin * avgLoss)
+                // 半Kelly公式（Half Kelly）：经典Kelly假设单资产二元结果，未考虑多资产联合分布。
+                // 直接使用原始Kelly会导致多资产组合仓位过度集中。半Kelly通过 f/2 降低集中风险，
+                // 同时保持Kelly公式的期望收益最大化特性。上限降至15%（原25%），进一步控制回撤。
                 KellyParams kp = calcKellyParams(signal.getPaperId());
                 if (kp != null && kp.avgLoss > 0) {
-                    double kellyF = (kp.winRate * kp.avgWin - kp.avgLoss) / (kp.avgWin * kp.avgLoss);
-                    kellyF = Math.max(0.05, Math.min(kellyF, 0.25)); // 限制在 5%~25%
+                    double rawKelly = (kp.winRate * kp.avgWin - kp.avgLoss) / (kp.avgWin * kp.avgLoss);
+                    double kellyF = Math.max(0.05, Math.min(rawKelly / 2, 0.15)); // 半Kelly，限制在 5%~15%
                     perStock = pt.getTotalAssets().multiply(BigDecimal.valueOf(kellyF));
-                    log.info("executeSignal: 凯利公式 f=%.3f, perStock=%.2f", kellyF, perStock);
+                    log.info("executeSignal: 半Kelly公式 raw={:.3f} f={:.3f}, perStock={:.2f}", rawKelly, kellyF, perStock);
                 } else {
                     perStock = pt.getInitialCapital().divide(BigDecimal.valueOf(10), 2, RoundingMode.HALF_UP);
                 }
@@ -1380,6 +1382,58 @@ public class PaperTradingService {
                 windowDays, latestIR, latestIR * Math.sqrt(252), avgIR, excessList.size());
         } else {
             log.info("[信息比率] 滚动IR全为NaN（标准差≈0），数据点={}", excessList.size());
+        }
+    }
+
+    /**
+     * 盘中自动止损卖出（风控触发时调用）
+     * 直接创建SELL信号并执行，不经过Scheduler。
+     * 如果持仓不存在或模拟盘未运行，则静默返回。
+     */
+    @Transactional
+    public void autoSellByStopLoss(Long paperId, String code, String reason) {
+        PaperTrading pt = paperTradingMapper.selectById(paperId);
+        if (pt == null || !"RUNNING".equals(pt.getStatus())) {
+            log.debug("autoSellByStopLoss: paperId={} 不存在或未运行，跳过", paperId);
+            return;
+        }
+        PaperPosition pos = paperPositionMapper.selectOne(
+            new LambdaQueryWrapper<PaperPosition>()
+                .eq(PaperPosition::getPaperId, paperId)
+                .eq(PaperPosition::getCode, code));
+        if (pos == null) {
+            log.debug("autoSellByStopLoss: paperId={} 未持有 {}，跳过", paperId, code);
+            return;
+        }
+
+        // 创建SELL信号
+        String name = getStockName(code);
+        BigDecimal price = getExecutionPrice(code);
+        if (price == null || price.compareTo(BigDecimal.ZERO) <= 0) {
+            log.warn("autoSellByStopLoss: {} 无法获取有效价格，跳过", code);
+            return;
+        }
+
+        PaperSignal signal = PaperSignal.builder()
+            .paperId(paperId)
+            .signalDate(LocalDate.now())
+            .factorDate(LocalDate.now())
+            .code(code)
+            .name(name)
+            .direction("SELL")
+            .signalPrice(price)
+            .reason(reason != null ? reason : "盘中止损触发")
+            .status("PENDING")
+            .build();
+        paperSignalMapper.insert(signal);
+
+        // 直接执行卖出
+        try {
+            executeSignal(signal.getId());
+            log.info("autoSellByStopLoss: paperId={} {}({}) 已自动止损卖出，price={}",
+                paperId, name, code, price);
+        } catch (Exception e) {
+            log.warn("autoSellByStopLoss: 执行卖出失败 paperId={} code={}: {}", paperId, code, e.getMessage());
         }
     }
 }

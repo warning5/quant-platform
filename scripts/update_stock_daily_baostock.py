@@ -303,28 +303,35 @@ def main():
         actual_end_date = db.get_last_trading_day_before(end_date)
         print(f"        实际期末交易日: {actual_end_date} (end_date={end_date})")
 
-        # 断点续传（无论是否指定 pool，均在此处执行）
-        if args.resume and not args.code:
+        # 快速预检：无论是否 --resume，都先查已有数据，避免空跑
+        # --resume 跳过已有 → 减少 Baostock 请求；不 resume 也做预检，全量已有直接进补全
+        if not args.code:
             print("\n[2/4] 检查已有数据...")
             all_codes = [s[0] for s in stocks]
-            # 使用区间查询，只检查 [start_date, end_date] 范围内的最新数据
             code_latest_map = db.get_latest_dates_in_range_batch(all_codes, start_date, end_date)
 
-            filtered_stocks = []
+            pending = []
             skipped = 0
             for code, name, market in stocks:
                 latest_date = code_latest_map.get(code)
                 if latest_date and latest_date >= actual_end_date:
                     skipped += 1
                     continue
-                filtered_stocks.append((code, name, market))
+                pending.append((code, name, market))
             print(f"        跳过: {skipped} 只(已有数据至实际期末 >= {actual_end_date})")
-            print(f"        待更新: {len(filtered_stocks)} 只")
-            stocks = filtered_stocks
+            print(f"        待更新: {len(pending)} 只")
 
-        if len(stocks) == 0:
-            print("\n没有需要更新的股票")
-            return
+            if args.force:
+                # --force 强制全量重刷，不跳过任何股票
+                pass
+            elif len(pending) == 0:
+                # 全量已有数据，跳过采集循环，直接进补全
+                print("\n全量数据已就绪，跳过日线采集")
+                stocks = []
+            else:
+                # 只处理有缺口的股票（无论是否 --resume）
+                # Baostock 按股票请求，跳过已有数据的不会加速单股查询
+                stocks = pending
 
         # ── [3/4] 遍历股票，插入数据 ─────────────────────────────────
         print(f"\n[4/4] 获取历史行情并写入...")
@@ -405,45 +412,22 @@ def main():
         print(f"无数据: {total_no_data} 只")
         print("=" * 70)
 
-        # ─── 自动补全 change 字段 ────────────────────────────────────
-        if total_success > 0:
-            print(f"\n补全 change 字段（pre_close/change_percent/change_amount）...")
+        # ─── 自动补全 change 字段 + PE/PB ────────────────────────────
+        # 即使日线采集全部跳过（total_success==0），仍触发补全以消化历史缺口
+        run_completion = total_success > 0 or skipped > 0
+        if run_completion:
+            print(f"\n补全 change 字段 + PE/PB（pre_close/change_percent/change_amount + 估值数据）...")
             try:
                 from field_completer import complete_fields
-                # 只补全本次成功写入的股票，避免全表扫描
+                # 日线全部跳过时传 None，让 complete_fields 自动扫全库缺口
                 n = complete_fields(db,
                                    code=args.code if args.code else None,
-                                   stock_list=processed_codes if not args.code else None,
+                                   stock_list=processed_codes if not args.code and total_success > 0 else None,
                                    skip_valuation=False,
-                                   force_full_scan=False)
+                                   force_full_scan=(total_success == 0))
                 print(f"  补全完成: {n} 条")
             except Exception as e:
                 print(f"  [WARN] change 字段补全异常（不影响日线数据）: {e}")
-
-        # ─── ClickHouse OPTIMIZE（去重合并）─────────────────────
-        # 在 return 前执行（访问 main() 局部变量），finally 中只关闭连接
-        if db.backend == "clickhouse":
-            import clickhouse_connect, time as _t
-            for _retry in range(3):
-                try:
-                    from db_config import CLICKHOUSE_CONFIG
-                    ch = clickhouse_connect.get_client(**CLICKHOUSE_CONFIG)
-                    print(f"\n  ClickHouse OPTIMIZE TABLE FINAL（去重合并）...")
-                    t0 = _t.time()
-                    ch.command("OPTIMIZE TABLE stock.stock_daily FINAL")
-                    elapsed = _t.time() - t0
-                    r = ch.query("SELECT count() AS total, countDistinct(code, trade_date) AS distinct_rows FROM stock.stock_daily")
-                    total_cnt, distinct_cnt = r.result_rows[0]
-                    dups = total_cnt - distinct_cnt
-                    print(f"  完成 (耗时 {elapsed:.1f}s): 总行 {total_cnt:,}, 去重后 {distinct_cnt:,}, 重复 {dups:,}")
-                    break
-                except Exception as e:
-                    if _retry < 2:
-                        print(f"  [WARN] ClickHouse OPTIMIZE 失败 (第{_retry+1}次): {e}，2s 后重试...")
-                        _t.sleep(2)
-                    else:
-                        print(f"  [WARN] ClickHouse OPTIMIZE 失败（已重试3次）: {e}")
-                        print(f"  [INFO] OPTIMIZE 失败不影响数据正确性，ReplacingMergeTree 查询时自动去重")
 
         return 0 if total_failed == 0 else 1
 

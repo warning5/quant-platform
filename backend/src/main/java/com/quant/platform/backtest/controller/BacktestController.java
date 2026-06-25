@@ -2,6 +2,7 @@ package com.quant.platform.backtest.controller;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.quant.platform.common.ratelimit.RateLimit;
 import com.quant.platform.backtest.domain.BacktestReport;
 import com.quant.platform.backtest.domain.BacktestTask;
 import com.quant.platform.backtest.domain.EquityCurve;
@@ -48,6 +49,7 @@ public class BacktestController {
     private final WalkForwardService walkForwardService;
 
     @PostMapping
+    @RateLimit(capacity = 5, duration = 1)
     @Operation(summary = "创建并启动回测任务")
     public ApiResponse<BacktestTask> create(@RequestBody BacktestTask task) {
         return ApiResponse.success("回测任务已提交", backtestService.createAndRun(task));
@@ -96,6 +98,7 @@ public class BacktestController {
     }
 
     @PostMapping("/{taskId}/rerun")
+    @RateLimit(capacity = 5, duration = 1)
     @Operation(summary = "重跑回测任务（清空旧结果并重新执行）")
     public ApiResponse<BacktestTask> rerun(@PathVariable Long taskId) {
         return ApiResponse.success("已重新提交回测任务", backtestService.rerunTask(taskId));
@@ -158,6 +161,7 @@ public class BacktestController {
      * 将组合超额收益分解为配置效应、选股效应、交互效应
      */
     @GetMapping("/{taskId}/attribution")
+    @RateLimit(capacity = 20, duration = 1)
     @Operation(summary = "Brinson归因分析")
     public ApiResponse<Map<String, Object>> getAttribution(@PathVariable Long taskId) {
         BacktestTask task = getAnyTask(taskId);
@@ -176,6 +180,7 @@ public class BacktestController {
      * 将策略超额收益对动量/波动率/市值/换手率因子做多元回归
      */
     @GetMapping("/{taskId}/factor-attribution")
+    @RateLimit(capacity = 20, duration = 1)
     @Operation(summary = "因子风格归因分析")
     public ApiResponse<Map<String, Object>> getFactorAttribution(@PathVariable Long taskId) {
         BacktestTask task = getAnyTask(taskId);
@@ -194,6 +199,7 @@ public class BacktestController {
      * 用标准 Fama-French 三因子（MKT/SMB/HML）回归组合超额收益，输出风格暴露报告。
      */
     @GetMapping("/{taskId}/factor-attribution/ff3")
+    @RateLimit(capacity = 20, duration = 1)
     @Operation(summary = "FF3 三因子风格归因")
     public ApiResponse<Map<String, Object>> getFF3Attribution(@PathVariable Long taskId) {
         BacktestTask task = getAnyTask(taskId);
@@ -212,6 +218,7 @@ public class BacktestController {
      * 60/120/252天滚动 Alpha 序列 + 衰减预警。
      */
     @GetMapping("/{taskId}/monitor/alpha-rolling")
+    @RateLimit(capacity = 20, duration = 1)
     @Operation(summary = "Alpha 滚动窗口监控")
     public ApiResponse<FactorStyleAttributionService.AlphaMonitorResult> getAlphaRolling(
             @PathVariable Long taskId) {
@@ -228,6 +235,7 @@ public class BacktestController {
      * 60/120/252天滚动 SMB/HML beta 序列 + 漂移预警。
      */
     @GetMapping("/{taskId}/monitor/style-rolling")
+    @RateLimit(capacity = 20, duration = 1)
     @Operation(summary = "FF3 风格β滚动监控")
     public ApiResponse<FactorStyleAttributionService.StyleMonitorResult> getStyleRolling(
             @PathVariable Long taskId) {
@@ -247,6 +255,7 @@ public class BacktestController {
      * 特征检测数据（换手率/持仓天数/行业集中度）保留供前端展示参考。
      */
     @GetMapping("/{taskId}/attribution-strategy")
+    @RateLimit(capacity = 10, duration = 1)
     @Operation(summary = "归因方案推荐（比较两种归因模型后推荐）")
     public ApiResponse<Map<String, Object>> getAttributionStrategy(@PathVariable Long taskId) {
         BacktestTask task = getAnyTask(taskId);
@@ -616,6 +625,7 @@ public class BacktestController {
      * Body: { "taskIds": [1, 2, 3] }
      */
     @PostMapping("/compare")
+    @RateLimit(capacity = 10, duration = 1)
     @Operation(summary = "多策略对比（P1）")
     public ApiResponse<Map<String, Object>> compare(@RequestBody Map<String, Object> body) {
         @SuppressWarnings("unchecked")
@@ -632,6 +642,7 @@ public class BacktestController {
      * GET /backtests/{taskId}/montecarlo?simulations=500&horizonDays=252
      */
     @GetMapping("/{taskId}/montecarlo")
+    @RateLimit(capacity = 5, duration = 1)
     @Operation(summary = "蒙特卡洛模拟（P1）")
     public ApiResponse<Map<String, Object>> monteCarlo(
             @PathVariable Long taskId,
@@ -645,6 +656,7 @@ public class BacktestController {
      * POST /backtests/param-optimize/submit
      */
     @PostMapping("/param-optimize/submit")
+    @RateLimit(capacity = 3, duration = 1)
     @Operation(summary = "提交参数优化任务（P1）")
     public ApiResponse<Map<String, Object>> submitParamOptimize(
             @RequestBody ParamOptimizeService.OptimizeRequest req) {
@@ -794,6 +806,7 @@ public class BacktestController {
      * }
      */
     @PostMapping("/walk-forward")
+    @RateLimit(capacity = 3, duration = 1)
     @Operation(summary = "Walk-Forward 滚动窗口验证")
     public ApiResponse<Map<String, Object>> runWalkForward(@RequestBody Map<String, Object> params) {
         try {

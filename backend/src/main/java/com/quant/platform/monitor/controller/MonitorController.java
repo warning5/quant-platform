@@ -1,7 +1,6 @@
 package com.quant.platform.monitor.controller;
 
 import com.quant.platform.monitor.IntradayMonitorService;
-import com.quant.platform.monitor.MinuteKlineService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
@@ -11,7 +10,6 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.math.BigDecimal;
-import java.time.LocalDate;
 import java.util.*;
 
 /**
@@ -24,7 +22,6 @@ import java.util.*;
 public class MonitorController {
 
     private final IntradayMonitorService intradayMonitorService;
-    private final MinuteKlineService minuteKlineService;
     private final JdbcTemplate jdbcTemplate;
 
     /**
@@ -127,30 +124,6 @@ public class MonitorController {
                 "dataDate", intradayMonitorService.getDataDate().toString(),
                 "targetPrices", targetPrices,
                 "signalHistory", intradayMonitorService.getSignalHistory()
-        ));
-        return ResponseEntity.ok(result);
-    }
-
-    /** 手动触发分钟K线采集 */
-    @PostMapping("/fetch-kline")
-    public ResponseEntity<Map<String, Object>> fetchKline(
-            @RequestParam String stockCode,
-            @RequestParam(defaultValue = "m30") String period,
-            @RequestParam(required = false) String startDate,
-            @RequestParam(required = false) String endDate) {
-
-        LocalDate start = startDate != null ? LocalDate.parse(startDate) : LocalDate.now().minusDays(30);
-        LocalDate end = endDate != null ? LocalDate.parse(endDate) : LocalDate.now();
-
-        int count = minuteKlineService.fetchMinuteKline(stockCode, period, start, end);
-
-        Map<String, Object> result = new HashMap<>();
-        result.put("code", 200);
-        result.put("data", Map.of(
-                "stockCode", stockCode,
-                "period", period,
-                "count", count,
-                "dateRange", start + " ~ " + end
         ));
         return ResponseEntity.ok(result);
     }

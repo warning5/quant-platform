@@ -18,6 +18,8 @@ import com.quant.platform.market.service.MarketDataService;
 import com.quant.platform.screen.dto.ScreenRequest;
 import com.quant.platform.screen.dto.ScreenResult;
 import com.quant.platform.screen.service.StockScreenService;
+import com.quant.platform.stock.entity.StockInfo;
+import com.quant.platform.stock.mapper.StockInfoMapper;
 import com.quant.platform.stock.service.DividendService;
 import com.quant.platform.strategy.domain.StrategyDefinition;
 import com.quant.platform.strategy.service.StrategyService;
@@ -70,6 +72,8 @@ public class BacktestEngine {
     /**
      * 调仓记录写入（统一后两种模式都写）
      */
+    @Autowired(required = false)
+    private StockInfoMapper stockInfoMapper;
     @Autowired(required = false)
     private RebalanceRecordMapper rebalanceRecordMapper;
     /**
@@ -212,6 +216,10 @@ public class BacktestEngine {
         List<LocalDate> tradingDates = marketDataService.getTradingDates(startDate, endDate);
         if (tradingDates.isEmpty()) throw new RuntimeException("无可用交易日数据");
 
+        // ── 预加载退市日期映射（幸存者偏差修复）────────────────────────
+        Map<String, LocalDate> delistDateMap = loadDelistDateMap();
+        log.info("Loaded {} delist dates for survivor-bias filtering", delistDateMap.size());
+
         // ── 前复权因子缓存（symbol → adjFactor）────────────────────────
         // 在回测时，如果 dividendReinvest=false，仍需对历史价格做前复权调整，
         // 以消除除权日价格跳空对技术指标/价格比较的影响。
@@ -338,9 +346,13 @@ public class BacktestEngine {
             List<MarketDailyBar> bars = new ArrayList<>();
             for (MarketDailyBar bar : barsRaw) {
                 String name = bar.getName();
+                String symbol = bar.getSymbol();
                 boolean isST = name != null && name.contains("ST");
                 boolean isDelisted = bar.getClose() == null || bar.getClose().doubleValue() <= 0;
-                if (!isST && !isDelisted) {
+                // 幸存者偏差修复：过滤已退市（含即将退市）股票
+                LocalDate delistDate = delistDateMap.get(symbol);
+                boolean willDelist = delistDate != null && !today.isBefore(delistDate);
+                if (!isST && !isDelisted && !willDelist) {
                     bars.add(bar);
                 }
             }
@@ -732,6 +744,10 @@ public class BacktestEngine {
         List<LocalDate> tradingDates = marketDataService.getTradingDates(startDate, endDate);
         if (tradingDates.isEmpty()) throw new RuntimeException("无可用交易日数据");
 
+        // ── 预加载退市日期映射（幸存者偏差修复）────────────────────────
+        Map<String, LocalDate> delistDateMap = loadDelistDateMap();
+        log.info("[SCREEN] Loaded {} delist dates for survivor-bias filtering", delistDateMap.size());
+
         // ── 止损止盈参数 ──
         double stopLossPct = task.getStopLossPct() != null ? task.getStopLossPct().doubleValue() : 0.0;
         double stopProfitPct = task.getStopProfitPct() != null ? task.getStopProfitPct().doubleValue() : 0.0;
@@ -790,9 +806,13 @@ public class BacktestEngine {
             List<MarketDailyBar> bars = new ArrayList<>();
             for (MarketDailyBar bar : barsRaw) {
                 String name = bar.getName();
+                String symbol = bar.getSymbol();
                 boolean isST = name != null && name.contains("ST");
                 boolean isDelisted = bar.getClose() == null || bar.getClose().doubleValue() <= 0;
-                if (!isST && !isDelisted) bars.add(bar);
+                // 幸存者偏差修复：过滤已退市（含即将退市）股票
+                LocalDate delistDate = delistDateMap.get(symbol);
+                boolean willDelist = delistDate != null && !today.isBefore(delistDate);
+                if (!isST && !isDelisted && !willDelist) bars.add(bar);
             }
             Map<String, MarketDailyBar> barMap = bars.stream()
                     .collect(Collectors.toMap(MarketDailyBar::getSymbol, b -> b));
@@ -2276,5 +2296,33 @@ public class BacktestEngine {
             int tradingDays,
             double benchmarkTotalReturn
     ) {
+    }
+
+    /**
+     * 加载所有股票的退市日期映射（幸存者偏差修复）。
+     * 从 stock_info 表查询 delist_date 字段，构建 symbol -> delistDate 的映射。
+     * 如果 stock_info 中无退市日期数据，则返回空 map（不影响现有逻辑）。
+     */
+    private Map<String, LocalDate> loadDelistDateMap() {
+        if (stockInfoMapper == null) {
+            return Map.of();
+        }
+        try {
+            List<StockInfo> list = stockInfoMapper.selectList(
+                    new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<StockInfo>()
+                            .isNotNull("delist_date")
+                            .gt("delist_date", "1900-01-01")
+            );
+            Map<String, LocalDate> map = new HashMap<>();
+            for (StockInfo info : list) {
+                if (info.getCode() != null && info.getDelistDate() != null) {
+                    map.put(info.getCode(), info.getDelistDate());
+                }
+            }
+            return map;
+        } catch (Exception e) {
+            log.warn("加载退市日期映射失败: {}", e.getMessage());
+            return Map.of();
+        }
     }
 }

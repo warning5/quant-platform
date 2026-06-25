@@ -97,6 +97,21 @@ public class ScheduleConfigController {
             "last_run_duration_sec, next_run_time, updated_at " +
             "FROM data_schedule_config ORDER BY id"
         );
+
+        // 为 SENTIMENT 任务注入 sub_items（情绪数据子项列表），前端动态展示
+        for (Map<String, Object> row : list) {
+            String taskKey = (String) row.get("task_key");
+            if ("SENTIMENT_MF".equals(taskKey) || "SENTIMENT_OTHER".equals(taskKey)) {
+                try {
+                    String extraConfigJson = (String) row.get("extra_config");
+                    DataUpdateRequest req = buildRequestFromKey(taskKey, extraConfigJson);
+                    row.put("sub_items", req.getSentimentSubItems());
+                } catch (Exception e) {
+                    log.warn("[ScheduleConfig] 构建 {} 的 sub_items 失败: {}", taskKey, e.getMessage());
+                }
+            }
+        }
+
         return ApiResponse.success(list);
     }
 
@@ -350,7 +365,18 @@ public class ScheduleConfigController {
                 break;
             case "SENTIMENT_OTHER":
                 req.setUpdateType("SENTIMENT");
+                // 其它情绪数据：关掉资金流向，开启其余
                 req.setFetchMoneyflow(false);
+                req.setFetchLhb(true);
+                req.setFetchMargin(true);
+                req.setFetchSurvey(true);
+                req.setFetchBlockTrade(true);
+                req.setFetchActivity(true);
+                req.setFetchZtPool(true);
+                req.setFetchNotice(true);
+                req.setFetchFundHolder(true);
+                req.setFetchShareholder(true);
+                req.setFetchNews(true);
                 break;
             case "RESEARCH":       req.setUpdateType("RESEARCH"); break;
             default: throw new IllegalArgumentException("未知的任务类型: " + taskKey);

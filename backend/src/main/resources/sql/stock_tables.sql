@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS `stock_info`
     `list_date`        DATE COMMENT '上市日期',
     `is_hs`            TINYINT  DEFAULT 0 COMMENT '是否沪深股通（0-否，1-是）',
     `is_st`            TINYINT  DEFAULT 0 COMMENT '是否ST（0-否，1-是）',
+    `delist_date`      DATE COMMENT '退市日期（退市后不再纳入回测选股）',
     `total_share`      DECIMAL(20, 2) COMMENT '总股本（股）',
     `float_share`      DECIMAL(20, 2) COMMENT '流通股本（股）',
     `total_market_cap` DECIMAL(20, 2) COMMENT '总市值（元）',

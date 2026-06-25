@@ -1,5 +1,6 @@
 package com.quant.platform.recommendation.controller;
 
+import com.quant.platform.common.ratelimit.RateLimit;
 import com.quant.platform.common.dto.ApiResponse;
 import com.quant.platform.factor.ic.domain.FactorIcRecord;
 import com.quant.platform.factor.ic.service.FactorIcService;
@@ -40,6 +41,7 @@ public class RecommendationController {
      * 手动触发生成推荐列表
      */
     @PostMapping("/generate")
+    @RateLimit(capacity = 10, duration = 1)
     public ApiResponse<Map<String, Object>> generate(@RequestBody(required = false) GenerateRequest req) {
         try {
             LocalDate date = req != null ? req.getDate() : null;
@@ -155,6 +157,7 @@ public class RecommendationController {
      * 批量计算因子 IC/IR（按日期范围）
      */
     @PostMapping("/ic/compute-batch")
+    @RateLimit(capacity = 3, duration = 1)
     public ApiResponse<Map<String, Object>> computeIcBatch(@RequestBody Map<String, Object> params) {
         try {
             LocalDate startDate = LocalDate.parse(params.get("startDate").toString());

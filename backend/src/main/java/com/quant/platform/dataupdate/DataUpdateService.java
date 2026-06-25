@@ -724,14 +724,70 @@ public class DataUpdateService {
     }
 
     /**
-     * 执行 stock_info 更新脚本
+     * 执行 stock_info 更新脚本，完成后自动标记退市股票
      */
     private boolean runUpdateStockInfo(String taskId, DataUpdateTask task) throws IOException, InterruptedException {
         List<String> cmd = new ArrayList<>();
         cmd.add(pythonPath);
         cmd.add("-u");
         cmd.add("update_stock_info_daily.py");
-        return runSingleScript(taskId, task, cmd, "股票信息");
+        boolean ok = runSingleScript(taskId, task, cmd, "股票信息");
+        if (ok && !"CANCELLED".equals(task.getStatus())) {
+            autoMarkDelistedStocks(taskId);
+        }
+        return ok;
+    }
+
+    /**
+     * 自动检测并标记退市股票（在 stock_info 更新后调用）
+     */
+    private void autoMarkDelistedStocks(String taskId) {
+        try {
+            broadcastLog(taskId, "[INFO] 自动检测退市股票...");
+            List<String> cmd = new ArrayList<>();
+            cmd.add(pythonPath);
+            cmd.add("-u");
+            cmd.add("find_delisted_stocks.py");
+            cmd.add("60");
+            cmd.add("--mark-only");
+            ProcessBuilder pb = new ProcessBuilder(cmd);
+            pb.directory(new java.io.File(resolvedScriptDir));
+            pb.redirectErrorStream(false);
+            pb.environment().put("PYTHONIOENCODING", "utf-8");
+            Process p = pb.start();
+
+            StringBuilder stdout = new StringBuilder();
+            try (java.io.BufferedReader br = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(p.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = br.readLine()) != null) {
+                    stdout.append(line).append("\n");
+                }
+            }
+            StringBuilder stderr = new StringBuilder();
+            try (java.io.BufferedReader er = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(p.getErrorStream(), java.nio.charset.StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = er.readLine()) != null) {
+                    stderr.append(line).append("\n");
+                }
+            }
+            int rc = p.waitFor();
+            if (rc == 0) {
+                String logMsg = stderr.toString().trim();
+                if (!logMsg.isEmpty()) {
+                    for (String line : logMsg.split("\n")) {
+                        broadcastLog(taskId, "[INFO] " + line);
+                    }
+                }
+                broadcastLog(taskId, "[INFO] 退市检测完成");
+            } else {
+                broadcastLog(taskId, "[WARN] 退市检测失败: " + stderr.toString().trim());
+            }
+        } catch (Exception e) {
+            log.warn("[DataUpdate] 自动标记退市股票失败: {}", e.getMessage());
+            broadcastLog(taskId, "[WARN] 自动标记退市股票失败: " + e.getMessage());
+        }
     }
 
     /**

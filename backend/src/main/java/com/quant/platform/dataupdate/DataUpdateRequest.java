@@ -195,4 +195,29 @@ public class DataUpdateRequest {
      * 情绪数据：股票代码列表（逗号分隔，为空则更新全部）
      */
     private String sentimentCodes;
+
+    /**
+     * 获取当前请求中启用的情绪数据子项中文名列表
+     * 用于前端定时任务管理页面的描述展示
+     */
+    public java.util.List<String> getSentimentSubItems() {
+        java.util.List<String> items = new java.util.ArrayList<>();
+        if (isFetchLhb()) items.add("龙虎榜");
+        if (isFetchMargin()) items.add("融资融券");
+        if (isFetchSurvey()) items.add("机构调研");
+        if (isFetchBlockTrade()) items.add("大宗交易");
+        if (isFetchActivity()) items.add("市场活跃度");
+        if (isFetchZtPool()) items.add("涨跌停池");
+        if (isFetchMoneyflow()) items.add("资金流向");
+        if (isFetchNotice()) items.add("公告");
+        if (isFetchFundHolder()) items.add("基金持仓");
+        if (isFetchShareholder()) items.add("股东人数");
+        if (isFetchNews()) items.add("新闻");
+        if (isFetchBondYield()) items.add("国债收益率");
+        if (isFetchShenwanIndex()) items.add("申万行业指数");
+        if (isFetchConsensusEstimate()) items.add("一致预期");
+        if (isFetchEarningsReport()) items.add("业绩快报");
+        if (isFetchQvix()) items.add("QVIX恐慌指数");
+        return items;
+    }
 }

@@ -2,6 +2,7 @@ package com.quant.platform.monitor;
 
 import com.quant.platform.notification.NotificationService;
 import com.quant.platform.calendar.service.TradeCalendarService;
+import com.quant.platform.strategy.paper.PaperTradingService;
 import lombok.Data;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
@@ -39,6 +40,7 @@ public class IntradayMonitorService {
 
     private final JdbcTemplate jdbcTemplate;
     private final NotificationService notificationService;
+    private final PaperTradingService paperTradingService;
     private final EntrySignalAnalyzer signalAnalyzer;
     private final TradeCalendarService tradeCalendarService;
 
@@ -76,10 +78,12 @@ public class IntradayMonitorService {
     private volatile LocalDate dataDate;
 
     public IntradayMonitorService(JdbcTemplate jdbcTemplate, NotificationService notificationService,
+                                  PaperTradingService paperTradingService,
                                   EntrySignalAnalyzer signalAnalyzer, TradeCalendarService tradeCalendarService,
                                   @Value("${quant.monitor.kline-thread-pool-size:4}") int klinePoolSize) {
         this.jdbcTemplate = jdbcTemplate;
         this.notificationService = notificationService;
+        this.paperTradingService = paperTradingService;
         this.signalAnalyzer = signalAnalyzer;
         this.tradeCalendarService = tradeCalendarService;
         this.klinePool = Executors.newFixedThreadPool(klinePoolSize,
@@ -669,6 +673,29 @@ public class IntradayMonitorService {
         sseEvent.put("time", LocalDateTime.now().toString());
         broadcastSse(sseEvent);
         recordSignalHistory(sseEvent);
+
+        // ── 实时风控：自动执行模拟盘止损卖出 ──
+        try {
+            List<Map<String, Object>> paperPositions = jdbcTemplate.query(
+                "SELECT pt.id as paper_id, pp.code " +
+                "FROM paper_trading pt JOIN paper_position pp ON pt.id = pp.paper_id " +
+                "WHERE pt.status = 'RUNNING' AND pp.code = ?",
+                (rs, rowNum) -> {
+                    Map<String, Object> m = new HashMap<>();
+                    m.put("paperId", rs.getLong("paper_id"));
+                    m.put("code", rs.getString("code"));
+                    return m;
+                }, stockCode);
+            for (Map<String, Object> pos : paperPositions) {
+                Long paperId = (Long) pos.get("paperId");
+                paperTradingService.autoSellByStopLoss(paperId, stockCode, "盘中止损触发");
+            }
+            if (!paperPositions.isEmpty()) {
+                log.info("[IntradayMonitor] 自动止损卖出: {} 在 {} 个模拟盘中执行", stockCode, paperPositions.size());
+            }
+        } catch (Exception e) {
+            log.warn("[IntradayMonitor] 自动止损执行失败: {} - {}", stockCode, e.getMessage());
+        }
     }
 
     /**

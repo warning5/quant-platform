@@ -61,6 +61,12 @@ public class StockInfo implements Serializable {
     private Integer isSt;
 
     /**
+     * 退市日期（退市后不再纳入回测选股）
+     */
+    @TableField("delist_date")
+    private LocalDate delistDate;
+
+    /**
      * 总股本（股）
      */
     @TableField("total_share")

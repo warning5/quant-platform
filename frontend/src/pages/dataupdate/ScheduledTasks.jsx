@@ -41,7 +41,7 @@ const TASK_ITEMS = [
     icon: '💹', defaultEnabled: true, color: '#eb2f96',
   },
   {
-    key: 'SENTIMENT_OTHER', name: '情绪数据-其它', desc: '龙虎榜/融资融券/机构调研/涨跌停池/公告/基金持仓/股东人数/新闻',
+    key: 'SENTIMENT_OTHER', name: '情绪数据-其它', desc: '龙虎榜/融资融券/机构调研/大宗交易/市场活跃度/涨跌停池/公告/基金持仓/股东人数/新闻/国债收益率/申万行业指数/一致预期/业绩快报/QVIX恐慌指数',
     icon: '🔥', defaultEnabled: true, color: '#f5222d',
   },
   {
@@ -1115,9 +1115,11 @@ export default function ScheduledTasks() {
       width: 240,
       render: (_, record) => {
         const def = TASK_ITEMS.find(d => d.key === record.task_key);
-        // 推荐任务用 extra_config 中的策略信息生成描述
+        // 优先使用后端返回的 sub_items 动态生成描述
         let desc = def?.desc;
-        if (!desc && record.task_key === 'DAILY_RECOMMENDATION') {
+        if (record.sub_items && record.sub_items.length > 0) {
+          desc = record.sub_items.join(' / ');
+        } else if (!desc && record.task_key === 'DAILY_RECOMMENDATION') {
           try {
             const ec = typeof record.extra_config === 'string' ? JSON.parse(record.extra_config) : record.extra_config;
             const ids = ec?.strategyIds || [];

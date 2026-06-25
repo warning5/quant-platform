@@ -10,9 +10,11 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * 持仓预警服务
@@ -66,9 +68,10 @@ public class PositionAlertService {
             alertCount += checkResearchReports(paperId, pos, today);
         }
 
-        // 5. 集中度/行业/回撤风控检测（每模拟盘一次）
+        // 5. 集中度/行业/回撤/相关性风控检测（每模拟盘一次）
         alertCount += checkRiskConcentration(paperId, positions, today);
         alertCount += checkRiskIndustry(paperId, positions, today);
+        alertCount += checkRiskCorrelation(paperId, positions, today);
         alertCount += checkRiskDrawdown(paperId, today);
 
         // 6. 事件驱动预警（定增/解禁/股权激励/业绩预告）
@@ -530,6 +533,141 @@ public class PositionAlertService {
             log.debug("回撤检测失败: paperId={}, error={}", paperId, e.getMessage());
         }
         return 0;
+    }
+
+    /**
+     * 相关性集中度检测（幸存者偏差修复：隐性集中风险）
+     * 计算持仓股票近60日收益率相关系数矩阵，
+     * 若任意两只持仓相关系数 > 0.7 且合计仓位 > 40%，则触发 WARNING。
+     */
+    private int checkRiskCorrelation(Long paperId, List<PaperPosition> positions, LocalDate today) {
+        if (clickHouseJdbcTemplate == null || positions.size() < 2) return 0;
+
+        BigDecimal totalAssets = getTotalAssets(paperId);
+        if (totalAssets == null || totalAssets.compareTo(BigDecimal.ZERO) <= 0) return 0;
+
+        // code -> name 映射
+        Map<String, String> nameMap = positions.stream()
+                .collect(Collectors.toMap(PaperPosition::getCode, p -> p.getName() != null ? p.getName() : p.getCode()));
+
+        // 提取持仓代码
+        List<String> codes = positions.stream()
+            .map(PaperPosition::getCode)
+            .distinct()
+            .toList();
+        if (codes.size() < 2) return 0;
+
+        // 从 ClickHouse 批量获取近60日收盘价
+        String codeList = codes.stream().map(c -> "'" + c + "'").collect(Collectors.joining(","));
+        String sql = String.format("""
+            SELECT code, trade_date, close_price
+            FROM stock.stock_daily
+            WHERE code IN (%s)
+              AND trade_date >= '%s'
+            ORDER BY code, trade_date ASC
+            """, codeList, today.minusDays(90));
+
+        try {
+            List<Map<String, Object>> rows = clickHouseJdbcTemplate.query(sql, (rs, rowNum) -> {
+                Map<String, Object> m = new HashMap<>();
+                m.put("code", rs.getString("code"));
+                m.put("date", rs.getString("trade_date"));
+                m.put("close", rs.getDouble("close_price"));
+                return m;
+            });
+
+            // 构建 code -> List<Double> closePrices
+            Map<String, List<Double>> priceMap = new HashMap<>();
+            for (Map<String, Object> row : rows) {
+                String code = (String) row.get("code");
+                priceMap.computeIfAbsent(code, k -> new ArrayList<>()).add((Double) row.get("close"));
+            }
+
+            // 只保留至少有30个价格点的股票（约30个交易日）
+            List<String> validCodes = priceMap.entrySet().stream()
+                .filter(e -> e.getValue().size() >= 30)
+                .map(Map.Entry::getKey)
+                .toList();
+            if (validCodes.size() < 2) return 0;
+
+            // 计算日收益率
+            Map<String, double[]> returnsMap = new HashMap<>();
+            for (String code : validCodes) {
+                List<Double> prices = priceMap.get(code);
+                double[] rets = new double[prices.size() - 1];
+                for (int i = 1; i < prices.size(); i++) {
+                    rets[i - 1] = prices.get(i - 1) > 0
+                        ? (prices.get(i) - prices.get(i - 1)) / prices.get(i - 1)
+                        : 0;
+                }
+                returnsMap.put(code, rets);
+            }
+
+            // 获取仓位映射
+            Map<String, BigDecimal> marketValueMap = new HashMap<>();
+            for (PaperPosition pos : positions) {
+                if (pos.getMarketValue() != null) {
+                    marketValueMap.merge(pos.getCode(), pos.getMarketValue(), BigDecimal::add);
+                }
+            }
+
+            // 计算相关系数矩阵，检查高相关+高仓位的组合
+            int alertCount = 0;
+            double CORR_THRESHOLD = 0.70;
+            double POS_THRESHOLD = 0.40;
+            for (int i = 0; i < validCodes.size(); i++) {
+                for (int j = i + 1; j < validCodes.size(); j++) {
+                    String codeA = validCodes.get(i);
+                    String codeB = validCodes.get(j);
+                    double corr = calcPearsonCorrelation(returnsMap.get(codeA), returnsMap.get(codeB));
+                    if (corr > CORR_THRESHOLD) {
+                        BigDecimal mvA = marketValueMap.getOrDefault(codeA, BigDecimal.ZERO);
+                        BigDecimal mvB = marketValueMap.getOrDefault(codeB, BigDecimal.ZERO);
+                        double combinedPct = mvA.add(mvB).divide(totalAssets, 4, java.math.RoundingMode.HALF_UP)
+                            .doubleValue();
+                        if (combinedPct > POS_THRESHOLD) {
+                            String nameA = nameMap.getOrDefault(codeA, codeA);
+                            String nameB = nameMap.getOrDefault(codeB, codeB);
+                            saveAlert(PositionAlert.builder()
+                                .paperId(paperId).code(codeA).name(nameA + "+" + nameB)
+                                .alertType("RISK_CORRELATION").alertLevel("WARNING")
+                                .title(String.format("相关性集中预警：%s+%s 相关系数%.2f 合计仓位%.1f%%",
+                                    nameA, nameB, corr, combinedPct * 100))
+                                .detail(String.format("%s(%s) + %s(%s) 近60日相关系数%.2f，合计市值%.2f/总资产%.2f = %.1f%%（阈值%.1f%%）",
+                                    nameA, codeA, nameB, codeB, corr,
+                                    mvA.add(mvB), totalAssets, combinedPct * 100, POS_THRESHOLD * 100))
+                                .alertDate(today).isRead(false).build());
+                            alertCount++;
+                            log.info("[相关性预警] paperId={} {}+{} corr={:.2f} combined={:.1f}%",
+                                paperId, codeA, codeB, corr, combinedPct * 100);
+                        }
+                    }
+                }
+            }
+            return alertCount;
+        } catch (Exception e) {
+            log.warn("相关性检测失败: paperId={}, error={}", paperId, e.getMessage());
+            return 0;
+        }
+    }
+
+    /**
+     * 计算皮尔逊相关系数
+     */
+    private double calcPearsonCorrelation(double[] x, double[] y) {
+        if (x.length != y.length || x.length < 2) return 0;
+        int n = x.length;
+        double sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0, sumY2 = 0;
+        for (int i = 0; i < n; i++) {
+            sumX += x[i];
+            sumY += y[i];
+            sumXY += x[i] * y[i];
+            sumX2 += x[i] * x[i];
+            sumY2 += y[i] * y[i];
+        }
+        double numerator = n * sumXY - sumX * sumY;
+        double denominator = Math.sqrt((n * sumX2 - sumX * sumX) * (n * sumY2 - sumY * sumY));
+        return denominator > 1e-10 ? numerator / denominator : 0;
     }
 
     /**

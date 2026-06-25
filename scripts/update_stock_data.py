@@ -597,7 +597,7 @@ def main():
         except Exception as e:
             print(f"\n[WARN] 字段补全异常: {e}")
 
-    # ─── Part 4: ClickHouse OPTIMIZE（去重合并） ───
+    # ─── Part 4: ClickHouse OPTIMIZE（去重合并 / PE/PB补全后统一执行一次）───
     if DB_BACKEND == "clickhouse" and do_daily:
         try:
             import clickhouse_connect

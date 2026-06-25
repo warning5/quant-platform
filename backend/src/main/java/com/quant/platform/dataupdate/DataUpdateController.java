@@ -43,11 +43,6 @@ public class DataUpdateController {
 
     private String resolvedScriptDir;
 
-    /** 退市股票查询缓存（结果 + 过期时间），1 小时有效 */
-    private volatile List<Map<String, Object>> delistedCache;
-    private volatile long delistedCacheTime = 0;
-    private static final long DELISTED_CACHE_TTL_MS = 3600_000; // 1 hour
-
     @PostConstruct
     public void init() {
         java.io.File dir = new java.io.File(scriptDir);
@@ -501,25 +496,16 @@ public class DataUpdateController {
     }
 
     @GetMapping("/delisted/list")
-    @Operation(summary = "查询退市股票列表（ClickHouse 检测最近无交易数据，缓存 1 小时）")
+    @Operation(summary = "查询退市股票列表（ClickHouse 检测最近无交易数据）")
     public ApiResponse<List<Map<String, Object>>> listDelistedStocks(
             @RequestParam(defaultValue = "30") int inactiveDays) {
         try {
-            // 缓存命中（注意：不同 inactiveDays 参数应分别缓存，简单处理：参数变化时清空缓存）
-            long now = System.currentTimeMillis();
-            if (delistedCache != null && (now - delistedCacheTime) < DELISTED_CACHE_TTL_MS) {
-                log.debug("[退市查询] 命中缓存，剩余 {} 分钟",
-                        (DELISTED_CACHE_TTL_MS - (now - delistedCacheTime)) / 60_000);
-                return ApiResponse.success(delistedCache);
-            }
-            // 缓存过期，调用 Python 脚本
+            // 直接调用脚本，不使用缓存（脚本执行速度快，且数据会频繁变化）
             String json = runFindDelistedScript(inactiveDays);
             com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
             List<Map<String, Object>> stocks = mapper.readValue(json,
                     mapper.getTypeFactory().constructCollectionType(List.class, Map.class));
-            delistedCache = stocks;
-            delistedCacheTime = System.currentTimeMillis();
-            log.info("[退市查询] 脚本执行完毕，结果已缓存 ({} 只)", stocks.size());
+            log.info("[退市查询] 脚本执行完毕 ({} 只)", stocks.size());
             return ApiResponse.success(stocks);
         } catch (Exception e) {
             log.error("查询退市股票列表失败", e);
@@ -527,17 +513,40 @@ public class DataUpdateController {
         }
     }
 
+    @PostMapping("/delisted/mark")
+    @Operation(summary = "标记退市股票（更新 delist_date 而非删除）")
+    public ApiResponse<Map<String, Object>> markDelistedStocks() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        try {
+            String json = runFindDelistedScript(60);
+            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            List<Map<String, Object>> stocks = mapper.readValue(json,
+                    mapper.getTypeFactory().constructCollectionType(List.class, Map.class));
+            // 统计有日期可标记的候选（实际标记数由脚本内部决定）
+            long markable = stocks.stream().filter(s -> {
+                Object out = s.get("out_date");
+                Object max = s.get("max_date");
+                return (out != null && !out.toString().isEmpty()) || (max != null && !max.toString().isEmpty());
+            }).count();
+            result.put("markedCount", markable);
+            result.put("candidateCount", stocks.size());
+            result.put("stocks", stocks);
+            log.info("[退市标记] 完成: 候选 {} 只, 可标记 {} 只", stocks.size(), markable);
+            return ApiResponse.success(result);
+        } catch (Exception e) {
+            log.error("退市标记失败", e);
+            return ApiResponse.error("标记失败: " + e.getMessage());
+        }
+    }
+
     @PostMapping("/delisted/clean")
-    @Operation(summary = "清理退市股票数据")
+    @Operation(summary = "清理退市股票数据（物理删除，慎用）")
     public ApiResponse<Map<String, Object>> cleanDelistedStocks(@RequestBody List<String> codes) {
         Map<String, Object> result = new LinkedHashMap<>();
         try {
             if (codes == null || codes.isEmpty()) {
                 return ApiResponse.error("请选择要清理的股票");
             }
-            // 清除退市查询缓存
-            delistedCache = null;
-            delistedCacheTime = 0;
 
             result.put("cleanedCodes", codes);
             result.put("codeCount", codes.size());

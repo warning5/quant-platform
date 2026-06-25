@@ -12,7 +12,7 @@ import {
   DatabaseOutlined, RiseOutlined, FallOutlined,
   CalendarOutlined, BarChartOutlined, PieChartOutlined, DollarOutlined,
   LineChartOutlined, GiftOutlined, FileTextOutlined, DeleteOutlined, ExclamationCircleOutlined,
-  LockOutlined, CheckSquareOutlined, CloseSquareOutlined
+  LockOutlined, CheckSquareOutlined, CloseSquareOutlined, FlagOutlined
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { dataUpdateApi, financialApi, silentConfig } from '../../api/index';
@@ -257,9 +257,10 @@ function DataUpdate() {
   const [researchValidateResult, setResearchValidateResult] = useState(null);
   const [researchValidateLoading, setResearchValidateLoading] = useState(false);
 
-  // ========== 退市股票清理 ==========
+  // ========== 退市股票管理 ==========
   const [delistedStocks, setDelistedStocks] = useState([]);
   const [delistedLoading, setDelistedLoading] = useState(false);
+  const [delistedMarking, setDelistedMarking] = useState(false);
   const [delistedCleaning, setDelistedCleaning] = useState(false);
   const [delistedCleanedCodes, setDelistedCleanedCodes] = useState([]);
   const [selectedDelistedKeys, setSelectedDelistedKeys] = useState([]);
@@ -275,6 +276,30 @@ function DataUpdate() {
       setDelistedLoading(false);
     }
   }, []);
+
+  const handleMarkDelisted = async () => {
+    setDelistedMarking(true);
+    try {
+      const res = await dataUpdateApi.markDelistedStocks();
+      const candidateCount = res?.candidateCount || 0;
+      const markedCount = res?.markedCount || 0;
+      const stocks = res?.stocks || [];
+      if (markedCount > 0) {
+        message.success(`已标记 ${markedCount} 只退市股票，stock_info.delist_date 已更新（检测到 ${candidateCount} 只候选）`);
+      } else if (candidateCount > 0) {
+        message.info(`检测到 ${candidateCount} 只退市候选，但均无可确认退市日期，未标记。请手动确认或清理。`);
+      } else {
+        message.info('未发现新的退市股票需要标记');
+      }
+      // 刷新列表
+      setDelistedStocks((stocks || []).map((s, i) => ({ ...s, key: i })));
+      setSelectedDelistedKeys([]);
+    } catch (e) {
+      message.error('标记退市失败：' + (e?.response?.data?.message || e.message));
+    } finally {
+      setDelistedMarking(false);
+    }
+  };
 
   const handleCleanDelisted = (codes) => {
     Modal.confirm({
@@ -318,6 +343,16 @@ function DataUpdate() {
       render: (v) => v?.includes('退') ? <Tag color="error">{v}</Tag> : <span>{v}</span> },
     { title: '市场', dataIndex: 'market', width: 70, align: 'center',
       render: (v) => <Tag color={MARKET_COLORS[v]}>{MARKET_NAMES[v]}</Tag> },
+    { title: '来源', dataIndex: 'source', width: 90, align: 'center',
+      render: (v) => {
+        const map = { akshare: '官方数据', clickhouse: '数据缺失', name_pattern: '名称检测' };
+        const color = v === 'akshare' ? 'red' : v === 'clickhouse' ? 'orange' : 'default';
+        return <Tag color={color}>{map[v] || v}</Tag>;
+      } },
+    { title: '状态', dataIndex: 'marked', width: 80, align: 'center',
+      render: (v) => v
+        ? <Tag color="success">已标记</Tag>
+        : <Tag color="warning">待处理</Tag> },
     { title: '退市日期', dataIndex: 'out_date', width: 120,
       render: (v) => v ? <Tag color="error">{v}</Tag> : '-' },
     { title: '最后交易日', dataIndex: 'max_date', width: 120 },
@@ -334,7 +369,7 @@ function DataUpdate() {
   const renderDelistedTab = () => (
     <div>
       <Alert
-        message="通过 Baostock 差分检测系统中已退市的股票（stock_info 中存在但 Baostock 已不包含）"
+        message="退市股票管理：多源检测（akshare官方退市数据 + ClickHouse数据缺失 + 名称检测），自动更新 stock_info.delist_date 字段用于回测幸存者偏差过滤。"
         type="info"
         showIcon
         style={{ marginBottom: 16 }}
@@ -358,9 +393,17 @@ function DataUpdate() {
           return (
           <Space>
             <span>已选择 {selectedRows.length} 只股票</span>
+            <Button
+              type="primary"
+              icon={<FlagOutlined />}
+              loading={delistedMarking}
+              onClick={handleMarkDelisted}
+            >
+              标记退市
+            </Button>
             <Popconfirm
               title="确认清理选中的股票？"
-              description="此操作将删除 stock_info、stock_daily、factor_value、moneyflow 中的相关数据，不可撤销。"
+              description="此操作将物理删除 stock_info、stock_daily、factor_value、moneyflow 中的相关数据，不可撤销。建议优先使用「标记退市」保留数据用于回测。"
               onConfirm={() => handleCleanDelisted(selectedRows.map(r => r.code))}
               okText="确认清理"
               cancelText="取消"
@@ -2770,7 +2813,7 @@ function DataUpdate() {
             {
               key: 'DELISTED',
               forceRender: false,
-              label: <span><DeleteOutlined /> 退市清理</span>,
+              label: <span><DeleteOutlined /> 退市管理</span>,
               children: <div style={{ padding: '16px 0' }}>{renderDelistedTab()}</div>,
             },
           ]}

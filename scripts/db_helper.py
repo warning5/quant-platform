@@ -504,7 +504,7 @@ class StockDailyDB:
             placeholders = ", ".join([f"'{c}'" for c in normalized_codes])
             r = self.ch_client.query(
                 f"SELECT code, MAX(trade_date) AS max_date "
-                f"FROM {self.CH_TABLE} FINAL "
+                f"FROM {self.CH_TABLE} "
                 f"WHERE code IN ({placeholders}) AND trade_date BETWEEN '{start_date}' AND '{end_date}' "
                 f"GROUP BY code"
             )
@@ -1349,7 +1349,7 @@ class StockDailyDB:
         """
         if self.backend == "clickhouse":
             r = self.ch_client.query(
-                f"SELECT DISTINCT code FROM {self.CH_TABLE} FINAL "
+                f"SELECT DISTINCT code FROM {self.CH_TABLE} "
                 f"WHERE (pe_ttm IS NULL OR pb IS NULL) "
                 f"AND code NOT LIKE '%.%' "
                 f"ORDER BY code"
@@ -1399,36 +1399,49 @@ class StockDailyDB:
             table = self.CH_TABLE
             now_dt = datetime.now()
             insert_rows = []
-            for item in batch_updates:
-                # (pe_ttm, None, None, pb, code, trade_date)
-                pe_val = item[0]
-                pb_val = item[3]
-                code = item[4]
-                trade_date = item[5]
 
-                # 读取原行完整数据
+            # 按 code 分组，每只股票一次无 FINAL 查询（避免 1741只×1000行 = 174万次全表扫描）
+            code_groups = {}
+            for item in batch_updates:
+                code = item[4]
+                code_groups.setdefault(code, []).append(item)
+
+            cols_str = ', '.join(self.DAILY_COLUMNS)
+
+            for code, items in code_groups.items():
+                # 一次查询拿回该股票所有历史行（无 FINAL，避免强制 merging）
                 try:
                     sel = self.ch_client.query(
-                        f"SELECT {', '.join(self.DAILY_COLUMNS)} FROM {table} FINAL "
-                        f"WHERE code = %(code)s AND toString(trade_date) = %(td)s",
-                        parameters={"code": code, "td": str(trade_date)}
+                        f"SELECT {cols_str} FROM {table} WHERE code = %(code)s",
+                        parameters={"code": code}
                     )
-                    if not sel.result_rows:
-                        continue
-                    orig = sel.result_rows[0]
-                    row_dict = dict(zip(self.DAILY_COLUMNS, orig))
                 except Exception:
                     continue
 
-                # 打补丁
-                if pe_val is not None:
-                    row_dict['pe_ttm'] = float(pe_val)
-                if pb_val is not None:
-                    row_dict['pb'] = float(pb_val)
-                row_dict['update_time'] = now_dt
+                # 构建 trade_date → row_dict（同日期重复取最后一条）
+                row_map = {}
+                for row in sel.result_rows:
+                    rd = dict(zip(self.DAILY_COLUMNS, row))
+                    row_map[str(rd['trade_date'])] = rd
 
-                vals = [row_dict.get(col) for col in self.DAILY_COLUMNS]
-                insert_rows.append(vals)
+                # 打补丁 PE/PB
+                for item in items:
+                    pe_val = item[0]
+                    pb_val = item[3]
+                    trade_date = str(item[5])
+
+                    row_dict = row_map.get(trade_date)
+                    if row_dict is None:
+                        continue
+
+                    if pe_val is not None:
+                        row_dict['pe_ttm'] = float(pe_val)
+                    if pb_val is not None:
+                        row_dict['pb'] = float(pb_val)
+                    row_dict['update_time'] = now_dt
+
+                    vals = [row_dict.get(col) for col in self.DAILY_COLUMNS]
+                    insert_rows.append(vals)
 
             if insert_rows:
                 ins_batch = 5000
