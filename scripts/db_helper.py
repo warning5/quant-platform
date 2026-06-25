@@ -273,6 +273,9 @@ class StockDailyDB:
         conditions = []
         params = []
 
+        # 排除已退市股票
+        conditions.append("delist_date IS NULL")
+
         if code:
             conditions.append("code = %s")
             params.append(code)

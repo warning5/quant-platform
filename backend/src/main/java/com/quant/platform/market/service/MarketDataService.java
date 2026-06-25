@@ -80,7 +80,10 @@ public class MarketDataService {
     @PostConstruct
     public void init() {
         log.info("[MarketDataService] 加载 code -> market 映射...");
-        List<StockInfo> all = stockInfoMapper.selectList(null);
+        // 排除已退市股票（delist_date IS NULL）
+        List<StockInfo> all = stockInfoMapper.selectList(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<StockInfo>()
+                        .isNull(StockInfo::getDelistDate));
         codeMarketMap = all.stream()
                 .collect(Collectors.toMap(StockInfo::getCode, StockInfo::getMarket));
         log.info("[MarketDataService] 已加载 {} 只股票的 market 映射", codeMarketMap.size());
