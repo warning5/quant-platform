@@ -609,7 +609,9 @@ def main():
                     print(f"  ClickHouse OPTIMIZE TABLE FINAL（去重合并）")
                     print(f"{'=' * 70}")
                     t0 = time.time()
-                    ch.command("OPTIMIZE TABLE stock.stock_daily FINAL")
+                    # 加大 receive_timeout（默认300s），大表 OPTIMIZE FINAL 可能超过5分钟
+                    ch.command("OPTIMIZE TABLE stock.stock_daily FINAL",
+                               settings={"receive_timeout": 1800})
                     elapsed = time.time() - t0
                     r = ch.query("SELECT count() AS total, countDistinct(code, trade_date) AS distinct_rows FROM stock.stock_daily")
                     total, distinct = r.result_rows[0]

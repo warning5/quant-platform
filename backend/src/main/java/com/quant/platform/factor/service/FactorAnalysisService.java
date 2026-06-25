@@ -823,17 +823,12 @@ public class FactorAnalysisService {
         int n = x.size();
         if (n != y.size() || n < 3) return Double.NaN;
 
-        int[] rankX = calcRank(x);
-        int[] rankY = calcRank(y);
+        double[] rankX = calcRank(x);
+        double[] rankY = calcRank(y);
 
         // Pearson correlation on ranks
-        double meanRX = 0, meanRY = 0;
-        for (int i = 0; i < n; i++) {
-            meanRX += rankX[i];
-            meanRY += rankY[i];
-        }
-        meanRX /= n;
-        meanRY /= n;
+        double meanRX = Arrays.stream(rankX).average().orElse(0);
+        double meanRY = Arrays.stream(rankY).average().orElse(0);
 
         double cov = 0, varX = 0, varY = 0;
         for (int i = 0; i < n; i++) {
@@ -876,16 +871,32 @@ public class FactorAnalysisService {
         return cov / Math.sqrt(varX * varY);
     }
 
-    private int[] calcRank(List<Double> values) {
+    /**
+     * 计算排名，正确处理并列值（平均排名法）
+     * 例如 [10, 20, 20, 30] → [1, 2.5, 2.5, 4]
+     */
+    private double[] calcRank(List<Double> values) {
         int n = values.size();
         Integer[] indices = new Integer[n];
         for (int i = 0; i < n; i++) indices[i] = i;
 
         Arrays.sort(indices, Comparator.comparingDouble(values::get));
 
-        int[] ranks = new int[n];
-        for (int i = 0; i < n; i++) {
-            ranks[indices[i]] = i + 1;
+        double[] ranks = new double[n];
+        int i = 0;
+        while (i < n) {
+            int j = i;
+            // 找并列值组团
+            while (j + 1 < n
+                    && Double.compare(values.get(indices[j + 1]), values.get(indices[j])) == 0) {
+                j++;
+            }
+            // 平均排名: (起始排名 + 结束排名) / 2 = (i+1 + j+1) / 2
+            double avgRank = (i + j + 2) / 2.0;
+            for (int k = i; k <= j; k++) {
+                ranks[indices[k]] = avgRank;
+            }
+            i = j + 1;
         }
         return ranks;
     }

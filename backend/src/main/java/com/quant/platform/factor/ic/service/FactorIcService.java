@@ -258,7 +258,9 @@ public class FactorIcService {
         // stock_daily.code 不带后缀，需要用 replaceRegexpOne 去掉后缀后再 JOIN
 
         try {
-            // row_number() OVER (ORDER BY ...) 得到排序位置，corr(Pearson) 作用于排名 = Spearman
+            // Spearman = Pearson(rank_x, rank_y)，排名需处理并列值（平均排名法）
+            // 先用 rank() 得到并列最小值，再用 count() OVER (PARTITION BY val) 计算组团大小，
+            // 平均排名 = rk + (tie_size - 1) / 2
             String sql = String.format("""
                 WITH base AS (
                     SELECT
@@ -277,16 +279,26 @@ public class FactorIcService {
                       AND f.factor_val IS NOT NULL
                       AND d1.close_price > 0
                       AND d2.close_price > 0
-            ),
-            ranked AS (
-                SELECT
-                    symbol,
-                    row_number() OVER (ORDER BY factor_val) as rankFactor,
-                    row_number() OVER (ORDER BY fwd_return) as rankReturn
-                FROM base
-            )
-            SELECT corr(rankFactor, rankReturn) as ic_value, count() as stock_count FROM ranked
-            """, date, forwardDate, factorCode, date);
+                ),
+                ranked AS (
+                    SELECT
+                        factor_val,
+                        fwd_return,
+                        rank() OVER (ORDER BY factor_val)     as rk_f,
+                        count() OVER (PARTITION BY factor_val) as tie_f,
+                        rank() OVER (ORDER BY fwd_return)    as rk_r,
+                        count() OVER (PARTITION BY fwd_return) as tie_r
+                    FROM base
+                ),
+                avg_ranked AS (
+                    SELECT
+                        rk_f + (tie_f - 1) / 2.0  as rankFactor,
+                        rk_r + (tie_r - 1) / 2.0  as rankReturn
+                    FROM ranked
+                )
+                SELECT corr(rankFactor, rankReturn) as ic_value, count() as stock_count
+                FROM avg_ranked
+                """, date, forwardDate, factorCode, date);
 
             Map<String, Object> row = clickHouseStockService.queryForList(sql).stream().findFirst().orElse(null);
             if (row == null || row.get("ic_value") == null) {

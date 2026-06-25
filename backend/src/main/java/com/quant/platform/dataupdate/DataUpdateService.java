@@ -1358,7 +1358,9 @@ public class DataUpdateService {
         Map<String, Object> result = new LinkedHashMap<>();
 
         // 总体统计（MySQL）
-        long totalStocks = stockInfoMapper.selectCount(null);
+        // 排除已退市股票
+        long totalStocks = stockInfoMapper.selectCount(
+                new LambdaQueryWrapper<StockInfo>().isNull(StockInfo::getDelistDate));
 
         // ── ClickHouse 合并查询：一次SQL查出所有指标（排除指数） ─────────────
         String mergedSql = """
@@ -1425,7 +1427,8 @@ public class DataUpdateService {
 
             // stock_info 中该市场股票总数（MySQL）
             LambdaQueryWrapper<StockInfo> iw = new LambdaQueryWrapper<>();
-            iw.eq(StockInfo::getMarket, market);
+            iw.eq(StockInfo::getMarket, market)
+              .isNull(StockInfo::getDelistDate);  // 排除已退市
             long infoCount = stockInfoMapper.selectCount(iw);
             m.put("infoCount", infoCount);
 
@@ -1690,6 +1693,7 @@ public class DataUpdateService {
                 SELECT si.code, si.name, si.market
                 FROM stock_info si
                 WHERE si.market IN ('SH', 'SZ', 'BJ')
+                AND si.delist_date IS NULL
                 %s
                 AND si.code NOT IN (
                     SELECT code FROM stock_daily WHERE trade_date = '%s'

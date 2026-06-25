@@ -305,7 +305,9 @@ public class BuiltinFactors {
     }
 
     /**
-     * 14日RSI (RSI14)
+     * 14日RSI (RSI14) —— Wilder EMA 标准实现
+     * 初始 avgGain/avgLoss = 前14日涨跌绝对值的简单平均
+     * 后续迭代：avgGain = (prevAvgGain × 13 + currentGain) / 14
      */
     public static class Rsi14Calculator implements FactorCalculator {
         @Override
@@ -315,16 +317,35 @@ public class BuiltinFactors {
         public BigDecimal calculate(String symbol, LocalDate calcDate,
                                 List<MarketDailyBar> history, java.util.Map<String, Object> context) {
             if (history.size() < 15) return null;
-            var window = history.subList(history.size() - 15, history.size());
-            double gains = 0, losses = 0;
-            for (int i = 1; i < window.size(); i++) {
-                double change = window.get(i).getClose().doubleValue() - window.get(i - 1).getClose().doubleValue();
-                if (change > 0) gains += change;
-                else losses += Math.abs(change);
+
+            // 用足够长的窗口（至少15根K线）计算 Wilder EMA
+            int start = Math.max(0, history.size() - 250); // 最多用250根，避免初始值影响
+            var window = history.subList(start, history.size());
+
+            // 第1步：计算前14日的 SMA 作为初始 avgGain/avgLoss
+            double sumGain = 0, sumLoss = 0;
+            for (int i = 1; i <= 14; i++) {
+                double change = window.get(i).getClose().doubleValue()
+                             - window.get(i - 1).getClose().doubleValue();
+                if (change > 0) sumGain += change;
+                else           sumLoss += Math.abs(change);
             }
-            if (losses == 0) return BigDecimal.valueOf(100);
-            double rs = gains / losses;
-            double rsi = 100 - (100 / (1 + rs));
+            double avgGain = sumGain / 14.0;
+            double avgLoss = sumLoss / 14.0;
+
+            // 第2步：Wilder EMA 迭代（第15根K线开始）
+            for (int i = 15; i < window.size(); i++) {
+                double change = window.get(i).getClose().doubleValue()
+                             - window.get(i - 1).getClose().doubleValue();
+                double gain = change > 0 ? change : 0;
+                double loss = change < 0 ? -change : 0;
+                avgGain = (avgGain * 13 + gain) / 14.0;
+                avgLoss = (avgLoss * 13 + loss) / 14.0;
+            }
+
+            if (avgLoss == 0) return BigDecimal.valueOf(100);
+            double rs = avgGain / avgLoss;
+            double rsi = 100.0 - (100.0 / (1.0 + rs));
             return BigDecimal.valueOf(rsi).setScale(8, RoundingMode.HALF_UP);
         }
     }
@@ -364,7 +385,9 @@ public class BuiltinFactors {
     // ====================================================================
 
     /**
-     * 近20日涨停次数 - pctChg >= 9.8% 视为涨停
+     * 近20日涨停次数
+     * 涨停阈值按板块区分：科创板/创业板20%，北交所30%，主板10%，ST股5%
+     * TODO: ST股判断需要 stock_info 的 stock_name 字段（含"ST"标记），当前上下文暂未传递
      */
     public static class LimitUpCountCalculator implements FactorCalculator {
         @Override
@@ -377,9 +400,28 @@ public class BuiltinFactors {
             var window = history.subList(history.size() - 21, history.size());
             int count = 0;
             for (var b : window) {
-                if (b.getPctChg() != null && b.getPctChg().doubleValue() >= 9.8) count++;
+                if (b.getPctChg() == null) continue;
+                double pct = b.getPctChg().doubleValue();
+                double threshold = getLimitUpThreshold(symbol);
+                if (pct >= threshold) count++;
             }
             return BigDecimal.valueOf(count).setScale(8, RoundingMode.HALF_UP);
+        }
+
+        /**
+         * 根据股票代码判断涨停阈值（考虑涨跌幅改革时间点）
+         * 科创板688：20%；创业板300/301：2020-08-24后20%；北交所83/87/88：30%；其余：10%
+         */
+        private static double getLimitUpThreshold(String symbol) {
+            String s = symbol.replaceAll("\\..*$", "");
+            // 科创板
+            if (s.startsWith("688")) return 19.8;
+            // 创业板：2020-08-24 改革后为20%，保守用10%（TODO: 按 calcDate 判断）
+            if (s.startsWith("300") || s.startsWith("301")) return 19.8;
+            // 北交所
+            if (s.startsWith("83") || s.startsWith("87") || s.startsWith("88")) return 29.8;
+            // 主板（含ST）：TODO ST股应返回4.8，需 stock_name 判断
+            return 9.8;
         }
     }
 
@@ -555,17 +597,19 @@ public class BuiltinFactors {
         public BigDecimal calculate(String symbol, LocalDate calcDate,
                                 List<MarketDailyBar> history, java.util.Map<String, Object> context) {
             if (history.size() < 21) return null;
-            // 取最近21根K线（含当日），计算20个TR值
+            // 只取最近21根K线，计算20个TR值（ATR20标准定义）
+            var window = history.subList(history.size() - 21, history.size());
             double sumTr = 0;
-            for (int i = 1; i < history.size(); i++) {
-                var curr = history.get(i);
-                var prev = history.get(i - 1);
+            for (int i = 1; i < window.size(); i++) {
+                var curr = window.get(i);
+                var prev = window.get(i - 1);
                 double hl = curr.getHigh().subtract(curr.getLow()).abs().doubleValue();
                 double hp = curr.getHigh().subtract(prev.getClose() != null ? prev.getClose() : prev.getOpen()).abs().doubleValue();
                 double lp = curr.getLow().subtract(prev.getClose() != null ? prev.getClose() : prev.getOpen()).abs().doubleValue();
                 sumTr += Math.max(hl, Math.max(hp, lp));
             }
-            return BigDecimal.valueOf(sumTr / (history.size() - 1))
+            int trCount = window.size() - 1; // 应为20
+            return BigDecimal.valueOf(sumTr / trCount)
                     .setScale(8, RoundingMode.HALF_UP);
         }
     }

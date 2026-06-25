@@ -1343,6 +1343,14 @@ public class FactorComputeEngine {
             int skippedNoData = 0;
             int skippedNoReturn = 0;
 
+            // 多 lag IC 累积（用于衰减分析）
+            int[] DECAY_LAGS = {1, 5, 10, 20};
+            @SuppressWarnings("unchecked")
+            List<Double>[] icListLag = new List[DECAY_LAGS.length];
+            for (int i = 0; i < DECAY_LAGS.length; i++) {
+                icListLag[i] = new ArrayList<>();
+            }
+
             for (int di = 0; di < dates.size() - 1; di++) {
                 LocalDate calcDate = dates.get(di);
                 LocalDate nextDate = dates.get(di + 1);
@@ -1393,29 +1401,59 @@ public class FactorComputeEngine {
                     continue;
                 }
 
-                // 分批获取当期+下期行情（避免 CH 内存爆掉）
+                // 分批获取当期+多期前向行情（lag=1/5/10/20，用于IC衰减分析）
                 List<String> symbols = factorValues.stream().map(FactorValue::getSymbol).toList();
                 final int BATCH = 1000;
                 Map<String, List<MarketDailyBar>> currBars = new HashMap<>();
-                Map<String, List<MarketDailyBar>> nextBars = new HashMap<>();
+                // lag → symbol → forwardReturn
+                Map<Integer, Map<String, Double>> lagReturns = new LinkedHashMap<>();
+
+                // 当期价格
                 for (int b = 0; b < symbols.size(); b += BATCH) {
                     List<String> batch = symbols.subList(b, Math.min(b + BATCH, symbols.size()));
                     currBars.putAll(marketDataService.getBarsBatch(batch, calcDate, calcDate));
-                    nextBars.putAll(marketDataService.getBarsBatch(batch, nextDate, nextDate));
                 }
-                // 获取下期收益
-                Map<String, Double> nextReturns = new HashMap<>();
-                for (FactorValue fv : factorValues) {
-                    String sym = fv.getSymbol();
-                    List<MarketDailyBar> curr = currBars.get(sym);
-                    List<MarketDailyBar> next = nextBars.get(sym);
-                    if (curr != null && !curr.isEmpty() && next != null && !next.isEmpty()) {
-                        double r = next.getFirst().getClose().doubleValue() / curr.getFirst().getClose().doubleValue() - 1;
-                        nextReturns.put(sym, r);
+                // 各 lag 的前向收益
+                for (int lag : DECAY_LAGS) {
+                    int fwdIdx = di + lag;
+                    if (fwdIdx >= dates.size()) continue;
+                    LocalDate fwdDate = dates.get(fwdIdx);
+                    Map<String, List<MarketDailyBar>> fwdBars = new HashMap<>();
+                    for (int b = 0; b < symbols.size(); b += BATCH) {
+                        List<String> batch = symbols.subList(b, Math.min(b + BATCH, symbols.size()));
+                        fwdBars.putAll(marketDataService.getBarsBatch(batch, fwdDate, fwdDate));
                     }
+                    Map<String, Double> retMap = new HashMap<>();
+                    for (FactorValue fv : factorValues) {
+                        String sym = fv.getSymbol();
+                        List<MarketDailyBar> curr = currBars.get(sym);
+                        List<MarketDailyBar> fwd = fwdBars.get(sym);
+                        if (curr != null && !curr.isEmpty() && fwd != null && !fwd.isEmpty()) {
+                            double r = fwd.getFirst().getClose().doubleValue()
+                                     / curr.getFirst().getClose().doubleValue() - 1;
+                            retMap.put(sym, r);
+                        }
+                    }
+                    lagReturns.put(lag, retMap);
                 }
 
-                List<FactorValue> valid = factorValues.stream().filter(fv -> nextReturns.containsKey(fv.getSymbol())).toList();
+                // 用 lag=1 的收益作为下期收益（原有逻辑保持不变）
+                Map<String, Double> nextReturns = lagReturns.get(1);
+                if (nextReturns == null) {
+                    skippedNoReturn++;
+                    appendNavPoint(groupNavData, calcDate, groupNavs, benchmarkNav);
+                    appendLsNavPoint(longShortNavData, calcDate, lsTopNav, lsBottomNav, lsNetNav);
+                    double[] zeros = new double[GROUP_COUNT];
+                    groupDailyReturnsList.add(zeros);
+                    topGroupDailyList.add(0.0);
+                    benchmarkDailyList.add(0.0);
+                    topActiveReturnList.add(0.0);
+                    processed++;
+                    continue;
+                }
+
+                List<FactorValue> valid = factorValues.stream()
+                        .filter(fv -> nextReturns.containsKey(fv.getSymbol())).toList();
 
                 if (valid.size() < GROUP_COUNT * 2) {
                     skippedNoReturn++;
@@ -1430,7 +1468,7 @@ public class FactorComputeEngine {
                     continue;
                 }
 
-                // ── IC 计算 ──────────────────────────────────────
+                // ── IC 计算（lag=1 原有逻辑） ───────────────────────────────
                 double[] fValues = valid.stream().mapToDouble(fv -> fv.getFactorVal().doubleValue()).toArray();
                 double[] returns = valid.stream().mapToDouble(fv -> nextReturns.get(fv.getSymbol())).toArray();
                 double[] rankVals = valid.stream().mapToDouble(fv -> fv.getRankValue() == null ? 0 : fv.getRankValue().doubleValue()).toArray();
@@ -1440,6 +1478,20 @@ public class FactorComputeEngine {
 
                 if (!Double.isNaN(ic)) icList.add(ic);
                 if (!Double.isNaN(rankIc)) rankIcList.add(rankIc);
+
+                // ── 多 lag IC 累积（用于衰减分析） ──────────────────────────
+                for (int li = 0; li < DECAY_LAGS.length; li++) {
+                    int lag = DECAY_LAGS[li];
+                    Map<String, Double> lr = lagReturns.get(lag);
+                    if (lr == null) continue;
+                    List<FactorValue> vLag = factorValues.stream()
+                            .filter(fv -> lr.containsKey(fv.getSymbol())).toList();
+                    if (vLag.size() < GROUP_COUNT * 2) continue;
+                    double[] fLag = vLag.stream().mapToDouble(fv -> fv.getFactorVal().doubleValue()).toArray();
+                    double[] rLag = vLag.stream().mapToDouble(fv -> lr.get(fv.getSymbol())).toArray();
+                    double icLag = pearsonCorr(fLag, rLag);
+                    if (!Double.isNaN(icLag)) icListLag[li].add(icLag);
+                }
 
                 Map<String, Object> icPoint = new HashMap<>();
                 icPoint.put("date", calcDate.toString());
@@ -1643,7 +1695,7 @@ public class FactorComputeEngine {
 
             // ── 因子衰减分析(因子有效期) ──────────────────────────────────────────
             sendProgress(factor.getFactorCode(), "TESTING", 98, "计算因子衰减分析");
-            Map<String, Object> decayAnalysis = computeFactorDecayAnalysis(icSeriesData);
+            Map<String, Object> decayAnalysis = computeFactorDecayAnalysis(icListLag, DECAY_LAGS);
             report.setDecayPeriods((BigDecimal) decayAnalysis.get("decayPeriods"));
             report.setHalfLifePeriods((BigDecimal) decayAnalysis.get("halfLifePeriods"));
             report.setDecayCoefficient((BigDecimal) decayAnalysis.get("decayCoefficient"));
@@ -1881,68 +1933,73 @@ public class FactorComputeEngine {
     }
 
     /**
-     * 计算因子衰减分析(因子有效期)
-     * 分析因子值与未来不同期数收益的相关性衰减规律
+     * 因子衰减分析（正确实现）
+     * 对同一批因子值，分别与 lag=1/5/10/20 日前收益计算 IC，
+     * 观察 |IC| 随前瞻天数衰减的规律。
      */
-    private Map<String, Object> computeFactorDecayAnalysis(List<Map<String, Object>> icSeriesData) {
+    private Map<String, Object> computeFactorDecayAnalysis(List<Double>[] icListLag, int[] lags) {
         List<Map<String, Object>> decaySeries = new ArrayList<>();
-        double[] initialICs = icSeriesData.stream().mapToDouble(d -> ((Number) d.get("ic")).doubleValue()).toArray();
+        double initialICAbs = 0;
 
-        double initialICMean = avg(Arrays.stream(initialICs).boxed().collect(Collectors.toList()));
-        double initialICAbs = Math.abs(initialICMean);
+        for (int i = 0; i < lags.length; i++) {
+            List<Double> icValues = icListLag[i];
+            if (icValues == null || icValues.isEmpty()) continue;
+            double icMean = avg(icValues);
+            double icAbs = Math.abs(icMean);
+            if (i == 0) initialICAbs = icAbs;
 
-        // 计算滞后1-10期的IC
-        int maxLag = Math.min(10, initialICs.length - 1);
-        for (int lag = 0; lag <= maxLag; lag++) {
-            List<Double> laggedICs = new ArrayList<>();
-            for (int i = 0; i < initialICs.length - lag; i++) {
-                laggedICs.add(initialICs[i + lag]);
-            }
-            double laggedICMean = laggedICs.isEmpty() ? 0 : avg(laggedICs);
-            double laggedICAbs = Math.abs(laggedICMean);
-
-            Map<String, Object> decayPoint = new HashMap<>();
-            decayPoint.put("period", lag);
-            decayPoint.put("laggedIc", round4(laggedICMean));
-            decayPoint.put("absoluteIc", round4(laggedICAbs));
-            decaySeries.add(decayPoint);
+            Map<String, Object> point = new LinkedHashMap<>();
+            point.put("period", lags[i]);
+            point.put("ic", round4(icMean));
+            point.put("absIc", round4(icAbs));
+            decaySeries.add(point);
         }
 
-        // 计算因子有效期: IC绝对值首次低于阈值0.02的期数
+        if (decaySeries.isEmpty()) {
+            Map<String, Object> empty = new LinkedHashMap<>();
+            empty.put("decayPeriods", BigDecimal.ZERO);
+            empty.put("halfLifePeriods", BigDecimal.ZERO);
+            empty.put("decayCoefficient", BigDecimal.ZERO);
+            empty.put("decayRSquared", BigDecimal.ZERO);
+            empty.put("decaySeries", new ArrayList<>());
+            return empty;
+        }
+
+        // 计算因子有效期: |IC| 首次低于阈值0.02的期数
         double decayPeriods = 0;
         final double IC_THRESHOLD = 0.02;
-        for (Map<String, Object> decayPoint : decaySeries) {
-            double absIC = ((Number) decayPoint.get("absoluteIc")).doubleValue();
+        for (Map<String, Object> point : decaySeries) {
+            double absIC = ((Number) point.get("absIc")).doubleValue();
             if (absIC < IC_THRESHOLD) {
-                decayPeriods = ((Number) decayPoint.get("period")).doubleValue();
+                decayPeriods = ((Number) point.get("period")).doubleValue();
                 break;
             }
         }
-        if (decayPeriods == 0 && !decaySeries.isEmpty()) {
-            decayPeriods = maxLag; // 如果未降至阈值,返回最大期数
+        if (decayPeriods == 0) {
+            int lastIdx = decaySeries.size() - 1;
+            decayPeriods = ((Number) decaySeries.get(lastIdx).get("period")).doubleValue();
         }
 
-        // 计算因子半衰期: IC降至初始值的50%所需的期数
+        // 计算半衰期
         double halfLifePeriods = 0;
         double halfICThreshold = initialICAbs * 0.5;
-        for (Map<String, Object> decayPoint : decaySeries) {
-            double absIC = ((Number) decayPoint.get("absoluteIc")).doubleValue();
+        for (Map<String, Object> point : decaySeries) {
+            double absIC = ((Number) point.get("absIc")).doubleValue();
             if (absIC < halfICThreshold) {
-                halfLifePeriods = ((Number) decayPoint.get("period")).doubleValue();
+                halfLifePeriods = ((Number) point.get("period")).doubleValue();
                 break;
             }
         }
 
-        // 拟合指数衰减模型: IC(t) = IC(0) * exp(-λ * t)
+        // 拟合指数衰减: |IC(t)| = |IC(0)| * exp(-λt)
         double decayCoefficient = 0;
         double decayRSquared = 0;
         try {
-            // 使用前maxLag期数据进行拟合
             List<Double> periods = new ArrayList<>();
             List<Double> absICs = new ArrayList<>();
-            for (Map<String, Object> decayPoint : decaySeries) {
-                int period = ((Number) decayPoint.get("period")).intValue();
-                double absIC = ((Number) decayPoint.get("absoluteIc")).doubleValue();
+            for (Map<String, Object> point : decaySeries) {
+                int period = ((Number) point.get("period")).intValue();
+                double absIC = ((Number) point.get("absIc")).doubleValue();
                 if (period > 0 && absIC > 0) {
                     periods.add((double) period);
                     absICs.add(absIC);
@@ -1950,10 +2007,8 @@ public class FactorComputeEngine {
             }
 
             if (periods.size() >= 3) {
-                // 对数变换: ln(IC(t)) = ln(IC(0)) - λ * t
-                List<Double> logICs = absICs.stream().map(Math::log).toList();
-
-                // 线性回归拟合
+                // ln(|IC|) = ln(|IC(0)|) - λt
+                List<Double> logICs = absICs.stream().map(Math::log).collect(Collectors.toList());
                 double sumT = 0, sumLogIC = 0, sumTLogIC = 0, sumT2 = 0;
                 int n = periods.size();
                 for (int i = 0; i < n; i++) {
@@ -1964,13 +2019,11 @@ public class FactorComputeEngine {
                     sumTLogIC += t * logIC;
                     sumT2 += t * t;
                 }
-
                 double slope = (n * sumTLogIC - sumT * sumLogIC) / (n * sumT2 - sumT * sumT);
                 double intercept = (sumLogIC - slope * sumT) / n;
+                decayCoefficient = -slope;
 
-                decayCoefficient = -slope; // λ = -斜率
-
-                // 计算R²
+                // R²
                 double meanLogIC = sumLogIC / n;
                 double ssRes = 0, ssTot = 0;
                 for (int i = 0; i < n; i++) {
@@ -1979,19 +2032,18 @@ public class FactorComputeEngine {
                     ssRes += Math.pow(actual - predicted, 2);
                     ssTot += Math.pow(actual - meanLogIC, 2);
                 }
-                decayRSquared = ssTot == 0 ? 0 : 1 - (ssRes / ssTot);
+                decayRSquared = ssTot == 0 ? 0 : 1 - ssRes / ssTot;
             }
         } catch (Exception e) {
-            log.warn("Failed to fit decay model", e);
+            log.warn("衰减曲线拟合失败: {}", e.getMessage());
         }
 
-        Map<String, Object> result = new HashMap<>();
+        Map<String, Object> result = new LinkedHashMap<>();
         result.put("decayPeriods", bd(decayPeriods));
         result.put("halfLifePeriods", bd(halfLifePeriods));
         result.put("decayCoefficient", bd(decayCoefficient));
         result.put("decayRSquared", bd(decayRSquared));
         result.put("decaySeries", decaySeries);
-
         return result;
     }
 }
