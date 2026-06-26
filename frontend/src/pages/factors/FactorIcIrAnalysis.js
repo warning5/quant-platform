@@ -409,8 +409,8 @@ export default function FactorIcIrAnalysis() {
   const [segmentedMode, setSegmentedMode] = useState(false);
   const [splitDate, setSplitDate] = useState(dayjs('2026-01-01'));
   const [segmentedResults, setSegmentedResults] = useState(null);
-  const [neutralizeByIndustry, setNeutralizeByIndustry] = useState(false);
-  const [neutralizeByMarketCap, setNeutralizeByMarketCap] = useState(false);
+  const [neutralizeByIndustry, setNeutralizeByIndustry] = useState(true);
+  const [neutralizeByMarketCap, setNeutralizeByMarketCap] = useState(true);
   const [correlationType, setCorrelationType] = useState('spearman'); // 'spearman' | 'pearson'
   const [icThreshold, setIcThreshold] = useState(0.03); // 复合IC因子预筛选阈值
   const [savingIc, setSavingIc] = useState(false);
