@@ -202,6 +202,7 @@ def build_daily_rows(db, code, name, market, rows, snapshot=None):
             "turnover_rate": to_float(row[7]) if len(row) > 7 else None,
             "pe_ttm": snap_pe,
             "pb": snap_pb,
+            "data_source": "qq",
         })
         return result
 
@@ -243,6 +244,7 @@ def build_daily_rows(db, code, name, market, rows, snapshot=None):
             "turnover_rate": to_float(row[7]) if len(row) > 7 else None,
             "pe_ttm": snap_pe,            # 腾讯快照当前值（北交所无历史）
             "pb": snap_pb,                # 同上
+            "data_source": "qq",
         })
 
         prev_close = close_p

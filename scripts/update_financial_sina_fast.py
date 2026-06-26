@@ -227,12 +227,10 @@ def _save_fast(df: pd.DataFrame, code: str, table_name: str,
 
     inserted = 0
     for code_, rd, rt, ed, insert_cols, insert_vals in rows_to_insert:
-        sets = ', '.join(f"{c} = VALUES({c})" for c in insert_cols)
         sql = (
-            f"INSERT INTO {table_name} "
+            f"INSERT IGNORE INTO {table_name} "
             f"(code, report_date, report_type, end_date, {', '.join(insert_cols)}) "
-            f"VALUES (%s,%s,%s,%s, {', '.join(['%s']*len(insert_cols))}) "
-            f"ON DUPLICATE KEY UPDATE {sets}"
+            f"VALUES (%s,%s,%s,%s, {', '.join(['%s']*len(insert_cols))})"
         )
         try:
             cursor.execute(sql, [code_, rd, rt, ed] + insert_vals)

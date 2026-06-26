@@ -1,11 +1,13 @@
 package com.quant.platform.strategy.paper;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.quant.platform.calendar.service.TradeCalendarService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDate;
 import java.util.List;
 
 /**
@@ -23,6 +25,7 @@ public class PaperTradingScheduler {
     private final PaperTradingService paperTradingService;
     private final PaperTradingMapper paperTradingMapper;
     private final PositionAlertService positionAlertService;
+    private final TradeCalendarService tradeCalendarService;
 
     /**
      * 每个交易日 15:30 执行（周一至周五）
@@ -30,6 +33,12 @@ public class PaperTradingScheduler {
      */
     @Scheduled(cron = "0 30 15 * * MON-FRI", zone = "Asia/Shanghai")
     public void runDailyPaperTrading() {
+        // 节假日跳过（MON-FRI 不足以排除 A 股法定节假日）
+        LocalDate today = LocalDate.now();
+        if (!tradeCalendarService.isTradingDay(today)) {
+            log.info("今日 [{}] 为非交易日，模拟盘定时任务跳过", today);
+            return;
+        }
         log.info("========== 模拟盘定时任务开始 ==========");
 
         List<PaperTrading> runningPapers = paperTradingMapper.selectList(

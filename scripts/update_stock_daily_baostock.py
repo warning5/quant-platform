@@ -220,6 +220,7 @@ def build_daily_rows(db, code, name, market, df):
             "turnover_rate": to_float(row['turn']),
             "pe_ttm": to_float(row['peTTM']),
             "pb": to_float(row['pbMRQ']),
+            "data_source": "baostock",
         })
 
         prev_close = close_price  # 下一行以此为昨收

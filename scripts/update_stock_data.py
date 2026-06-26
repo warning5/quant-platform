@@ -629,6 +629,46 @@ def main():
         except ImportError:
             print(f"\n[WARN] clickhouse_connect 未安装，跳过 OPTIMIZE")
 
+    # ─── Part 5: 价格异常检测（单日涨跌幅 >50%）───
+    if DB_BACKEND == "clickhouse" and do_daily:
+        try:
+            import clickhouse_connect
+            from db_config import CLICKHOUSE_CONFIG
+            ch_check = clickhouse_connect.get_client(**CLICKHOUSE_CONFIG)
+            # 查最近5个交易日内涨跌幅绝对值 > 50% 的股票（排除ST和复权误差）
+            anomaly_sql = """
+                SELECT code, name, trade_date, close_price, pre_close, change_percent
+                FROM stock.stock_daily
+                WHERE trade_date >= today() - 7
+                  AND pre_close > 0
+                  AND abs(change_percent) > 50
+                  AND code NOT LIKE '688%'  -- 科创板涨跌停30%以内不排除，异常则额外警示
+                ORDER BY trade_date DESC, abs(change_percent) DESC
+                LIMIT 50
+            """
+            anomaly_rows = ch_check.query(anomaly_sql).result_rows
+            if anomaly_rows:
+                print(f"\n{'!' * 70}")
+                print(f"  ⚠️  价格异常告警：发现 {len(anomaly_rows)} 条单日涨跌幅 >50% 记录（近7天）")
+                print(f"{'!' * 70}")
+                print(f"  {'代码':<10} {'名称':<10} {'日期':<12} {'收盘价':>8} {'昨收':>8} {'涨跌幅':>8}")
+                print(f"  {'-' * 62}")
+                for r in anomaly_rows:
+                    code, name, td, close, pre_close, chg = r
+                    flag = "🔴" if chg > 0 else "🟢"
+                    print(f"  {flag} {str(code):<9} {str(name or ''):<10} {str(td):<12} "
+                          f"{close:>8.2f} {pre_close:>8.2f} {chg:>+7.2f}%")
+                print(f"{'!' * 70}")
+                print(f"  可能原因：①除权复权误差  ②ST摘帽/退市整理  ③首日上市  ④数据源错误")
+                print(f"  建议检查：若为数据错误，执行 fix_valuation_by_qq 重新补全或手动校正")
+                results.append(("价格异常检测", False))  # False 表示有告警，需关注
+            else:
+                print(f"\n  ✅ 价格异常检测：近7天无单日涨跌幅 >50% 异常记录")
+                results.append(("价格异常检测", True))
+            ch_check.close()
+        except Exception as e:
+            print(f"\n[WARN] 价格异常检测失败: {e}")
+
     # ─── 汇总 ───
     total_elapsed = time.time() - total_start
 

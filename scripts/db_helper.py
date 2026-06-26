@@ -650,7 +650,7 @@ class StockDailyDB:
             "id", "code", "trade_date", "name", "open_price", "close_price",
             "high_price", "low_price", "pre_close", "volume", "amount",
             "change_percent", "change_amount", "turnover_rate",
-            "pe_ttm", "pb",
+            "pe_ttm", "pb", "data_source",
         ]
 
         # ── 预过滤：查 FINAL 表，找出已存在的 (code, trade_date) ──

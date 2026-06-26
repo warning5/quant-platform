@@ -142,17 +142,11 @@ def save_yjbb_to_indicator(df, conn, report_year, force=False):
         gross_margin = parse_number(row.get('销售毛利率'))
         try:
             cursor.execute("""
-                INSERT INTO stock_financial_indicator
+                INSERT IGNORE INTO stock_financial_indicator
                     (code, report_date, report_type, end_date,
                      bps, revenue_yoy, net_profit_yoy, roe,
                      gross_profit_margin)
                 VALUES (%s,%s,%s,%s, %s,%s,%s,%s, %s)
-                ON DUPLICATE KEY UPDATE
-                    bps = VALUES(bps),
-                    revenue_yoy = VALUES(revenue_yoy),
-                    net_profit_yoy = VALUES(net_profit_yoy),
-                    roe = VALUES(roe),
-                    gross_profit_margin = VALUES(gross_profit_margin)
             """, (code, rd, rt, ed,
                   bps, revenue_yoy, net_profit_yoy, roe, gross_margin))
             inserted += 1
@@ -243,10 +237,9 @@ def save_ths_to_tables(df, code, conn, force=False):
                     insert_vals.append(indicator_vals[col])
             if insert_cols:
                 sql = f"""
-                    INSERT INTO stock_financial_indicator
+                    INSERT IGNORE INTO stock_financial_indicator
                         (code, report_date, report_type, end_date, {', '.join(insert_cols)})
                     VALUES (%s,%s,%s,%s, {', '.join(['%s']*len(insert_cols))})
-                    ON DUPLICATE KEY UPDATE {', '.join(set_parts)}
                 """
                 try:
                     cursor.execute(sql, [code, rd, rt, ed] + insert_vals)
@@ -261,15 +254,13 @@ def save_ths_to_tables(df, code, conn, force=False):
             insert_vals = []
             for col in income_cols:
                 if col in income_vals:
-                    set_parts.append(f"{col} = VALUES({col})")
                     insert_cols.append(col)
                     insert_vals.append(income_vals[col])
             if insert_cols:
                 sql = f"""
-                    INSERT INTO stock_income
+                    INSERT IGNORE INTO stock_income
                         (code, report_date, report_type, end_date, {', '.join(insert_cols)})
                     VALUES (%s,%s,%s,%s, {', '.join(['%s']*len(insert_cols))})
-                    ON DUPLICATE KEY UPDATE {', '.join(set_parts)}
                 """
                 try:
                     cursor.execute(sql, [code, rd, rt, ed] + insert_vals)
@@ -508,10 +499,9 @@ def _save_ths_table(df, code, table_name, col_map, conn, force=False):
 
         set_parts = [f"{c} = VALUES({c})" for c in insert_cols]
         sql = f"""
-            INSERT INTO {table_name}
+            INSERT IGNORE INTO {table_name}
                 (code, report_date, report_type, end_date, {', '.join(insert_cols)})
             VALUES (%s,%s,%s,%s, {', '.join(['%s']*len(insert_cols))})
-            ON DUPLICATE KEY UPDATE {', '.join(set_parts)}
         """
         try:
             cursor.execute(sql, [code, rd, rt, ed] + insert_vals)

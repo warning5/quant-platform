@@ -1774,6 +1774,166 @@ public class DataUpdateService {
         return result;
     }
 
+    /**
+     * P1-2.3: 数据新鲜度检查
+     * 检查各核心数据表的最新日期，超阈值记录告警。
+     * 由 ScheduleService 定时调用或通过 REST API 手动触发。
+     *
+     * @return 新鲜度报告（各表最新日期 + 是否过期）
+     */
+    public Map<String, Object> checkDataFreshness() {
+        Map<String, Object> report = new LinkedHashMap<>();
+        report.put("checkTime", LocalDateTime.now().toString());
+
+        // 确定"最新交易日"作为基准
+        LocalDate today = LocalDate.now();
+        LocalDate latestTradeDate = today;
+        if (tradeCalendarService != null) {
+            // 回退到最近交易日
+            for (int i = 0; i < 10; i++) {
+                LocalDate d = today.minusDays(i);
+                if (tradeCalendarService.isTradingDay(d)) {
+                    latestTradeDate = d;
+                    break;
+                }
+            }
+        }
+        report.put("latestTradeDate", latestTradeDate.toString());
+
+        // ── 1. stock_daily (ClickHouse) ──
+        try {
+            Object sdMax = clickHouseStockService.queryForObject(
+                "SELECT max(trade_date) FROM stock_daily WHERE code NOT LIKE '399%' AND code NOT LIKE '000%' AND length(code)=6");
+            LocalDate sdDate = sdMax != null ? LocalDate.parse(sdMax.toString()) : null;
+            long sdDays = sdDate != null ? latestTradeDate.toEpochDay() - sdDate.toEpochDay() : 999;
+            Map<String, Object> sdStatus = new LinkedHashMap<>();
+            sdStatus.put("latestDate", sdDate != null ? sdDate.toString() : "N/A");
+            sdStatus.put("daysBehind", sdDays);
+            sdStatus.put("stale", sdDays > 2);
+            if (sdDays > 2) {
+                log.warn("[数据新鲜度] stock_daily 落后 {} 天（最新={}，基准={}）",
+                    sdDays, sdDate, latestTradeDate);
+            }
+            report.put("stockDaily", sdStatus);
+        } catch (Exception e) {
+            log.warn("[数据新鲜度] stock_daily 查询失败: {}", e.getMessage());
+            report.put("stockDaily", Map.of("error", e.getMessage()));
+        }
+
+        // ── 2. factor_value (ClickHouse) ──
+        try {
+            Object fvMax = clickHouseStockService.queryForObject(
+                "SELECT max(trade_date) FROM factor_value WHERE status = 'ACTIVE'");
+            LocalDate fvDate = fvMax != null ? LocalDate.parse(fvMax.toString()) : null;
+            long fvDays = fvDate != null ? latestTradeDate.toEpochDay() - fvDate.toEpochDay() : 999;
+            Map<String, Object> fvStatus = new LinkedHashMap<>();
+            fvStatus.put("latestDate", fvDate != null ? fvDate.toString() : "N/A");
+            fvStatus.put("daysBehind", fvDays);
+            fvStatus.put("stale", fvDays > 1);
+            if (fvDays > 1) {
+                log.warn("[数据新鲜度] factor_value 落后 {} 天（最新={}，基准={}）",
+                    fvDays, fvDate, latestTradeDate);
+            }
+            report.put("factorValue", fvStatus);
+        } catch (Exception e) {
+            log.warn("[数据新鲜度] factor_value 查询失败: {}", e.getMessage());
+            report.put("factorValue", Map.of("error", e.getMessage()));
+        }
+
+        // ── 3. stock_financial_indicator (MySQL) ──
+        try {
+            Object fiMax = jdbcTemplate.queryForObject(
+                "SELECT max(report_date) FROM stock_financial_indicator WHERE report_type IN (1,2,4)", String.class);
+            LocalDate fiDate = fiMax != null ? LocalDate.parse(fiMax.toString()) : null;
+            // 财务数据按季度判断：计算距离最近季末的天数
+            long fiStale = 999;
+            if (fiDate != null) {
+                // 最近季末日期（3/31, 6/30, 9/30, 12/31）
+                int year = today.getYear();
+                int month = today.getMonthValue();
+                LocalDate lastQuarterEnd;
+                if (month <= 3) lastQuarterEnd = LocalDate.of(year - 1, 12, 31);
+                else if (month <= 6) lastQuarterEnd = LocalDate.of(year, 3, 31);
+                else if (month <= 9) lastQuarterEnd = LocalDate.of(year, 6, 30);
+                else lastQuarterEnd = LocalDate.of(year, 9, 30);
+                fiStale = lastQuarterEnd.toEpochDay() - fiDate.toEpochDay();
+                if (fiStale < 0) fiStale = 0; // 数据比预期新，没问题
+            }
+            Map<String, Object> fiStatus = new LinkedHashMap<>();
+            fiStatus.put("latestReportDate", fiDate != null ? fiDate.toString() : "N/A");
+            fiStatus.put("quartersBehind", fiStale > 90 ? fiStale / 90 : 0);
+            fiStatus.put("stale", fiStale > 90);
+            if (fiStale > 90) {
+                log.warn("[数据新鲜度] stock_financial_indicator 落后约 {} 天（最新报告期={}）",
+                    fiStale, fiDate);
+            }
+            report.put("financialIndicator", fiStatus);
+        } catch (Exception e) {
+            log.warn("[数据新鲜度] financial_indicator 查询失败: {}", e.getMessage());
+            report.put("financialIndicator", Map.of("error", e.getMessage()));
+        }
+
+        report.put("hasWarning", report.values().stream().anyMatch(v -> {
+            if (v instanceof Map<?,?> m) {
+                Object stale = m.get("stale");
+                return stale instanceof Boolean b && b;
+            }
+            return false;
+        }));
+
+        return report;
+    }
+
+    /**
+     * 价格异常检测：查询近 N 天内单日涨跌幅绝对值 > 50% 的记录。
+     * 可能原因：①除权复权误差  ②ST摘帽/退市整理板  ③首日上市  ④数据源错误
+     *
+     * @param days 回溯天数（默认7）
+     * @return 异常记录列表 + 汇总信息
+     */
+    public Map<String, Object> checkPriceAnomalies(int days) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("checkTime", LocalDateTime.now().toString());
+        result.put("lookbackDays", days);
+
+        try {
+            String sql = String.format(
+                "SELECT code, name, trade_date, close_price, pre_close, change_percent " +
+                "FROM stock_daily " +
+                "WHERE trade_date >= today() - %d " +
+                "  AND pre_close > 0 " +
+                "  AND abs(change_percent) > 50 " +
+                "ORDER BY trade_date DESC, abs(change_percent) DESC " +
+                "LIMIT 100", days);
+
+            List<Map<String, Object>> anomalies = new ArrayList<>();
+            List<Map<String, Object>> rows = clickHouseStockService.queryForList(sql);
+            for (Map<String, Object> row : rows) {
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("code", row.get("code"));
+                item.put("name", row.get("name"));
+                item.put("tradeDate", row.get("trade_date") != null ? row.get("trade_date").toString() : null);
+                item.put("closePrice", row.get("close_price"));
+                item.put("preClose", row.get("pre_close"));
+                item.put("changePct", row.get("change_percent"));
+                anomalies.add(item);
+            }
+
+            result.put("anomalyCount", anomalies.size());
+            result.put("anomalies", anomalies);
+            result.put("hasAnomaly", !anomalies.isEmpty());
+
+            if (!anomalies.isEmpty()) {
+                log.warn("[价格异常检测] 近{}天发现 {} 条涨跌幅 >50% 记录，建议人工复核", days, anomalies.size());
+            }
+        } catch (Exception e) {
+            log.warn("[价格异常检测] 查询失败: {}", e.getMessage());
+            result.put("error", e.getMessage());
+        }
+
+        return result;
+    }
+
     @PreDestroy
     public void cleanup() {
         if (currentProcess != null && currentProcess.isAlive()) {

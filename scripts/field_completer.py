@@ -220,9 +220,51 @@ def fix_valuation_by_qq(db, codes=None, batch_size=200, delay=0.1, max_workers=3
                 if pe is not None or pb is not None:
                     date_map[d] = (pe, pb)
 
+            # P1-3.1: 合理性校验 — 跳变检测（PE 跳变 >100% 则丢弃异常值）
             if date_map:
+                validated_map = {}
+                sorted_dates = sorted(date_map.keys())
+                prev_pe, prev_pb = None, None
+                for i, d in enumerate(sorted_dates):
+                    pe, pb = date_map[d]
+                    keep = True
+                    # PE 跳变检测：与前一日对比
+                    if pe is not None and prev_pe is not None and prev_pe > 0:
+                        jump = abs(pe - prev_pe) / prev_pe
+                        if jump > 1.0:  # 跳变 >100%
+                            # 看哪个值更可疑：PE<0.5 或 PE>5000 可能是坏值
+                            if pe < 0.5 or pe > 5000:
+                                pe = None  # 丢弃当前异常值
+                            elif prev_pe < 0.5 or prev_pe > 5000:
+                                # 前值可疑，但前值可能已写入，此处无法回滚，记录日志
+                                _dlog(f"  [VALIDATE] {code} {d} PE跳变: {prev_pe:.2f}→{pe:.2f} (前值可能异常)")
+                            else:
+                                # 两个值都在合理范围但跳变很大，保留后值
+                                _dlog(f"  [VALIDATE] {code} {d} PE跳变但均在合理范围: {prev_pe:.2f}→{pe:.2f}")
+                    # PB 跳变检测
+                    if pb is not None and prev_pb is not None and prev_pb > 0:
+                        jump = abs(pb - prev_pb) / prev_pb
+                        if jump > 1.0:
+                            if pb < 0.01 or pb > 100:
+                                pb = None
+                            elif prev_pb < 0.01 or prev_pb > 100:
+                                _dlog(f"  [VALIDATE] {code} {d} PB跳变: {prev_pb:.2f}→{pb:.2f} (前值可能异常)")
+                    # 绝对值合理性检查
+                    if pe is not None and (pe < 0.5 or pe > 5000):
+                        _dlog(f"  [VALIDATE] {code} {d} PE异常范围: {pe:.2f}，丢弃")
+                        pe = None
+                    if pb is not None and (pb < 0.01 or pb > 100):
+                        _dlog(f"  [VALIDATE] {code} {d} PB异常范围: {pb:.2f}，丢弃")
+                        pb = None
+                    if pe is not None or pb is not None:
+                        validated_map[d] = (pe, pb)
+                    if pe is not None:
+                        prev_pe = pe
+                    if pb is not None:
+                        prev_pb = pb
+
                 batch_updates = []
-                for d, (pe, pb) in date_map.items():
+                for d, (pe, pb) in validated_map.items():
                     batch_updates.append((pe, None, None, pb, code, d))
                 if batch_updates:
                     n = db.update_valuation_batch(batch_updates)
@@ -244,6 +286,104 @@ def fix_valuation_by_qq(db, codes=None, batch_size=200, delay=0.1, max_workers=3
     print(f"[fix_valuation_by_qq] DONE | total_fixed={total_fixed}")
     return total_fixed
 
+
+def cross_validate_ohlcv(db, sample_size=50, tolerance=0.02):
+    """
+    P1-4.1: 日线数据源交叉验证
+    随机抽取沪深股票，对比 Baostock 和腾讯接口同日的 OHLCV 数据。
+    偏差超过 tolerance（默认2%）的记录写入验证日志。
+
+    参数:
+        db: StockDailyDB 实例
+        sample_size: 抽样股票数
+        tolerance: 允许偏差（小数，0.02=2%）
+    返回: (matched, diverged) 对比数和偏差数
+    """
+    import random
+    import requests as _req
+
+    print(f"\n[交叉验证] 抽样 {sample_size} 只沪深股票，对比 Baostock vs 腾讯 OHLCV...")
+
+    # 获取最近交易日的沪深股票列表
+    latest_date = db.get_latest_date()
+    if not latest_date:
+        print("[交叉验证] 无法获取最新交易日")
+        return 0, 0
+
+    codes = db.query(
+        f"SELECT DISTINCT code FROM {db.CH_TABLE} "
+        f"WHERE trade_date = %(date)s AND code REGEXP '^[0-9]{{6}}$' "
+        f"AND code NOT LIKE '8%' AND code NOT LIKE '4%' ORDER BY rand() LIMIT %(n)s",
+        {"date": latest_date, "n": sample_size}
+    )
+    codes = [r[0] for r in codes] if codes else []
+    if len(codes) == 0:
+        print("[交叉验证] 无可用抽样股票")
+        return 0, 0
+
+    print(f"  抽样 {len(codes)} 只: {codes[:5]}...")
+
+    # 获取 Baostock 数据（已存在 CH 中）
+    bs_rows = db.query(
+        f"SELECT code, trade_date, open, high, low, close, volume FROM {db.CH_TABLE} "
+        f"WHERE code IN ({','.join(['%s'] * len(codes))}) AND trade_date = %(date)s",
+        {"date": latest_date, "codes": tuple(codes)}
+    ) if db.backend == "mysql" else None
+
+    if db.backend == "clickhouse":
+        # ClickHouse 不支持 parameterized IN
+        code_list_str = ",".join(f"'{c}'" for c in codes)
+        bs_rows = db.query(
+            f"SELECT code, trade_date, open, high, low, close, volume FROM {db.CH_TABLE} "
+            f"WHERE code IN ({code_list_str}) AND trade_date = %(date)s",
+            {"date": latest_date}
+        )
+
+    bs_map = {}
+    for row in (bs_rows or []):
+        c, d, o, h, l, cl, v = row
+        bs_map[c] = {"open": float(o) if o else None, "high": float(h) if h else None,
+                      "low": float(l) if l else None, "close": float(cl) if cl else None,
+                      "volume": float(v) if v else None}
+
+    # 从腾讯接口拉同一批股票（批量请求）
+    matched, diverged = 0, 0
+    for code in bs_map:
+        try:
+            market = "sh" if code.startswith(("6", "9")) else "sz"
+            url = f"http://qt.gtimg.cn/q={market}{code}"
+            resp = _req.get(url, headers=QQ_HEADERS, timeout=5)
+            resp.encoding = "gbk"
+            text = resp.text
+            if "~" not in text:
+                continue
+            parts = text.split("~")
+            if len(parts) < 50:
+                continue
+            # 腾讯快照字段: [1]name [3]current [4]昨收 [5]open [33]high [34]low [6]volume
+            qq_open = _parse_val(parts[5]) if len(parts) > 5 else None
+            qq_high = _parse_val(parts[33]) if len(parts) > 33 else None
+            qq_low = _parse_val(parts[34]) if len(parts) > 34 else None
+            qq_close = _parse_val(parts[3])
+            qq_vol = _parse_val(parts[6])
+
+            bs = bs_map[code]
+            # 比较 OHLCV（close 优先，然后 high，然后 open）
+            for field, bs_val in [("close", bs["close"]), ("high", bs["high"]),
+                                   ("low", bs["low"]), ("open", bs["open"])]:
+                qq_val = locals().get(f"qq_{field}")
+                if bs_val and qq_val and bs_val != 0:
+                    dev = abs(qq_val - bs_val) / bs_val
+                    if dev > tolerance:
+                        _dlog(f"  [CROSS] {code} {latest_date} {field}: "
+                              f"BS={bs_val:.2f} QQ={qq_val:.2f} dev={dev*100:.1f}%")
+                        diverged += 1
+                    matched += 1
+        except Exception as e:
+            _dlog(f"  [CROSS] {code} 腾讯请求失败: {e}")
+
+    print(f"  交叉验证完成: {len(codes)} 只股票, {matched} 次比较, {diverged} 次偏差>{tolerance*100:.0f}%")
+    return matched, diverged
 
 
 def complete_fields(db, code=None, stock_list=None, skip_valuation=False, force_full_scan=False):

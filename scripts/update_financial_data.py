@@ -157,16 +157,17 @@ def save_yjbb_to_indicator(df, conn, report_year, force=False):
                 INSERT INTO stock_financial_indicator
                     (code, report_date, report_type, end_date,
                      bps, revenue_yoy, net_profit_yoy, roe,
-                     gross_profit_margin)
-                VALUES (%s,%s,%s,%s, %s,%s,%s,%s, %s)
+                     gross_profit_margin, source)
+                VALUES (%s,%s,%s,%s, %s,%s,%s,%s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     bps = VALUES(bps),
                     revenue_yoy = VALUES(revenue_yoy),
                     net_profit_yoy = VALUES(net_profit_yoy),
                     roe = VALUES(roe),
-                    gross_profit_margin = VALUES(gross_profit_margin)
+                    gross_profit_margin = VALUES(gross_profit_margin),
+                    source = VALUES(source)
             """, (code, rd, rt, ed,
-                  bps, revenue_yoy, net_profit_yoy, roe, gross_margin))
+                  bps, revenue_yoy, net_profit_yoy, roe, gross_margin, 'akshare'))
             inserted += 1
         except Exception as e:
             print(f"    ERR {code} {rd}: {e}")
@@ -258,8 +259,9 @@ def save_ths_to_tables(df, code, conn, force=False):
         # ─── 写入 stock_financial_indicator ───
         indicator_cols = ['net_profit_margin', 'gross_profit_margin', 'roe',
                           'inventory_turnover', 'inventory_turnover_days', 'ar_turnover_days',
-                          'current_ratio', 'quick_ratio', 'debt_to_asset_ratio']
+                          'current_ratio', 'quick_ratio', 'debt_to_asset_ratio', 'source']
         if indicator_vals:
+            indicator_vals.setdefault('source', 'akshare_ths')
             # 构建 UPDATE 部分
             set_parts = []
             insert_cols = []
@@ -285,6 +287,7 @@ def save_ths_to_tables(df, code, conn, force=False):
 
         # ─── 写入 stock_income（补充关键指标）───
         if income_vals:
+            income_vals.setdefault('source', 'akshare_ths')
             # 动态包含所有已映射的 income 字段（而非写死列表）
             income_cols = [col for col in income_vals.keys()]
             set_parts = []
@@ -541,6 +544,10 @@ def save_sina_to_table(df, code, table_name, col_map, conn, force=False):
 
         if not insert_cols:
             continue
+
+        # 标注数据来源
+        insert_cols.append('source')
+        insert_vals.append('akshare_sina')
 
         set_parts = [f"{c} = VALUES({c})" for c in insert_cols]
         sql = f"""
@@ -950,34 +957,72 @@ def validate_financial_data(conn, years):
         mark = "✓" if rate >= 80 else ("△" if rate >= 50 else "✗")
         print(f"  {field:<22} {rate:>5.1f}%  [{bar}] {mark}")
 
-    # 4. 净利润同比异常检测（变化超过10倍）
-    print("\n【4】净利润同比异常检测（变化 > 10倍 或 扭亏/转亏）")
+    # 4. 财务指标同比异常检测（多指标：ROE、营收增速、毛利率、净利率）
+    print("\n【4】财务指标同比异常检测（同比变化 > 5倍）")
     print("-" * 50)
+
+    anomaly_fields = [
+        ('roe',                'ROE'),
+        ('revenue_yoy',        '营收增速'),
+        ('gross_profit_margin', '毛利率'),
+        ('net_profit_margin',  '净利率'),
+    ]
+
+    total_anomalies = 0
+    for field, label in anomaly_fields:
+        cursor.execute(f"""
+            SELECT a.code, LEFT(a.report_date,4) as report_year, a.report_type,
+                   a.{field} as cur_val,
+                   b.{field} as prev_val
+            FROM stock_financial_indicator a
+            LEFT JOIN stock_financial_indicator b
+              ON a.code = b.code
+             AND LEFT(b.report_date,4) = LEFT(a.report_date,4) - 1
+             AND b.report_type = a.report_type
+            WHERE LEFT(a.report_date,4) >= YEAR(CURDATE()) - 3
+              AND a.report_type IN (1, 2, 4)
+              AND a.{field} IS NOT NULL AND b.{field} IS NOT NULL
+              AND ABS(a.{field} / NULLIF(b.{field}, 0)) > 5
+            ORDER BY ABS(a.{field} / NULLIF(b.{field}, 0)) DESC
+            LIMIT 8
+        """)
+        anomalies = cursor.fetchall()
+        if anomalies:
+            print(f"\n  [{label}] 发现异常:")
+            print(f"  {'代码':<10} {'年份':<6} {'类型':<4} {'当年':>10} {'上年':>10}")
+            for r in anomalies:
+                print(f"  {r['code']:<10} {r['report_year']:<6} {r['report_type']:<4} "
+                      f"{r['cur_val']:>10.2f} {r['prev_val']:>10.2f}")
+            total_anomalies += len(anomalies)
+
+    # 经营现金流/净利润异常（比率 < -5 或 > 20）
+    print("\n  [经营现金流/净利润比] 异常检测（比率 < -5 或 > 20，或净利正但OCF为负）:")
     cursor.execute("""
         SELECT a.code, LEFT(a.report_date,4) as report_year, a.report_type,
-               a.roe as cur_roe,
-               b.roe as prev_roe
+               c.net_operate_cf as ocf, a.net_profit_yoy as np_yoy
         FROM stock_financial_indicator a
-        LEFT JOIN stock_financial_indicator b
-          ON a.code = b.code
-         AND LEFT(b.report_date,4) = LEFT(a.report_date,4) - 1
-         AND b.report_type = a.report_type
+        LEFT JOIN stock_cashflow c
+          ON a.code = c.code AND a.report_date = c.report_date AND a.report_type = c.report_type
         WHERE LEFT(a.report_date,4) >= YEAR(CURDATE()) - 3
           AND a.report_type IN (1, 2, 4)
-          AND a.roe IS NOT NULL AND b.roe IS NOT NULL
-          AND (ABS(a.roe) > 100 OR ABS(b.roe) > 100)
-          AND ABS(a.roe / NULLIF(b.roe, 0)) > 5
-        ORDER BY ABS(a.roe / NULLIF(b.roe, 0)) DESC
-        LIMIT 15
+          AND c.net_operate_cf IS NOT NULL
+          AND a.net_profit_yoy IS NOT NULL AND a.net_profit_yoy > 0
+          AND (c.net_operate_cf < 0
+               OR c.net_operate_cf / NULLIF(a.net_profit_yoy, 0) > 20
+               OR c.net_operate_cf / NULLIF(a.net_profit_yoy, 0) < -5)
+        ORDER BY a.code, a.report_date DESC
+        LIMIT 10
     """)
-    anomalies = cursor.fetchall()
-    if anomalies:
-        print(f"  {'代码':<10} {'年份':<6} {'类型':<4} {'当年ROE':>10} {'上年ROE':>10}  备注")
-        for r in anomalies:
+    cf_anomalies = cursor.fetchall()
+    if cf_anomalies:
+        print(f"  {'代码':<10} {'年份':<6} {'类型':<4} {'经营CF':>12} {'净利':>12}  备注")
+        for r in cf_anomalies:
+            note = "OCF为负" if (r['ocf'] or 0) < 0 else "比率异常"
             print(f"  {r['code']:<10} {r['report_year']:<6} {r['report_type']:<4} "
-                  f"{r['cur_roe']:>10.2f} {r['prev_roe']:>10.2f}  ROE异常波动")
-        print(f"\n  共发现 {len(anomalies)} 条ROE异常（仅显示前15条），通常因资产重组/会计政策变更/季节性因素")
-    else:
+                  f"{r['ocf']:>12.0f} {r['np_yoy']:>12.2f}  {note}")
+        total_anomalies += len(cf_anomalies)
+
+    if total_anomalies == 0:
         print("  未发现明显异常")
 
     # 5. 缺失年份的股票（应有时段但无数据的）

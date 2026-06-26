@@ -546,6 +546,31 @@ public class DataUpdateController {
         }
     }
 
+    @GetMapping("/freshness")
+    @Operation(summary = "数据新鲜度检查 — 检查各核心数据表的最新日期，超阈值告警")
+    public ApiResponse<Map<String, Object>> checkFreshness() {
+        try {
+            Map<String, Object> report = dataUpdateService.checkDataFreshness();
+            return ApiResponse.success(report);
+        } catch (Exception e) {
+            log.error("数据新鲜度检查失败", e);
+            return ApiResponse.error("检查失败: " + e.getMessage());
+        }
+    }
+
+    @GetMapping("/price-anomalies")
+    @Operation(summary = "价格异常检测 — 查询近 N 天内单日涨跌幅绝对值 >50% 的记录")
+    public ApiResponse<Map<String, Object>> checkPriceAnomalies(
+            @RequestParam(defaultValue = "7") int days) {
+        try {
+            Map<String, Object> report = dataUpdateService.checkPriceAnomalies(days);
+            return ApiResponse.success(report);
+        } catch (Exception e) {
+            log.error("价格异常检测失败", e);
+            return ApiResponse.error("检测失败: " + e.getMessage());
+        }
+    }
+
     @PostMapping("/delisted/clean")
     @Operation(summary = "清理退市股票数据（物理删除，慎用）")
     public ApiResponse<Map<String, Object>> cleanDelistedStocks(@RequestBody List<String> codes) {
