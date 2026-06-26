@@ -328,6 +328,7 @@ public class FactorController {
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(defaultValue = "5") int forwardDays,
             @RequestParam(defaultValue = "false") boolean neutralizeByIndustry,
+            @RequestParam(defaultValue = "false") boolean neutralizeByMarketCap,
             @RequestParam(defaultValue = "spearman") String correlationType,
             @RequestParam(defaultValue = "0.03") double icThreshold) {
         if (forwardDays < 1 || forwardDays > 60) {
@@ -338,7 +339,7 @@ public class FactorController {
             throw new IllegalArgumentException("单次最多分析50个因子");
         }
         return ApiResponse.success(
-                factorAnalysisService.batchCalcIcIr(codes, startDate.toString(), endDate.toString(), forwardDays, neutralizeByIndustry, correlationType, icThreshold));
+                factorAnalysisService.batchCalcIcIr(codes, startDate.toString(), endDate.toString(), forwardDays, neutralizeByIndustry, neutralizeByMarketCap, correlationType, icThreshold));
     }
 
     /**
@@ -354,6 +355,7 @@ public class FactorController {
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate splitDate,
             @RequestParam(defaultValue = "5") int forwardDays,
             @RequestParam(defaultValue = "false") boolean neutralizeByIndustry,
+            @RequestParam(defaultValue = "false") boolean neutralizeByMarketCap,
             @RequestParam(defaultValue = "spearman") String correlationType) {
         if (forwardDays < 1 || forwardDays > 60) {
             throw new IllegalArgumentException("forwardDays须在1~60之间");
@@ -367,7 +369,7 @@ public class FactorController {
         }
         return ApiResponse.success(
                 factorAnalysisService.batchCalcIcIrSegmented(
-                        codes, startDate.toString(), endDate.toString(), splitDate.toString(), forwardDays, neutralizeByIndustry, correlationType));
+                        codes, startDate.toString(), endDate.toString(), splitDate.toString(), forwardDays, neutralizeByIndustry, neutralizeByMarketCap, correlationType));
     }
 
     /**

@@ -2,23 +2,17 @@ package com.quant.platform.factor.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.jdbc.core.JdbcTemplate;
+import org.apache.commons.math3.distribution.TDistribution;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
-import com.quant.platform.factor.domain.FactorValue;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.*;
 import java.util.stream.Collectors;
-import org.apache.commons.math3.distribution.TDistribution;
-
-/**
- * 行业映射缓存：code → industry
- * 从 ClickHouse stock_info.industry 加载，启动时初始化 + 每日刷新
- */
 
 /**
  * 因子有效性分析服务
@@ -68,12 +62,12 @@ public class FactorAnalysisService {
      * @param forwardDays 前瞻天数（默认5日）
      * @return 每个因子的 IC/IR 统计
      */
-    public List<Map<String, Object>> batchCalcIcIr(List<String> factorCodes, String startDate, String endDate, int forwardDays, boolean neutralizeByIndustry, String correlationType, double icThreshold) {
+    public List<Map<String, Object>> batchCalcIcIr(List<String> factorCodes, String startDate, String endDate, int forwardDays, boolean neutralizeByIndustry, boolean neutralizeByMarketCap, String correlationType, double icThreshold) {
         List<Map<String, Object>> results = new ArrayList<>();
 
         for (String factorCode : factorCodes) {
             try {
-                Map<String, Object> stat = calcSingleFactorIcIr(factorCode, startDate, endDate, forwardDays, neutralizeByIndustry, correlationType);
+                Map<String, Object> stat = calcSingleFactorIcIr(factorCode, startDate, endDate, forwardDays, neutralizeByIndustry, neutralizeByMarketCap, correlationType);
                 results.add(stat);
             } catch (Exception e) {
                 log.error("因子IC/IR计算失败: factorCode={}, error={}", factorCode, e.getMessage());
@@ -94,7 +88,7 @@ public class FactorAnalysisService {
             try {
                 List<Map<String, Object>> composites = computeCompositeIcResults(
                     factorCodes, startDate, endDate, forwardDays,
-                    neutralizeByIndustry, correlationType, validResults,
+                    neutralizeByIndustry, neutralizeByMarketCap, correlationType, validResults,
                     icThreshold);
                 results.addAll(composites);
             } catch (Exception e) {
@@ -125,7 +119,6 @@ public class FactorAnalysisService {
     
     /**
      * 行业中性化（百分位秩法 → 标准正态映射）
-     * 
      * 原理：z-score 是行业内单调变换，与 Spearman 秩相关天然冲突。
      * 百分位秩法先将行业内因子值映射到 [0,1] 均匀分布，
      * 再通过 probit 映射到标准正态 N(0,1)，打破行业内单调性。
@@ -181,10 +174,7 @@ public class FactorAnalysisService {
         for (Map.Entry<String, List<Integer>> e : indIndices.entrySet()) {
             List<Integer> indices = e.getValue();
             Integer[] sorted = indices.toArray(new Integer[0]);
-            Arrays.sort(sorted, (a, b) -> Double.compare(
-                ((BigDecimal) dayFactors.get(a).get("factorVal")).doubleValue(),
-                ((BigDecimal) dayFactors.get(b).get("factorVal")).doubleValue()
-            ));
+            Arrays.sort(sorted, Comparator.comparingDouble(a -> ((BigDecimal) dayFactors.get(a).get("factorVal")).doubleValue()));
             int n = sorted.length;
             for (int rank = 0; rank < n; rank++) {
                 int idx = sorted[rank];
@@ -221,11 +211,9 @@ public class FactorAnalysisService {
 
     /**
      * 市值中性化（行业内按市值线性回归取残差）
-     *
      * 在行业中性化的基础上，进一步消除大小盘偏差。
      * 大盘股天然有某些因子特征（如低波动、高质量），不剥离的话
      * 因子IC中会混入"大小盘效应"而非真正的alpha。
-     *
      * 算法：
      * 1. 按行业分组（复用 industryMap）
      * 2. 组内对 factor = α + β × log(market_cap) + ε 做 OLS 回归
@@ -386,7 +374,7 @@ public class FactorAnalysisService {
      */
     private List<Map<String, Object>> computeCompositeIcResults(
             List<String> factorCodes, String startDate, String endDate,
-            int forwardDays, boolean neutralizeByIndustry,
+            int forwardDays, boolean neutralizeByIndustry, boolean neutralizeByMarketCap,
             String correlationType, List<Map<String, Object>> individualResults,
             double icThreshold) {
 
@@ -561,8 +549,11 @@ public class FactorAnalysisService {
             double[][] zScores = new double[nStocks][nFactorsFinal];
             for (int j = 0; j < nFactorsFinal; j++) {
                 double sum = 0; int cnt = 0;
-                for (int i = 0; i < nStocks; i++) {
-                    if (!Double.isNaN(factorVecs.get(i)[j])) { sum += factorVecs.get(i)[j]; cnt++; }
+                for (double[] factorVec : factorVecs) {
+                    if (!Double.isNaN(factorVec[j])) {
+                        sum += factorVec[j];
+                        cnt++;
+                    }
                 }
                 if (cnt < 5) { for (int i = 0; i < nStocks; i++) zScores[i][j] = 0; continue; }
                 double mean = sum / cnt;
@@ -657,7 +648,8 @@ public class FactorAnalysisService {
             try {
                 TDistribution tDist = new TDistribution(n - 1);
                 pValue = 2.0 * (1.0 - tDist.cumulativeProbability(Math.abs(tStat)));
-            } catch (Exception e) { pValue = 1.0; }
+            } catch (Exception ignored) {
+            }
         }
 
         Map<String, Object> r = new LinkedHashMap<>();
@@ -689,18 +681,19 @@ public class FactorAnalysisService {
 
     /**
      * 单因子 IC/IR 详细计算（原始值，不含中性化）
-     * 重载方法，默认 neutralizeByIndustry=false
+     * 重载方法，默认 neutralizeByIndustry=false, neutralizeByMarketCap=false
      */
     private Map<String, Object> calcSingleFactorIcIr(String factorCode, String startDate, String endDate, int forwardDays) {
-        return calcSingleFactorIcIr(factorCode, startDate, endDate, forwardDays, false, "spearman");
+        return calcSingleFactorIcIr(factorCode, startDate, endDate, forwardDays, false, false, "spearman");
     }
 
     /**
      * 单因子 IC/IR 详细计算
      * @param neutralizeByIndustry 是否做行业中性化
+     * @param neutralizeByMarketCap 是否做市值中性化（独立于行业中性化）
      * @param correlationType spearman | pearson
      */
-    private Map<String, Object> calcSingleFactorIcIr(String factorCode, String startDate, String endDate, int forwardDays, boolean neutralizeByIndustry, String correlationType) {
+    private Map<String, Object> calcSingleFactorIcIr(String factorCode, String startDate, String endDate, int forwardDays, boolean neutralizeByIndustry, boolean neutralizeByMarketCap, String correlationType) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("factorCode", factorCode);
         result.put("forwardDays", forwardDays);
@@ -808,21 +801,17 @@ public class FactorAnalysisService {
             }
             if (validDayFactors.size() < 10) continue;
 
-            // 2. 行业中性化（百分位秩法 → probit，打破行业内单调性）
+            // 2. 行业中性化 + 市值中性化（独立控制）
             List<Double> factorVals;
-            if (neutralizeByIndustry) {
-                Map<String, String> indMap = loadIndustryMap();
-                if (!indMap.isEmpty()) {
-                    factorVals = neutralizeByIndustry(validDayFactors, indMap);
-                    // 行业中性化后，再做市值中性化（消除大小盘偏差）
-                    factorVals = neutralizeByMarketCap(factorVals, validDayFactors, indMap);
-                } else {
-                    log.warn("[IC/IR] 行业映射为空，行业中性化退化为原始值");
-                    factorVals = new ArrayList<>();
-                    for (Map<String, Object> f : validDayFactors) {
-                        BigDecimal fv = (BigDecimal) f.get("factorVal");
-                        factorVals.add(fv != null ? fv.doubleValue() : 0.0);
-                    }
+            Map<String, String> indMap = neutralizeByIndustry || neutralizeByMarketCap ? loadIndustryMap() : null;
+            if (neutralizeByIndustry && indMap != null && !indMap.isEmpty()) {
+                factorVals = neutralizeByIndustry(validDayFactors, indMap);
+            } else if (neutralizeByIndustry) {
+                log.warn("[IC/IR] 行业映射为空，行业中性化退化为原始值");
+                factorVals = new ArrayList<>();
+                for (Map<String, Object> f : validDayFactors) {
+                    BigDecimal fv = (BigDecimal) f.get("factorVal");
+                    factorVals.add(fv != null ? fv.doubleValue() : 0.0);
                 }
             } else {
                 factorVals = new ArrayList<>();
@@ -830,6 +819,10 @@ public class FactorAnalysisService {
                     BigDecimal fv = (BigDecimal) f.get("factorVal");
                     factorVals.add(fv != null ? fv.doubleValue() : 0.0);
                 }
+            }
+            // 市值中性化（可在行业中性化之后叠加，也可独立执行）
+            if (neutralizeByMarketCap && indMap != null && !indMap.isEmpty()) {
+                factorVals = neutralizeByMarketCap(factorVals, validDayFactors, indMap);
             }
 
             if (factorVals.size() < 10) continue;
@@ -875,8 +868,7 @@ public class FactorAnalysisService {
             try {
                 TDistribution tDist = new TDistribution(n - 1);
                 pValue = 2.0 * (1.0 - tDist.cumulativeProbability(Math.abs(tStat)));
-            } catch (Exception e) {
-                pValue = 1.0;
+            } catch (Exception ignored) {
             }
         }
         result.put("pValue", Math.round(pValue * 10000.0) / 10000.0);
@@ -1044,7 +1036,7 @@ public class FactorAnalysisService {
      */
     public Map<String, Object> batchCalcIcIrSegmented(
             List<String> factorCodes, String startDate, String endDate,
-            String splitDate, int forwardDays, boolean neutralizeByIndustry, String correlationType) {
+            String splitDate, int forwardDays, boolean neutralizeByIndustry, boolean neutralizeByMarketCap, String correlationType) {
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("segmented", true);
@@ -1058,7 +1050,7 @@ public class FactorAnalysisService {
         for (String factorCode : factorCodes) {
             try {
                 Map<String, Object> seg = calcSingleFactorIcIrSegmented(
-                        factorCode, startDate, endDate, splitDate, forwardDays, neutralizeByIndustry, correlationType);
+                        factorCode, startDate, endDate, splitDate, forwardDays, neutralizeByIndustry, neutralizeByMarketCap, correlationType);
 
                 @SuppressWarnings("unchecked")
                 Map<String, Object> before = (Map<String, Object>) seg.get("before");
@@ -1129,7 +1121,7 @@ public class FactorAnalysisService {
      */
     private Map<String, Object> calcSingleFactorIcIrSegmented(
             String factorCode, String startDate, String endDate,
-            String splitDate, int forwardDays, boolean neutralizeByIndustry, String correlationType) {
+            String splitDate, int forwardDays, boolean neutralizeByIndustry, boolean neutralizeByMarketCap, String correlationType) {
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("factorCode", factorCode);
@@ -1227,21 +1219,17 @@ public class FactorAnalysisService {
             }
             if (validDayFactors.size() < 10) continue;
 
-            // 2. 行业中性化（百分位秩法 → probit，打破行业内单调性）
+            // 2. 行业中性化 + 市值中性化（独立控制）
             List<Double> factorVals;
-            if (neutralizeByIndustry) {
-                Map<String, String> indMap = loadIndustryMap();
-                if (!indMap.isEmpty()) {
-                    factorVals = neutralizeByIndustry(validDayFactors, indMap);
-                    // 行业中性化后，再做市值中性化（消除大小盘偏差）
-                    factorVals = neutralizeByMarketCap(factorVals, validDayFactors, indMap);
-                } else {
-                    log.warn("[分段IC] 行业映射为空，行业中性化退化为原始值");
-                    factorVals = new ArrayList<>();
-                    for (Map<String, Object> f : validDayFactors) {
-                        BigDecimal fv = (BigDecimal) f.get("factorVal");
-                        factorVals.add(fv != null ? fv.doubleValue() : 0.0);
-                    }
+            Map<String, String> indMap = neutralizeByIndustry || neutralizeByMarketCap ? loadIndustryMap() : null;
+            if (neutralizeByIndustry && indMap != null && !indMap.isEmpty()) {
+                factorVals = neutralizeByIndustry(validDayFactors, indMap);
+            } else if (neutralizeByIndustry) {
+                log.warn("[分段IC] 行业映射为空，行业中性化退化为原始值");
+                factorVals = new ArrayList<>();
+                for (Map<String, Object> f : validDayFactors) {
+                    BigDecimal fv = (BigDecimal) f.get("factorVal");
+                    factorVals.add(fv != null ? fv.doubleValue() : 0.0);
                 }
             } else {
                 factorVals = new ArrayList<>();
@@ -1249,6 +1237,10 @@ public class FactorAnalysisService {
                     BigDecimal fv = (BigDecimal) f.get("factorVal");
                     factorVals.add(fv != null ? fv.doubleValue() : 0.0);
                 }
+            }
+            // 市值中性化（可在行业中性化之后叠加，也可独立执行）
+            if (neutralizeByMarketCap && indMap != null && !indMap.isEmpty()) {
+                factorVals = neutralizeByMarketCap(factorVals, validDayFactors, indMap);
             }
 
             if (factorVals.size() < 10) continue;
@@ -1409,7 +1401,7 @@ public class FactorAnalysisService {
         if (factorCodes == null || factorCodes.isEmpty()) return snapshots;
 
         // 计算起始日期
-        LocalDate startDate = referenceDate.minusDays(lookbackDays * 2); // buffer
+        LocalDate startDate = referenceDate.minusDays(lookbackDays * 2L); // buffer
         String startDateStr = startDate.toString();
         String endDateStr = referenceDate.toString();
 
@@ -1417,9 +1409,7 @@ public class FactorAnalysisService {
             try {
                 FactorIcSnapshot snapshot = computeSnapshot(fc, startDateStr, endDateStr,
                         forwardReturnDays, false, "spearman", halflifeDays, icThreshold);
-                if (snapshot != null) {
-                    snapshots.put(fc, snapshot);
-                }
+                snapshots.put(fc, snapshot);
             } catch (Exception e) {
                 log.warn("[IC快照] 因子 {} 计算失败: {}", fc, e.getMessage());
                 FactorIcSnapshot err = new FactorIcSnapshot();
@@ -1444,7 +1434,7 @@ public class FactorAnalysisService {
         // 1. 获取IC时序
         List<Double> icTimeline = getIcTimeline(factorCode, startDate, endDate, forwardDays,
                 neutralizeByIndustry, correlationType);
-        if (icTimeline == null || icTimeline.isEmpty()) {
+        if (icTimeline.isEmpty()) {
             FactorIcSnapshot s = new FactorIcSnapshot();
             s.factorCode = factorCode;
             s.status = "NO_DATA";
@@ -1500,7 +1490,7 @@ public class FactorAnalysisService {
         // 复用 calcSingleFactorIcIr，提取 icTimeline
         try {
             Map<String, Object> result = calcSingleFactorIcIr(factorCode, startDate, endDate,
-                    forwardDays, neutralizeByIndustry, correlationType);
+                    forwardDays, neutralizeByIndustry, false, correlationType);
             @SuppressWarnings("unchecked")
             List<Map<String, Object>> timeline = (List<Map<String, Object>>) result.get("icTimeline");
             if (timeline == null) return Collections.emptyList();

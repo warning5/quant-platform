@@ -122,9 +122,9 @@ export const factorApi = {
   // 缠论筛选元数据（动态获取因子定义）
   chanScreenMeta: () => api.get('/factors/chan-screen/meta'),
   // P1: 因子IC/IR批量分析
-  batchIcIrAnalysis: (factorCodes, startDate, endDate, forwardDays = 5, neutralizeByIndustry = false, correlationType = 'spearman', icThreshold = 0.03) =>
+  batchIcIrAnalysis: (factorCodes, startDate, endDate, forwardDays = 5, neutralizeByIndustry = false, neutralizeByMarketCap = false, correlationType = 'spearman', icThreshold = 0.03) =>
     api.post('/factors/ic-ir-analysis', null, {
-      params: { factorCodes: factorCodes.join(','), startDate, endDate, forwardDays, neutralizeByIndustry, correlationType, icThreshold },
+      params: { factorCodes: factorCodes.join(','), startDate, endDate, forwardDays, neutralizeByIndustry, neutralizeByMarketCap, correlationType, icThreshold },
       timeout: 180000,
     }),
   // P1: 单因子IC趋势
@@ -134,9 +134,9 @@ export const factorApi = {
       timeout: 120000,
     }),
   // 分段IC/IR对比分析（按splitDate拆分前后段+全量）
-  batchIcIrSegmented: (factorCodes, startDate, endDate, splitDate, forwardDays = 5, neutralizeByIndustry = false, correlationType = 'spearman', icThreshold = 0.03) =>
+  batchIcIrSegmented: (factorCodes, startDate, endDate, splitDate, forwardDays = 5, neutralizeByIndustry = false, neutralizeByMarketCap = false, correlationType = 'spearman', icThreshold = 0.03) =>
     api.post('/factors/ic-ir-analysis/segmented', null, {
-      params: { factorCodes: factorCodes.join(','), startDate, endDate, splitDate, forwardDays, neutralizeByIndustry, correlationType, icThreshold },
+      params: { factorCodes: factorCodes.join(','), startDate, endDate, splitDate, forwardDays, neutralizeByIndustry, neutralizeByMarketCap, correlationType, icThreshold },
       timeout: 300000,
     }),
   // 按日期筛选缺失因子值的因子

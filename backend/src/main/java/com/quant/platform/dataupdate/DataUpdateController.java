@@ -1,23 +1,22 @@
 package com.quant.platform.dataupdate;
 
 import com.quant.platform.common.dto.ApiResponse;
-import com.quant.platform.config.ClickHouseConfig;
 import com.quant.platform.stock.service.ClickHouseStockService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.*;
-import java.io.*;
-import java.nio.charset.StandardCharsets;
-
-import org.springframework.beans.factory.annotation.Value;
-import jakarta.annotation.PostConstruct;
 
 /**
  * 数据更新管理 API
@@ -198,13 +197,14 @@ public class DataUpdateController {
         int totalMissing = 0;
 
         // 1. 各市场 stock_info 股票总数（MySQL 始终走这里）
-        //    注意：仅统计 查询日 ≥ 上市日 的股票（查询日前尚未上市的不计入）
+        //    注意：仅统计 查询日 ≥ 上市日 且 未退市 的股票
         Map<String, Long> totalByMarket = new HashMap<>();
         for (String market : Arrays.asList("SH", "SZ", "BJ")) {
             com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.quant.platform.stock.entity.StockInfo> w =
                     new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
             w.eq(com.quant.platform.stock.entity.StockInfo::getMarket, market);
             w.le(com.quant.platform.stock.entity.StockInfo::getListDate, date); // 上市日在查询日之前或当天
+            w.isNull(com.quant.platform.stock.entity.StockInfo::getDelistDate);   // 排除已退市
             Long total = stockInfoMapper.selectCount(w);
             totalByMarket.put(market, total != null ? total : 0L);
         }
@@ -222,6 +222,7 @@ public class DataUpdateController {
             }
 
             // 懒加载 code → market 映射 + code → listDate 映射（仅 ClickHouse 路径需要）
+            // 排除已退市股票，避免虚增缺失统计
             if (codeToMarket == null) {
                 codeToMarket = new HashMap<>();
                 codeToListDate = new HashMap<>();
@@ -230,6 +231,7 @@ public class DataUpdateController {
                 w.select(com.quant.platform.stock.entity.StockInfo::getCode,
                         com.quant.platform.stock.entity.StockInfo::getMarket,
                         com.quant.platform.stock.entity.StockInfo::getListDate);
+                w.isNull(com.quant.platform.stock.entity.StockInfo::getDelistDate); // 排除已退市
                 for (com.quant.platform.stock.entity.StockInfo s : stockInfoMapper.selectList(w)) {
                     if (s.getCode() != null && s.getMarket() != null) {
                         codeToMarket.put(s.getCode(), s.getMarket());
@@ -270,7 +272,8 @@ public class DataUpdateController {
                                 "JOIN stock_info si ON sd.code = si.code " +
                                 "WHERE sd.trade_date = ? " +
                                 "  AND si.market = ?" +
-                                "  AND si.list_date IS NOT NULL AND si.list_date <= ?";
+                                "  AND si.list_date IS NOT NULL AND si.list_date <= ?" +
+                                "  AND si.delist_date IS NULL";
                 Long existing = jdbcTemplate.queryForObject(mysqlSql, Long.class,
                         java.sql.Date.valueOf(date), market, java.sql.Date.valueOf(date));
                 long missing = Math.max(0, total - existing);
@@ -298,23 +301,27 @@ public class DataUpdateController {
     /**
      * 查询缺失股票列表
      * 只匹配 stock_info 中的 code，排除指数（指数不在 stock_info 中）
-     * 过滤规则：仅报告 查询日 ≥ 上市日 的股票（查询日前尚未上市的股票不视为缺失）
+     * 过滤规则：
+     *   ① 查询日 ≥ 上市日（查询日前尚未上市的股票不视为缺失）
+     *   ② 排除已退市股票（delist_date IS NULL）
      */
     private List<Map<String, Object>> queryMissingStocks(LocalDate date, String market) {
         // clickhouse.enabled = true  → ClickHouse 查已有 codes
         // clickhouse.enabled = false → MySQL 直接查已有 codes
 
-        // 1. stock_info 目标市场全部股票（MySQL，始终查询）
+        // 1. stock_info 目标市场全部股票（MySQL，始终查询），排除已退市
         com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.quant.platform.stock.entity.StockInfo> wrapper =
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
         if (!"ALL".equalsIgnoreCase(market)) {
             wrapper.eq(com.quant.platform.stock.entity.StockInfo::getMarket, market);
         }
+        wrapper.isNull(com.quant.platform.stock.entity.StockInfo::getDelistDate); // 排除已退市
         wrapper.select(
                 com.quant.platform.stock.entity.StockInfo::getCode,
                 com.quant.platform.stock.entity.StockInfo::getName,
                 com.quant.platform.stock.entity.StockInfo::getMarket,
-                com.quant.platform.stock.entity.StockInfo::getListDate);
+                com.quant.platform.stock.entity.StockInfo::getListDate,
+                com.quant.platform.stock.entity.StockInfo::getDelistDate);
         List<com.quant.platform.stock.entity.StockInfo> allStocks = stockInfoMapper.selectList(wrapper);
 
         // 2. 获取该日 stock_daily 中已有数据的 codes
@@ -564,10 +571,6 @@ public class DataUpdateController {
                 result.put("stockInfoError", e.getMessage());
             }
 
-            // 2. ClickHouse 各表删除
-            String[] chTables = {
-                "stock_daily", "factor_value", "stock_sentiment_moneyflow"
-            };
             // stock_daily 和 moneyflow 用 code 字段，factor_value 用 symbol 字段
             Map<String, String> codeColumns = new LinkedHashMap<>();
             codeColumns.put("stock_daily", "code");
@@ -583,15 +586,15 @@ public class DataUpdateController {
                     Object bc = clickHouseStockService.queryForObject(
                             "SELECT count() FROM stock." + table + " FINAL WHERE " + col + " IN (" + ph + ")",
                             codes.toArray());
-                    Long beforeCount = bc != null ? ((Number) bc).longValue() : 0L;
+                    long beforeCount = bc != null ? ((Number) bc).longValue() : 0L;
                     result.put(table + "_before", beforeCount);
 
-                    if (beforeCount != null && beforeCount > 0) {
+                    if (beforeCount > 0) {
                         String inClause = String.join(",", codes.stream().map(c -> "'" + c + "'").toArray(String[]::new));
                         String deleteSql = "ALTER TABLE stock." + table + " DELETE WHERE " + col + " IN (" + inClause + ")";
                         clickHouseStockService.executeDdl(deleteSql);
                         result.put(table + "_deleted", beforeCount);
-                        totalDeleted += beforeCount;
+                        totalDeleted += (int) beforeCount;
                     } else {
                         result.put(table + "_deleted", 0);
                     }

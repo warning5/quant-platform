@@ -410,6 +410,7 @@ export default function FactorIcIrAnalysis() {
   const [splitDate, setSplitDate] = useState(dayjs('2026-01-01'));
   const [segmentedResults, setSegmentedResults] = useState(null);
   const [neutralizeByIndustry, setNeutralizeByIndustry] = useState(false);
+  const [neutralizeByMarketCap, setNeutralizeByMarketCap] = useState(false);
   const [correlationType, setCorrelationType] = useState('spearman'); // 'spearman' | 'pearson'
   const [icThreshold, setIcThreshold] = useState(0.03); // 复合IC因子预筛选阈值
   const [savingIc, setSavingIc] = useState(false);
@@ -528,6 +529,7 @@ export default function FactorIcIrAnalysis() {
             splitDate.format('YYYY-MM-DD'),
             forwardDays,
             neutralizeByIndustry,
+            neutralizeByMarketCap,
             correlationType,
             icThreshold,
           );
@@ -546,6 +548,7 @@ export default function FactorIcIrAnalysis() {
             dateRange[1].format('YYYY-MM-DD'),
             forwardDays,
             neutralizeByIndustry,
+            neutralizeByMarketCap,
             correlationType,
             icThreshold,
           );
@@ -1298,6 +1301,16 @@ export default function FactorIcIrAnalysis() {
               <Tooltip title="对每个交易日的因子值按行业分组做z-score标准化，消除行业beta对IC的影响">
                 <InfoCircleOutlined style={{ color: '#bbb', fontSize: 10 }} />
               </Tooltip>
+              <Text type="secondary" style={{ fontSize: 12, marginLeft: 12 }}>市值中性化</Text>
+              <Switch
+                checked={neutralizeByMarketCap}
+                onChange={setNeutralizeByMarketCap}
+                checkedChildren="开"
+                unCheckedChildren="关"
+              />
+              <Tooltip title="在行业中性化后（或独立），按log(市值)做OLS回归取残差，消除大小盘偏差">
+                <InfoCircleOutlined style={{ color: '#bbb', fontSize: 10 }} />
+              </Tooltip>
               <Divider type="vertical" />
               <Text type="secondary" style={{ fontSize: 12 }}>IC方法</Text>
               <Radio.Group
@@ -1383,7 +1396,7 @@ export default function FactorIcIrAnalysis() {
 
       {/* 结果表格 */}
       {results && (
-        <Card title={<Space>分析结果{neutralizeByIndustry ? <Tag color="purple" style={{ fontSize: 11 }}>行业中性化(百分位秩)</Tag> : null}{correlationType === 'pearson'
+        <Card title={<Space>分析结果{neutralizeByIndustry ? <Tag color="purple" style={{ fontSize: 11 }}>行业中性化</Tag> : null}{neutralizeByMarketCap ? <Tag color="cyan" style={{ fontSize: 11 }}>市值中性化</Tag> : null}{correlationType === 'pearson'
                     ? <Tooltip title="Pearson线性相关系数：基于原始值计算，对异常值敏感，需假设正态分布"><Tag color="cyan" style={{ fontSize: 11 }}>Pearson <QuestionCircleOutlined style={{ fontSize: 10 }} /></Tag></Tooltip>
                     : <Tooltip title="Spearman秩相关系数：基于排名计算，对异常值不敏感，A股最常用"><Tag color="default" style={{ fontSize: 11 }}>Spearman <QuestionCircleOutlined style={{ fontSize: 10 }} /></Tag></Tooltip>
                   }<Text type="secondary" style={{ fontSize: 12 }}>（点击因子代码查看IC趋势）</Text></Space>} size="small" style={{ marginBottom: 16 }}

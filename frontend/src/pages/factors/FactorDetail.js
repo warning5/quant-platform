@@ -1051,6 +1051,18 @@ export default function FactorDetail() {
                       }
                     },
                     {
+                      title: '截面换手率', dataIndex: 'turnoverRate', width: 100, align: 'right',
+                      render: v => v != null
+                        ? <Typography.Text style={{ fontSize: 12 }}>{(+v * 100).toFixed(1)}%</Typography.Text>
+                        : <Typography.Text type="secondary">-</Typography.Text>
+                    },
+                    {
+                      title: '因子自相关', dataIndex: 'factorAutoCorr', width: 100, align: 'right',
+                      render: v => v != null
+                        ? <Typography.Text style={{ fontSize: 12 }}>{(+v).toFixed(3)}</Typography.Text>
+                        : <Typography.Text type="secondary">-</Typography.Text>
+                    },
+                    {
                       title: '状态', dataIndex: 'status', width: 90, align: 'center',
                       render: v => (
                         <Tag color={v === 'COMPLETED' ? 'success' : v === 'RUNNING' ? 'processing' : v === 'PENDING' ? 'default' : v === 'FAILED' ? 'error' : 'default'} style={{ fontSize: 11 }}>
@@ -1225,6 +1237,8 @@ export default function FactorDetail() {
                       { title: '分组 IR', value: fmt4(selectedReport.groupIr), note: '多空年化 IR', signal: { good: v => Math.abs(v) > 0.5, bad: v => Math.abs(v) < 0.2 }, raw: selectedReport.groupIr },
                       { title: '多空年化收益', value: fmtPct(selectedReport.longShortReturn), note: '多头-空头', signal: { good: v => v > 0.05, bad: v => v < 0 }, raw: selectedReport.longShortReturn },
                       { title: '多空显著性(p)', value: fmt4(selectedReport.lsPValue), note: '< 0.05 显著', signal: { good: v => v < 0.05, bad: v => v > 0.1 }, raw: selectedReport.lsPValue },
+                      { title: '截面换手率', value: selectedReport.turnoverRate != null ? `${(+selectedReport.turnoverRate * 100).toFixed(1)}%` : '-', note: 'Top组新增比例', signal: { good: v => v < 0.3, bad: v => v > 0.7 }, raw: selectedReport.turnoverRate },
+                      { title: '因子自相关', value: selectedReport.factorAutoCorr != null ? (+selectedReport.factorAutoCorr).toFixed(3) : '-', note: 'corr(f_t, f_{t-1})', signal: { good: v => Math.abs(v) > 0.8, bad: v => Math.abs(v) < 0.5 }, raw: selectedReport.factorAutoCorr },
                     ].map(m => (
                       <Col xs={12} sm={6} md={3} key={m.title}>
                         <Card size="small" hoverable style={{ textAlign: 'center', padding: '8px 4px' }}>
