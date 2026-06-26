@@ -61,6 +61,34 @@ public class PaperRiskConfig {
     @TableField("allocation_mode")
     private String allocationMode;
 
+    /** 滑点比例（小数，默认0.002=0.2%） */
+    @TableField("slippage_pct")
+    private BigDecimal slippagePct;
+
+    /** 滑点模型：NONE/FIXED，默认NONE */
+    @TableField("slippage_model")
+    private String slippageModel;
+
+    /** 现金缓冲比例（小数，默认0.05=5%），买入分配时预留此比例不投入 */
+    @TableField("cash_buffer_pct")
+    private BigDecimal cashBufferPct;
+
+    /** 再平衡频率：DAILY/WEEKLY/MONTHLY/THRESHOLD/VOL_ADAPTIVE/HYBRID */
+    @TableField("rebalance_freq")
+    private String rebalanceFreq;
+
+    /** 再平衡偏离阈值（小数，默认0.05=5%），当前权重偏离目标超过此值触发调仓 */
+    @TableField("rebalance_threshold")
+    private BigDecimal rebalanceThreshold;
+
+    /** 是否启用自动阻断（1=启用，0=仅预警），超限时自动阻止交易而非仅生成预警 */
+    @TableField("auto_block_enabled")
+    private Integer autoBlockEnabled;
+
+    /** TWAP大单拆分阈值（股），超过此数量触发TWAP拆分，默认50000股 */
+    @TableField("twap_threshold")
+    private Integer twapThreshold;
+
     /** 配置创建时间 */
     @TableField(value = "created_at", fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
@@ -82,6 +110,13 @@ public class PaperRiskConfig {
             .timingEnabled(0)
             .benchmarkCode("000300")
             .allocationMode("equal")
+            .slippagePct(new BigDecimal("0.002"))
+            .slippageModel("NONE")
+            .cashBufferPct(new BigDecimal("0.05"))
+            .rebalanceFreq("DAILY")
+            .rebalanceThreshold(new BigDecimal("0.05"))
+            .autoBlockEnabled(1)  // 默认开启自动阻断
+            .twapThreshold(50000)  // TWAP大单拆分阈值（默认50000股）
             .build();
     }
 }

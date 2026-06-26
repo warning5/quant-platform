@@ -37,6 +37,8 @@ public class ScheduleService implements SchedulingConfigurer {
 
     // taskKey → ScheduledFuture（用于动态取消）
     private final Map<String, ScheduledFuture<?>> scheduledTasks = new ConcurrentHashMap<>();
+    // taskKey → 失败重试计数（key = taskKey + ":" + scheduledTime.toLocalDate()，同一天只重试一次）
+    private final Map<String, Boolean> retryTracker = new ConcurrentHashMap<>();
 
     /**
      * Spring 启动后回调：注册所有 enabled 的任务
@@ -190,6 +192,25 @@ public class ScheduleService implements SchedulingConfigurer {
                 LocalDateTime.now(), taskKey
             );
             log.error("[ScheduleService] 定时执行失败: {}", taskKey, e);
+
+            // P1-2.2: 失败后5分钟自动重试一次（同一天同一任务只重试一次）
+            String retryKey = taskKey + ":" + LocalDate.now();
+            if (retryTracker.putIfAbsent(retryKey, true) == null) {
+                log.info("[ScheduleService] 5分钟后自动重试: {}", taskKey);
+                taskScheduler.schedule(
+                    () -> {
+                        try {
+                            log.info("[ScheduleService] 重试执行: {}", taskKey);
+                            executeTask(taskKey);
+                        } catch (Exception retryEx) {
+                            log.error("[ScheduleService] 重试仍然失败: {}", taskKey, retryEx);
+                        }
+                    },
+                    new java.util.Date(System.currentTimeMillis() + 5 * 60 * 1000)
+                );
+            } else {
+                log.info("[ScheduleService] 今日已重试过，不再重试: {}", taskKey);
+            }
         }
     }
 

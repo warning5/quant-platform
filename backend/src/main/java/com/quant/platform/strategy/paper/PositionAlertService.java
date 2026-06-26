@@ -9,11 +9,13 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
@@ -732,6 +734,140 @@ public class PositionAlertService {
             }
         }
         return count;
+    }
+
+    // ─── 交易前风控检查 ─────────────────────────────────────────────
+
+    /**
+     * 买入前风控检查（可阻断交易）
+     * 检查行业集中度、单股仓位、最大回撤，若超限且autoBlockEnabled=true则阻断
+     */
+    public RiskCheckResult checkBeforeTrade(Long paperId, String code, BigDecimal plannedAmount) {
+        PaperRiskConfig cfg = getRiskConfig(paperId);
+        if (cfg == null) return RiskCheckResult.pass();
+
+        // 若未开启自动阻断，仅记录预警不阻断
+        boolean autoBlock = cfg.getAutoBlockEnabled() != null && cfg.getAutoBlockEnabled() == 1;
+
+        BigDecimal totalAssets = getTotalAssets(paperId);
+        if (totalAssets == null || totalAssets.compareTo(BigDecimal.ZERO) <= 0) {
+            return RiskCheckResult.pass();
+        }
+
+        // 1. 行业集中度检查
+        if (cfg.getMaxIndustryPct() != null) {
+            String industry = getStockIndustry(code);
+            if (industry != null) {
+                BigDecimal industryValue = getIndustryMarketValue(paperId, industry);
+                // 加上本次计划买入金额
+                industryValue = industryValue.add(plannedAmount);
+                double ratio = industryValue.divide(totalAssets, 4, RoundingMode.HALF_UP)
+                    .multiply(new BigDecimal("100")).doubleValue();
+                double limit = cfg.getMaxIndustryPct().doubleValue() * 100;
+                if (ratio > limit) {
+                    String msg = String.format("行业集中度超限：%s 占比 %.1f%% > %.1f%%", industry, ratio, limit);
+                    if (autoBlock) {
+                        return RiskCheckResult.blocked(msg);
+                    }
+                    log.warn("行业集中度预警(不阻断): {}", msg);
+                }
+            }
+        }
+
+        // 2. 单股仓位检查
+        if (cfg.getMaxPositionPct() != null) {
+            // 查当前该股市值
+            BigDecimal currentValue = getStockMarketValue(paperId, code);
+            // 加上本次计划买入金额
+            BigDecimal newValue = currentValue.add(plannedAmount);
+            double ratio = newValue.divide(totalAssets, 4, RoundingMode.HALF_UP)
+                .multiply(new BigDecimal("100")).doubleValue();
+            double limit = cfg.getMaxPositionPct().doubleValue() * 100;
+            if (ratio > limit) {
+                String msg = String.format("单股仓位超限：%s 占比 %.1f%% > %.1f%%", code, ratio, limit);
+                if (autoBlock) {
+                    return RiskCheckResult.blocked(msg);
+                }
+                log.warn("单股仓位预警(不阻断): {}", msg);
+            }
+        }
+
+        // 3. 最大回撤检查
+        if (cfg.getMaxDrawdownPct() != null) {
+            double maxDd = cfg.getMaxDrawdownPct().doubleValue();
+            try {
+                List<BigDecimal> navs = jdbcTemplate.query(
+                    "SELECT total_assets FROM paper_nav WHERE paper_id = ? ORDER BY nav_date ASC",
+                    (rs, rowNum) -> rs.getBigDecimal("total_assets"), paperId);
+
+                if (!navs.isEmpty()) {
+                    BigDecimal peak = navs.stream()
+                        .filter(Objects::nonNull)
+                        .reduce(BigDecimal.ZERO, (a, b) -> a.compareTo(b) > 0 ? a : b);
+                    BigDecimal current = navs.get(navs.size() - 1);
+                    if (peak.compareTo(BigDecimal.ZERO) > 0) {
+                        double drawdownPct = peak.subtract(current)
+                            .divide(peak, 4, RoundingMode.HALF_UP)
+                            .multiply(new BigDecimal("100")).doubleValue();
+                        if (drawdownPct > maxDd * 100) {
+                            String msg = String.format("最大回撤超限：当前回撤 %.1f%% > %.1f%%", drawdownPct, maxDd * 100);
+                            if (autoBlock) {
+                                return RiskCheckResult.blocked(msg);
+                            }
+                            log.warn("最大回撤预警(不阻断): {}", msg);
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                log.debug("回撤检查失败: {}", e.getMessage());
+            }
+        }
+
+        return RiskCheckResult.pass();
+    }
+
+    /**
+     * 查询某行业的当前持仓市值
+     */
+    private BigDecimal getIndustryMarketValue(Long paperId, String industry) {
+        try {
+            List<Map<String, Object>> rows = jdbcTemplate.query(
+                "SELECT p.code, p.market_value, s.industry " +
+                "FROM paper_position p " +
+                "LEFT JOIN stock_info s ON p.code = s.code " +
+                "WHERE p.paper_id = ?",
+                (rs, rowNum) -> {
+                    Map<String, Object> m = new HashMap<>();
+                    m.put("industry", rs.getString("industry"));
+                    m.put("mv", rs.getBigDecimal("market_value"));
+                    return m;
+                }, paperId);
+
+            BigDecimal total = BigDecimal.ZERO;
+            for (Map<String, Object> row : rows) {
+                if (industry.equals(row.get("industry"))) {
+                    BigDecimal mv = (BigDecimal) row.get("mv");
+                    if (mv != null) total = total.add(mv);
+                }
+            }
+            return total;
+        } catch (Exception e) {
+            return BigDecimal.ZERO;
+        }
+    }
+
+    /**
+     * 查询某股票的当前持仓市值
+     */
+    private BigDecimal getStockMarketValue(Long paperId, String code) {
+        try {
+            List<BigDecimal> r = jdbcTemplate.query(
+                "SELECT market_value FROM paper_position WHERE paper_id = ? AND code = ?",
+                (rs, rowNum) -> rs.getBigDecimal("market_value"), paperId, code);
+            return r.isEmpty() ? BigDecimal.ZERO : r.getFirst();
+        } catch (Exception e) {
+            return BigDecimal.ZERO;
+        }
     }
 
     // ─── 辅助方法 ───────────────────────────────────────────────────

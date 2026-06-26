@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Card, Row, Col, Table, Tag, Button, Modal, Select, InputNumber, Space, Typography, Statistic, Spin, Tooltip, Alert, Popconfirm, Form, Switch, Divider, Collapse, Tabs, Badge } from 'antd';
+import { Card, Row, Col, Table, Tag, Button, Modal, Select, Input, InputNumber, Space, Typography, Statistic, Spin, Tooltip, Alert, Popconfirm, Form, Switch, Divider, Collapse, Tabs, Badge } from 'antd';
 import { message } from '../../utils/messageUtil';
 import {
   ThunderboltOutlined, PlayCircleOutlined, PauseCircleOutlined,
   CheckCircleOutlined, CloseCircleOutlined, SendOutlined, LeftOutlined,
   InfoCircleOutlined, DeleteOutlined, AlertOutlined, BellOutlined, EyeOutlined,
-  FundOutlined, SafetyCertificateOutlined,
+  FundOutlined, SafetyCertificateOutlined, BarChartOutlined,
 } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import { paperTradingApi, strategyApi } from '../../api';
@@ -200,6 +200,10 @@ function PaperDetail({ paperId, onBack }) {
   const [execLoading, setExecLoading] = useState(null);
   const [batchExecLoading, setBatchExecLoading] = useState(false);
   const [dividendLoading, setDividendLoading] = useState(false);
+  // 条件单
+  const [condOrderVisible, setCondOrderVisible] = useState(false);
+  const [condOrderLoading, setCondOrderLoading] = useState(false);
+  const [condOrderForm] = Form.useForm();
   const [alerts, setAlerts] = useState([]);
   const [alertLoading, setAlertLoading] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -210,6 +214,8 @@ function PaperDetail({ paperId, onBack }) {
   const [riskSaving, setRiskSaving] = useState(false);
   // 功能区 Tab
   const [activeTab, setActiveTab] = useState('overview');
+  const [executionQuality, setExecutionQuality] = useState(null);
+  const [qualityLoading, setQualityLoading] = useState(false);
 
   /* ── 大盘温度计 ─────────────────────── */
   const { data: thData2, status: thStatus2 } = useMarketThermometer();
@@ -230,10 +236,21 @@ function PaperDetail({ paperId, onBack }) {
         maxIndustryPct: cfg?.maxIndustryPct ?? 0.30,
         maxDrawdownPct: cfg?.maxDrawdownPct ?? 0.15,
         timingEnabled: cfg?.timingEnabled === 1,
+        autoBlockEnabled: cfg?.autoBlockEnabled !== 0,  // 默认开启（1）
+        twapThreshold: cfg?.twapThreshold ?? 50000,
         benchmarkCode: cfg?.benchmarkCode ?? '000300',
         allocationMode: cfg?.allocationMode ?? 'equal',
       });
     }).catch(() => {});
+  };
+
+  const loadExecutionQuality = () => {
+    setQualityLoading(true);
+    paperTradingApi.getExecutionQuality(paperId).then(d => {
+      setExecutionQuality(d || null);
+    }).catch(() => {
+      setExecutionQuality(null);
+    }).finally(() => setQualityLoading(false));
   };
 
   const handleSaveRiskConfig = async () => {
@@ -248,6 +265,8 @@ function PaperDetail({ paperId, onBack }) {
         maxIndustryPct: vals.maxIndustryPct,
         maxDrawdownPct: vals.maxDrawdownPct,
         timingEnabled: vals.timingEnabled ? 1 : 0,
+        autoBlockEnabled: vals.autoBlockEnabled ? 1 : 0,
+        twapThreshold: vals.twapThreshold ?? 50000,
         benchmarkCode: vals.benchmarkCode ?? '000300',
         allocationMode: vals.allocationMode ?? 'equal',
       };
@@ -272,6 +291,7 @@ function PaperDetail({ paperId, onBack }) {
       .catch(() => setSignals([]));
     loadAlerts();
     loadRiskConfig();
+    loadExecutionQuality();
   };
 
   useEffect(() => { load(); }, [paperId]);
@@ -328,6 +348,44 @@ function PaperDetail({ paperId, onBack }) {
       // 错误信息由 axios 拦截器统一展示
     } finally {
       setDividendLoading(false);
+    }
+  };
+
+  // 【缺陷1】条件单创建
+  const handleCreateConditionalOrder = async () => {
+    setCondOrderLoading(true);
+    try {
+      const vals = condOrderForm.getFieldsValue();
+      const params = {
+        code: vals.code,
+        direction: vals.direction,
+        orderType: vals.orderType,
+        triggerPrice: vals.triggerPrice,
+        limitPrice: vals.limitPrice,
+        trailPct: vals.trailPct,
+        trailAmount: vals.trailAmount,
+        reason: vals.reason,
+      };
+      await paperTradingApi.createConditionalOrder(paperId, params);
+      message.success('条件单创建成功');
+      setCondOrderVisible(false);
+      condOrderForm.resetFields();
+      load();
+    } catch (e) {
+      // 错误信息由 axios 拦截器统一展示
+    } finally {
+      setCondOrderLoading(false);
+    }
+  };
+
+  // 【缺陷1】检查条件单触发
+  const handleCheckConditionalOrders = async () => {
+    try {
+      const count = await paperTradingApi.checkConditionalOrders(paperId);
+      message.success(`条件单检查完成，触发了 ${count || 0} 笔`);
+      load();
+    } catch (e) {
+      // 错误信息由 axios 拦截器统一展示
     }
   };
 
@@ -459,13 +517,28 @@ function PaperDetail({ paperId, onBack }) {
       title: '方向', dataIndex: 'direction', width: 70,
       render: v => <Tag color={v === 'BUY' ? 'red' : 'green'}>{v === 'BUY' ? '买入' : '卖出'}</Tag>,
     },
+    {
+      title: '订单类型', dataIndex: 'orderType', width: 100,
+      render: v => {
+        if (!v || v === 'MARKET') return <Tag>市价单</Tag>;
+        const map = { LIMIT: { color: 'orange', text: '限价单' }, STOP: { color: 'red', text: '止损单' }, STOP_LIMIT: { color: 'volcano', text: '止损限价' }, TRAILING_STOP: { color: 'purple', text: '追踪止损' } };
+        const cfg = map[v] || { color: 'default', text: v };
+        return <Tag color={cfg.color}>{cfg.text}</Tag>;
+      },
+    },
+    {
+      title: '触发价', dataIndex: 'triggerPrice', width: 80,
+      render: v => v != null ? (+v).toFixed(2) : '-',
+    },
     { title: '信号价', dataIndex: 'signalPrice', width: 80, render: v => v != null ? (+v).toFixed(2) : '-' },
+    { title: '执行价', dataIndex: 'executedPrice', width: 80, render: v => v != null ? (+v).toFixed(2) : '-' },
+    { title: '偏差', width: 80, render: (_, r) => r.priceDeviationPct != null ? ((r.priceDeviationPct > 0 ? '+' : '') + (r.priceDeviationPct * 100).toFixed(2) + '%') : '-' },
     { title: '因子得分', dataIndex: 'factorScore', width: 80, render: v => v != null ? (+v).toFixed(3) : '-' },
     { title: '原因', dataIndex: 'reason', width: 180, ellipsis: true },
     {
       title: '状态', dataIndex: 'status', width: 80,
       render: v => {
-        const map = { PENDING: { color: 'blue', text: '待执行' }, EXECUTED: { color: 'green', text: '已执行' }, SKIPPED: { color: 'default', text: '已跳过' }, EXPIRED: { color: 'red', text: '已过期' } };
+        const map = { PENDING: { color: 'blue', text: '待执行' }, EXECUTED: { color: 'green', text: '已执行' }, SKIPPED: { color: 'default', text: '已跳过' }, EXPIRED: { color: 'red', text: '已过期' }, BLOCKED: { color: 'volcano', text: '风控阻断' } };
         const cfg = map[v] || { color: 'default', text: v };
         return <Tag color={cfg.color}>{cfg.text}</Tag>;
       },
@@ -570,6 +643,8 @@ function PaperDetail({ paperId, onBack }) {
                 <Row gutter={12} style={{ marginBottom: 16 }}>
                   <Col span={24} style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                     <Button type="primary" icon={<SendOutlined />} onClick={handleGenerate} loading={genLoading}>生成信号</Button>
+                    <Button icon={<SafetyCertificateOutlined />} onClick={() => setCondOrderVisible(true)}>创建条件单</Button>
+                    <Button icon={<CheckCircleOutlined />} onClick={handleCheckConditionalOrders}>检查条件单</Button>
                   </Col>
                 </Row>
                 <Alert
@@ -579,6 +654,7 @@ function PaperDetail({ paperId, onBack }) {
                       <Text type="secondary">• 信号按因子综合得分排序，买入TOP标的，卖出分数下降的持仓</Text>
                       <Text type="secondary">• 开启大盘择时后，大盘温度计为空头信号时自动暂停新开仓（不影响已有持仓）</Text>
                       <Text type="secondary">• 执行信号后，按止盈止损规则自动监控持仓盈亏</Text>
+                      <Text type="secondary">• 条件单（限价/止损/追踪止损）需满足触发条件后才执行，可点击"检查条件单"手动触发检查</Text>
                     </Space>
                   }
                   type="info"
@@ -751,6 +827,16 @@ function PaperDetail({ paperId, onBack }) {
                         <Switch checkedChildren="开" unCheckedChildren="关" />
                       </Form.Item>
                     </Col>
+                    <Col span={8}>
+                      <Form.Item label={<LabelWithTip text="自动阻断" tip="开启后，行业集中度/单股仓位/最大回撤超限时自动阻止交易（而非仅生成预警）。关闭则仅生成预警不阻断。" />} name="autoBlockEnabled" valuePropName="checked">
+                        <Switch checkedChildren="开" unCheckedChildren="关" />
+                      </Form.Item>
+                    </Col>
+                    <Col span={8}>
+                      <Form.Item label={<LabelWithTip text="TWAP拆分阈值" tip="单笔委托超过此股数时，自动触发TWAP拆单（大单拆分为多笔小单执行，降低市场冲击）。设为0则禁用TWAP。" />} name="twapThreshold">
+                        <InputNumber min={0} step={10000} style={{ width: '100%' }} addonAfter="股" />
+                      </Form.Item>
+                    </Col>
                     <Col span={12}>
                       <Form.Item label={<LabelWithTip text="基准指数" tip="用于计算超额收益。净值曲线图中叠加显示基准指数走势。" />} name="benchmarkCode">
                         <Select options={[
@@ -782,8 +868,126 @@ function PaperDetail({ paperId, onBack }) {
               </>
             ),
           },
+          {
+            key: 'quality',
+            label: <span><BarChartOutlined /> 执行质量</span>,
+            children: (
+              <>
+                <Alert
+                  message="执行质量分析说明"
+                  description={
+                    <Space direction="vertical" size={4}>
+                      <Text type="secondary">• 自动记录每笔执行的信号价与成交价偏差、滑点成本、佣金</Text>
+                      <Text type="secondary">• 平均偏差接近0%说明信号价与执行价高度一致</Text>
+                      <Text type="secondary">• 滑点成本 = |执行价 - 信号价| × 股数</Text>
+                    </Space>
+                  }
+                  type="info"
+                  showIcon
+                  style={{ marginBottom: 16 }}
+                />
+                {qualityLoading ? <Spin /> : (
+                  <>
+                    {executionQuality && (
+                      <Row gutter={16} style={{ marginBottom: 16 }}>
+                        <Col span={6}><Card size="small"><Statistic title="总交易笔数" value={executionQuality.totalTrades || 0} /></Card></Col>
+                        <Col span={6}><Card size="small"><Statistic title="平均偏差(%)" value={(executionQuality.avgDeviationPct || 0) * 100} precision={4} valueStyle={{ color: (executionQuality.avgDeviationPct || 0) > 0 ? '#f5222d' : '#52c41a' }} /></Card></Col>
+                        <Col span={6}><Card size="small"><Statistic title="平均滑点成本(元)" value={executionQuality.avgSlippageCost || 0} precision={2} /></Card></Col>
+                        <Col span={6}><Card size="small"><Statistic title="总交易成本(元)" value={executionQuality.totalCost || 0} precision={2} prefix="¥" /></Card></Col>
+                      </Row>
+                    )}
+                    {executionQuality?.records?.length > 0 ? (
+                      <Card title="执行质量明细" size="small">
+                        <Table
+                          dataSource={executionQuality.records}
+                          rowKey="id"
+                          size="small"
+                          pagination={{ pageSize: 10 }}
+                          columns={[
+                            { title: '时间', dataIndex: 'executionTime', render: v => v || '-' },
+                            { title: '代码', dataIndex: 'code' },
+                            { title: '方向', dataIndex: 'direction', render: v => v === 'BUY' ? <Tag color="red">买</Tag> : <Tag color="green">卖</Tag> },
+                            { title: '信号价', dataIndex: 'signalPrice', render: v => v != null ? (+v).toFixed(2) : '-' },
+                            { title: '执行价', dataIndex: 'executedPrice', render: v => v != null ? (+v).toFixed(2) : '-' },
+                            { title: '偏差(%)', render: (_, r) => {
+                              if (r.priceDeviationPct == null) return '-';
+                              const prefix = r.priceDeviationPct > 0 ? '+' : '';
+                              return prefix + (r.priceDeviationPct * 100).toFixed(4) + '%';
+                            } },
+                            { title: '滑点成本', dataIndex: 'slippageCost', render: v => v != null ? (+v).toFixed(2) : '-' },
+                            { title: '佣金', dataIndex: 'commission', render: v => v != null ? (+v).toFixed(2) : '-' },
+                          ]}
+                        />
+                      </Card>
+                    ) : (
+                      <Text type="secondary">暂无执行质量数据，请先执行交易信号</Text>
+                    )}
+                  </>
+                )}
+              </>
+            ),
+          },
         ]}
       />
+
+      {/* ── 条件单创建 Modal ── */}
+      <Modal
+        title="创建条件单"
+        open={condOrderVisible}
+        onCancel={() => { setCondOrderVisible(false); condOrderForm.resetFields(); }}
+        onOk={handleCreateConditionalOrder}
+        confirmLoading={condOrderLoading}
+        width={520}
+      >
+        <Form form={condOrderForm} layout="vertical" initialValues={{ direction: 'SELL', orderType: 'LIMIT' }}>
+          <Form.Item label="股票代码" name="code" rules={[{ required: true, message: '请输入股票代码' }]}>
+            <InputNumber style={{ width: '100%' }} placeholder="如 600519" />
+          </Form.Item>
+          <Form.Item label="信号方向" name="direction" rules={[{ required: true }]}>
+            <Select options={[
+              { label: '卖出 (SELL)', value: 'SELL' },
+              { label: '买入 (BUY)', value: 'BUY' },
+            ]} />
+          </Form.Item>
+          <Form.Item label="订单类型" name="orderType" rules={[{ required: true }]}>
+            <Select options={[
+              { label: '限价单 (LIMIT)', value: 'LIMIT' },
+              { label: '止损单 (STOP)', value: 'STOP' },
+              { label: '止损限价单 (STOP_LIMIT)', value: 'STOP_LIMIT' },
+              { label: '追踪止损 (TRAILING_STOP)', value: 'TRAILING_STOP' },
+            ]} />
+          </Form.Item>
+          <Form.Item label="触发价格（元）" name="triggerPrice">
+            <InputNumber style={{ width: '100%' }} min={0} step={0.01} placeholder="限价单/止损单的触发价" />
+          </Form.Item>
+          <Form.Item label="限价（元）" name="limitPrice">
+            <InputNumber style={{ width: '100%' }} min={0} step={0.01} placeholder="止损限价单的执行限价" />
+          </Form.Item>
+          <Form.Item label="追踪止损回撤比例" name="trailPct">
+            <InputNumber style={{ width: '100%' }} min={0} max={1} step={0.01} placeholder="如 0.05 = 5%" />
+          </Form.Item>
+          <Form.Item label="追踪止损回撤金额（元）" name="trailAmount">
+            <InputNumber style={{ width: '100%' }} min={0} step={0.5} placeholder="从最高价回撤金额" />
+          </Form.Item>
+          <Form.Item label="备注原因" name="reason">
+            <Input placeholder="可选备注" />
+          </Form.Item>
+        </Form>
+        <Alert
+          message="条件单说明"
+          description={
+            <Space direction="vertical" size={4}>
+              <Text type="secondary">• 限价单(LIMIT)：买入时当前价≤触发价才执行；卖出时当前价≥触发价才执行</Text>
+              <Text type="secondary">• 止损单(STOP)：当前价≤触发价时卖出（保护性止损）</Text>
+              <Text type="secondary">• 止损限价单(STOP_LIMIT)：触发后仅在限价范围内执行</Text>
+              <Text type="secondary">• 追踪止损(TRAILING_STOP)：从最高价回撤指定比例/金额时卖出（动态止损）</Text>
+            </Space>
+          }
+          type="info"
+          showIcon
+          style={{ marginTop: 12 }}
+        />
+      </Modal>
 
       {/* ── 未读预警行高亮样式注入 ── */}
       <style>{`.alert-unread-row { background-color: #fff2f0; }`}</style>

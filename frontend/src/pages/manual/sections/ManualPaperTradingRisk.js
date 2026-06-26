@@ -145,17 +145,21 @@ export default function ManualPaperTradingRisk() {
           <Card size="small" type="inner" style={{ borderLeft: '4px solid #fa8c16' }} title="🏭 行业集中度">
             <Paragraph style={{ fontSize: 12, margin: 0 }}>
               <Text strong>阈值：</Text>单一行业仓位 ≤ 35%（可配置）<br/>
-              <Text strong>检测时机：</Text>每次调仓后（买入/卖出后）<br/>
-              <Text strong>超限处理：</Text>生成 WARNING 预警，但不会自动阻止交易
+              <Text strong>检测时机：</Text>买入前实时检查<br/>
+              <Text strong>超限处理：</Text>
+              开启「自动阻断」后，超限将<Text type="danger">阻止买入</Text>；
+              关闭则仅生成 WARNING 预警（兼容旧行为）
             </Paragraph>
           </Card>
         </Col>
         <Col xs={24} md={12}>
           <Card size="small" type="inner" style={{ borderLeft: '4px solid #722ed1' }} title="💼 仓位集中度">
             <Paragraph style={{ fontSize: 12, margin: 0 }}>
-              <Text strong>阈值：</Text>单只股票仓位 ≤ 25%（可配置）<br/>
+              <Text strong>阈值：</Text>单只股票仓位 ≤ 20%（可配置）<br/>
               <Text strong>计算方式：</Text>单只股票市值 / 总资产<br/>
-              <Text strong>超限处理：</Text>生成 WARNING 预警，不会阻止买入（无法精确控制）
+              <Text strong>超限处理：</Text>
+              开启「自动阻断」后，超限将<Text type="danger">阻止买入</Text>；
+              关闭则仅生成 WARNING 预警
             </Paragraph>
           </Card>
         </Col>
@@ -169,7 +173,7 @@ export default function ManualPaperTradingRisk() {
             <ul style={{ paddingLeft: 20, marginBottom: 0, fontSize: 13 }}>
               <li>每日收盘后计算当前净值与历史最高净值的回撤幅度</li>
               <li>若回撤超过阈值（默认 20%），生成 <Tag color="orange">WARNING</Tag> 级别预警</li>
-              <li>回撤控制不会自动减仓，需人工判断是否暂停策略或手动清仓</li>
+              <li>开启「自动阻断」后，回撤超限将阻止新建仓位（不自动减仓）</li>
               <li>回撤控制阈值可按风险偏好调整（激进 → 30%；保守 → 15%）</li>
             </ul>
           </div>

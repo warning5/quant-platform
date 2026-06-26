@@ -2,6 +2,7 @@ package com.quant.platform.strategy.paper;
 
 import com.quant.platform.common.dto.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -21,15 +22,17 @@ public class PaperTradingController {
 
     private final PaperTradingService paperTradingService;
     private final PositionAlertService positionAlertService;
+    private final ExecutionQualityService executionQualityService;
 
     @PostMapping("/create")
-    @Operation(summary = "创建模拟盘")
+    @Operation(summary = "创建模拟盘（支持单策略或多策略组合）")
     public ApiResponse<PaperTrading> create(
-            @RequestParam Long strategyId,
+            @RequestParam(required = false) Long strategyId,
             @RequestParam(required = false) String strategyCode,
-            @RequestParam(defaultValue = "1000000") BigDecimal initialCapital) {
+            @RequestParam(defaultValue = "1000000") BigDecimal initialCapital,
+            @RequestParam(required = false) String strategyConfigJson) {
         return ApiResponse.success("模拟盘创建成功",
-            paperTradingService.createPaperTrading(strategyId, strategyCode, initialCapital));
+            paperTradingService.createPaperTrading(strategyId, strategyCode, initialCapital, strategyConfigJson));
     }
 
     @GetMapping("/list")
@@ -54,6 +57,33 @@ public class PaperTradingController {
     @Operation(summary = "执行信号（买入/卖出）")
     public ApiResponse<PaperPosition> executeSignal(@PathVariable Long signalId) {
         return ApiResponse.success("信号执行成功", paperTradingService.executeSignal(signalId));
+    }
+
+    /** 【缺陷1修复】创建条件单（限价单/止损单/追踪止损单） */
+    @PostMapping("/{paperId}/conditional-order")
+    @Operation(summary = "创建条件单（限价/止损/追踪止损）")
+    public ApiResponse<PaperSignal> createConditionalOrder(
+            @PathVariable Long paperId,
+            @Parameter(description = "股票代码") @RequestParam String code,
+            @Parameter(description = "信号方向：BUY/SELL") @RequestParam String direction,
+            @Parameter(description = "订单类型：LIMIT/STOP/STOP_LIMIT/TRAILING_STOP") @RequestParam String orderType,
+            @Parameter(description = "触发价格（限价单/止损单）") @RequestParam(required = false) BigDecimal triggerPrice,
+            @Parameter(description = "限价（止损限价单）") @RequestParam(required = false) BigDecimal limitPrice,
+            @Parameter(description = "追踪止损回撤比例（小数，如0.05=5%）") @RequestParam(required = false) BigDecimal trailPct,
+            @Parameter(description = "追踪止损回撤金额（元）") @RequestParam(required = false) BigDecimal trailAmount,
+            @Parameter(description = "信号价格") @RequestParam(required = false) BigDecimal signalPrice,
+            @Parameter(description = "信号原因") @RequestParam(required = false) String reason) {
+        return ApiResponse.success("条件单创建成功",
+            paperTradingService.createConditionalOrder(paperId, code, direction, orderType,
+                triggerPrice, limitPrice, trailPct, trailAmount, signalPrice, reason));
+    }
+
+    /** 【缺陷1修复】检查并执行所有待触发的条件单 */
+    @PostMapping("/{paperId}/check-conditional-orders")
+    @Operation(summary = "检查条件单触发状态并执行")
+    public ApiResponse<Integer> checkConditionalOrders(@PathVariable Long paperId) {
+        return ApiResponse.success("条件单检查完成",
+            paperTradingService.checkAndExecuteConditionalOrders(paperId));
     }
 
     @GetMapping("/{paperId}/signals")
@@ -161,10 +191,50 @@ public class PaperTradingController {
             @RequestParam(required = false) BigDecimal maxDrawdownPct,
             @RequestParam(required = false) Integer timingEnabled,
             @RequestParam(required = false) String benchmarkCode,
-            @RequestParam(required = false) String allocationMode) {
+            @RequestParam(required = false) String allocationMode,
+            @RequestParam(required = false) BigDecimal slippagePct,
+            @RequestParam(required = false) String slippageModel,
+            @RequestParam(required = false) BigDecimal cashBufferPct,
+            @RequestParam(required = false) String rebalanceFreq,
+            @RequestParam(required = false) BigDecimal rebalanceThreshold,
+            @RequestParam(required = false) Integer autoBlockEnabled,
+            @RequestParam(required = false) Integer twapThreshold) {
         return ApiResponse.success("风控配置已更新",
             paperTradingService.updateRiskConfig(paperId, stopLossPct, takeProfitPct,
                 trailingAtr, maxPositionPct, maxIndustryPct, maxDrawdownPct,
-                timingEnabled, benchmarkCode, allocationMode));
+                timingEnabled, benchmarkCode, allocationMode,
+                slippagePct, slippageModel, cashBufferPct, rebalanceFreq, rebalanceThreshold,
+                autoBlockEnabled, twapThreshold));
+    }
+
+    @PostMapping("/{paperId}/cash-flow/deposit")
+    @Operation(summary = "追加入金")
+    public ApiResponse<PaperCashFlow> deposit(
+            @PathVariable Long paperId,
+            @RequestParam BigDecimal amount,
+            @RequestParam(required = false) String note) {
+        return ApiResponse.success("入金成功", paperTradingService.deposit(paperId, amount, note));
+    }
+
+    @PostMapping("/{paperId}/cash-flow/withdraw")
+    @Operation(summary = "提取出金")
+    public ApiResponse<PaperCashFlow> withdraw(
+            @PathVariable Long paperId,
+            @RequestParam BigDecimal amount,
+            @RequestParam(required = false) String note) {
+        return ApiResponse.success("出金成功", paperTradingService.withdraw(paperId, amount, note));
+    }
+
+    @GetMapping("/{paperId}/cash-flow")
+    @Operation(summary = "查询现金流记录")
+    public ApiResponse<List<PaperCashFlow>> getCashFlows(@PathVariable Long paperId) {
+        return ApiResponse.success(paperTradingService.getCashFlows(paperId));
+    }
+
+    // ─── 执行质量分析 ──────────────────────────────────────────────
+    @GetMapping("/{paperId}/execution-quality")
+    @Operation(summary = "获取执行质量分析")
+    public ApiResponse<Map<String, Object>> getExecutionQuality(@PathVariable Long paperId) {
+        return ApiResponse.success(executionQualityService.getQualityReport(paperId));
     }
 }

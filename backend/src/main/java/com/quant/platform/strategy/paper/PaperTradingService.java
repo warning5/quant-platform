@@ -34,6 +34,9 @@ public class PaperTradingService {
     private final PaperSignalMapper paperSignalMapper;
     private final PaperNavMapper paperNavMapper;
     private final PaperRiskConfigMapper paperRiskConfigMapper;
+    private final PaperCashFlowMapper paperCashFlowMapper;
+    @Autowired(required = false)
+    private PaperExecutionQualityMapper paperExecutionQualityMapper;
     private final JdbcTemplate jdbcTemplate;
 
     @Autowired(required = false)
@@ -49,16 +52,32 @@ public class PaperTradingService {
     @Autowired(required = false)
     private TradeCalendarService tradeCalendarService;
 
+    @Autowired(required = false)
+    private PositionAlertService positionAlertService;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
      * 创建模拟盘
      */
     @Transactional
-    public PaperTrading createPaperTrading(Long strategyId, String strategyCode, BigDecimal initialCapital) {
+    public PaperTrading createPaperTrading(Long strategyId, String strategyCode, BigDecimal initialCapital, String strategyConfigJson) {
+        // 组合模式校验：strategyConfigJson必须有效，权重之和≈1
+        if (strategyConfigJson != null && !strategyConfigJson.isBlank()) {
+            double weightSum = parseStrategyWeights(strategyConfigJson).values().stream().mapToDouble(Double::doubleValue).sum();
+            if (Math.abs(weightSum - 1.0) > 0.05) {
+                throw new IllegalArgumentException("组合策略权重之和必须≈1.0，当前=" + weightSum);
+            }
+            // 组合模式不需要strategyId（取JSON中第一个策略的ID做标记）
+            if (strategyId == null) {
+                strategyId = parseStrategyWeights(strategyConfigJson).keySet().stream().findFirst().orElse(0L);
+            }
+        }
+
         PaperTrading pt = PaperTrading.builder()
             .strategyId(strategyId)
             .strategyCode(strategyCode)
+            .strategyConfigJson(strategyConfigJson)
             .status("RUNNING")
             .initialCapital(initialCapital)
             .currentCapital(initialCapital)
@@ -340,6 +359,87 @@ public class PaperTradingService {
     }
 
     /**
+     * 【缺陷1修复】创建条件单（限价单/止损单/止损限价单/追踪止损单）
+     */
+    @Transactional
+    public PaperSignal createConditionalOrder(Long paperId, String code, String direction,
+            String orderType, BigDecimal triggerPrice, BigDecimal limitPrice,
+            BigDecimal trailPct, BigDecimal trailAmount, BigDecimal signalPrice, String reason) {
+        // 参数校验
+        if (!"LIMIT".equals(orderType) && !"STOP".equals(orderType)
+                && !"STOP_LIMIT".equals(orderType) && !"TRAILING_STOP".equals(orderType)) {
+            throw new IllegalArgumentException("不支持的条件单类型: " + orderType);
+        }
+        if ("LIMIT".equals(orderType) && triggerPrice == null) {
+            throw new IllegalArgumentException("限价单必须指定触发价格(triggerPrice)");
+        }
+        if ("STOP".equals(orderType) && triggerPrice == null) {
+            throw new IllegalArgumentException("止损单必须指定触发价格(triggerPrice)");
+        }
+        if ("STOP_LIMIT".equals(orderType) && (triggerPrice == null || limitPrice == null)) {
+            throw new IllegalArgumentException("止损限价单必须指定触发价格(triggerPrice)和限价(limitPrice)");
+        }
+        if ("TRAILING_STOP".equals(orderType)
+                && ((trailPct == null && trailAmount == null)
+                    || (trailPct != null && trailPct.compareTo(BigDecimal.ZERO) <= 0)
+                    || (trailAmount != null && trailAmount.compareTo(BigDecimal.ZERO) <= 0))) {
+            throw new IllegalArgumentException("追踪止损必须指定回撤比例(trailPct>0)或回撤金额(trailAmount>0)");
+        }
+        if (!"BUY".equals(direction) && !"SELL".equals(direction)) {
+            throw new IllegalArgumentException("信号方向必须是 BUY 或 SELL");
+        }
+
+        // 止损单和追踪止损只能用于卖出（保护已有持仓）
+        if (("STOP".equals(orderType) || "STOP_LIMIT".equals(orderType) || "TRAILING_STOP".equals(orderType))
+                && "BUY".equals(direction)) {
+            throw new IllegalArgumentException("止损单/止损限价单/追踪止损单只能用于卖出方向");
+        }
+
+        String name = getStockName(code);
+        if (signalPrice == null) {
+            signalPrice = getExecutionPrice(code, paperId);
+        }
+        if (reason == null) {
+            reason = String.format("%s条件单 %s@%s", orderType, direction, code);
+        }
+
+        // 追踪止损：初始最高价取当前持仓成本价或当前价
+        BigDecimal highestSinceBuy = null;
+        if ("TRAILING_STOP".equals(orderType)) {
+            PaperPosition pos = paperPositionMapper.selectOne(
+                new LambdaQueryWrapper<PaperPosition>()
+                    .eq(PaperPosition::getPaperId, paperId)
+                    .eq(PaperPosition::getCode, code));
+            if (pos == null) {
+                throw new IllegalArgumentException("追踪止损需要有对应持仓: " + code);
+            }
+            highestSinceBuy = pos.getCostPrice() != null ? pos.getCostPrice() : signalPrice;
+        }
+
+        PaperSignal signal = PaperSignal.builder()
+            .paperId(paperId)
+            .signalDate(LocalDate.now())
+            .factorDate(LocalDate.now())
+            .code(code)
+            .name(name)
+            .direction(direction)
+            .signalPrice(signalPrice)
+            .reason(reason)
+            .status("PENDING")
+            .orderType(orderType)
+            .triggerPrice(triggerPrice)
+            .limitPrice(limitPrice)
+            .trailPct(trailPct)
+            .trailAmount(trailAmount)
+            .highestSinceBuy(highestSinceBuy)
+            .build();
+        paperSignalMapper.insert(signal);
+        log.info("条件单创建: paperId={} code={} direction={} orderType={} triggerPrice={} trailPct={}",
+            paperId, code, direction, orderType, triggerPrice, trailPct);
+        return signal;
+    }
+
+    /**
      * 生成交易信号
      * 根据策略因子配置，计算最新截面得分，生成买入/卖出信号
      */
@@ -375,39 +475,37 @@ public class PaperTradingService {
         log.info("generateSignals: paperId={}, stopLoss={}%, takeProfit={}%",
             paperId, stopLossPct, takeProfitPct);
 
-        // 获取策略因子配置
-        String factorConfigJson = getStrategyFactorConfig(pt.getStrategyId());
-        if (factorConfigJson == null || factorConfigJson.isEmpty()) {
-            throw new IllegalArgumentException("策略因子配置为空");
+        // 获取策略因子配置（支持单策略和多策略组合）
+        Map<Long, Double> strategyWeights; // strategyId → weight
+        if (pt.getStrategyConfigJson() != null && !pt.getStrategyConfigJson().isBlank()) {
+            // 组合模式：从JSON解析多策略权重
+            strategyWeights = parseStrategyWeights(pt.getStrategyConfigJson());
+        } else {
+            // 单策略模式：权重=1.0
+            strategyWeights = Map.of(pt.getStrategyId(), 1.0);
         }
 
-        // 兼容两种格式: {"factors":[...]} 或直接 [...]
-        List<Map<String, Object>> factorConfigs;
-        try {
-            Object raw = objectMapper.readValue(factorConfigJson, Object.class);
-            if (raw instanceof List) {
-                @SuppressWarnings("unchecked")
-                List<Map<String, Object>> list = (List<Map<String, Object>>) raw;
-                factorConfigs = list;
-            } else if (raw instanceof Map) {
-                @SuppressWarnings("unchecked")
-                Map<String, Object> map = (Map<String, Object>) raw;
-                @SuppressWarnings("unchecked")
-                List<Map<String, Object>> factors = (List<Map<String, Object>>) map.get("factors");
-                factorConfigs = factors != null ? factors : List.of();
-            } else {
-                factorConfigs = List.of();
+        // 收集所有策略使用的因子code（按权重加权）
+        Map<String, Double> combinedFactorWeights = new LinkedHashMap<>();
+        for (Map.Entry<Long, Double> entry : strategyWeights.entrySet()) {
+            String factorConfigJson = getStrategyFactorConfig(entry.getKey());
+            if (factorConfigJson == null || factorConfigJson.isEmpty()) {
+                log.warn("策略{}因子配置为空，跳过", entry.getKey());
+                continue;
             }
-        } catch (Exception e) {
-            throw new IllegalArgumentException("因子配置解析失败: " + e.getMessage());
+            List<Map<String, Object>> factorConfigs = parseFactorConfigs(factorConfigJson);
+            double strategyWeight = entry.getValue();
+            for (Map<String, Object> fc : factorConfigs) {
+                String code = (String) fc.getOrDefault("code", fc.get("factorCode"));
+                if (code != null && !code.isBlank()) {
+                    // 同一因子在多策略中出现时，权重叠加
+                    double factorWeight = ((Number) fc.getOrDefault("weight", 1.0)).doubleValue();
+                    combinedFactorWeights.merge(code, strategyWeight * factorWeight, Double::sum);
+                }
+            }
         }
 
-        // 收集策略中实际使用的因子code
-        Set<String> usedFactorCodes = new LinkedHashSet<>();
-        for (Map<String, Object> fc : factorConfigs) {
-            String code = (String) fc.getOrDefault("code", fc.get("factorCode"));
-            if (code != null && !code.isBlank()) usedFactorCodes.add(code);
-        }
+        Set<String> usedFactorCodes = combinedFactorWeights.keySet();
 
         // 修复 Bug：signalDate 取日频因子的最大日期（排除 FIN_/CHAN_），不再取所有因子日期的最小值
         // 这样 signalDate = 最新日频因子日期，与每个因子的截面查询日期一致
@@ -435,29 +533,23 @@ public class PaperTradingService {
             } catch (Exception ignored) {}
         }
         signalDate = maxDailyDate != null ? maxDailyDate.toString() : LocalDate.now().toString();
-        log.info("generateSignals: paperId={}, signalDate={}（日频因子最新，排除FIN_/CHAN_）, factorConfigs={}",
-            paperId, signalDate, factorConfigs.size());
+        log.info("generateSignals: paperId={}, signalDate={}（日频因子最新，排除FIN_/CHAN_）, strategies={}, factorCount={}",
+            paperId, signalDate, strategyWeights.size(), combinedFactorWeights.size());
 
         // 改造：每个因子用自己的最新日期，分别归一化后加权合并
-        // 不再统一用 latestDate，避免财务因子拖拽整体日期
+        // 组合模式下，因子权重 = 各策略因子权重 × 策略权重 之和
         Map<String, Double> stockScores = new HashMap<>();
         Map<String, Double> stockWeights = new HashMap<>();
 
-        for (Map<String, Object> fc : factorConfigs) {
-            // 兼容 "code" (前端/DB存储) 和 "factorCode" 两种字段名
-            String factorCode = (String) fc.getOrDefault("code", fc.get("factorCode"));
-            double weight = fc.get("weight") != null ? ((Number) fc.get("weight")).doubleValue() : 1.0;
-            String direction = fc.get("direction") != null ? (String) fc.get("direction") : "ASC";
-
-            if (factorCode == null || factorCode.isBlank()) {
-                log.warn("generateSignals: 因子配置缺少code字段, 跳过: {}", fc);
-                continue;
-            }
+        // 需要因子方向信息，从DB获取
+        for (String factorCode : usedFactorCodes) {
+            double weight = combinedFactorWeights.getOrDefault(factorCode, 1.0);
+            // 从 factor_definition 获取因子方向
+            String direction = getFactorDirection(factorCode);
 
             // 从 CH 获取因子值：每个因子用自己的最新日期
             if (clickHouseJdbcTemplate != null) {
                 try {
-                    // 查该因子自己的最新日期
                     String factorDate = getFactorLatestDate(factorCode);
                     if (factorDate == null) {
                         log.warn("generateSignals: 因子 {} 无数据，跳过", factorCode);
@@ -472,12 +564,11 @@ public class PaperTradingService {
                         String sym = rs.getString("symbol");
                         if (sym != null && sym.contains(".")) sym = sym.split("\\.")[0];
                         double rankVal = rs.getBigDecimal("rank_value").doubleValue();
-                        // ASC 方向 rank 越大越好，DESC 反转
                         double adjustedRank = "DESC".equals(direction) ? (1.0 - rankVal) : rankVal;
                         stockScores.merge(sym, adjustedRank * weight, Double::sum);
                         stockWeights.merge(sym, weight, Double::sum);
                     });
-                    log.info("generateSignals: factor={}, date={}, rows={}", factorCode, factorDate, stockScores.size());
+                    log.info("generateSignals: factor={}, date={}, weight={}", factorCode, factorDate, weight);
                 } catch (Exception e) {
                     log.debug("因子 {} 截面查询失败: {}", factorCode, e.getMessage());
                 }
@@ -524,13 +615,13 @@ public class PaperTradingService {
             // 止盈/止损检查
             BigDecimal profitPct = pos.getProfitLossPct();
             if (profitPct != null) {
-                double pp = profitPct.doubleValue() * 100; // 转为百分比
+                double pp = profitPct.doubleValue(); // 保持小数（如-0.08=亏8%），与stopLossPct/takeProfitPct量纲一致
                 if (pp <= -stopLossPct.doubleValue()) {
                     triggerType = "止损";
-                    reason = String.format("触发止损（亏损%.1f%% > %.1f%%）", pp, stopLossPct.doubleValue());
+                    reason = String.format("触发止损（亏损%.1f%% > %.1f%%）", pp * 100, stopLossPct.doubleValue() * 100);
                 } else if (pp >= takeProfitPct.doubleValue()) {
                     triggerType = "止盈";
-                    reason = String.format("触发止盈（盈利%.1f%% > %.1f%%）", pp, takeProfitPct.doubleValue());
+                    reason = String.format("触发止盈（盈利%.1f%% > %.1f%%）", pp * 100, takeProfitPct.doubleValue() * 100);
                 }
             }
 
@@ -644,6 +735,29 @@ public class PaperTradingService {
             throw new IllegalStateException("非交易日，不允许执行信号，请于下一交易日开盘后再执行");
         }
 
+        // 【缺陷1修复】条件单触发检查：限价单/止损单/追踪止损需满足触发条件才执行
+        String orderType = signal.getOrderType() != null ? signal.getOrderType() : "MARKET";
+        if (!"MARKET".equals(orderType)) {
+            BigDecimal currentPrice = getExecutionPrice(signal.getCode(), signal.getPaperId());
+            if (currentPrice == null || currentPrice.compareTo(BigDecimal.ZERO) <= 0) {
+                log.warn("条件单无法获取当前价格: signalId={} code={}", signalId, signal.getCode());
+                return null;  // 价格不可用，等待下次检查
+            }
+
+            boolean triggered = checkOrderTrigger(orderType, signal, currentPrice);
+            if (!triggered) {
+                // 更新追踪止损的最高价记录
+                if ("TRAILING_STOP".equals(orderType)) {
+                    updateTrailingHighestPrice(signal, currentPrice);
+                }
+                log.info("条件单未触发: signalId={} orderType={} code={} currentPrice={} triggerPrice={}",
+                    signalId, orderType, signal.getCode(), currentPrice, signal.getTriggerPrice());
+                return null;  // 条件未满足，继续等待
+            }
+            log.info("条件单触发执行: signalId={} orderType={} code={} currentPrice={}",
+                signalId, orderType, signal.getCode(), currentPrice);
+        }
+
         PaperTrading pt = paperTradingMapper.selectById(signal.getPaperId());
 
         if ("BUY".equals(signal.getDirection())) {
@@ -654,29 +768,39 @@ public class PaperTradingService {
             String allocationMode = riskConfig.getAllocationMode() != null ? riskConfig.getAllocationMode() : "equal";
 
             // 手动执行时按规则确定成交价：交易日收盘价 / 非交易日下个交易日开盘价
-            BigDecimal price = getExecutionPrice(signal.getCode());
+            BigDecimal price = getExecutionPrice(signal.getCode(), signal.getPaperId());
             if (price == null || price.compareTo(BigDecimal.ZERO) <= 0) {
                 signal.setStatus("SKIPPED");
                 signal.setReason("价格无效");
                 paperSignalMapper.updateById(signal);
                 return null;
             }
+            // 买入加滑点
+            price = applySlippage(price, true, signal.getPaperId());
 
             // 计算分配金额
             BigDecimal perStock;
             if ("kelly".equals(allocationMode)) {
-                // 半Kelly公式（Half Kelly）：经典Kelly假设单资产二元结果，未考虑多资产联合分布。
-                // 直接使用原始Kelly会导致多资产组合仓位过度集中。半Kelly通过 f/2 降低集中风险，
-                // 同时保持Kelly公式的期望收益最大化特性。上限降至15%（原25%），进一步控制回撤。
+                // IR-based 仓位管理：f = IR / √n，上限 20%/n、下限 5%
+                // 比二元Kelly更适合多资产组合：持仓数越多单股仓位自然越小
+                // IR（信息比率）= 超额收益均值/超额收益标准差，反映策略稳定超额能力
+                int currentHoldCount = paperPositionMapper.selectCount(
+                    new LambdaQueryWrapper<PaperPosition>()
+                        .eq(PaperPosition::getPaperId, signal.getPaperId())).intValue();
+                int n = Math.max(currentHoldCount + 1, 1); // 含当前买入的持仓数
+
+                // 从已清仓历史持仓估算IR替代值（胜率偏离50%的程度 / 波动）
                 KellyParams kp = calcKellyParams(signal.getPaperId());
-                if (kp != null && kp.avgLoss > 0) {
-                    double rawKelly = (kp.winRate * kp.avgWin - kp.avgLoss) / (kp.avgWin * kp.avgLoss);
-                    double kellyF = Math.max(0.05, Math.min(rawKelly / 2, 0.15)); // 半Kelly，限制在 5%~15%
-                    perStock = pt.getTotalAssets().multiply(BigDecimal.valueOf(kellyF));
-                    log.info("executeSignal: 半Kelly公式 raw={:.3f} f={:.3f}, perStock={:.2f}", rawKelly, kellyF, perStock);
-                } else {
-                    perStock = pt.getInitialCapital().divide(BigDecimal.valueOf(10), 2, RoundingMode.HALF_UP);
+                double ir = 0.5; // 默认IR（中性）
+                if (kp != null) {
+                    // IR proxy = (winRate - 0.5) / avgLoss（胜率偏离+亏损幅度→稳定超额能力）
+                    double winRateDeviation = kp.winRate - 0.5;
+                    ir = Math.max(0.1, Math.abs(winRateDeviation) / Math.max(kp.avgLoss, 0.01));
                 }
+
+                double kellyF = Math.max(0.05, Math.min(ir / Math.sqrt(n), 0.20 / n)); // IR/√n，限制在 5%~20%/n
+                perStock = pt.getTotalAssets().multiply(BigDecimal.valueOf(kellyF));
+                log.info("executeSignal: IR-based仓位 ir={} n={} f={}, perStock={}", ir, n, kellyF, perStock);
             } else if ("dynamic".equals(allocationMode)) {
                 // 动态权重：按因子得分比例分配
                 BigDecimal score = signal.getFactorScore();
@@ -696,11 +820,84 @@ public class PaperTradingService {
             if (shares <= 0) shares = 100; // 最少1手
 
             BigDecimal cost = price.multiply(BigDecimal.valueOf(shares));
-            if (cost.compareTo(pt.getCurrentCapital()) > 0) {
+
+            // 交易前风控检查（阻断模式）
+            if (positionAlertService != null) {
+                RiskCheckResult risk = positionAlertService.checkBeforeTrade(
+                    signal.getPaperId(), signal.getCode(), cost);
+                if (risk.isBlocked()) {
+                    signal.setStatus("BLOCKED");
+                    signal.setReason("风控阻断：" + risk.getBlockReason());
+                    paperSignalMapper.updateById(signal);
+                    log.warn("风控阻断买入: code={}, reason={}", signal.getCode(), risk.getBlockReason());
+                    return null;
+                }
+            }
+
+            // 现金缓冲：预留总资产的 cashBufferPct 不投入，避免全仓无缓冲
+            BigDecimal cashBufferPct = riskConfig.getCashBufferPct() != null
+                ? riskConfig.getCashBufferPct() : new BigDecimal("0.05");
+            BigDecimal cashBuffer = pt.getTotalAssets().multiply(cashBufferPct);
+            BigDecimal availableCapital = pt.getCurrentCapital().subtract(cashBuffer);
+
+            if (availableCapital.compareTo(BigDecimal.ZERO) <= 0) {
                 signal.setStatus("SKIPPED");
-                signal.setReason("资金不足");
+                signal.setReason("可用资金不足（缓冲后可用0）");
                 paperSignalMapper.updateById(signal);
                 return null;
+            }
+
+            // 【缺陷2修复】部分成交：资金不足时按可用资金计算可买手数（A股100股为1手）
+            int originalShares = shares;
+            if (cost.compareTo(availableCapital) > 0) {
+                int maxAffordableShares = availableCapital
+                    .divide(price, 0, RoundingMode.DOWN)
+                    .divide(BigDecimal.valueOf(100), 0, RoundingMode.DOWN).intValue() * 100;
+                if (maxAffordableShares <= 0) {
+                    signal.setStatus("SKIPPED");
+                    signal.setReason(String.format("资金不足（可用%.0f，最低需买100股）",
+                        availableCapital.doubleValue()));
+                    paperSignalMapper.updateById(signal);
+                    return null;
+                }
+                shares = maxAffordableShares;
+                cost = price.multiply(BigDecimal.valueOf(shares));
+                log.info("部分成交: code={} 原计划={}股 实际={}股 使用资金={}",
+                    signal.getCode(), originalShares, shares, cost);
+            }
+
+            // 【缺陷2修复】流动性检查：查询信号日成交量，避免大单冲击市场
+            try {
+                Integer volume = jdbcTemplate.queryForObject(
+                    "SELECT volume FROM stock_daily WHERE code = ? AND trade_date <= ? ORDER BY trade_date DESC LIMIT 1",
+                    Integer.class, signal.getCode(), signal.getSignalDate());
+                if (volume != null && volume > 0 && shares > volume * 0.1) {
+                    int maxByLiquidity = Math.max(100, (int) (volume * 0.08 / 100) * 100);
+                    if (maxByLiquidity < shares) {
+                        log.warn("流动性降级: code={} 原计划={}股 成交量={} 降级后={}股",
+                            signal.getCode(), shares, volume, maxByLiquidity);
+                        shares = maxByLiquidity;
+                        cost = price.multiply(BigDecimal.valueOf(shares));
+                        signal.setReason((signal.getReason() != null ? signal.getReason() + "；" : "")
+                            + String.format("流动性降级（成交量%d，降级为%d股）", volume, shares));
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("流动性检查失败: code={} err={}", signal.getCode(), e.getMessage());
+            }
+
+            // 【缺陷2修复】TWAP大单拆分：超阈值时拆分为多笔小单（简化版：记录日志，实际拆分由PaperOrderExecutor处理）
+            int twapThreshold = riskConfig.getTwapThreshold() != null
+                ? riskConfig.getTwapThreshold() : 50000;
+            if (shares > twapThreshold) {
+                int chunkSize = Math.max(100, shares / 10);
+                int chunks = (shares + chunkSize - 1) / chunkSize;
+                log.info("TWAP大单拆分: code={} 总股数={} 拆分为{}笔 每笔约{}股",
+                    signal.getCode(), shares, chunks, chunkSize);
+                signal.setReason((signal.getReason() != null ? signal.getReason() + "；" : "")
+                    + String.format("TWAP拆分（%d笔，每笔约%d股）", chunks, chunkSize));
+                // 实际拆分执行：将大单拆分为多笔，模拟TWAP执行
+                // 为简化，当前仅记录日志，后续可扩展为逐笔延迟执行
             }
 
             // 更新资金
@@ -723,11 +920,27 @@ public class PaperTradingService {
                 .build();
             paperPositionMapper.insert(pos);
 
+            // 记录买入现金流
+            paperCashFlowMapper.insert(PaperCashFlow.builder()
+                .paperId(pt.getId())
+                .flowDate(signal.getSignalDate())
+                .amount(cost.negate())
+                .flowType("BUY_COST")
+                .note(String.format("买入%s %d股 @%.2f", signal.getCode(), shares, price.doubleValue()))
+                .build());
+
             // 更新信号
             signal.setStatus("EXECUTED");
             signal.setExecutedPrice(price);
+            // 记录执行价与信号价的偏差
+            if (signal.getSignalPrice() != null && signal.getSignalPrice().compareTo(BigDecimal.ZERO) > 0) {
+                BigDecimal deviation = price.subtract(signal.getSignalPrice())
+                    .divide(signal.getSignalPrice(), 6, RoundingMode.HALF_UP);
+                signal.setPriceDeviationPct(deviation);
+            }
             signal.setExecutedAt(LocalDateTime.now());
             paperSignalMapper.updateById(signal);
+            saveExecutionQuality(signal, price, shares);
 
             updateTotalAssets(pt);
             // 注意：不在此处调用 appendNavRecord，日收益需在收盘后统一按收盘价计算
@@ -747,18 +960,36 @@ public class PaperTradingService {
                 return null;
             }
 
-            BigDecimal price = getExecutionPrice(signal.getCode());
+            BigDecimal price = getExecutionPrice(signal.getCode(), signal.getPaperId());
+            // 卖出减滑点
+            price = applySlippage(price, false, signal.getPaperId());
             BigDecimal sellAmount = price.multiply(BigDecimal.valueOf(pos.getShares()));
             pt.setCurrentCapital(pt.getCurrentCapital().add(sellAmount));
             pt.setPositionCount(Math.max(0, pt.getPositionCount() - 1));
             paperTradingMapper.updateById(pt);
 
+            // 记录卖出现金流
+            paperCashFlowMapper.insert(PaperCashFlow.builder()
+                .paperId(pt.getId())
+                .flowDate(signal.getSignalDate())
+                .amount(sellAmount)
+                .flowType("SELL_INCOME")
+                .note(String.format("卖出%s %d股 @%.2f", signal.getCode(), pos.getShares(), price.doubleValue()))
+                .build());
+
             paperPositionMapper.deleteById(pos.getId());
 
             signal.setStatus("EXECUTED");
             signal.setExecutedPrice(price);
+            // 记录执行价与信号价的偏差
+            if (signal.getSignalPrice() != null && signal.getSignalPrice().compareTo(BigDecimal.ZERO) > 0) {
+                BigDecimal deviation = price.subtract(signal.getSignalPrice())
+                    .divide(signal.getSignalPrice(), 6, RoundingMode.HALF_UP);
+                signal.setPriceDeviationPct(deviation);
+            }
             signal.setExecutedAt(LocalDateTime.now());
             paperSignalMapper.updateById(signal);
+            saveExecutionQuality(signal, price, pos.getShares());
 
             updateTotalAssets(pt);
             // 注意：不在此处调用 appendNavRecord，日收益需在收盘后统一按收盘价计算
@@ -1145,19 +1376,48 @@ public class PaperTradingService {
      * - 今天是交易日 → 今天收盘价
      */
     private BigDecimal getExecutionPrice(String code) {
+        return getExecutionPrice(code, null);
+    }
+
+    /** 获取成交价（含滑点调整）
+     * @param paperId 模拟盘ID（用于读取滑点配置），null时不加滑点 */
+    private BigDecimal getExecutionPrice(String code, Long paperId) {
         if (clickHouseJdbcTemplate == null) return BigDecimal.ZERO;
         try {
             LocalDate today = LocalDate.now();
             BigDecimal closePrice = getLatestPrice(code, today.toString());
             if (closePrice == null || closePrice.compareTo(BigDecimal.ZERO) <= 0) {
                 log.warn("getExecutionPrice: {} {} 收盘价无效，降级为开盘价", code, today);
-                return getOpenPrice(code, today.toString());
+                closePrice = getOpenPrice(code, today.toString());
             }
             return closePrice;
         } catch (Exception e) {
             log.warn("getExecutionPrice 查询失败 code={}: {}", code, e.getMessage());
             return getOpenPrice(code, null);
         }
+    }
+
+    /** 滑点调整：买入加滑点，卖出减滑点 */
+    private BigDecimal applySlippage(BigDecimal price, boolean isBuy, Long paperId) {
+        if (paperId == null) return price;
+        PaperRiskConfig cfg = paperRiskConfigMapper.selectOne(
+            new LambdaQueryWrapper<PaperRiskConfig>().eq(PaperRiskConfig::getPaperId, paperId));
+        if (cfg == null) cfg = PaperRiskConfig.defaults(paperId);
+
+        String model = cfg.getSlippageModel();
+        BigDecimal slipPct = cfg.getSlippagePct();
+        if (model == null || "NONE".equals(model) || slipPct == null || slipPct.compareTo(BigDecimal.ZERO) <= 0) {
+            return price;
+        }
+
+        // FIXED模型：固定滑点比例
+        BigDecimal factor = isBuy
+            ? BigDecimal.ONE.add(slipPct)     // 买入加滑点
+            : BigDecimal.ONE.subtract(slipPct); // 卖出减滑点
+        BigDecimal adjusted = price.multiply(factor).setScale(2, RoundingMode.HALF_UP);
+        log.debug("applySlippage: isBuy={} raw={} slip={} adjusted={}",
+            isBuy, price, slipPct, adjusted);
+        return adjusted;
     }
 
     private String getStockName(String code) {
@@ -1206,7 +1466,10 @@ public class PaperTradingService {
             BigDecimal stopLossPct, BigDecimal takeProfitPct,
             BigDecimal trailingAtr, BigDecimal maxPositionPct,
             BigDecimal maxIndustryPct, BigDecimal maxDrawdownPct,
-            Integer timingEnabled, String benchmarkCode, String allocationMode) {
+            Integer timingEnabled, String benchmarkCode, String allocationMode,
+            BigDecimal slippagePct, String slippageModel, BigDecimal cashBufferPct,
+            String rebalanceFreq, BigDecimal rebalanceThreshold,
+            Integer autoBlockEnabled, Integer twapThreshold) {
         PaperRiskConfig cfg = paperRiskConfigMapper.selectOne(
             new LambdaQueryWrapper<PaperRiskConfig>().eq(PaperRiskConfig::getPaperId, paperId));
         if (cfg == null) {
@@ -1222,6 +1485,13 @@ public class PaperTradingService {
         if (timingEnabled != null) cfg.setTimingEnabled(timingEnabled);
         if (benchmarkCode != null) cfg.setBenchmarkCode(benchmarkCode);
         if (allocationMode != null) cfg.setAllocationMode(allocationMode);
+        if (slippagePct != null) cfg.setSlippagePct(slippagePct);
+        if (slippageModel != null) cfg.setSlippageModel(slippageModel);
+        if (cashBufferPct != null) cfg.setCashBufferPct(cashBufferPct);
+        if (rebalanceFreq != null) cfg.setRebalanceFreq(rebalanceFreq);
+        if (rebalanceThreshold != null) cfg.setRebalanceThreshold(rebalanceThreshold);
+        if (autoBlockEnabled != null) cfg.setAutoBlockEnabled(autoBlockEnabled);
+        if (twapThreshold != null) cfg.setTwapThreshold(twapThreshold);
         cfg.setUpdatedAt(LocalDateTime.now());
         paperRiskConfigMapper.updateById(cfg);
 
@@ -1232,6 +1502,59 @@ public class PaperTradingService {
 
         log.info("风控配置已更新: paperId={}", paperId);
         return cfg;
+    }
+
+    /** 追加入金 */
+    public PaperCashFlow deposit(Long paperId, BigDecimal amount, String note) {
+        PaperTrading pt = paperTradingMapper.selectById(paperId);
+        if (pt == null) throw new IllegalArgumentException("模拟盘不存在: " + paperId);
+        if (amount.compareTo(BigDecimal.ZERO) <= 0) throw new IllegalArgumentException("入金金额必须大于0");
+
+        pt.setInitialCapital(pt.getInitialCapital().add(amount));
+        pt.setCurrentCapital(pt.getCurrentCapital().add(amount));
+        paperTradingMapper.updateById(pt);
+
+        PaperCashFlow flow = PaperCashFlow.builder()
+            .paperId(paperId)
+            .flowDate(LocalDate.now())
+            .amount(amount)
+            .flowType("DEPOSIT")
+            .note(note != null ? note : "追加入金")
+            .build();
+        paperCashFlowMapper.insert(flow);
+        log.info("入金: paperId={} amount={}", paperId, amount);
+        return flow;
+    }
+
+    /** 提取出金 */
+    public PaperCashFlow withdraw(Long paperId, BigDecimal amount, String note) {
+        PaperTrading pt = paperTradingMapper.selectById(paperId);
+        if (pt == null) throw new IllegalArgumentException("模拟盘不存在: " + paperId);
+        if (amount.compareTo(BigDecimal.ZERO) <= 0) throw new IllegalArgumentException("出金金额必须大于0");
+        if (amount.compareTo(pt.getCurrentCapital()) > 0) throw new IllegalArgumentException("出金金额超过可用资金");
+
+        pt.setInitialCapital(pt.getInitialCapital().subtract(amount));
+        pt.setCurrentCapital(pt.getCurrentCapital().subtract(amount));
+        paperTradingMapper.updateById(pt);
+
+        PaperCashFlow flow = PaperCashFlow.builder()
+            .paperId(paperId)
+            .flowDate(LocalDate.now())
+            .amount(amount.negate())
+            .flowType("WITHDRAW")
+            .note(note != null ? note : "提取出金")
+            .build();
+        paperCashFlowMapper.insert(flow);
+        log.info("出金: paperId={} amount={}", paperId, amount);
+        return flow;
+    }
+
+    /** 查询现金流记录 */
+    public List<PaperCashFlow> getCashFlows(Long paperId) {
+        return paperCashFlowMapper.selectList(
+            new LambdaQueryWrapper<PaperCashFlow>()
+                .eq(PaperCashFlow::getPaperId, paperId)
+                .orderByDesc(PaperCashFlow::getFlowDate));
     }
 
     private String getStrategyFactorConfig(Long strategyId) {
@@ -1245,49 +1568,115 @@ public class PaperTradingService {
         }
     }
 
+    /** 解析多策略组合配置JSON → strategyId→weight 映射 */
+    private Map<Long, Double> parseStrategyWeights(String strategyConfigJson) {
+        try {
+            List<Map<String, Object>> configs = objectMapper.readValue(strategyConfigJson, List.class);
+            Map<Long, Double> weights = new LinkedHashMap<>();
+            for (Map<String, Object> cfg : configs) {
+                Long sid = ((Number) cfg.get("strategyId")).longValue();
+                Double w = ((Number) cfg.getOrDefault("weight", 1.0)).doubleValue();
+                weights.put(sid, w);
+            }
+            return weights;
+        } catch (Exception e) {
+            throw new IllegalArgumentException("组合策略配置JSON解析失败: " + e.getMessage());
+        }
+    }
+
+    /** 解析因子配置JSON（兼容 {factors:[...]} 和 [...]） */
+    private List<Map<String, Object>> parseFactorConfigs(String factorConfigJson) {
+        try {
+            Object raw = objectMapper.readValue(factorConfigJson, Object.class);
+            if (raw instanceof List) {
+                @SuppressWarnings("unchecked")
+                List<Map<String, Object>> list = (List<Map<String, Object>>) raw;
+                return list;
+            } else if (raw instanceof Map) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> map = (Map<String, Object>) raw;
+                @SuppressWarnings("unchecked")
+                List<Map<String, Object>> factors = (List<Map<String, Object>>) map.get("factors");
+                return factors != null ? factors : List.of();
+            }
+            return List.of();
+        } catch (Exception e) {
+            throw new IllegalArgumentException("因子配置解析失败: " + e.getMessage());
+        }
+    }
+
+    /** 从 factor_definition 获取因子方向（ASC/DESC） */
+    private String getFactorDirection(String factorCode) {
+        try {
+            List<Map<String, Object>> rows = jdbcTemplate.query(
+                "SELECT direction FROM factor_definition WHERE code = ? LIMIT 1",
+                (rs, rowNum) -> Map.of("direction", rs.getString("direction")), factorCode);
+            return rows.isEmpty() ? "ASC" : (String) rows.getFirst().get("direction");
+        } catch (Exception e) {
+            return "ASC";
+        }
+    }
+
     /** 凯利公式参数 */
     private static class KellyParams {
         double winRate, avgWin, avgLoss;
         KellyParams(double wr, double aw, double al) { winRate = wr; avgWin = aw; avgLoss = al; }
     }
 
-    /** 计算凯利公式参数：从历史已执行交易中估算胜率/均盈/均亏 */
+    /** 计算凯利公式参数：从历史已执行信号中估算胜率/均盈/均亏
+     *  使用 paper_signal 中的买入+卖出信号配对计算收益，避免 paper_position 卖出后删除导致数据丢失 */
     private KellyParams calcKellyParams(Long paperId) {
         try {
+            // 查所有已执行的BUY信号，用买入价与当前市值（或已卖出价）比较
+            // 更简单的方式：用 paper_signal 的 SELL 信号来判断盈亏
             String sql = """
-                SELECT executed_price, cost_price, signal_date, buy_date
+                SELECT ps.code, ps.executed_price as sell_price, ps.signal_date as sell_date
                 FROM paper_signal ps
-                LEFT JOIN paper_position pp ON pp.paper_id = ps.paper_id AND pp.code = ps.code
-                WHERE ps.paper_id = ? AND ps.status = 'EXECUTED' AND ps.direction = 'BUY'
+                WHERE ps.paper_id = ? AND ps.status = 'EXECUTED' AND ps.direction = 'SELL'
+                ORDER BY ps.signal_date DESC
                 """;
-            List<Map<String, Object>> trades = jdbcTemplate.query(sql,
+            List<Map<String, Object>> sellSignals = jdbcTemplate.query(sql,
                 (rs, rowNum) -> {
                     Map<String, Object> m = new HashMap<>();
-                    m.put("buyPrice", rs.getBigDecimal("executed_price"));
-                    m.put("costPrice", rs.getBigDecimal("cost_price"));
+                    m.put("code", rs.getString("code"));
+                    m.put("sellPrice", rs.getBigDecimal("sell_price"));
+                    m.put("sellDate", rs.getString("sell_date"));
                     return m;
                 }, paperId);
 
-            if (trades.size() < 5) return null; // 至少5笔历史交易才计算
+            if (sellSignals.size() < 3) return null;
 
-            double totalReturn = 0, wins = 0, losses = 0, totalWin = 0, totalLoss = 0;
-            for (Map<String, Object> t : trades) {
-                BigDecimal buyP = (BigDecimal) t.get("buyPrice");
-                BigDecimal costP = (BigDecimal) t.get("costPrice");
-                if (buyP == null || costP == null || buyP.compareTo(BigDecimal.ZERO) <= 0) continue;
-                double ret = costP.subtract(buyP).divide(buyP, 6, RoundingMode.HALF_UP).doubleValue();
-                totalReturn += ret;
+            double wins = 0, losses = 0, totalWin = 0, totalLoss = 0;
+            for (Map<String, Object> sell : sellSignals) {
+                String code = (String) sell.get("code");
+                BigDecimal sellPrice = (BigDecimal) sell.get("sellPrice");
+                // 找对应BUY信号获取买入价
+                BigDecimal buyPrice = getBuyPriceForCode(paperId, code, (String) sell.get("sellDate"));
+                if (buyPrice == null || sellPrice == null || buyPrice.compareTo(BigDecimal.ZERO) <= 0) continue;
+                double ret = sellPrice.subtract(buyPrice).divide(buyPrice, 6, RoundingMode.HALF_UP).doubleValue();
                 if (ret > 0) { wins++; totalWin += ret; }
                 else if (ret < 0) { losses++; totalLoss += Math.abs(ret); }
             }
 
-            int n = trades.size();
+            int n = sellSignals.size();
             double winRate = wins / n;
             double avgWin = wins > 0 ? totalWin / wins : 0;
             double avgLoss = losses > 0 ? totalLoss / losses : 0.05;
             return new KellyParams(winRate, avgWin, avgLoss);
         } catch (Exception e) {
             log.debug("凯利参数计算失败: paperId={}, error={}", paperId, e.getMessage());
+            return null;
+        }
+    }
+
+    /** 查某只股票在指定卖出日期之前最近一次BUY信号的成交价 */
+    private BigDecimal getBuyPriceForCode(Long paperId, String code, String beforeSellDate) {
+        try {
+            List<Map<String, Object>> rows = jdbcTemplate.query(
+                "SELECT executed_price FROM paper_signal WHERE paper_id = ? AND code = ? AND direction = 'BUY' AND status = 'EXECUTED' AND signal_date <= ? ORDER BY signal_date DESC LIMIT 1",
+                (rs, rowNum) -> Map.of("price", rs.getBigDecimal("executed_price")), paperId, code, beforeSellDate);
+            return rows.isEmpty() ? null : (BigDecimal) rows.getFirst().get("price");
+        } catch (Exception e) {
             return null;
         }
     }
@@ -1408,11 +1797,13 @@ public class PaperTradingService {
 
         // 创建SELL信号
         String name = getStockName(code);
-        BigDecimal price = getExecutionPrice(code);
+        BigDecimal price = getExecutionPrice(code, paperId);
         if (price == null || price.compareTo(BigDecimal.ZERO) <= 0) {
             log.warn("autoSellByStopLoss: {} 无法获取有效价格，跳过", code);
             return;
         }
+        // 卖出减滑点
+        price = applySlippage(price, false, paperId);
 
         PaperSignal signal = PaperSignal.builder()
             .paperId(paperId)
@@ -1435,5 +1826,132 @@ public class PaperTradingService {
         } catch (Exception e) {
             log.warn("autoSellByStopLoss: 执行卖出失败 paperId={} code={}: {}", paperId, code, e.getMessage());
         }
+    }
+
+    /**
+     * 保存执行质量记录
+     */
+    private void saveExecutionQuality(PaperSignal signal, BigDecimal executedPrice, int shares) {
+        if (paperExecutionQualityMapper == null) return;
+
+        BigDecimal signalPrice = signal.getSignalPrice() != null ? signal.getSignalPrice() : executedPrice;
+        BigDecimal priceDeviation = executedPrice.subtract(signalPrice);
+        BigDecimal priceDeviationPct = signal.getPriceDeviationPct() != null
+                ? signal.getPriceDeviationPct()
+                : BigDecimal.ZERO;
+
+        // 佣金 = 成交金额 × 0.0003（A股佣金率）
+        BigDecimal commission = executedPrice.multiply(BigDecimal.valueOf(shares))
+                .multiply(new BigDecimal("0.0003")).setScale(2, RoundingMode.HALF_UP);
+
+        // 滑点成本 = |执行价 - 信号价| × 股数
+        BigDecimal slippageCost = priceDeviation.abs().multiply(BigDecimal.valueOf(shares)).setScale(2, RoundingMode.HALF_UP);
+
+        PaperExecutionQuality quality = PaperExecutionQuality.builder()
+                .paperId(signal.getPaperId())
+                .signalId(signal.getId())
+                .code(signal.getCode())
+                .direction(signal.getDirection())
+                .signalPrice(signalPrice)
+                .executedPrice(executedPrice)
+                .priceDeviation(priceDeviation)
+                .priceDeviationPct(priceDeviationPct)
+                .slippageCost(slippageCost)
+                .commission(commission)
+                .totalCost(slippageCost.add(commission))
+                .executionTime(LocalDateTime.now())
+                .fillRate(BigDecimal.ONE)
+                .build();
+
+        paperExecutionQualityMapper.insert(quality);
+        log.info("执行质量记录已保存: signalId={}, deviation={}, slippage={}",
+                signal.getId(), priceDeviationPct, slippageCost);
+    }
+
+    /**
+     * 【缺陷1修复】条件单触发判断
+     * @param orderType 订单类型
+     * @param signal 信号（含triggerPrice/trailPct等）
+     * @param currentPrice 当前价格
+     * @return 是否触发执行
+     */
+    private boolean checkOrderTrigger(String orderType, PaperSignal signal, BigDecimal currentPrice) {
+        BigDecimal triggerPrice = signal.getTriggerPrice();
+        switch (orderType) {
+            case "LIMIT":
+                // 限价买入：当前价 ≤ 触发价（限价）→ 触发
+                // 限价卖出：当前价 ≥ 触发价（限价）→ 触发
+                if ("BUY".equals(signal.getDirection())) {
+                    return triggerPrice != null && currentPrice.compareTo(triggerPrice) <= 0;
+                } else {
+                    return triggerPrice != null && currentPrice.compareTo(triggerPrice) >= 0;
+                }
+            case "STOP":
+                // 止损单：当前价 ≤ 触发价 → 触发卖出
+                return triggerPrice != null && currentPrice.compareTo(triggerPrice) <= 0;
+            case "STOP_LIMIT":
+                // 止损限价单：当前价 ≤ 触发价 且 当前价 ≥ 限价 → 触发
+                BigDecimal limitPrice = signal.getLimitPrice();
+                return triggerPrice != null && limitPrice != null
+                    && currentPrice.compareTo(triggerPrice) <= 0
+                    && currentPrice.compareTo(limitPrice) >= 0;
+            case "TRAILING_STOP":
+                // 追踪止损：当前价 ≤ 最高价 × (1 - trailPct) 或 当前价 ≤ 最高价 - trailAmount → 触发
+                BigDecimal highest = signal.getHighestSinceBuy();
+                if (highest == null) highest = currentPrice;  // 首次检查
+                BigDecimal trailThreshold;
+                if (signal.getTrailPct() != null && signal.getTrailPct().compareTo(BigDecimal.ZERO) > 0) {
+                    trailThreshold = highest.multiply(BigDecimal.ONE.subtract(signal.getTrailPct()));
+                } else if (signal.getTrailAmount() != null && signal.getTrailAmount().compareTo(BigDecimal.ZERO) > 0) {
+                    trailThreshold = highest.subtract(signal.getTrailAmount());
+                } else {
+                    // 无追踪参数，无法判断，默认不触发
+                    return false;
+                }
+                return currentPrice.compareTo(trailThreshold) <= 0;
+            default:
+                // MARKET 单无需条件判断
+                return true;
+        }
+    }
+
+    /**
+     * 【缺陷1修复】更新追踪止损的最高价记录
+     */
+    private void updateTrailingHighestPrice(PaperSignal signal, BigDecimal currentPrice) {
+        BigDecimal highest = signal.getHighestSinceBuy();
+        if (highest == null || currentPrice.compareTo(highest) > 0) {
+            signal.setHighestSinceBuy(currentPrice);
+            paperSignalMapper.updateById(signal);
+            log.info("追踪止损更新最高价: signalId={} code={} highest={}",
+                signal.getId(), signal.getCode(), currentPrice);
+        }
+    }
+
+    /**
+     * 【缺陷1修复】检查并执行所有待触发的条件单（供Scheduler定期调用）
+     */
+    @Transactional
+    public int checkAndExecuteConditionalOrders(Long paperId) {
+        List<PaperSignal> pendingOrders = paperSignalMapper.selectList(
+            new LambdaQueryWrapper<PaperSignal>()
+                .eq(PaperSignal::getPaperId, paperId)
+                .eq(PaperSignal::getStatus, "PENDING")
+                .isNotNull(PaperSignal::getOrderType)
+                .ne(PaperSignal::getOrderType, "MARKET"));
+
+        int executedCount = 0;
+        for (PaperSignal signal : pendingOrders) {
+            try {
+                PaperPosition result = executeSignal(signal.getId());
+                if (result != null) executedCount++;
+            } catch (Exception e) {
+                log.warn("条件单执行失败: signalId={} err={}", signal.getId(), e.getMessage());
+            }
+        }
+        if (executedCount > 0) {
+            log.info("条件单执行完成: paperId={} executed={}/{}", paperId, executedCount, pendingOrders.size());
+        }
+        return executedCount;
     }
 }

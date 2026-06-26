@@ -201,6 +201,11 @@ export const paperTradingApi = {
   // 风控配置
   getRiskConfig: (paperId) => api.get(`/paper-trading/${paperId}/risk-config`),
   updateRiskConfig: (paperId, params) => api.put(`/paper-trading/${paperId}/risk-config`, null, { params }),
+  // 执行质量分析
+  getExecutionQuality: (paperId) => api.get(`/paper-trading/${paperId}/execution-quality`),
+  // 条件单（限价/止损/追踪止损）
+  createConditionalOrder: (paperId, params) => api.post(`/paper-trading/${paperId}/conditional-order`, null, { params }),
+  checkConditionalOrders: (paperId) => api.post(`/paper-trading/${paperId}/check-conditional-orders`),
 };
 
 // ===== 回测 API =====

@@ -25,6 +25,10 @@ public class PaperTrading {
     @TableField("strategy_code")
     private String strategyCode;
 
+    /** 多策略组合配置JSON，格式：[{strategyId:1,weight:0.4},{strategyId:2,weight:0.3},{strategyId:3,weight:0.3}]。null=单策略模式 */
+    @TableField("strategy_config_json")
+    private String strategyConfigJson;
+
     @TableField("status")
     private String status; // RUNNING/PAUSED/STOPPED
 

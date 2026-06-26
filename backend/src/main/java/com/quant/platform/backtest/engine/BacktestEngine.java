@@ -1883,9 +1883,14 @@ public class BacktestEngine {
     /**
      * 判断是否应该调仓
      */
-    private boolean shouldRebalance(LocalDate today, LocalDate lastDate, String freq) {
+    /** 再平衡触发判断：支持日历频率+偏离阈值+波动率自适应+混合 */
+    private boolean shouldRebalance(LocalDate today, LocalDate lastDate, String freq,
+                                     double currentDeviation, double volatilityLevel,
+                                     double threshold) {
         if (lastDate == null) return true;
-        return switch (freq.toUpperCase()) {
+
+        // 日历频率基础判断
+        boolean calendarTrigger = switch (freq.toUpperCase()) {
             case "DAILY" -> true;
             case "WEEKLY" -> today.getYear() != lastDate.getYear() ||
                     today.get(java.time.temporal.IsoFields.WEEK_OF_WEEK_BASED_YEAR) !=
@@ -1896,6 +1901,30 @@ public class BacktestEngine {
                     (today.getMonthValue() - 1) / 3 != (lastDate.getMonthValue() - 1) / 3;
             default -> today.getMonthValue() != lastDate.getMonthValue();
         };
+
+        // 根据触发模式组合
+        // THRESHOLD: 仅偏离触发
+        // VOL_ADAPTIVE: 日历触发（高波动时周频，低波动时月频）
+        // HYBRID: 日历+偏离双重触发
+        if ("THRESHOLD".equalsIgnoreCase(freq)) {
+            return currentDeviation > threshold;
+        } else if ("VOL_ADAPTIVE".equalsIgnoreCase(freq)) {
+            // 高波动(volatility>0.03日波动≈年化48%) → 周频
+            // 低波动(volatility<=0.02日波动≈年化32%) → 月频
+            // 中间 → 两周频
+            String adaptedFreq = volatilityLevel > 0.03 ? "WEEKLY" :
+                                 volatilityLevel <= 0.02 ? "MONTHLY" : "WEEKLY";
+            return shouldRebalance(today, lastDate, adaptedFreq, 0, 0, threshold);
+        } else if ("HYBRID".equalsIgnoreCase(freq)) {
+            return calendarTrigger || currentDeviation > threshold;
+        } else {
+            return calendarTrigger;
+        }
+    }
+
+    /** 简化版：仅日历频率触发 */
+    private boolean shouldRebalance(LocalDate today, LocalDate lastDate, String freq) {
+        return shouldRebalance(today, lastDate, freq, 0, 0, 0);
     }
 
     /**
