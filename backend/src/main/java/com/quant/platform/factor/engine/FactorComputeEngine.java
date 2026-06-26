@@ -79,6 +79,27 @@ public class FactorComputeEngine {
     @Lazy
     @Resource
     private FactorComputeEngine self;
+    org.springframework.jdbc.core.JdbcTemplate clickHouseJdbcTemplate;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setClickHouseJdbcTemplate(
+            @org.springframework.beans.factory.annotation.Qualifier("clickHouseJdbcTemplate")
+            org.springframework.jdbc.core.JdbcTemplate jdbcTemplate) {
+        this.clickHouseJdbcTemplate = jdbcTemplate;
+    }
+
+    /** 启动时加载ST股票名单到 LimitUpCountCalculator */
+    @jakarta.annotation.PostConstruct
+    private void loadStStockCodes() {
+        try {
+            Set<String> stCodes = new HashSet<>(clickHouseJdbcTemplate.queryForList(
+                    "SELECT DISTINCT code FROM stock.stock_info WHERE stock_name LIKE '%ST%'", String.class));
+            BuiltinFactors.LimitUpCountCalculator.initStStockCodes(stCodes);
+            log.info("Loaded {} ST stock codes into LimitUpCountCalculator filter", stCodes.size());
+        } catch (Exception e) {
+            log.warn("Failed to load ST stock codes, ST filter disabled: {}", e.getMessage());
+        }
+    }
 
     {
         // 注册内置技术因子（12个ACTIVE）
@@ -1351,6 +1372,10 @@ public class FactorComputeEngine {
                 icListLag[i] = new ArrayList<>();
             }
 
+            // ── 因子换手率追踪（#6 修复） ─────────────────────────────
+            List<Set<String>> topGroupHistory = new ArrayList<>();      // 每期Top组股票集合
+            List<double[]> factorCrossSectionHistory = new ArrayList<>(); // 每期截面因子值(用于自相关)
+
             for (int di = 0; di < dates.size() - 1; di++) {
                 LocalDate calcDate = dates.get(di);
                 LocalDate nextDate = dates.get(di + 1);
@@ -1522,6 +1547,22 @@ public class FactorComputeEngine {
                 benchmarkDailyList.add(benchmarkRet);
                 topActiveReturnList.add(topRet - benchmarkRet);
 
+                // ── 记录 Top 组股票 + 截面因子值（用于换手率计算） ──
+                if (groupSize > 0) {
+                    int topFrom = (GROUP_COUNT - 1) * groupSize;
+                    Set<String> topSymbols = new java.util.LinkedHashSet<>();
+                    for (int k = topFrom; k < sortedByFactor.size(); k++) {
+                        topSymbols.add(sortedByFactor.get(k).getSymbol());
+                    }
+                    topGroupHistory.add(topSymbols);
+
+                    // 保存截面因子值（用于自相关换手率 corr(f_t, f_{t-1})）
+                    double[] crossSection = valid.stream()
+                            .mapToDouble(fv -> fv.getFactorVal().doubleValue())
+                            .toArray();
+                    factorCrossSectionHistory.add(crossSection);
+                }
+
                 // ── 更新净值 ─────────────────────────────────────
                 for (int g = 0; g < GROUP_COUNT; g++) {
                     groupNavs[g] *= (1 + todayGroupRet[g]);
@@ -1557,6 +1598,53 @@ public class FactorComputeEngine {
             }
 
             sendProgress(factor.getFactorCode(), "TESTING", 95, "回测计算完成，开始计算统计指标");
+
+            // ── 因子换手率计算（#6 新增）────────────────────────────
+            double avgTurnover = 0;
+            double autoCorr1 = 0;
+            int turnoverCount = 0;
+
+            if (topGroupHistory.size() >= 2) {
+                // 截面换手率：相邻两期 Top 组新增股票比例
+                double sumTurnover = 0;
+                for (int t = 1; t < topGroupHistory.size(); t++) {
+                    Set<String> prevTop = topGroupHistory.get(t - 1);
+                    Set<String> currTop = topGroupHistory.get(t);
+                    // 新增 = 当前有但前期没有的
+                    int newStocks = 0;
+                    for (String s : currTop) {
+                        if (!prevTop.contains(s)) newStocks++;
+                    }
+                    // 换手率 = (新增 + 离开) / Top组大小（近似用新增×2/大小）
+                    int topSize = Math.max(prevTop.size(), currTop.size());
+                    if (topSize > 0) {
+                        sumTurnover += (double) newStocks / topSize;
+                        turnoverCount++;
+                    }
+                }
+                avgTurnover = turnoverCount > 0 ? sumTurnover / turnoverCount : 0;
+            }
+
+            if (factorCrossSectionHistory.size() >= 2) {
+                // 自相关换手率：corr(截面_t, 截面_{t-1})，衡量因子值稳定性
+                int nPeriods = factorCrossSectionHistory.size();
+                double sumCorr = 0;
+                int corrCount = 0;
+                for (int t = 1; t < nPeriods; t++) {
+                    double[] prev = factorCrossSectionHistory.get(t - 1);
+                    double[] curr = factorCrossSectionHistory.get(t);
+                    int minN = Math.min(prev.length, curr.length);
+                    if (minN < 10) continue;  // 至少10只股票才算自相关
+                    double c = pearsonCorr(
+                            Arrays.copyOf(curr, minN),
+                            Arrays.copyOf(prev, minN));
+                    if (!Double.isNaN(c)) { sumCorr += c; corrCount++; }
+                }
+                autoCorr1 = corrCount > 0 ? sumCorr / corrCount : 0;
+            }
+
+            log.info("[换手率] factor={} | Top组截面换手率={:.4f} | 自相关={} | 计算期数={}",
+                    factor.getFactorCode(), avgTurnover, autoCorr1, turnoverCount);
 
             // ── 汇总：IC 统计 ────────────────────────────────────
             sendProgress(factor.getFactorCode(), "TESTING", 96, "计算IC统计指标");
@@ -1701,6 +1789,10 @@ public class FactorComputeEngine {
             report.setDecayCoefficient((BigDecimal) decayAnalysis.get("decayCoefficient"));
             report.setDecayRSquared((BigDecimal) decayAnalysis.get("decayRSquared"));
             report.setDecaySeriesJson(objectMapper.writeValueAsString(decayAnalysis.get("decaySeries")));
+
+            // 因子换手率（#6 新增）
+            report.setTurnoverRate(bd(avgTurnover));
+            report.setFactorAutoCorr(bd(autoCorr1));
 
             report.setStatus(FactorTestReport.TestStatus.COMPLETED);
             report.setCompletedAt(java.time.LocalDateTime.now());

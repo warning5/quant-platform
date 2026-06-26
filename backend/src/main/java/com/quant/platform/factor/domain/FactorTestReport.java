@@ -200,6 +200,22 @@ public class FactorTestReport implements Serializable {
     @TableField("decay_r_squared")
     private BigDecimal decayRSquared;
 
+    // ── 因子换手率（#6 新增） ─────────────────────────────
+
+    /**
+     * Top组截面换手率：相邻两期Top组新增股票的平均比例 [0,1]
+     * 高换手率 → 因子不稳定 → 回测收益虚高（忽略交易成本）
+     */
+    @TableField("turnover_rate")
+    private BigDecimal turnoverRate;
+
+    /**
+     * 因子值一阶自相关：corr(截面_t, 截面_{t-1}) 的跨期均值 [-1,1]
+     * 低自相关 → 因子值逐期大幅波动 → 需要频繁调仓
+     */
+    @TableField("factor_auto_corr")
+    private BigDecimal factorAutoCorr;
+
     /**
      * 因子衰减序列JSON: [{period, laggedIc, absoluteIc}]
      */

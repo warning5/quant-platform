@@ -53,6 +53,14 @@ public class FactorAnalysisService {
     private static final long INDUSTRY_CACHE_MS = 3600_000L; // 1小时刷新一次
 
     /**
+     * 市值缓存：symbol → market_cap (对数)
+     * 从 ClickHouse stock_info.market_cap 加载，用于市值中性化
+     */
+    private volatile Map<String, Double> stockMarketCapLogMap = new HashMap<>();
+    private volatile long marketCapMapLoadTime = 0;
+    private static final long MARKETCAP_CACHE_MS = 3600_000L; // 1小时刷新一次
+
+    /**
      * 批量计算多因子 IC/IR
      * @param factorCodes 因子代码列表
      * @param startDate 开始日期
@@ -209,6 +217,130 @@ public class FactorAnalysisService {
         List<Double> out = new ArrayList<>(dayFactors.size());
         for (double v : result) out.add(v);
         return out;
+    }
+
+    /**
+     * 市值中性化（行业内按市值线性回归取残差）
+     *
+     * 在行业中性化的基础上，进一步消除大小盘偏差。
+     * 大盘股天然有某些因子特征（如低波动、高质量），不剥离的话
+     * 因子IC中会混入"大小盘效应"而非真正的alpha。
+     *
+     * 算法：
+     * 1. 按行业分组（复用 industryMap）
+     * 2. 组内对 factor = α + β × log(market_cap) + ε 做 OLS 回归
+     * 3. 取残差 ε 作为市值中性化后的因子值
+     *
+     * @param neutralizedFactors 已经过行业中性化的因子值列表（与 dayFactors 同顺序）
+     * @param dayFactors         原始因子数据（用于提取 symbol）
+     * @param industryMap        code → industry 映射
+     * @return 市值中性化后的因子值列表（与输入顺序一致）
+     */
+    private List<Double> neutralizeByMarketCap(
+            List<Double> neutralizedFactors,
+            java.util.List<java.util.Map<String, Object>> dayFactors,
+            Map<String, String> industryMap) {
+
+        // 加载市值数据
+        Map<String, Double> marketCapLogMap = loadMarketCapLogMap();
+        if (marketCapLogMap.isEmpty()) {
+            log.debug("[市值中性化] 无市值数据，跳过");
+            return neutralizedFactors;
+        }
+
+        final int MIN_REG_SIZE = 10;  // 最少10只股票才做回归
+
+        // 1. 按行业分组索引
+        Map<String, List<Integer>> indIndices = new LinkedHashMap<>();
+        List<Integer> marketIndices = new ArrayList<>();
+        for (int i = 0; i < dayFactors.size(); i++) {
+            String sym = (String) dayFactors.get(i).get("symbol");
+            String ind = industryMap.get(sym);
+            if (ind != null && !ind.isEmpty()) {
+                indIndices.computeIfAbsent(ind, k -> new ArrayList<>()).add(i);
+            } else {
+                marketIndices.add(i);
+            }
+        }
+
+        // 2. 初始化结果（fallback = 行业中性化后的值）
+        double[] result = new double[dayFactors.size()];
+        for (int i = 0; i < dayFactors.size(); i++) {
+            result[i] = neutralizedFactors.get(i);
+        }
+
+        // 3. 行业内 OLS 回归: factor = α + β × log(mcap) → 取残差
+        for (Map.Entry<String, List<Integer>> entry : indIndices.entrySet()) {
+            List<Integer> indices = entry.getValue();
+            if (indices.size() < MIN_REG_SIZE) continue;
+
+            List<double[]> points = new ArrayList<>();
+            for (int idx : indices) {
+                String sym = (String) dayFactors.get(idx).get("symbol");
+                Double logMcap = marketCapLogMap.get(sym);
+                if (logMcap != null && !Double.isNaN(logMcap)) {
+                    points.add(new double[]{logMcap, neutralizedFactors.get(idx)});
+                }
+            }
+
+            if (points.size() < MIN_REG_SIZE) continue;
+
+            // OLS: β = Cov(x,y)/Var(x),  α = mean(y) - β*mean(x)
+            double sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+            int n = points.size();
+            for (double[] p : points) {
+                sumX += p[0]; sumY += p[1];
+                sumXY += p[0] * p[1];
+                sumX2 += p[0] * p[0];
+            }
+            double meanX = sumX / n, meanY = sumY / n;
+            double beta = (sumXY - n * meanX * meanY) / (sumX2 - n * meanX * meanX + 1e-15);
+            double alpha = meanY - beta * meanX;
+
+            // 取残差
+            for (int idx : indices) {
+                String sym = (String) dayFactors.get(idx).get("symbol");
+                Double logMcap = marketCapLogMap.get(sym);
+                if (logMcap != null) {
+                    double predicted = alpha + beta * logMcap;
+                    result[idx] = neutralizedFactors.get(idx) - predicted;
+                }
+            }
+        }
+
+        List<Double> out = new ArrayList<>(dayFactors.size());
+        for (double v : result) out.add(v);
+        return out;
+    }
+
+    /**
+     * 加载市值缓存（从 CH stock_info.market_cap，存储为对数）
+     */
+    private synchronized Map<String, Double> loadMarketCapLogMap() {
+        long now = System.currentTimeMillis();
+        if (!stockMarketCapLogMap.isEmpty() && (now - marketCapMapLoadTime) < MARKETCAP_CACHE_MS) {
+            return stockMarketCapLogMap;
+        }
+        Map<String, Double> newMap = new HashMap<>();
+        if (clickHouseJdbcTemplate != null) {
+            try {
+                String sql = "SELECT code, market_cap FROM stock.stock_info WHERE market_cap IS NOT NULL AND market_cap > 0";
+                clickHouseJdbcTemplate.query(sql, (rs) -> {
+                    String code = rs.getString("code");
+                    double mcap = rs.getDouble("market_cap");
+                    if (code != null && mcap > 0) {
+                        String c = code.contains(".") ? code.split("\\.")[0] : code;
+                        newMap.put(c, Math.log(mcap));
+                    }
+                });
+                log.info("[市值中性化] 加载市值映射完成：{} 只股票有市值数据", newMap.size());
+            } catch (Exception e) {
+                log.warn("[市值中性化] 加载市值映射失败：{}，将跳过市值中性化", e.getMessage());
+            }
+        }
+        stockMarketCapLogMap = newMap;
+        marketCapMapLoadTime = now;
+        return stockMarketCapLogMap;
     }
 
     /**
@@ -682,6 +814,8 @@ public class FactorAnalysisService {
                 Map<String, String> indMap = loadIndustryMap();
                 if (!indMap.isEmpty()) {
                     factorVals = neutralizeByIndustry(validDayFactors, indMap);
+                    // 行业中性化后，再做市值中性化（消除大小盘偏差）
+                    factorVals = neutralizeByMarketCap(factorVals, validDayFactors, indMap);
                 } else {
                     log.warn("[IC/IR] 行业映射为空，行业中性化退化为原始值");
                     factorVals = new ArrayList<>();
@@ -1099,6 +1233,8 @@ public class FactorAnalysisService {
                 Map<String, String> indMap = loadIndustryMap();
                 if (!indMap.isEmpty()) {
                     factorVals = neutralizeByIndustry(validDayFactors, indMap);
+                    // 行业中性化后，再做市值中性化（消除大小盘偏差）
+                    factorVals = neutralizeByMarketCap(factorVals, validDayFactors, indMap);
                 } else {
                     log.warn("[分段IC] 行业映射为空，行业中性化退化为原始值");
                     factorVals = new ArrayList<>();

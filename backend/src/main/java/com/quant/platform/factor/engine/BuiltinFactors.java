@@ -8,7 +8,10 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 内置因子实现集合
@@ -386,10 +389,21 @@ public class BuiltinFactors {
 
     /**
      * 近20日涨停次数
-     * 涨停阈值按板块区分：科创板/创业板20%，北交所30%，主板10%，ST股5%
-     * TODO: ST股判断需要 stock_info 的 stock_name 字段（含"ST"标记），当前上下文暂未传递
+     * 涨停阈值按板块区分：科创板/创业板20%，北交所30%，主板9.8%
+     * ST股直接排除不计入（ST股涨跌5%限制，且不应进入选股池）
      */
     public static class LimitUpCountCalculator implements FactorCalculator {
+        /** ST股票代码集合（纯数字代码，如 "000520"），外部初始化时填充 */
+        private static volatile Set<String> stStockCodes = Collections.emptySet();
+
+        /** 外部调用：从数据库/CH 加载含"ST"的股票代码后调用此方法初始化 */
+        public static void initStStockCodes(Set<String> codes) {
+            stStockCodes = Collections.unmodifiableSet(new HashSet<>(codes));
+        }
+
+        /** 清空（测试用） */
+        public static void clearStStockCodes() { stStockCodes = Collections.emptySet(); }
+
         @Override
         public String getFactorCode() { return "LIMIT_UP_COUNT"; }
 
@@ -397,6 +411,13 @@ public class BuiltinFactors {
         public BigDecimal calculate(String symbol, LocalDate calcDate,
                                 List<MarketDailyBar> history, java.util.Map<String, Object> context) {
             if (history.size() < 21) return null;
+
+            // 排除ST股
+            String codeOnly = symbol.replaceAll("\\..*$", "");
+            if (!stStockCodes.isEmpty() && stStockCodes.contains(codeOnly)) {
+                return BigDecimal.valueOf(0).setScale(8, RoundingMode.HALF_UP);
+            }
+
             var window = history.subList(history.size() - 21, history.size());
             int count = 0;
             for (var b : window) {
@@ -410,17 +431,13 @@ public class BuiltinFactors {
 
         /**
          * 根据股票代码判断涨停阈值（考虑涨跌幅改革时间点）
-         * 科创板688：20%；创业板300/301：2020-08-24后20%；北交所83/87/88：30%；其余：10%
+         * 科创板688：20%；创业板300/301：20%；北交所83/87/88：30%；主板：9.8%
          */
         private static double getLimitUpThreshold(String symbol) {
             String s = symbol.replaceAll("\\..*$", "");
-            // 科创板
             if (s.startsWith("688")) return 19.8;
-            // 创业板：2020-08-24 改革后为20%，保守用10%（TODO: 按 calcDate 判断）
             if (s.startsWith("300") || s.startsWith("301")) return 19.8;
-            // 北交所
             if (s.startsWith("83") || s.startsWith("87") || s.startsWith("88")) return 29.8;
-            // 主板（含ST）：TODO ST股应返回4.8，需 stock_name 判断
             return 9.8;
         }
     }

@@ -5,6 +5,7 @@ import com.quant.platform.factor.ic.mapper.FactorIcRecordMapper;
 import com.quant.platform.stock.service.ClickHouseStockService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -245,6 +246,73 @@ public class FactorIcService {
             return tradingDates.get(forwardDays);
         }
         return null;
+    }
+
+    /**
+     * 从 ClickHouse 查询单因子单日 IC 值（带缓存）
+     *
+     * 缓存 key: factorCode + date + forwardDays
+     * 缓存时间: 30分钟（因子值日频更新，同日内结果不变）
+     * 这是纯查询方法，不写数据库
+     */
+    @Cacheable(value = "factorIc", cacheManager = "factorIcCacheManager",
+               key = "#factorCode + '_' + #date.toString() + '_' + #forwardDays")
+    public Map<String, Object> querySpearmanIcFromCH(String factorCode, LocalDate date, int forwardDays) {
+        LocalDate forwardDate = findForwardTradingDate(date, forwardDays);
+        if (forwardDate == null) {
+            return Map.of("ic_value", null, "stock_count", 0);
+        }
+
+        try {
+            String sql = String.format("""
+                WITH base AS (
+                    SELECT
+                        f.symbol,
+                        f.factor_val,
+                        (d2.close_price - d1.close_price) / d1.close_price * 100 as fwd_return
+                    FROM stock.factor_value f
+                    INNER JOIN stock.stock_daily d1
+                        ON replaceRegexpOne(f.symbol, '\\.[A-Z]+$', '') = d1.code
+                        AND d1.trade_date = '%s'
+                    INNER JOIN stock.stock_daily d2
+                        ON replaceRegexpOne(f.symbol, '\\.[A-Z]+$', '') = d2.code
+                        AND d2.trade_date = '%s'
+                    WHERE f.factor_code = '%s'
+                      AND f.calc_date = '%s'
+                      AND f.factor_val IS NOT NULL
+                      AND d1.close_price > 0
+                      AND d2.close_price > 0
+                ),
+                ranked AS (
+                    SELECT
+                        factor_val,
+                        fwd_return,
+                        rank() OVER (ORDER BY factor_val)     as rk_f,
+                        count() OVER (PARTITION BY factor_val) as tie_f,
+                        rank() OVER (ORDER BY fwd_return)    as rk_r,
+                        count() OVER (PARTITION BY fwd_return) as tie_r
+                    FROM base
+                ),
+                avg_ranked AS (
+                    SELECT
+                        rk_f + (tie_f - 1) / 2.0  as rankFactor,
+                        rk_r + (tie_r - 1) / 2.0  as rankReturn
+                    FROM ranked
+                )
+                SELECT corr(rankFactor, rankReturn) as ic_value, count() as stock_count
+                FROM avg_ranked
+                """, date, forwardDate, factorCode, date);
+
+            Map<String, Object> row = clickHouseStockService.queryForList(sql).stream().findFirst().orElse(null);
+            if (row == null) {
+                return Map.of("ic_value", null, "stock_count", 0);
+            }
+            return row;
+        } catch (Exception e) {
+            log.warn("[FactorIC] CH查询异常: factor={} date={} forwardDays={} error={}",
+                    factorCode, date, forwardDays, e.getMessage());
+            return Map.of("ic_value", null, "stock_count", 0, "error", e.getMessage());
+        }
     }
 
     /**

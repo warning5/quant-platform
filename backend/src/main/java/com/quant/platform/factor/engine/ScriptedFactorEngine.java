@@ -3,6 +3,8 @@ package com.quant.platform.factor.engine;
 import com.quant.platform.market.domain.MarketDailyBar;
 import groovy.lang.Binding;
 import groovy.lang.GroovyShell;
+import groovy.lang.Script;
+import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.codehaus.groovy.control.CompilerConfiguration;
 import org.springframework.stereotype.Component;
@@ -11,16 +13,23 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Groovy脚本因子计算引擎
- * 支持用Groovy脚本动态定义自定义因子逻辑
+ * Groovy脚本因子计算引擎（带编译缓存）
+ *
+ * 性能优化：同一脚本源码 → 只编译一次，复用 Script 实例
+ * - 无缓存时：5000股 × 250日 = 1,250,000 次编译
+ * - 有缓存后：N个不同脚本 × 1次编译 = N 次（通常 N < 50）
  */
 @Slf4j
 @Component
 public class ScriptedFactorEngine {
 
     private final CompilerConfiguration config;
+
+    /** 脚本编译缓存：scriptCodeHash → 已编译的 Script Class（线程安全，每次 createScript 创建新实例） */
+    private final ConcurrentHashMap<String, Class<? extends Script>> scriptClassCache = new ConcurrentHashMap<>();
 
     public ScriptedFactorEngine() {
         config = new CompilerConfiguration();
@@ -43,21 +52,25 @@ public class ScriptedFactorEngine {
                                 List<MarketDailyBar> history,
                                 Map<String, Object> context) {
         try {
+            // 1. 从缓存获取或编译 Script Class（线程安全）
+            Class<? extends Script> scriptClass = getOrCompile(scriptCode);
+
+            // 2. 绑定本次执行上下文（每次调用独立的 Binding + Script 实例）
             Binding binding = new Binding();
             binding.setVariable("symbol", symbol);
             binding.setVariable("calcDate", calcDate);
             binding.setVariable("history", history);
             binding.setVariable("context", context);
             binding.setVariable("bars", history);
-            // 便捷访问
             if (!history.isEmpty()) {
                 binding.setVariable("bar", history.getLast());
                 binding.setVariable("close", history.getLast().getClose());
                 binding.setVariable("n", history.size());
             }
 
-            GroovyShell shell = new GroovyShell(binding, config);
-            Object result = shell.evaluate(scriptCode);
+            // 3. 每次创建新 Script 实例（线程安全），绑定后执行
+            Script script = org.codehaus.groovy.runtime.InvokerHelper.createScript(scriptClass, binding);
+            Object result = script.run();
 
             return switch (result) {
                 case BigDecimal bd -> bd;
@@ -68,6 +81,19 @@ public class ScriptedFactorEngine {
             log.warn("Script execution failed for factor [{}] symbol [{}]: {}", factorCode, symbol, e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * 获取已编译的 Script Class（从缓存 or 新编译）
+     * 缓存 Class 而非 Script 实例，因为 Script 实例的 Binding 不是线程安全的
+     */
+    private Class<? extends Script> getOrCompile(String scriptCode) {
+        String key = Integer.toHexString(scriptCode.hashCode());
+        return scriptClassCache.computeIfAbsent(key, k -> {
+            log.debug("Compiling new Groovy script (cache miss), hash={}", k);
+            GroovyShell shell = new GroovyShell(config);
+            return shell.parse(scriptCode).getClass();
+        });
     }
 
     /**
@@ -84,6 +110,23 @@ public class ScriptedFactorEngine {
         } catch (Exception e) {
             return e.getMessage();
         }
+    }
+
+    /** 清空编译缓存（脚本更新后调用） */
+    public void clearCache() {
+        int size = scriptClassCache.size();
+        scriptClassCache.clear();
+        log.info("Groovy script cache cleared ({} entries)", size);
+    }
+
+    /** 返回当前缓存大小（监控用） */
+    public int getCacheSize() {
+        return scriptClassCache.size();
+    }
+
+    @PreDestroy
+    public void destroy() {
+        scriptClassCache.clear();
     }
 
     /**

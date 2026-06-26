@@ -61,23 +61,24 @@ public class FactorWeightOptimizeService {
         }
 
         // ── 1. 获取各因子的截面 IC 时序（代理收益率）─────────────────────
-        Map<String, List<Double>> returns = loadFactorReturns(factorCodes, startDate, endDate, financialCodes);
+        Map<String, FactorSeries> returns = loadFactorReturns(factorCodes, startDate, endDate, financialCodes);
 
         // ── 1.5 过滤无有效数据的因子（分类别阈值）────────────────────
         List<String> skippedFactors = new ArrayList<>();
         List<String> skippedDetails = new ArrayList<>();
         List<String> validCodes = new ArrayList<>();
         for (String code : factorCodes) {
-            List<Double> r = returns.getOrDefault(code, Collections.emptyList());
+            FactorSeries s = returns.get(code);
+            int sz = (s != null) ? s.size() : 0;
             boolean isFinancial = financialCodes.contains(code);
             int minRequired = isFinancial ? 3 : 5;
-            if (r.size() < minRequired) {
+            if (sz < minRequired) {
                 skippedFactors.add(code);
                 String reason = isFinancial
-                        ? String.format("%s(财务因子,%d点,需≥%d)", code, r.size(), minRequired)
-                        : String.format("%s(%d点,需≥%d)", code, r.size(), minRequired);
+                        ? String.format("%s(财务因子,%d点,需≥%d)", code, sz, minRequired)
+                        : String.format("%s(%d点,需≥%d)", code, sz, minRequired);
                 skippedDetails.add(reason);
-                log.warn("因子 {} 有效数据点不足（{} 个，最低要求 {}），已跳过", code, r.size(), minRequired);
+                log.warn("因子 {} 有效数据点不足（{} 个，最低要求 {}），已跳过", code, sz, minRequired);
             } else {
                 validCodes.add(code);
             }
@@ -87,8 +88,8 @@ public class FactorWeightOptimizeService {
             throw new IllegalStateException("有效因子不足（需≥2个，当前" + validCodes.size() + "个）" + detail);
         }
 
-        // ── 2. 对齐日期（取交集）─────────────────────────────────────────
-        List<String> aligned = alignDates(returns, validCodes);
+        // ── 2. 对齐日期（取所有因子的日期交集）───────────────────────────
+        List<LocalDate> aligned = alignDates(returns, validCodes);
         int minAligned = validCodes.stream().anyMatch(financialCodes::contains) ? 3 : 5;
         if (aligned.size() < minAligned) {
             throw new IllegalStateException("有效数据点不足（" + aligned.size() + " 个），无法进行优化");
@@ -100,9 +101,12 @@ public class FactorWeightOptimizeService {
         // ── 3. 提取对齐后的收益矩阵 [n × T] ─────────────────────────────
         double[][] retMatrix = new double[n][T];
         for (int i = 0; i < n; i++) {
-            List<Double> r = returns.get(validCodes.get(i));
+            FactorSeries series = returns.get(validCodes.get(i));
+            Map<LocalDate, Integer> dateIndex = new HashMap<>();
+            for (int t = 0; t < series.dates.size(); t++) dateIndex.put(series.dates.get(t), t);
             for (int t = 0; t < T; t++) {
-                retMatrix[i][t] = r.get(t);
+                Integer idx = dateIndex.get(aligned.get(t));
+                retMatrix[i][t] = (idx != null) ? series.values.get(idx) : 0.0;
             }
         }
 
@@ -198,12 +202,26 @@ public class FactorWeightOptimizeService {
     // 私有：数据加载
     // ──────────────────────────────────────────────────────────────────────────
 
+    // ──────────────────────────────────────────────────────────────────────────
+    // 内部数据结构：带时间戳的因子序列
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /** 因子时序数据（日期 + 值一一对应） */
+    private static class FactorSeries {
+        final List<LocalDate> dates;
+        final List<Double> values;
+        FactorSeries(List<LocalDate> d, List<Double> v) { this.dates = d; this.values = v; }
+        int size() { return dates.size(); }
+    }
+
     /**
-     * 加载因子截面收益率
-     * - 财务因子(FINANCIAL)：用原始 rank_value 中位数作为收益（季度财报本身即基本面度量）
-     * - 其他因子：用 rank_value 中位数差分作为日收益代理（捕捉因子变化趋势）
+     * 加载因子截面收益率（带日期对齐）
+     * - 财务因子(FINANCIAL)：用原始 rank_value 中位数作为收益
+     * - 其他因子：用 rank_value 中位数差分作为日收益代理
+     *
+     * @return Map<factorCode, FactorSeries> 每个因子的日期+数值序列
      */
-    private Map<String, List<Double>> loadFactorReturns(List<String> factorCodes,
+    private Map<String, FactorSeries> loadFactorReturns(List<String> factorCodes,
                                                         String startDate, String endDate,
                                                         Set<String> financialCodes) {
         LocalDate start = startDate != null ? LocalDate.parse(startDate) : LocalDate.of(2020, 1, 1);
@@ -218,50 +236,81 @@ public class FactorWeightOptimizeService {
             throw new RuntimeException("ClickHouse rank 中位数查询失败，请稍后重试", e);
         }
 
-        Map<String, List<Double>> result = new HashMap<>();
+        Map<String, FactorSeries> result = new LinkedHashMap<>();
         for (String code : factorCodes) {
             Map<LocalDate, Double> dailyMedian = rankMedians.getOrDefault(code, new LinkedHashMap<>());
             List<LocalDate> dates = new ArrayList<>(dailyMedian.keySet());
-            List<Double> returns;
+            List<Double> values;
 
             if (financialCodes.contains(code)) {
-                // 财务因子：直接用 rank 值（季度频率，rank值本身就是截面排序度量）
-                returns = new ArrayList<>();
+                // 财务因子：直接用 rank 值（季度频率）
+                values = new ArrayList<>();
                 for (LocalDate date : dates) {
-                    returns.add(dailyMedian.get(date));
+                    values.add(dailyMedian.get(date));
                 }
-                log.debug("Factor {} (FINANCIAL) loaded {} raw rank points as returns", code, returns.size());
+                log.debug("Factor {} (FINANCIAL) loaded {} raw rank points", code, values.size());
             } else {
-                // 非财务因子：差分得到日变化率
-                returns = new ArrayList<>();
+                // 非财务因子：差分得到日变化率（dates/values 同步缩减1位）
+                values = new ArrayList<>();
+                List<LocalDate> diffDates = new ArrayList<>();
                 for (int i = 1; i < dates.size(); i++) {
                     double prev = dailyMedian.get(dates.get(i - 1));
                     double curr = dailyMedian.get(dates.get(i));
-                    returns.add(prev != 0 ? (curr - prev) / Math.abs(prev) : 0.0);
+                    values.add(prev != 0 ? (curr - prev) / Math.abs(prev) : 0.0);
+                    diffDates.add(dates.get(i));  // 差分值的日期 = 当前日
                 }
-                log.debug("Factor {} loaded {} daily return points (diff)", code, returns.size());
+                dates = diffDates;
+                log.debug("Factor {} loaded {} daily return points (diff)", code, values.size());
             }
-            result.put(code, returns);
+            result.put(code, new FactorSeries(dates, values));
         }
         return result;
     }
 
-    private List<String> alignDates(Map<String, List<Double>> returns, List<String> codes) {
-        // 找出所有因子最短的那个序列长度作为对齐基准
-        int minLen = codes.stream()
-                .mapToInt(c -> returns.getOrDefault(c, Collections.emptyList()).size())
-                .min().orElse(0);
-        // 截断到共同长度（假设各因子日期对齐）
-        codes.forEach(c -> {
-            List<Double> r = returns.get(c);
-            if (r != null && r.size() > minLen) {
-                returns.put(c, r.subList(r.size() - minLen, r.size()));
+    /**
+     * 基于日期交集对齐多因子时序数据
+     *
+     * 修复前：只按最短序列长度截断，假设所有因子日期天然对齐（实际不成立）
+     * 修复后：取所有因子日期的交集，确保每个因子的第t个值对应同一个交易日
+     *
+     * @param returns 因子代码 → (日期列表, 数值列表)
+     * @param codes   有效因子代码
+     * @return 对齐后的共同日期列表（已排序）
+     */
+    private List<LocalDate> alignDates(Map<String, FactorSeries> returns, List<String> codes) {
+        if (codes.isEmpty()) return List.of();
+
+        // 取第一个因子的日期集合作为初始交集
+        Set<LocalDate> intersection = null;
+        for (String code : codes) {
+            FactorSeries s = returns.get(code);
+            if (s == null || s.dates.isEmpty()) continue;
+            Set<LocalDate> datesSet = new LinkedHashSet<>(s.dates);
+            if (intersection == null) {
+                intersection = datesSet;
+            } else {
+                intersection.retainAll(datesSet);
             }
-        });
-        // 返回代表日期（简化：序号列表）
-        List<String> dates = new ArrayList<>();
-        for (int i = 0; i < minLen; i++) dates.add(String.valueOf(i));
-        return dates;
+        }
+
+        if (intersection == null || intersection.isEmpty()) {
+            log.warn("[alignDates] 因子间无共同日期，无法对齐");
+            return List.of();
+        }
+
+        List<LocalDate> aligned = new ArrayList<>(intersection);
+        aligned.sort(LocalDate::compareTo);
+
+        // 日志：报告各因子原始长度 vs 对齐后长度
+        if (log.isDebugEnabled()) {
+            for (String code : codes) {
+                FactorSeries s = returns.get(code);
+                log.debug("[alignDates] {} → 原始{}点 → 对齐{}点",
+                        code, (s != null ? s.size() : 0), aligned.size());
+            }
+        }
+
+        return aligned;
     }
 
     // ──────────────────────────────────────────────────────────────────────────
