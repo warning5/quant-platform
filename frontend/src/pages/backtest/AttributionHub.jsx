@@ -12,7 +12,7 @@ import {
 } from '@ant-design/icons';
 import ReactECharts from '../../components/LazyECharts';
 import { backtestApi } from '../../api';
-import { useFactorMeta } from '../../hooks/useFactorMeta';
+import useFactorStore from '../../stores/factorStore';
 
 const { Title, Text } = Typography;
 
@@ -1645,10 +1645,12 @@ function BrinsonConclusion({ summary, industrySummary, periods }) {
 // 6. 因子归因详情（含结论组件）
 // ══════════════════════════════════════════════════════════════════════════════
 
-// 因子描述从后端动态加载（见 useFactorMeta hook），不再硬编码
+// 因子描述从后端动态加载（使用全局 Zustand store，跨组件共享缓存）
 
 function FactorDetail({ taskId }) {
-  const { factorMeta } = useFactorMeta();
+  const factorMeta = useFactorStore(state => state.factorMeta);
+  const loadFactorMeta = useFactorStore(state => state.load);
+  useEffect(() => { loadFactorMeta(); }, [loadFactorMeta]);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);

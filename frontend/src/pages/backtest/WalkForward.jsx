@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Card, Row, Col, Typography, Tag, Table, Alert, Spin, Button, Form,
   InputNumber, DatePicker, Select, message, Statistic, Space, Empty, Tooltip, Divider,
@@ -9,7 +9,7 @@ import {
 } from '@ant-design/icons';
 import ReactECharts from '../../components/LazyECharts';
 import { backtestApi } from '../../api';
-import { useFactorMeta } from '../../hooks/useFactorMeta';
+import useFactorStore from '../../stores/factorStore';
 import dayjs from 'dayjs';
 
 const { Title, Text } = Typography;
@@ -30,10 +30,12 @@ const icBarColor = (v) => {
   return v >= 0 ? COLOR_UP : COLOR_DOWN;
 };
 
-// 可用因子列表从后端动态加载（见 useFactorMeta hook）
+// 可用因子列表从后端动态加载（使用全局 Zustand store，跨组件共享缓存）
 
 export default function WalkForward() {
-  const { factorList } = useFactorMeta();
+  const factorList = useFactorStore(state => state.factorList);
+  const loadFactorList = useFactorStore(state => state.load);
+  useEffect(() => { loadFactorList(); }, [loadFactorList]);
   const [running, setRunning] = useState(false);
   const [results, setResults] = useState(null);
   const [summary, setSummary] = useState(null);

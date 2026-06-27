@@ -5,7 +5,7 @@ import { message } from '../../utils/messageUtil';
 import dayjs from 'dayjs';
 import { ThunderboltOutlined, ReloadOutlined, LineChartOutlined, StockOutlined, RiseOutlined, FallOutlined, MinusOutlined, QuestionCircleOutlined, RadarChartOutlined, StopOutlined, UnlockOutlined, DownloadOutlined } from '@ant-design/icons';
 import api, { recommendationApi, blacklistApi, confidenceApi, calendarApi } from '../../api';
-import { useFactorMeta } from '../../hooks/useFactorMeta';
+import useFactorStore from '../../stores/factorStore';
 import ReactECharts from '../../components/LazyECharts';
 import { exportCsv } from '../../utils/exportUtil';
 
@@ -57,7 +57,7 @@ function formatMarketCap(val) {
   return val.toFixed(0);
 }
 
-// ── 因子元信息（从后端动态加载，见 useFactorMeta hook）──
+// ── 因子元信息（使用全局 Zustand store，跨组件共享缓存）──
 
 // ── IC 诊断动作配色 ──
 const DIAG_CONFIG = {
@@ -71,7 +71,9 @@ const DIAG_CONFIG = {
 };
 
 export default function RecommendationList() {
-  const { factorMeta } = useFactorMeta();
+  const factorMeta = useFactorStore(state => state.factorMeta);
+  const loadFactorMeta = useFactorStore(state => state.load);
+  useEffect(() => { loadFactorMeta(); }, [loadFactorMeta]);
   const [recommendations, setRecommendations] = useState([]);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);

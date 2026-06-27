@@ -13,12 +13,10 @@ import {
   CloseCircleOutlined, MinusCircleOutlined, SyncOutlined,
   InfoCircleOutlined, WarningOutlined, StopOutlined
 } from '@ant-design/icons';
-import { Client } from '@stomp/stompjs';
+import { useStompWebSocket } from '../../hooks/useStompWebSocket';
 import ReactECharts from '../../components/LazyECharts';
 import dayjs from 'dayjs';
 import { factorApi } from '../../api';
-
-const WS_URL = '/ws-native';
 
 const { Title, Text } = Typography;
 const { RangePicker } = DatePicker;
@@ -51,7 +49,6 @@ export default function FactorDetail() {
   const [computeDone, setComputeDone]       = useState(false);  // 曾经完成过计算（计算完成后切换到检测视图）
   const [computeProgress, setComputeProgress] = useState(0);
   const [computeLogs, setComputeLogs]       = useState([]);     // [{time, text, type}]
-  const computeStompRef = useRef(null);
 
   // ── 测试 modal & 进度
   const [testModal, setTestModal]     = useState(false);
@@ -64,9 +61,25 @@ export default function FactorDetail() {
   const [testLogs, setTestLogs]               = useState([]);     // 检测日志
   const [runningReportId, setRunningReportId] = useState(null);
   const testPollRef = useRef(null);
-  const testStompRef = useRef(null);
   const testWsDataFlag = useRef(false);  // WebSocket 是否收到过真实数据
   const testPollStartRef = useRef(null); // 轮询开始时间
+
+  // ── WebSocket（on-demand 模式：检测开始时启用，完成/失败时关闭）
+  const [wsEnabled, setWsEnabled] = useState(false);
+  const wsHandlerRef = useRef(null);     // 动态消息处理函数（ref 避免重连）
+  const wsTopicRef = useRef(null);       // 动态订阅主题
+
+  const { connected: wsConnected, subscribe: wsSubscribe } = useStompWebSocket({
+    enabled: wsEnabled,
+    subscriptions: {},   // 预定义订阅为空，由 onConnect 手动订阅
+    onConnect: () => {
+      // 连接成功后，手动订阅到当前因子的检测主题
+      const topic = wsTopicRef.current;
+      if (topic && wsHandlerRef.current) {
+        wsSubscribe(topic, wsHandlerRef.current);
+      }
+    },
+  });
 
   // ── 报告选择
   const [selectedReport, setSelectedReport] = useState(null);
@@ -133,11 +146,10 @@ export default function FactorDetail() {
     }
   }, [factor?.factorCode, valuesTabVisited]);
 
-  // ── 清理 WebSocket（组件卸载）
+  // ── 清理（组件卸载时关闭 WS 和轮询）
   useEffect(() => {
     return () => {
-      computeStompRef.current?.deactivate();
-      testStompRef.current?.deactivate();
+      setWsEnabled(false);
       if (testPollRef.current) clearInterval(testPollRef.current);
     };
   }, []);
@@ -238,7 +250,7 @@ export default function FactorDetail() {
       if (runningReportId === reportId) {
         setRunningReportId(null);
         setTestProgress(0);
-        testStompRef.current?.deactivate();
+        setWsEnabled(false);
       }
       loadFactor();
     }).finally(() => setDeleteLoading(prev => ({ ...prev, [reportId]: false })));
@@ -290,7 +302,7 @@ export default function FactorDetail() {
         setTestLogs([]);
         setRunningReportId(null);
         setTestProgress(0);
-        testStompRef.current?.deactivate();
+        setWsEnabled(false);
         setSelectedRowKeys([]);
         loadFactor();
       })
@@ -300,10 +312,8 @@ export default function FactorDetail() {
 
   // ── 启动对运行中检测的监听
   const handleStartMonitoring = (report, { keepLogs = false } = {}) => {
-    // 清理旧的WebSocket连接
-    if (testStompRef.current) {
-      testStompRef.current.deactivate();
-    }
+    // 关闭旧的 WebSocket 连接（如果还在运行）
+    setWsEnabled(false);
     
     // 设置进度和日志
     setRunningReportId(report.id);
@@ -315,137 +325,125 @@ export default function FactorDetail() {
     setComputeLogs([]);
     pushTestLog(keepLogs ? '🔌 WebSocket 已连接，开始监听检测进度' : '📌 开始监听检测进度', 'info');
 
-    // 启动WebSocket监听
-    const testClient = new Client({
-      brokerURL: WS_URL,
-      debug: str => console.log('[TEST STOMP]', str),
-      onConnect: () => {
-        pushTestLog('🔌 WebSocket 已连接，开始监听检测进度', 'info');
-        testClient.subscribe(`/topic/factor/${factor.factorCode}`, msg => {
-          const data = JSON.parse(msg.body);
-
-          // ── 因子值计算阶段 ──
-          if (data.stage === 'COMPUTING') {
-            testWsDataFlag.current = true;  // 收到计算进度，也算真实数据
-            setComputing(true);
-            setComputeProgress(data.progress || 0);
-            const msgText = data.message || '正在计算因子值...';
-            // 去重：避免相同进度百分比重复添加日志
-            setComputeLogs(prev => {
-              const last = prev[0]?.text || '';
-              if (last.includes(`${data.progress}%`)) return prev;
-              return [
-                { id: Date.now() + Math.random(), time: dayjs().format('HH:mm:ss'), text: msgText, type: 'info' },
-                ...prev.slice(0, 49),
-              ];
-            });
-            if (data.progress >= 100) {
-              setComputing(false);
-              setComputeDone(true);
-              setValueCount(null);
-              loadValueCount();
-              pushTestLog('✅ 因子值计算完成，开始检测', 'success');
-            }
-            return;
-          }
-
-          if (data.stage?.startsWith('TEST')) {
-            testWsDataFlag.current = true;  // 收到真实数据，标记
-            // 如果刚从计算阶段切到检测阶段，标记计算完成
-            if (computing) {
-              setComputing(false);
-              setComputeDone(true);
-              setValueCount(null);
-              loadValueCount();
-            } else {
-              setComputing(false);
-              setComputeDone(true);
-            }
-            if (data.progress != null) {
-              setTestProgress(data.progress);
-            }
-
-            // 根据不同的阶段添加详细的日志信息
-            if (data.stage === 'TEST_START') {
-              // 数据准备阶段
-              if (data.message.includes('获取交易日期完成')) {
-                const match = data.message.match(/共(\d+)个交易日/);
-                pushTestLogWithStage('PREPARE', `📅 获取交易日期完成，共 ${match?.[1] || '?'} 个交易日`, 'info');
-              } else if (data.message.includes('调仓频率过滤完成')) {
-                const match = data.message.match(/有效交易日(\d+)个/);
-                pushTestLogWithStage('PREPARE', `⏰ 调仓频率过滤完成，有效交易日 ${match?.[1] || '?'} 个`, 'info');
-              } else if (data.message.includes('股票池加载完成')) {
-                const match = data.message.match(/(\d+)只股票|全A（不限制）/);
-                const poolText = match?.[1] ? match[1] + ' 只股票' : (match?.[0] || '全A');
-                pushTestLogWithStage('PREPARE', `📊 股票池加载完成，${poolText}`, 'info');
-              } else {
-                pushTestLogWithStage('PREPARE', data.message || '开始准备检测数据...', 'info');
-              }
-            } else if (data.stage === 'TESTING') {
-              // 检测计算阶段
-              if (data.message) {
-                if (data.message.includes('计算IC统计指标')) {
-                  pushTestLogWithStage('IC_TEST', '📊 开始计算IC统计指标（均值、标准差、IR、显著性等）...', 'info');
-                } else if (data.message.includes('IC统计完成')) {
-                  const match = data.message.match(/样本数(\d+)/);
-                  pushTestLogWithStage('IC_TEST', `✅ IC统计完成，样本数 ${match?.[1] || '?'}`, 'success');
-                } else if (data.message.includes('主动指标计算完成')) {
-                  pushTestLogWithStage('STATS', '✅ 主动指标计算完成：主动年化波动率、相对基准胜率', 'success');
-                } else if (data.message.includes('计算分组收益')) {
-                  pushTestLogWithStage('GROUP_TEST', '📈 计算各组年化收益、波动率、夏普比...', 'info');
-                } else if (data.message.includes('回测计算完成')) {
-                  pushTestLogWithStage('GROUP_TEST', '✅ 分组回测计算完成，开始计算统计指标', 'success');
-                } else if (data.message.includes('分组回测计算中')) {
-                  const match = data.message.match(/(\d+)\/(\d+)/);
-                  if (match) {
-                    pushTestLogWithStage('GROUP_TEST', `📊 分组回测计算中... ${match[1]}/${match[2]} 天`, 'info');
-                  } else {
-                    pushTestLogWithStage('GROUP_TEST', data.message, 'info');
-                  }
-                } else {
-                  pushTestLog(`⏳ ${data.message}`, 'info');
-                }
-              }
-            } else if (data.stage === 'TEST_DONE') {
-              const match = data.message?.match(/reportId=(\d+)/);
-              pushTestLogWithStage('DONE', `🎉 检测完成！报告ID: ${match?.[1] || '?'}`, 'success');
-              testClient.deactivate();
-              setRunningReportId(null);
-              setTestProgress(100);
-              // 刷新列表
-              loadFactor();
-            }
-          }
-
-          // ── 异常终止消息（不满足 TEST_ 前缀，单独处理）──
-          if (data.stage === 'FAILED' || data.stage === 'TEST_FAILED') {
-            pushTestLog(`❌ ${data.message || '检测失败'}`, 'error');
-            clearInterval(testPollRef.current);
-            testClient.deactivate();
-            setRunningReportId(null);
-            setTestProgress(0);
-            message.error(data.message || '因子检测失败');
-            loadFactor();
-          }
-
-          if (data.stage === 'COMPLETED') {
-            pushTestLog(`ℹ️ ${data.message || '检测已完成'}`, 'info');
-            clearInterval(testPollRef.current);
-            testClient.deactivate();
-            setRunningReportId(null);
-            setTestProgress(100);
-            loadFactor();
-          }
+    // 设置动态订阅主题和消息处理函数
+    wsTopicRef.current = `/topic/factor/${factor.factorCode}`;
+    wsHandlerRef.current = (data) => {
+      // ── 因子值计算阶段 ──
+      if (data.stage === 'COMPUTING') {
+        testWsDataFlag.current = true;  // 收到计算进度，也算真实数据
+        setComputing(true);
+        setComputeProgress(data.progress || 0);
+        const msgText = data.message || '正在计算因子值...';
+        // 去重：避免相同进度百分比重复添加日志
+        setComputeLogs(prev => {
+          const last = prev[0]?.text || '';
+          if (last.includes(`${data.progress}%`)) return prev;
+          return [
+            { id: Date.now() + Math.random(), time: dayjs().format('HH:mm:ss'), text: msgText, type: 'info' },
+            ...prev.slice(0, 49),
+          ];
         });
-      },
-      onStompError: frame => {
-        console.error('[TEST STOMP ERROR]', frame);
-        pushTestLog(`❌ STOMP 错误: ${frame.headers.message}`, 'error');
+        if (data.progress >= 100) {
+          setComputing(false);
+          setComputeDone(true);
+          setValueCount(null);
+          loadValueCount();
+          pushTestLog('✅ 因子值计算完成，开始检测', 'success');
+        }
+        return;
       }
-    });
-    
-    testStompRef.current = testClient;
-    testClient.activate();
+
+      if (data.stage?.startsWith('TEST')) {
+        testWsDataFlag.current = true;  // 收到真实数据，标记
+        // 如果刚从计算阶段切到检测阶段，标记计算完成
+        if (computing) {
+          setComputing(false);
+          setComputeDone(true);
+          setValueCount(null);
+          loadValueCount();
+        } else {
+          setComputing(false);
+          setComputeDone(true);
+        }
+        if (data.progress != null) {
+          setTestProgress(data.progress);
+        }
+
+        // 根据不同的阶段添加详细的日志信息
+        if (data.stage === 'TEST_START') {
+          // 数据准备阶段
+          if (data.message.includes('获取交易日期完成')) {
+            const match = data.message.match(/共(\d+)个交易日/);
+            pushTestLogWithStage('PREPARE', `📅 获取交易日期完成，共 ${match?.[1] || '?'} 个交易日`, 'info');
+          } else if (data.message.includes('调仓频率过滤完成')) {
+            const match = data.message.match(/有效交易日(\d+)个/);
+            pushTestLogWithStage('PREPARE', `⏰ 调仓频率过滤完成，有效交易日 ${match?.[1] || '?'} 个`, 'info');
+          } else if (data.message.includes('股票池加载完成')) {
+            const match = data.message.match(/(\d+)只股票|全A（不限制）/);
+            const poolText = match?.[1] ? match[1] + ' 只股票' : (match?.[0] || '全A');
+            pushTestLogWithStage('PREPARE', `📊 股票池加载完成，${poolText}`, 'info');
+          } else {
+            pushTestLogWithStage('PREPARE', data.message || '开始准备检测数据...', 'info');
+          }
+        } else if (data.stage === 'TESTING') {
+          // 检测计算阶段
+          if (data.message) {
+            if (data.message.includes('计算IC统计指标')) {
+              pushTestLogWithStage('IC_TEST', '📊 开始计算IC统计指标（均值、标准差、IR、显著性等）...', 'info');
+            } else if (data.message.includes('IC统计完成')) {
+              const match = data.message.match(/样本数(\d+)/);
+              pushTestLogWithStage('IC_TEST', `✅ IC统计完成，样本数 ${match?.[1] || '?'}`, 'success');
+            } else if (data.message.includes('主动指标计算完成')) {
+              pushTestLogWithStage('STATS', '✅ 主动指标计算完成：主动年化波动率、相对基准胜率', 'success');
+            } else if (data.message.includes('计算分组收益')) {
+              pushTestLogWithStage('GROUP_TEST', '📈 计算各组年化收益、波动率、夏普比...', 'info');
+            } else if (data.message.includes('回测计算完成')) {
+              pushTestLogWithStage('GROUP_TEST', '✅ 分组回测计算完成，开始计算统计指标', 'success');
+            } else if (data.message.includes('分组回测计算中')) {
+              const match = data.message.match(/(\d+)\/(\d+)/);
+              if (match) {
+                pushTestLogWithStage('GROUP_TEST', `📊 分组回测计算中... ${match[1]}/${match[2]} 天`, 'info');
+              } else {
+                pushTestLogWithStage('GROUP_TEST', data.message, 'info');
+              }
+            } else {
+              pushTestLog(`⏳ ${data.message}`, 'info');
+            }
+          }
+        } else if (data.stage === 'TEST_DONE') {
+          const match = data.message?.match(/reportId=(\d+)/);
+          pushTestLogWithStage('DONE', `🎉 检测完成！报告ID: ${match?.[1] || '?'}`, 'success');
+          setWsEnabled(false);
+          setRunningReportId(null);
+          setTestProgress(100);
+          // 刷新列表
+          loadFactor();
+        }
+      }
+
+      // ── 异常终止消息（不满足 TEST_ 前缀，单独处理）──
+      if (data.stage === 'FAILED' || data.stage === 'TEST_FAILED') {
+        pushTestLog(`❌ ${data.message || '检测失败'}`, 'error');
+        clearInterval(testPollRef.current);
+        setWsEnabled(false);
+        setRunningReportId(null);
+        setTestProgress(0);
+        message.error(data.message || '因子检测失败');
+        loadFactor();
+      }
+
+      if (data.stage === 'COMPLETED') {
+        pushTestLog(`ℹ️ ${data.message || '检测已完成'}`, 'info');
+        clearInterval(testPollRef.current);
+        setWsEnabled(false);
+        setRunningReportId(null);
+        setTestProgress(100);
+        loadFactor();
+      }
+    };
+
+    // 启用 WebSocket 连接（触发 useStompWebSocket 的 effect）
+    setWsEnabled(true);
 
     // 启动轮询检查状态
     if (testPollRef.current) clearInterval(testPollRef.current);
@@ -473,7 +471,7 @@ export default function FactorDetail() {
           clearInterval(testPollRef.current);
           setTestProgress(100);
           setRunningReportId(null);
-          testStompRef.current?.deactivate();
+          setWsEnabled(false);
           loadFactor();
           if (r.status === 'COMPLETED') message.success('因子检测完成！');
           else message.error('因子检测失败，请稍后重试');
@@ -483,7 +481,7 @@ export default function FactorDetail() {
         clearInterval(testPollRef.current);
         setRunningReportId(null);
         setTestProgress(0);
-        testStompRef.current?.deactivate();
+        setWsEnabled(false);
       });
     }, 3000);
   };

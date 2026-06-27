@@ -14,7 +14,7 @@ import { Client } from '@stomp/stompjs';
  *   - reconnectDelay: number  重连延迟(ms)，默认5000
  *   - enabled: boolean  是否启用连接（默认true），可传 false 暂停连接
  *
- * @returns {{ connected: boolean, send: (dest, body) => void, clientRef: React.MutableRefObject }}
+ * @returns {{ connected: boolean, send: (dest, body) => void, subscribe: (dest, handler) => subscription|null, clientRef: React.MutableRefObject }}
  */
 export function useStompWebSocket({
   brokerURL,
@@ -41,6 +41,24 @@ export function useStompWebSocket({
     }
   }, []);
 
+  // 手动订阅（用于 on-demand 连接模式，如因子检测监听）
+  // 返回 subscription 对象，可在不需要时调用 .unsubscribe()
+  const subscribe = useCallback((destination, handler) => {
+    if (clientRef.current?.active) {
+      const sub = clientRef.current.subscribe(destination, (frame) => {
+        try {
+          const data = JSON.parse(frame.body);
+          handler(data);
+        } catch {
+          handler(frame.body);
+        }
+      });
+      subIdsRef.current.push(sub);
+      return sub;
+    }
+    return null;
+  }, []);
+
   useEffect(() => {
     if (!enabled) {
       // 不启用时，断开已有连接
@@ -58,7 +76,7 @@ export function useStompWebSocket({
       heartbeatOutgoing: 10000,
       onConnect: () => {
         setConnected(true);
-        // 执行所有订阅
+        // 执行所有预定义订阅
         subIdsRef.current = [];
         for (const [dest, handler] of Object.entries(subscriptions)) {
           const subscription = client.subscribe(dest, (frame) => {
@@ -99,5 +117,5 @@ export function useStompWebSocket({
     };
   }, [enabled, wsUrl, reconnectDelay]); // 注意：subscriptions 不作为依赖，避免频繁重连
 
-  return { connected, send, clientRef };
+  return { connected, send, subscribe, clientRef };
 }
