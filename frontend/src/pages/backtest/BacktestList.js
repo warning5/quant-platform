@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { Table, Tag, Button, Space, Card, Typography, Popconfirm, Progress, Tooltip, Select, Modal, DatePicker } from 'antd';
 import { message } from '../../utils/messageUtil';
-import { PlusOutlined, EyeOutlined, DeleteOutlined, ReloadOutlined, StopOutlined, LoadingOutlined, RedoOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { PlusOutlined, EyeOutlined, DeleteOutlined, ReloadOutlined, StopOutlined, LoadingOutlined, RedoOutlined, ThunderboltOutlined, DownloadOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { backtestApi, strategyApi } from '../../api';
+import { exportCsv } from '../../utils/exportUtil';
 import dayjs from 'dayjs';
 
 const { Title, Text } = Typography;
@@ -249,7 +250,9 @@ export default function BacktestList() {
         </Space>
       </div>
 
-      <Card style={{ border: '1px solid #d9d9d9' }}>
+      <Card style={{ border: '1px solid #d9d9d9' }} extra={
+        <Button size="small" icon={<DownloadOutlined />} onClick={() => exportCsv({ data: data?.records || [], columns, filename: '回测列表' })} disabled={!data?.records?.length}>导出CSV</Button>
+      }>
         <Table
           dataSource={data.records}
           columns={columns}

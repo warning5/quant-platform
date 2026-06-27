@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Card, Row, Col, Select, DatePicker, Button, Table, Spin, Alert, Space, Tag, Tooltip, Divider } from 'antd';
 import { message } from '../../utils/messageUtil';
 import { PartitionOutlined, ReloadOutlined } from '@ant-design/icons';
-import ReactECharts from 'echarts-for-react';
+import ReactECharts from '../../components/LazyECharts';
 import dayjs from 'dayjs';
 import { factorApi } from '../../api';
 

@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Link, useLocation, useParams } from 'react-router-dom';
-import { App as AntApp, Layout, Menu, Typography, Space, Badge, Button, Tooltip } from 'antd';
+import { App as AntApp, Layout, Menu, Typography, Space, Badge, Button, Tooltip, Spin, Drawer, Switch, ConfigProvider, theme } from 'antd';
 import {
   FundOutlined, FundViewOutlined, ThunderboltOutlined,
   DashboardOutlined, BarChartOutlined, StockOutlined,
@@ -8,47 +8,51 @@ import {
   PartitionOutlined, AccountBookOutlined,
   SearchOutlined,
   AppstoreOutlined, ControlOutlined,
+  MoonOutlined, SunOutlined,
 } from '@ant-design/icons';
 
-import Dashboard from './pages/Dashboard';
-import MarketList from './pages/market/MarketList';
-import FactorList from './pages/factors/FactorList';
-import FactorDetail from './pages/factors/FactorDetail';
-import FactorEditor from './pages/factors/FactorEditor';
-import FactorCorrelation from './pages/factors/FactorCorrelation';
-import FactorMonitor from './pages/factors/FactorMonitor';
-import StrategyList from './pages/strategies/StrategyList';
-import StrategyDetail from './pages/strategies/StrategyDetail';
-import StrategyEditor from './pages/strategies/StrategyEditor';
-import PaperTradingPage from './pages/strategies/PaperTradingPage';
-import BacktestList from './pages/backtest/BacktestList';
-import BacktestReport from './pages/backtest/BacktestReport';
-import BacktestCreate from './pages/backtest/BacktestCreate';
-import BacktestRunning from './pages/backtest/BacktestRunning';
-import BacktestCompare from './pages/backtest/BacktestCompare';
-import ParamOptimize from './pages/backtest/ParamOptimize';
-import WalkForward from './pages/backtest/WalkForward.jsx';
-import FactorWeightOptimize from './pages/factors/FactorWeightOptimize';
-import RecommendationList from './pages/recommendation/RecommendationList';
-import LlmAnalysisPage from './pages/llm/LlmAnalysisPage';
-import MonitorPage from './pages/monitor/MonitorPage';
-import FactorIcIrAnalysis from './pages/factors/FactorIcIrAnalysis';
-import StockScreen from './pages/screen/StockScreen';
-import ManualOverviewPage from './pages/manual/ManualOverviewPage';
-import ManualDataInfoPage from './pages/manual/ManualDataInfoPage';
-import ManualStockAnalysisPage from './pages/manual/ManualStockAnalysisPage';
-import ManualMarketThermometerPage from './pages/manual/ManualMarketThermometerPage';
-import ManualPaperTradingFullPage from './pages/manual/ManualPaperTradingFullPage';
-import ManualFactorPage from './pages/manual/ManualFactorPage';
-import ManualFactorTestPage from './pages/manual/ManualFactorTestPage';
-import ManualStrategyPage from './pages/manual/ManualStrategyPage';
-import ManualBacktestPage from './pages/manual/ManualBacktestPage';
-import FinancialData from './pages/financial/FinancialData';
-import ResearchData from './pages/datadetail/ResearchData';
-import DataUpdate from './pages/dataupdate/DataUpdate';
-import ScheduledTasks from './pages/dataupdate/ScheduledTasks';
-import StockAnalysis from './pages/analysis/StockAnalysis';
-import TradeCalendar from './pages/calendar/TradeCalendar';
+// ── 页面懒加载（React.lazy + Suspense）──
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const MarketList = lazy(() => import('./pages/market/MarketList'));
+const SectorRanking = lazy(() => import('./pages/market/SectorRanking'));
+const FactorList = lazy(() => import('./pages/factors/FactorList'));
+const FactorDetail = lazy(() => import('./pages/factors/FactorDetail'));
+const FactorEditor = lazy(() => import('./pages/factors/FactorEditor'));
+const FactorCorrelation = lazy(() => import('./pages/factors/FactorCorrelation'));
+const FactorMonitor = lazy(() => import('./pages/factors/FactorMonitor'));
+const FactorIcIrAnalysis = lazy(() => import('./pages/factors/FactorIcIrAnalysis'));
+const FactorWeightOptimize = lazy(() => import('./pages/factors/FactorWeightOptimize'));
+const StrategyList = lazy(() => import('./pages/strategies/StrategyList'));
+const StrategyDetail = lazy(() => import('./pages/strategies/StrategyDetail'));
+const StrategyEditor = lazy(() => import('./pages/strategies/StrategyEditor'));
+const PaperTradingPage = lazy(() => import('./pages/strategies/PaperTradingPage'));
+const BacktestList = lazy(() => import('./pages/backtest/BacktestList'));
+const BacktestReport = lazy(() => import('./pages/backtest/BacktestReport'));
+const BacktestCreate = lazy(() => import('./pages/backtest/BacktestCreate'));
+const BacktestRunning = lazy(() => import('./pages/backtest/BacktestRunning'));
+const BacktestCompare = lazy(() => import('./pages/backtest/BacktestCompare'));
+const ParamOptimize = lazy(() => import('./pages/backtest/ParamOptimize'));
+const WalkForward = lazy(() => import('./pages/backtest/WalkForward.jsx'));
+const RecommendationList = lazy(() => import('./pages/recommendation/RecommendationList'));
+const LlmAnalysisPage = lazy(() => import('./pages/llm/LlmAnalysisPage'));
+const MonitorPage = lazy(() => import('./pages/monitor/MonitorPage'));
+const StockScreen = lazy(() => import('./pages/screen/StockScreen'));
+const ManualOverviewPage = lazy(() => import('./pages/manual/ManualOverviewPage'));
+const ManualDataInfoPage = lazy(() => import('./pages/manual/ManualDataInfoPage'));
+const ManualStockAnalysisPage = lazy(() => import('./pages/manual/ManualStockAnalysisPage'));
+const ManualMarketThermometerPage = lazy(() => import('./pages/manual/ManualMarketThermometerPage'));
+const ManualPaperTradingFullPage = lazy(() => import('./pages/manual/ManualPaperTradingFullPage'));
+const ManualFactorPage = lazy(() => import('./pages/manual/ManualFactorPage'));
+const ManualFactorTestPage = lazy(() => import('./pages/manual/ManualFactorTestPage'));
+const ManualStrategyPage = lazy(() => import('./pages/manual/ManualStrategyPage'));
+const ManualBacktestPage = lazy(() => import('./pages/manual/ManualBacktestPage'));
+const FinancialData = lazy(() => import('./pages/financial/FinancialData'));
+const ResearchData = lazy(() => import('./pages/datadetail/ResearchData'));
+const DataUpdate = lazy(() => import('./pages/dataupdate/DataUpdate'));
+const ScheduledTasks = lazy(() => import('./pages/dataupdate/ScheduledTasks'));
+const StockAnalysis = lazy(() => import('./pages/analysis/StockAnalysis'));
+const TradeCalendar = lazy(() => import('./pages/calendar/TradeCalendar'));
+const MarketThermometer = lazy(() => import('./pages/analysis/MarketThermometer'));
 
 /** 滚动回测旧路由重定向到统一回测 */
 function OldRollingRedirect() {
@@ -56,15 +60,24 @@ function OldRollingRedirect() {
   if (id) return <Navigate to={`/backtests/${id}/report`} replace />;
   return <Navigate to="/backtests" replace />;
 }
-import MarketThermometer from './pages/analysis/MarketThermometer';
-import SectorRanking from './pages/market/SectorRanking';
+
+/** 懒加载 fallback：页面级 Spin */
+function PageLoading() {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}>
+      <Spin size="large" tip="加载中..." />
+    </div>
+  );
+}
 
 const { Header, Sider, Content } = Layout;
 const { Title } = Typography;
 
-function AppLayout() {
+function AppLayout({ isDark, setIsDark }) {
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const location = useLocation();
+  const isMobile = window.innerWidth < 768;
 
   const menuItems = [
     { key: '/', icon: <DashboardOutlined />, label: <Link to="/">总览</Link> },
@@ -159,19 +172,22 @@ function AppLayout() {
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
-      <Sider
-        collapsible
-        collapsed={collapsed}
-        onCollapse={setCollapsed}
-        trigger={null}
-        style={{
-          background: '#001529',
-          transition: 'width 0.2s',
-          overflow: 'hidden',
-        }}
-        width={220}
-        collapsedWidth={64}
-      >
+      {/* ── 桌面端：固定侧边栏 ── */}
+      {!isMobile && (
+        <Sider
+          className="desktop-sider"
+          collapsible
+          collapsed={collapsed}
+          onCollapse={setCollapsed}
+          trigger={null}
+          style={{
+            background: '#001529',
+            transition: 'width 0.2s',
+            overflow: 'hidden',
+          }}
+          width={220}
+          collapsedWidth={64}
+        >
         {/* Logo 区域 */}
         <div style={{
           height: 56,
@@ -209,10 +225,32 @@ function AppLayout() {
           inlineCollapsed={collapsed}
         />
       </Sider>
+      )}
+
+      {/* ── 移动端：Drawer 侧边栏 ── */}
+      {isMobile && (
+        <Drawer
+          title="导航菜单"
+          placement="left"
+          onClose={() => setMobileDrawerOpen(false)}
+          open={mobileDrawerOpen}
+          width={260}
+          styles={{ body: { padding: 0 } }}
+        >
+          <Menu
+            mode="inline"
+            selectedKeys={selectedKeys}
+            openKeys={openKeys}
+            onOpenChange={(keys) => setOpenKeys(keys.length > openKeys.length ? [keys[keys.length - 1]] : [])}
+            items={menuItems}
+            onClick={() => setMobileDrawerOpen(false)}
+          />
+        </Drawer>
+      )}
 
       <Layout style={{ transition: 'all 0.2s' }}>
         <Header style={{
-          background: '#fff',
+          background: isDark ? '#141414' : '#fff',
           padding: '0 16px 0 0',
           display: 'flex',
           alignItems: 'center',
@@ -224,76 +262,95 @@ function AppLayout() {
           zIndex: 100,
         }}>
           {/* 收放触发按钮 */}
-          <Tooltip title={collapsed ? '展开菜单' : '收起菜单'} placement="right">
+          {isMobile ? (
             <Button
               type="text"
-              icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-              onClick={() => setCollapsed(!collapsed)}
-              style={{
-                width: 56, height: 56,
-                fontSize: 16,
-                borderRadius: 0,
-                color: '#595959',
-              }}
+              icon={<MenuUnfoldOutlined />}
+              onClick={() => setMobileDrawerOpen(true)}
+              style={{ width: 48, height: 48, fontSize: 16, borderRadius: 0 }}
             />
-          </Tooltip>
+          ) : (
+            <Tooltip title={collapsed ? '展开菜单' : '收起菜单'} placement="right">
+              <Button
+                type="text"
+                icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+                onClick={() => setCollapsed(!collapsed)}
+                style={{
+                  width: 56, height: 56,
+                  fontSize: 16,
+                  borderRadius: 0,
+                  color: '#595959',
+                }}
+              />
+            </Tooltip>
+          )}
 
           <Space style={{ marginRight: 8 }}>
             <Badge status="processing" text="系统运行正常" />
             <Typography.Text type="secondary" style={{ fontSize: 12, marginLeft: 16 }}>
               Quant Platform v1.0 · Java 21 + Spring Boot 3
             </Typography.Text>
+            {/* ── 暗黑模式切换 ── */}
+            <Switch
+              checked={isDark}
+              onChange={setIsDark}
+              checkedChildren={<MoonOutlined />}
+              unCheckedChildren={<SunOutlined />}
+              style={{ marginLeft: 12 }}
+            />
           </Space>
         </Header>
 
         <Content style={{ margin: 16, minHeight: 280 }}>
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/market" element={<MarketList />} />
-            <Route path="/data-detail/research" element={<ResearchData />} />
-            <Route path="/data-detail/financial" element={<FinancialData />} />
-            <Route path="/data-update" element={<DataUpdate />} />
-            <Route path="/scheduled-tasks" element={<ScheduledTasks />} />
-            <Route path="/factors" element={<FactorList />} />
-            <Route path="/factors/new" element={<FactorEditor />} />
-            <Route path="/factors/:id" element={<FactorDetail />} />
-            <Route path="/factors/:id/edit" element={<FactorEditor />} />
-            <Route path="/factor-correlation" element={<FactorCorrelation />} />
-            <Route path="/factor-monitor" element={<FactorMonitor />} />
-            <Route path="/strategies" element={<StrategyList />} />
-            <Route path="/strategies/new" element={<StrategyEditor />} />
-            <Route path="/strategies/:id" element={<StrategyDetail />} />
-            <Route path="/strategies/:id/edit" element={<StrategyEditor />} />
-            <Route path="/paper-trading" element={<PaperTradingPage />} />
-            <Route path="/backtests" element={<BacktestList />} />
-            <Route path="/backtests/new" element={<BacktestCreate />} />
-            <Route path="/backtests/compare" element={<BacktestCompare />} />
-            <Route path="/backtests/param-optimize" element={<ParamOptimize />} />
-            <Route path="/backtests/walk-forward" element={<WalkForward />} />
-            <Route path="/backtests/:taskId/running" element={<BacktestRunning />} />
-            <Route path="/backtests/:taskId/report" element={<BacktestReport />} />
-            <Route path="/factor-weight-optimize" element={<FactorWeightOptimize defaultFactorCodes={[]} />} />
-            <Route path="/factor-ic-ir" element={<FactorIcIrAnalysis />} />
-            <Route path="/screen" element={<StockScreen />} />
-            <Route path="/recommendation" element={<RecommendationList />} />
-            <Route path="/llm" element={<LlmAnalysisPage />} />
-            <Route path="/monitor" element={<MonitorPage />} />
-            <Route path="/screen/backtest/:id" element={<OldRollingRedirect />} />
-            <Route path="/screen/backtest" element={<OldRollingRedirect />} />
-            <Route path="/manual/overview" element={<ManualOverviewPage />} />
-            <Route path="/manual/data-info" element={<ManualDataInfoPage />} />
-            <Route path="/manual/stock-analysis" element={<ManualStockAnalysisPage />} />
-            <Route path="/manual/market-thermometer" element={<ManualMarketThermometerPage />} />
-            <Route path="/manual/paper-trading" element={<ManualPaperTradingFullPage />} />
-            <Route path="/manual/factors" element={<ManualFactorPage />} />
-            <Route path="/manual/strategy" element={<ManualStrategyPage />} />
-            <Route path="/manual/backtest" element={<ManualBacktestPage />} />
-            <Route path="/stock-analysis" element={<StockAnalysis />} />
-            <Route path="/market-thermometer" element={<MarketThermometer />} />
-            <Route path="/sector-ranking" element={<SectorRanking />} />
-            <Route path="/calendar" element={<TradeCalendar />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
+          <Suspense fallback={<PageLoading />}>
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/market" element={<MarketList />} />
+              <Route path="/data-detail/research" element={<ResearchData />} />
+              <Route path="/data-detail/financial" element={<FinancialData />} />
+              <Route path="/data-update" element={<DataUpdate />} />
+              <Route path="/scheduled-tasks" element={<ScheduledTasks />} />
+              <Route path="/factors" element={<FactorList />} />
+              <Route path="/factors/new" element={<FactorEditor />} />
+              <Route path="/factors/:id" element={<FactorDetail />} />
+              <Route path="/factors/:id/edit" element={<FactorEditor />} />
+              <Route path="/factor-correlation" element={<FactorCorrelation />} />
+              <Route path="/factor-monitor" element={<FactorMonitor />} />
+              <Route path="/strategies" element={<StrategyList />} />
+              <Route path="/strategies/new" element={<StrategyEditor />} />
+              <Route path="/strategies/:id" element={<StrategyDetail />} />
+              <Route path="/strategies/:id/edit" element={<StrategyEditor />} />
+              <Route path="/paper-trading" element={<PaperTradingPage />} />
+              <Route path="/backtests" element={<BacktestList />} />
+              <Route path="/backtests/new" element={<BacktestCreate />} />
+              <Route path="/backtests/compare" element={<BacktestCompare />} />
+              <Route path="/backtests/param-optimize" element={<ParamOptimize />} />
+              <Route path="/backtests/walk-forward" element={<WalkForward />} />
+              <Route path="/backtests/:taskId/running" element={<BacktestRunning />} />
+              <Route path="/backtests/:taskId/report" element={<BacktestReport />} />
+              <Route path="/factor-weight-optimize" element={<FactorWeightOptimize defaultFactorCodes={[]} />} />
+              <Route path="/factor-ic-ir" element={<FactorIcIrAnalysis />} />
+              <Route path="/screen" element={<StockScreen />} />
+              <Route path="/recommendation" element={<RecommendationList />} />
+              <Route path="/llm" element={<LlmAnalysisPage />} />
+              <Route path="/monitor" element={<MonitorPage />} />
+              <Route path="/screen/backtest/:id" element={<OldRollingRedirect />} />
+              <Route path="/screen/backtest" element={<OldRollingRedirect />} />
+              <Route path="/manual/overview" element={<ManualOverviewPage />} />
+              <Route path="/manual/data-info" element={<ManualDataInfoPage />} />
+              <Route path="/manual/stock-analysis" element={<ManualStockAnalysisPage />} />
+              <Route path="/manual/market-thermometer" element={<ManualMarketThermometerPage />} />
+              <Route path="/manual/paper-trading" element={<ManualPaperTradingFullPage />} />
+              <Route path="/manual/factors" element={<ManualFactorPage />} />
+              <Route path="/manual/strategy" element={<ManualStrategyPage />} />
+              <Route path="/manual/backtest" element={<ManualBacktestPage />} />
+              <Route path="/stock-analysis" element={<StockAnalysis />} />
+              <Route path="/market-thermometer" element={<MarketThermometer />} />
+              <Route path="/sector-ranking" element={<SectorRanking />} />
+              <Route path="/calendar" element={<TradeCalendar />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </Suspense>
         </Content>
       </Layout>
     </Layout>
@@ -301,6 +358,13 @@ function AppLayout() {
 }
 
 export default function App() {
+  const [isDark, setIsDark] = useState(false);
+
+  // 暗色主题时，给 body 设置 data-theme 属性，CSS 变量自动切换
+  useEffect(() => {
+    document.body.setAttribute('data-theme', isDark ? 'dark' : 'light');
+  }, [isDark]);
+
   return (
     <BrowserRouter
       future={{
@@ -308,9 +372,18 @@ export default function App() {
         v7_relativeSplatPath: true,
       }}
     >
-      <AntApp>
-        <AppLayout />
-      </AntApp>
+      <ConfigProvider
+        theme={{
+          algorithm: isDark ? theme.darkAlgorithm : theme.defaultAlgorithm,
+          token: {
+            colorPrimary: '#1677ff',
+          },
+        }}
+      >
+        <AntApp>
+          <AppLayout isDark={isDark} setIsDark={setIsDark} />
+        </AntApp>
+      </ConfigProvider>
     </BrowserRouter>
   );
 }

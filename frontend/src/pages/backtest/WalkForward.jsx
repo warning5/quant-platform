@@ -7,7 +7,7 @@ import {
   PlayCircleOutlined, WarningOutlined, CheckCircleOutlined,
   LineChartOutlined, BarChartOutlined, QuestionCircleOutlined,
 } from '@ant-design/icons';
-import ReactECharts from 'echarts-for-react';
+import ReactECharts from '../../components/LazyECharts';
 import { backtestApi } from '../../api';
 import { useFactorMeta } from '../../hooks/useFactorMeta';
 import dayjs from 'dayjs';

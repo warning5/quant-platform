@@ -1,6 +1,6 @@
 import React from 'react';
 import { Card, Row, Col, Table, Statistic, Tag, Alert, Empty, Spin, Typography, Tooltip } from 'antd';
-import ReactECharts from 'echarts-for-react';
+import ReactECharts from '../../components/LazyECharts';
 
 const { Text } = Typography;
 

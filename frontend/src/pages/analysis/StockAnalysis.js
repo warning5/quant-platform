@@ -13,7 +13,7 @@ import { useSearchParams, Link } from 'react-router-dom';
 import { stockAnalysisApi, silentConfig } from '../../api';
 import api from '../../api';
 import { useMarketThermometer } from '../../hooks/useMarketThermometer';
-import ReactECharts from 'echarts-for-react';
+import ReactECharts from '../../components/LazyECharts';
 import { NewsEventTab } from './NewsEventTab';
 import { BidAskPanel } from './BidAskPanel';
 import { InstitutionCoverageTab } from './InstitutionCoverageTab';
@@ -523,10 +523,11 @@ export default function StockAnalysis() {
           rowKey={(_, i) => i}
           size="small"
           pagination={false}
+          scroll={{ x: 'max-content' }}
           columns={[
             { title: '尾部风险', dataIndex: 'name', key: 'name', width: 120,
-              render: (t, r) => <Tooltip title={r.metric} className="tip-light"><Text strong>{t}</Text></Tooltip>,
-            },
+                render: (t, r) => <Tooltip title={r.metric} className="tip-light"><Text strong>{t}</Text></Tooltip>,
+              },
             { title: '概率', dataIndex: 'probability', key: 'probability', width: 80,
               render: t => <Tag color="red">{t}</Tag>,
             },
@@ -2264,6 +2265,7 @@ function ResearchReportTab({ data, code }) {
               <Table
                 size="small"
                 pagination={false}
+                scroll={{ x: 'max-content' }}
                 columns={[
                   { title: '月份', dataIndex: 'month', width: 90 },
                   {
@@ -2325,6 +2327,7 @@ function ResearchReportTab({ data, code }) {
               <Table
                 size="small"
                 pagination={false}
+                scroll={{ x: 'max-content' }}
                 dataSource={cov.institutions}
                 rowKey="institution"
                 columns={[
@@ -2350,6 +2353,7 @@ function ResearchReportTab({ data, code }) {
               <Table
                 size="small"
                 pagination={false}
+                scroll={{ x: 'max-content' }}
                 dataSource={data.recentReports}
                 rowKey={(r) => r.reportDate + r.institution}
                 columns={[
@@ -2653,6 +2657,7 @@ function IndustryCorrelationTab({ data, code }) {
           <Table
             size="small"
             pagination={false}
+            scroll={{ x: 'max-content' }}
             dataSource={recentAlign}
             rowKey="dayIndex"
             style={{ border: '1px solid #f0f0f0', borderRadius: 6 }}
@@ -2788,6 +2793,7 @@ function LimitUpTab({ data, code }) {
           <Table
             size="small"
             pagination={{ defaultPageSize: 10, showSizeChanger: true, pageSizeOptions: ['10', '20', '30', '50'], size: 'small' }}
+            scroll={{ x: 'max-content' }}
             dataSource={records}
             rowKey={(r, i) => r.tradeDate + r.ztType + i}
             columns={[
@@ -2883,6 +2889,7 @@ function BlockTradeTab({ data, code }) {
           <Card size="small" title="买方营业部（Top10）" styles={{ body: {padding: 0} }}>
             {topBuy.length > 0 ? (
               <Table size="small" pagination={false} dataSource={topBuy} rowKey="branch"
+                scroll={{ x: 'max-content' }}
                 columns={[
                   { title: '营业部', dataIndex: 'branch', ellipsis: true },
                   { title: '次数', dataIndex: 'count', width: 50, align: 'center' },
@@ -2896,6 +2903,7 @@ function BlockTradeTab({ data, code }) {
           <Card size="small" title="卖方营业部（Top10）" styles={{ body: {padding: 0} }}>
             {topSell.length > 0 ? (
               <Table size="small" pagination={false} dataSource={topSell} rowKey="branch"
+                scroll={{ x: 'max-content' }}
                 columns={[
                   { title: '营业部', dataIndex: 'branch', ellipsis: true },
                   { title: '次数', dataIndex: 'count', width: 50, align: 'center' },
@@ -3101,11 +3109,11 @@ function ChanChartTab({ data, code }) {
 
   return (
     <div>
-      <Row gutter={8} style={{ marginBottom: 12 }}>
-        <Col span={6}><Statistic title="K线天数" value={barCount || 0} valueStyle={{ fontSize: 16 }} /></Col>
-        <Col span={6}><Statistic title="笔数" value={penCount || 0} valueStyle={{ fontSize: 16 }} /></Col>
-        <Col span={6}><Statistic title="中枢数" value={hubCount || 0} valueStyle={{ fontSize: 16 }} /></Col>
-        <Col span={6}><Statistic title="买卖点" value={bsPointCount || 0} valueStyle={{ fontSize: 16 }} /></Col>
+      <Row gutter={[8, 8]} style={{ marginBottom: 12 }}>
+        <Col xs={12} sm={6}><Statistic title="K线天数" value={barCount || 0} valueStyle={{ fontSize: 16 }} /></Col>
+        <Col xs={12} sm={6}><Statistic title="笔数" value={penCount || 0} valueStyle={{ fontSize: 16 }} /></Col>
+        <Col xs={12} sm={6}><Statistic title="中枢数" value={hubCount || 0} valueStyle={{ fontSize: 16 }} /></Col>
+        <Col xs={12} sm={6}><Statistic title="买卖点" value={bsPointCount || 0} valueStyle={{ fontSize: 16 }} /></Col>
       </Row>
       <ReactECharts option={option} style={{ height: 600 }} notMerge lazyUpdate />
     </div>
@@ -3192,12 +3200,12 @@ function MoneyFlowHistoryTab({ data, bidAskData, code }) {
       {/* 内外盘比面板（独立展示） */}
       <BidAskPanel data={bidAskData} />
 
-      <Row gutter={8} style={{ marginBottom: 12 }}>
-        <Col span={4}><Statistic title="天数" value={days || 0} valueStyle={{ fontSize: 15 }} /></Col>
-        <Col span={5}><Statistic title="日均净流入" value={avgNetMain || 0} suffix="亿" precision={2} valueStyle={{ fontSize: 15 }} /></Col>
-        <Col span={5}><Statistic title="日均占比" value={avgNetMainPct || 0} suffix="%" precision={2} valueStyle={{ fontSize: 15 }} /></Col>
-        <Col span={5}><Statistic title="平均评分" value={avgMoneyScore || 0} suffix="/25" precision={1} valueStyle={{ fontSize: 15 }} /></Col>
-        <Col span={5}><Statistic title="流入占比" value={inflowRatio || 0} suffix="%" precision={1} valueStyle={{ fontSize: 15 }} /></Col>
+      <Row gutter={[8, 8]} style={{ marginBottom: 12 }}>
+        <Col xs={12} sm={8} md={4}><Statistic title="天数" value={days || 0} valueStyle={{ fontSize: 15 }} /></Col>
+        <Col xs={12} sm={8} md={5}><Statistic title="日均净流入" value={avgNetMain || 0} suffix="亿" precision={2} valueStyle={{ fontSize: 15 }} /></Col>
+        <Col xs={12} sm={8} md={5}><Statistic title="日均占比" value={avgNetMainPct || 0} suffix="%" precision={2} valueStyle={{ fontSize: 15 }} /></Col>
+        <Col xs={12} sm={8} md={5}><Statistic title="平均评分" value={avgMoneyScore || 0} suffix="/25" precision={1} valueStyle={{ fontSize: 15 }} /></Col>
+        <Col xs={12} sm={8} md={5}><Statistic title="流入占比" value={inflowRatio || 0} suffix="%" precision={1} valueStyle={{ fontSize: 15 }} /></Col>
       </Row>
       <ReactECharts option={option} style={{ height: 500 }} notMerge lazyUpdate />
     </div>
@@ -3275,15 +3283,15 @@ function RelativeStrengthTab({ data, code }) {
 
   return (
     <div>
-      <Row gutter={8} style={{ marginBottom: 12 }}>
-        <Col span={4}><Statistic title="行业" value={industry || '-'} valueStyle={{ fontSize: 14 }} /></Col>
-        <Col span={5}><Statistic title="个股累计" value={latestStockCumRet || 0} suffix="%" precision={2}
+      <Row gutter={[8, 8]} style={{ marginBottom: 12 }}>
+        <Col xs={12} sm={8} md={4}><Statistic title="行业" value={industry || '-'} valueStyle={{ fontSize: 14 }} /></Col>
+        <Col xs={12} sm={8} md={5}><Statistic title="个股累计" value={latestStockCumRet || 0} suffix="%" precision={2}
           valueStyle={{ fontSize: 15, color: (latestStockCumRet || 0) >= 0 ? '#ef5350' : '#26a69a' }} /></Col>
-        <Col span={5}><Statistic title="行业累计" value={latestIndCumRet || 0} suffix="%" precision={2}
+        <Col xs={12} sm={8} md={5}><Statistic title="行业累计" value={latestIndCumRet || 0} suffix="%" precision={2}
           valueStyle={{ fontSize: 15, color: (latestIndCumRet || 0) >= 0 ? '#ef5350' : '#26a69a' }} /></Col>
-        <Col span={5}><Statistic title="超额收益" value={latestExcessRet || 0} suffix="%" precision={2}
+        <Col xs={12} sm={8} md={5}><Statistic title="超额收益" value={latestExcessRet || 0} suffix="%" precision={2}
           valueStyle={{ fontSize: 15, color: (latestExcessRet || 0) >= 0 ? '#ef5350' : '#26a69a' }} /></Col>
-        <Col span={5}><Statistic title="RS Ratio" value={latestRsRatio || 0} precision={2}
+        <Col xs={12} sm={8} md={5}><Statistic title="RS Ratio" value={latestRsRatio || 0} precision={2}
           valueStyle={{ fontSize: 15, color: (latestRsRatio || 0) >= 1 ? '#ef5350' : '#26a69a' }} /></Col>
       </Row>
       <Alert

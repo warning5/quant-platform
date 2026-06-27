@@ -9,7 +9,7 @@ import {
   SwapOutlined, FundOutlined, ExperimentOutlined,
   QuestionCircleOutlined, RedoOutlined,
 } from '@ant-design/icons';
-import ReactECharts from 'echarts-for-react';
+import ReactECharts from '../../components/LazyECharts';
 import { backtestApi } from '../../api';
 import MonteCarloPanel from './MonteCarloPanel';
 import AttributionHub from './AttributionHub';

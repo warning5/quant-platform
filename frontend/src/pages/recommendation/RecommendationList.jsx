@@ -3,10 +3,11 @@ import { Link } from 'react-router-dom';
 import { Card, Table, Button, Tag, Select, Space, Statistic, Row, Col, Typography, Tooltip, Spin, Progress, DatePicker, Divider, Modal, Popconfirm, Switch } from 'antd';
 import { message } from '../../utils/messageUtil';
 import dayjs from 'dayjs';
-import { ThunderboltOutlined, ReloadOutlined, LineChartOutlined, StockOutlined, RiseOutlined, FallOutlined, MinusOutlined, QuestionCircleOutlined, RadarChartOutlined, StopOutlined, UnlockOutlined } from '@ant-design/icons';
+import { ThunderboltOutlined, ReloadOutlined, LineChartOutlined, StockOutlined, RiseOutlined, FallOutlined, MinusOutlined, QuestionCircleOutlined, RadarChartOutlined, StopOutlined, UnlockOutlined, DownloadOutlined } from '@ant-design/icons';
 import api, { recommendationApi, blacklistApi, confidenceApi, calendarApi } from '../../api';
 import { useFactorMeta } from '../../hooks/useFactorMeta';
-import ReactEcharts from 'echarts-for-react';
+import ReactECharts from '../../components/LazyECharts';
+import { exportCsv } from '../../utils/exportUtil';
 
 const { Title, Text } = Typography;
 
@@ -1216,7 +1217,36 @@ export default function RecommendationList() {
       })()}
 
       {/* 推荐列表 */}
-      <Card size="small" styles={{ body: { padding: 0 } }}>
+      <Card 
+        size="small" 
+        title={`🎯 推荐结果（共 ${recommendations.length} 只）`}
+        extra={
+          recommendations.length > 0 && (
+            <Button
+              size="small"
+              icon={<DownloadOutlined />}
+              onClick={() => exportCsv(
+                recommendations.map(r => ({
+                  股票代码: r.stockCode,
+                  股票名称: r.stockName,
+                  推荐评分: r.totalScore,
+                  技术评分: r.technicalScore,
+                  资金评分: r.capitalScore,
+                  事件评分: r.eventScore,
+                  基本面评分: r.fundamentalScore,
+                  风险评分: r.riskScore,
+                  流动性评分: r.liquidityScore,
+                  推荐理由: r.reason,
+                })),
+                `推荐结果_${selectedStrategyId}_${dayjs().format('YYYYMMDD')}`
+              )}
+            >
+              导出 CSV
+            </Button>
+          )
+        }
+        styles={{ body: { padding: 0 } }}
+      >
         <Spin spinning={loading}>
 
           {/* ── 方案C: 策略置信度状态栏 ── */}
@@ -1321,7 +1351,7 @@ export default function RecommendationList() {
                 const total6d = dims.reduce((s, d) => s + d.val, 0);
                 return (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 24, padding: '8px 16px', background: '#fafafa' }}>
-                    <ReactEcharts option={radarOption} style={{ width: 280, height: 220 }} />
+                    <ReactECharts option={radarOption} style={{ width: 280, height: 220 }} />
                     <div style={{ flex: 1, fontSize: 13 }}>
                       <div style={{ fontWeight: 600, marginBottom: 12, fontSize: 14 }}>📊 {rec.stockName}（{rec.stockCode}）六维度评分详情</div>
                       <Row gutter={[16, 8]}>
@@ -1643,7 +1673,7 @@ export default function RecommendationList() {
                 }
                 style={{ marginBottom: 16 }}
               >
-                <ReactEcharts option={trendOption} style={{ height: 260 }} />
+                <ReactECharts option={trendOption} style={{ height: 260 }} />
               </Card>
             )}
 

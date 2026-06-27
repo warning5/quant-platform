@@ -14,7 +14,7 @@ import {
   InfoCircleOutlined, WarningOutlined, StopOutlined
 } from '@ant-design/icons';
 import { Client } from '@stomp/stompjs';
-import ReactECharts from 'echarts-for-react';
+import ReactECharts from '../../components/LazyECharts';
 import dayjs from 'dayjs';
 import { factorApi } from '../../api';
 

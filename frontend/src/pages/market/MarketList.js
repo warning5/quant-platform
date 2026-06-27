@@ -3,11 +3,12 @@ import { Card, Table, Tag, Button, Select, Space, Typography, Row, Col, Statisti
 import { message } from '../../utils/messageUtil';
 import {
   ReloadOutlined, StockOutlined, RiseOutlined, FallOutlined,
-  BarChartOutlined, LineChartOutlined, SearchOutlined, QuestionCircleOutlined
+  BarChartOutlined, LineChartOutlined, SearchOutlined, QuestionCircleOutlined, DownloadOutlined
 } from '@ant-design/icons';
-import ReactECharts from 'echarts-for-react';
+import ReactECharts from '../../components/LazyECharts';
 import dayjs from 'dayjs';
 import { marketApi, silentConfig } from '../../api';
+import { exportCsv } from '../../utils/exportUtil';
 
 const { Title, Text } = Typography;
 const { RangePicker } = DatePicker;
@@ -384,13 +385,16 @@ export default function MarketList() {
                       title={`截面行情 · 共 ${crossTotal} 只`}
                       size="small"
                       extra={
-                        <Input.Search
+                        <Space>
+                          <Button size="small" icon={<DownloadOutlined />} onClick={() => exportCsv({ data: crossData || [], columns: crossSectionColumns, filename: '截面行情' })} disabled={!crossData?.length}>导出</Button>
+                          <Input.Search
                           placeholder="搜索代码或名称"
                           allowClear
                           onSearch={handleCrossSearch}
                           style={{ width: 200 }}
                           enterButton={<SearchOutlined />}
                         />
+                        </Space>
                       }
                     >
                       <Table

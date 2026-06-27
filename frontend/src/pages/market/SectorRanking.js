@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Table, Tag, Spin, Empty, Typography, Tabs, Statistic, Row, Col, Button, Select, Modal, Space } from 'antd';
 import { ArrowUpOutlined, ArrowDownOutlined, StockOutlined, ArrowLeftOutlined, RocketOutlined } from '@ant-design/icons';
-import ReactECharts from 'echarts-for-react';
+import ReactECharts from '../../components/LazyECharts';
 import { stockAnalysisApi } from '../../api';
 
 const { Title, Text } = Typography;
@@ -119,11 +119,11 @@ function SectorDetail({ conceptName, onBack }) {
     <div>
       <div style={{ marginBottom: 12 }}><a onClick={onBack}><ArrowLeftOutlined /> 返回板块列表</a></div>
       <Title level={4} style={{ marginBottom: 16 }}>{conceptName}</Title>
-      <Row gutter={16} style={{ marginBottom: 16 }}>
-        <Col span={4}><Card size="small"><Statistic title="成分股" value={stocks.length} /></Card></Col>
-        <Col span={4}><Card size="small"><Statistic title="平均涨跌" value={avgChange} suffix="%" valueStyle={{ color: chgColorHot(+avgChange) }} /></Card></Col>
-        <Col span={4}><Card size="small"><Statistic title="上涨" value={upCount} prefix={<ArrowUpOutlined />} valueStyle={{ color: '#ef5350' }} /></Card></Col>
-        <Col span={4}><Card size="small"><Statistic title="下跌" value={downCount} prefix={<ArrowDownOutlined />} valueStyle={{ color: '#26a69a' }} /></Card></Col>
+      <Row gutter={[16, 12]} style={{ marginBottom: 16 }}>
+        <Col xs={12} sm={6}><Card size="small"><Statistic title="成分股" value={stocks.length} /></Card></Col>
+        <Col xs={12} sm={6}><Card size="small"><Statistic title="平均涨跌" value={avgChange} suffix="%" valueStyle={{ color: chgColorHot(+avgChange) }} /></Card></Col>
+        <Col xs={12} sm={6}><Card size="small"><Statistic title="上涨" value={upCount} prefix={<ArrowUpOutlined />} valueStyle={{ color: '#ef5350' }} /></Card></Col>
+        <Col xs={12} sm={6}><Card size="small"><Statistic title="下跌" value={downCount} prefix={<ArrowDownOutlined />} valueStyle={{ color: '#26a69a' }} /></Card></Col>
       </Row>
       {trendOption && (<Card title="近5日板块涨跌" size="small" style={{ marginBottom: 16 }}>
         <ReactECharts option={trendOption} style={{ height: 200 }} notMerge={true} />

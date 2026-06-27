@@ -1,19 +1,17 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Card, Row, Col, Statistic, Table, Tag, Progress, Button, Select, Typography, Space, Badge, Modal, DatePicker, Form, Switch, Alert, Divider } from 'antd';
 import { message } from '../../utils/messageUtil';
 import {
   ReloadOutlined, PlayCircleOutlined, CheckCircleOutlined,
   ClockCircleOutlined, ThunderboltOutlined, RiseOutlined,
-  SyncOutlined, WarningOutlined, ClearOutlined, CodeOutlined
+  SyncOutlined, WarningOutlined, ClearOutlined, CodeOutlined, DownloadOutlined
 } from '@ant-design/icons';
-import ReactECharts from 'echarts-for-react';
+import ReactECharts from '../../components/LazyECharts';
 import dayjs from 'dayjs';
 import { factorApi } from '../../api/index';
 import { CATEGORY_LABELS } from './constants';
-
-// WebSocket 连接地址（Vite 代理转发到后端 /api/ws-native）
-// 注意：运算符优先级，必须用括号保证 protocol 完整拼接
-const WS_URL = (window.location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + window.location.host + '/ws-native';
+import { useStompWebSocket } from '../../hooks/useStompWebSocket';
+import { exportCsv } from '../../utils/exportUtil';
 
 const { Text, Title } = Typography;
 const { RangePicker } = DatePicker;
@@ -71,8 +69,6 @@ function FactorMonitor() {
       return saved ? JSON.parse(saved) : [];
     } catch { return []; }
   });
-  const [wsConnected, setWsConnected] = useState(false);
-  const wsRef = useRef(null);
   const logContainerRef = useRef(null);
   const pushLogRef = useRef(null); // 稳定引用，避免闭包问题
   const fetchDebounceRef = useRef(null);          // debounce 刷新定时器
@@ -94,172 +90,65 @@ function FactorMonitor() {
     try { sessionStorage.setItem('factor_compute_logs', JSON.stringify(computeLogs)); } catch { /* quota exceeded，忽略 */ }
   }, [computeLogs]);
 
-  // 手动 STOMP 帧
-  const stompFrame = useCallback((cmd, headers, body) => {
-    let frame = cmd + '\n';
-    if (headers) {
-      Object.entries(headers).forEach(([k, v]) => { frame += k + ':' + v + '\n'; });
-    }
-    frame += '\n' + (body || '') + '\x00';
-    return frame;
-  }, []);
+  // ── 统一 WebSocket（useStompWebSocket Hook）──
+  // 批量日志回调：处理 BATCH_START / BATCH_SUBMITTED / FACTOR_PROGRESS 消息
+  const handleBatchLog = useCallback((data) => {
+    const ts = data.timestamp
+      ? new Date(data.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      : dayjs().format('HH:mm:ss');
+    const push = pushLogRef.current;
+    if (!push) return;
 
-  // 解析 STOMP 帧
-  const parseStomp = useCallback((data) => {
-    const frames = [];
-    let remaining = data;
-    while (remaining.length > 0) {
-      const nullIdx = remaining.indexOf('\x00');
-      if (nullIdx === -1) break;
-      const frameStr = remaining.substring(0, nullIdx);
-      remaining = remaining.substring(nullIdx + 1);
-      // 处理 \r\n 换行（某些代理可能引入 \r）
-      const lines = frameStr.split('\n').map(l => l.endsWith('\r') ? l.slice(0, -1) : l);
-      const command = lines[0];
-      const headers = {};
-      let bodyStart = 1;
-      for (let i = 1; i < lines.length; i++) {
-        if (lines[i] === '') { bodyStart = i + 1; break; }
-        const colonIdx = lines[i].indexOf(':');
-        if (colonIdx > 0) {
-          headers[lines[i].substring(0, colonIdx)] = lines[i].substring(colonIdx + 1);
+    if (data.type === 'BATCH_START') {
+      push(`🚀 批量计算已启动：${data.totalFactors} 个因子 × ${data.symbolCount} 只股票 | ${data.startDate} ~ ${data.endDate} | ${data.incremental ? '增量模式' : '全量模式'}`, 'info', ts);
+    } else if (data.type === 'BATCH_SUBMITTED') {
+      const sub = data.submitted?.length || 0;
+      const skip = data.skipped?.length || 0;
+      push(`📋 提交完成：${sub} 个已提交，${skip} 个跳过`, skip > 0 ? 'warning' : 'success', ts);
+    } else if (data.type === 'FACTOR_PROGRESS') {
+      console.log('[WS] FACTOR_PROGRESS:', data);
+      const icons = { COMPUTING: '🔢', DONE: '✅', TEST_START: '🧪', TESTING: '📊', TEST_DONE: '🎉', FAILED: '❌' };
+      const icon = icons[data.stage] || 'ℹ️';
+      const logType = data.stage === 'DONE' || data.stage === 'TEST_DONE' ? 'success' : data.stage === 'FAILED' ? 'error' : 'info';
+      push(`${icon} [${data.factorCode}] ${data.message}`, logType, ts);
+      if (data.factorCode) {
+        if (data.stage === 'COMPUTING') {
+          setRunningFactorCodes(prev => new Set([...prev, data.factorCode]));
+          if (data.progress != null) setWsProgress(prev => ({ ...prev, [data.factorCode]: data.progress }));
+          if (data.etaSec != null) setFactorEtaSecData(prev => ({ ...prev, [data.factorCode]: data.etaSec }));
+        } else if (data.stage === 'DONE' || data.stage === 'FAILED' || data.stage === 'TEST_DONE') {
+          setRunningFactorCodes(prev => { const next = new Set(prev); next.delete(data.factorCode); return next; });
+          setWsProgress(prev => { const next = { ...prev }; delete next[data.factorCode]; return next; });
+          setFactorEtaSecData(prev => { const next = { ...prev }; delete next[data.factorCode]; return next; });
+          clearTimeout(fetchDebounceRef.current);
+          fetchDebounceRef.current = setTimeout(() => fetchData(), 500);
         }
       }
-      const body = lines.slice(bodyStart).join('\n');
-      frames.push({ command, headers, body });
     }
-    return frames;
-  }, []);
+  }, [fetchData]);
 
-  // WebSocket 连接
-  useEffect(() => {
-    let buffer = '';
-    const ws = new WebSocket(WS_URL);
-
-    ws.onopen = () => {
-      ws.send(stompFrame('CONNECT', {
-        'accept-version': '1.2',
-        'heart-beat': '10000,10000',
-      }));
-    };
-
-    ws.onmessage = (evt) => {
-      buffer += evt.data;
-      const frames = parseStomp(buffer);
-      const lastNullIdx = buffer.lastIndexOf('\x00');
-      buffer = lastNullIdx >= 0 ? buffer.substring(lastNullIdx + 1) : buffer;
-
-      // 调试：打印解析到的帧数
-      if (frames.length > 0) {
-        console.log('[WS] parsed frames:', frames.length, 'commands:', frames.map(f => f.command));
-      }
-
-      frames.forEach(frame => {
-        if (frame.command === 'CONNECTED') {
-          setWsConnected(true);
-          // 订阅批量日志
-          ws.send(stompFrame('SUBSCRIBE', {
-            id: 'batch-log-sub',
-            destination: '/topic/factor/batch-log',
-          }));
-          // 连上后主动查询后端正在计算的因子，同步状态
-          factorApi.running().then(res => {
-            const codes = res?.data || res;
-            if (Array.isArray(codes) && codes.length > 0) {
-              setRunningFactorCodes(new Set(codes));
-            } else {
-              setRunningFactorCodes(new Set());
-            }
-          }).catch(() => {});
-        } else if (frame.command === 'MESSAGE') {
-          try {
-            if (!frame.body || frame.body.trim() === '') {
-              console.warn('[WS] 收到空消息体');
-              return;
-            }
-            const data = JSON.parse(frame.body);
-            const ts = data.timestamp
-              ? new Date(data.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-              : dayjs().format('HH:mm:ss');
-            const push = pushLogRef.current;
-            if (!push) return;
-
-            if (data.type === 'BATCH_START') {
-              push(`🚀 批量计算已启动：${data.totalFactors} 个因子 × ${data.symbolCount} 只股票 | ${data.startDate} ~ ${data.endDate} | ${data.incremental ? '增量模式' : '全量模式'}`, 'info', ts);
-            } else if (data.type === 'BATCH_SUBMITTED') {
-              const sub = data.submitted?.length || 0;
-              const skip = data.skipped?.length || 0;
-              push(`📋 提交完成：${sub} 个已提交，${skip} 个跳过`, skip > 0 ? 'warning' : 'success', ts);
-            } else if (data.type === 'FACTOR_PROGRESS') {
-              // 🔍 调试：把完整 WebSocket 消息打印到浏览器 Console
-              console.log('[WS] FACTOR_PROGRESS:', data);
-              const icons = { COMPUTING: '🔢', DONE: '✅', TEST_START: '🧪', TESTING: '📊', TEST_DONE: '🎉', FAILED: '❌' };
-              const icon = icons[data.stage] || 'ℹ️';
-              const logType = data.stage === 'DONE' || data.stage === 'TEST_DONE' ? 'success' : data.stage === 'FAILED' ? 'error' : 'info';
-              push(`${icon} [${data.factorCode}] ${data.message}`, logType, ts);
-              // 通过 WebSocket 消息跟踪正在计算的因子（解决 cnt=0 时 isRunning 误判为 false 的问题）
-              // 同时存储实时进度（data.progress）
-              if (data.factorCode) {
-                if (data.stage === 'COMPUTING') {
-                  setRunningFactorCodes(prev => new Set([...prev, data.factorCode]));
-                  // 存储实时进度（后端 sendProgress 的 progress 字段，0-100）
-                  if (data.progress != null) {
-                    setWsProgress(prev => ({ ...prev, [data.factorCode]: data.progress }));
-                  }
-                  // 存储实时 ETA（后端 sendProgress 的 etaSec 字段）
-                  if (data.etaSec != null) {
-                    setFactorEtaSecData(prev => ({ ...prev, [data.factorCode]: data.etaSec }));
-                  }
-                } else if (data.stage === 'DONE' || data.stage === 'FAILED' || data.stage === 'TEST_DONE') {
-                  setRunningFactorCodes(prev => {
-                    const next = new Set(prev);
-                    next.delete(data.factorCode);
-                    return next;
-                  });
-                  setWsProgress(prev => {
-                    const next = { ...prev };
-                    delete next[data.factorCode];
-                    return next;
-                  });
-                  // 清除该因子的 ETA 缓存
-                  setFactorEtaSecData(prev => { const next = { ...prev }; delete next[data.factorCode]; return next; });
-                  // 计算完成后自动刷新列表状态（debounce 500ms，避免批量完成时频繁刷新）
-                  clearTimeout(fetchDebounceRef.current);
-                  fetchDebounceRef.current = setTimeout(() => fetchData(), 500);
-                }
-              }
-            }
-          } catch (e) {
-            console.error('WS message parse error:', e);
-          }
+  const { connected: wsConnected } = useStompWebSocket({
+    subscriptions: useMemo(() => ({
+      '/topic/factor/batch-log': handleBatchLog,
+    }), [handleBatchLog]),
+    onConnect: () => {
+      // 连上后主动查询后端正在计算的因子，同步状态
+      factorApi.running().then(res => {
+        const codes = res?.data || res;
+        if (Array.isArray(codes) && codes.length > 0) {
+          setRunningFactorCodes(new Set(codes));
+        } else {
+          setRunningFactorCodes(new Set());
         }
-      });
-    };
-
-    ws.onclose = () => {
-      setWsConnected(false);
+      }).catch(() => {});
+    },
+    onDisconnect: () => {
       // 后端可能已重启，清空残留的计算状态
       setRunningFactorCodes(new Set());
       setWsProgress({});
       setFactorEtaSecData({});
-    };
-    ws.onerror = () => {
-      setWsConnected(false);
-      setRunningFactorCodes(new Set());
-      setWsProgress({});
-      setFactorEtaSecData({});
-    };
-
-    wsRef.current = ws;
-    return () => {
-      clearTimeout(fetchDebounceRef.current);
-      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
-        try { ws.send(stompFrame('DISCONNECT')); } catch {}
-        ws.close();
-      }
-      wsRef.current = null;
-    };
-  }, [stompFrame, parseStomp]);
+    },
+  });
 
   // 初始化时加载因子定义
   useEffect(() => {
@@ -861,7 +750,10 @@ function FactorMonitor() {
 
       {/* 因子详情表格 */}
       <Card size="small" title="📋 因子详情" extra={
-        <Text type="secondary" style={{ fontSize: 12 }}>共 {(factors || []).length} 个因子</Text>
+        <Space>
+          <Button size="small" icon={<DownloadOutlined />} onClick={() => exportCsv({ data: factorsWithStats, columns, filename: '因子监控' })} disabled={!factorsWithStats?.length}>导出CSV</Button>
+          <Text type="secondary" style={{ fontSize: 12 }}>共 {(factors || []).length} 个因子</Text>
+        </Space>
       }>
         {factorsLoading ? (
           <div style={{ textAlign: 'center', padding: '40px 0', color: '#bfbfbf' }}>
@@ -874,6 +766,7 @@ function FactorMonitor() {
             dataSource={factorsWithStats}
             rowKey="code"
             size="small"
+            scroll={{ x: 'max-content' }}
             pagination={{ pageSize, showSizeChanger: true, pageSizeOptions: ['20', '50', '100'], onShowSizeChange: (_, size) => setPageSize(size) }}
             rowClassName={row => row.isDone ? '' : row.isRunning ? '' : 'row-pending'}
           />

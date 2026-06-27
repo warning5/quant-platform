@@ -2,13 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Card, Row, Col, Table, Tag, Button, Modal, Select, Input, InputNumber, Space, Typography, Statistic, Spin, Tooltip, Alert, Popconfirm, Form, Switch, Divider, Collapse, Tabs, Badge } from 'antd';
 import { message } from '../../utils/messageUtil';
+import { exportCsv } from '../../utils/exportUtil';
 import {
   ThunderboltOutlined, PlayCircleOutlined, PauseCircleOutlined,
   CheckCircleOutlined, CloseCircleOutlined, SendOutlined, LeftOutlined,
   InfoCircleOutlined, DeleteOutlined, AlertOutlined, BellOutlined, EyeOutlined,
-  FundOutlined, SafetyCertificateOutlined, BarChartOutlined,
+  FundOutlined, SafetyCertificateOutlined, BarChartOutlined, DownloadOutlined,
 } from '@ant-design/icons';
-import ReactECharts from 'echarts-for-react';
+import ReactECharts from '../../components/LazyECharts';
 import { paperTradingApi, strategyApi } from '../../api';
 import { useMarketThermometer } from '../../hooks/useMarketThermometer';
 
@@ -125,7 +126,7 @@ function PaperList({ onSelect }) {
         <Button type="primary" onClick={() => setShowCreate(true)}>新建模拟盘</Button>
       </div>
 
-      <Table dataSource={list} columns={columns} rowKey="id" size="small" loading={loading} pagination={false} />
+      <Table dataSource={list} columns={columns} rowKey="id" size="small" loading={loading} pagination={false} scroll={{ x: 'max-content' }} />
 
       <CreateModal visible={showCreate} onClose={() => setShowCreate(false)} onCreated={load} />
     </div>
@@ -566,12 +567,12 @@ function PaperDetail({ paperId, onBack }) {
         )}
       </div>
 
-      <Row gutter={12} style={{ marginBottom: 12 }}>
-        <Col span={4}><Card size="small"><Statistic title="初始资金" value={paper.initialCapital} prefix="¥" /></Card></Col>
-        <Col span={4}><Card size="small"><Statistic title="当前资产" value={paper.totalAssets} prefix="¥" valueStyle={{ color: chgColor(cumulativeReturn) }} /></Card></Col>
-        <Col span={4}><Card size="small"><Statistic title="累计收益" value={cumulativeReturn * 100} suffix="%" precision={2} valueStyle={{ color: chgColor(cumulativeReturn) }} /></Card></Col>
-        <Col span={4}><Card size="small"><Statistic title="持仓数" value={paper.positionCount} /></Card></Col>
-        <Col span={8}><Card size="small"><Statistic title="可用资金" value={paper.currentCapital} prefix="¥" /></Card></Col>
+      <Row gutter={[12, 12]} style={{ marginBottom: 12 }}>
+        <Col xs={12} sm={8} md={4}><Card size="small"><Statistic title="初始资金" value={paper.initialCapital} prefix="¥" /></Card></Col>
+        <Col xs={12} sm={8} md={4}><Card size="small"><Statistic title="当前资产" value={paper.totalAssets} prefix="¥" valueStyle={{ color: chgColor(cumulativeReturn) }} /></Card></Col>
+        <Col xs={12} sm={8} md={4}><Card size="small"><Statistic title="累计收益" value={cumulativeReturn * 100} suffix="%" precision={2} valueStyle={{ color: chgColor(cumulativeReturn) }} /></Card></Col>
+        <Col xs={12} sm={8} md={4}><Card size="small"><Statistic title="持仓数" value={paper.positionCount} /></Card></Col>
+        <Col xs={24} sm={12} md={8}><Card size="small"><Statistic title="可用资金" value={paper.currentCapital} prefix="¥" /></Card></Col>
       </Row>
 
       <Tabs
@@ -629,8 +630,39 @@ function PaperDetail({ paperId, onBack }) {
                   </Card>
                 )}
                 <Card title="当前持仓" size="small">
-                  <Table dataSource={positions} columns={posColumns} rowKey="id" size="small" pagination={false} />
-                  {positions.length === 0 && <Text type="secondary">暂无持仓</Text>}
+                  <Row gutter={16}>
+                    <Col span={positions.length > 3 ? 16 : 24}>
+                      <Table dataSource={positions} columns={posColumns} rowKey="id" size="small" pagination={false} scroll={{ x: 'max-content' }} />
+                      {positions.length === 0 && <Text type="secondary">暂无持仓</Text>}
+                    </Col>
+                    {positions.length > 3 && (
+                      <Col xs={24} sm={8}>
+                        <ReactECharts
+                          option={{
+                            tooltip: { trigger: 'item', formatter: '{b}: ¥{c} ({d}%)' },
+                            legend: { type: 'scroll', orient: 'vertical', right: 0, top: 20, bottom: 20, itemWidth: 10, itemHeight: 10, textStyle: { fontSize: 11 } },
+                            series: [{
+                              type: 'pie',
+                              radius: ['35%', '70%'],
+                              center: ['35%', '50%'],
+                              data: positions.map(p => ({
+                                name: p.name || p.code,
+                                value: +p.marketValue || 0,
+                                itemStyle: { color: +p.profitLossPct > 0 ? '#cf1322' : +p.profitLossPct < 0 ? '#3f8600' : '#8c8c8c' },
+                              })),
+                              label: { show: false },
+                              emphasis: { label: { show: true, fontSize: 12, fontWeight: 'bold' } },
+                            }],
+                          }}
+                          style={{ height: 200 }}
+                          notMerge={true}
+                        />
+                        <Text type="secondary" style={{ fontSize: 11, textAlign: 'center', display: 'block' }}>
+                          持仓市值分布（红=盈利 绿=亏损）
+                        </Text>
+                      </Col>
+                    )}
+                  </Row>
                 </Card>
               </>
             ),
@@ -645,6 +677,7 @@ function PaperDetail({ paperId, onBack }) {
                     <Button type="primary" icon={<SendOutlined />} onClick={handleGenerate} loading={genLoading}>生成信号</Button>
                     <Button icon={<SafetyCertificateOutlined />} onClick={() => setCondOrderVisible(true)}>创建条件单</Button>
                     <Button icon={<CheckCircleOutlined />} onClick={handleCheckConditionalOrders}>检查条件单</Button>
+                    <Button icon={<DownloadOutlined />} onClick={() => exportCsv({ data: signals, columns: sigColumns, filename: `信号_${paperId}` })}>导出CSV</Button>
                   </Col>
                 </Row>
                 <Alert
@@ -662,7 +695,7 @@ function PaperDetail({ paperId, onBack }) {
                   style={{ marginBottom: 16 }}
                 />
                 <Card title="交易信号" size="small">
-                  <Table dataSource={signals} columns={sigColumns} rowKey="id" size="small" pagination={{ pageSize: 10 }} />
+                  <Table dataSource={signals} columns={sigColumns} rowKey="id" size="small" pagination={{ pageSize: 10 }} scroll={{ x: 'max-content' }} />
                   {signals.length === 0 && <Text type="secondary">暂无信号，请先生成信号</Text>}
                 </Card>
               </>
@@ -720,6 +753,7 @@ function PaperDetail({ paperId, onBack }) {
                       rowKey="id"
                       size="small"
                       pagination={{ pageSize: 10 }}
+                      scroll={{ x: 'max-content' }}
                       rowClassName={r => !r.isRead ? 'alert-unread-row' : ''}
                       columns={[
                         { title: '日期', dataIndex: 'alertDate', width: 100, render: v => !v ? '-' : v },
@@ -797,42 +831,42 @@ function PaperDetail({ paperId, onBack }) {
                 />
                 <Form form={riskForm} layout="vertical" size="small">
                   <Row gutter={16}>
-                    <Col span={8}>
+                    <Col xs={24} sm={8}>
                       <Form.Item label={<LabelWithTip text="止损阈值" tip="单笔持仓亏损达到此比例，触发止损卖出信号。例：0.08=亏损8%止损" />} name="stopLossPct">
                         <InputNumber min={0} max={1} step={0.01} style={{ width: '100%' }} placeholder="0.08" />
                       </Form.Item>
                     </Col>
-                    <Col span={8}>
+                    <Col xs={24} sm={8}>
                       <Form.Item label={<LabelWithTip text="止盈阈值" tip="单笔持仓盈利达到此比例，触发止盈卖出信号。例：0.30=盈利30%止盈" />} name="takeProfitPct">
                         <InputNumber min={0} max={10} step={0.01} style={{ width: '100%' }} placeholder="0.30" />
                       </Form.Item>
                     </Col>
-                    <Col span={8}>
+                    <Col xs={24} sm={8}>
                       <Form.Item label={<LabelWithTip text="最大单股集中度" tip="单一股票市值占总资产的比例上限。例：0.20=单股不超过20%" />} name="maxPositionPct">
                         <InputNumber min={0.01} max={1} step={0.01} style={{ width: '100%' }} placeholder="0.20" />
                       </Form.Item>
                     </Col>
-                    <Col span={8}>
+                    <Col xs={24} sm={8}>
                       <Form.Item label={<LabelWithTip text="最大行业暴露" tip="同一行业市值占总资产的比例上限。建议≤30%。例：0.30=单一行业不超过30%" />} name="maxIndustryPct">
                         <InputNumber min={0.01} max={0.35} step={0.01} style={{ width: '100%' }} placeholder="0.30" />
                       </Form.Item>
                     </Col>
-                    <Col span={8}>
+                    <Col xs={24} sm={8}>
                       <Form.Item label={<LabelWithTip text="最大回撤限制" tip="从历史峰值最大回撤比例。例：0.15=回撤不超过15%" />} name="maxDrawdownPct">
                         <InputNumber min={0.01} max={1} step={0.01} style={{ width: '100%' }} placeholder="0.15" />
                       </Form.Item>
                     </Col>
-                    <Col span={8}>
+                    <Col xs={24} sm={8}>
                       <Form.Item label={<LabelWithTip text="大盘择时" tip="开启后，大盘温度计为空头信号时自动暂停新开仓（不影响已有持仓）" />} name="timingEnabled" valuePropName="checked">
                         <Switch checkedChildren="开" unCheckedChildren="关" />
                       </Form.Item>
                     </Col>
-                    <Col span={8}>
+                    <Col xs={24} sm={8}>
                       <Form.Item label={<LabelWithTip text="自动阻断" tip="开启后，行业集中度/单股仓位/最大回撤超限时自动阻止交易（而非仅生成预警）。关闭则仅生成预警不阻断。" />} name="autoBlockEnabled" valuePropName="checked">
                         <Switch checkedChildren="开" unCheckedChildren="关" />
                       </Form.Item>
                     </Col>
-                    <Col span={8}>
+                    <Col xs={24} sm={8}>
                       <Form.Item label={<LabelWithTip text="TWAP拆分阈值" tip="单笔委托超过此股数时，自动触发TWAP拆单（大单拆分为多笔小单执行，降低市场冲击）。设为0则禁用TWAP。" />} name="twapThreshold">
                         <InputNumber min={0} step={10000} style={{ width: '100%' }} addonAfter="股" />
                       </Form.Item>
@@ -903,6 +937,7 @@ function PaperDetail({ paperId, onBack }) {
                           rowKey="id"
                           size="small"
                           pagination={{ pageSize: 10 }}
+                          scroll={{ x: 'max-content' }}
                           columns={[
                             { title: '时间', dataIndex: 'executionTime', render: v => v || '-' },
                             { title: '代码', dataIndex: 'code' },

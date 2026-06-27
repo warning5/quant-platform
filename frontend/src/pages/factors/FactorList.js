@@ -1,10 +1,11 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { Table, Tag, Button, Space, Input, Select, Card, Typography, Popconfirm, Tooltip, Badge, DatePicker, Alert, Modal, Radio } from 'antd';
 import { message } from '../../utils/messageUtil';
-import { PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined, PlayCircleOutlined, ClearOutlined, SearchOutlined, CalculatorOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined, PlayCircleOutlined, ClearOutlined, SearchOutlined, CalculatorOutlined, ThunderboltOutlined, DownloadOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { factorApi } from '../../api';
 import { CATEGORY_OPTIONS, CATEGORY_LABELS } from './constants';
+import { exportCsv } from '../../utils/exportUtil';
 import dayjs from 'dayjs';
 
 const { Title } = Typography;
@@ -372,7 +373,9 @@ export default function FactorList() {
         )}
       </Card>
 
-      <Card style={{ border: '1px solid #d9d9d9' }}>
+      <Card style={{ border: '1px solid #d9d9d9' }} extra={
+        <Button size="small" icon={<DownloadOutlined />} onClick={() => exportCsv({ data: data?.records || [], columns, filename: '因子列表' })} disabled={!data?.records?.length}>导出CSV</Button>
+      }>
         {selectedRowKeys.length > 0 && (
           <Alert
             type="info"

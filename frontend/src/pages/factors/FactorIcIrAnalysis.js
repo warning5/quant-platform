@@ -9,7 +9,7 @@ import {
   CheckCircleOutlined, WarningOutlined, CloseCircleOutlined, QuestionCircleOutlined,
   ArrowUpOutlined, ArrowDownOutlined, MinusOutlined, DownloadOutlined,
 } from '@ant-design/icons';
-import ReactECharts from 'echarts-for-react';
+import ReactECharts from '../../components/LazyECharts';
 import { factorApi, strategyApi, recommendationApi } from '../../api';
 
 const { Text, Title } = Typography;

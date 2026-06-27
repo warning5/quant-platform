@@ -8,7 +8,7 @@ import {
   TrophyOutlined, RiseOutlined, FallOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import ReactECharts from 'echarts-for-react';
+import ReactECharts from '../../components/LazyECharts';
 import { backtestApi } from '../../api';
 
 const { Title, Text } = Typography;

@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { Table, Tag, Button, Space, Input, Select, Card, Typography, Popconfirm, Tooltip, Badge } from 'antd';
 import { message } from '../../utils/messageUtil';
-import { PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined, ExperimentOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined, ExperimentOutlined, DownloadOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { strategyApi } from '../../api';
+import { exportCsv } from '../../utils/exportUtil';
 
 const { Title } = Typography;
 const { Option } = Select;
@@ -103,7 +104,9 @@ export default function StrategyList() {
         </Space>
       </Card>
 
-      <Card style={{ border: '1px solid #d9d9d9' }}>
+      <Card style={{ border: '1px solid #d9d9d9' }} extra={
+        <Button size="small" icon={<DownloadOutlined />} onClick={() => exportCsv({ data: data?.records || [], columns, filename: '策略列表' })} disabled={!data?.records?.length}>导出CSV</Button>
+      }>
         <Table
           dataSource={data.records}
           columns={columns}

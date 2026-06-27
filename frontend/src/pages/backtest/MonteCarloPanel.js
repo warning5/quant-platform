@@ -6,7 +6,7 @@ import {
 import {
   ExperimentOutlined, ReloadOutlined, InfoCircleOutlined,
 } from '@ant-design/icons';
-import ReactECharts from 'echarts-for-react';
+import ReactECharts from '../../components/LazyECharts';
 import { backtestApi } from '../../api';
 
 const { Text } = Typography;

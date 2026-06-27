@@ -5,7 +5,7 @@ import { message } from '../../utils/messageUtil';
 import {
   BarChartOutlined, ReloadOutlined, AimOutlined, InfoCircleOutlined, CheckCircleOutlined,
 } from '@ant-design/icons';
-import ReactECharts from 'echarts-for-react';
+import ReactECharts from '../../components/LazyECharts';
 import { factorApi } from '../../api';
 import { CATEGORY_LABELS as categoryNames } from './constants';
 

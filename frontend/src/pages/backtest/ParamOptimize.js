@@ -16,7 +16,7 @@ import {
   QuestionCircleOutlined, RocketOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import ReactECharts from 'echarts-for-react';
+import ReactECharts from '../../components/LazyECharts';
 import { backtestApi, strategyApi } from '../../api';
 
 const { Title, Text } = Typography;

@@ -7,7 +7,7 @@ import {
   PieChartOutlined, BarChartOutlined, QuestionCircleOutlined,
   SafetyCertificateOutlined, ThunderboltOutlined, RobotOutlined, ArrowLeftOutlined
 } from '@ant-design/icons';
-import ReactECharts from 'echarts-for-react';
+import ReactECharts from '../../components/LazyECharts';
 import { financialApi, marketApi, silentConfig } from '../../api';
 
 const { Title, Text } = Typography;

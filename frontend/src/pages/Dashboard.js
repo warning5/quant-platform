@@ -94,6 +94,7 @@ export default function Dashboard() {
               rowKey="id"
               pagination={false}
               size="small"
+              scroll={{ x: 'max-content' }}
             />
           </Card>
         </Col>
@@ -105,6 +106,7 @@ export default function Dashboard() {
               rowKey="id"
               pagination={false}
               size="small"
+              scroll={{ x: 'max-content' }}
             />
           </Card>
         </Col>

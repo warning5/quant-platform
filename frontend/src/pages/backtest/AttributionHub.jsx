@@ -10,7 +10,7 @@ import {
   ClockCircleOutlined, DollarOutlined, FundOutlined,
   LineChartOutlined, AlertOutlined, DashboardOutlined,
 } from '@ant-design/icons';
-import ReactECharts from 'echarts-for-react';
+import ReactECharts from '../../components/LazyECharts';
 import { backtestApi } from '../../api';
 import { useFactorMeta } from '../../hooks/useFactorMeta';
 
@@ -925,34 +925,34 @@ function TradeAttributionPanel({ attr }) {
   return (
     <Card size="small" title={<><DollarOutlined style={{ marginRight: 6 }} />关键交易贡献分析</>}
       style={{ marginBottom: 16 }}>
-      <Row gutter={16} style={{ marginBottom: 12 }}>
-        <Col span={6}><Statistic title="总配对交易" value={attr.totalTrades} suffix="笔" /></Col>
-        <Col span={6}>
+      <Row gutter={[16, 12]} style={{ marginBottom: 12 }}>
+        <Col xs={12} sm={6}><Statistic title="总配对交易" value={attr.totalTrades} suffix="笔" /></Col>
+        <Col xs={12} sm={6}>
           <Statistic title="盈利笔数"
             value={attr.winnerCount}
             suffix={`/${attr.totalTrades}`}
             valueStyle={{ color: RED }}
           />
         </Col>
-        <Col span={6}>
+        <Col xs={12} sm={6}>
           <Statistic title="最大单笔盈利" value={fmtMoney(attr.maxWin)}
             valueStyle={{ color: RED, fontSize: 16 }}
           />
         </Col>
-        <Col span={6}>
+        <Col xs={12} sm={6}>
           <Statistic title="最大单笔亏损" value={fmtMoney(attr.maxLoss)}
             valueStyle={{ color: GREEN, fontSize: 16 }}
           />
         </Col>
       </Row>
-      <Row gutter={16} style={{ marginBottom: 12 }}>
-        <Col span={6}><Statistic title="平均盈利" value={fmtMoney(attr.avgWin)} valueStyle={{ color: RED, fontSize: 14 }} /></Col>
-        <Col span={6}><Statistic title="平均亏损" value={fmtMoney(attr.avgLoss)} valueStyle={{ color: GREEN, fontSize: 14 }} /></Col>
-        <Col span={6}>
+      <Row gutter={[16, 12]} style={{ marginBottom: 12 }}>
+        <Col xs={12} sm={6}><Statistic title="平均盈利" value={fmtMoney(attr.avgWin)} valueStyle={{ color: RED, fontSize: 14 }} /></Col>
+        <Col xs={12} sm={6}><Statistic title="平均亏损" value={fmtMoney(attr.avgLoss)} valueStyle={{ color: GREEN, fontSize: 14 }} /></Col>
+        <Col xs={12} sm={6}>
           <Statistic title="盈亏比" value={attr.avgLoss !== 0 ? fmt(Math.abs(attr.avgWin / attr.avgLoss)) : '-'}
             valueStyle={{ fontSize: 14 }} />
         </Col>
-        <Col span={6}>
+        <Col xs={12} sm={6}>
           <Statistic title="Top 3 贡献" value={fmtPct(attr.top3Contribution)}
             suffix={attr.top3Contribution > 0.5 ? <Tag color="volcano">集中</Tag> : null}
           />
@@ -2417,21 +2417,21 @@ function FF3Detail({ taskId }) {
       })()}
 
       {/* 关键指标 */}
-      <Row gutter={12} style={{marginBottom:12}}>
-        <Col span={6}>
+      <Row gutter={[12, 12]} style={{marginBottom:12}}>
+        <Col xs={12} sm={6}>
           <Card size="small"><Statistic title="R²" value={fmtPct(regressionDetail.rSquared || 0)} valueStyle={{fontSize:20}} suffix={
             <Text style={{fontSize:11}} type="secondary">（解释力）</Text>
           } /></Card>
         </Col>
-        <Col span={6}>
+        <Col xs={12} sm={6}>
           <Card size="small"><Statistic title="日 Alpha" value={fmtPct(regressionDetail.alpha || 0)}
             valueStyle={{fontSize:20, color: (regressionDetail.alpha||0)>=0?RED:GREEN}} /></Card>
         </Col>
-        <Col span={6}>
+        <Col xs={12} sm={6}>
           <Card size="small"><Statistic title="年化 Alpha" value={fmtPct(regressionDetail.annualizedAlpha || 0)}
             valueStyle={{fontSize:20, color: (regressionDetail.annualizedAlpha||0)>=0?RED:GREEN}} /></Card>
         </Col>
-        <Col span={6}>
+        <Col xs={12} sm={6}>
           <Card size="small"><Statistic title="α t 值" value={fmt(regressionDetail.alphaTStat, 2)}
             valueStyle={{fontSize:20, color: Math.abs(regressionDetail.alphaTStat||0)>=1.96?'#fa8c16':undefined}}
             suffix={Math.abs(regressionDetail.alphaTStat||0)>=1.96 ? <Tag color="orange" style={{fontSize:10,padding:'0 4px',lineHeight:'16px'}}>显著</Tag> : ''} /></Card>
@@ -2458,11 +2458,11 @@ function FF3Detail({ taskId }) {
       </Text>
 
       {/* 贡献饼图 */}
-      <Row gutter={16} style={{marginTop:12}}>
-        <Col span={12}>
+      <Row gutter={[16, 12]} style={{marginTop:12}}>
+        <Col xs={24} md={12}>
           <ReactECharts option={contribPieOption} style={{ height: 260 }} />
         </Col>
-        <Col span={12}>
+        <Col xs={24} md={12}>
           <Table size="small" dataSource={styleContributions} pagination={false}
             rowKey={r => r.factorCode}
             columns={[
@@ -2576,17 +2576,17 @@ function AlphaMonitorPanel({ taskId }) {
       )}
 
       {/* 关键指标 */}
-      <Row gutter={12} style={{marginBottom:12}}>
-        <Col span={8}>
+      <Row gutter={[12, 12]} style={{marginBottom:12}}>
+        <Col xs={24} sm={8}>
           <Card size="small"><Statistic title="历史 Alpha 均值" value={fmtPct(data.historicalMean || 0)}
             valueStyle={{fontSize:20, color: (data.historicalMean||0)>=0?'#52c41a':'#ff4d4f'}} /></Card>
         </Col>
-        <Col span={8}>
+        <Col xs={24} sm={8}>
           <Card size="small"><Statistic title="近期 Alpha 均值" value={fmtPct(data.recentMean || 0)}
             valueStyle={{fontSize:20, color: (data.recentMean||0)>=0?'#52c41a':'#ff4d4f'}} /></Card>
         </Col>
         {!data.decayWarning?.includes('数据不足') && (
-        <Col span={8}>
+        <Col xs={24} sm={8}>
           <Card size="small"><Statistic title="近期趋势" value={data.slope != null ? data.slope.toFixed(6) : '-'}
             valueStyle={{fontSize:20, color: (data.slope||0)<0?'#fa8c16':'#52c41a'}} suffix="斜率" /></Card>
         </Col>
@@ -2801,20 +2801,20 @@ function StyleMonitorPanel({ taskId }) {
       )}
 
       {/* 关键指标 */}
-      <Row gutter={12} style={{marginBottom:12}}>
-        <Col span={6}>
+      <Row gutter={[12, 12]} style={{marginBottom:12}}>
+        <Col xs={12} sm={6}>
           <Card size="small"><Statistic title="SMB 历史均值" value={fmt(data.smbHistoricalMean, 4)}
             valueStyle={{fontSize:18, color: (data.smbHistoricalMean||0)>=0?RED:GREEN}} /></Card>
         </Col>
-        <Col span={6}>
+        <Col xs={12} sm={6}>
           <Card size="small"><Statistic title="SMB 近期均值" value={fmt(data.smbRecentMean, 4)}
             valueStyle={{fontSize:18, color: (data.smbRecentMean||0)>=0?RED:GREEN}} /></Card>
         </Col>
-        <Col span={6}>
+        <Col xs={12} sm={6}>
           <Card size="small"><Statistic title="HML 历史均值" value={fmt(data.hmlHistoricalMean, 4)}
             valueStyle={{fontSize:18, color: (data.hmlHistoricalMean||0)>=0?RED:GREEN}} /></Card>
         </Col>
-        <Col span={6}>
+        <Col xs={12} sm={6}>
           <Card size="small"><Statistic title="HML 近期均值" value={fmt(data.hmlRecentMean, 4)}
             valueStyle={{fontSize:18, color: (data.hmlRecentMean||0)>=0?RED:GREEN}} /></Card>
         </Col>

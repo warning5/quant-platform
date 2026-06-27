@@ -162,7 +162,7 @@ class StockDailyDB:
     CH_TABLE = "stock.stock_daily"
     CH_INDEX_TABLE = "stock.index_daily"  # 指数日线（上证指数/沪深300/创业板指等，code 纯数字无前缀）
 
-    # ─── stock_daily / index_daily 共用字段（18列）────────────
+    # ─── stock_daily / index_daily 共用字段（19列）────────────
     DAILY_COLUMNS = [
         "id",              # 自增主键
         "code",            # 股票代码（纯数字：000300=沪深300 / 600519=贵州茅台）
@@ -180,6 +180,7 @@ class StockDailyDB:
         "turnover_rate",   # 换手率(%)（指数通常为 NULL）
         "pe_ttm",          # 市盈率 TTM（指数通常为 NULL）
         "pb",              # 市净率（指数通常为 NULL）
+        "data_source",     # 数据来源（baostock/qq/qq_fallback，2026-06-26 新增）
         "create_time",     # 创建时间
         "update_time",     # 更新时间（ReplacingMergeTree 版本列，新值覆盖旧值）
     ]
@@ -646,12 +647,8 @@ class StockDailyDB:
         now_dt = datetime.now()
         # 使用实例方法 _ch_norm_code（统一 code 格式）
 
-        biz_cols = [
-            "id", "code", "trade_date", "name", "open_price", "close_price",
-            "high_price", "low_price", "pre_close", "volume", "amount",
-            "change_percent", "change_amount", "turnover_rate",
-            "pe_ttm", "pb", "data_source",
-        ]
+        # biz_cols = DAILY_COLUMNS 不含 create_time/update_time（自动同步）
+        biz_cols = [c for c in self.DAILY_COLUMNS if c not in ("create_time", "update_time")]  # 不含 create_time/update_time
 
         # ── 预过滤：查 FINAL 表，找出已存在的 (code, trade_date) ──
         existing_keys = set()
@@ -687,8 +684,10 @@ class StockDailyDB:
                             code_chunk = code_list[ci:ci + ch_batch]
                             code_ph = ", ".join(f"'{c}'" for c in code_chunk)
                             date_ph = ", ".join(f"'{d}'" for d in date_str_list)
+                            # 不用 FINAL（FINAL 强制合并所有 part，百万行表极慢）
+                            # ReplacingMergeTree 后台自动去重，短暂重复行对业务无影响
                             r = self.ch_client.query(
-                                f"SELECT code, trade_date FROM {target_table} FINAL "
+                                f"SELECT code, trade_date FROM {target_table} "
                                 f"WHERE code IN ({code_ph}) AND trade_date IN ({date_ph})"
                             )
                             for row_data in r.result_rows:
@@ -738,14 +737,16 @@ class StockDailyDB:
                     val = row.get(col)
                     if col == "code":
                         val = self._ch_norm_code(val)  # ← 统一去前缀
-                    if col == "trade_date":
+                    elif col == "trade_date":
                         if isinstance(val, str):
                             val = date.fromisoformat(val)
                         elif isinstance(val, datetime):
                             val = val.date()
                     elif col in ("volume",) and val is not None:
                         val = int(val)
-                    elif col != "code" and col != "name" and val is not None:
+                    elif col in ("name", "data_source"):
+                        pass  # String 列，不转换，原样追加
+                    elif val is not None:
                         val = float(val)
                     vals.append(val)
 
@@ -1438,9 +1439,9 @@ class StockDailyDB:
                         continue
 
                     if pe_val is not None:
-                        row_dict['pe_ttm'] = float(pe_val)
+                        row_dict['pe_ttm'] = to_float(pe_val)
                     if pb_val is not None:
-                        row_dict['pb'] = float(pb_val)
+                        row_dict['pb'] = to_float(pb_val)
                     row_dict['update_time'] = now_dt
 
                     vals = [row_dict.get(col) for col in self.DAILY_COLUMNS]
@@ -1463,10 +1464,10 @@ class StockDailyDB:
                     params = []
                     if pe_val is not None:
                         set_parts.append("pe_ttm = %s")
-                        params.append(float(pe_val))
+                        params.append(to_float(pe_val))
                     if pb_val is not None:
                         set_parts.append("pb = %s")
-                        params.append(float(pb_val))
+                        params.append(to_float(pb_val))
                     if set_parts:
                         params.extend([code, trade_date])
                         sql = f"UPDATE stock_daily SET {', '.join(set_parts)} WHERE code = %s AND trade_date = %s"

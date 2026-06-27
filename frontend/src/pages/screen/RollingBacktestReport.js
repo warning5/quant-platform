@@ -6,7 +6,7 @@ import {
   StopOutlined, QuestionCircleOutlined, DownOutlined, RightOutlined, RedoOutlined
 } from '@ant-design/icons';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import ReactECharts from 'echarts-for-react';
+import ReactECharts from '../../components/LazyECharts';
 import { backtestApi } from '../../api';
 
 const { Title, Text } = Typography;

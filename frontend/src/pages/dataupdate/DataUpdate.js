@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Card, Row, Col, Statistic, Button, Input, Select, DatePicker, Form,
   Checkbox, Tag, Typography, Space, Alert, Table, Tooltip, Progress, Badge, Divider, Tabs, Spin, Modal, Popconfirm, Radio, Collapse
@@ -16,12 +16,10 @@ import {
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { dataUpdateApi, financialApi, silentConfig } from '../../api/index';
+import { useStompWebSocket } from '../../hooks/useStompWebSocket';
 
 const { Text, Title } = Typography;
 const { RangePicker } = DatePicker;
-
-// WebSocket 地址 - 开发环境直接连后端（绕过 Vite WS 代理兼容性问题）
-const WS_URL = 'ws://localhost:8080/api/ws-native';
 
 const SOURCE_OPTIONS = [
   { value: 'ALL', label: '全部数据源' },
@@ -197,8 +195,6 @@ function DataUpdate() {
   const [form] = Form.useForm();
   const [indexForm] = Form.useForm();
   const [dividendForm] = Form.useForm();
-  const wsRef = useRef(null);
-  const reconnectTimerRef = useRef(null);
 
   // 三个 Tab 各自独立的任务状态和日志
   const [dailyTask, setDailyTask] = useState(null);
@@ -380,6 +376,7 @@ function DataUpdate() {
         loading={delistedLoading}
         size="small"
         pagination={false}
+        scroll={{ x: 'max-content' }}
         rowSelection={{
           type: 'checkbox',
           selectedRowKeys: selectedDelistedKeys,
@@ -429,8 +426,6 @@ function DataUpdate() {
       />
     </div>
   );
-
-  const [wsConnected, setWsConnected] = useState(false);
 
   // 当前激活的 Tab（刷新后保持在原 Tab）
   const [activeTab, setActiveTab] = useState(
@@ -544,128 +539,80 @@ function DataUpdate() {
     }
   }, []);
 
-  // ========== WebSocket 连接 ==========
-  const connectWs = useCallback(() => {
-    if (wsRef.current) return;
+  // ── 统一 WebSocket（useStompWebSocket Hook）──
+  // 状态回调：根据 updateType 更新对应任务状态
+  const handleUpdateStatus = useCallback((msg) => {
+    const ut = msg.updateType || 'DAILY';
+    const updater = getTaskUpdater(ut);
+    updater(prev => {
+      const t = prev ? { ...prev } : {};
+      if (msg.taskId !== undefined) t.taskId = msg.taskId;
+      if (msg.status !== undefined) t.status = msg.status;
+      if (msg.progress !== undefined) t.progress = msg.progress;
+      if (msg.currentStep !== undefined) t.currentStep = msg.currentStep;
+      if (msg.processedStocks !== undefined) t.processedStocks = msg.processedStocks;
+      if (msg.totalStocks !== undefined) t.totalStocks = msg.totalStocks;
+      if (msg.processedRecords !== undefined) t.processedRecords = msg.processedRecords;
+      if (msg.failedStocks !== undefined) t.failedStocks = msg.failedStocks;
+      if (msg.startTime !== undefined) t.startTime = msg.startTime;
+      if (msg.endTime !== undefined) t.endTime = msg.endTime;
+      if (msg.error !== undefined) t.error = msg.error;
+      if (msg.bidAskStats !== undefined) t.bidAskStats = msg.bidAskStats;
+      t.updateType = ut;
+      if (msg.market !== undefined) t.configMarket = msg.market;
+      if (msg.source !== undefined) t.configSource = msg.source;
+      if (msg.startDate !== undefined) t.configStartDate = msg.startDate;
+      if (msg.endDate !== undefined) t.configEndDate = msg.endDate;
+      if (msg.resume !== undefined) t.configResume = msg.resume;
+      if (msg.excludeSt !== undefined) t.configExcludeSt = msg.excludeSt;
+      if (msg.dailyOnly !== undefined) t.configDailyOnly = msg.dailyOnly;
+      if (msg.infoOnly !== undefined) t.configInfoOnly = msg.infoOnly;
+      if (msg.force !== undefined) t.configForce = msg.force;
+      if (msg.yearStart !== undefined) t.configYearStart = msg.yearStart;
+      if (msg.yearEnd !== undefined) t.configYearEnd = msg.yearEnd;
+      if (msg.stockPool !== undefined) t.configStockPool = msg.stockPool;
+      if (msg.fetchLhb !== undefined) t.configFetchLhb = msg.fetchLhb;
+      if (msg.fetchMargin !== undefined) t.configFetchMargin = msg.fetchMargin;
+      if (msg.fetchSurvey !== undefined) t.configFetchSurvey = msg.fetchSurvey;
+      if (msg.fetchBlockTrade !== undefined) t.configFetchBlockTrade = msg.fetchBlockTrade;
+      if (msg.fetchActivity !== undefined) t.configFetchActivity = msg.fetchActivity;
+      if (msg.fetchZtPool !== undefined) t.configFetchZtPool = msg.fetchZtPool;
+      if (msg.fetchMoneyflow !== undefined) t.configFetchMoneyflow = msg.fetchMoneyflow;
+      if (msg.fetchNotice !== undefined) t.configFetchNotice = msg.fetchNotice;
+      if (msg.fetchFundHolder !== undefined) t.configFetchFundHolder = msg.fetchFundHolder;
+      if (msg.fetchShareholder !== undefined) t.configFetchShareholder = msg.fetchShareholder;
+      if (msg.fetchNews !== undefined) t.configFetchNews = msg.fetchNews;
+      if (msg.fetchBondYield !== undefined) t.configFetchBondYield = msg.fetchBondYield;
+      if (msg.fetchShenwanIndex !== undefined) t.configFetchShenwanIndex = msg.fetchShenwanIndex;
+      if (msg.fetchQvix !== undefined) t.configFetchQvix = msg.fetchQvix;
+      if (msg.moneyflowSource !== undefined) t.configMoneyflowSource = msg.moneyflowSource;
+      if (msg.emMoneyflowMode !== undefined) t.configEmMoneyflowMode = msg.emMoneyflowMode;
+      if (msg.singleCode !== undefined) t.configSingleCode = msg.singleCode;
+      if (msg.force !== undefined) t.configForce = msg.force;
+      return t;
+    });
+  }, [getTaskUpdater]);
 
-    const ws = new WebSocket(WS_URL);
-    wsRef.current = ws;
-
-    const sendFrame = (cmd, headers = {}, body = '') => {
-      let frame = cmd + '\n';
-      Object.entries(headers).forEach(([k, v]) => { frame += k + ':' + v + '\n'; });
-      frame += '\n' + body + '\x00';
-      ws.send(frame);
+  // 日志回调：根据 updateType 推送到对应日志数组
+  const handleUpdateLog = useCallback((msg) => {
+    const ut = msg.updateType || 'DAILY';
+    const logEntry = {
+      id: Date.now() + Math.random(),
+      time: msg.time || dayjs().format('HH:mm:ss'),
+      text: msg.line || '',
+      taskId: msg.taskId,
     };
+    const logUpdater = getLogUpdater(ut);
+    logUpdater(prev => [...prev.slice(-499), logEntry]);
+  }, [getLogUpdater]);
 
-    ws.onopen = () => {
-      setWsConnected(true);
-      sendFrame('CONNECT', { 'accept-version': '1.2', host: window.location.host });
-    };
-
-    ws.onmessage = (evt) => {
-      const data = evt.data;
-      const nullIdx = data.indexOf('\x00');
-      if (nullIdx === -1) return;
-      const frameStr = data.substring(0, nullIdx);
-
-      const lines = frameStr.split('\n');
-      if (lines.length === 0) return;
-      const command = lines[0].trim();
-      const bodyStart = frameStr.indexOf('\n\n');
-      const body = bodyStart >= 0 ? frameStr.substring(bodyStart + 2) : '';
-
-      if (command === 'CONNECTED') {
-        sendFrame('SUBSCRIBE', { id: 'data-update-status', destination: '/topic/data-update/status' });
-        sendFrame('SUBSCRIBE', { id: 'data-update-log', destination: '/topic/data-update/log' });
-      } else if (command === 'MESSAGE') {
-        try {
-          const msg = JSON.parse(body);
-          if (msg.type === 'DATA_UPDATE_STATUS') {
-            const ut = msg.updateType || 'DAILY';
-            const updater = getTaskUpdater(ut);
-            updater(prev => {
-              const t = prev ? { ...prev } : {};
-              // 只更新 msg 中有的字段
-              if (msg.taskId !== undefined) t.taskId = msg.taskId;
-              if (msg.status !== undefined) t.status = msg.status;
-              if (msg.progress !== undefined) t.progress = msg.progress;
-              if (msg.currentStep !== undefined) t.currentStep = msg.currentStep;
-              if (msg.processedStocks !== undefined) t.processedStocks = msg.processedStocks;
-              if (msg.totalStocks !== undefined) t.totalStocks = msg.totalStocks;
-              if (msg.processedRecords !== undefined) t.processedRecords = msg.processedRecords;
-              if (msg.failedStocks !== undefined) t.failedStocks = msg.failedStocks;
-              if (msg.startTime !== undefined) t.startTime = msg.startTime;
-              if (msg.endTime !== undefined) t.endTime = msg.endTime;
-              if (msg.error !== undefined) t.error = msg.error;
-              if (msg.bidAskStats !== undefined) t.bidAskStats = msg.bidAskStats;
-              t.updateType = ut;
-              // 保存配置信息用于展示
-              if (msg.market !== undefined) t.configMarket = msg.market;
-              if (msg.source !== undefined) t.configSource = msg.source;
-              if (msg.startDate !== undefined) t.configStartDate = msg.startDate;
-              if (msg.endDate !== undefined) t.configEndDate = msg.endDate;
-              if (msg.resume !== undefined) t.configResume = msg.resume;
-              if (msg.excludeSt !== undefined) t.configExcludeSt = msg.excludeSt;
-              if (msg.dailyOnly !== undefined) t.configDailyOnly = msg.dailyOnly;
-              if (msg.infoOnly !== undefined) t.configInfoOnly = msg.infoOnly;
-              if (msg.force !== undefined) t.configForce = msg.force;
-              if (msg.yearStart !== undefined) t.configYearStart = msg.yearStart;
-              if (msg.yearEnd !== undefined) t.configYearEnd = msg.yearEnd;
-              if (msg.stockPool !== undefined) t.configStockPool = msg.stockPool;
-              if (msg.fetchLhb !== undefined) t.configFetchLhb = msg.fetchLhb;
-              if (msg.fetchMargin !== undefined) t.configFetchMargin = msg.fetchMargin;
-              if (msg.fetchSurvey !== undefined) t.configFetchSurvey = msg.fetchSurvey;
-              if (msg.fetchBlockTrade !== undefined) t.configFetchBlockTrade = msg.fetchBlockTrade;
-              if (msg.fetchActivity !== undefined) t.configFetchActivity = msg.fetchActivity;
-              if (msg.fetchZtPool !== undefined) t.configFetchZtPool = msg.fetchZtPool;
-              if (msg.fetchMoneyflow !== undefined) t.configFetchMoneyflow = msg.fetchMoneyflow;
-              if (msg.fetchNotice !== undefined) t.configFetchNotice = msg.fetchNotice;
-              if (msg.fetchFundHolder !== undefined) t.configFetchFundHolder = msg.fetchFundHolder;
-              if (msg.fetchShareholder !== undefined) t.configFetchShareholder = msg.fetchShareholder;
-              if (msg.fetchNews !== undefined) t.configFetchNews = msg.fetchNews;
-              if (msg.fetchBondYield !== undefined) t.configFetchBondYield = msg.fetchBondYield;
-              if (msg.fetchShenwanIndex !== undefined) t.configFetchShenwanIndex = msg.fetchShenwanIndex;
-              if (msg.fetchQvix !== undefined) t.configFetchQvix = msg.fetchQvix;
-              if (msg.moneyflowSource !== undefined) t.configMoneyflowSource = msg.moneyflowSource;
-              if (msg.emMoneyflowMode !== undefined) t.configEmMoneyflowMode = msg.emMoneyflowMode;
-              if (msg.singleCode !== undefined) t.configSingleCode = msg.singleCode;
-              if (msg.force !== undefined) t.configForce = msg.force;
-              return t;
-            });
-          } else if (msg.type === 'DATA_UPDATE_LOG') {
-            // 日志根据 updateType 匹配到对应的 Tab
-            const ut = msg.updateType || 'DAILY';
-            const logEntry = {
-              id: Date.now() + Math.random(),
-              time: msg.time || dayjs().format('HH:mm:ss'),
-              text: msg.line || '',
-              taskId: msg.taskId,
-            };
-            const logUpdater = getLogUpdater(ut);
-            logUpdater(prev => [...prev.slice(-499), logEntry]);
-          }
-        } catch (e) { /* ignore parse errors */ }
-      }
-    };
-
-    ws.onclose = () => {
-      setWsConnected(false);
-      wsRef.current = null;
-      // 断线后 3 秒自动重连
-      reconnectTimerRef.current = setTimeout(() => {
-        if (!wsRef.current) connectWs();
-      }, 3000);
-    };
-    ws.onerror = () => {
-      setWsConnected(false);
-      wsRef.current = null;
-      // 连接失败时也要重连（onerror 不一定触发 onclose）
-      reconnectTimerRef.current = setTimeout(() => {
-        if (!wsRef.current) connectWs();
-      }, 3000);
-    };
-  }, [getTaskUpdater, getLogUpdater]);
+  const { connected: wsConnected } = useStompWebSocket({
+    subscriptions: useMemo(() => ({
+      '/topic/data-update/status': handleUpdateStatus,
+      '/topic/data-update/log': handleUpdateLog,
+    }), [handleUpdateStatus, handleUpdateLog]),
+    reconnectDelay: 3000,
+  });
 
   // ========== 日志自动滚动 ==========
   useEffect(() => {
@@ -887,7 +834,6 @@ function DataUpdate() {
   }, [dividendTask?.status, fetchDividendCoverage]);
 
   useEffect(() => {
-    connectWs();
     // 初始化时恢复各Tab最近的任务状态
     dataUpdateApi.getRecentTasks().then(res => {
       if (res && Array.isArray(res)) {
@@ -920,11 +866,6 @@ function DataUpdate() {
         });
       }
     }).catch(() => {});
-
-    return () => {
-      if (reconnectTimerRef.current) { clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null; }
-      if (wsRef.current) { wsRef.current.close(); wsRef.current = null; }
-    };
   }, []);
 
   // 日志自动滚动
@@ -1535,7 +1476,7 @@ function DataUpdate() {
             { title: '记录数', dataIndex: 'records', render: v => v?.toLocaleString(), align: 'right' },
             { title: '覆盖股票', dataIndex: 'stocks', render: v => v?.toLocaleString(), align: 'right' },
           ]}
-          size="small" pagination={false} style={{ marginTop: 8, marginBottom: 16 }} />
+          size="small" pagination={false} scroll={{ x: 'max-content' }} style={{ marginTop: 8, marginBottom: 16 }} />
 
         {/* 年份覆盖 */}
         <Text strong style={{ fontSize: 13 }}>【2】年份覆盖（stock_financial_indicator）</Text>
@@ -1545,7 +1486,7 @@ function DataUpdate() {
             { title: '报告期数', dataIndex: 'record_cnt', render: v => v?.toLocaleString(), align: 'right' },
             { title: '覆盖股票', dataIndex: 'stock_cnt', render: v => v?.toLocaleString(), align: 'right' },
           ]}
-          size="small" pagination={false} style={{ marginTop: 8, marginBottom: 16 }} />
+          size="small" pagination={false} scroll={{ x: 'max-content' }} style={{ marginTop: 8, marginBottom: 16 }} />
 
         {/* 字段空值率 */}
         <Text strong style={{ fontSize: 13 }}>【3】关键字段空值率</Text>
@@ -1557,7 +1498,7 @@ function DataUpdate() {
             { title: '空值率(%)', dataIndex: 'rate', render: v => `${v}%`,
               align: 'right' },
           ]}
-          size="small" pagination={false} style={{ marginTop: 8, marginBottom: 16 }} />
+          size="small" pagination={false} scroll={{ x: 'max-content' }} style={{ marginTop: 8, marginBottom: 16 }} />
 
         {/* 同比异常 */}
         <Text strong style={{ fontSize: 13 }}>【4】净利润同比异常（扭亏/转亏/变化&gt;10倍）</Text>
@@ -1574,7 +1515,7 @@ function DataUpdate() {
               { title: '上年净利润', dataIndex: 'prev_profit', align: 'right',
                 render: v => v != null ? Number(v).toLocaleString() : '-' },
             ]}
-            size="small" pagination={false} style={{ marginTop: 8, marginBottom: 16 }} />
+            size="small" pagination={false} scroll={{ x: 'max-content' }} style={{ marginTop: 8, marginBottom: 16 }} />
         ) : (
           <Alert message="未发现明显异常" type="success" showIcon style={{ marginTop: 8, marginBottom: 16 }} />
         )}
@@ -1590,7 +1531,7 @@ function DataUpdate() {
                 { title: '名称', dataIndex: 'name', width: 120 },
                 { title: '市场', dataIndex: 'market', width: 80 },
               ]}
-              size="small" pagination={false} />
+              size="small" pagination={false} scroll={{ x: 'max-content' }} />
           </>
         ) : (
           <Alert message="未发现明显缺失" type="success" showIcon style={{ marginTop: 8 }} />
@@ -2209,7 +2150,7 @@ function DataUpdate() {
               ) : '-'
             },
           ]}
-          size="small" pagination={false}
+          size="small" pagination={false} scroll={{ x: 'max-content' }}
         />
 
         {/* 资金流向深度校验 */}
@@ -2232,7 +2173,7 @@ function DataUpdate() {
                   render: v => <span style={{ fontSize: 12 }}>{v}</span>
                 },
               ]}
-              size="small" pagination={false} showHeader={true}
+              size="small" pagination={false} scroll={{ x: 'max-content' }} showHeader={true}
             />
           </Card>
         ))}
@@ -2411,6 +2352,7 @@ function DataUpdate() {
                   render: (v, r) => r.holiday ? '-' : v },
               ]}
               pagination={false}
+              scroll={{ x: 'max-content' }}
               style={{ marginTop: 8 }}
             />
           )}
@@ -2587,6 +2529,7 @@ function DataUpdate() {
             type="warning" showIcon style={{ marginBottom: 12 }} />
           <Table dataSource={missingIndices} rowKey="code" size="small"
             pagination={false}
+            scroll={{ x: 'max-content' }}
             columns={[
               { title: '代码', dataIndex: 'code', width: 100 },
               { title: '名称', dataIndex: 'name', width: 150 },

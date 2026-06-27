@@ -78,7 +78,7 @@ def fetch_stock_history(code, name, market, start_date, end_date, max_retries=2,
             adjustflag="2",  # 2: 前复权（1=后复权,3=不复权；前复权保证close与实时行情一致）
         )
         data_list = []
-        while (rs.error_code == '0') & rs.next():
+        while (rs.error_code == '0') and rs.next():
             data_list.append(rs.get_row_data())
         return data_list, rs.fields
 

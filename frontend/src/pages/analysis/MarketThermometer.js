@@ -7,7 +7,7 @@ import {
   QuestionCircleOutlined,
   TrophyOutlined, BuildOutlined,
 } from '@ant-design/icons';
-import ReactEcharts from 'echarts-for-react';
+import ReactECharts from '../../components/LazyECharts';
 import { stockAnalysisApi } from '../../api';
 
 const { Title, Text, Paragraph } = Typography;
@@ -599,7 +599,7 @@ export default function MarketThermometer() {
         <Col xs={24} md={16}>
           <Card title={<><FundOutlined /> PE分位趋势（近30交易日）</>} size="small">
             {peChartData.length > 0 ? (
-              <ReactEcharts option={peOption} style={{ height: 200 }} />
+              <ReactECharts option={peOption} style={{ height: 200 }} />
             ) : (
               <div style={{ height: 200, textAlign: 'center', lineHeight: '200px' }}>
                 <Text type="secondary">暂无数据</Text>
@@ -617,7 +617,7 @@ export default function MarketThermometer() {
               沪深300盈利收益率 ÷ 10年国债收益率 | 绿色虚线(3.0)=低估区间 | 红色虚线(1.5)=高估区间
             </Paragraph>
             {bondChartData.length > 0 ? (
-              <ReactEcharts option={bondOption} style={{ height: 180 }} />
+              <ReactECharts option={bondOption} style={{ height: 180 }} />
             ) : (
               <div style={{ height: 180, textAlign: 'center', lineHeight: '180px' }}>
                 <Text type="secondary">暂无数据</Text>

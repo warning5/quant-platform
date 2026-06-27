@@ -8,7 +8,7 @@ import {
   LineChartOutlined, CheckCircleOutlined, CloseCircleOutlined,
   ArrowLeftOutlined, FileTextOutlined,
 } from '@ant-design/icons';
-import ReactECharts from 'echarts-for-react';
+import ReactECharts from '../../components/LazyECharts';
 import { Client } from '@stomp/stompjs';
 import { backtestApi } from '../../api';
 
