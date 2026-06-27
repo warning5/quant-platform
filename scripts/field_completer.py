@@ -79,7 +79,7 @@ def _bs_login():
     return lg
 
 
-def fix_valuation_by_qq(db, codes=None, batch_size=200, delay=0.1, max_workers=30):
+def fix_valuation_by_qq(db, codes=None, batch_size=200, delay=0.1, max_workers=30, target_dates=None, max_stocks=None):
     """
     通过 Baostock 历史接口补全 pe_ttm / pb（按日历史序列，不依赖腾讯快照）。
 
@@ -89,6 +89,10 @@ def fix_valuation_by_qq(db, codes=None, batch_size=200, delay=0.1, max_workers=3
         db: StockDailyDB 实例
         codes: [(code, market), ...] 列表。None = 自动查询缺失 PE/PB 的股票
         batch_size: 每批处理的股票数
+        target_dates: 仅处理指定日期列表（如 ["2026-06-26"]），
+                    为 None 时处理所有缺失日期（全量补缺模式）
+        max_stocks: 最多处理 N 只股票（优先处理最近缺口的），None 则不限制。
+                    用于日常渐进补缺：每天补 100 只，一个月补完所有历史缺口
     返回: 补全的记录数
     """
     latest_date = db.get_latest_date()
@@ -137,9 +141,35 @@ def fix_valuation_by_qq(db, codes=None, batch_size=200, delay=0.1, max_workers=3
                 if not mn_is_null:
                     date_range_map[code] = (mn_str, mx_str)
 
+    # ── 如果指定了 target_dates，只处理那些日期 ────────────────────────────
+    if target_dates:
+        # target_dates: ["2026-06-26", ...]
+        # 只保留 date_range_map 中与 target_dates 重叠的股票的日期范围
+        # 并将 end_date 截断到 target_dates 的最大日期
+        td_set = set(target_dates)
+        td_min = min(target_dates)
+        td_max = max(target_dates)
+        # 计算上下文起始日（目标日前5天，给跳变检测留上下文）
+        _td_min_dt = datetime.datetime.strptime(td_min, "%Y-%m-%d")
+        _ctx_start = (_td_min_dt - datetime.timedelta(days=5)).strftime("%Y-%m-%d")
+        filtered_range = {}
+        for code, (mn, mx) in date_range_map.items():
+            # 该股票的缺失范围与 target_dates 有重叠
+            if mn <= td_max and mx >= td_min:
+                filtered_range[code] = (max(mn, _ctx_start), td_max)
+        date_range_map = filtered_range
+        print(f"  [target_dates] 限定处理日期: {td_min} ~ {td_max}，涉及 {len(date_range_map)} 只股票")
+
     codes_with_range = [(c, date_range_map.get(c)) for c, m in codes]
     codes_need_fetch = [(c, m) for c, m in codes if c in date_range_map]
     print(f"  {len(codes_need_fetch)} 只有缺失日期（需要抓取）")
+
+    # ── max_stocks：日常渐进补缺，优先处理最近缺口 ─────────────────────
+    if max_stocks and len(codes_need_fetch) > max_stocks:
+        # 按 gap 最近日期（max_date）降序排序，优先补最近的缺口
+        codes_need_fetch.sort(key=lambda cm: date_range_map[cm[0]][1], reverse=True)
+        codes_need_fetch = codes_need_fetch[:max_stocks]
+        print(f"  [max_stocks] 截断至 {len(codes_need_fetch)} 只（优先最近缺口）")
 
     if not codes_need_fetch:
         return 0
@@ -232,36 +262,50 @@ def fix_valuation_by_qq(db, codes=None, batch_size=200, delay=0.1, max_workers=3
                     if pe is not None and prev_pe is not None and prev_pe > 0:
                         jump = abs(pe - prev_pe) / prev_pe
                         if jump > 1.0:  # 跳变 >100%
-                            # 看哪个值更可疑：PE<0.5 或 PE>5000 可能是坏值
-                            if pe < 0.5 or pe > 5000:
+                            # 看哪个值更可疑：PE<0.5 或 PE>50000 可能是坏值
+                            if pe < 0.5 or pe > 50000:
                                 pe = None  # 丢弃当前异常值
-                            elif prev_pe < 0.5 or prev_pe > 5000:
+                            elif prev_pe < 0.5 or prev_pe > 50000:
                                 # 前值可疑，但前值可能已写入，此处无法回滚，记录日志
                                 _dlog(f"  [VALIDATE] {code} {d} PE跳变: {prev_pe:.2f}→{pe:.2f} (前值可能异常)")
+                            elif jump > 2.0:
+                                # 跳变 >200%：可能是财报公布导致TTM EPS剧烈变化（如600617 PE 84→782），
+                                # 保留后值但标注警告，由数据质量监控后续验证多日连续性
+                                _dlog(f"  [VALIDATE] {code} {d} PE剧烈跳变({jump*100:.0f}%): {prev_pe:.2f}→{pe:.2f} (保留，可能为财报驱动)")
                             else:
-                                # 两个值都在合理范围但跳变很大，保留后值
-                                _dlog(f"  [VALIDATE] {code} {d} PE跳变但均在合理范围: {prev_pe:.2f}→{pe:.2f}")
+                                # 跳变 100%~200%：保留后值
+                                _dlog(f"  [VALIDATE] {code} {d} PE跳变({jump*100:.0f}%): {prev_pe:.2f}→{pe:.2f} (保留后值)")
                     # PB 跳变检测
                     if pb is not None and prev_pb is not None and prev_pb > 0:
                         jump = abs(pb - prev_pb) / prev_pb
                         if jump > 1.0:
-                            if pb < 0.01 or pb > 100:
+                            if pb < 0.01 or pb > 10000:
                                 pb = None
-                            elif prev_pb < 0.01 or prev_pb > 100:
+                            elif prev_pb < 0.01 or prev_pb > 10000:
                                 _dlog(f"  [VALIDATE] {code} {d} PB跳变: {prev_pb:.2f}→{pb:.2f} (前值可能异常)")
+                            elif jump > 2.0:
+                                # 跳变 >200%：可能是资产重估/并购导致，保留但标注警告
+                                _dlog(f"  [VALIDATE] {code} {d} PB剧烈跳变({jump*100:.0f}%): {prev_pb:.2f}→{pb:.2f} (保留)")
+                            else:
+                                _dlog(f"  [VALIDATE] {code} {d} PB跳变({jump*100:.0f}%): {prev_pb:.2f}→{pb:.2f} (保留后值)")
                     # 绝对值合理性检查
-                    if pe is not None and (pe < 0.5 or pe > 5000):
+                    if pe is not None and (pe < 0.5 or pe > 50000):
                         _dlog(f"  [VALIDATE] {code} {d} PE异常范围: {pe:.2f}，丢弃")
                         pe = None
-                    if pb is not None and (pb < 0.01 or pb > 100):
+                    if pb is not None and (pb < 0.01 or pb > 10000):
                         _dlog(f"  [VALIDATE] {code} {d} PB异常范围: {pb:.2f}，丢弃")
                         pb = None
-                    if pe is not None or pb is not None:
-                        validated_map[d] = (pe, pb)
+                    # 更新 prev_pe/prev_pb（用于跳变检测上下文，即使当天不是目标日期）
                     if pe is not None:
                         prev_pe = pe
                     if pb is not None:
                         prev_pb = pb
+                    # 只有以下情况才写入 DB：
+                    # 1. target_dates=None（全量补缺模式）→ 所有日期都写
+                    # 2. target_dates 包含当天 → 只写目标日期
+                    in_target = target_dates is None or d in target_dates
+                    if in_target and (pe is not None or pb is not None):
+                        validated_map[d] = (pe, pb)
 
                 batch_updates = []
                 for d, (pe, pb) in validated_map.items():
@@ -386,7 +430,7 @@ def cross_validate_ohlcv(db, sample_size=50, tolerance=0.02):
     return matched, diverged
 
 
-def complete_fields(db, code=None, stock_list=None, skip_valuation=False, force_full_scan=False):
+def complete_fields(db, code=None, stock_list=None, skip_valuation=False, force_full_scan=False, target_dates=None):
     """
     执行字段补全，确保当天所有数据完整。
 
@@ -396,6 +440,8 @@ def complete_fields(db, code=None, stock_list=None, skip_valuation=False, force_
         stock_list: [(code, market), ...] 股票列表（可选，用于估值补全）
         skip_valuation: True 则跳过估值补全（估值已在插入时由 ValuationFetcher 写入）
         force_full_scan: True 则忽略 code/stock_list，强制全量扫描所有缺失估值的股票
+        target_dates: 仅处理指定日期列表（如 ["2026-06-26"]），
+                    为 None 时处理所有缺失日期（全量补缺模式）
     """
     import traceback as _tb
     # Step 1: SQL 补全 change_percent / change_amount / pre_close
@@ -421,7 +467,7 @@ def complete_fields(db, code=None, stock_list=None, skip_valuation=False, force_
             codes = None  # fix_valuation_by_qq 内部会调用 get_codes_with_missing_pe_pb
 
         try:
-            n2 = fix_valuation_by_qq(db, codes=codes)
+            n2 = fix_valuation_by_qq(db, codes=codes, target_dates=target_dates)
             print(f"  [补全] 估值字段 (Baostock 历史 pe_ttm/pb): {n2:,} 条")
         except Exception as e:
             print(f"  [WARN] fix_valuation_by_qq 异常: {e}")

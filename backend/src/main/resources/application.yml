@@ -11,10 +11,10 @@ spring:
     name: quant-platform
   # MySQL datasource config
   datasource:
-    url: jdbc:mysql://localhost:3306/stock?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&tinyInt1isBit=false
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:stock}?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&tinyInt1isBit=false
     driver-class-name: com.mysql.cj.jdbc.Driver
-    username: root
-    password: 123456
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD:123456}
     hikari:
       maximum-pool-size: 30
       minimum-idle: 5
@@ -56,11 +56,11 @@ springdoc:
 
 # ClickHouse 配置
 clickhouse:
-  host: 172.19.72.140
-  port: 8123
-  database: stock
-  username: default
-  password: 123456
+  host: ${CLICKHOUSE_HOST:172.19.72.140}
+  port: ${CLICKHOUSE_PORT:8123}
+  database: ${CLICKHOUSE_DATABASE:stock}
+  username: ${CLICKHOUSE_USER:default}
+  password: ${CLICKHOUSE_PASSWORD:123456}
   enabled: true  # 是否启用 ClickHouse 优先查询
 
 logging:
@@ -77,12 +77,12 @@ logging:
 # DeepSeek LLM 统一配置（OpenAI 兼容接口，支持 DeepSeek / Ollama / Qwen 等）
 llm:
   enabled: true                                    # 设为 true 启用 LLM
-  base-url: https://api.deepseek.com/v1             # API 地址（Ollama: http://localhost:11434/v1）
-  api-key: "sk-3bedb909271f49d59edbb2c1e5ab989d"                                       # API Key（Ollama 无需填写）
-  model: deepseek-v4-flash                          # 模型名（deepseek-v4-flash / deepseek-v4-pro）
-  max-tokens: 4096                                  # 最大输出 token 数（2048不够会导致JSON截断）
-  temperature: 0.3                                  # 温度（低温更准确）
-  timeout-seconds: 60                               # 请求超时（秒）
+  base-url: ${LLM_BASE_URL:https://api.deepseek.com/v1}             # API 地址（Ollama: http://localhost:11434/v1）
+  api-key: ${LLM_API_KEY:"sk-3bedb909271f49d59edbb2c1e5ab989d"}                                       # API Key（Ollama 无需填写）
+  model: ${LLM_MODEL:deepseek-v4-flash}                          # 模型名（deepseek-v4-flash / deepseek-v4-pro）
+  max-tokens: ${LLM_MAX_TOKENS:4096}                                  # 最大输出 token 数（2048不够会导致JSON截断）
+  temperature: ${LLM_TEMPERATURE:0.3}                                  # 温度（低温更准确）
+  timeout-seconds: ${LLM_TIMEOUT_SECONDS:60}                               # 请求超时（秒）
 
 quant:
   monitor:

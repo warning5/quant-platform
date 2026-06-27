@@ -1213,9 +1213,8 @@ public class PaperTradingService {
             for (String code : factorCodes) {
                 try {
                     List<String> dates = clickHouseJdbcTemplate.query(
-                        String.format(
-                            "SELECT MAX(calc_date) FROM stock.factor_value FINAL WHERE factor_code = '%s'",
-                            code),
+                        "SELECT MAX(calc_date) FROM stock.factor_value FINAL WHERE factor_code = ?",
+                        new Object[]{code},
                         (rs, rowNum) -> rs.getString(1));
                     if (!dates.isEmpty() && dates.getFirst() != null) {
                         LocalDate d = LocalDate.parse(dates.getFirst());
@@ -1259,7 +1258,8 @@ public class PaperTradingService {
         if (clickHouseJdbcTemplate == null) return LocalDate.now().toString();
         try {
             List<String> dates = clickHouseJdbcTemplate.query(
-                String.format("SELECT MAX(calc_date) FROM stock.factor_value FINAL WHERE factor_code = '%s'", factorCode),
+                "SELECT MAX(calc_date) FROM stock.factor_value FINAL WHERE factor_code = ?",
+                new Object[]{factorCode},
                 (rs, rowNum) -> rs.getString(1));
             return dates.isEmpty() || dates.getFirst() == null ? null : dates.getFirst();
         } catch (Exception e) {

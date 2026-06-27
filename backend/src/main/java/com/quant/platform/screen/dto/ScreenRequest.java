@@ -104,10 +104,18 @@ public class ScreenRequest {
     /**
      * 自定义 SQL WHERE 条件（高级模式）
      * 将直接拼接到选股查询的 WHERE 子句中，用于进阶用户做精确筛选
-     * 例如: "close > 10 AND volume > 1000000"
-     * 注意：仅限 AND 条件，不允许写 OR/UNION 等危险语句
+     * 例如: "close > ? AND volume > ?"
+     * 注意：必须使用 ? 占位符，参数值通过 customSqlParams 传递
+     *       仅限 AND 条件，不允许写 OR/UNION 等危险语句
      */
     private String customSqlWhere;
+
+    /**
+     * 自定义 SQL 条件中的参数值列表（与 customSqlWhere 中的 ? 占位符一一对应）
+     * 例如: customSqlWhere = "close > ? AND volume > ?"
+     *       customSqlParams = [10.0, 1000000.0]
+     */
+    private List<Object> customSqlParams;
 
     /**
      * MA 均线位置过滤

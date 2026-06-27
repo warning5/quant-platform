@@ -416,17 +416,39 @@ def main():
         # ─── 自动补全 change 字段 + PE/PB ────────────────────────────
         # 即使日线采集全部跳过（total_success==0），仍触发补全以消化历史缺口
         run_completion = total_success > 0 or skipped > 0
+        force_full_scan = (total_success == 0)
         if run_completion:
             print(f"\n补全 change 字段 + PE/PB（pre_close/change_percent/change_amount + 估值数据）...")
             try:
                 from field_completer import complete_fields
                 # 日线全部跳过时传 None，让 complete_fields 自动扫全库缺口
+                # 正常更新时传 target_dates 限定只补当天，避免全量历史补缺触发跨年跳变检测日志
+                if args.code:
+                    target_dates = None  # 指定单只股票时全量补缺
+                elif force_full_scan:
+                    target_dates = None  # 全量补缺模式不分日期
+                else:
+                    target_dates = [str(actual_end_date)]
                 n = complete_fields(db,
                                    code=args.code if args.code else None,
                                    stock_list=processed_codes if not args.code and total_success > 0 else None,
                                    skip_valuation=False,
-                                   force_full_scan=(total_success == 0))
+                                   force_full_scan=force_full_scan,
+                                   target_dates=target_dates)
                 print(f"  补全完成: {n} 条")
+
+                # ── 日常渐进补缺：额外补 100 只股票的历史 PE/PB 缺口 ────
+                # target_dates 只补当天，历史缺口永不消失——每天补一批，一个月补完
+                HISTORICAL_BACKFILL_LIMIT = 100
+                if not args.code and not force_full_scan and target_dates:
+                    try:
+                        from field_completer import fix_valuation_by_qq
+                        print(f"\n历史 PE/PB 渐进补缺（最多 {HISTORICAL_BACKFILL_LIMIT} 只）...")
+                        n_hist = fix_valuation_by_qq(db, codes=None, target_dates=None,
+                                                     max_stocks=HISTORICAL_BACKFILL_LIMIT)
+                        print(f"  历史补缺完成: {n_hist} 条")
+                    except Exception as e:
+                        print(f"  [WARN] 历史 PE/PB 补缺异常（不影响日线）: {e}")
             except Exception as e:
                 print(f"  [WARN] change 字段补全异常（不影响日线数据）: {e}")
 

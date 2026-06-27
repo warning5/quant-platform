@@ -50,6 +50,7 @@ const FinancialData = lazy(() => import('./pages/financial/FinancialData'));
 const ResearchData = lazy(() => import('./pages/datadetail/ResearchData'));
 const DataUpdate = lazy(() => import('./pages/dataupdate/DataUpdate'));
 const ScheduledTasks = lazy(() => import('./pages/dataupdate/ScheduledTasks'));
+const DataQuality = lazy(() => import('./pages/dataupdate/DataQualityDashboard'));
 const StockAnalysis = lazy(() => import('./pages/analysis/StockAnalysis'));
 const TradeCalendar = lazy(() => import('./pages/calendar/TradeCalendar'));
 const MarketThermometer = lazy(() => import('./pages/analysis/MarketThermometer'));
@@ -131,6 +132,7 @@ function AppLayout({ isDark, setIsDark }) {
         { key: '/data-detail/research', label: <Link to="/data-detail/research">研报数据</Link> },
         { key: '/sector-ranking', label: <Link to="/sector-ranking">行业排行</Link> },
         { key: '/scheduled-tasks', label: <Link to="/scheduled-tasks">定时任务</Link> },
+        { key: '/data-quality', label: <Link to="/data-quality">质量监控</Link> },
       ],
     },
     {
@@ -155,7 +157,7 @@ function AppLayout({ isDark, setIsDark }) {
     if (path.startsWith('/strateg') || path.startsWith('/backtest') || path === '/paper-trading') return ['strategies'];
     if (path.startsWith('/screen') || path.startsWith('/recommendation') || path.startsWith('/llm') || path.startsWith('/monitor') || path.startsWith('/calendar')) return ['screen'];
     if (path.startsWith('/data-detail')) return ['data-info'];
-    if (path === '/data-update' || path === '/scheduled-tasks' || path === '/sector-ranking') return ['data-info'];
+    if (path === '/data-update' || path === '/scheduled-tasks' || path === '/sector-ranking' || path === '/data-quality') return ['data-info'];
     if (path.startsWith('/manual/')) return ['manual'];
     return [];
   });
@@ -165,7 +167,7 @@ function AppLayout({ isDark, setIsDark }) {
     if (path.startsWith('/factor') || path === '/factor-weight-optimize') setOpenKeys(['factors']);
     else if (path.startsWith('/strateg') || path.startsWith('/backtest') || path === '/paper-trading') setOpenKeys(['strategies']);
     else if (path.startsWith('/screen') || path.startsWith('/recommendation') || path.startsWith('/llm') || path.startsWith('/monitor') || path.startsWith('/calendar')) setOpenKeys(['screen']);
-    else if (path.startsWith('/data-detail') || path === '/data-update' || path === '/scheduled-tasks' || path === '/sector-ranking') setOpenKeys(['data-info']);
+    else if (path.startsWith('/data-detail') || path === '/data-update' || path === '/scheduled-tasks' || path === '/sector-ranking' || path === '/data-quality') setOpenKeys(['data-info']);
     else if (path.startsWith('/manual/')) setOpenKeys(['manual']);
     else setOpenKeys([]);
   }, [location.pathname]);
@@ -310,6 +312,7 @@ function AppLayout({ isDark, setIsDark }) {
               <Route path="/data-detail/financial" element={<FinancialData />} />
               <Route path="/data-update" element={<DataUpdate />} />
               <Route path="/scheduled-tasks" element={<ScheduledTasks />} />
+              <Route path="/data-quality" element={<DataQuality />} />
               <Route path="/factors" element={<FactorList />} />
               <Route path="/factors/new" element={<FactorEditor />} />
               <Route path="/factors/:id" element={<FactorDetail />} />

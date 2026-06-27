@@ -982,8 +982,20 @@ def fetch_zt_data(date_str: str) -> list:
             for _, r in df.iterrows():
                 code = str(r.get("代码", "")).zfill(6)
                 pct_chg = to_float(r.get("涨跌幅"))
-                # 过滤：涨幅必须 ≥ 9.8% 才算真实涨停（与因子/回测一致）
-                if pct_chg is None or pct_chg < 9.8:
+                name = str(r.get("名称", ""))
+                # 按板块和ST状态确定涨停阈值（含容差）
+                is_st = "ST" in name or "*ST" in name
+                if code.startswith("688") or code.startswith("300") or code.startswith("301"):
+                    threshold = 19.5
+                elif code.startswith("43") or code.startswith("83") or code.startswith("87") \
+                        or code.startswith("88") or code.startswith("92") or code.startswith("920"):
+                    threshold = 29.5
+                elif is_st:
+                    threshold = 4.8
+                else:
+                    threshold = 9.8
+                # 过滤：涨幅必须 ≥ 对应板块涨停阈值才算真实涨停
+                if pct_chg is None or pct_chg < threshold:
                     continue
                 zt_stat = str(r.get("涨停统计", ""))
                 lb_count = str(r.get("连板数", ""))

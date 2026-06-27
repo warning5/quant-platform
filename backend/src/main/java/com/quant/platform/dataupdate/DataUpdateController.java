@@ -580,6 +580,23 @@ public class DataUpdateController {
                 return ApiResponse.error("请选择要清理的股票");
             }
 
+            // 安全校验：验证 codes 均为合法的股票代码格式，拒绝 SQL 注入
+            List<String> validatedCodes = new ArrayList<>();
+            for (String c : codes) {
+                if (c == null) continue;
+                String trimmed = c.trim();
+                // 股票代码格式：[0-9]{6}(可选的后缀 .SH/.SZ/.BJ)
+                if (trimmed.matches("^[0-9]{6}(\\.(SH|SZ|BJ))?$")) {
+                    validatedCodes.add(trimmed);
+                } else {
+                    log.warn("[退市清理] 拒绝无效的股票代码: {}", trimmed);
+                }
+            }
+            if (validatedCodes.isEmpty()) {
+                return ApiResponse.error("没有有效的股票代码可清理");
+            }
+            codes = validatedCodes;
+
             result.put("cleanedCodes", codes);
             result.put("codeCount", codes.size());
             int totalDeleted = 0;

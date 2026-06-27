@@ -1,5 +1,6 @@
 package com.quant.platform.factor.engine;
 
+import com.quant.platform.common.utils.LimitUpUtils;
 import com.quant.platform.market.domain.MarketDailyBar;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -389,7 +390,8 @@ public class BuiltinFactors {
 
     /**
      * 近20日涨停次数
-     * 涨停阈值按板块区分：科创板/创业板20%，北交所30%，主板9.8%
+     * 涨停阈值按板块区分：科创板/创业板20%，北交所30%，主板9.8%，ST股5%
+     * 创业板2020-08-24改革前为10%，改革后为20%（使用 LimitUpUtils 统一判断）
      * ST股直接排除不计入（ST股涨跌5%限制，且不应进入选股池）
      */
     public static class LimitUpCountCalculator implements FactorCalculator {
@@ -423,22 +425,11 @@ public class BuiltinFactors {
             for (var b : window) {
                 if (b.getPctChg() == null) continue;
                 double pct = b.getPctChg().doubleValue();
-                double threshold = getLimitUpThreshold(symbol);
+                // 使用 LimitUpUtils 统一判断，传入每根K线的交易日期以处理创业板改革
+                double threshold = LimitUpUtils.getLimitUpThreshold(symbol, b.getTradeDate(), false);
                 if (pct >= threshold) count++;
             }
             return BigDecimal.valueOf(count).setScale(8, RoundingMode.HALF_UP);
-        }
-
-        /**
-         * 根据股票代码判断涨停阈值（考虑涨跌幅改革时间点）
-         * 科创板688：20%；创业板300/301：20%；北交所83/87/88：30%；主板：9.8%
-         */
-        private static double getLimitUpThreshold(String symbol) {
-            String s = symbol.replaceAll("\\..*$", "");
-            if (s.startsWith("688")) return 19.8;
-            if (s.startsWith("300") || s.startsWith("301")) return 19.8;
-            if (s.startsWith("83") || s.startsWith("87") || s.startsWith("88")) return 29.8;
-            return 9.8;
         }
     }
 
@@ -470,7 +461,7 @@ public class BuiltinFactors {
             for (var bar : window) {
                 if (bar.getPeTtm() != null) {
                     double pe = bar.getPeTtm().doubleValue();
-                    if (pe > 0 && pe < 10000) peValues.add(pe);
+                    if (pe > 0 && pe < 50000) peValues.add(pe);
                 }
             }
             if (peValues.size() < 30) return null;

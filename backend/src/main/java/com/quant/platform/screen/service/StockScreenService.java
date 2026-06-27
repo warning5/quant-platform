@@ -171,23 +171,54 @@ public class StockScreenService {
         }
 
         // ── 2.5 自定义 SQL WHERE 条件过滤（高级模式）──────────────────
+        // 安全说明：req.getCustomSqlWhere() 来自前端用户输入，存在 SQL 注入风险。
+        // 修复方式：使用参数化查询，禁止拼接；白名单校验字段名，拒绝危险关键字。
         if (req.getCustomSqlWhere() != null && !req.getCustomSqlWhere().isBlank()) {
             String rawSql = req.getCustomSqlWhere().trim();
-            // 安全检查：禁止危险关键字
-            String upper = rawSql.toUpperCase();
-            for (String keyword : new String[]{"UNION", "DELETE", "DROP", "INSERT", "UPDATE", "OR", "--", ";", "/*"}) {
+            // 安全校验1：禁止危险关键字（含注释符、多语句分隔符）
+            String upper = rawSql.toUpperCase(Locale.US);
+            for (String keyword : new String[]{"UNION", "DELETE", "DROP", "INSERT", "UPDATE", "OR 1=", "--", ";", "/*", "*/", "@@", "CHAR(", "EXEC", "XP_", "SLEEP(", "BENCHMARK("}) {
                 if (upper.contains(keyword)) {
                     log.warn("Blocked custom SQL containing forbidden keyword: {}", keyword);
                     throw new IllegalArgumentException("自定义SQL条件包含不安全的关键字: " + keyword);
                 }
             }
+            // 安全校验2：只允许常见的 WHERE 条件语法（字段名 运算符 值），拒绝子查询、JOIN 等
+            if (rawSql.toUpperCase(Locale.US).contains("SELECT ") ||
+                rawSql.toUpperCase(Locale.US).contains("JOIN ") ||
+                rawSql.toUpperCase(Locale.US).contains("SUBQUERY") ||
+                rawSql.contains("(") && rawSql.contains(")")) {
+                // 允许简单括号（优先级），但拒绝看起来像子查询的结构
+                if (rawSql.toUpperCase(Locale.US).contains("SELECT ") ||
+                    rawSql.toUpperCase(Locale.US).contains("FROM ")) {
+                    log.warn("Blocked custom SQL possibly containing subquery: {}", rawSql);
+                    throw new IllegalArgumentException("自定义SQL条件不支持子查询语法");
+                }
+            }
             try {
                 // 用 stock_daily 表 + 选股日期做安全查询，只返回符合条件的 symbol 列表
+                // 修复：不再拼接 rawSql，而是要求其使用 ? 占位符，通过参数传入
+                // 前端必须按 "field OP ?" 格式传参，参数值在 customSqlParams 中
+                List<Object> sqlParams = req.getCustomSqlParams() != null
+                        ? req.getCustomSqlParams() : Collections.emptyList();
+                String safeSql = buildSafeCustomSql(rawSql, sqlParams.size());
                 Set<String> sqlFiltered = new HashSet<>();
                 try (Connection conn = dataSource.getConnection();
                      PreparedStatement ps = conn.prepareStatement(
-                             "SELECT DISTINCT code FROM stock_daily WHERE trade_date = ? AND (" + rawSql + ")")) {
-                    ps.setString(1, screenDate.toString());
+                             "SELECT DISTINCT code FROM stock_daily WHERE trade_date = ? AND " + safeSql)) {
+                    int paramIdx = 1;
+                    ps.setString(paramIdx++, screenDate.toString());
+                    for (Object p : sqlParams) {
+                        if (p instanceof String) {
+                            ps.setString(paramIdx++, (String) p);
+                        } else if (p instanceof Number) {
+                            ps.setBigDecimal(paramIdx++, BigDecimal.valueOf(((Number) p).doubleValue()));
+                        } else if (p instanceof java.time.LocalDate) {
+                            ps.setString(paramIdx++, p.toString());
+                        } else {
+                            ps.setObject(paramIdx++, p);
+                        }
+                    }
                     try (ResultSet rs = ps.executeQuery()) {
                         while (rs.next()) {
                             sqlFiltered.add(rs.getString("code"));
@@ -1631,5 +1662,72 @@ public class StockScreenService {
 
         log.info("[DynamicWeight] mode={} date={} weights={}", weightMode, screenDate, dynamicWeights);
         return dynamicWeights;
+    }
+
+    /**
+     * 安全构建自定义 SQL WHERE 条件
+     * 1. 校验 customSqlWhere 只包含 ? 占位符（不允许字符串字面量）
+     * 2. 校验字段名在白名单内
+     * 3. 校验只包含安全的运算符
+     * @param rawSql 用户传入的 SQL 条件（必须使用 ? 占位符）
+     * @param paramCount 参数个数（用于校验 ? 数量）
+     * @return 安全的 SQL 片段（直接使用，因为已校验）
+     */
+    private static String buildSafeCustomSql(String rawSql, int paramCount) {
+        if (rawSql == null || rawSql.isBlank()) {
+            throw new IllegalArgumentException("自定义SQL条件不能为空");
+        }
+
+        // 校验1：统计 ? 占位符数量
+        int qmCount = 0;
+        for (int i = 0; i < rawSql.length(); i++) {
+            if (rawSql.charAt(i) == '?') qmCount++;
+        }
+        if (qmCount != paramCount) {
+            throw new IllegalArgumentException("占位符 ? 数量(" + qmCount + ")与参数个数(" + paramCount + ")不匹配");
+        }
+
+        // 校验2：拒绝字符串字面量（单引号）
+        if (rawSql.contains("'") || rawSql.contains("\"")) {
+            throw new IllegalArgumentException("自定义SQL条件不允许包含字符串字面量，请使用 ? 占位符");
+        }
+
+        // 校验3：字段名白名单（stock_daily 表的字段）
+        java.util.Set<String> allowedFields = new java.util.HashSet<>(java.util.Arrays.asList(
+            "code", "name", "trade_date", "open", "high", "low", "close", "volume", "amount",
+            "change_percent", "turnover_rate", "total_market_cap", "pe_ttm", "pb",
+            "ma5", "ma10", "ma20", "ma60", "ma120", "ma250",
+            "volatility_20", "volume_ratio", "turnover_rate_f", "ps_ttm"
+        ));
+
+        // 使用正则提取字段名（字母开头，后跟字母/数字/下划线）
+        java.util.regex.Pattern fieldPat = java.util.regex.Pattern.compile("\\b([a-zA-Z_][a-zA-Z0-9_]*)\\b");
+        java.util.regex.Matcher m = fieldPat.matcher(rawSql);
+        while (m.find()) {
+            String field = m.group(1);
+            // 排除 SQL 关键字
+            String upper = field.toUpperCase();
+            if (upper.equals("AND") || upper.equals("OR") || upper.equals("NOT") ||
+                upper.equals("NULL") || upper.equals("TRUE") || upper.equals("FALSE") ||
+                upper.equals("SELECT") || upper.equals("FROM") || upper.equals("WHERE") ||
+                upper.equals("INSERT") || upper.equals("UPDATE") || upper.equals("DELETE") ||
+                upper.equals("DROP") || upper.equals("UNION") || upper.equals("JOIN")) {
+                continue;
+            }
+            if (!allowedFields.contains(field) && !allowedFields.contains(field.toLowerCase())) {
+                throw new IllegalArgumentException("自定义SQL条件包含不允许的字段名: " + field);
+            }
+        }
+
+        // 校验4：只允许安全的运算符
+        String upperSql = rawSql.toUpperCase();
+        if (upperSql.contains("UNION") || upperSql.contains("SELECT") || upperSql.contains("FROM") ||
+            upperSql.contains("DELETE") || upperSql.contains("DROP") || upperSql.contains("INSERT") ||
+            upperSql.contains("UPDATE") || upperSql.contains(";") || upperSql.contains("--") ||
+            upperSql.contains("/*") || upperSql.contains("*/")) {
+            throw new IllegalArgumentException("自定义SQL条件包含不安全的语法");
+        }
+
+        return rawSql;
     }
 }

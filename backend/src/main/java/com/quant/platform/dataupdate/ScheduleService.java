@@ -10,6 +10,7 @@ import org.springframework.scheduling.config.ScheduledTaskRegistrar;
 import org.springframework.scheduling.support.CronTrigger;
 import org.springframework.stereotype.Service;
 
+import com.quant.platform.notification.NotificationService;
 import com.quant.platform.recommendation.service.RecommendationService;
 
 import java.time.LocalDate;
@@ -34,11 +35,39 @@ public class ScheduleService implements SchedulingConfigurer {
     private final TaskScheduler taskScheduler;
     private final RecommendationService recommendationService;
     private final ApplicationContext applicationContext;
+    // 懒加载注入，避免循环依赖
+    private NotificationService notificationService;
+    private DataQualityService dataQualityService;
 
     // taskKey → ScheduledFuture（用于动态取消）
     private final Map<String, ScheduledFuture<?>> scheduledTasks = new ConcurrentHashMap<>();
     // taskKey → 失败重试计数（key = taskKey + ":" + scheduledTime.toLocalDate()，同一天只重试一次）
     private final Map<String, Boolean> retryTracker = new ConcurrentHashMap<>();
+
+    /** 依赖链：任务完成后自动触发下游任务（延迟毫秒数） */
+    private static final Map<String, List<String>> DEPENDENCY_CHAIN = Map.of(
+        "DAILY",    List.of("FINANCIAL", "BIDASK"),
+        "FINANCIAL", List.of("DAILY_RECOMMENDATION")
+    );
+    /** 依赖触发延迟（毫秒）：FINANCIAL 等 DAILY 写完 5 分钟后再跑 */
+    private static final long DEPENDENCY_DELAY_MS = 5 * 60 * 1000;
+
+    /** 今日已完成任务集合（用于依赖编排：避免重复触发） */
+    private final Map<String, Boolean> todayCompleted = new ConcurrentHashMap<>();
+
+    private NotificationService getNotificationService() {
+        if (notificationService == null) {
+            notificationService = applicationContext.getBean(NotificationService.class);
+        }
+        return notificationService;
+    }
+
+    private DataQualityService getDataQualityService() {
+        if (dataQualityService == null) {
+            dataQualityService = applicationContext.getBean(DataQualityService.class);
+        }
+        return dataQualityService;
+    }
 
     /**
      * Spring 启动后回调：注册所有 enabled 的任务
@@ -151,23 +180,48 @@ public class ScheduleService implements SchedulingConfigurer {
 
     /**
      * 执行任务：构建 DataUpdateRequest → 提交给 DataUpdateService（支持并发）
+     * 完成后自动触发依赖链下游任务
      */
     public void executeTask(String taskKey) {
+        boolean success = true;
         try {
-            // P1-4: 推荐追踪任务（每个交易日15:30自动执行）
+            // 质量检查任务：数据新鲜度
+            if ("DATA_FRESHNESS".equals(taskKey)) {
+                Map<String, Object> result = getDataQualityService().checkDataFreshness();
+                log.info("[ScheduleService] 数据新鲜度检查完成: hasWarning={}", result.get("hasWarning"));
+                updateTaskStatus(taskKey, "SUCCESS");
+                // 质量检查结果通过 DataQualityService 内部推送
+                success = true;
+                return;
+            }
+
+            // 质量检查任务：价格异常检测
+            if ("PRICE_ANOMALY".equals(taskKey)) {
+                Map<String, Object> result = getDataQualityService().checkPriceAnomalies(7);
+                log.info("[ScheduleService] 价格异常检测完成: count={}", result.get("anomalyCount"));
+                updateTaskStatus(taskKey, "SUCCESS");
+                success = true;
+                return;
+            }
+
+            // P1-4: 推荐追踪任务
             if ("RECOMMENDATION_TRACK".equals(taskKey)) {
                 int updated = recommendationService.trackRecommendationPerformance();
                 log.info("[ScheduleService] 推荐追踪完成: 更新{}条", updated);
+                updateTaskStatus(taskKey, "SUCCESS");
+                success = true;
                 return;
             }
 
             // Phase 2: 每日自动推荐任务
             if ("DAILY_RECOMMENDATION".equals(taskKey)) {
                 executeDailyRecommendation();
+                // executeDailyRecommendation 内部已更新状态
+                success = true;
                 return;
             }
 
-            // 读取任务的 extra_config
+            // 普通数据更新任务
             Map<String, Object> configRow = null;
             try {
                 configRow = jdbcTemplate.queryForMap(
@@ -176,7 +230,6 @@ public class ScheduleService implements SchedulingConfigurer {
 
             String extraConfigJson = configRow != null ? (String) configRow.get("extra_config") : null;
             DataUpdateRequest request = buildRequestFromKey(taskKey, extraConfigJson);
-            // 使用 submitTaskConcurrent 绕过单任务限制，支持多任务并发
             dataUpdateService.submitTaskConcurrent(request);
 
             jdbcTemplate.update(
@@ -192,6 +245,7 @@ public class ScheduleService implements SchedulingConfigurer {
                 LocalDateTime.now(), taskKey
             );
             log.error("[ScheduleService] 定时执行失败: {}", taskKey, e);
+            success = false;
 
             // P1-2.2: 失败后5分钟自动重试一次（同一天同一任务只重试一次）
             String retryKey = taskKey + ":" + LocalDate.now();
@@ -211,6 +265,81 @@ public class ScheduleService implements SchedulingConfigurer {
             } else {
                 log.info("[ScheduleService] 今日已重试过，不再重试: {}", taskKey);
             }
+
+            // 10: 失败告警推送通知
+            sendFailureAlert(taskKey, e);
+        }
+
+        // 9: 依赖编排 — 成功后触发下游任务
+        if (success) {
+            triggerDependents(taskKey);
+        }
+    }
+
+    /** 更新任务状态 */
+    private void updateTaskStatus(String taskKey, String status) {
+        jdbcTemplate.update(
+            "UPDATE data_schedule_config SET last_run_time = ?, last_run_status = ? WHERE task_key = ?",
+            LocalDateTime.now(), status, taskKey
+        );
+    }
+
+    /** 10: 失败时推送告警通知 */
+    private void sendFailureAlert(String taskKey, Exception e) {
+        try {
+            String todayStr = LocalDate.now().toString();
+            String alertKey = "FAIL_" + taskKey + "_" + todayStr;
+            // 同一天同一任务只发一次告警
+            if (retryTracker.putIfAbsent(alertKey, true) != null) return;
+
+            String msg = String.format(
+                "## 调度任务失败\n\n- 任务: %s\n- 时间: %s\n- 错误: %s\n\n系统将在5分钟后自动重试一次。",
+                taskKey, LocalDateTime.now(), e.getMessage());
+            getNotificationService().sendAlert(msg);
+            log.info("[ScheduleService] 已发送失败告警: {}", taskKey);
+        } catch (Exception ex) {
+            log.warn("[ScheduleService] 告警推送失败: {}", ex.getMessage());
+        }
+    }
+
+    /** 9: 依赖编排 — 触发下游任务 */
+    private void triggerDependents(String taskKey) {
+        // 清除当前任务的今日完成标记（允许下次重新触发）
+        String doneKey = "DONE_" + taskKey + "_" + LocalDate.now();
+        todayCompleted.put(doneKey, true);
+
+        List<String> dependents = DEPENDENCY_CHAIN.get(taskKey);
+        if (dependents == null || dependents.isEmpty()) return;
+
+        for (String depKey : dependents) {
+            String depDoneKey = "DONE_" + depKey + "_" + LocalDate.now();
+            if (todayCompleted.containsKey(depDoneKey)) {
+                log.info("[ScheduleService] 依赖任务 {} 今日已执行，跳过触发", depKey);
+                continue;
+            }
+
+            // 检查该任务是否已启用
+            try {
+                Integer enabled = jdbcTemplate.queryForObject(
+                    "SELECT enabled FROM data_schedule_config WHERE task_key = ?", Integer.class, depKey);
+                if (enabled == null || enabled == 0) {
+                    log.info("[ScheduleService] 依赖任务 {} 已禁用，跳过触发", depKey);
+                    continue;
+                }
+            } catch (Exception ignored) {}
+
+            log.info("[ScheduleService] {} 完成，{}ms 后触发下游: {}", taskKey, DEPENDENCY_DELAY_MS, depKey);
+            taskScheduler.schedule(
+                () -> {
+                    try {
+                        log.info("[ScheduleService] 依赖触发: {} (from {})", depKey, taskKey);
+                        executeTask(depKey);
+                    } catch (Exception ex) {
+                        log.error("[ScheduleService] 依赖触发失败: {} (from {})", depKey, taskKey, ex);
+                    }
+                },
+                new java.util.Date(System.currentTimeMillis() + DEPENDENCY_DELAY_MS)
+            );
         }
     }
 
@@ -320,6 +449,8 @@ public class ScheduleService implements SchedulingConfigurer {
                 yield req;
             }
             case "RESEARCH"      -> { req.setUpdateType("RESEARCH");      yield req; }
+            case "DATA_FRESHNESS"   -> { /* 质量检查: 已在executeTask中特殊处理 */ yield null; }
+            case "PRICE_ANOMALY"    -> { /* 质量检查: 已在executeTask中特殊处理 */ yield null; }
             case "RECOMMENDATION_TRACK" -> { /* P1-4: 已在executeTask中特殊处理 */ yield null; }
             case "DAILY_RECOMMENDATION" -> { /* Phase 2: 已在executeTask中特殊处理 */ yield null; }
             default -> throw new IllegalArgumentException("未知任务类型: " + taskKey);

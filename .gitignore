@@ -7,3 +7,5 @@
 /scripts/.workbuddy/
 /logs/
 /.workbuddy/
+.env
+.env.*

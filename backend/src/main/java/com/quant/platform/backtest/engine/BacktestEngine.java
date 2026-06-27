@@ -8,6 +8,7 @@ import com.quant.platform.backtest.domain.RebalanceRecord;
 import com.quant.platform.backtest.mapper.BacktestReportMapper;
 import com.quant.platform.backtest.mapper.BacktestTaskMapper;
 import com.quant.platform.backtest.mapper.EquityCurveMapper;
+import com.quant.platform.common.utils.LimitUpUtils;
 import com.quant.platform.backtest.mapper.RebalanceRecordMapper;
 import com.quant.platform.factor.domain.FactorValue;
 import com.quant.platform.factor.ic.service.FactorIcService;
@@ -1461,23 +1462,18 @@ public class BacktestEngine {
 
     /**
      * 判断是否涨停（无法买入）
-     * 涨停条件：收盘价 >= 昨收价 × 1.1（普通股）或 1.2（ST股）或 1.05（科创板/创业板20%）
-     * 简化判断：涨跌幅 >= 9.8% 视为涨停
+     * 使用 LimitUpUtils 统一处理板块差异、ST股、创业板改革日期。
+     * - 主板：10%（ST 5%）
+     * - 创业板 300/301：2020-08-24前10%，之后20%
+     * - 科创板 688：20%
+     * - 北交所：30%
      */
     private boolean isLimitUp(MarketDailyBar bar) {
         if (bar.getPreClose() == null || bar.getPreClose().doubleValue() <= 0) return false;
         if (bar.getPctChg() == null) return false;
         double pct = bar.getPctChg().doubleValue();
-        // 科创板/创业板 20% 涨跌幅
-        String symbol = bar.getSymbol();
-        if (symbol.contains(".SH") && symbol.startsWith("688")) return pct >= 19.5;
-        if (symbol.contains(".SZ") && (symbol.startsWith("300") || symbol.startsWith("301"))) return pct >= 19.5;
-        // 北交所 30%
-        if (symbol.contains(".BJ")) return pct >= 29.5;
-        // ST 5%
-        if (bar.getName() != null && bar.getName().startsWith("ST")) return pct >= 4.8;
-        // 普通股 10%
-        return pct >= 9.8;
+        boolean isSt = LimitUpUtils.isStName(bar.getName());
+        return LimitUpUtils.isLimitUp(pct, bar.getSymbol(), bar.getTradeDate(), isSt);
     }
 
     /**
@@ -1487,12 +1483,8 @@ public class BacktestEngine {
         if (bar.getPreClose() == null || bar.getPreClose().doubleValue() <= 0) return false;
         if (bar.getPctChg() == null) return false;
         double pct = bar.getPctChg().doubleValue();
-        String symbol = bar.getSymbol();
-        if (symbol.contains(".SH") && symbol.startsWith("688")) return pct <= -19.5;
-        if (symbol.contains(".SZ") && (symbol.startsWith("300") || symbol.startsWith("301"))) return pct <= -19.5;
-        if (symbol.contains(".BJ")) return pct <= -29.5;
-        if (bar.getName() != null && bar.getName().startsWith("ST")) return pct <= -4.8;
-        return pct <= -9.8;
+        boolean isSt = LimitUpUtils.isStName(bar.getName());
+        return LimitUpUtils.isLimitDown(pct, bar.getSymbol(), bar.getTradeDate(), isSt);
     }
 
     /**

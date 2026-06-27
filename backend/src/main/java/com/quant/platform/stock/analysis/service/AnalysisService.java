@@ -1468,7 +1468,7 @@ public class AnalysisService {
                 SELECT pe_ttm, pb FROM stock.stock_daily FINAL
                 WHERE code = ?
                   AND trade_date >= subtractYears(today(), ?)
-                  AND pe_ttm > 0 AND pe_ttm < 10000
+                  AND pe_ttm > 0 AND pe_ttm < 50000
                   AND pb > 0 AND pb < 10000
                 ORDER BY trade_date ASC
                 """;

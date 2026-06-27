@@ -3,6 +3,8 @@ package com.quant.platform.factor.service;
 import com.quant.platform.config.ClickHouseConfig;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -30,6 +32,9 @@ public class ClickHouseFactorValueService {
     /**
      * 根据因子代码和日期查询因子值（CH 优先）
      */
+    @Cacheable(value = "factorValue", key = "'fc:' + #factorCode + ':' + #calcDate",
+               cacheManager = "factorValueCacheManager",
+               unless = "#result == null || #result.isEmpty()")
     public java.util.List<com.quant.platform.factor.domain.FactorValue> findByFactorCodeAndDate(
             String factorCode, java.time.LocalDate calcDate) {
         if (!clickHouseConfig.isEnabled()) {
@@ -57,6 +62,9 @@ public class ClickHouseFactorValueService {
     /**
      * 根据因子代码和日期范围查询因子值（CH 优先）
      */
+    @Cacheable(value = "factorValue", key = "'fcr:' + #factorCode + ':' + #startDate + ':' + #endDate",
+               cacheManager = "factorValueCacheManager",
+               unless = "#result == null || #result.isEmpty()")
     public java.util.List<com.quant.platform.factor.domain.FactorValue> findByFactorCodeAndDateRange(
             String factorCode, java.time.LocalDate startDate, java.time.LocalDate endDate) {
         if (!clickHouseConfig.isEnabled()) {
@@ -86,6 +94,9 @@ public class ClickHouseFactorValueService {
      * 每个 symbol 取 announce_date 最大（即最新财报）的那条。
      * 日频因子 announce_date 为 NULL，用 IS NULL 兼容。
      */
+    @Cacheable(value = "factorValue", key = "'q:' + #factorCode + ':' + #screenDate",
+               cacheManager = "factorValueCacheManager",
+               unless = "#result == null || #result.isEmpty()")
     public java.util.List<com.quant.platform.factor.domain.FactorValue> findQuarterlyByScreenDate(
             String factorCode, java.time.LocalDate screenDate) {
         if (!clickHouseConfig.isEnabled()) {
@@ -151,6 +162,9 @@ public class ClickHouseFactorValueService {
     /**
      * 聚合统计查询（CH 优先）
      */
+    @Cacheable(value = "factorValue", key = "'stats'",
+               cacheManager = "factorValueCacheManager",
+               unless = "#result == null || #result.isEmpty()")
     public List<Map<String, Object>> selectFactorStats() {
         if (!clickHouseConfig.isEnabled()) {
             return List.of(); // 回退到 Mapper
@@ -168,6 +182,9 @@ public class ClickHouseFactorValueService {
      * 按因子代码列表批量查询统计（只查CH，不降级到MySQL）
      * 用于因子列表页的计算状态展示
      */
+    @Cacheable(value = "factorValue", key = "'status:' + #factorCodes.hashCode()",
+               cacheManager = "factorValueCacheManager",
+               unless = "#result == null || #result.isEmpty()")
     public Map<String, Map<String, Object>> batchGetStatusFromCH(List<String> factorCodes) {
         if (!clickHouseConfig.isEnabled() || factorCodes == null || factorCodes.isEmpty()) {
             return Map.of();
@@ -348,6 +365,9 @@ public class ClickHouseFactorValueService {
     /**
      * 总记录数查询（CH 优先）
      */
+    @Cacheable(value = "factorValue", key = "'count'",
+               cacheManager = "factorValueCacheManager",
+               unless = "#result == null || #result < 0")
     public long selectTotalCount() {
         if (!clickHouseConfig.isEnabled()) {
             return -1; // 回退到 Mapper
@@ -364,6 +384,9 @@ public class ClickHouseFactorValueService {
     /**
      * 查询因子在日期范围内有数据的日期列表（仅 DISTINCT calc_date，轻量查询）
      */
+    @Cacheable(value = "factorValue", key = "'dates:' + #factorCode + ':' + #startDate + ':' + #endDate",
+               cacheManager = "factorValueCacheManager",
+               unless = "#result == null || #result.isEmpty()")
     public java.util.List<java.time.LocalDate> findDistinctDatesByFactorCode(
             String factorCode, java.time.LocalDate startDate, java.time.LocalDate endDate) {
         if (!clickHouseConfig.isEnabled()) {
@@ -409,6 +432,9 @@ public class ClickHouseFactorValueService {
      * @param symbol CH 格式的股票代码（如 000526.SZ, 600027.SH）
      * @return Map<factorCode, Map<"factorVal"/"rankValue", Double>>
      */
+    @Cacheable(value = "factorValue", key = "'sym:' + #symbol",
+               cacheManager = "factorValueCacheManager",
+               unless = "#result == null || #result.isEmpty()")
     public Map<String, Map<String, Double>> findLatestBySymbol(String symbol) {
         if (!clickHouseConfig.isEnabled() || symbol == null || symbol.isBlank()) {
             return Map.of();
@@ -474,6 +500,9 @@ public class ClickHouseFactorValueService {
      * @param code 纯股票代码（不带后缀，如 000526）
      * @return Map 含 pe_ttm, pb, close_price, high_price
      */
+    @Cacheable(value = "factorValue", key = "'daily:' + #code",
+               cacheManager = "factorValueCacheManager",
+               unless = "#result == null || #result.isEmpty()")
     public Map<String, Double> findStockDailyLatest(String code) {
         if (!clickHouseConfig.isEnabled() || code == null || code.isBlank()) {
             return Map.of();
@@ -515,6 +544,9 @@ public class ClickHouseFactorValueService {
      * 查询指定日期范围内有数据的因子代码列表
      * 用于对比全量因子，找出缺失日期的因子
      */
+    @Cacheable(value = "factorValue", key = "'fwd:' + #date",
+               cacheManager = "factorValueCacheManager",
+               unless = "#result == null || #result.isEmpty()")
     public java.util.List<String> findFactorsWithDates(String date) {
         if (!clickHouseConfig.isEnabled()) {
             return List.of();
@@ -545,6 +577,7 @@ public class ClickHouseFactorValueService {
      * 批量写入因子值到 ClickHouse（多行 VALUES INSERT，比 JDBC batch 快 3-5x）
      * 每批 5000 行，单条 SQL 一次网络往返
      */
+    @CacheEvict(value = "factorValue", allEntries = true, cacheManager = "factorValueCacheManager")
     public void batchUpsertToCH(java.util.List<com.quant.platform.factor.domain.FactorValue> values) {
         if (!clickHouseConfig.isEnabled() || values == null || values.isEmpty()) {
             return;
@@ -719,6 +752,7 @@ public class ClickHouseFactorValueService {
      * 按因子代码删除 ClickHouse 因子值（异步ALTER TABLE DELETE）
      * @return 删除前的记录数（用于前端提示）
      */
+    @CacheEvict(value = "factorValue", allEntries = true, cacheManager = "factorValueCacheManager")
     public long deleteByFactorCode(String factorCode) {
         if (!clickHouseConfig.isEnabled()) {
             return 0L;
@@ -758,6 +792,7 @@ public class ClickHouseFactorValueService {
      *
      * @return 删除前的记录数
      */
+    @CacheEvict(value = "factorValue", allEntries = true, cacheManager = "factorValueCacheManager")
     public long deleteByFactorCodeAndDateRange(String factorCode, String startDate, String endDate) {
         if (!clickHouseConfig.isEnabled()) {
             return 0L;
@@ -843,6 +878,7 @@ public class ClickHouseFactorValueService {
      *
      * @return 处理的行数
      */
+    @CacheEvict(value = "factorValue", allEntries = true, cacheManager = "factorValueCacheManager")
     public long batchNormalize(String factorCode, java.util.List<java.time.LocalDate> dates) {
         if (!clickHouseConfig.isEnabled() || dates == null || dates.isEmpty()) {
             return 0L;
@@ -1089,6 +1125,7 @@ public class ClickHouseFactorValueService {
      * 通过 HTTP POST JSONEachRow 批量写入因子值（绕过 JDBC，速度更快）
      * 147万条约 10-20 秒，比 JDBC VALUES INSERT 快 10x+
      */
+    @CacheEvict(value = "factorValue", allEntries = true, cacheManager = "factorValueCacheManager")
     public void httpBatchInsert(List<com.quant.platform.factor.domain.FactorValue> values) {
         if (!clickHouseConfig.isEnabled() || values == null || values.isEmpty()) return;
         java.time.LocalDateTime now = java.time.LocalDateTime.now();
@@ -1123,6 +1160,7 @@ public class ClickHouseFactorValueService {
      * 对 factor_value 表执行 OPTIMIZE TABLE FINAL，合并 ReplacingMergeTree 重复行。
      * 归一化写入新行后调用，确保查询能立即读到 z_score/rank_value 而非旧行 NULL。
      */
+    @CacheEvict(value = "factorValue", allEntries = true, cacheManager = "factorValueCacheManager")
     public void optimizeFactorValue() {
         // 用 HTTP POST body 方式发送 DDL，绕过 readonly=2 的 URL 参数限制
         try {
@@ -1167,6 +1205,9 @@ public class ClickHouseFactorValueService {
      * 批量获取多因子的日度截面中位数（CH 侧聚合，避免拉取全量数据）
      * @return Map<factorCode, Map<日期, 中位数>>
      */
+    @Cacheable(value = "factorValue", key = "'med:' + #factorCodes.hashCode() + ':' + #startDate + ':' + #endDate",
+               cacheManager = "factorValueCacheManager",
+               unless = "#result == null || #result.isEmpty()")
     public Map<String, Map<java.time.LocalDate, Double>> getDailyMedians(
             List<String> factorCodes, java.time.LocalDate startDate, java.time.LocalDate endDate) {
         if (!clickHouseConfig.isEnabled() || factorCodes == null || factorCodes.isEmpty()) {
@@ -1217,6 +1258,9 @@ public class ClickHouseFactorValueService {
      * 用于权重优化等需要因子截面排名的场景
      * @return Map<factorCode, Map<日期, rank_value中位数>>
      */
+    @Cacheable(value = "factorValue", key = "'rmed:' + #factorCodes.hashCode() + ':' + #startDate + ':' + #endDate",
+               cacheManager = "factorValueCacheManager",
+               unless = "#result == null || #result.isEmpty()")
     public Map<String, Map<java.time.LocalDate, Double>> getDailyRankMedians(
             List<String> factorCodes, java.time.LocalDate startDate, java.time.LocalDate endDate) {
         if (!clickHouseConfig.isEnabled() || factorCodes == null || factorCodes.isEmpty()) {
@@ -1265,6 +1309,9 @@ public class ClickHouseFactorValueService {
     /**
      * 获取因子最新数据日期
      */
+    @Cacheable(value = "factorValue", key = "'latest:' + #factorCode",
+               cacheManager = "factorValueCacheManager",
+               unless = "#result == null")
     public java.time.LocalDate getLatestDate(String factorCode) {
         if (!clickHouseConfig.isEnabled() || factorCode == null) return null;
         String sql = String.format(
@@ -1286,6 +1333,9 @@ public class ClickHouseFactorValueService {
     /**
      * 获取因子有数据的所有股票代码
      */
+    @Cacheable(value = "factorValue", key = "'syms:' + #factorCode",
+               cacheManager = "factorValueCacheManager",
+               unless = "#result == null || #result.isEmpty()")
     public java.util.Set<String> getDistinctSymbols(String factorCode) {
         if (!clickHouseConfig.isEnabled() || factorCode == null) return java.util.Set.of();
         String sql = String.format(

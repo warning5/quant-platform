@@ -1442,8 +1442,7 @@ public class DataUpdateService {
             // 最新交易日覆盖股票数
             if (latestDateStr != null && !latestDateStr.equals("无数据")) {
                 LocalDate latestDate = LocalDate.parse(latestDateStr);
-                String patternSql = buildCodePatternSql(marketPatterns[i]);
-                long latestDayCount = clickHouseStockService.getDistinctCodeCount(latestDate, patternSql);
+                long latestDayCount = clickHouseStockService.getDistinctCodeCount(latestDate, marketPatterns[i]);
                 m.put("latestDayCount", latestDayCount);
             } else {
                 m.put("latestDayCount", 0);

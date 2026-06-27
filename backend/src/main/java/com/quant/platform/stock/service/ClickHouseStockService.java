@@ -87,25 +87,31 @@ public class ClickHouseStockService {
             return result;
         }
 
-        // ClickHouse: 用字符串拼接 SQL，避免 PreparedStatement 参数绑定返回空
-        String codesStr = codes.stream()
-                .map(c -> "'" + c + "'")
+        // ClickHouse: 修复 SQL 注入 - 使用 PreparedStatement 参数化查询
+        String placeholders = codes.stream()
+                .map(c -> "?")
                 .collect(Collectors.joining(","));
-        String sql = String.format(
+        String sql = 
                 "SELECT code, trade_date, name, open_price, close_price, high_price, low_price, " +
                 "pre_close, volume, amount, change_percent, change_amount, " +
                 "turnover_rate, pe_ttm, pb " +
                 "FROM index_daily FINAL " +
-                "WHERE code IN (%s) AND trade_date >= '%s' AND trade_date <= '%s' " +
-                "ORDER BY code, trade_date",
-                codesStr, startDate, endDate);
+                "WHERE code IN (" + placeholders + ") AND trade_date >= ? AND trade_date <= ? " +
+                "ORDER BY code, trade_date";
 
         try (Connection conn = getConnection();
-             Statement stmt = conn.createStatement();
-             ResultSet rs = stmt.executeQuery(sql)) {
-            while (rs.next()) {
-                StockDaily daily = convertResultSet(rs);
-                result.computeIfAbsent(daily.getCode(), k -> new ArrayList<>()).add(daily);
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            int paramIdx = 1;
+            for (String code : codes) {
+                stmt.setString(paramIdx++, code);
+            }
+            stmt.setDate(paramIdx++, Date.valueOf(startDate));
+            stmt.setDate(paramIdx, Date.valueOf(endDate));
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    StockDaily daily = convertResultSet(rs);
+                    result.computeIfAbsent(daily.getCode(), k -> new ArrayList<>()).add(daily);
+                }
             }
         } catch (Exception e) {
             log.warn("[ClickHouse] 批量指数查询失败: {}", e.getMessage());
@@ -328,6 +334,7 @@ public class ClickHouseStockService {
 
     /**
      * 按条件查询记录数（用于市场覆盖率统计）
+     * @param codeLike 代码前缀模式，如 "6%" 表示 6开头
      */
     public long getDailyCountByCodePrefix(String codeLike) {
         if (!clickHouseConfig.isEnabled()) {
@@ -337,11 +344,14 @@ public class ClickHouseStockService {
         }
 
         try {
-            String sql = "SELECT COUNT(*) FROM stock_daily WHERE " + codeLike;
+            // 修复 SQL 注入 - 使用 PreparedStatement 参数化查询
+            String sql = "SELECT COUNT(*) FROM stock_daily WHERE code LIKE ?";
             try (Connection conn = getConnection();
-                 PreparedStatement stmt = conn.prepareStatement(sql);
-                 ResultSet rs = stmt.executeQuery()) {
-                if (rs.next()) return rs.getLong(1);
+                 PreparedStatement stmt = conn.prepareStatement(sql)) {
+                stmt.setString(1, codeLike);
+                try (ResultSet rs = stmt.executeQuery()) {
+                    if (rs.next()) return rs.getLong(1);
+                }
             }
         } catch (Exception e) {
             log.warn("[ClickHouse] 按前缀统计失败，回退到 MySQL: {}", e.getMessage());
@@ -381,22 +391,39 @@ public class ClickHouseStockService {
 
     /**
      * 按市场和日期查询最新交易日的股票数 (COUNT DISTINCT code)
+     * @param prefixes 代码前缀数组，如 ["6"], ["0", "3"], ["92"]
      */
-    public long getDistinctCodeCount(LocalDate date, String codePattern) {
+    public long getDistinctCodeCount(LocalDate date, String... prefixes) {
         if (!clickHouseConfig.isEnabled()) {
             // MySQL 回退：查所有再 count distinct
             LambdaQueryWrapper<StockDaily> wrapper = new LambdaQueryWrapper<>();
             wrapper.eq(StockDaily::getTradeDate, date);
-            applyCodePatternToWrapper(wrapper, codePattern);
+            applyPrefixesToWrapper(wrapper, prefixes);
             List<StockDaily> list = stockDailyMapper.selectList(wrapper);
             return list.stream().map(StockDaily::getCode).distinct().count();
         }
 
         try {
-            String sql = "SELECT COUNT(DISTINCT code) FROM stock_daily FINAL WHERE trade_date = ? AND " + codePattern;
+            // 修复 SQL 注入 - 使用 PreparedStatement 参数化查询
+            StringBuilder sql = new StringBuilder("SELECT COUNT(DISTINCT code) FROM stock_daily FINAL WHERE trade_date = ?");
+            if (prefixes != null && prefixes.length > 0) {
+                sql.append(" AND (");
+                for (int i = 0; i < prefixes.length; i++) {
+                    if (i > 0) sql.append(" OR ");
+                    sql.append("code LIKE ?");
+                }
+                sql.append(")");
+            }
+            
             try (Connection conn = getConnection();
-                 PreparedStatement stmt = conn.prepareStatement(sql)) {
-                stmt.setString(1, date.toString());
+                 PreparedStatement stmt = conn.prepareStatement(sql.toString())) {
+                int paramIdx = 1;
+                stmt.setString(paramIdx++, date.toString());
+                if (prefixes != null) {
+                    for (String prefix : prefixes) {
+                        stmt.setString(paramIdx++, prefix + "%");
+                    }
+                }
                 try (ResultSet rs = stmt.executeQuery()) {
                     if (rs.next()) return rs.getLong(1);
                 }
@@ -405,11 +432,26 @@ public class ClickHouseStockService {
             log.warn("[ClickHouse] distinct count 查询失败，回退到 MySQL: {}", e.getMessage());
         }
 
+        // MySQL 回退
         LambdaQueryWrapper<StockDaily> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(StockDaily::getTradeDate, date);
-        applyCodePatternToWrapper(wrapper, codePattern);
+        applyPrefixesToWrapper(wrapper, prefixes);
         List<StockDaily> list = stockDailyMapper.selectList(wrapper);
         return list.stream().map(StockDaily::getCode).distinct().count();
+    }
+
+    /**
+     * 将前缀数组应用到 QueryWrapper
+     */
+    private void applyPrefixesToWrapper(LambdaQueryWrapper<StockDaily> wrapper, String... prefixes) {
+        if (prefixes == null || prefixes.length == 0) return;
+        
+        wrapper.and(w -> {
+            w.likeRight(StockDaily::getCode, prefixes[0]);
+            for (int i = 1; i < prefixes.length; i++) {
+                w.or().likeRight(StockDaily::getCode, prefixES[i]);
+            }
+        });
     }
 
     /**
@@ -488,7 +530,7 @@ public class ClickHouseStockService {
             return queryFromClickHouse(codes.get(0), startDate, endDate);
         }
 
-        String placeholders = String.join(",", codes.stream().map(c -> "'" + c + "'").toList());
+        String placeholders = String.join(",", Collections.nCopies(codes.size(), "?"));
         String finalClause = useFinal ? " FINAL" : "";
         String sql = String.format("""
                 SELECT code, trade_date, name, open_price, close_price, high_price, low_price,
@@ -499,7 +541,26 @@ public class ClickHouseStockService {
                 ORDER BY code, trade_date
                 """, finalClause, placeholders);
 
-        return executeQuery(sql, startDate, endDate);
+        try (Connection conn = getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            int paramIdx = 1;
+            for (String code : codes) {
+                stmt.setString(paramIdx++, code);
+            }
+            stmt.setString(paramIdx++, startDate.toString());
+            stmt.setString(paramIdx, endDate.toString());
+            
+            try (ResultSet rs = stmt.executeQuery()) {
+                List<StockDaily> result = new ArrayList<>();
+                while (rs.next()) {
+                    result.add(convertResultSet(rs));
+                }
+                return result;
+            }
+        } catch (Exception e) {
+            log.warn("[ClickHouse] 批量查询失败: {}", e.getMessage());
+            throw new RuntimeException("ClickHouse 批量查询失败", e);
+        }
     }
 
     private List<StockDaily> queryDailyByDateFromClickHouse(LocalDate date, Collection<String> excludeNames) {
@@ -512,14 +573,20 @@ public class ClickHouseStockService {
                 """);
 
         if (excludeNames != null && !excludeNames.isEmpty()) {
-            String names = String.join("','", excludeNames);
-            sql.append("AND name NOT IN ('").append(names).append("') ");
+            String placeholders = String.join(",", Collections.nCopies(excludeNames.size(), "?"));
+            sql.append("AND name NOT IN (").append(placeholders).append(") ");
         }
         sql.append("ORDER BY code");
 
         try (Connection conn = getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql.toString())) {
-            stmt.setString(1, date.toString());
+            int paramIdx = 1;
+            stmt.setString(paramIdx++, date.toString());
+            if (excludeNames != null && !excludeNames.isEmpty()) {
+                for (String name : excludeNames) {
+                    stmt.setString(paramIdx++, name);
+                }
+            }
             try (ResultSet rs = stmt.executeQuery()) {
                 List<StockDaily> result = new ArrayList<>();
                 while (rs.next()) result.add(convertResultSet(rs));
@@ -534,9 +601,14 @@ public class ClickHouseStockService {
     private Map<String, Object> getCrossSectionPagedFromClickHouse(LocalDate date, int page, int size,
                                                                    String keyword, String sortField, String sortOrder) {
         StringBuilder whereSql = new StringBuilder("WHERE trade_date = ?");
+        List<Object> params = new ArrayList<>();
+        params.add(date.toString());
+        
         if (keyword != null && !keyword.trim().isEmpty()) {
             String kw = keyword.trim();
-            whereSql.append(" AND (code LIKE '%").append(kw).append("%' OR name LIKE '%").append(kw).append("%')");
+            whereSql.append(" AND (code LIKE ? OR name LIKE ?)");
+            params.add("%" + kw + "%");
+            params.add("%" + kw + "%");
         }
 
         // 总数
@@ -544,7 +616,9 @@ public class ClickHouseStockService {
         String countSql = "SELECT COUNT(*) FROM stock_daily FINAL " + whereSql;
         try (Connection conn = getConnection();
              PreparedStatement stmt = conn.prepareStatement(countSql)) {
-            stmt.setString(1, date.toString());
+            for (int i = 0; i < params.size(); i++) {
+                stmt.setObject(i + 1, params.get(i));
+            }
             try (ResultSet rs = stmt.executeQuery()) {
                 total = rs.next() ? rs.getLong(1) : 0;
             }
@@ -568,9 +642,12 @@ public class ClickHouseStockService {
         List<StockDaily> records = new ArrayList<>();
         try (Connection conn = getConnection();
              PreparedStatement stmt = conn.prepareStatement(dataSql)) {
-            stmt.setString(1, date.toString());
-            stmt.setInt(2, size);
-            stmt.setInt(3, offset);
+            int paramIdx = 1;
+            for (Object param : params) {
+                stmt.setObject(paramIdx++, param);
+            }
+            stmt.setInt(paramIdx++, size);
+            stmt.setInt(paramIdx, offset);
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) records.add(convertResultSet(rs));
             }
@@ -738,11 +815,15 @@ public class ClickHouseStockService {
         // 批量查询，避免超长 IN clause
         for (int i = 0; i < codeList.size(); i += batchSize) {
             List<String> batch = codeList.subList(i, Math.min(i + batchSize, codeList.size()));
-            String placeholders = String.join(",", batch.stream().map(c -> "'" + c + "'").toList());
+            String placeholders = String.join(",", Collections.nCopies(batch.size(), "?"));
             String sql = "SELECT DISTINCT code FROM stock_daily WHERE trade_date = ? AND code IN (" + placeholders + ")";
             try (Connection conn = getConnection();
                  PreparedStatement stmt = conn.prepareStatement(sql)) {
-                stmt.setString(1, date.toString());
+                int paramIdx = 1;
+                stmt.setString(paramIdx++, date.toString());
+                for (String code : batch) {
+                    stmt.setString(paramIdx++, code);
+                }
                 try (ResultSet rs = stmt.executeQuery()) {
                     while (rs.next()) result.add(rs.getString("code"));
                 }
@@ -951,20 +1032,6 @@ public class ClickHouseStockService {
         return "ORDER BY " + col + (asc ? " ASC" : " DESC");
     }
 
-    private void applyCodePatternToWrapper(LambdaQueryWrapper<StockDaily> wrapper, String codePattern) {
-        // 简化处理：将 SQL LIKE 模式转为 MyBatis-Plus wrapper
-        if (codePattern.contains("688%") || codePattern.contains("689%")) {
-            wrapper.and(w -> w.likeRight(StockDaily::getCode, "688")
-                    .or().likeRight(StockDaily::getCode, "689"));
-        } else if (codePattern.contains("6%")) {
-            wrapper.likeRight(StockDaily::getCode, "6");
-        } else if (codePattern.contains("0%") || codePattern.contains("3%")) {
-            wrapper.and(w -> w.likeRight(StockDaily::getCode, "0")
-                    .or().likeRight(StockDaily::getCode, "3"));
-        } else if (codePattern.contains("92%")) {
-            wrapper.likeRight(StockDaily::getCode, "92");
-        }
-    }
 
     /**
      * 执行 ClickHouse 查询
@@ -1235,20 +1302,22 @@ public class ClickHouseStockService {
         String chCode = normalizeCodeForCH(code);
         // CH SQL: 用 lagInFrame 窗口函数取前一交易日收盘价，计算日收益率，再年化
         // ⚠️ neighbor() 在 CH v26+ 已被移除，改用 lagInFrame()
-        String sql = String.format("""
+        // 修复 SQL 注入 - 使用 PreparedStatement 参数化查询
+        String sql = """
                 WITH daily_ret AS (
                     SELECT
                         close_price / nullIf(lagInFrame(close_price, 1) OVER (ORDER BY trade_date), 0) - 1 AS ret
                     FROM stock_daily
-                    WHERE code = '%s' AND trade_date >= today() - 400
+                    WHERE code = ? AND trade_date >= today() - 400
                 )
                 SELECT stddevPop(ret) * sqrt(252) AS annual_vol
                 FROM daily_ret
                 WHERE ret IS NOT NULL AND abs(ret) < 0.25
-                """, chCode);
+                """;
         try (Connection conn = this.getConnection();
-             Statement stmt = conn.createStatement();
-             ResultSet rs = stmt.executeQuery(sql)) {
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, chCode);
+            try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
                     double vol = rs.getDouble(1);
                     if (!rs.wasNull()) {

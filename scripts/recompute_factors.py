@@ -129,6 +129,7 @@ def load_stock_daily():
         data = defaultdict(list)
         for code, td, close, high, turnover, vol, pe_ttm, pb in rows:
             data[code].append({
+                "code": code,
                 "date": td,
                 "close": float(close),
                 "high": float(high) if high else float(close),
@@ -430,17 +431,44 @@ def calc_volume_surprise(history):
     return today_vol / avg_vol
 
 
+def get_limit_up_threshold(code, date):
+    """获取涨停阈值（百分比），按板块和日期区分
+    - 科创板688: 20%（2019-07-22开板即20%）
+    - 创业板300/301: 2020-08-24前10%，之后20%
+    - 北交所43/83/87/88/92/920: 30%（2021-11-15开市即30%）
+    - 主板: 10%
+    返回阈值如 9.8（含容差）
+    """
+    GEM_REFORM = date(2020, 8, 24)
+    if code.startswith("688"):
+        return 19.5
+    if code.startswith("300") or code.startswith("301"):
+        if date and date < GEM_REFORM:
+            return 9.8
+        return 19.5
+    if code.startswith("43") or code.startswith("83") or code.startswith("87") \
+            or code.startswith("88") or code.startswith("92") or code.startswith("920"):
+        return 29.5
+    return 9.8
+
+
 def calc_limit_up_count(history):
-    """涨停次数 = 近20日涨停次数（收盘价≥前收9.8%）
-    覆盖沪深主板/创业板/科创板，用9.8%阈值兼顾"""
+    """涨停次数 = 近20日涨停次数
+    按板块区分涨停阈值：主板9.8%、创业板/科创板19.5%、北交所29.5%
+    创业板2020-08-24改革前为10%（9.8%阈值）"""
     if len(history) < 21:
         return None
     count = 0
     for i in range(1, min(21, len(history))):
         prev = history[-i]["close"]
         curr = history[-i + 1]["close"]
-        if prev > 0 and curr >= prev * 1.098:
-            count += 1
+        bar_date = history[-i + 1].get("date")
+        bar_code = history[-i + 1].get("code", "")
+        if prev > 0:
+            pct = (curr - prev) / prev * 100
+            threshold = get_limit_up_threshold(bar_code, bar_date)
+            if pct >= threshold:
+                count += 1
     return float(count)
 
 
@@ -455,12 +483,12 @@ def calc_pe_percentile(history):
     window = history[-lookback:] if len(history) > lookback else history
 
     # 收集有效PE值
-    pe_values = [d["pe_ttm"] for d in window if d.get("pe_ttm") is not None and 0 < d["pe_ttm"] < 10000]
+    pe_values = [d["pe_ttm"] for d in window if d.get("pe_ttm") is not None and 0 < d["pe_ttm"] < 50000]
     if len(pe_values) < 30:
         return None
 
     current_pe = history[-1].get("pe_ttm")
-    if current_pe is None or current_pe <= 0 or current_pe >= 10000:
+    if current_pe is None or current_pe <= 0 or current_pe >= 50000:
         return None
 
     # 百分位：低于当前值的占比

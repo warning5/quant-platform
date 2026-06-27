@@ -162,12 +162,12 @@ class StockDailyDB:
     CH_TABLE = "stock.stock_daily"
     CH_INDEX_TABLE = "stock.index_daily"  # 指数日线（上证指数/沪深300/创业板指等，code 纯数字无前缀）
 
-    # ─── stock_daily / index_daily 共用字段（19列）────────────
+    # ─── stock_daily 字段（19列，含 data_source）────────────
     DAILY_COLUMNS = [
         "id",              # 自增主键
         "code",            # 股票代码（纯数字：000300=沪深300 / 600519=贵州茅台）
         "trade_date",      # 交易日期
-        "name",            # 名称（指数名称如"上证指数"，或股票名称如"贵州茅台"）
+        "name",            # 名称（指数名称如"上证指数"，或股票名称如"贵州茅台")
         "open_price",      # 开盘价
         "close_price",     # 收盘价
         "high_price",      # 最高价
@@ -184,6 +184,10 @@ class StockDailyDB:
         "create_time",     # 创建时间
         "update_time",     # 更新时间（ReplacingMergeTree 版本列，新值覆盖旧值）
     ]
+
+    # ─── index_daily 字段（18列，不含 data_source）────────────
+    # 指数只有 Baostock 单一数据源，无需 data_source 标记
+    INDEX_DAILY_COLUMNS = [c for c in DAILY_COLUMNS if c != "data_source"]
 
     def __init__(self):
         self.backend = DB_BACKEND
@@ -644,11 +648,10 @@ class StockDailyDB:
         # table="index" → stock.index_daily （指数日线，与股票物理隔离避免 code 冲突）
         target_table = self.CH_INDEX_TABLE if table == "index" else self.CH_TABLE
 
-        now_dt = datetime.now()
-        # 使用实例方法 _ch_norm_code（统一 code 格式）
-
-        # biz_cols = DAILY_COLUMNS 不含 create_time/update_time（自动同步）
-        biz_cols = [c for c in self.DAILY_COLUMNS if c not in ("create_time", "update_time")]  # 不含 create_time/update_time
+        # ─── 根据目标表选择列列表 ───────────────────────────
+        # stock_daily 有 data_source 列（19列），index_daily 无 data_source 列（18列）
+        all_columns = self.INDEX_DAILY_COLUMNS if table == "index" else self.DAILY_COLUMNS
+        biz_cols = [c for c in all_columns if c not in ("create_time", "update_time")]  # 不含 create_time/update_time
 
         # ── 预过滤：查 FINAL 表，找出已存在的 (code, trade_date) ──
         existing_keys = set()
@@ -788,7 +791,7 @@ class StockDailyDB:
                 continue
             try:
                 # 直接 INSERT 到目标表
-                self.ch_client.insert(target_table, insert_rows, column_names=self.DAILY_COLUMNS)
+                self.ch_client.insert(target_table, insert_rows, column_names=all_columns)
                 total_inserted += len(insert_rows)
             except Exception as e:
                 print(f"  [ERROR] ClickHouse 插入失败 (批次 {i // batch_size + 1}): {e}")

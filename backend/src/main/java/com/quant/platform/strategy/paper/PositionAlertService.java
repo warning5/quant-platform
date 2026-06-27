@@ -182,26 +182,30 @@ public class PositionAlertService {
         for (int n : periods) {
             try {
                 // 取最近 n+2 天的收盘价，确保能算 MA(N) 和判断破位
+                // 修复 SQL 注入：使用 ? 占位符，不拼接 pos.getCode()
                 String sql = String.format("""
                     SELECT trade_date, close_price,
                            avg(close_price) OVER (ORDER BY trade_date ROWS BETWEEN %d PRECEDING AND CURRENT ROW) as ma
                     FROM (
                         SELECT trade_date, close_price
                         FROM stock.stock_daily FINAL
-                        WHERE code = '%s' AND trade_date <= '%s'
+                        WHERE code = ? AND trade_date <= ?
                         ORDER BY trade_date DESC
                         LIMIT %d
                     ) sub
                     ORDER BY trade_date ASC
-                    """, n - 1, pos.getCode(), today, n + 5);
+                    """, n - 1, n + 5);
 
-                List<Map<String, Object>> rows = clickHouseJdbcTemplate.query(sql, (rs, rowNum) -> {
-                    Map<String, Object> m = new HashMap<>();
-                    m.put("date", rs.getString("trade_date"));
-                    m.put("close", rs.getBigDecimal("close_price"));
-                    m.put("ma", rs.getBigDecimal("ma"));
-                    return m;
-                });
+                List<Map<String, Object>> rows = clickHouseJdbcTemplate.query(
+                    sql, 
+                    new Object[]{pos.getCode(), today.toString()},
+                    (rs, rowNum) -> {
+                        Map<String, Object> m = new HashMap<>();
+                        m.put("date", rs.getString("trade_date"));
+                        m.put("close", rs.getBigDecimal("close_price"));
+                        m.put("ma", rs.getBigDecimal("ma"));
+                        return m;
+                    });
 
                 if (rows.size() < n + 2) continue;
 
@@ -252,21 +256,25 @@ public class PositionAlertService {
         if (clickHouseJdbcTemplate == null) return 0;
 
         try {
-            String sql = String.format("""
+            // 修复 SQL 注入：使用 ? 占位符
+            String sql = """
                 SELECT trade_date, close_price, change_percent
                 FROM stock.stock_daily FINAL
-                WHERE code = '%s' AND trade_date <= '%s'
+                WHERE code = ? AND trade_date <= ?
                 ORDER BY trade_date DESC
                 LIMIT 2
-                """, pos.getCode(), today);
+                """;
 
-            List<Map<String, Object>> rows = clickHouseJdbcTemplate.query(sql, (rs, rowNum) -> {
-                Map<String, Object> m = new HashMap<>();
-                m.put("date", rs.getString("trade_date"));
-                m.put("close", rs.getBigDecimal("close_price"));
-                m.put("change", rs.getBigDecimal("change_percent"));
-                return m;
-            });
+            List<Map<String, Object>> rows = clickHouseJdbcTemplate.query(
+                sql,
+                new Object[]{pos.getCode(), today.toString()},
+                (rs, rowNum) -> {
+                    Map<String, Object> m = new HashMap<>();
+                    m.put("date", rs.getString("trade_date"));
+                    m.put("close", rs.getBigDecimal("close_price"));
+                    m.put("change", rs.getBigDecimal("change_percent"));
+                    return m;
+                });
 
             if (rows.isEmpty()) return 0;
             Map<String, Object> latest = rows.getFirst();
@@ -307,30 +315,36 @@ public class PositionAlertService {
         int count = 0;
 
         try {
-            // 构建 notice_type IN 条件
-            StringBuilder typeList = new StringBuilder();
+            // 构建 notice_type IN 条件（静态常量，低风险）
+            // 修复 SQL 注入：code 和 notice_date 使用 ? 占位符
+            String placeholders = String.join(",", java.util.Collections.nCopies(IMPORTANT_NOTICE_TYPES.length, "?"));
+
+            String sql =
+                "SELECT notice_type, notice_date, title " +
+                "FROM stock.stock_sentiment_notice FINAL " +
+                "WHERE code = ? " +
+                "  AND notice_date >= ? " +
+                "  AND notice_type IN (" + placeholders + ") " +
+                "ORDER BY notice_date DESC " +
+                "LIMIT 5";
+
+            // 构建参数数组：code + notice_date + 所有 notice_type
+            Object[] params = new Object[2 + IMPORTANT_NOTICE_TYPES.length];
+            params[0] = pos.getCode();
+            params[1] = today.minusDays(3);
             for (int i = 0; i < IMPORTANT_NOTICE_TYPES.length; i++) {
-                if (i > 0) typeList.append(",");
-                typeList.append("'").append(IMPORTANT_NOTICE_TYPES[i]).append("'");
+                params[2 + i] = IMPORTANT_NOTICE_TYPES[i];
             }
 
-            String sql = String.format("""
-                SELECT notice_type, notice_date, title
-                FROM stock.stock_sentiment_notice FINAL
-                WHERE code = '%s'
-                  AND notice_date >= '%s'
-                  AND notice_type IN (%s)
-                ORDER BY notice_date DESC
-                LIMIT 5
-                """, pos.getCode(), today.minusDays(3), typeList);
-
-            List<Map<String, Object>> rows = clickHouseJdbcTemplate.query(sql, (rs, rowNum) -> {
-                Map<String, Object> m = new HashMap<>();
-                m.put("type", rs.getString("notice_type"));
-                m.put("date", rs.getString("notice_date"));
-                m.put("title", rs.getString("title"));
-                return m;
-            });
+            List<Map<String, Object>> rows = clickHouseJdbcTemplate.query(
+                sql, params,
+                (rs, rowNum) -> {
+                    Map<String, Object> m = new HashMap<>();
+                    m.put("type", rs.getString("notice_type"));
+                    m.put("date", rs.getString("notice_date"));
+                    m.put("title", rs.getString("title"));
+                    return m;
+                });
 
             for (Map<String, Object> row : rows) {
                 LocalDate noticeDate = LocalDate.parse(row.get("date").toString());
@@ -560,23 +574,32 @@ public class PositionAlertService {
         if (codes.size() < 2) return 0;
 
         // 从 ClickHouse 批量获取近60日收盘价
-        String codeList = codes.stream().map(c -> "'" + c + "'").collect(Collectors.joining(","));
-        String sql = String.format("""
-            SELECT code, trade_date, close_price
-            FROM stock.stock_daily
-            WHERE code IN (%s)
-              AND trade_date >= '%s'
-            ORDER BY code, trade_date ASC
-            """, codeList, today.minusDays(90));
+            // 修复 SQL 注入：使用 ? 占位符，不拼接 code 列表
+            String placeholders = String.join(",", java.util.Collections.nCopies(codes.size(), "?"));
+            String sql =
+                "SELECT code, trade_date, close_price " +
+                "FROM stock.stock_daily " +
+                "WHERE code IN (" + placeholders + ") " +
+                "  AND trade_date >= ? " +
+                "ORDER BY code, trade_date ";
+
+            // 构建参数数组
+            Object[] params = new Object[codes.size() + 1];
+            for (int i = 0; i < codes.size(); i++) {
+                params[i] = codes.get(i);
+            }
+            params[codes.size()] = today.minusDays(90);
 
         try {
-            List<Map<String, Object>> rows = clickHouseJdbcTemplate.query(sql, (rs, rowNum) -> {
-                Map<String, Object> m = new HashMap<>();
-                m.put("code", rs.getString("code"));
-                m.put("date", rs.getString("trade_date"));
-                m.put("close", rs.getDouble("close_price"));
-                return m;
-            });
+            List<Map<String, Object>> rows = clickHouseJdbcTemplate.query(
+                sql, params,
+                (rs, rowNum) -> {
+                    Map<String, Object> m = new HashMap<>();
+                    m.put("code", rs.getString("code"));
+                    m.put("date", rs.getString("trade_date"));
+                    m.put("close", rs.getDouble("close_price"));
+                    return m;
+                });
 
             // 构建 code -> List<Double> closePrices
             Map<String, List<Double>> priceMap = new HashMap<>();
@@ -682,23 +705,28 @@ public class PositionAlertService {
 
         for (PaperPosition pos : positions) {
             try {
-                String sql = String.format("""
+                // 修复 SQL 注入：使用 ? 占位符
+                    String sql = """
                     SELECT notice_type, notice_date, title
                     FROM stock.stock_sentiment_notice FINAL
-                    WHERE code = '%s'
-                      AND notice_date >= '%s'
-                      AND notice_type IN ('定增', '解禁', '股权激励', '业绩预告', '业绩快报')
+                    WHERE code = ?
+                      AND notice_date >= ?
+                      AND notice_type IN (?, ?, ?, ?, ?)
                     ORDER BY notice_date DESC
                     LIMIT 3
-                    """, pos.getCode(), today.minusDays(7));
+                    """;
 
-                List<Map<String, Object>> rows = clickHouseJdbcTemplate.query(sql, (rs, rowNum) -> {
-                    Map<String, Object> m = new HashMap<>();
-                    m.put("type", rs.getString("notice_type"));
-                    m.put("date", rs.getString("notice_date"));
-                    m.put("title", rs.getString("title"));
-                    return m;
-                });
+                List<Map<String, Object>> rows = clickHouseJdbcTemplate.query(
+                    sql,
+                    new Object[]{pos.getCode(), today.minusDays(7),
+                                 "定增", "解禁", "股权激励", "业绩预告", "业绩快报"},
+                    (rs, rowNum) -> {
+                        Map<String, Object> m = new HashMap<>();
+                        m.put("type", rs.getString("notice_type"));
+                        m.put("date", rs.getString("notice_date"));
+                        m.put("title", rs.getString("title"));
+                        return m;
+                    });
 
                 for (Map<String, Object> row : rows) {
                     String type = (String) row.get("type");

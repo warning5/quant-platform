@@ -12,7 +12,6 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * 缓存配置
- *
  * 缓存策略：
  * - 主缓存(cacheManager)：通用 5min/100条
  * - stylePicks：选股策略 4h/20条
@@ -55,7 +54,6 @@ public class CacheConfig {
      * 因子IC计算缓存：30分钟过期
      * IC计算需查CH factor_value + stock_daily，单次查询涉及数千行数据。
      * 同一因子+日期+forwardDays 的结果在30分钟内不会变化（因子值日频更新）。
-     *
      * 用于 @Cacheable(value = "factorIc", cacheManager = "factorIcCacheManager")
      */
     @Bean
@@ -72,7 +70,6 @@ public class CacheConfig {
      * Groovy脚本编译缓存：永不过期
      * 脚本源码不变时，编译出的Class完全相同。5000股×250日=125万次调用，
      * 有缓存时实际只编译N个不同脚本（N=自定义因子数量，通常<50）。
-     *
      * 注意：此缓存用于 ScriptedFactorEngine 手动管理，非 @Cacheable
      */
     @Bean
@@ -81,6 +78,29 @@ public class CacheConfig {
         cacheManager.setCaffeine(Caffeine.newBuilder()
                 .maximumSize(50)
                 .expireAfterWrite(Long.MAX_VALUE, TimeUnit.DAYS)  // 实际永不过期
+                .recordStats());
+        return cacheManager;
+    }
+
+    /**
+     * 因子值查询缓存：5分钟过期，最多5000条
+     * <p>
+     * ClickHouseFactorValueService 中所有读方法使用此缓存。
+     * 因子数据T+1更新，5分钟TTL完全安全；写入/删除/归一化时通过 @CacheEvict 全量清除。
+     * <p>
+     * 典型命中场景：
+     * <ul>
+     *   <li>回测调仓：37因子 × 12调仓日 = 444次查询，缓存后仅首次miss</li>
+     *   <li>IC分析：同因子同日期范围重复查询，缓存命中率>90%</li>
+     *   <li>因子监控页：30秒轮询 batchGetStatusFromCH，5分钟内命中10次</li>
+     * </ul>
+     */
+    @Bean
+    public CacheManager factorValueCacheManager() {
+        CaffeineCacheManager cacheManager = new CaffeineCacheManager("factorValue");
+        cacheManager.setCaffeine(Caffeine.newBuilder()
+                .maximumSize(5000)
+                .expireAfterWrite(5, TimeUnit.MINUTES)
                 .recordStats());
         return cacheManager;
     }

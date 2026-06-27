@@ -319,6 +319,13 @@ export const scheduleApi = {
   delete: (taskKey) => api.delete(`/schedule-config/${taskKey}`),
 };
 
+// ===== 数据质量 API =====
+export const dataQualityApi = {
+  fullCheck: () => api.get('/data-quality/full'),
+  freshness: () => api.get('/data-quality/freshness'),
+  priceAnomalies: (days = 7) => api.get(`/data-quality/price-anomalies?days=${days}`),
+};
+
 // ===== 研报数据 API =====
 export const researchApi = {
   getOverview: (config) => api.get('/research/overview', config),

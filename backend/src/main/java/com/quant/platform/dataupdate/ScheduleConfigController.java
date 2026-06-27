@@ -379,6 +379,8 @@ public class ScheduleConfigController {
                 req.setFetchNews(true);
                 break;
             case "RESEARCH":       req.setUpdateType("RESEARCH"); break;
+            case "DATA_FRESHNESS": /* 质量检查: 已在 ScheduleService 中特殊处理 */ break;
+            case "PRICE_ANOMALY":  /* 质量检查: 已在 ScheduleService 中特殊处理 */ break;
             default: throw new IllegalArgumentException("未知的任务类型: " + taskKey);
         }
 
@@ -419,7 +421,7 @@ public class ScheduleConfigController {
      */
     @DeleteMapping("/{taskKey}")
     public ApiResponse<Boolean> deleteConfig(@PathVariable String taskKey) {
-        String[] systemKeys = {"GLOBAL", "DAILY", "INDEX", "DIVIDEND", "FINANCIAL", "BIDASK", "SENTIMENT_MF", "SENTIMENT_OTHER", "RESEARCH"};
+        String[] systemKeys = {"GLOBAL", "DAILY", "INDEX", "DIVIDEND", "FINANCIAL", "BIDASK", "SENTIMENT_MF", "SENTIMENT_OTHER", "RESEARCH", "DATA_FRESHNESS", "PRICE_ANOMALY"};
         for (String sk : systemKeys) {
             if (sk.equalsIgnoreCase(taskKey)) {
                 return ApiResponse.error("不允许删除系统预定义任务: " + taskKey);
