@@ -39,10 +39,10 @@ function DataQualityDashboard() {
         api.get('/data-quality/factor-nulls'),
         api.get('/data-quality/financial-anomalies'),
       ]);
-      setFreshness(freshRes.data);
-      setAnomalies(anomalyRes.data);
-      setFactorNulls(fnRes.data);
-      setFinAnomalies(faRes.data);
+      setFreshness(freshRes);
+      setAnomalies(anomalyRes);
+      setFactorNulls(fnRes);
+      setFinAnomalies(faRes);
       setLastCheck(dayjs());
     } catch (e) {
       setError(e.response?.data?.message || e.message || '获取数据失败');
