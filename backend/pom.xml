@@ -215,6 +215,8 @@
                 <version>9.0.7</version>
                 <configuration>
                     <failOnError>false</failOnError>
+                    <!-- 离线模式：不更新NVD数据库（避免403错误） -->
+                    <failOnUpdateError>false</failOnUpdateError>
                     <suppressionFiles>
                         <suppressionFile>dependency-check-suppressions.xml</suppressionFile>
                     </suppressionFiles>
