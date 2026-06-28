@@ -684,7 +684,14 @@ public class DataUpdateService {
         try {
             String url = "http://172.19.72.140:8123/";
             String sql = "OPTIMIZE TABLE stock.stock_daily FINAL";
-            String params = "user=default&password=123456&receive_timeout=1800";
+            // 从环境变量读取密码，不硬编码
+            String password = System.getenv("CLICKHOUSE_PASSWORD");
+            if (password == null || password.isEmpty()) {
+                password = "123456"; // 本地开发环境默认值
+            }
+            String params = "user=default&password=" + password + "&receive_timeout=1800";
+            // 日志脱敏：不打印完整密码
+            log.debug("[OPTIMIZE] 执行 OPTIMIZE TABLE, URL: {}?user=default&password=***", url);
             
             ProcessBuilder pb = new ProcessBuilder(
                 "curl", "-s", "--max-time", "1800",

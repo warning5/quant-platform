@@ -9,3 +9,27 @@
 /.workbuddy/
 .env
 .env.*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+.installed.cfg
+Allwheelhouse
+
+# Windows
+Thumbs.db
+Desktop.ini
+nul
+nul*

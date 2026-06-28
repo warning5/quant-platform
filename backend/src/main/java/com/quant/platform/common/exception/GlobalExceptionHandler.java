@@ -44,7 +44,9 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(Exception.class)
     @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
     public ApiResponse<Void> handleException(Exception ex) {
-        log.error("Unexpected error", ex);
-        return ApiResponse.error(500, "系统内部错误: " + ex.getMessage());
+        // 生成唯一的错误ID，用于日志追踪（不泄露敏感信息）
+        String errorId = java.util.UUID.randomUUID().toString().substring(0, 8);
+        log.error("Unexpected error [ID: {}]", errorId, ex);
+        return ApiResponse.error(500, "系统内部错误，请联系管理员。错误ID: " + errorId);
     }
 }

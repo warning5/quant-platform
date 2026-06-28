@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<suppressions xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.3.xsd">
+    <!-- 忽略误报或无法修复的漏洞 -->
+    
+    <!-- Example: 忽略某个CVE -->
+    <!-- <suppress>
+        <notes><![CDATA[
+            CVE-2023-XXXX 误报，实际不影响本项目
+        ]]></notes>
+        <cve>CVE-2023-XXXX</cve>
+    </suppress> -->
+</suppressions>

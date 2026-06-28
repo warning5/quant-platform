@@ -208,6 +208,26 @@
                     </annotationProcessorPaths>
                 </configuration>
             </plugin>
+            <!-- OWASP 依赖安全漏洞检查 -->
+            <plugin>
+                <groupId>org.owasp</groupId>
+                <artifactId>dependency-check-maven</artifactId>
+                <version>9.0.7</version>
+                <configuration>
+                    <failOnError>false</failOnError>
+                    <suppressionFiles>
+                        <suppressionFile>dependency-check-suppressions.xml</suppressionFile>
+                    </suppressionFiles>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <phase>verify</phase>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
 </project>

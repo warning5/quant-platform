@@ -1187,11 +1187,25 @@ public class ClickHouseFactorValueService {
 
     /** HTTP POST 到 ClickHouse */
     private void httpPost(String query, String body) {
+        // 验证query参数（防止SQL注入）
+        if (query == null || query.trim().isEmpty()) {
+            throw new IllegalArgumentException("Query cannot be null or empty");
+        }
+        // 简单SQL注入检测（禁止多个语句）
+        if (query.contains(";") && query.indexOf(";") != query.length() - 1) {
+            throw new IllegalArgumentException("Multiple SQL statements are not allowed");
+        }
+        
         try {
             String url = String.format("http://%s:%d/?user=%s&password=%s&query=%s",
                     clickHouseConfig.getHost(), clickHouseConfig.getPort(),
                     clickHouseConfig.getUsername(), clickHouseConfig.getPassword(),
                     java.net.URLEncoder.encode(query, "UTF-8"));
+            // 日志脱敏：不打印完整URL（密码脱敏）
+            log.debug("[ClickHouse] HTTP POST: {}?user={}&password=***&query={}", 
+                      clickHouseConfig.getHost(), clickHouseConfig.getUsername(), 
+                      query.substring(0, Math.min(50, query.length())) + "...");
+            
             java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
                     .uri(java.net.URI.create(url))
                     .header("Content-Type", "application/x-www-form-urlencoded")
