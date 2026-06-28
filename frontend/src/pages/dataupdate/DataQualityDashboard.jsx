@@ -23,6 +23,8 @@ function DataQualityDashboard() {
   const [loading, setLoading] = useState(false);
   const [freshness, setFreshness] = useState(null);
   const [anomalies, setAnomalies] = useState(null);
+  const [factorNulls, setFactorNulls] = useState(null);
+  const [finAnomalies, setFinAnomalies] = useState(null);
   const [error, setError] = useState(null);
   const [lastCheck, setLastCheck] = useState(null);
   const intervalRef = useRef(null);
@@ -31,12 +33,16 @@ function DataQualityDashboard() {
     setLoading(true);
     setError(null);
     try {
-      const [freshRes, anomalyRes] = await Promise.all([
+      const [freshRes, anomalyRes, fnRes, faRes] = await Promise.all([
         api.get('/data-quality/freshness'),
         api.get('/data-quality/price-anomalies?days=7'),
+        api.get('/data-quality/factor-nulls'),
+        api.get('/data-quality/financial-anomalies'),
       ]);
       setFreshness(freshRes.data);
       setAnomalies(anomalyRes.data);
+      setFactorNulls(fnRes.data);
+      setFinAnomalies(faRes.data);
       setLastCheck(dayjs());
     } catch (e) {
       setError(e.response?.data?.message || e.message || '获取数据失败');
@@ -58,8 +64,8 @@ function DataQualityDashboard() {
   const getStatusIcon = (stale) => stale ? <WarningOutlined /> : <CheckCircleOutlined />;
   const getStatusText = (stale) => stale ? '异常' : '正常';
 
-  const overallStatus = freshness && anomalies
-    ? ((freshness.hasWarning || anomalies.hasAnomaly) ? 'warning' : 'success')
+  const overallStatus = freshness && anomalies && factorNulls && finAnomalies
+    ? ((freshness.hasWarning || anomalies.hasAnomaly || (factorNulls.hasWarning) || (finAnomalies.hasAnomaly)) ? 'warning' : 'success')
     : 'idle';
 
   // === 异常列表列 ===
@@ -210,6 +216,85 @@ function DataQualityDashboard() {
             />
           ) : (
             <Empty description="近7天未发现价格异常" />
+          )}
+        </Card>
+
+        {/* 因子NULL异常 */}
+        <Card
+          title={
+            <span>
+              <WarningOutlined style={{ marginRight: 8 }} />
+              因子数据 NULL 异常（NULL比例 &gt;50%）
+            </span>
+          }
+          extra={
+            factorNulls ? (
+              <Tag color={factorNulls.hasWarning ? 'orange' : 'green'}>
+                {factorNulls.hasWarning ? `${factorNulls.nullFactorCount || 0} 个因子` : '正常'}
+              </Tag>
+            ) : null
+          }
+          style={{ marginBottom: 16 }}
+        >
+          {factorNulls && factorNulls.nullFactors && factorNulls.nullFactors.length > 0 ? (
+            <Table
+              dataSource={factorNulls.nullFactors}
+              columns={[
+                { title: '因子代码', dataIndex: 'factorCode', key: 'factorCode', width: 180 },
+                {
+                  title: 'NULL比例(%)', dataIndex: 'nullPct', key: 'nullPct', width: 130,
+                  render: (v) => <Tag color={Number(v) > 80 ? 'red' : 'orange'}>{v}%</Tag>,
+                },
+                { title: '总记录数', dataIndex: 'totalCount', key: 'totalCount', width: 100 },
+                { title: 'NULL数', dataIndex: 'nullCount', key: 'nullCount', width: 100 },
+              ]}
+              rowKey={(r) => r.factorCode}
+              size="small"
+              pagination={{ pageSize: 10 }}
+            />
+          ) : (
+            <Empty description="所有因子NULL比例正常（≤50%）" />
+          )}
+        </Card>
+
+        {/* 财务数据突变 */}
+        <Card
+          title={
+            <span>
+              <WarningOutlined style={{ marginRight: 8 }} />
+              财务数据突变（营收/利润环比跳变 &gt;100%）
+            </span>
+          }
+          extra={
+            finAnomalies ? (
+              <Tag color={finAnomalies.hasAnomaly ? 'red' : 'green'}>
+                {finAnomalies.hasAnomaly ? `发现 ${finAnomalies.anomalyCount || 0} 条` : '正常'}
+              </Tag>
+            ) : null
+          }
+          style={{ marginBottom: 16 }}
+        >
+          {finAnomalies && finAnomalies.anomalies && finAnomalies.anomalies.length > 0 ? (
+            <Table
+              dataSource={finAnomalies.anomalies}
+              columns={[
+                { title: '代码', dataIndex: 'code', key: 'code', width: 100 },
+                { title: '报告期', dataIndex: 'reportDate', key: 'reportDate', width: 120 },
+                {
+                  title: '营收变化(%)', dataIndex: 'revenueChgPct', key: 'revenueChgPct', width: 120,
+                  render: (v) => v > 0 ? <Text type="danger">+{v}%</Text> : <Text>{v}%</Text>,
+                },
+                {
+                  title: '利润变化(%)', dataIndex: 'profitChgPct', key: 'profitChgPct', width: 120,
+                  render: (v) => v > 0 ? <Text type="danger">+{v}%</Text> : <Text>{v}%</Text>,
+                },
+              ]}
+              rowKey={(r) => `${r.code}_${r.reportDate}`}
+              size="small"
+              pagination={{ pageSize: 10 }}
+            />
+          ) : (
+            <Empty description="近18个月未发现财务数据突变" />
           )}
         </Card>
 

@@ -204,6 +204,24 @@ public class ScheduleService implements SchedulingConfigurer {
                 return;
             }
 
+            // 质量检查任务：因子NULL检测
+            if ("FACTOR_NULL_CHECK".equals(taskKey)) {
+                Map<String, Object> result = getDataQualityService().checkFactorNullRatio();
+                log.info("[ScheduleService] 因子NULL检测完成: nullFactorCount={}", result.get("nullFactorCount"));
+                updateTaskStatus(taskKey, "SUCCESS");
+                success = true;
+                return;
+            }
+
+            // 质量检查任务：财务突变检测
+            if ("FINANCIAL_ANOMALY".equals(taskKey)) {
+                Map<String, Object> result = getDataQualityService().checkFinancialAnomalies();
+                log.info("[ScheduleService] 财务突变检测完成: count={}", result.get("anomalyCount"));
+                updateTaskStatus(taskKey, "SUCCESS");
+                success = true;
+                return;
+            }
+
             // P1-4: 推荐追踪任务
             if ("RECOMMENDATION_TRACK".equals(taskKey)) {
                 int updated = recommendationService.trackRecommendationPerformance();

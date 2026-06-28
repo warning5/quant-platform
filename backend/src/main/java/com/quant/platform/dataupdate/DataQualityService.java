@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 /**
@@ -45,9 +46,17 @@ public class DataQualityService {
         Map<String, Object> anomalies = checkPriceAnomalies(7);
         report.put("priceAnomalies", anomalies);
 
+        Map<String, Object> factorNulls = checkFactorNullRatio();
+        report.put("factorNullRatio", factorNulls);
+
+        Map<String, Object> finAnomalies = checkFinancialAnomalies();
+        report.put("financialAnomalies", finAnomalies);
+
         // 汇总告警状态
         boolean hasWarning = freshness.get("hasWarning") instanceof Boolean b && b;
         if (anomalies.get("hasAnomaly") instanceof Boolean b && b) hasWarning = true;
+        if (factorNulls.get("hasWarning") instanceof Boolean b && b) hasWarning = true;
+        if (finAnomalies.get("hasAnomaly") instanceof Boolean b && b) hasWarning = true;
         report.put("hasWarning", hasWarning);
 
         // WebSocket 推送
@@ -69,6 +78,14 @@ public class DataQualityService {
             if (anomalies.get("hasAnomaly") instanceof Boolean b && b) {
                 alertMsg.append("### 价格异常\n");
                 alertMsg.append("发现 ").append(anomalies.get("anomalyCount")).append(" 条涨跌幅>50%记录\n");
+            }
+            if (factorNulls.get("hasWarning") instanceof Boolean b && b) {
+                alertMsg.append("### 因子数据 NULL 异常\n");
+                alertMsg.append("发现 ").append(factorNulls.get("nullFactorCount")).append(" 个因子NULL比例>50%\n");
+            }
+            if (finAnomalies.get("hasAnomaly") instanceof Boolean b && b) {
+                alertMsg.append("### 财务数据突变\n");
+                alertMsg.append("发现 ").append(finAnomalies.get("anomalyCount")).append(" 条营收/利润环比跳变>100%记录\n");
             }
 
             notificationService.sendAlert(alertMsg.toString());
@@ -123,7 +140,7 @@ public class DataQualityService {
         // 2. factor_value (ClickHouse)
         try {
             Object fvMax = clickHouseStockService.queryForObject(
-                "SELECT max(trade_date) FROM factor_value WHERE status = 'ACTIVE'");
+                "SELECT max(calc_date) FROM factor_value");
             LocalDate fvDate = fvMax != null ? LocalDate.parse(fvMax.toString()) : null;
             long fvDays = fvDate != null ? latestTradeDate.toEpochDay() - fvDate.toEpochDay() : 999;
             Map<String, Object> fvStatus = new LinkedHashMap<>();
@@ -143,7 +160,16 @@ public class DataQualityService {
         try {
             Object fiMax = jdbcTemplate.queryForObject(
                 "SELECT max(report_date) FROM stock_financial_indicator WHERE report_type IN (1,2,4)", String.class);
-            LocalDate fiDate = fiMax != null ? LocalDate.parse(fiMax.toString()) : null;
+            LocalDate fiDate = null;
+            if (fiMax != null) {
+                String fiStr = fiMax.toString().trim();
+                try {
+                    fiDate = LocalDate.parse(fiStr);
+                } catch (Exception parseEx) {
+                    // report_date 可能存储为 yyyyMMdd 格式（如 20260331）
+                    fiDate = LocalDate.parse(fiStr, DateTimeFormatter.ofPattern("yyyyMMdd"));
+                }
+            }
             long fiStale = 999;
             if (fiDate != null) {
                 int year = today.getYear();
@@ -241,5 +267,138 @@ public class DataQualityService {
         if (fi != null && fi.get("stale") instanceof Boolean b && b) {
             sb.append("- 财务数据落后 ").append(fi.get("quartersBehind")).append(" 个季度（最新报告期=").append(fi.get("latestReportDate")).append("）\n");
         }
+    }
+
+    /**
+     * 因子全 NULL 检测
+     * 检查 factor_value 中每个 ACTIVE 因子在最新交易日的 NULL 值比例
+     * NULL 比例 > 50% 的因子视为异常
+     */
+    public Map<String, Object> checkFactorNullRatio() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("checkTime", LocalDateTime.now().toString());
+
+        try {
+            // 查询最新交易日
+            Object latestDateObj = clickHouseStockService.queryForObject(
+                "SELECT max(calc_date) FROM factor_value");
+            if (latestDateObj == null) {
+                result.put("error", "factor_value 表无数据");
+                result.put("hasWarning", false);
+                return result;
+            }
+            String latestDate = latestDateObj.toString();
+            result.put("latestDate", latestDate);
+
+            // 按因子代码统计 NULL 比例
+            String sql =
+                "SELECT factor_code, " +
+                "  count() AS total, " +
+                "  countIf(isNull(factor_val)) AS null_cnt, " +
+                "  round(null_cnt / total * 100, 2) AS null_pct " +
+                "FROM factor_value " +
+                "WHERE calc_date = ? " +
+                "GROUP BY factor_code " +
+                "HAVING null_pct > 50 " +
+                "ORDER BY null_pct DESC";
+
+            List<Map<String, Object>> rows = clickHouseStockService.queryForList(sql, latestDate);
+
+            List<Map<String, Object>> nullFactors = new ArrayList<>();
+            for (Map<String, Object> row : rows) {
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("factorCode", row.get("factor_code"));
+                item.put("nullPct", row.get("null_pct"));
+                item.put("totalCount", row.get("total"));
+                item.put("nullCount", row.get("null_cnt"));
+                nullFactors.add(item);
+            }
+
+            result.put("nullFactorCount", nullFactors.size());
+            result.put("nullFactors", nullFactors);
+            result.put("hasWarning", !nullFactors.isEmpty());
+
+            if (!nullFactors.isEmpty()) {
+                log.warn("[数据质量] 发现 {} 个因子在 {} 的NULL比例>50%",
+                    nullFactors.size(), latestDate);
+            }
+        } catch (Exception e) {
+            log.warn("[数据质量] 因子NULL检测失败: {}", e.getMessage());
+            result.put("error", e.getMessage());
+            result.put("hasWarning", false);
+        }
+
+        return result;
+    }
+
+    /**
+     * 财务数据突变检测
+     * 检查 stock_income 中营收/净利润环比跳变 > 100% 的记录
+     * 跳变 = |本期 - 上期| / |上期| > 100%（且上期 != 0）
+     */
+    public Map<String, Object> checkFinancialAnomalies() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("checkTime", LocalDateTime.now().toString());
+
+        try {
+            // 查询最近两个报告期，用 LAG 窗口函数获取上期值
+            // 注意：MySQL 不允许 WHERE 引用 SELECT 别名，需多包一层子查询
+            // report_date 是 VARCHAR(10) 格式 "20250331"，需 STR_TO_DATE 转换后比较
+            String sql =
+                "SELECT * FROM (" +
+                "  SELECT code, report_date, " +
+                "    revenue, net_profit, " +
+                "    prevRevenue, prevNetProfit, " +
+                "    CASE WHEN prevRevenue IS NOT NULL AND prevRevenue != 0 " +
+                "      THEN ROUND(ABS(revenue - prevRevenue) / ABS(prevRevenue) * 100, 2) " +
+                "      ELSE 0 END AS revenue_chg_pct, " +
+                "    CASE WHEN prevNetProfit IS NOT NULL AND prevNetProfit != 0 " +
+                "      THEN ROUND(ABS(net_profit - prevNetProfit) / ABS(prevNetProfit) * 100, 2) " +
+                "      ELSE 0 END AS profit_chg_pct " +
+                "  FROM (" +
+                "    SELECT code, report_date, revenue, net_profit, " +
+                "      LAG(revenue) OVER (PARTITION BY code ORDER BY report_date) AS prevRevenue, " +
+                "      LAG(net_profit) OVER (PARTITION BY code ORDER BY report_date) AS prevNetProfit " +
+                "    FROM stock_income " +
+                "    WHERE report_type IN (1, 2, 4) " +
+                "      AND STR_TO_DATE(report_date, '%Y%m%d') >= DATE_SUB(CURDATE(), INTERVAL 18 MONTH) " +
+                "  ) t" +
+                ") t2 " +
+                "WHERE (revenue_chg_pct > 100 OR profit_chg_pct > 100) " +
+                "  AND prevRevenue IS NOT NULL " +
+                "  AND prevNetProfit IS NOT NULL " +
+                "ORDER BY GREATEST(revenue_chg_pct, profit_chg_pct) DESC " +
+                "LIMIT 50";
+
+            List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql);
+
+            List<Map<String, Object>> anomalies = new ArrayList<>();
+            for (Map<String, Object> row : rows) {
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("code", row.get("code"));
+                item.put("reportDate", row.get("report_date") != null ? row.get("report_date").toString() : null);
+                item.put("revenue", row.get("revenue"));
+                item.put("prevRevenue", row.get("prevRevenue"));
+                item.put("revenueChgPct", row.get("revenue_chg_pct"));
+                item.put("netProfit", row.get("net_profit"));
+                item.put("prevNetProfit", row.get("prevNetProfit"));
+                item.put("profitChgPct", row.get("profit_chg_pct"));
+                anomalies.add(item);
+            }
+
+            result.put("anomalyCount", anomalies.size());
+            result.put("anomalies", anomalies);
+            result.put("hasAnomaly", !anomalies.isEmpty());
+
+            if (!anomalies.isEmpty()) {
+                log.warn("[数据质量] 发现 {} 条财务数据环比跳变>100%记录", anomalies.size());
+            }
+        } catch (Exception e) {
+            log.warn("[数据质量] 财务突变检测失败: {}", e.getMessage());
+            result.put("error", e.getMessage());
+            result.put("hasAnomaly", false);
+        }
+
+        return result;
     }
 }

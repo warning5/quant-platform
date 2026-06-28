@@ -45,4 +45,18 @@ public class DataQualityController {
             @RequestParam(defaultValue = "7") int days) {
         return ApiResponse.success(dataQualityService.checkPriceAnomalies(days));
     }
+
+    /** 因子NULL检测 */
+    @GetMapping("/factor-nulls")
+    @Operation(summary = "因子NULL检测", description = "检查因子值在最新交易日的NULL比例，>50%为异常")
+    public ApiResponse<Map<String, Object>> factorNulls() {
+        return ApiResponse.success(dataQualityService.checkFactorNullRatio());
+    }
+
+    /** 财务突变检测 */
+    @GetMapping("/financial-anomalies")
+    @Operation(summary = "财务突变检测", description = "检查营收/净利润环比跳变>100%的记录")
+    public ApiResponse<Map<String, Object>> financialAnomalies() {
+        return ApiResponse.success(dataQualityService.checkFinancialAnomalies());
+    }
 }

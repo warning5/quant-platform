@@ -1865,7 +1865,7 @@ public class DataUpdateService {
         // ── 2. factor_value (ClickHouse) ──
         try {
             Object fvMax = clickHouseStockService.queryForObject(
-                "SELECT max(trade_date) FROM factor_value WHERE status = 'ACTIVE'");
+                "SELECT max(calc_date) FROM factor_value");
             LocalDate fvDate = fvMax != null ? LocalDate.parse(fvMax.toString()) : null;
             long fvDays = fvDate != null ? latestTradeDate.toEpochDay() - fvDate.toEpochDay() : 999;
             Map<String, Object> fvStatus = new LinkedHashMap<>();
@@ -1886,7 +1886,16 @@ public class DataUpdateService {
         try {
             Object fiMax = jdbcTemplate.queryForObject(
                 "SELECT max(report_date) FROM stock_financial_indicator WHERE report_type IN (1,2,4)", String.class);
-            LocalDate fiDate = fiMax != null ? LocalDate.parse(fiMax.toString()) : null;
+            LocalDate fiDate = null;
+            if (fiMax != null) {
+                String fiStr = fiMax.toString().trim();
+                try {
+                    fiDate = LocalDate.parse(fiStr);
+                } catch (Exception parseEx) {
+                    // report_date 可能存储为 yyyyMMdd 格式（如 20260331）
+                    fiDate = LocalDate.parse(fiStr, DateTimeFormatter.ofPattern("yyyyMMdd"));
+                }
+            }
             // 财务数据按季度判断：计算距离最近季末的天数
             long fiStale = 999;
             if (fiDate != null) {

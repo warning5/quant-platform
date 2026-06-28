@@ -483,7 +483,8 @@ public class ClickHouseStockService {
         try {
             return queryForListFromClickHouse(sql, params);
         } catch (Exception e) {
-            log.warn("[ClickHouse] 通用查询失败，回退到 MySQL: {}", e.getMessage());
+            String rootCause = e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
+            log.warn("[ClickHouse] 通用查询失败，回退到 MySQL: {} | SQL: {}", rootCause, sql);
         }
 
         return queryForListFromMySQL(sql, params);
@@ -500,7 +501,8 @@ public class ClickHouseStockService {
         try {
             return queryForObjectFromClickHouse(sql, params);
         } catch (Exception e) {
-            log.warn("[ClickHouse] 通用单值查询失败，回退到 MySQL: {}", e.getMessage());
+            String rootCause = e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
+            log.warn("[ClickHouse] 通用单值查询失败，回退到 MySQL: {} | SQL: {}", rootCause, sql);
         }
 
         return queryForObjectFromMySQL(sql, params);

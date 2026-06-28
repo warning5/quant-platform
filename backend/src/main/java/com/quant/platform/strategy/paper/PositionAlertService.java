@@ -12,6 +12,8 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -848,6 +850,125 @@ public class PositionAlertService {
                 }
             } catch (Exception e) {
                 log.debug("回撤检查失败: {}", e.getMessage());
+            }
+        }
+
+        // 4. 相关性集中度检查（交易前阻断版）
+        // 检查目标股票与现有持仓的相关系数，若高相关+合计仓位超限则阻断
+        if (clickHouseJdbcTemplate != null) {
+            try {
+                List<PaperPosition> positions = getPositions(paperId);
+                if (positions.size() >= 1) {
+                    BigDecimal plannedMv = plannedAmount;
+                    // 构建包含目标股票的代码列表
+                    List<String> existingCodes = positions.stream()
+                        .map(PaperPosition::getCode)
+                        .distinct()
+                        .filter(c -> !c.equals(code))
+                        .toList();
+
+                    if (!existingCodes.isEmpty()) {
+                        // 从 CH 获取目标股票和现有持仓的近60日收盘价
+                        List<String> allCodes = new ArrayList<>();
+                        allCodes.add(code);
+                        allCodes.addAll(existingCodes);
+                        allCodes = allCodes.stream().distinct().toList();
+
+                        String placeholders = String.join(",", Collections.nCopies(allCodes.size(), "?"));
+                        String priceSql =
+                            "SELECT code, trade_date, close_price " +
+                            "FROM stock.stock_daily " +
+                            "WHERE code IN (" + placeholders + ") " +
+                            "  AND trade_date >= ? " +
+                            "ORDER BY code, trade_date ";
+
+                        Object[] priceParams = new Object[allCodes.size() + 1];
+                        for (int i = 0; i < allCodes.size(); i++) {
+                            priceParams[i] = allCodes.get(i);
+                        }
+                        priceParams[allCodes.size()] = LocalDate.now().minusDays(90);
+
+                        List<Map<String, Object>> priceRows = clickHouseJdbcTemplate.query(
+                            priceSql, priceParams,
+                            (rs, rowNum) -> {
+                                Map<String, Object> m = new HashMap<>();
+                                m.put("code", rs.getString("code"));
+                                m.put("close", rs.getDouble("close_price"));
+                                return m;
+                            });
+
+                        // 构建代码 -> 收盘价列表
+                        Map<String, List<Double>> priceMap = new HashMap<>();
+                        for (Map<String, Object> row : priceRows) {
+                            String c = (String) row.get("code");
+                            priceMap.computeIfAbsent(c, k -> new ArrayList<>()).add((Double) row.get("close"));
+                        }
+
+                        // 目标股票至少需要30个数据点
+                        List<Double> targetPrices = priceMap.get(code);
+                        if (targetPrices != null && targetPrices.size() >= 30) {
+                            double[] targetReturns = new double[targetPrices.size() - 1];
+                            for (int i = 1; i < targetPrices.size(); i++) {
+                                targetReturns[i - 1] = targetPrices.get(i - 1) > 0
+                                    ? (targetPrices.get(i) - targetPrices.get(i - 1)) / targetPrices.get(i - 1)
+                                    : 0;
+                            }
+
+                            // 持仓市值映射
+                            Map<String, BigDecimal> mvMap = new HashMap<>();
+                            for (PaperPosition pos : positions) {
+                                if (pos.getMarketValue() != null) {
+                                    mvMap.merge(pos.getCode(), pos.getMarketValue(), BigDecimal::add);
+                                }
+                            }
+
+                            double CORR_THRESHOLD = 0.70;
+                            double POS_THRESHOLD = 0.40;
+
+                            for (String existingCode : existingCodes) {
+                                List<Double> existPrices = priceMap.get(existingCode);
+                                if (existPrices == null || existPrices.size() < 30) continue;
+
+                                // 对齐长度
+                                int minLen = Math.min(targetReturns.length, existPrices.size() - 1);
+                                if (minLen < 20) continue;
+
+                                double[] existReturns = new double[existPrices.size() - 1];
+                                for (int i = 1; i < existPrices.size(); i++) {
+                                    existReturns[i - 1] = existPrices.get(i - 1) > 0
+                                        ? (existPrices.get(i) - existPrices.get(i - 1)) / existPrices.get(i - 1)
+                                        : 0;
+                                }
+
+                                // 截取相同长度计算相关系数
+                                double[] x = Arrays.copyOf(targetReturns, minLen);
+                                double[] y = Arrays.copyOf(existReturns, minLen);
+                                double corr = calcPearsonCorrelation(x, y);
+
+                                if (corr > CORR_THRESHOLD) {
+                                    BigDecimal existMv = mvMap.getOrDefault(existingCode, BigDecimal.ZERO);
+                                    // 合计仓位 = 现有持仓市值 + 计划买入金额
+                                    double combinedPct = existMv.add(plannedMv)
+                                        .divide(totalAssets, 4, RoundingMode.HALF_UP)
+                                        .doubleValue();
+
+                                    if (combinedPct > POS_THRESHOLD) {
+                                        String msg = String.format(
+                                            "相关性集中度超限：%s 与持仓 %s 相关系数 %.2f > %.2f，合计仓位 %.1f%% > %.1f%%",
+                                            code, existingCode, corr, CORR_THRESHOLD,
+                                            combinedPct * 100, POS_THRESHOLD * 100);
+                                        if (autoBlock) {
+                                            return RiskCheckResult.blocked(msg);
+                                        }
+                                        log.warn("相关性集中度预警(不阻断): {}", msg);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                log.debug("交易前相关性检查失败: {}", e.getMessage());
             }
         }
 
