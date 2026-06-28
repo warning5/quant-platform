@@ -33,6 +33,23 @@ import java.util.*;
 @RequiredArgsConstructor
 public class FactorService {
 
+    /**
+     * factorCode 白名单正则（防御 SQL 注入）
+     */
+    private static final java.util.regex.Pattern FACTOR_CODE_PATTERN =
+            java.util.regex.Pattern.compile("[a-zA-Z0-9_\\-]+");
+
+    /**
+     * 校验 factorCode（防御 SQL 注入）
+     * @param factorCode 因子代码
+     * @throws IllegalArgumentException 如果 factorCode 包含非法字符
+     */
+    private void validateFactorCode(String factorCode) {
+        if (factorCode == null || !FACTOR_CODE_PATTERN.matcher(factorCode).matches()) {
+            throw new IllegalArgumentException("Invalid factorCode: " + factorCode);
+        }
+    }
+
     private final FactorDefinitionMapper factorMapper;
     private final ClickHouseFactorValueService clickHouseFactorValueService;
     private final FactorTestReportMapper testReportMapper;
@@ -380,6 +397,9 @@ public class FactorService {
      * 获取因子测试报告列表
      */
     public List<FactorTestReport> getTestReports(String factorCode) {
+        // SQL注入防护
+        validateFactorCode(factorCode);
+        
         return testReportMapper.findByFactorCode(factorCode);
     }
 
@@ -422,6 +442,9 @@ public class FactorService {
      */
     public List<FactorValue> getFactorTimeSeries(String factorCode, String symbol,
                                                  LocalDate start, LocalDate end) {
+        // SQL注入防护
+        validateFactorCode(factorCode);
+        
         List<FactorValue> result = clickHouseFactorValueService
                 .findByFactorCodeAndDateRange(factorCode, start, end);
         return result.stream()
@@ -439,6 +462,9 @@ public class FactorService {
      * 全部走 ClickHouse；无关键词时返回前 200 条（按代码排序），有关键词时不限条数
      */
     public List<Map<String, String>> getFactorSymbols(String factorCode, String keyword) {
+        // SQL注入防护
+        validateFactorCode(factorCode);
+        
         // 从 CH 获取该因子有数据的股票列表
         Set<String> factorSymbols;
         try {
@@ -500,6 +526,9 @@ public class FactorService {
      * 全部走 ClickHouse
      */
     public Map<String, Object> getFactorCrossSection(String factorCode, LocalDate date, int page, int size) {
+        // SQL注入防护
+        validateFactorCode(factorCode);
+        
         List<FactorValue> values = new java.util.ArrayList<>(clickHouseFactorValueService.findByFactorCodeAndDate(factorCode, date));
 
         // 批量查询股票名称：从 symbol（如 000001.SZ）中提取 code，关联 stock_info

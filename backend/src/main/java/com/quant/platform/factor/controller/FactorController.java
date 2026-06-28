@@ -34,6 +34,24 @@ import java.util.stream.Collectors;
 @Tag(name = "因子管理", description = "因子定义、计算、测试管理接口")
 public class FactorController {
 
+    /**
+     * factorCode 白名单正则（防御 SQL 注入）
+     * 只允许字母、数字、下划线、横线
+     */
+    private static final java.util.regex.Pattern FACTOR_CODE_PATTERN =
+            java.util.regex.Pattern.compile("[a-zA-Z0-9_\\-]+");
+
+    /**
+     * 校验 factorCode（防御 SQL 注入）
+     * @param factorCode 因子代码
+     * @throws IllegalArgumentException 如果 factorCode 包含非法字符
+     */
+    private void validateFactorCode(String factorCode) {
+        if (factorCode == null || !FACTOR_CODE_PATTERN.matcher(factorCode).matches()) {
+            throw new IllegalArgumentException("Invalid factorCode: " + factorCode);
+        }
+    }
+
     private final FactorService factorService;
     private final FactorCorrelationService correlationService;
     private final FactorWeightOptimizeService factorWeightOptimizeService;
@@ -156,6 +174,7 @@ public class FactorController {
     @GetMapping("/{factorCode}/tests")
     @Operation(summary = "查询因子测试报告列表")
     public ApiResponse<List<FactorTestReport>> getTests(@PathVariable String factorCode) {
+        validateFactorCode(factorCode);  // SQL注入防护
         return ApiResponse.success(factorService.getTestReports(factorCode));
     }
 
@@ -177,6 +196,7 @@ public class FactorController {
     public ApiResponse<List<Map<String, String>>> getFactorSymbols(
             @PathVariable String factorCode,
             @RequestParam(required = false, defaultValue = "") String keyword) {
+        validateFactorCode(factorCode);  // SQL注入防护
         return ApiResponse.success(factorService.getFactorSymbols(factorCode, keyword));
     }
 
@@ -187,6 +207,7 @@ public class FactorController {
             @RequestParam String symbol,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+        validateFactorCode(factorCode);  // SQL注入防护
         return ApiResponse.success(factorService.getFactorTimeSeries(factorCode, symbol, startDate, endDate));
     }
 
@@ -197,6 +218,7 @@ public class FactorController {
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "100") int size) {
+        validateFactorCode(factorCode);  // SQL注入防护
         return ApiResponse.success(factorService.getFactorCrossSection(factorCode, date, page, size));
     }
 
@@ -383,6 +405,7 @@ public class FactorController {
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(defaultValue = "5") int forwardDays) {
+        validateFactorCode(factorCode);  // SQL注入防护
         if (forwardDays < 1 || forwardDays > 60) {
             throw new IllegalArgumentException("forwardDays须在1~60之间");
         }
