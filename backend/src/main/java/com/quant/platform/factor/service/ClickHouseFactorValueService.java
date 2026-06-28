@@ -17,13 +17,23 @@ import java.util.Map;
 /**
  * ClickHouse 因子值服务
  * 优先从 ClickHouse 查询，失败时回退到 MySQL（通过 FactorValueMapper）
- * 所有查询方法统一遵循: CH enabled → 查 CH → 失败/无数据 → 回退 MySQL
- * 写入方法统一: 同时写入 MySQL + ClickHouse
+ *
+ * 安全：所有接受 factorCode 的方法均通过白名单校验（字母/数字/下划线/横线）
  */
-@Slf4j
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class ClickHouseFactorValueService {
+
+    /** factorCode 白名单正则（防御 SQL 注入） */
+    private static final java.util.regex.Pattern FACTOR_CODE_PATTERN =
+            java.util.regex.Pattern.compile("[a-zA-Z0-9_\\-]+");
+
+    private static void checkFactorCode(String factorCode) {
+        if (factorCode == null || !FACTOR_CODE_PATTERN.matcher(factorCode).matches()) {
+            throw new IllegalArgumentException("Invalid factorCode: " + factorCode);
+        }
+    }
 
     private final ClickHouseConfig clickHouseConfig;
 
@@ -634,6 +644,11 @@ public class ClickHouseFactorValueService {
 
     private java.util.List<com.quant.platform.factor.domain.FactorValue> queryByFactorCodeAndDateFromCH(
             String factorCode, java.time.LocalDate calcDate) {
+        // 安全校验：factorCode 白名单（字母/数字/下划线/横线）
+        if (factorCode == null || !factorCode.matches("[a-zA-Z0-9_\\-]+")) {
+            log.warn("queryByFactorCodeAndDateFromCH: invalid factorCode rejected: {}", factorCode);
+            return java.util.Collections.emptyList();
+        }
         // 使用 <= date + argMax 取最新值，同时兼容日频因子（exact match）和财务因子（latest report）
         // CH JDBC v0.6.3 对 PreparedStatement 参数绑定处理有问题，改为字符串拼接
         // CH v26.5.1 bug: GROUP BY 别名不能跟 WHERE 子句中的列同名，否则报 ILLEGAL_AGGREGATION
@@ -1314,6 +1329,10 @@ public class ClickHouseFactorValueService {
                unless = "#result == null")
     public java.time.LocalDate getLatestDate(String factorCode) {
         if (!clickHouseConfig.isEnabled() || factorCode == null) return null;
+        if (!factorCode.matches("[a-zA-Z0-9_\\-]+")) {
+            log.warn("getLatestDate: invalid factorCode rejected: {}", factorCode);
+            return null;
+        }
         String sql = String.format(
                 "SELECT max(calc_date) FROM stock.factor_value FINAL WHERE factor_code='%s'",
                 factorCode.replace("'", "''"));
@@ -1338,6 +1357,7 @@ public class ClickHouseFactorValueService {
                unless = "#result == null || #result.isEmpty()")
     public java.util.Set<String> getDistinctSymbols(String factorCode) {
         if (!clickHouseConfig.isEnabled() || factorCode == null) return java.util.Set.of();
+        checkFactorCode(factorCode);
         String sql = String.format(
                 "SELECT DISTINCT symbol FROM stock.factor_value FINAL WHERE factor_code='%s'",
                 factorCode.replace("'", "''"));

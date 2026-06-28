@@ -10,6 +10,7 @@ import argparse
 import pymysql
 import akshare as ak
 from datetime import datetime, timedelta
+from db_config import MYSQL_CONFIG
 
 sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
@@ -20,7 +21,7 @@ parser.add_argument('--force', action='store_true', help='Force update all data'
 args = parser.parse_args()
 
 # ─── 数据库连接 ───────────────────────────────────────────────
-conn = pymysql.connect(host='localhost', port=3306, user='root', password='123456', database='stock', charset='utf8mb4')
+conn = pymysql.connect(**MYSQL_CONFIG)
 cursor = conn.cursor()
 
 # 建表（如果不存在）

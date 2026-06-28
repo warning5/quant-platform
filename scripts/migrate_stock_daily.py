@@ -1,17 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """迁移 stock_daily：ReplacingMergeTree(version) → ReplacingMergeTree(update_time)"""
-import clickhouse_connect
+import sys
+sys.path.insert(0, '.')
+from db_config import CLICKHOUSE_CONFIG
 
-CH_CONFIG = dict(
-    host="172.19.72.140",
-    port=8123,
-    username="default",
-    password="123456",
-    database="stock",
-)
-
-ch = clickhouse_connect.get_client(**CH_CONFIG, settings={"receive_timeout": 600})
+ch = clickhouse_connect.get_client(**CLICKHOUSE_CONFIG, settings={"receive_timeout": 600})
 
 # Step 1: 创建新表
 print("[Step 1/5] 创建 stock_daily_new...")

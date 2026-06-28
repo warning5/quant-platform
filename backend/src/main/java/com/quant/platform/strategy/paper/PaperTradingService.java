@@ -172,14 +172,15 @@ public class PaperTradingService {
                 LocalDate endDate = LocalDate.now();
 
                 // 归一化基准指数净值（起点=1.0）
-                String benchmarkSql = String.format("""
+                String benchmarkSql = """
                     SELECT trade_date, close_price
                     FROM stock.index_daily FINAL
-                    WHERE code = '%s' AND trade_date >= '%s' AND trade_date <= '%s'
+                    WHERE code = ? AND trade_date >= ? AND trade_date <= ?
                     ORDER BY trade_date ASC
-                    """, benchmarkCode, startDate, endDate);
+                    """;
 
                 List<Map<String, Object>> indexRows = clickHouseJdbcTemplate.query(benchmarkSql,
+                    new Object[]{benchmarkCode, startDate, endDate},
                     (rs, rowNum) -> {
                         Map<String, Object> m = new LinkedHashMap<>();
                         m.put("date", rs.getString("trade_date"));
@@ -555,12 +556,12 @@ public class PaperTradingService {
                         log.warn("generateSignals: 因子 {} 无数据，跳过", factorCode);
                         continue;
                     }
-                    String sql = String.format("""
+                    String sql = """
                         SELECT symbol, rank_value FROM stock.factor_value FINAL
-                        WHERE factor_code = '%s' AND calc_date = '%s'
+                        WHERE factor_code = ? AND calc_date = ?
                           AND rank_value IS NOT NULL
-                        """, factorCode, factorDate);
-                    clickHouseJdbcTemplate.query(sql, (rs) -> {
+                        """;
+                    clickHouseJdbcTemplate.query(sql, new Object[]{factorCode, factorDate}, (rs) -> {
                         String sym = rs.getString("symbol");
                         if (sym != null && sym.contains(".")) sym = sym.split("\\.")[0];
                         double rankVal = rs.getBigDecimal("rank_value").doubleValue();

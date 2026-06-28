@@ -449,7 +449,7 @@ public class ClickHouseStockService {
         wrapper.and(w -> {
             w.likeRight(StockDaily::getCode, prefixes[0]);
             for (int i = 1; i < prefixes.length; i++) {
-                w.or().likeRight(StockDaily::getCode, prefixES[i]);
+                w.or().likeRight(StockDaily::getCode, prefixes[i]);
             }
         });
     }
@@ -1325,6 +1325,7 @@ public class ClickHouseStockService {
                         return vol;
                     }
                 }
+            }
         } catch (Exception e) {
             log.warn("[ClickHouse] 波动率计算失败({}): {}", code, e.getMessage());
         }
@@ -1343,7 +1344,7 @@ public class ClickHouseStockService {
         }
         // 去掉 .SH/.SZ/.BJ 后缀
         if (c.matches("^\\d+\\.(sh|sz|bj)$")) {
-            return c.split("\\.")[0];
+            return c.substring(0, c.indexOf('.'));
         }
         return c;
     }

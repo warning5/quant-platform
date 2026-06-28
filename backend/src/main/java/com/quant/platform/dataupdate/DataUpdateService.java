@@ -663,11 +663,55 @@ public class DataUpdateService {
             if (!indexOk) allSuccess = false;
         }
 
+        // ─── 自动执行 OPTIMIZE TABLE FINAL 去重 ─────────────────────
+        if (!"CANCELLED".equals(task.getStatus())) {
+            optimizeClickHouseTable(taskId);
+        }
+
         broadcastLog(taskId, "\n========== 全部完成 ==========");
         if (!"CANCELLED".equals(task.getStatus())) {
             task.setStatus(allSuccess ? "SUCCESS" : "FAILED");
             task.setProgress(100);
             task.setCurrentStep(allSuccess ? "全部完成" : "部分失败");
+        }
+    }
+
+    /**
+     * 执行 ClickHouse OPTIMIZE TABLE FINAL 去重
+     */
+    private void optimizeClickHouseTable(String taskId) {
+        broadcastLog(taskId, "\n[OPTIMIZE] 开始合并去重（可能需要几分钟）...");
+        try {
+            String url = "http://172.19.72.140:8123/";
+            String sql = "OPTIMIZE TABLE stock.stock_daily FINAL";
+            String params = "user=default&password=123456&receive_timeout=1800";
+            
+            ProcessBuilder pb = new ProcessBuilder(
+                "curl", "-s", "--max-time", "1800",
+                url + "?" + params,
+                "--data", sql
+            );
+            pb.redirectErrorStream(true);
+            Process proc = pb.start();
+            
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(proc.getInputStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    broadcastLog(taskId, "[OPTIMIZE] " + line);
+                }
+            }
+            
+            int exitCode = proc.waitFor();
+            if (exitCode == 0) {
+                broadcastLog(taskId, "[OPTIMIZE] ✅ 合并去重完成");
+                log.info("[DataUpdate] OPTIMIZE TABLE stock_daily FINAL 完成");
+            } else {
+                broadcastLog(taskId, "[OPTIMIZE] ⚠️ 合并失败，退出码: " + exitCode);
+            }
+        } catch (Exception e) {
+            broadcastLog(taskId, "[OPTIMIZE] ⚠️ 合并失败: " + e.getMessage());
+            log.error("[DataUpdate] OPTIMIZE 失败: {}", e.getMessage());
         }
     }
 
@@ -1478,16 +1522,6 @@ public class DataUpdateService {
         if (obj == null) return "无数据";
         String str = obj.toString();
         return str.isEmpty() ? "无数据" : str;
-    }
-
-    private String buildCodePatternSql(String[] prefixes) {
-        StringBuilder sb = new StringBuilder("(");
-        for (int i = 0; i < prefixes.length; i++) {
-            if (i > 0) sb.append(" OR ");
-            sb.append("code LIKE '").append(prefixes[i]).append("%'");
-        }
-        sb.append(")");
-        return sb.toString();
     }
 
     /**

@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Statement;
 import java.time.LocalDate;
@@ -480,28 +481,28 @@ public class FactorStyleAttributionService {
 
         // 加载因子名称
         Map<String, String> nameMap = loadFactorNames(factorCodes);
-
+        
         List<FactorDef> result = new ArrayList<>();
         for (String code : factorCodes) {
             String name = nameMap.getOrDefault(code, code);
             result.add(new FactorDef(code, name, code + "因子"));
         }
-
+        
         log.info("策略 {} 加载到 {} 个因子: {}", strategyId, result.size(),
                 result.stream().map(FactorDef::code).collect(Collectors.joining(",")));
         return result;
     }
 
     /**
-     * 批量加载因子名称
+     * 批量加载因子名称（参数化查询，防SQL注入）
      */
     private Map<String, String> loadFactorNames(List<String> codes) {
         if (codes.isEmpty()) return Map.of();
         Map<String, String> map = new LinkedHashMap<>();
         try {
-            String inClause = codes.stream().map(c -> "'" + c + "'").collect(Collectors.joining(","));
-            String sql = "SELECT factor_code, factor_name FROM factor_definition WHERE factor_code IN (" + inClause + ")";
-            jdbcTemplate.query(sql, (rs) -> {
+            String placeholders = codes.stream().map(c -> "?").collect(Collectors.joining(","));
+            String sql = "SELECT factor_code, factor_name FROM factor_definition WHERE factor_code IN (" + placeholders + ")";
+            jdbcTemplate.query(sql, codes.toArray(), (rs) -> {
                 map.put(rs.getString("factor_code"), rs.getString("factor_name"));
             });
         } catch (Exception e) {
@@ -524,8 +525,7 @@ public class FactorStyleAttributionService {
             throw new BusinessException("ClickHouse 不可用，因子风格归因需要 CH 因子数据");
         }
 
-        String factorList = factors.stream().map(f -> "'" + f.code + "'")
-                .collect(Collectors.joining(","));
+        String placeholders = factors.stream().map(f -> "?").collect(Collectors.joining(","));
 
         String sql = String.format("""
                 SELECT fv.calc_date, fv.factor_code,
@@ -539,22 +539,28 @@ public class FactorStyleAttributionService {
                   ON replaceRegexpOne(fv.symbol, '\\\\.[A-Z]+$', '') = sd.code
                   AND fv.calc_date = sd.trade_date
                 WHERE fv.factor_code IN (%s)
-                  AND fv.calc_date >= '%s'
-                  AND fv.calc_date <= '%s'
+                  AND fv.calc_date >= ?
+                  AND fv.calc_date <= ?
                   AND fv.factor_val IS NOT NULL
                   AND sd.pre_close > 0
                   AND sd.close_price > 0
                 ORDER BY fv.calc_date, fv.factor_code, fv.factor_val
-                """, factorList, startDate, endDate);
+                """, placeholders);
 
         // date → factor_code → List of {factor_val, daily_ret}
         Map<LocalDate, Map<String, List<double[]>>> rawData = new LinkedHashMap<>();
 
         try (Connection conn = DriverManager.getConnection(clickHouseConfig.getJdbcUrl());
-             Statement stmt = conn.createStatement()) {
+             PreparedStatement ps = conn.prepareStatement(sql)) {
 
-            stmt.setFetchSize(50000);
-            try (ResultSet rs = stmt.executeQuery(sql)) {
+            int idx = 1;
+            for (FactorDef f : factors) {
+                ps.setString(idx++, f.code());
+            }
+            ps.setDate(idx++, java.sql.Date.valueOf(startDate));
+            ps.setDate(idx++, java.sql.Date.valueOf(endDate));
+
+            try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     LocalDate d = rs.getDate("calc_date").toLocalDate();
                     String factorCode = rs.getString("factor_code");

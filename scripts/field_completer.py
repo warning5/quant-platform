@@ -10,7 +10,7 @@ stock_daily 字段补全工具模块。
 2. pe_ttm / pb — Baostock 历史序列接口（每日不同值，不依赖腾讯快照）
 
 ⚠️ market_cap / circ_market_cap 已于 2026-04-25 从 stock_daily 表删除，
-市值数据统一从 stock_info.total_market_cap 获取。
+   市值数据统一从 stock_info.total_market_cap 获取。
 
 通过 db_helper 操作数据库，自动适配 ClickHouse / MySQL。
 
@@ -25,8 +25,9 @@ import datetime
 import decimal
 import requests
 import warnings
-
-
+import os as _os
+import pymysql as _pymysql
+import json
 
 
 # ─── 腾讯行情接口配置 ──────────────────────────────────────────
@@ -37,22 +38,143 @@ QQ_HEADERS = {
 
 MARKET_PREFIX = {"SH": "sh", "SZ": "sz", "BJ": "bj"}
 
+
 import baostock as _bs
 _HAS_BAOSTOCK = True
 
-# ─── 调试日志 ─────────────────────────────────────────────────
+# ─── 调试日志 ────────────────────────────────────────────────
 import os as _os
 _DEBUG_LOG = _os.path.join(_os.path.dirname(__file__), "debug_valuation.log")
 
 def _dlog(msg):
     ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
     line = f"[{ts}] {msg}"
-    print(line, flush=True)
+    # 只写文件，不打印到控制台（避免控制台被跳变日志刷屏）
     try:
         with open(_DEBUG_LOG, "a", encoding="utf-8") as f:
             f.write(line + "\n")
     except Exception:
         pass
+
+
+# ─── 可补全股票缓存机制（方案C：每次查MySQL + 可选缓存）───
+_COMPLETABLE_CACHE_FILE = _os.path.join(_os.path.dirname(__file__), "._pe_completable_cache.json")
+_CACHE_HOURS = 24  # 缓存有效期（小时）
+
+
+def get_all_completable_stocks(mysql_config=None, cache_hours=24, force_refresh=False):
+    """
+    从 MySQL 一次性获取所有可通过财务数据补全 PE 的股票代码集合。
+    
+    逻辑：
+    1. 如果缓存文件存在且未过期 → 直接返回缓存
+    2. 否则 → 查询 MySQL（单次批量查询），更新缓存
+    
+    参数:
+        mysql_config: MySQL 配置（None 则用默认）
+        cache_hours: 缓存有效期（小时），0=不缓存
+        force_refresh: True=强制刷新缓存
+    
+    返回:
+        set: 可补全 PE 的股票代码集合
+    """
+    if mysql_config is None:
+        import os
+        mysql_config = {
+            "host": os.environ.get("MYSQL_HOST", "localhost"),
+            "port": int(os.environ.get("MYSQL_PORT", "3306")),
+            "user": os.environ.get("MYSQL_USER", "root"),
+            "password": os.environ.get("MYSQL_PASSWORD", ""),
+            "database": os.environ.get("MYSQL_DATABASE", "stock"),
+            "charset": "utf8mb4"
+        }
+    
+    # 1. 尝试从缓存加载
+    if not force_refresh and cache_hours > 0 and _os.path.exists(_COMPLETABLE_CACHE_FILE):
+        try:
+            with open(_COMPLETABLE_CACHE_FILE, "r", encoding="utf-8") as f:
+                cache = json.load(f)
+            cache_time = datetime.datetime.fromisoformat(cache["timestamp"])
+            if datetime.datetime.now() - cache_time < datetime.timedelta(hours=cache_hours):
+                completable = set(cache["codes"])
+                age_hours = int((datetime.datetime.now() - cache_time).total_seconds() // 3600)
+                print(f"[缓存] 使用缓存: {len(completable)} 只可补全股票 (age={age_hours}h)")
+                return completable
+        except Exception as e:
+            print(f"[缓存] 读取失败，重新查询: {e}")
+    
+    # 2. 查询 MySQL（单次批量查询，获取有>=4季度正EPS的股票）
+    print(f"[MySQL] 查询可补全股票（有>=4季度正EPS）...")
+    try:
+        conn = _pymysql.connect(**mysql_config)
+        with conn.cursor() as cursor:
+            # 按股票分组，统计正EPS的季度数
+            cursor.execute("""
+                SELECT code, COUNT(*) as cnt
+                FROM stock_financial_indicator
+                WHERE eps_basic IS NOT NULL AND eps_basic > 0
+                GROUP BY code
+                HAVING cnt >= 4
+            """)
+            rows = cursor.fetchall()
+            completable = set(row[0] for row in rows)
+            
+            print(f"[MySQL] 找到 {len(completable)} 只可补全股票")
+            
+            # 3. 写入缓存
+            if cache_hours > 0:
+                try:
+                    cache = {
+                        "timestamp": datetime.datetime.now().isoformat(),
+                        "codes": sorted(completable)
+                    }
+                    with open(_COMPLETABLE_CACHE_FILE, "w", encoding="utf-8") as f:
+                        json.dump(cache, f, ensure_ascii=False, indent=2)
+                    print(f"[缓存] 已更新: {_COMPLETABLE_CACHE_FILE}")
+                except Exception as e:
+                    print(f"[缓存] 写入失败: {e}")
+            
+            return completable
+    except Exception as e:
+        print(f"[MySQL] 查询失败: {e}，返回空集合")
+        return set()
+    finally:
+        try:
+            conn.close()
+        except:
+            pass
+
+
+def filter_completable_stocks(codes_with_market, mysql_config=None, cache_hours=24):
+    """
+    过滤出可补全 PE 的股票（方案C：每次运行都查 MySQL，带缓存）。
+    
+    参数:
+        codes_with_market: [(code, market), ...]
+        mysql_config: MySQL 配置
+        cache_hours: 缓存有效期（小时），0=不缓存，24=默认
+    
+    返回:
+        filtered_codes: 可补全的股票列表 [(code, market), ...]
+    """
+    # 一次性获取所有可补全股票（带缓存）
+    completable_set = get_all_completable_stocks(mysql_config, cache_hours)
+    
+    if not completable_set:
+        print(f"[过滤] 无可补全股票（MySQL查询失败或无数据）")
+        return []
+    
+    # 过滤：只保留在可补全集合中的股票
+    filtered = [(c, m) for c, m in codes_with_market if c in completable_set]
+    skipped = len(codes_with_market) - len(filtered)
+    
+    if skipped > 0:
+        skipped_codes = [c for c, m in codes_with_market if c not in completable_set]
+        print(f"[过滤] 跳过 {skipped} 只不可补全股票（无>=4季度正EPS）")
+        print(f"  示例: {skipped_codes[:5]}")
+    
+    print(f"[过滤] 可补全: {len(filtered)} 只，不可补全: {skipped} 只")
+    return filtered
 
 
 def _parse_val(s):
@@ -79,12 +201,12 @@ def _bs_login():
     return lg
 
 
-def fix_valuation_by_qq(db, codes=None, batch_size=200, delay=0.1, max_workers=30, target_dates=None, max_stocks=None):
+def fix_valuation_by_qq(db, codes=None, batch_size=200, delay=0.1, max_workers=30, target_dates=None, max_stocks=None, scan_mode="full"):
     """
     通过 Baostock 历史接口补全 pe_ttm / pb（按日历史序列，不依赖腾讯快照）。
-
+    
     此函数只负责 PE / PB 的历史补全。
-
+    
     参数:
         db: StockDailyDB 实例
         codes: [(code, market), ...] 列表。None = 自动查询缺失 PE/PB 的股票
@@ -93,6 +215,10 @@ def fix_valuation_by_qq(db, codes=None, batch_size=200, delay=0.1, max_workers=3
                     为 None 时处理所有缺失日期（全量补缺模式）
         max_stocks: 最多处理 N 只股票（优先处理最近缺口的），None 则不限制。
                     用于日常渐进补缺：每天补 100 只，一个月补完所有历史缺口
+        scan_mode: 扫描模式（仅当 codes=None 时生效）
+          - "full": 扫描所有有任意一天缺失 PE/PB 的股票（用于日线更新补当天）
+          - "never_processed": 只扫描从未被处理过的股票（所有日期 PE+PB 都 NULL）
+            用于渐进历史补缺，避免重复处理已有部分 PE/PB 值的股票
     返回: 补全的记录数
     """
     latest_date = db.get_latest_date()
@@ -102,10 +228,11 @@ def fix_valuation_by_qq(db, codes=None, batch_size=200, delay=0.1, max_workers=3
         print("[fix_valuation_by_qq] ABORT: latest_date is None")
         return 0
 
-    # ── 确定待补全的股票列表 ──────────────────────────────────────
+    # ── 确定待补全的股票列表 ─────────────────────────────────────
     if codes is None:
-        codes = db.get_all_codes_with_missing_pe_pb()
-        print(f"[fix_valuation_by_qq] auto mode (全量扫描): {len(codes)} 只股票缺失 PE/PB")
+        codes = db.get_all_codes_with_missing_pe_pb(scan_mode=scan_mode)
+        mode_desc = "从未被处理" if scan_mode == "never_processed" else "全量扫描"
+        print(f"[fix_valuation_by_qq] auto mode ({mode_desc}): {len(codes)} 只股票缺失 PE/PB")
     else:
         print(f"[fix_valuation_by_qq] manual mode: {len(codes)} 只股票")
 
@@ -114,6 +241,14 @@ def fix_valuation_by_qq(db, codes=None, batch_size=200, delay=0.1, max_workers=3
         return 0
 
     codes = list(dict.fromkeys(codes))
+    
+    # ── 过滤不可补全的股票（无正EPS数据）──
+    if codes:
+        codes = filter_completable_stocks(codes)
+        if not codes:
+            print("[fix_valuation_by_qq] 所有股票都不可补全，退出")
+            return 0
+
     print(f"[fix_valuation_by_qq] 待处理: {len(codes)} 只")
 
     # ── 第一步：批量查询每只股票缺失 PE/PB 的日期范围 ────────────
@@ -140,7 +275,6 @@ def fix_valuation_by_qq(db, codes=None, batch_size=200, delay=0.1, max_workers=3
                 mn_is_null = hasattr(mn_val, 'year') and mn_val.year < 1975
                 if not mn_is_null:
                     date_range_map[code] = (mn_str, mx_str)
-
     # ── 如果指定了 target_dates，只处理那些日期 ────────────────────────────
     if target_dates:
         # target_dates: ["2026-06-26", ...]
@@ -160,11 +294,11 @@ def fix_valuation_by_qq(db, codes=None, batch_size=200, delay=0.1, max_workers=3
         date_range_map = filtered_range
         print(f"  [target_dates] 限定处理日期: {td_min} ~ {td_max}，涉及 {len(date_range_map)} 只股票")
 
-    codes_with_range = [(c, date_range_map.get(c)) for c, m in codes]
+    codes_with_range = [(c, m) for c, m in codes]
     codes_need_fetch = [(c, m) for c, m in codes if c in date_range_map]
     print(f"  {len(codes_need_fetch)} 只有缺失日期（需要抓取）")
 
-    # ── max_stocks：日常渐进补缺，优先处理最近缺口 ─────────────────────
+    # ── max_stocks：日常渐进补缺，优先处理最近缺口 ────────────────────
     if max_stocks and len(codes_need_fetch) > max_stocks:
         # 按 gap 最近日期（max_date）降序排序，优先补最近的缺口
         codes_need_fetch.sort(key=lambda cm: date_range_map[cm[0]][1], reverse=True)
@@ -328,7 +462,29 @@ def fix_valuation_by_qq(db, codes=None, batch_size=200, delay=0.1, max_workers=3
             pass
 
     print(f"[fix_valuation_by_qq] DONE | total_fixed={total_fixed}")
+
+    # ── 自动执行 OPTIMIZE TABLE FINAL 去重 ─────────────────────
+    print(f"\n[OPTIMIZE] 开始合并去重（可能需要几分钟）...")
+    try:
+        import requests as _req
+        ch_url = f"http://{CLICKHOUSE_CONFIG['host']}:{CLICKHOUSE_CONFIG['port']}/"
+        ch_params = {
+            'user': CLICKHOUSE_CONFIG['username'],
+            'password': CLICKHOUSE_CONFIG['password'],
+            'receive_timeout': 1800  # 30分钟超时
+        }
+        optimize_sql = "OPTIMIZE TABLE stock.stock_daily FINAL"
+        resp = _req.post(ch_url, params=ch_params, data=optimize_sql, timeout=1800)
+        if resp.status_code == 200:
+            print(f"[OPTIMIZE] ✅ 合并去重完成")
+        else:
+            print(f"[OPTIMIZE] ⚠️ 合并失败: {resp.text}")
+    except Exception as e:
+        print(f"[OPTIMIZE] ⚠️ 合并失败: {e}")
+        print(f"[OPTIMIZE] 请稍后手动执行: OPTIMIZE TABLE stock.stock_daily FINAL")
+
     return total_fixed
+
 
 
 def cross_validate_ohlcv(db, sample_size=50, tolerance=0.02):
@@ -430,7 +586,8 @@ def cross_validate_ohlcv(db, sample_size=50, tolerance=0.02):
     return matched, diverged
 
 
-def complete_fields(db, code=None, stock_list=None, skip_valuation=False, force_full_scan=False, target_dates=None):
+
+def complete_fields(db, code=None, stock_list=None, skip_valuation=False, force_full_scan=False, target_dates=None, scan_mode="full"):
     """
     执行字段补全，确保当天所有数据完整。
 
@@ -439,24 +596,22 @@ def complete_fields(db, code=None, stock_list=None, skip_valuation=False, force_
         code: 指定股票代码（可选）
         stock_list: [(code, market), ...] 股票列表（可选，用于估值补全）
         skip_valuation: True 则跳过估值补全（估值已在插入时由 ValuationFetcher 写入）
-        force_full_scan: True 则忽略 code/stock_list，强制全量扫描所有缺失估值的股票
+        force_full_scan: 已废弃，保留参数兼容性但不影响逻辑
         target_dates: 仅处理指定日期列表（如 ["2026-06-26"]），
                     为 None 时处理所有缺失日期（全量补缺模式）
+        scan_mode: "full" 扫描所有有NULL的股票（默认），"never_processed" 只扫描从未被处理的
     """
     import traceback as _tb
-    # Step 1: SQL 补全 change_percent / change_amount / pre_close
+    # Step1: SQL 补全 change_percent / change_amount / pre_close
     # 传入 stock_list 限制范围，避免全表扫描
     n1 = db.complete_change_fields(code=code, stock_list=stock_list)
     print(f"  [补全] change 字段: {n1:,} 条")
 
     n2 = 0
 
-    # Step 2: Baostock 补全 pe_ttm / pb（历史序列，不依赖腾讯快照）
+    # Step2: Baostock 补全 pe_ttm / pb（历史序列，不依赖腾讯快照）
     if not skip_valuation:
-        if force_full_scan:
-            # 强制全量扫描：忽略 code/stock_list，扫描所有缺失 PE/PB 的股票
-            codes = None
-        elif code:
+        if code:
             market = db.get_market_by_code(code)
             codes = [(code, market)] if market else None
         elif stock_list:
@@ -467,7 +622,7 @@ def complete_fields(db, code=None, stock_list=None, skip_valuation=False, force_
             codes = None  # fix_valuation_by_qq 内部会调用 get_codes_with_missing_pe_pb
 
         try:
-            n2 = fix_valuation_by_qq(db, codes=codes, target_dates=target_dates)
+            n2 = fix_valuation_by_qq(db, codes=codes, target_dates=target_dates, scan_mode=scan_mode)
             print(f"  [补全] 估值字段 (Baostock 历史 pe_ttm/pb): {n2:,} 条")
         except Exception as e:
             print(f"  [WARN] fix_valuation_by_qq 异常: {e}")
@@ -475,3 +630,28 @@ def complete_fields(db, code=None, stock_list=None, skip_valuation=False, force_
 
     return n1 + n2
 
+# ─── 直接运行入口 ─────────────────────────────────────────────
+if __name__ == "__main__":
+    import sys
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="字段补全工具（PE/PB缺失数据补全）")
+    parser.add_argument("--phase", type=int, choices=[1, 2], default=1,
+                        help="补全阶段：1=Baostock历史数据，2=财务数据计算（默认：1）")
+    parser.add_argument("--max-stocks", type=int, default=None,
+                        help="最大处理股票数（测试用）")
+    args = parser.parse_args()
+    
+    print("=" * 70)
+    print("字段补全工具（PE/PB 缺失数据补全）")
+    print("=" * 70)
+    
+    if args.phase == 1:
+        print("\n[阶段 1] Baostock 历史数据补全")
+        total = fix_valuation_by_qq(max_stocks=args.max_stocks)
+        print(f"\n✅ 阶段 1 完成：补全 {total} 条数据")
+        print(f"   OPTIMIZE 已在函数末尾自动执行")
+    else:
+        print("\n[阶段 2] 财务数据计算 PE（未完成）")
+        print("   请先完成阶段 1")
+        sys.exit(1)

@@ -16,7 +16,13 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Groovy脚本因子计算引擎（带编译缓存）
+ * Groovy脚本因子计算引擎（带编译缓存 + 脚本内容安全预检）
+ *
+ * 安全方案：执行前预检脚本源码，拒绝包含危险模式的脚本
+ * - 禁止：execute / exec / Runtime / ProcessBuilder / System.exit
+ * - 禁止：File / Socket / URL / HttpURLConnection 等危险类
+ * - 禁止：Thread / ClassLoader / Unsafe 等底层操作
+ * - 禁止：GroovyShell 嵌套执行（防止沙箱逃逸）
  *
  * 性能优化：同一脚本源码 → 只编译一次，复用 Script 实例
  * - 无缓存时：5000股 × 250日 = 1,250,000 次编译
@@ -31,9 +37,37 @@ public class ScriptedFactorEngine {
     /** 脚本编译缓存：scriptCodeHash → 已编译的 Script Class（线程安全，每次 createScript 创建新实例） */
     private final ConcurrentHashMap<String, Class<? extends Script>> scriptClassCache = new ConcurrentHashMap<>();
 
+    /** 危险模式黑名单（脚本预检） */
+    private static final List<String> DANGEROUS_PATTERNS = List.of(
+        "execute(", "exec(", "Runtime", "ProcessBuilder",
+        "System.exit", "System.setProperty", "System.getProperty",
+        "new File", "FileWriter", "FileReader", "RandomAccessFile",
+        "new Socket", "new URL", "HttpURLConnection",
+        "Thread.", "ClassLoader", "Unsafe", "GroovyShell",
+        "Class.forName", "Method.invoke", "Field.setAccessible",
+        "RuntimeMXBean", "ManagementFactory"
+    );
+
     public ScriptedFactorEngine() {
         config = new CompilerConfiguration();
         config.setScriptBaseClass("groovy.lang.Script");
+    }
+
+    /**
+     * 预检脚本安全性，拒绝危险模式
+     * @return null表示安全通过，否则返回拒绝原因
+     */
+    private String preCheckScript(String scriptCode) {
+        for (String pattern : DANGEROUS_PATTERNS) {
+            if (scriptCode.contains(pattern)) {
+                return "脚本包含不允许的操作: " + pattern;
+            }
+        }
+        // 检查是否尝试绕过字符串（十六进制/Unicode编码）
+        if (scriptCode.matches(".*\\\\u[0-9a-fA-F]{4}.*")) {
+            return "脚本包含 Unicode 转义，疑似绕过检测";
+        }
+        return null;
     }
 
     /**
@@ -52,6 +86,12 @@ public class ScriptedFactorEngine {
                                 List<MarketDailyBar> history,
                                 Map<String, Object> context) {
         try {
+            // 0. 安全预检
+            String preCheck = preCheckScript(scriptCode);
+            if (preCheck != null) {
+                log.warn("Script pre-check FAILED for factor [{}]: {}", factorCode, preCheck);
+                return null;
+            }
             // 1. 从缓存获取或编译 Script Class（线程安全）
             Class<? extends Script> scriptClass = getOrCompile(scriptCode);
 
@@ -88,6 +128,11 @@ public class ScriptedFactorEngine {
      * 缓存 Class 而非 Script 实例，因为 Script 实例的 Binding 不是线程安全的
      */
     private Class<? extends Script> getOrCompile(String scriptCode) {
+        // 安全预检（编译前拦截）
+        String preCheck = preCheckScript(scriptCode);
+        if (preCheck != null) {
+            throw new SecurityException("Script rejected: " + preCheck);
+        }
         String key = Integer.toHexString(scriptCode.hashCode());
         return scriptClassCache.computeIfAbsent(key, k -> {
             log.debug("Compiling new Groovy script (cache miss), hash={}", k);
@@ -103,6 +148,11 @@ public class ScriptedFactorEngine {
      * @return null表示语法正确，否则返回错误信息
      */
     public String validateScript(String scriptCode) {
+        // 先预检安全性
+        String preCheck = preCheckScript(scriptCode);
+        if (preCheck != null) {
+            return "安全检测未通过: " + preCheck;
+        }
         try {
             GroovyShell shell = new GroovyShell(config);
             shell.parse(scriptCode);

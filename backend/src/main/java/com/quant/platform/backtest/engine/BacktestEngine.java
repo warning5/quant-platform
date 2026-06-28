@@ -54,6 +54,32 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class BacktestEngine {
 
+    // ─── Groovy 脚本安全预检（静态，所有实例共享）─────────────────
+    private static final List<String> DANGEROUS_PATTERNS = List.of(
+        "execute(", "exec(", "Runtime", "ProcessBuilder",
+        "System.exit", "System.setProperty", "System.getProperty",
+        "new File", "FileWriter", "FileReader", "RandomAccessFile",
+        "new Socket", "new URL", "HttpURLConnection",
+        "Thread.", "ClassLoader", "Unsafe", "GroovyShell",
+        "Class.forName", "Method.invoke", "Field.setAccessible",
+        "RuntimeMXBean", "ManagementFactory"
+    );
+
+    /**
+     * 预检脚本安全性，拒绝危险模式
+     */
+    private static String preCheckScript(String scriptCode) {
+        for (String pattern : DANGEROUS_PATTERNS) {
+            if (scriptCode.contains(pattern)) {
+                return "脚本包含不允许的操作: " + pattern;
+            }
+        }
+        if (scriptCode.matches(".*\\\\u[0-9a-fA-F]{4}.*")) {
+            return "脚本包含 Unicode 转义，疑似绕过检测";
+        }
+        return null;
+    }
+
     private final BacktestTaskMapper taskMapper;
     private final BacktestReportMapper reportMapper;
     private final MarketDataService marketDataService;
@@ -1332,6 +1358,13 @@ public class BacktestEngine {
             Map<String, Map<String, List<FactorValue>>> historicalFactors = loadHistoricalFactors(
                     factorValueMap.keySet(), rebalanceDate, 120);
             binding.setVariable("historicalFactors", historicalFactors);
+
+            // 安全预检
+            String preCheck = preCheckScript(strategy.getScriptCode());
+            if (preCheck != null) {
+                log.warn("Strategy [{}] script REJECTED: {}", strategy.getStrategyCode(), preCheck);
+                return scores;
+            }
 
             GroovyShell shell = new GroovyShell(binding);
             Object result = shell.evaluate(strategy.getScriptCode());

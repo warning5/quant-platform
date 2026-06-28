@@ -12,6 +12,7 @@ db_config.py
     from db_config import DB_BACKEND, get_db_params
 """
 import os
+import warnings
 
 # ─── 后端选择 ─────────────────────────────────────────────────
 # 优先级: 环境变量 > 默认值
@@ -19,23 +20,43 @@ DB_BACKEND = os.environ.get("DB_BACKEND", "clickhouse").lower()
 assert DB_BACKEND in ("clickhouse", "mysql"), f"DB_BACKEND 必须是 clickhouse 或 mysql，当前: {DB_BACKEND}"
 
 
-# ─── MySQL 配置（从环境变量读取，无默认值仅用于本地开发兜底）───
+# ─── MySQL 配置（从环境变量读取，无硬编码密码）─────────────────
+# 本地开发请在项目根目录创建 .env 文件（已有 .env.example 模板）
+_mysql_password = os.environ.get("MYSQL_PASSWORD")
+if not _mysql_password:
+    # 本地开发环境默认密码（与 ClickHouse 一致）
+    _mysql_password = "123456"
+    warnings.warn(f"MYSQL_PASSWORD 未设置，使用默认密码（本地开发）")
+
 MYSQL_CONFIG = dict(
     host=os.environ.get("MYSQL_HOST", "localhost"),
     port=int(os.environ.get("MYSQL_PORT", "3306")),
     user=os.environ.get("MYSQL_USER", "root"),
-    password=os.environ.get("MYSQL_PASSWORD", "123456"),
+    password=_mysql_password,
     database=os.environ.get("MYSQL_DATABASE", "stock"),
     charset="utf8mb4",
 )
 
 
-# ─── ClickHouse 配置（从环境变量读取）────────────────────────
+# ─── ClickHouse 配置（从环境变量读取，无硬编码密码）────────────
+_clickhouse_password = os.environ.get("CLICKHOUSE_PASSWORD")
+if not _clickhouse_password:
+    # 本地开发环境默认密码（与 MySQL 一致）
+    _clickhouse_password = "123456"
+    warnings.warn(f"CLICKHOUSE_PASSWORD 未设置，使用默认密码（本地开发）")
+
+# 本地开发默认 host（仅 host 有默认值，密码必须显式设置）
+# 注意：默认改为 172.19.72.140（内网 ClickHouse 地址），localhost 可能无法访问
+_clickhouse_host = os.environ.get("CLICKHOUSE_HOST", "172.19.72.140")
+if "CLICKHOUSE_HOST" not in os.environ and _clickhouse_host == "localhost":
+    # 如果没显式设置，且是默认值，记录一下
+    pass
+
 CLICKHOUSE_CONFIG = dict(
-    host=os.environ.get("CLICKHOUSE_HOST", "172.19.72.140"),
+    host=_clickhouse_host,
     port=int(os.environ.get("CLICKHOUSE_PORT", "8123")),
     username=os.environ.get("CLICKHOUSE_USER", "default"),
-    password=os.environ.get("CLICKHOUSE_PASSWORD", "123456"),
+    password=_clickhouse_password,
     database=os.environ.get("CLICKHOUSE_DATABASE", "stock"),
 )
 

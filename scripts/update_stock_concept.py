@@ -23,6 +23,7 @@ import pymysql
 import akshare as ak
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from db_config import MYSQL_CONFIG
 
 # ── 默认热门板块（覆盖主要科技/消费/周期方向）─────────────────────────────────
 DEFAULT_HOT_CONCEPTS = [
@@ -45,12 +46,7 @@ DEFAULT_HOT_CONCEPTS = [
 
 
 def get_db_conn():
-    return pymysql.connect(
-        host="localhost", port=3306,
-        user="root", password="123456",
-        database="stock", charset="utf8mb4",
-        autocommit=False
-    )
+    return pymysql.connect(**MYSQL_CONFIG)
 
 
 def fetch_concept_list():

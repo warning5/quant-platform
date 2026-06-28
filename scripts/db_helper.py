@@ -1346,31 +1346,66 @@ class StockDailyDB:
         market_map = self.get_market_for_codes(codes)
         return [(c, market_map.get(c, "SZ")) for c in codes]
 
-    def get_all_codes_with_missing_pe_pb(self):
+    def get_all_codes_with_missing_pe_pb(self, scan_mode="full"):
         """
-        获取所有日期中任意一天缺失 PE 或 PB 的股票列表（不限日期，全量扫描）。
+        获取缺失 PE 或 PB 的股票列表。
         排除指数数据（code 含 '.' 的如 sh.000001）。
 
+        参数:
+            scan_mode: 扫描模式
+              - "full": 返回所有有任意一天缺失 PE/PB 的股票（当前默认行为）
+                用于日线更新补全当天数据。
+              - "never_processed": 只返回所有日期的 PE 和 PB 都为 NULL 的股票
+                即从未被 Baostock 处理过的股票。这些股票的 PE/PB NULL 是
+                "从未填充"，而非"已处理但亏损期正常NULL"。用于渐进历史补缺，
+                避免重复处理已有部分 PE/PB 值但剩余 NULL 是正常的股票。
+
         返回: [(code, market), ...]
-        用于更新完成后对全量股票做补全。
         """
         if self.backend == "clickhouse":
-            r = self.ch_client.query(
-                f"SELECT DISTINCT code FROM {self.CH_TABLE} "
-                f"WHERE (pe_ttm IS NULL OR pb IS NULL) "
-                f"AND code NOT LIKE '%.%' "
-                f"ORDER BY code"
-            )
+            if scan_mode == "never_processed":
+                # 只返回所有日期 PE+PB 都 NULL 的股票（从未被处理）
+                # 排除已有任何非 NULL PE 或 PB 的股票（它们已被处理，剩余 NULL 是正常的）
+                r = self.ch_client.query(
+                    f"SELECT DISTINCT code FROM {self.CH_TABLE} "
+                    f"WHERE code NOT IN ("
+                    f"  SELECT DISTINCT code FROM {self.CH_TABLE} "
+                    f"  WHERE pe_ttm IS NOT NULL OR pb IS NOT NULL"
+                    f") "
+                    f"AND code NOT LIKE '%.%' "
+                    f"ORDER BY code"
+                )
+            else:
+                # full 模式：返回所有有任意一天缺失 PE/PB 的股票
+                r = self.ch_client.query(
+                    f"SELECT DISTINCT code FROM {self.CH_TABLE} "
+                    f"WHERE (pe_ttm IS NULL OR pb IS NULL) "
+                    f"AND code NOT LIKE '%.%' "
+                    f"ORDER BY code"
+                )
             codes = [row[0] for row in r.result_rows]
         else:
-            with self.mysql_conn.cursor() as cur:
-                cur.execute(
-                    "SELECT DISTINCT code FROM stock_daily "
-                    "WHERE pe_ttm IS NULL OR pb IS NULL "
-                    "AND code NOT LIKE '%.%' "
-                    "ORDER BY code"
-                )
-                codes = [row["code"] for row in cur.fetchall()]
+            if scan_mode == "never_processed":
+                with self.mysql_conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT DISTINCT code FROM stock_daily "
+                        "WHERE code NOT IN ("
+                        "  SELECT DISTINCT code FROM stock_daily "
+                        "  WHERE pe_ttm IS NOT NULL OR pb IS NOT NULL"
+                        ") "
+                        "AND code NOT LIKE '%.%' "
+                        "ORDER BY code"
+                    )
+                    codes = [row["code"] for row in cur.fetchall()]
+            else:
+                with self.mysql_conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT DISTINCT code FROM stock_daily "
+                        "WHERE pe_ttm IS NULL OR pb IS NULL "
+                        "AND code NOT LIKE '%.%' "
+                        "ORDER BY code"
+                    )
+                    codes = [row["code"] for row in cur.fetchall()]
 
         if not codes:
             return []

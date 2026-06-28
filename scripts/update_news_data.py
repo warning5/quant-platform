@@ -192,10 +192,15 @@ def _batch_infer(texts, model, tokenizer, batch_size=256):
                 results.append((score, ntype))
     return results
 
-# ── 数据库配置 ──────────────────────────────────────────────
+# ── 数据库配置（从环境变量读取，无硬编码密码）──────────────────────
+import os
 DB_CONFIG = {
-    "host": "127.0.0.1", "port": 3306, "user": "root",
-    "password": "123456", "database": "stock", "charset": "utf8mb4",
+    "host": os.environ.get("MYSQL_HOST", "127.0.0.1"),
+    "port": int(os.environ.get("MYSQL_PORT", "3306")),
+    "user": os.environ.get("MYSQL_USER", "root"),
+    "password": os.environ.get("MYSQL_PASSWORD", ""),
+    "database": os.environ.get("MYSQL_DATABASE", "stock"),
+    "charset": "utf8mb4",
 }
 
 # 事件标签关键词

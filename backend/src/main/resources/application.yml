@@ -14,7 +14,7 @@ spring:
     url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:stock}?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&tinyInt1isBit=false
     driver-class-name: com.mysql.cj.jdbc.Driver
     username: ${MYSQL_USER:root}
-    password: ${MYSQL_PASSWORD:123456}
+    password: ${MYSQL_PASSWORD}
     hikari:
       maximum-pool-size: 30
       minimum-idle: 5
@@ -60,7 +60,7 @@ clickhouse:
   port: ${CLICKHOUSE_PORT:8123}
   database: ${CLICKHOUSE_DATABASE:stock}
   username: ${CLICKHOUSE_USER:default}
-  password: ${CLICKHOUSE_PASSWORD:123456}
+  password: ${CLICKHOUSE_PASSWORD}
   enabled: true  # 是否启用 ClickHouse 优先查询
 
 logging:
@@ -78,7 +78,7 @@ logging:
 llm:
   enabled: true                                    # 设为 true 启用 LLM
   base-url: ${LLM_BASE_URL:https://api.deepseek.com/v1}             # API 地址（Ollama: http://localhost:11434/v1）
-  api-key: ${LLM_API_KEY:"sk-3bedb909271f49d59edbb2c1e5ab989d"}                                       # API Key（Ollama 无需填写）
+  api-key: ${LLM_API_KEY}                                       # API Key（Ollama 无需填写，从环境变量读取）
   model: ${LLM_MODEL:deepseek-v4-flash}                          # 模型名（deepseek-v4-flash / deepseek-v4-pro）
   max-tokens: ${LLM_MAX_TOKENS:4096}                                  # 最大输出 token 数（2048不够会导致JSON截断）
   temperature: ${LLM_TEMPERATURE:0.3}                                  # 温度（低温更准确）

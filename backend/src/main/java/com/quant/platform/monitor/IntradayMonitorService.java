@@ -334,11 +334,11 @@ public class IntradayMonitorService {
         // 诊断：先查推荐BUY记录
         if (recDate != null) {
             try {
-                String diagSql = String.format(
+                String diagSql = 
                         "SELECT r.stock_code, r.stock_name, r.suggested_buy_price " +
                                 "FROM stock_recommendation r " +
-                                "WHERE r.recommend_date = '%s' AND r.action_tag = 'BUY'", recDate);
-                List<Map<String, Object>> allBuy = jdbcTemplate.queryForList(diagSql);
+                                "WHERE r.recommend_date = ? AND r.action_tag = 'BUY'";
+                List<Map<String, Object>> allBuy = jdbcTemplate.queryForList(diagSql, recDate);
                 log.info("[IntradayMonitor] 诊断: {} 共有 {} 条BUY推荐", recDate, allBuy.size());
                 for (Map<String, Object> rec : allBuy) {
                     log.info("[IntradayMonitor] 诊断-BUY: {}({}) suggested_buy_price={}",
@@ -352,13 +352,13 @@ public class IntradayMonitorService {
         try {
             // 数据源1: llm_analysis BUY推荐（用LLM自己的最新日期）
             if (llmDate != null) {
-                String llmSql = String.format(
+                String llmSql = 
                         "SELECT a.stock_code, a.stock_name, a.buy_price_low, a.buy_price_high, " +
                                 "a.stop_loss, a.target_price " +
                                 "FROM llm_analysis a " +
-                                "WHERE a.analysis_date = '%s' AND a.recommendation = 'BUY' " +
-                                "AND a.buy_price_high IS NOT NULL", llmDate);
-                jdbcTemplate.query(llmSql, rs -> {
+                                "WHERE a.analysis_date = ? AND a.recommendation = 'BUY' " +
+                                "AND a.buy_price_high IS NOT NULL";
+                jdbcTemplate.query(llmSql, new Object[]{llmDate}, rs -> {
                     TargetPriceInfo info = new TargetPriceInfo();
                     info.setStockCode(rs.getString("stock_code"));
                     info.setStockName(rs.getString("stock_name"));
@@ -374,12 +374,12 @@ public class IntradayMonitorService {
 
             // 数据源2: stock_recommendation 智能推荐（用推荐自己的最新日期）
             if (recDate != null) {
-                String recSql = String.format(
+                String recSql = 
                         "SELECT r.stock_code, r.stock_name, r.suggested_buy_price, r.close_price " +
                                 "FROM stock_recommendation r " +
-                                "WHERE r.recommend_date = '%s' AND r.action_tag = 'BUY' " +
-                                "AND r.suggested_buy_price IS NOT NULL", recDate);
-                jdbcTemplate.query(recSql, rs -> {
+                                "WHERE r.recommend_date = ? AND r.action_tag = 'BUY' " +
+                                "AND r.suggested_buy_price IS NOT NULL";
+                jdbcTemplate.query(recSql, new Object[]{recDate}, rs -> {
                     String code = rs.getString("stock_code");
                     if (targetPriceCache.containsKey(code)) return;
 

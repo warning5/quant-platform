@@ -60,7 +60,7 @@ for _sig in (signal.SIGINT, signal.SIGTERM):
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ─── 数据库后端配置 ─────────────────────────────────────────────
-from db_config import DB_BACKEND, get_backend_label
+from db_config import DB_BACKEND, get_backend_label, MYSQL_CONFIG
 
 # ─── 子脚本映射 ─────────────────────────────────────────────
 BAOSTOCK_SCRIPT = os.path.join(SCRIPT_DIR, "update_stock_daily_baostock.py")
@@ -288,11 +288,7 @@ def show_summary():
 
             # 各市场覆盖（stock_info 始终从 MySQL）
             import pymysql
-            conn = pymysql.connect(
-                host="localhost", port=3306, db="stock",
-                user="root", password="123456", charset="utf8mb4",
-                cursorclass=pymysql.cursors.DictCursor,
-            )
+            conn = pymysql.connect(**MYSQL_CONFIG)
             with conn.cursor() as cur:
                 cur.execute("""
                     SELECT s.market, COUNT(DISTINCT s.code) as stock_count,

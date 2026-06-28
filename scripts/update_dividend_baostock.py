@@ -58,11 +58,15 @@ def get_session(workers=5):
     return _session
 
 
-DB_CONFIG = dict(
-    host="localhost", port=3306, db="stock",
-    user="root", password="123456",
-    charset="utf8mb4", cursorclass=pymysql.cursors.DictCursor,
-)
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""分红数据更新（巨潮 API）"""
+import sys
+sys.path.insert(0, '.')
+from db_config import MYSQL_CONFIG
+import pymysql
+
+DB_CONFIG = MYSQL_CONFIG
 
 # 巨潮 API 字段映射（可能缺失）
 FIELD_MAP = {
