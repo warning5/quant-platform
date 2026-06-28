@@ -41,6 +41,17 @@ public class GlobalExceptionHandler {
         return ApiResponse.error(400, "参数校验失败: " + errors);
     }
 
+    /**
+     * 处理参数验证错误（如非法factorCode）
+     * 返回400 Bad Request，日志记录为WARN级别
+     */
+    @ExceptionHandler(IllegalArgumentException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public ApiResponse<Void> handleIllegalArgumentException(IllegalArgumentException ex) {
+        log.warn("参数验证错误: {}", ex.getMessage());
+        return ApiResponse.error(400, ex.getMessage());
+    }
+
     @ExceptionHandler(Exception.class)
     @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
     public ApiResponse<Void> handleException(Exception ex) {
