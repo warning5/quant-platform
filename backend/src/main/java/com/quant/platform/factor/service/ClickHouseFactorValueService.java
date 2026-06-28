@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 
 /**
  * ClickHouse 因子值服务
@@ -298,7 +299,14 @@ public class ClickHouseFactorValueService {
             where.append(" AND chan_pen_count <= ").append(penCountMax);
         }
         if (keyword != null && !keyword.isBlank()) {
-            where.append(" AND (d.symbol LIKE '%").append(keyword.replace("'", "''")).append("%' OR si.name LIKE '%").append(keyword.replace("'", "''")).append("%')");
+            // 转义 LIKE 通配符 % / _ 和转义符 \，防止通配符注入
+            String escaped = keyword
+                    .replace("\\", "\\\\")
+                    .replace("%", "\\%")
+                    .replace("_", "\\_")
+                    .replace("'", "''");
+            where.append(" AND (d.symbol LIKE '%").append(escaped).append("%' ESCAPE '\\'")
+                 .append(" OR si.name LIKE '%").append(escaped).append("%' ESCAPE '\\')");
         }
 
         // 5. 拼接完整 SQL（用 StringBuilder 避免模板占位符混淆）
@@ -1394,6 +1402,11 @@ public class ClickHouseFactorValueService {
     }
 
     private Connection getConnection() throws SQLException {
-        return DriverManager.getConnection(clickHouseConfig.getJdbcUrl());
+        Properties props = new Properties();
+        props.setProperty("user", clickHouseConfig.getUsername());
+        if (clickHouseConfig.getPassword() != null && !clickHouseConfig.getPassword().isEmpty()) {
+            props.setProperty("password", clickHouseConfig.getPassword());
+        }
+        return DriverManager.getConnection(clickHouseConfig.getJdbcUrl(), props);
     }
 }

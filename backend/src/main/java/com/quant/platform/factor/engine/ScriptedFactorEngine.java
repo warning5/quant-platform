@@ -1,127 +1,42 @@
 package com.quant.platform.factor.engine;
 
+import com.quant.platform.common.security.GroovySandboxConfig;
 import com.quant.platform.market.domain.MarketDailyBar;
 import groovy.lang.Binding;
 import groovy.lang.GroovyShell;
 import groovy.lang.Script;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
-import org.codehaus.groovy.control.CompilerConfiguration;
-import org.codehaus.groovy.control.customizers.SecureASTCustomizer;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeoutException;
 
 /**
- * Groovy脚本因子计算引擎（带编译缓存 + 脚本内容安全预检）
- * 安全方案：执行前预检脚本源码，拒绝包含危险模式的脚本
- * - 禁止：execute / exec / Runtime / ProcessBuilder / System.exit
- * - 禁止：File / Socket / URL / HttpURLConnection 等危险类
- * - 禁止：Thread / ClassLoader / Unsafe 等底层操作
- * - 禁止：GroovyShell 嵌套执行（防止沙箱逃逸）
+ * Groovy脚本因子计算引擎（带编译缓存 + 脚本内容安全预检 + 执行超时）
+ * 安全方案（统一由 GroovySandboxConfig 提供）：
+ * - 源码预检：正则边界匹配拒绝危险模式（比 contains 更难绕过）
+ * - 编译层沙箱：SecureASTCustomizer 白名单 receivers + 禁止 import
+ * - 执行超时：30秒限制，防止死循环阻塞
  * 性能优化：同一脚本源码 → 只编译一次，复用 Script 实例
- * - 无缓存时：5000股 × 250日 = 1,250,000 次编译
- * - 有缓存后：N个不同脚本 × 1次编译 = N 次（通常 N < 50）
+ * - 缓存 key 使用 SHA-256 摘要（替代 hashCode，避免碰撞风险）
  */
 @Slf4j
 @Component
 public class ScriptedFactorEngine {
 
-    private final CompilerConfiguration config;
-
-    /** 脚本编译缓存：scriptCodeHash → 已编译的 Script Class（线程安全，每次 createScript 创建新实例） */
+    /** 脚本编译缓存：SHA-256 digest → 已编译的 Script Class（线程安全，每次 createScript 创建新实例） */
     private final ConcurrentHashMap<String, Class<? extends Script>> scriptClassCache = new ConcurrentHashMap<>();
-
-    /** 危险模式黑名单（脚本预检） */
-    private static final List<String> DANGEROUS_PATTERNS = List.of(
-        "execute(", "exec(", "Runtime", "ProcessBuilder",
-        "System.exit", "System.setProperty", "System.getProperty",
-        "new File", "FileWriter", "FileReader", "RandomAccessFile",
-        "new Socket", "new URL", "HttpURLConnection",
-        "Thread.", "ClassLoader", "Unsafe", "GroovyShell",
-        "Class.forName", "Method.invoke", "Field.setAccessible",
-        "RuntimeMXBean", "ManagementFactory"
-    );
-
-    public ScriptedFactorEngine() {
-        config = createSecureConfig();
-    }
-
-    /**
-     * 创建带安全沙箱的 CompilerConfiguration（SecureASTCustomizer）
-     */
-    private static CompilerConfiguration createSecureConfig() {
-        SecureASTCustomizer secure = new SecureASTCustomizer();
-        secure.setAllowedImports(List.of());
-        secure.setAllowedStarImports(List.of());
-        secure.setAllowedStaticImports(List.of());
-        secure.setAllowedStaticStarImports(List.of());
-        secure.setIndirectImportCheckEnabled(true);
-        secure.setMethodDefinitionAllowed(false);
-        secure.setClosuresAllowed(true);
-        secure.setAllowedReceivers(List.of(
-            Math.class.getName(),
-            BigDecimal.class.getName(),
-            RoundingMode.class.getName(),
-            List.class.getName(),
-            Map.class.getName(),
-            Set.class.getName(),
-            ArrayList.class.getName(),
-            HashMap.class.getName(),
-            LinkedHashMap.class.getName(),
-            String.class.getName(),
-            LocalDate.class.getName(),
-            LocalDateTime.class.getName(),
-            java.time.format.DateTimeFormatter.class.getName(),
-            Integer.class.getName(),
-            Long.class.getName(),
-            Double.class.getName(),
-            Float.class.getName(),
-            Number.class.getName(),
-            "com.quant.platform.factor.domain.FactorValue",
-            "com.quant.platform.market.domain.MarketDailyBar",
-            groovy.lang.Range.class.getName(),
-            groovy.lang.Closure.class.getName()
-        ));
-
-        CompilerConfiguration cc = new CompilerConfiguration();
-        cc.addCompilationCustomizers(secure);
-        cc.setScriptBaseClass("groovy.lang.Script");
-        return cc;
-    }
-
-    /**
-     * 预检脚本安全性，拒绝危险模式
-     * @return null表示安全通过，否则返回拒绝原因
-     */
-    private String preCheckScript(String scriptCode) {
-        for (String pattern : DANGEROUS_PATTERNS) {
-            if (scriptCode.contains(pattern)) {
-                return "脚本包含不允许的操作: " + pattern;
-            }
-        }
-        // 检查是否尝试绕过字符串（十六进制/Unicode编码）
-        if (scriptCode.matches(".*\\\\u[0-9a-fA-F]{4}.*")) {
-            return "脚本包含 Unicode 转义，疑似绕过检测";
-        }
-        return null;
-    }
 
     /**
      * 执行Groovy脚本计算因子值
      *
      * @param scriptCode Groovy脚本代码
-     * @param factorCode 因子代码（用于缓存）
+     * @param factorCode 因子代码（用于日志）
      * @param symbol     股票代码
      * @param calcDate   计算日期
      * @param history    历史K线数据
@@ -133,8 +48,8 @@ public class ScriptedFactorEngine {
                                 List<MarketDailyBar> history,
                                 Map<String, Object> context) {
         try {
-            // 0. 安全预检
-            String preCheck = preCheckScript(scriptCode);
+            // 0. 安全预检（统一由 GroovySandboxConfig 提供）
+            String preCheck = GroovySandboxConfig.preCheckScript(scriptCode);
             if (preCheck != null) {
                 log.warn("Script pre-check FAILED for factor [{}]: {}", factorCode, preCheck);
                 return null;
@@ -155,9 +70,16 @@ public class ScriptedFactorEngine {
                 binding.setVariable("n", history.size());
             }
 
-            // 3. 每次创建新 Script 实例（线程安全），绑定后执行
-            Script script = org.codehaus.groovy.runtime.InvokerHelper.createScript(scriptClass, binding);
-            Object result = script.run();
+            // 3. 带超时执行脚本（30秒超时，防止死循环阻塞）
+            Object result;
+            try {
+                result = GroovySandboxConfig.runScriptWithTimeout(
+                        scriptClass, binding, GroovySandboxConfig.FACTOR_TIMEOUT_SECONDS);
+            } catch (TimeoutException e) {
+                log.warn("Script execution timed out for factor [{}] symbol [{}]: {}s", factorCode, symbol,
+                        GroovySandboxConfig.FACTOR_TIMEOUT_SECONDS);
+                return null;
+            }
 
             return switch (result) {
                 case BigDecimal bd -> bd;
@@ -175,15 +97,15 @@ public class ScriptedFactorEngine {
      * 缓存 Class 而非 Script 实例，因为 Script 实例的 Binding 不是线程安全的
      */
     private Class<? extends Script> getOrCompile(String scriptCode) {
-        // 安全预检（编译前拦截）
-        String preCheck = preCheckScript(scriptCode);
+        // 安全预检（编译前拦截，统一由 GroovySandboxConfig 提供）
+        String preCheck = GroovySandboxConfig.preCheckScript(scriptCode);
         if (preCheck != null) {
             throw new SecurityException("Script rejected: " + preCheck);
         }
-        String key = Integer.toHexString(scriptCode.hashCode());
+        String key = GroovySandboxConfig.scriptDigest(scriptCode);
         return scriptClassCache.computeIfAbsent(key, k -> {
-            log.debug("Compiling new Groovy script (cache miss), hash={}", k);
-            GroovyShell shell = new GroovyShell(config);
+            log.debug("Compiling new Groovy script (cache miss), sha256={}", k.substring(0, 16));
+            GroovyShell shell = new GroovyShell(GroovySandboxConfig.SECURE_GROOVY_CONFIG);
             return shell.parse(scriptCode).getClass();
         });
     }
@@ -195,18 +117,7 @@ public class ScriptedFactorEngine {
      * @return null表示语法正确，否则返回错误信息
      */
     public String validateScript(String scriptCode) {
-        // 先预检安全性
-        String preCheck = preCheckScript(scriptCode);
-        if (preCheck != null) {
-            return "安全检测未通过: " + preCheck;
-        }
-        try {
-            GroovyShell shell = new GroovyShell(config);
-            shell.parse(scriptCode);
-            return null;
-        } catch (Exception e) {
-            return e.getMessage();
-        }
+        return GroovySandboxConfig.validateScript(scriptCode);
     }
 
     /** 清空编译缓存（脚本更新后调用） */

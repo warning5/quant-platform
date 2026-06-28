@@ -13,6 +13,31 @@ db_config.py
 """
 import os
 import warnings
+from pathlib import Path
+
+# ─── 自动加载 .env 文件（纯 Python，零外部依赖）────────────────
+_env_file = Path(__file__).resolve().parent.parent / ".env"
+if _env_file.exists():
+    _loaded = 0
+    for _line in _env_file.read_text(encoding="utf-8").splitlines():
+        _line = _line.strip()
+        # 跳过空行和注释
+        if not _line or _line.startswith("#"):
+            continue
+        # 解析 KEY=VALUE（等号分隔，值可能包含 =）
+        if "=" not in _line:
+            continue
+        _eq = _line.index("=")
+        _key = _line[:_eq].strip()
+        _val = _line[_eq + 1:].strip()
+        # 去掉引号包裹（单引号或双引号）
+        if len(_val) >= 2:
+            if (_val[0] == '"' and _val[-1] == '"') or (_val[0] == "'" and _val[-1] == "'"):
+                _val = _val[1:-1]
+        # 不覆盖已有环境变量
+        if _key and _key not in os.environ:
+            os.environ[_key] = _val
+            _loaded += 1
 
 # ─── 后端选择 ─────────────────────────────────────────────────
 # 优先级: 环境变量 > 默认值

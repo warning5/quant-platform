@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.quant.platform.common.exception.BusinessException;
 import com.quant.platform.common.exception.ResourceNotFoundException;
+import com.quant.platform.common.security.GroovySandboxConfig;
 import com.quant.platform.strategy.domain.StrategyDefinition;
 import com.quant.platform.strategy.mapper.StrategyDefinitionMapper;
 import lombok.RequiredArgsConstructor;
@@ -60,6 +61,13 @@ public class StrategyService {
         if (strategyMapper.existsByStrategyCode(strategy.getStrategyCode())) {
             throw new BusinessException("策略代码已存在: " + strategy.getStrategyCode());
         }
+        // 脚本安全验证（防止恶意脚本存入数据库）
+        if (strategy.getScriptCode() != null && !strategy.getScriptCode().isBlank()) {
+            String error = GroovySandboxConfig.validateScript(strategy.getScriptCode());
+            if (error != null) {
+                throw new BusinessException("Groovy脚本安全/语法验证未通过: " + error);
+            }
+        }
         strategyMapper.insert(strategy);
         return strategy;
     }
@@ -77,6 +85,14 @@ public class StrategyService {
                 throw new BusinessException("策略代码已存在: " + newCode);
             }
             existing.setStrategyCode(newCode);
+        }
+        // 脚本安全验证（防止通过 update 注入恶意脚本绕过创建时验证）
+        String newScriptCode = update.getScriptCode();
+        if (newScriptCode != null && !newScriptCode.isBlank()) {
+            String error = GroovySandboxConfig.validateScript(newScriptCode);
+            if (error != null) {
+                throw new BusinessException("Groovy脚本安全/语法验证未通过: " + error);
+            }
         }
         existing.setStrategyName(update.getStrategyName());
         existing.setDescription(update.getDescription());

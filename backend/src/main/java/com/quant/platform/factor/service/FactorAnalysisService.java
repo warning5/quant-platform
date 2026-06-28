@@ -19,11 +19,30 @@ import java.util.stream.Collectors;
  * 计算 IC (Information Coefficient) / IR (Information Ratio) 等指标
  * IC = Spearman秩相关系数(因子值, 下期收益率)
  * IR = IC均值 / IC标准差
+ *
+ * 安全：所有接受 factorCode/factorCodes 的方法均通过白名单校验（字母/数字/下划线/横线）
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class FactorAnalysisService {
+
+    /** factorCode 白名单正则（防御 SQL 注入） */
+    private static final java.util.regex.Pattern FACTOR_CODE_PATTERN =
+            java.util.regex.Pattern.compile("[a-zA-Z0-9_\\-]+");
+
+    private static void checkFactorCode(String factorCode) {
+        if (factorCode == null || !FACTOR_CODE_PATTERN.matcher(factorCode).matches()) {
+            throw new IllegalArgumentException("Invalid factorCode: " + factorCode);
+        }
+    }
+
+    private static void checkFactorCodes(List<String> factorCodes) {
+        if (factorCodes == null) return;
+        for (String fc : factorCodes) {
+            checkFactorCode(fc);
+        }
+    }
 
     @Autowired(required = false)
     @Qualifier("clickHouseJdbcTemplate")
@@ -63,6 +82,9 @@ public class FactorAnalysisService {
      * @return 每个因子的 IC/IR 统计
      */
     public List<Map<String, Object>> batchCalcIcIr(List<String> factorCodes, String startDate, String endDate, int forwardDays, boolean neutralizeByIndustry, boolean neutralizeByMarketCap, String correlationType, double icThreshold) {
+        // 安全校验：factorCode 白名单
+        checkFactorCodes(factorCodes);
+
         List<Map<String, Object>> results = new ArrayList<>();
 
         for (String factorCode : factorCodes) {
@@ -110,6 +132,9 @@ public class FactorAnalysisService {
      * 获取因子IC/IR趋势数据（单个因子）
      */
     public Map<String, Object> getFactorIcTrend(String factorCode, String startDate, String endDate, int forwardDays) {
+        // 安全校验：factorCode 白名单
+        checkFactorCode(factorCode);
+
         // icTimeline 已包含在 result 中
         return calcSingleFactorIcIr(factorCode, startDate, endDate, forwardDays);
     }
@@ -1038,6 +1063,9 @@ public class FactorAnalysisService {
             List<String> factorCodes, String startDate, String endDate,
             String splitDate, int forwardDays, boolean neutralizeByIndustry, boolean neutralizeByMarketCap, String correlationType) {
 
+        // 安全校验：factorCode 白名单
+        checkFactorCodes(factorCodes);
+
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("segmented", true);
         result.put("splitDate", splitDate);
@@ -1396,6 +1424,9 @@ public class FactorAnalysisService {
     public Map<String, FactorIcSnapshot> quickFactorIcSnapshot(
             List<String> factorCodes, LocalDate referenceDate,
             int lookbackDays, double icThreshold, int halflifeDays) {
+
+        // 安全校验：factorCode 白名单
+        checkFactorCodes(factorCodes);
 
         Map<String, FactorIcSnapshot> snapshots = new LinkedHashMap<>();
         if (factorCodes == null || factorCodes.isEmpty()) return snapshots;

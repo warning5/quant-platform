@@ -9,6 +9,7 @@ import com.quant.platform.backtest.mapper.BacktestReportMapper;
 import com.quant.platform.backtest.mapper.BacktestTaskMapper;
 import com.quant.platform.backtest.mapper.EquityCurveMapper;
 import com.quant.platform.backtest.mapper.RebalanceRecordMapper;
+import com.quant.platform.common.security.GroovySandboxConfig;
 import com.quant.platform.common.utils.LimitUpUtils;
 import com.quant.platform.factor.domain.FactorValue;
 import com.quant.platform.factor.ic.service.FactorIcService;
@@ -25,12 +26,9 @@ import com.quant.platform.stock.service.DividendService;
 import com.quant.platform.strategy.domain.StrategyDefinition;
 import com.quant.platform.strategy.service.StrategyService;
 import groovy.lang.Binding;
-import groovy.lang.GroovyShell;
 import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.codehaus.groovy.control.CompilerConfiguration;
-import org.codehaus.groovy.control.customizers.SecureASTCustomizer;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.scheduling.annotation.Async;
@@ -45,6 +43,7 @@ import java.sql.ResultSet;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
 /**
@@ -56,22 +55,6 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class BacktestEngine {
 
-    // ─── Groovy 脚本安全预检（静态，所有实例共享）─────────────────
-    private static final List<String> DANGEROUS_PATTERNS = List.of(
-            "execute(", "exec(", "Runtime", "ProcessBuilder",
-            "System.exit", "System.setProperty", "System.getProperty",
-            "new File", "FileWriter", "FileReader", "RandomAccessFile",
-            "new Socket", "new URL", "HttpURLConnection",
-            "Thread.", "ClassLoader", "Unsafe", "GroovyShell",
-            "Class.forName", "Method.invoke", "Field.setAccessible",
-            "RuntimeMXBean", "ManagementFactory"
-    );
-
-    /**
-     * Groovy 安全沙箱配置（SecureASTCustomizer + CompilerConfiguration）
-     * 限制脚本只能使用白名单内的类和方法，阻止任意代码执行
-     */
-    private static final CompilerConfiguration SECURE_GROOVY_CONFIG = createSecureConfig();
     private final BacktestTaskMapper taskMapper;
     private final BacktestReportMapper reportMapper;
     private final MarketDataService marketDataService;
@@ -104,72 +87,6 @@ public class BacktestEngine {
     private SimpMessagingTemplate messagingTemplate;
     @Resource
     private DataSource dataSource;
-
-    private static CompilerConfiguration createSecureConfig() {
-        SecureASTCustomizer secure = new SecureASTCustomizer();
-        // 禁止导入任意类（白名单为空 = 禁止所有 import）
-        secure.setAllowedImports(List.of());
-        secure.setAllowedStarImports(List.of());
-        secure.setAllowedStaticImports(List.of());
-        secure.setAllowedStaticStarImports(List.of());
-        // 启用间接导入检查，防止通过全限定类名绕过
-        secure.setIndirectImportCheckEnabled(true);
-        // 禁止方法定义（脚本只允许单一 run() 方法）
-        secure.setMethodDefinitionAllowed(false);
-        // 允许闭包（脚本常用 collect/each 等闭包操作）
-        secure.setClosuresAllowed(true);
-        // 允许的接收者类型白名单（限制脚本可调用的对象类型）
-        secure.setAllowedReceivers(List.of(
-                // 基础数学运算
-                Math.class.getName(),
-                java.math.BigDecimal.class.getName(),
-                java.math.RoundingMode.class.getName(),
-                // 集合操作
-                List.class.getName(),
-                Map.class.getName(),
-                Set.class.getName(),
-                ArrayList.class.getName(),
-                HashMap.class.getName(),
-                LinkedHashMap.class.getName(),
-                // 字符串操作
-                String.class.getName(),
-                // 日期时间
-                LocalDate.class.getName(),
-                LocalDateTime.class.getName(),
-                java.time.format.DateTimeFormatter.class.getName(),
-                // 数值类型
-                Integer.class.getName(),
-                Long.class.getName(),
-                Double.class.getName(),
-                Float.class.getName(),
-                Number.class.getName(),
-                // 因子相关（脚本上下文绑定的类型）
-                "com.quant.platform.factor.domain.FactorValue",
-                "com.quant.platform.market.domain.MarketDailyBar",
-                // Groovy 范围与闭包
-                groovy.lang.Range.class.getName(),
-                groovy.lang.Closure.class.getName()
-        ));
-
-        CompilerConfiguration config = new CompilerConfiguration();
-        config.addCompilationCustomizers(secure);
-        return config;
-    }
-
-    /**
-     * 预检脚本安全性，拒绝危险模式
-     */
-    private static String preCheckScript(String scriptCode) {
-        for (String pattern : DANGEROUS_PATTERNS) {
-            if (scriptCode.contains(pattern)) {
-                return "脚本包含不允许的操作: " + pattern;
-            }
-        }
-        if (scriptCode.matches(".*\\\\u[0-9a-fA-F]{4}.*")) {
-            return "脚本包含 Unicode 转义，疑似绕过检测";
-        }
-        return null;
-    }
 
     /**
      * 异步运行回测
@@ -1412,16 +1329,9 @@ public class BacktestEngine {
                     factorValueMap.keySet(), rebalanceDate, 120);
             binding.setVariable("historicalFactors", historicalFactors);
 
-            // 安全预检
-            String preCheck = preCheckScript(strategy.getScriptCode());
-            if (preCheck != null) {
-                log.warn("Strategy [{}] script REJECTED: {}", strategy.getStrategyCode(), preCheck);
-                return scores;
-            }
-
-            // 使用 SecureASTCustomizer 配置的 GroovyShell 执行脚本（双重安全防护）
-            GroovyShell shell = new GroovyShell(binding, SECURE_GROOVY_CONFIG);
-            Object result = shell.evaluate(strategy.getScriptCode());
+            // 安全预检 + 带超时执行（统一由 GroovySandboxConfig 提供双重防护 + 超时保护）
+            Object result = GroovySandboxConfig.evaluateScriptWithTimeout(
+                    binding, strategy.getScriptCode(), GroovySandboxConfig.BACKTEST_TIMEOUT_SECONDS);
 
             if (result instanceof Map<?, ?> resultMap) {
                 for (Map.Entry<?, ?> entry : resultMap.entrySet()) {

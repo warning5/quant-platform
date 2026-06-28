@@ -19,10 +19,29 @@ import java.util.*;
  * 1. 评估因子有效性（IC绝对值越大越好）
  * 2. 评估因子稳定性（IR越大越好）
  * 3. 为推荐管线提供自适应因子权重（IC衰减的因子自动降权）
+ *
+ * 安全：所有接受 factorCode/factorCodes 的方法均通过白名单校验（字母/数字/下划线/横线）
  */
 @Slf4j
 @Service
 public class FactorIcService {
+
+    /** factorCode 白名单正则（防御 SQL 注入） */
+    private static final java.util.regex.Pattern FACTOR_CODE_PATTERN =
+            java.util.regex.Pattern.compile("[a-zA-Z0-9_\\-]+");
+
+    private static void checkFactorCode(String factorCode) {
+        if (factorCode == null || !FACTOR_CODE_PATTERN.matcher(factorCode).matches()) {
+            throw new IllegalArgumentException("Invalid factorCode: " + factorCode);
+        }
+    }
+
+    private static void checkFactorCodes(List<String> factorCodes) {
+        if (factorCodes == null) return;
+        for (String fc : factorCodes) {
+            checkFactorCode(fc);
+        }
+    }
 
     private final FactorIcRecordMapper icRecordMapper;
     private final ClickHouseStockService clickHouseStockService;
@@ -43,6 +62,9 @@ public class FactorIcService {
      * @param factorCodes 要计算的因子代码列表（null 或 空 则无操作）
      */
     public Map<String, FactorIcRecord> computeAndSaveIc(LocalDate date, List<String> factorCodes) {
+        // 安全校验：factorCode 白名单
+        checkFactorCodes(factorCodes);
+
         if (factorCodes == null || factorCodes.isEmpty()) {
             log.warn("[FactorIC] 未指定因子，跳过计算");
             return Collections.emptyMap();
@@ -102,6 +124,9 @@ public class FactorIcService {
      * @return 每个日期的计算结果
      */
     public Map<LocalDate, Map<String, FactorIcRecord>> computeAndSaveIcBatch(LocalDate startDate, LocalDate endDate, List<String> factorCodes) {
+        // 安全校验：factorCode 白名单
+        checkFactorCodes(factorCodes);
+
         Map<LocalDate, Map<String, FactorIcRecord>> allResults = new LinkedHashMap<>();
         int totalRecords = 0;
 
@@ -195,6 +220,9 @@ public class FactorIcService {
      * @return IC值列表（按日期倒序）
      */
     public List<Double> getIcHistory(String factorCode, LocalDate endDate, int days) {
+        // 安全校验：factorCode 白名单
+        checkFactorCode(factorCode);
+
         return icRecordMapper.findRecentIcValues(factorCode, endDate, days, forwardReturnDays);
     }
 
@@ -207,6 +235,9 @@ public class FactorIcService {
      * @return 所有因子共有IC数据的最新日期，若所有因子均无数据返回 null
      */
     public LocalDate getLatestCommonIcDate(List<String> factorCodes) {
+        // 安全校验：factorCode 白名单
+        checkFactorCodes(factorCodes);
+
         if (factorCodes == null || factorCodes.isEmpty()) return null;
         // 修复：取各因子最新IC日期的交集中最新的那个，而非最早的
         LocalDate latestCommon = null;
@@ -258,6 +289,9 @@ public class FactorIcService {
     @Cacheable(value = "factorIc", cacheManager = "factorIcCacheManager",
                key = "#factorCode + '_' + #date.toString() + '_' + #forwardDays")
     public Map<String, Object> querySpearmanIcFromCH(String factorCode, LocalDate date, int forwardDays) {
+        // 安全校验：factorCode 白名单
+        checkFactorCode(factorCode);
+
         LocalDate forwardDate = findForwardTradingDate(date, forwardDays);
         if (forwardDate == null) {
             return Map.of("ic_value", null, "stock_count", 0);

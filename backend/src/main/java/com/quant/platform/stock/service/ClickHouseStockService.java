@@ -1133,7 +1133,12 @@ public class ClickHouseStockService {
      * 获取 ClickHouse 连接
      */
     private Connection getConnection() throws SQLException {
-        return DriverManager.getConnection(clickHouseConfig.getJdbcUrl());
+        Properties props = new Properties();
+        props.setProperty("user", clickHouseConfig.getUsername());
+        if (clickHouseConfig.getPassword() != null && !clickHouseConfig.getPassword().isEmpty()) {
+            props.setProperty("password", clickHouseConfig.getPassword());
+        }
+        return DriverManager.getConnection(clickHouseConfig.getJdbcUrl(), props);
     }
 
     /**

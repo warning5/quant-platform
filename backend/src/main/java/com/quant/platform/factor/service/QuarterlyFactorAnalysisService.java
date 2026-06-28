@@ -290,17 +290,21 @@ public class QuarterlyFactorAnalysisService {
             for (int i = 0; i < codeList.size(); i += batchSize) {
                 int endIdx = Math.min(i + batchSize, codeList.size());
                 List<String> batch = codeList.subList(i, endIdx);
-                String inClause = batch.stream()
-                        .map(c -> "'" + c + "'")
-                        .collect(Collectors.joining(","));
-                
-                String sql = String.format(
-                    "SELECT symbol, (argMax(close, trade_date) - argMin(close, trade_date)) / argMin(close, trade_date) AS ret " +
-                    "FROM stock_daily WHERE symbol IN (%s) AND trade_date BETWEEN '%s' AND '%s' " +
-                    "GROUP BY symbol HAVING ret IS NOT NULL",
-                    inClause, start.toString(), end.toString());
+                String placeholders = batch.stream().map(c -> "?").collect(Collectors.joining(","));
 
-                List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql);
+                String sql = "SELECT symbol, (argMax(close, trade_date) - argMin(close, trade_date)) / argMin(close, trade_date) AS ret " +
+                    "FROM stock_daily WHERE symbol IN (" + placeholders + ") AND trade_date BETWEEN ? AND ? " +
+                    "GROUP BY symbol HAVING ret IS NOT NULL";
+
+                // 构建参数数组：[batch codes..., start, end]
+                Object[] args = new Object[batch.size() + 2];
+                for (int j = 0; j < batch.size(); j++) {
+                    args[j] = batch.get(j);
+                }
+                args[batch.size()] = start.toString();
+                args[batch.size() + 1] = end.toString();
+
+                List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, args);
                 for (Map<String, Object> row : rows) {
                     String code = (String) row.get("symbol");
                     Object retVal = row.get("ret");

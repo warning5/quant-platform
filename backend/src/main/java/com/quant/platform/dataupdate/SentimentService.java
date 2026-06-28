@@ -55,8 +55,39 @@ public class SentimentService {
         DATE_COLUMNS.put("stock_sentiment_survey", "notice_date");
     }
 
+    // 允许直接拼接到 SQL 中的表名白名单（sentiment 表 + coverage 中追加的 MySQL-only 表）
+    private static final Set<String> ALLOWED_TABLES;
+    static {
+        Set<String> set = new HashSet<>(SENTIMENT_TABLES);
+        set.add("stock_fund_holder");
+        set.add("stock_shareholder");
+        set.add("stock_news");
+        set.add("macro_bond_yield");
+        set.add("stock_consensus_estimate");
+        set.add("stock_earnings_report");
+        ALLOWED_TABLES = Collections.unmodifiableSet(set);
+    }
+
+    // 允许直接拼接到 SQL 中的日期列名白名单
+    private static final Set<String> ALLOWED_DATE_COLUMNS = new HashSet<>(Arrays.asList(
+            "trade_date", "notice_date", "report_date", "publish_date", "update_time"
+    ));
+
     private String getDateColumn(String table) {
         return DATE_COLUMNS.getOrDefault(table, "trade_date");
+    }
+
+    /**
+     * 校验表名和日期列名是否在白名单中，避免 SQL 拼接被注入。
+     * 校验不通过直接抛出 IllegalArgumentException，不执行后续 SQL。
+     */
+    private static void validateTableAndColumn(String table, String dateCol) {
+        if (!ALLOWED_TABLES.contains(table)) {
+            throw new IllegalArgumentException("无效的表名: " + table);
+        }
+        if (!ALLOWED_DATE_COLUMNS.contains(dateCol)) {
+            throw new IllegalArgumentException("无效的日期列: " + dateCol);
+        }
     }
 
     /**
@@ -70,6 +101,9 @@ public class SentimentService {
 
         for (String table : SENTIMENT_TABLES) {
             try {
+                // 白名单校验：SQL 拼接前确认表名和日期列名合法
+                validateTableAndColumn(table, getDateColumn(table));
+
                 // 查询记录数
                 String countSql = "SELECT COUNT(*) as cnt FROM " + table;
                 Integer count = jdbcTemplate.queryForObject(countSql, Integer.class);
@@ -115,6 +149,9 @@ public class SentimentService {
             String name = extra[1];
             String dateCol = extra[2];
             try {
+                // 白名单校验
+                validateTableAndColumn(table, dateCol);
+
                 Integer count = jdbcTemplate.queryForObject("SELECT COUNT(*) as cnt FROM " + table, Integer.class);
                 if (count == null) count = 0;
                 totalRecords += count;
@@ -155,12 +192,11 @@ public class SentimentService {
      * 获取指定表的详细统计
      */
     public Map<String, Object> getTableStats(String table) {
-        Map<String, Object> result = new LinkedHashMap<>();
+        // 先计算日期列并完成白名单校验，校验失败直接抛异常
+        String dateCol = getDateColumn(table);
+        validateTableAndColumn(table, dateCol);
 
-        if (!SENTIMENT_TABLES.contains(table)) {
-            result.put("error", "无效的表名: " + table);
-            return result;
-        }
+        Map<String, Object> result = new LinkedHashMap<>();
 
         try {
             // 记录数
@@ -169,7 +205,6 @@ public class SentimentService {
 
             // 时间范围
             try {
-                String dateCol = getDateColumn(table);
                 Map<String, Object> dateRange = jdbcTemplate.queryForMap(
                         "SELECT MIN(" + dateCol + ") as min_date, MAX(" + dateCol + ") as max_date FROM " + table);
                 result.put("minDate", dateRange.get("min_date"));
@@ -181,7 +216,6 @@ public class SentimentService {
             }
 
             // 按日期分布（最近30天）
-            String dateCol = getDateColumn(table);
             String dateDistSql = "SELECT " + dateCol + " as trade_date, COUNT(*) as cnt FROM " + table +
                     " WHERE " + dateCol + " >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)" +
                     " GROUP BY " + dateCol + " ORDER BY " + dateCol + " DESC LIMIT 30";
@@ -210,6 +244,9 @@ public class SentimentService {
 
         for (String table : SENTIMENT_TABLES) {
             try {
+                // 白名单校验
+                validateTableAndColumn(table, getDateColumn(table));
+
                 Map<String, Object> validation = new LinkedHashMap<>();
                 validation.put("table", table);
                 validation.put("name", TABLE_NAMES.getOrDefault(table, table));

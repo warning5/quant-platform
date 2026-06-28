@@ -550,7 +550,12 @@ public class FactorStyleAttributionService {
         // date → factor_code → List of {factor_val, daily_ret}
         Map<LocalDate, Map<String, List<double[]>>> rawData = new LinkedHashMap<>();
 
-        try (Connection conn = DriverManager.getConnection(clickHouseConfig.getJdbcUrl());
+        Properties props = new Properties();
+        props.setProperty("user", clickHouseConfig.getUsername());
+        if (clickHouseConfig.getPassword() != null && !clickHouseConfig.getPassword().isEmpty()) {
+            props.setProperty("password", clickHouseConfig.getPassword());
+        }
+        try (Connection conn = DriverManager.getConnection(clickHouseConfig.getJdbcUrl(), props);
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
             int idx = 1;
@@ -1113,7 +1118,12 @@ public class FactorStyleAttributionService {
                 """, startDate, endDate);
 
         Map<LocalDate, Map<String, Double>> dailyRetsByDate = new LinkedHashMap<>();
-        try (Connection conn = DriverManager.getConnection(clickHouseConfig.getJdbcUrl());
+        Properties props = new Properties();
+        props.setProperty("user", clickHouseConfig.getUsername());
+        if (clickHouseConfig.getPassword() != null && !clickHouseConfig.getPassword().isEmpty()) {
+            props.setProperty("password", clickHouseConfig.getPassword());
+        }
+        try (Connection conn = DriverManager.getConnection(clickHouseConfig.getJdbcUrl(), props);
              Statement stmt = conn.createStatement()) {
             stmt.setFetchSize(50000);
             try (ResultSet rs = stmt.executeQuery(sql)) {

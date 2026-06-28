@@ -55,6 +55,8 @@
             <artifactId>spring-boot-starter-websocket</artifactId>
         </dependency>
 
+        <!-- .env 通过 DotenvLoader (EnvironmentPostProcessor) 原生加载，无需外部依赖 -->
+
         <!-- MySQL Driver -->
         <dependency>
             <groupId>com.mysql</groupId>

@@ -1323,18 +1323,18 @@ public class PaperTradingService {
         if (clickHouseJdbcTemplate == null) return BigDecimal.ZERO;
         try {
             // date 为 null 时自动取 stock_daily 最新交易日的价格
-            String sql;
+            List<BigDecimal> prices;
             if (date == null || date.isBlank()) {
-                sql = String.format(
-                    "SELECT close_price FROM stock.stock_daily FINAL WHERE code = '%s' ORDER BY trade_date DESC LIMIT 1",
-                    code);
+                prices = clickHouseJdbcTemplate.query(
+                    "SELECT close_price FROM stock.stock_daily FINAL WHERE code = ? ORDER BY trade_date DESC LIMIT 1",
+                    new Object[]{code},
+                    (rs, rowNum) -> rs.getBigDecimal("close_price"));
             } else {
-                sql = String.format(
-                    "SELECT close_price FROM stock.stock_daily FINAL WHERE code = '%s' AND trade_date = '%s'",
-                    code, date);
+                prices = clickHouseJdbcTemplate.query(
+                    "SELECT close_price FROM stock.stock_daily FINAL WHERE code = ? AND trade_date = ?",
+                    new Object[]{code, date},
+                    (rs, rowNum) -> rs.getBigDecimal("close_price"));
             }
-            List<BigDecimal> prices = clickHouseJdbcTemplate.query(sql,
-                (rs, rowNum) -> rs.getBigDecimal("close_price"));
             return prices.isEmpty() ? BigDecimal.ZERO : prices.getFirst();
         } catch (Exception e) {
             return BigDecimal.ZERO;
@@ -1348,18 +1348,18 @@ public class PaperTradingService {
     private BigDecimal getOpenPrice(String code, String date) {
         if (clickHouseJdbcTemplate == null) return BigDecimal.ZERO;
         try {
-            String sql;
+            List<BigDecimal> prices;
             if (date == null || date.isBlank()) {
-                sql = String.format(
-                    "SELECT open_price FROM stock.stock_daily FINAL WHERE code = '%s' ORDER BY trade_date DESC LIMIT 1",
-                    code);
+                prices = clickHouseJdbcTemplate.query(
+                    "SELECT open_price FROM stock.stock_daily FINAL WHERE code = ? ORDER BY trade_date DESC LIMIT 1",
+                    new Object[]{code},
+                    (rs, rowNum) -> rs.getBigDecimal("open_price"));
             } else {
-                sql = String.format(
-                    "SELECT open_price FROM stock.stock_daily FINAL WHERE code = '%s' AND trade_date = '%s'",
-                    code, date);
+                prices = clickHouseJdbcTemplate.query(
+                    "SELECT open_price FROM stock.stock_daily FINAL WHERE code = ? AND trade_date = ?",
+                    new Object[]{code, date},
+                    (rs, rowNum) -> rs.getBigDecimal("open_price"));
             }
-            List<BigDecimal> prices = clickHouseJdbcTemplate.query(sql,
-                (rs, rowNum) -> rs.getBigDecimal("open_price"));
             if (prices.isEmpty() || prices.getFirst() == null || prices.getFirst().compareTo(BigDecimal.ZERO) <= 0) {
                 // 开盘价为空时降级为收盘价
                 log.warn("getOpenPrice: {} {} 开盘价为空，降级为收盘价", code, date);

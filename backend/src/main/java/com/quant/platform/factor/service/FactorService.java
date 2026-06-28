@@ -180,6 +180,14 @@ public class FactorService {
         if (existing.getFactorType() == FactorDefinition.FactorType.BUILTIN) {
             throw new BusinessException("内置因子不可修改");
         }
+        // 脚本安全验证（防止通过 update 注入恶意脚本绕过创建时验证）
+        if (existing.getFactorType() == FactorDefinition.FactorType.SCRIPTED
+                && update.getScriptCode() != null && !update.getScriptCode().isBlank()) {
+            String error = scriptedEngine.validateScript(update.getScriptCode());
+            if (error != null) {
+                throw new BusinessException("Groovy脚本安全/语法验证未通过: " + error);
+            }
+        }
         existing.setFactorName(update.getFactorName());
         existing.setDescription(update.getDescription());
         existing.setCategory(update.getCategory());

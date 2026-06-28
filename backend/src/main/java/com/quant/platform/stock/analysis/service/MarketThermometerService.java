@@ -147,8 +147,8 @@ public class MarketThermometerService {
         try {
             // 取最近交易日
             String tradeDate = chJdbc.queryForObject(
-                    "SELECT MAX(trade_date) FROM stock.stock_daily FINAL WHERE trade_date <= '" + date + "'",
-                    String.class);
+                    "SELECT MAX(trade_date) FROM stock.stock_daily FINAL WHERE trade_date <= ?",
+                    String.class, date.toString());
             if (tradeDate == null) {
                 result.put("pePercentile", 0.0);
                 result.put("pbPercentile", 0.0);
@@ -158,43 +158,44 @@ public class MarketThermometerService {
             }
 
             // 全市场 PE/PB 当前值（等权平均）
-            String statsSql = String.format("""
+            String statsSql = """
                     SELECT avg(pe_ttm) as avg_pe, avg(pb) as avg_pb, avg(1/pe_ttm) as avg_earning_yield
                     FROM stock.stock_daily FINAL
-                    WHERE trade_date = '%s' AND pe_ttm > 0 AND pe_ttm < 500 AND pb > 0 AND pb < 50
-                    """, tradeDate);
-            Map<String, Object> stats = chJdbc.queryForMap(statsSql);
+                    WHERE trade_date = ? AND pe_ttm > 0 AND pe_ttm < 500 AND pb > 0 AND pb < 50
+                    """;
+            Map<String, Object> stats = chJdbc.queryForMap(statsSql, tradeDate);
             double avgPe = ((Number) stats.get("avg_pe")).doubleValue();
             double avgEarningYield = ((Number) stats.get("avg_earning_yield")).doubleValue();
             result.put("marketEarningYield", avgEarningYield * 100);  // 盈利收益率%
 
             // 近3年历史 PE 分布，计算当前分位
             String histStart = date.minusYears(3).toString();
-            String histSql = String.format("""
+            double avgPb = ((Number) stats.get("avg_pb")).doubleValue();
+            String histSql = """
                     WITH daily_stats AS (
                         SELECT trade_date,
                                avg(pe_ttm) as avg_pe,
                                avg(pb) as avg_pb
                         FROM stock.stock_daily FINAL
-                        WHERE trade_date >= '%s' AND trade_date <= '%s'
+                        WHERE trade_date >= ? AND trade_date <= ?
                           AND pe_ttm > 0 AND pe_ttm < 500
                         GROUP BY trade_date
                     )
-                    SELECT countIf(avg_pe <= %f) * 100.0 / count(*) as pe_percentile,
-                           countIf(avg_pb <= %f) * 100.0 / count(*) as pb_percentile
+                    SELECT countIf(avg_pe <= ?) * 100.0 / count(*) as pe_percentile,
+                           countIf(avg_pb <= ?) * 100.0 / count(*) as pb_percentile
                     FROM daily_stats
-                    """, histStart, tradeDate, avgPe, ((Number) stats.get("avg_pb")).doubleValue());
-            Map<String, Object> pctResult = chJdbc.queryForMap(histSql);
+                    """;
+            Map<String, Object> pctResult = chJdbc.queryForMap(histSql, histStart, tradeDate, avgPe, avgPb);
             result.put("pePercentile", Math.round(((Number) pctResult.get("pe_percentile")).doubleValue() * 10) / 10.0);
             result.put("pbPercentile", Math.round(((Number) pctResult.get("pb_percentile")).doubleValue() * 10) / 10.0);
 
             // PE 分位历史（近30个交易日）
-            String historySql = String.format("""
+            String historySql = """
                     WITH daily_stats AS (
                         SELECT trade_date,
                                avg(pe_ttm) as avg_pe
                         FROM stock.stock_daily FINAL
-                        WHERE trade_date >= '%s' AND trade_date <= '%s'
+                        WHERE trade_date >= ? AND trade_date <= ?
                           AND pe_ttm > 0 AND pe_ttm < 500
                         GROUP BY trade_date
                     ),
@@ -210,8 +211,8 @@ public class MarketThermometerService {
                     GROUP BY a.trade_date, a.avg_pe
                     ORDER BY a.trade_date DESC
                     LIMIT 30
-                    """, histStart, tradeDate);
-            List<Map<String, Object>> rawHistory = chJdbc.queryForList(historySql);
+                    """;
+            List<Map<String, Object>> rawHistory = chJdbc.queryForList(historySql, histStart, tradeDate);
             List<Map<String, Object>> history = new ArrayList<>();
             for (Map<String, Object> row : rawHistory) {
                 Map<String, Object> h = new LinkedHashMap<>();
@@ -252,13 +253,13 @@ public class MarketThermometerService {
         try {
             // 沪深300 指数 code = 000300（存储在 index_daily）
             // 注意：数据按 ASC 存储（早期在前），PRECEDING 取前N行 = 近N日均线
-            String sql = String.format("""
+            String sql = """
                     WITH ma AS (
                         SELECT trade_date, close_price,
                                avg(close_price) OVER (ORDER BY trade_date ROWS BETWEEN 19 PRECEDING AND CURRENT ROW) as ma20,
                                avg(close_price) OVER (ORDER BY trade_date ROWS BETWEEN 59 PRECEDING AND CURRENT ROW) as ma60
                         FROM stock.index_daily FINAL
-                        WHERE code = '000300' AND trade_date <= '%s'
+                        WHERE code = '000300' AND trade_date <= ?
                         QUALIFY row_number() OVER (ORDER BY trade_date DESC) <= 65
                     )
                     SELECT trade_date, close_price, ma20, ma60,
@@ -266,8 +267,8 @@ public class MarketThermometerService {
                     FROM ma
                     ORDER BY trade_date DESC
                     LIMIT 20
-                    """, date);
-            List<Map<String, Object>> rows = chJdbc.queryForList(sql);
+                    """;
+            List<Map<String, Object>> rows = chJdbc.queryForList(sql, date.toString());
 
             if (rows.isEmpty()) {
                 result.put("temperature", 50.0);
@@ -342,14 +343,14 @@ public class MarketThermometerService {
         List<Map<String, Object>> history = new ArrayList<>();
         if (chJdbc != null) {
             try {
-                String histSql = String.format("""
+                String histSql = """
                         SELECT trade_date, close_price
                         FROM stock.index_daily FINAL
-                        WHERE code = '000300' AND trade_date <= '%s'
+                        WHERE code = '000300' AND trade_date <= ?
                         ORDER BY trade_date DESC
                         LIMIT 30
-                        """, date);
-                List<Map<String, Object>> indexRows = chJdbc.queryForList(histSql);
+                        """;
+                List<Map<String, Object>> indexRows = chJdbc.queryForList(histSql, date.toString());
                 // 盈利收益率 = 1/PE，用沪深300平均PE（用bondYield和当前ratio反推今日基准）
                 // 当前ratio作为基准
                 for (int i = indexRows.size() - 1; i >= 0; i--) {
@@ -428,17 +429,17 @@ public class MarketThermometerService {
 
         try {
             // 从 stock_sentiment_moneyflow 查主力净流入作为情绪代理指标（近5日）
-            String sql = String.format("""
+            String sql = """
                     SELECT trade_date,
                            sum(net_main) as net_main,
                            sum(net_main_pct) as net_main_pct
                     FROM stock.stock_sentiment_moneyflow FINAL
-                    WHERE trade_date <= '%s'
+                    WHERE trade_date <= ?
                     GROUP BY trade_date
                     ORDER BY trade_date DESC
                     LIMIT 10
-                    """, date);
-            List<Map<String, Object>> rows = chJdbc.queryForList(sql);
+                    """;
+            List<Map<String, Object>> rows = chJdbc.queryForList(sql, date.toString());
 
             if (rows.size() < 2) {
                 result.put("change", 0.0);
@@ -583,8 +584,8 @@ except Exception as e:
             String tradeDate = null;
             try {
                 tradeDate = chJdbc.queryForObject(
-                    "SELECT MAX(trade_date) FROM stock.index_daily FINAL WHERE code = '000300' AND trade_date <= '" + date + "'",
-                    String.class);
+                    "SELECT MAX(trade_date) FROM stock.index_daily FINAL WHERE code = '000300' AND trade_date <= ?",
+                    String.class, date.toString());
             } catch (Exception ignored) {}
             if (tradeDate == null) return result;
 
@@ -621,14 +622,14 @@ except Exception as e:
     /** 计算指定指数近N日收盘价涨跌幅（绝对差值，非百分比差） */
     private double calcIndexCloseReturn(String indexCode, String tradeDate, int days) {
         try {
-            String sql = String.format("""
+            String sql = """
                 SELECT close_price
                 FROM stock.index_daily FINAL
-                WHERE code = '%s' AND trade_date <= '%s'
+                WHERE code = ? AND trade_date <= ?
                 ORDER BY trade_date DESC
-                LIMIT %d
-                """, indexCode, tradeDate, days);
-            List<Map<String, Object>> rows = chJdbc.queryForList(sql);
+                LIMIT ?
+                """;
+            List<Map<String, Object>> rows = chJdbc.queryForList(sql, indexCode, tradeDate, days);
             if (rows == null || rows.size() < 2) return Double.NaN;
             double last = ((Number) rows.get(0).get("close_price")).doubleValue();
             double first = ((Number) rows.get(rows.size() - 1).get("close_price")).doubleValue();
@@ -703,14 +704,14 @@ except Exception as e:
             String name = def[1];
             try {
                 // 取最新2天数据算涨跌幅
-                String sql = String.format("""
+                String sql = """
                     SELECT trade_date, close_price, change_percent
                     FROM stock.index_daily FINAL
-                    WHERE code = '%s' AND trade_date <= '%s'
+                    WHERE code = ? AND trade_date <= ?
                     ORDER BY trade_date DESC
                     LIMIT 2
-                    """, code, tradeDate);
-                List<Map<String, Object>> rows = chJdbc.queryForList(sql);
+                    """;
+                List<Map<String, Object>> rows = chJdbc.queryForList(sql, code, tradeDate);
                 if (rows.isEmpty()) continue;
 
                 Map<String, Object> curr = rows.get(0);

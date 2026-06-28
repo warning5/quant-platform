@@ -63,15 +63,53 @@ public class ClickHouseSentimentService {
         DATE_COLUMNS.put("stock_sentiment_survey", "notice_date");
     }
 
+    // 允许直接拼接到 SQL 中的表名白名单（sentiment 表 + coverage 中追加的 MySQL-only 表 + CH-only 表）
+    private static final Set<String> ALLOWED_TABLES;
+    static {
+        Set<String> set = new HashSet<>(SENTIMENT_TABLES);
+        set.add("stock_fund_holder");
+        set.add("stock_shareholder");
+        set.add("stock_news");
+        set.add("macro_bond_yield");
+        set.add("stock_consensus_estimate");
+        set.add("stock_earnings_report");
+        set.add("index_daily");
+        set.add("market_sentiment");
+        ALLOWED_TABLES = Collections.unmodifiableSet(set);
+    }
+
+    // 允许直接拼接到 SQL 中的日期列名白名单
+    private static final Set<String> ALLOWED_DATE_COLUMNS = new HashSet<>(Arrays.asList(
+            "trade_date", "notice_date", "report_date", "publish_date", "update_time"
+    ));
+
     private String getDateColumn(String table) {
         return DATE_COLUMNS.getOrDefault(table, "trade_date");
+    }
+
+    /**
+     * 校验表名和日期列名是否在白名单中，避免 SQL 拼接被注入。
+     * 校验不通过直接抛出 IllegalArgumentException，不执行后续 SQL。
+     */
+    private static void validateTableAndColumn(String table, String dateCol) {
+        if (!ALLOWED_TABLES.contains(table)) {
+            throw new IllegalArgumentException("无效的表名: " + table);
+        }
+        if (!ALLOWED_DATE_COLUMNS.contains(dateCol)) {
+            throw new IllegalArgumentException("无效的日期列: " + dateCol);
+        }
     }
 
     /**
      * 获取 ClickHouse 连接
      */
     private Connection getConnection() throws Exception {
-        return DriverManager.getConnection(clickHouseConfig.getJdbcUrl());
+        Properties props = new Properties();
+        props.setProperty("user", clickHouseConfig.getUsername());
+        if (clickHouseConfig.getPassword() != null && !clickHouseConfig.getPassword().isEmpty()) {
+            props.setProperty("password", clickHouseConfig.getPassword());
+        }
+        return DriverManager.getConnection(clickHouseConfig.getJdbcUrl(), props);
     }
 
     /**
@@ -104,6 +142,9 @@ public class ClickHouseSentimentService {
 
         for (String table : SENTIMENT_TABLES) {
             try {
+                // 白名单校验：SQL 拼接前确认表名和日期列名合法
+                validateTableAndColumn(table, getDateColumn(table));
+
                 // 查询记录数
                 String countSql = "SELECT COUNT(*) as cnt FROM " + table;
                 long count = 0L;
@@ -165,6 +206,9 @@ public class ClickHouseSentimentService {
             String name = extra[1];
             String dateCol = extra[2];
             try {
+                // 白名单校验
+                validateTableAndColumn(table, dateCol);
+
                 Integer count = jdbcTemplate.queryForObject("SELECT COUNT(*) as cnt FROM " + table, Integer.class);
                 if (count == null) count = 0;
                 totalRecords += count;
@@ -197,6 +241,8 @@ public class ClickHouseSentimentService {
         // 追加：申万行业指数（ClickHouse 表）
         try {
             String chTable = "index_daily";
+            // 白名单校验
+            validateTableAndColumn(chTable, "trade_date");
             Long count = 0L;
             try (Connection conn = getConnection();
                  PreparedStatement stmt = conn.prepareStatement("SELECT COUNT(*) as cnt FROM " + chTable);
@@ -239,6 +285,8 @@ public class ClickHouseSentimentService {
         // 追加：QVIX恐慌指数（ClickHouse market_sentiment 表）
         try {
             String chTable = "market_sentiment";
+            // 白名单校验
+            validateTableAndColumn(chTable, "trade_date");
             Long count = 0L;
             try (Connection conn = getConnection();
                  PreparedStatement stmt = conn.prepareStatement("SELECT COUNT(*) as cnt FROM " + chTable);
@@ -288,11 +336,8 @@ public class ClickHouseSentimentService {
      * 获取指定表的详细统计（优先 ClickHouse）
      */
     public Map<String, Object> getTableStats(String table) {
-        if (!SENTIMENT_TABLES.contains(table)) {
-            Map<String, Object> error = new HashMap<>();
-            error.put("error", "无效的表名: " + table);
-            return error;
-        }
+        // 先完成白名单校验，非法表名直接抛异常
+        validateTableAndColumn(table, getDateColumn(table));
 
         if (!clickHouseConfig.isEnabled()) {
             return sentimentService.getTableStats(table);
@@ -313,6 +358,8 @@ public class ClickHouseSentimentService {
     private Map<String, Object> queryTableStatsFromClickHouse(String table) throws Exception {
         Map<String, Object> result = new LinkedHashMap<>();
         String dateCol = getDateColumn(table);
+        // 白名单校验
+        validateTableAndColumn(table, dateCol);
 
         // 记录数
         String countSql = "SELECT COUNT(*) as cnt FROM " + table;
@@ -389,6 +436,9 @@ public class ClickHouseSentimentService {
         int totalWarnings = 0;
 
         for (String table : SENTIMENT_TABLES) {
+            // 白名单校验
+            validateTableAndColumn(table, getDateColumn(table));
+
             Map<String, Object> validation = new LinkedHashMap<>();
             validation.put("table", table);
             validation.put("name", TABLE_NAMES.getOrDefault(table, table));
