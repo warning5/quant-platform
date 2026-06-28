@@ -59,7 +59,7 @@ import requests
 import urllib3
 urllib3.disable_warnings()
 from db_helper import ch_dedup_filter
-from db_config import CLICKHOUSE_CONFIG, MYSQL_CONFIG
+from db_config import CLICKHOUSE_CONFIG, MYSQL_CONFIG, EASTMONEY_TOKEN, EASTMONEY_UT
 
 # ─── westock-data 资金流向（已替代 NeoData，无需 token）───────────
 
@@ -670,10 +670,10 @@ def fetch_moneyflow_em_realtime() -> list:
                 "np": 1,
                 "fltt": 2,
                 "invt": 2,
-                "ut": "b2884a393a59ad64002292a3e90d46a5",
+                "ut": EASTMONEY_UT,
                 "fields": "f12,f14,f2,f3,f62,f72,f75,f78,f66",
                 "fs": "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23",
-                "token": os.environ.get("EASTMONEY_TOKEN", "95508b664a61ff632843c2d25ef6dfcb"),
+                "token": EASTMONEY_TOKEN,
             }
             json_data = None
             for attempt in range(3):
@@ -801,10 +801,10 @@ def fetch_moneyflow_em_hist_single(code: str, market: str = "", max_retries: int
         "secid": secid,
         "klt": 101,
         "lmt": 120,
-        "ut": "b2884a393a59ad64002292a3e90d46a5",
+        "ut": EASTMONEY_UT,
         "fields1": "f1,f2,f3,f7",
         "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65",
-        "token": os.environ.get("EASTMONEY_TOKEN", "95508b664a61ff632843c2d25ef6dfcb"),
+        "token": EASTMONEY_TOKEN,
     }
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",

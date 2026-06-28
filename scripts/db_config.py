@@ -65,6 +65,18 @@ CLICKHOUSE_CONFIG = dict(
 STOCK_INFO_DB = MYSQL_CONFIG
 
 
+# ─── 东方财富 API Token（公开接口 token，从环境变量读取）─────────
+# 东方财富 push2/push2his 接口的 token 和 ut 参数
+# 注意：这是公开 API 的 token（非用户密码），但仍建议通过环境变量配置
+EASTMONEY_TOKEN = os.environ.get("EASTMONEY_TOKEN", "")
+if not EASTMONEY_TOKEN:
+    warnings.warn("EASTMONEY_TOKEN 未设置，东方财富接口可能无法访问")
+
+EASTMONEY_UT = os.environ.get("EASTMONEY_UT", "")
+if not EASTMONEY_UT:
+    warnings.warn("EASTMONEY_UT 未设置，东方财富接口可能无法访问")
+
+
 def get_db_params():
     """获取当前后端的连接参数"""
     if DB_BACKEND == "clickhouse":

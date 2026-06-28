@@ -8,8 +8,8 @@ import com.quant.platform.backtest.domain.RebalanceRecord;
 import com.quant.platform.backtest.mapper.BacktestReportMapper;
 import com.quant.platform.backtest.mapper.BacktestTaskMapper;
 import com.quant.platform.backtest.mapper.EquityCurveMapper;
-import com.quant.platform.common.utils.LimitUpUtils;
 import com.quant.platform.backtest.mapper.RebalanceRecordMapper;
+import com.quant.platform.common.utils.LimitUpUtils;
 import com.quant.platform.factor.domain.FactorValue;
 import com.quant.platform.factor.ic.service.FactorIcService;
 import com.quant.platform.factor.mapper.FactorValueMapper;
@@ -29,6 +29,8 @@ import groovy.lang.GroovyShell;
 import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.codehaus.groovy.control.CompilerConfiguration;
+import org.codehaus.groovy.control.customizers.SecureASTCustomizer;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.scheduling.annotation.Async;
@@ -56,30 +58,20 @@ public class BacktestEngine {
 
     // ─── Groovy 脚本安全预检（静态，所有实例共享）─────────────────
     private static final List<String> DANGEROUS_PATTERNS = List.of(
-        "execute(", "exec(", "Runtime", "ProcessBuilder",
-        "System.exit", "System.setProperty", "System.getProperty",
-        "new File", "FileWriter", "FileReader", "RandomAccessFile",
-        "new Socket", "new URL", "HttpURLConnection",
-        "Thread.", "ClassLoader", "Unsafe", "GroovyShell",
-        "Class.forName", "Method.invoke", "Field.setAccessible",
-        "RuntimeMXBean", "ManagementFactory"
+            "execute(", "exec(", "Runtime", "ProcessBuilder",
+            "System.exit", "System.setProperty", "System.getProperty",
+            "new File", "FileWriter", "FileReader", "RandomAccessFile",
+            "new Socket", "new URL", "HttpURLConnection",
+            "Thread.", "ClassLoader", "Unsafe", "GroovyShell",
+            "Class.forName", "Method.invoke", "Field.setAccessible",
+            "RuntimeMXBean", "ManagementFactory"
     );
 
     /**
-     * 预检脚本安全性，拒绝危险模式
+     * Groovy 安全沙箱配置（SecureASTCustomizer + CompilerConfiguration）
+     * 限制脚本只能使用白名单内的类和方法，阻止任意代码执行
      */
-    private static String preCheckScript(String scriptCode) {
-        for (String pattern : DANGEROUS_PATTERNS) {
-            if (scriptCode.contains(pattern)) {
-                return "脚本包含不允许的操作: " + pattern;
-            }
-        }
-        if (scriptCode.matches(".*\\\\u[0-9a-fA-F]{4}.*")) {
-            return "脚本包含 Unicode 转义，疑似绕过检测";
-        }
-        return null;
-    }
-
+    private static final CompilerConfiguration SECURE_GROOVY_CONFIG = createSecureConfig();
     private final BacktestTaskMapper taskMapper;
     private final BacktestReportMapper reportMapper;
     private final MarketDataService marketDataService;
@@ -112,6 +104,72 @@ public class BacktestEngine {
     private SimpMessagingTemplate messagingTemplate;
     @Resource
     private DataSource dataSource;
+
+    private static CompilerConfiguration createSecureConfig() {
+        SecureASTCustomizer secure = new SecureASTCustomizer();
+        // 禁止导入任意类（白名单为空 = 禁止所有 import）
+        secure.setAllowedImports(List.of());
+        secure.setAllowedStarImports(List.of());
+        secure.setAllowedStaticImports(List.of());
+        secure.setAllowedStaticStarImports(List.of());
+        // 启用间接导入检查，防止通过全限定类名绕过
+        secure.setIndirectImportCheckEnabled(true);
+        // 禁止方法定义（脚本只允许单一 run() 方法）
+        secure.setMethodDefinitionAllowed(false);
+        // 允许闭包（脚本常用 collect/each 等闭包操作）
+        secure.setClosuresAllowed(true);
+        // 允许的接收者类型白名单（限制脚本可调用的对象类型）
+        secure.setAllowedReceivers(List.of(
+                // 基础数学运算
+                Math.class.getName(),
+                java.math.BigDecimal.class.getName(),
+                java.math.RoundingMode.class.getName(),
+                // 集合操作
+                List.class.getName(),
+                Map.class.getName(),
+                Set.class.getName(),
+                ArrayList.class.getName(),
+                HashMap.class.getName(),
+                LinkedHashMap.class.getName(),
+                // 字符串操作
+                String.class.getName(),
+                // 日期时间
+                LocalDate.class.getName(),
+                LocalDateTime.class.getName(),
+                java.time.format.DateTimeFormatter.class.getName(),
+                // 数值类型
+                Integer.class.getName(),
+                Long.class.getName(),
+                Double.class.getName(),
+                Float.class.getName(),
+                Number.class.getName(),
+                // 因子相关（脚本上下文绑定的类型）
+                "com.quant.platform.factor.domain.FactorValue",
+                "com.quant.platform.market.domain.MarketDailyBar",
+                // Groovy 范围与闭包
+                groovy.lang.Range.class.getName(),
+                groovy.lang.Closure.class.getName()
+        ));
+
+        CompilerConfiguration config = new CompilerConfiguration();
+        config.addCompilationCustomizers(secure);
+        return config;
+    }
+
+    /**
+     * 预检脚本安全性，拒绝危险模式
+     */
+    private static String preCheckScript(String scriptCode) {
+        for (String pattern : DANGEROUS_PATTERNS) {
+            if (scriptCode.contains(pattern)) {
+                return "脚本包含不允许的操作: " + pattern;
+            }
+        }
+        if (scriptCode.matches(".*\\\\u[0-9a-fA-F]{4}.*")) {
+            return "脚本包含 Unicode 转义，疑似绕过检测";
+        }
+        return null;
+    }
 
     /**
      * 异步运行回测
@@ -414,8 +472,6 @@ public class BacktestEngine {
             // ── 止损止盈检查（参数优化时启用）────────────────────────────────
             if ((stopLossPct > 0 || stopProfitPct > 0) && !positions.isEmpty()) {
                 List<String> toSell = new ArrayList<>();
-                double currentTotalCost = positionCosts.values().stream().mapToDouble(Double::doubleValue).sum();
-
                 for (Map.Entry<String, Double> pos : positions.entrySet()) {
                     String symbol = pos.getKey();
                     MarketDailyBar bar = barMap.get(symbol);
@@ -560,10 +616,10 @@ public class BacktestEngine {
 
                 // 4. 计算买入缩放比例
                 double maxInvestable = portfolioValue - keptValue - sellFee - newBuyFee;
-                double buyScale = rawInvestedValue > 0 ? Math.max(0, Math.min(1.0, maxInvestable / rawInvestedValue)) : 0;
-                if (buyScale < 0.9999) {
+                double scale = rawInvestedValue > 0 ? Math.max(0, Math.min(1.0, maxInvestable / rawInvestedValue)) : 0;
+                if (scale < 0.9999) {
                     log.info("Buy scale capped: {} (available={}, target={}, kept={})",
-                            String.format("%.4f", buyScale), String.format("%.2f", maxInvestable),
+                            String.format("%.4f", scale), String.format("%.2f", maxInvestable),
                             String.format("%.2f", rawInvestedValue), String.format("%.2f", keptValue));
                 }
 
@@ -572,14 +628,14 @@ public class BacktestEngine {
                         positions, targetWeights, barMap, portfolioValue, commission, slippage,
                         today, positionValues, slippageModel, stampTaxRate, minCommission,
                         limitFilter, suspendFilter, transferFeeRate, orderType, tradingDates, di,
-                        nextDayBarMap, positionCosts, buyScale);
+                        nextDayBarMap, positionCosts, scale);
                 tradeLog.addAll(rebalanceTrades);
                 totalTrades += rebalanceTrades.size();
 
                 // 重新计算cash
                 cash = recalcCash(positions, targetWeights, barMap, portfolioValue, commission, slippage,
                         slippageModel, stampTaxRate, minCommission, limitFilter, suspendFilter,
-                        transferFeeRate, orderType, tradingDates, di, buyScale);
+                        transferFeeRate, scale);
 
                 // 计算实际可买入的标的（排除涨停/停牌）
                 Map<String, Double> effectiveTargets = new HashMap<>(targetWeights);
@@ -604,7 +660,6 @@ public class BacktestEngine {
                     soldSymbols.add(sym);
                 }
 
-                final double currentPortfolioValue = portfolioValue;
                 positions = new HashMap<>();
 
                 // 保留未卖出的旧持仓
@@ -616,12 +671,11 @@ public class BacktestEngine {
                 // 加入新买入的持仓（应用缩放）
                 // 注意：已保留的旧持仓（soldSymbols 不包含且 barMap 存在）在上方已写入 positions，
                 // 这里只处理真正的新买入标的，避免 buyScale=0 时覆盖旧持仓的正确股数。
-                final double scale = buyScale;
                 for (Map.Entry<String, Double> entry : effectiveTargets.entrySet()) {
                     String sym = entry.getKey();
                     if (barMap.containsKey(sym) && !positions.containsKey(sym)) {
                         positions.put(sym,
-                                (currentPortfolioValue * entry.getValue() * scale) / barMap.get(sym).getClose().doubleValue());
+                                (portfolioValue * entry.getValue() * scale) / barMap.get(sym).getClose().doubleValue());
                     }
                 }
 
@@ -691,7 +745,7 @@ public class BacktestEngine {
                 taskMapper.updateById(task);
                 // 取最近一个基准净值
                 double bmVal = benchmarkCurve.isEmpty() ? 1.0
-                        : ((Number) benchmarkCurve.get(benchmarkCurve.size() - 1).get("value")).doubleValue();
+                        : ((Number) benchmarkCurve.getLast().get("value")).doubleValue();
                 sendProgressWithCurve(task.getId(), pct, today.toString(),
                         round(portfolioValue / initialCapital, 6), bmVal);
             }
@@ -722,7 +776,7 @@ public class BacktestEngine {
 
         // 计算基准总收益
         double benchmarkTotalReturn = benchmarkCurve.isEmpty() ? 0.0
-                : ((Number) benchmarkCurve.get(benchmarkCurve.size() - 1).get("value")).doubleValue() - 1.0;
+                : ((Number) benchmarkCurve.getLast().get("value")).doubleValue() - 1.0;
 
         return new BacktestResult(
                 portfolioValue / initialCapital - 1,
@@ -976,20 +1030,20 @@ public class BacktestEngine {
                     sellFee += calcFee(amount, true, commission, stampTaxRate, minCommission, sym, transferFeeRate);
                 }
                 double maxInvestable = portfolioValue - keptValue - sellFee - newBuyFee;
-                double buyScale = rawInvestedValue > 0 ? Math.max(0, Math.min(1.0, maxInvestable / rawInvestedValue)) : 0;
+                double scale = rawInvestedValue > 0 ? Math.max(0, Math.min(1.0, maxInvestable / rawInvestedValue)) : 0;
 
                 // ── 交易执行（复用 rebalance/recalcCash）──
                 List<Map<String, Object>> rebalanceTrades = rebalance(
                         positions, targetWeights, barMap, portfolioValue, commission, slippage,
                         today, null, slippageModel, stampTaxRate, minCommission,
                         limitFilter, suspendFilter, transferFeeRate, orderType, tradingDates, di,
-                        nextDayBarMap, positionCosts, buyScale);
+                        nextDayBarMap, positionCosts, scale);
                 tradeLog.addAll(rebalanceTrades);
                 totalTrades += rebalanceTrades.size();
 
                 cash = recalcCash(positions, targetWeights, barMap, portfolioValue, commission, slippage,
                         slippageModel, stampTaxRate, minCommission, limitFilter, suspendFilter,
-                        transferFeeRate, orderType, tradingDates, di, buyScale);
+                        transferFeeRate, scale);
 
                 // ── 写入 rebalance_record ──
                 try {
@@ -1056,7 +1110,6 @@ public class BacktestEngine {
                         positions.put(sym, oldPositions.get(sym));
                     }
                 }
-                final double scale = buyScale;
                 for (Map.Entry<String, Double> entry : targetWeights.entrySet()) {
                     String sym = entry.getKey();
                     if (barMap.containsKey(sym) && !positions.containsKey(sym)) {
@@ -1128,7 +1181,7 @@ public class BacktestEngine {
                 task.setProgress(pct);
                 taskMapper.updateById(task);
                 double bmVal = benchmarkCurve.isEmpty() ? 1.0
-                        : ((Number) benchmarkCurve.get(benchmarkCurve.size() - 1).get("value")).doubleValue();
+                        : ((Number) benchmarkCurve.getLast().get("value")).doubleValue();
                 sendProgressWithCurve(task.getId(), pct, today.toString(),
                         round(portfolioValue / initialCapital, 6), bmVal);
             }
@@ -1160,7 +1213,7 @@ public class BacktestEngine {
         }
 
         double benchmarkTotalReturn = benchmarkCurve.isEmpty() ? 0.0
-                : ((Number) benchmarkCurve.get(benchmarkCurve.size() - 1).get("value")).doubleValue() - 1.0;
+                : ((Number) benchmarkCurve.getLast().get("value")).doubleValue() - 1.0;
 
         return new BacktestResult(
                 portfolioValue / initialCapital - 1,
@@ -1366,7 +1419,8 @@ public class BacktestEngine {
                 return scores;
             }
 
-            GroovyShell shell = new GroovyShell(binding);
+            // 使用 SecureASTCustomizer 配置的 GroovyShell 执行脚本（双重安全防护）
+            GroovyShell shell = new GroovyShell(binding, SECURE_GROOVY_CONFIG);
             Object result = shell.evaluate(strategy.getScriptCode());
 
             if (result instanceof Map<?, ?> resultMap) {
@@ -1845,9 +1899,6 @@ public class BacktestEngine {
                               boolean limitFilter,
                               boolean suspendFilter,
                               double transferFeeRate,
-                              String orderType,
-                              List<LocalDate> tradingDates,
-                              int di,
                               double buyScale) {
         double totalFee = 0;
 
@@ -1906,12 +1957,11 @@ public class BacktestEngine {
     }
 
     /**
-     * 判断是否应该调仓
+     * 再平衡触发判断：支持日历频率+偏离阈值+波动率自适应+混合
      */
-    /** 再平衡触发判断：支持日历频率+偏离阈值+波动率自适应+混合 */
     private boolean shouldRebalance(LocalDate today, LocalDate lastDate, String freq,
-                                     double currentDeviation, double volatilityLevel,
-                                     double threshold) {
+                                    double currentDeviation, double volatilityLevel,
+                                    double threshold) {
         if (lastDate == null) return true;
 
         // 日历频率基础判断
@@ -1938,7 +1988,7 @@ public class BacktestEngine {
             // 低波动(volatility<=0.02日波动≈年化32%) → 月频
             // 中间 → 两周频
             String adaptedFreq = volatilityLevel > 0.03 ? "WEEKLY" :
-                                 volatilityLevel <= 0.02 ? "MONTHLY" : "WEEKLY";
+                    volatilityLevel <= 0.02 ? "MONTHLY" : "WEEKLY";
             return shouldRebalance(today, lastDate, adaptedFreq, 0, 0, threshold);
         } else if ("HYBRID".equalsIgnoreCase(freq)) {
             return calendarTrigger || currentDeviation > threshold;
@@ -1947,7 +1997,9 @@ public class BacktestEngine {
         }
     }
 
-    /** 简化版：仅日历频率触发 */
+    /**
+     * 简化版：仅日历频率触发
+     */
     private boolean shouldRebalance(LocalDate today, LocalDate lastDate, String freq) {
         return shouldRebalance(today, lastDate, freq, 0, 0, 0);
     }
@@ -2270,8 +2322,8 @@ public class BacktestEngine {
      * @return factorCode -> 动态权重系数（已与静态权重乘算）
      */
     private Map<String, Double> computeDynamicFactorWeights(List<FactorWeight> factorWeights,
-                                                             String weightMode,
-                                                             LocalDate rebalanceDate) {
+                                                            String weightMode,
+                                                            LocalDate rebalanceDate) {
         Map<String, Double> dynamicWeights = new LinkedHashMap<>();
         Map<String, Double> icScores = new LinkedHashMap<>();
 
@@ -2330,28 +2382,6 @@ public class BacktestEngine {
         return dynamicWeights;
     }
 
-    record FactorWeight(String factorCode, double weight) {
-    }
-
-    record BacktestResult(
-            double totalReturn,
-            double finalValue,
-            double initialCapital,
-            double maxDrawdown,
-            int maxDrawdownDuration,
-            int totalTrades,
-            List<Double> tradeReturns,
-            List<Map<String, Object>> equityCurve,
-            List<Map<String, Object>> benchmarkCurve,
-            List<Map<String, Object>> drawdownSeries,
-            List<Map<String, Object>> monthlyReturns,
-            List<Map<String, Object>> positionHistory,
-            List<Map<String, Object>> tradeLog,
-            int tradingDays,
-            double benchmarkTotalReturn
-    ) {
-    }
-
     /**
      * 加载所有股票的退市日期映射（幸存者偏差修复）。
      * 从 stock_info 表查询 delist_date 字段，构建 symbol -> delistDate 的映射。
@@ -2378,5 +2408,27 @@ public class BacktestEngine {
             log.warn("加载退市日期映射失败: {}", e.getMessage());
             return Map.of();
         }
+    }
+
+    record FactorWeight(String factorCode, double weight) {
+    }
+
+    record BacktestResult(
+            double totalReturn,
+            double finalValue,
+            double initialCapital,
+            double maxDrawdown,
+            int maxDrawdownDuration,
+            int totalTrades,
+            List<Double> tradeReturns,
+            List<Map<String, Object>> equityCurve,
+            List<Map<String, Object>> benchmarkCurve,
+            List<Map<String, Object>> drawdownSeries,
+            List<Map<String, Object>> monthlyReturns,
+            List<Map<String, Object>> positionHistory,
+            List<Map<String, Object>> tradeLog,
+            int tradingDays,
+            double benchmarkTotalReturn
+    ) {
     }
 }

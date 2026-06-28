@@ -103,7 +103,9 @@ def _get_mcode():
 
 
 def get_db():
-    return pymysql.connect(**DB_CONFIG)
+    import pymysql.cursors
+    cfg = dict(DB_CONFIG, cursorclass=pymysql.cursors.DictCursor)
+    return pymysql.connect(**cfg)
 
 
 def ensure_table(conn):

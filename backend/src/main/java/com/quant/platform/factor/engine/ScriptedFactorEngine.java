@@ -7,23 +7,28 @@ import groovy.lang.Script;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.codehaus.groovy.control.CompilerConfiguration;
+import org.codehaus.groovy.control.customizers.SecureASTCustomizer;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Groovy脚本因子计算引擎（带编译缓存 + 脚本内容安全预检）
- *
  * 安全方案：执行前预检脚本源码，拒绝包含危险模式的脚本
  * - 禁止：execute / exec / Runtime / ProcessBuilder / System.exit
  * - 禁止：File / Socket / URL / HttpURLConnection 等危险类
  * - 禁止：Thread / ClassLoader / Unsafe 等底层操作
  * - 禁止：GroovyShell 嵌套执行（防止沙箱逃逸）
- *
  * 性能优化：同一脚本源码 → 只编译一次，复用 Script 实例
  * - 无缓存时：5000股 × 250日 = 1,250,000 次编译
  * - 有缓存后：N个不同脚本 × 1次编译 = N 次（通常 N < 50）
@@ -49,8 +54,50 @@ public class ScriptedFactorEngine {
     );
 
     public ScriptedFactorEngine() {
-        config = new CompilerConfiguration();
-        config.setScriptBaseClass("groovy.lang.Script");
+        config = createSecureConfig();
+    }
+
+    /**
+     * 创建带安全沙箱的 CompilerConfiguration（SecureASTCustomizer）
+     */
+    private static CompilerConfiguration createSecureConfig() {
+        SecureASTCustomizer secure = new SecureASTCustomizer();
+        secure.setAllowedImports(List.of());
+        secure.setAllowedStarImports(List.of());
+        secure.setAllowedStaticImports(List.of());
+        secure.setAllowedStaticStarImports(List.of());
+        secure.setIndirectImportCheckEnabled(true);
+        secure.setMethodDefinitionAllowed(false);
+        secure.setClosuresAllowed(true);
+        secure.setAllowedReceivers(List.of(
+            Math.class.getName(),
+            BigDecimal.class.getName(),
+            RoundingMode.class.getName(),
+            List.class.getName(),
+            Map.class.getName(),
+            Set.class.getName(),
+            ArrayList.class.getName(),
+            HashMap.class.getName(),
+            LinkedHashMap.class.getName(),
+            String.class.getName(),
+            LocalDate.class.getName(),
+            LocalDateTime.class.getName(),
+            java.time.format.DateTimeFormatter.class.getName(),
+            Integer.class.getName(),
+            Long.class.getName(),
+            Double.class.getName(),
+            Float.class.getName(),
+            Number.class.getName(),
+            "com.quant.platform.factor.domain.FactorValue",
+            "com.quant.platform.market.domain.MarketDailyBar",
+            groovy.lang.Range.class.getName(),
+            groovy.lang.Closure.class.getName()
+        ));
+
+        CompilerConfiguration cc = new CompilerConfiguration();
+        cc.addCompilationCustomizers(secure);
+        cc.setScriptBaseClass("groovy.lang.Script");
+        return cc;
     }
 
     /**

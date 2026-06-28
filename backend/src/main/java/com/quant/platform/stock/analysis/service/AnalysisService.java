@@ -580,7 +580,7 @@ public class AnalysisService {
         }
 
         // 最新一日数据
-        DailyBarRow latest = bars.get(bars.size() - 1);
+        DailyBarRow latest = bars.getLast();
 
         // 计算量比（当日成交量 / 5日均量）
         if (latest.getVolume() != null && bars.size() >= 6) {
@@ -1629,6 +1629,10 @@ public class AnalysisService {
 
                     // CH IN 子句有长度限制，分批查询（每批500）
                     List<String> codeList = new ArrayList<>(allCodes);
+                    // 安全校验：确保所有股票代码格式合法（6位纯数字），防止 SQL 注入
+                    codeList = codeList.stream()
+                        .filter(c -> c != null && c.matches("\\d{6}"))
+                        .collect(Collectors.toList());
                     Map<String, Map<String, Object>> codeChgMap = new HashMap<>();
                     for (int i = 0; i < codeList.size(); i += 500) {
                         List<String> batch = codeList.subList(i, Math.min(i + 500, codeList.size()));
@@ -2130,8 +2134,10 @@ public class AnalysisService {
         }
         if (codes.isEmpty()) return Collections.emptyList();
 
-        // 2. CH批量查询行情
-        String inClause = String.join("','", codes);
+        // 2. CH批量查询行情（校验股票代码格式，防止 SQL 注入）
+        List<String> validCodes = codes.stream().filter(c -> c.matches("\\d{6}")).collect(Collectors.toList());
+        if (validCodes.isEmpty()) return Collections.emptyList();
+        String inClause = String.join("','", validCodes);
         String chSortCol = switch (sortBy) {
             case "changePercent" -> "sd.change_percent";
             case "peTtm" -> "sd.pe_ttm";
