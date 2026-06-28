@@ -3,6 +3,8 @@ package com.quant.platform.recommendation.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quant.platform.factor.ic.service.FactorIcService;
 import com.quant.platform.factor.service.FactorAnalysisService;
+import com.quant.platform.factor.service.FactorCorrelationService;
+import com.quant.platform.factor.service.QuarterlyFactorAnalysisService;
 import com.quant.platform.market.domain.MarketDailyBar;
 import com.quant.platform.market.service.MarketDataService;
 import com.quant.platform.recommendation.domain.StockRecommendation;
@@ -20,8 +22,6 @@ import com.quant.platform.stock.entity.StockInfo;
 import com.quant.platform.stock.mapper.StockInfoMapper;
 import com.quant.platform.stock.service.ClickHouseStockService;
 import com.quant.platform.stock.service.DividendService;
-import com.quant.platform.factor.service.FactorCorrelationService;
-import com.quant.platform.factor.service.QuarterlyFactorAnalysisService;
 import com.quant.platform.strategy.domain.StrategyDefinition;
 import com.quant.platform.strategy.mapper.StrategyDefinitionMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -122,9 +122,13 @@ public class RecommendationService {
      * ATR 历史分位数回溯天数
      */
     private static final int ATR_LOOKBACK_DAYS = 250;
-    /** P1: 默认IC预筛选阈值 */
+    /**
+     * P1: 默认IC预筛选阈值
+     */
     private static final double DEFAULT_IC_THRESHOLD = 0.03;
-    /** P2: 默认半衰期（交易日） */
+    /**
+     * P2: 默认半衰期（交易日）
+     */
     private static final int DEFAULT_HALFLIFE_DAYS = 20;
     /**
      * 沪深300指数代码
@@ -253,10 +257,20 @@ public class RecommendationService {
     }
 
     /**
+     * 计算数组标准差
+     */
+    private static double std(double[] values) {
+        if (values.length == 0) return 0;
+        double mean = Arrays.stream(values).average().orElse(0);
+        double variance = Arrays.stream(values).map(x -> (x - mean) * (x - mean)).average().orElse(0);
+        return Math.sqrt(variance);
+    }
+
+    /**
      * 生成推荐列表
-     *
+     * <p>
      * P1: 默认启用IC动态权重（不再需要weightMode="IC"）
-     *     自动预筛选+方向对齐+衰减加权
+     * 自动预筛选+方向对齐+衰减加权
      *
      * @param date        推荐日期（null 则使用最新可用日期）
      * @param topN        最终推荐数量（默认20）
@@ -602,6 +616,8 @@ public class RecommendationService {
         return recs;
     }
 
+    // ── 私有方法 ──
+
     /**
      * 追踪推荐表现（Phase 3.2）
      * 对未追踪或需要更新的推荐批次，计算:
@@ -706,8 +722,6 @@ public class RecommendationService {
 
         return totalUpdated;
     }
-
-    // ── 私有方法 ──
 
     /**
      * 获取推荐命中率统计
@@ -893,7 +907,7 @@ public class RecommendationService {
         // 只取有次日收益的
         List<StockRecommendation> tracked = recs.stream()
                 .filter(r -> r.getNextDayReturn() != null)
-                .collect(java.util.stream.Collectors.toList());
+                .toList();
 
         // 最佳3只（次日收益最高）
         List<StockRecommendation> best3 = tracked.stream()
@@ -932,12 +946,12 @@ public class RecommendationService {
         // 2) 市值中位数对比
         Map<String, Object> marketCapDiff = new LinkedHashMap<>();
         Double bestMedianCap = median(best3.stream()
-                .filter(r -> r.getMarketCap() != null)
                 .map(StockRecommendation::getMarketCap)
+                .filter(Objects::nonNull)
                 .collect(java.util.stream.Collectors.toList()));
         Double worstMedianCap = median(worst3.stream()
-                .filter(r -> r.getMarketCap() != null)
                 .map(StockRecommendation::getMarketCap)
+                .filter(Objects::nonNull)
                 .collect(java.util.stream.Collectors.toList()));
         marketCapDiff.put("bestMedianCap", bestMedianCap);
         marketCapDiff.put("worstMedianCap", worstMedianCap);
@@ -1063,7 +1077,7 @@ public class RecommendationService {
                 .collect(Collectors.toList());
 
         // ── 维度1: 指数趋势 ──
-        MarketDailyBar latestBar = bars.get(bars.size() - 1);
+        MarketDailyBar latestBar = bars.getLast();
         info.indexClose = latestBar.getClose().doubleValue();
         info.indexChangePct = latestBar.getPctChg() != null ? latestBar.getPctChg().doubleValue() : null;
         double ma20 = avg(closes, 20);
@@ -1166,7 +1180,7 @@ public class RecommendationService {
         try {
             List<Double> bondYields = loadBondYield10y(date, 25);
             if (bondYields != null && bondYields.size() >= 20) {
-                double currentYield = bondYields.get(bondYields.size() - 1);
+                double currentYield = bondYields.getLast();
                 double yieldMa20 = bondYields.stream()
                         .mapToDouble(Double::doubleValue)
                         .limit(Math.max(1, bondYields.size() - 1))
@@ -1264,15 +1278,14 @@ public class RecommendationService {
         int size = closes.size();
         if (size < period + 1) return 0;
 
-        double atr = 0;
+        double atr;
         // 初始值用第一个真实波幅
         double prevClose = closes.get(size - period - 1);
-        double tr0 = Math.max(
+        atr = Math.max(
                 Math.abs(highs.get(size - period) - lows.get(size - period)),
                 Math.max(
                         Math.abs(highs.get(size - period) - prevClose),
                         Math.abs(lows.get(size - period) - prevClose)));
-        atr = tr0;
 
         for (int i = size - period + 1; i < size; i++) {
             double prevC = closes.get(i - 1);
@@ -1427,7 +1440,7 @@ public class RecommendationService {
      */
     private String getCorrGroup(String industry) {
         for (List<String> group : INDUSTRY_CORR_GROUPS) {
-            if (group.contains(industry)) return group.get(0); // 用组内第一个行业作为组key
+            if (group.contains(industry)) return group.getFirst(); // 用组内第一个行业作为组key
         }
         return industry; // 不在任何组中，独立计算
     }
@@ -1521,7 +1534,6 @@ public class RecommendationService {
      * @param regime 市场环境(含沪深300涨跌幅)
      * @return 行业 → IndustryMomentum 映射
      */
-    @SuppressWarnings("unchecked")
     private Map<String, IndustryMomentum> computeIndustryMomentum(RegimeInfo regime, LocalDate date) {
         Map<String, IndustryMomentum> result = new LinkedHashMap<>();
         try {
@@ -1548,7 +1560,7 @@ public class RecommendationService {
                     SELECT code, change_percent, trade_date
                     FROM stock.stock_daily FINAL
                     WHERE trade_date >= '%s' AND trade_date <= '%s'
-                    """, lookbackStart.toString(), targetDate);
+                    """, lookbackStart, targetDate);
             List<Map<String, Object>> rows = clickHouseStockService.queryForList(sql);
             log.info("[Recommendation] 行业动量: CH stock_daily 返回 {} 行(含20日回溯)", rows != null ? rows.size() : -1);
             if (rows == null || rows.isEmpty()) {
@@ -1694,7 +1706,7 @@ public class RecommendationService {
                 IndustryMomentum im = sorted.get(i);
                 sb.append(String.format("%s=%.2f%%(limit=%d) ", im.industry, im.avgChangePct, im.industryDiversifyLimit));
             }
-            log.info("[Recommendation] {}", sb.toString());
+            log.info("[Recommendation] {}", sb);
 
             // ── P2-1: 行业20日动量增强 ──
             // 用已获取的20日数据计算每个行业的累计动量和动量趋势
@@ -1828,7 +1840,7 @@ public class RecommendationService {
                     .collect(Collectors.toList());
 
             // ── 维度1: 趋势 ──
-            double latestClose = closes.get(closes.size() - 1);
+            double latestClose = closes.getLast();
             double ma20 = avg(closes, 20);
             double ma60 = avg(closes, 60);
             // 引入0.5%缓冲带，避免单日噪声导致Regime频繁切换
@@ -1902,7 +1914,7 @@ public class RecommendationService {
         try {
             // 先取 baseDate 前后足够多的行情，找到 baseDate 对应的交易日及之后第 forwardDays 个交易日
             LocalDate searchStart = baseDate.minusDays(5); // 确保包含baseDate当天
-            LocalDate searchEnd = baseDate.plusDays(forwardDays * 2 + 10); // 多取一些确保有足够交易日
+            LocalDate searchEnd = baseDate.plusDays(forwardDays * 2L + 10); // 多取一些确保有足够交易日
             List<MarketDailyBar> bars = marketDataService.getBarsInRange(stockCode, searchStart, searchEnd);
             if (bars == null || bars.isEmpty()) return null;
 
@@ -2020,10 +2032,10 @@ public class RecommendationService {
      * - 预筛选：|IC| &lt; icThreshold 的因子被剔除
      * - 方向对齐：负IC因子自动反转direction，使用|IC|参与加权
      * - 权重分配（由 weightMode 决定）：
-     *   EQW  = 等权分配
-     *   ICW  = 按|IC|比例分配
-     *   OPT  = 按 1/σ²(IC) 分配（稳定性越高权重越大）
-     *   STATIC = 不调整（由调用方处理，不会进入此方法）
+     * EQW  = 等权分配
+     * ICW  = 按|IC|比例分配
+     * OPT  = 按 1/σ²(IC) 分配（稳定性越高权重越大）
+     * STATIC = 不调整（由调用方处理，不会进入此方法）
      *
      * @param factors     原始因子配置
      * @param date        选股日期
@@ -2458,7 +2470,7 @@ public class RecommendationService {
                 if (qvix != null) {
                     double qvixVal = qvix.getValue().doubleValue();
                     double multiplier = 1.0;
-                    String qvixNote = "";
+                    String qvixNote;
                     if (qvixVal >= 35) {
                         // 市场恐慌 → 高动量股票风险加大，降分
                         multiplier = 0.85;
@@ -2477,9 +2489,7 @@ public class RecommendationService {
                     double adjusted = rec.getFinalScore() * multiplier;
                     rec.setFinalScore(Math.round(adjusted * 10000.0) / 10000.0);
                     String existing = rec.getBuyReason() != null ? rec.getBuyReason() : "";
-                    if (!qvixNote.isEmpty()) {
-                        rec.setBuyReason(existing + " | " + qvixNote);
-                    }
+                    rec.setBuyReason(existing + " | " + qvixNote);
                     log.info("[Recommendation] QVIX调整: code={}, QVIX={}, multiplier={}, score={}",
                             pureCode, String.format("%.1f", qvixVal), String.format("%.2f", multiplier), rec.getFinalScore());
                 }
@@ -2584,6 +2594,115 @@ public class RecommendationService {
     }
 
     /**
+     * P2: 动态半衰期计算
+     * 基于沪深300收益率波动率分位数，调用 FactorAnalysisService.adaptiveHalflife()
+     */
+    private int computeAdaptiveHalflife(LocalDate refDate) {
+        try {
+            List<com.quant.platform.market.domain.MarketDailyBar> hist =
+                    marketDataService.getBarsBySymbol(SSE300_CODE, refDate.minusDays(60), refDate);
+            if (hist == null || hist.size() < 20) {
+                log.warn("[DynamicWeight] P2 沪深300历史数据不足({}), 使用默认半衰期{}天",
+                        hist == null ? "null" : hist.size(), DEFAULT_HALFLIFE_DAYS);
+                return DEFAULT_HALFLIFE_DAYS;
+            }
+            // 计算20日收益率(seq: close[t]/close[t-1] - 1)
+            double[] returns = new double[hist.size() - 1];
+            for (int i = 1; i < hist.size(); i++) {
+                double prev = hist.get(i - 1).getClose().doubleValue();
+                double curr = hist.get(i).getClose().doubleValue();
+                returns[i - 1] = (prev > 0) ? (curr / prev - 1) : 0;
+            }
+            double vol = std(returns);
+            // 波动率分位数估算（假设市场波动率中值~12%，范围5%~25%）
+            double volatilityPercentile = Math.max(0, Math.min(1, (vol - 0.05) / 0.20 + 0.375));
+            int halflife = com.quant.platform.factor.service.FactorAnalysisService.adaptiveHalflife(volatilityPercentile);
+            log.info("[DynamicWeight] P2 动态半衰期: 20日波动率={}, 分位数~{}, 半衰期={}天",
+                    vol, volatilityPercentile, halflife);
+            return halflife;
+        } catch (Exception e) {
+            log.warn("[DynamicWeight] P2 动态半衰期计算失败: {}, 使用默认值", e.getMessage());
+            return DEFAULT_HALFLIFE_DAYS;
+        }
+    }
+
+    /**
+     * P3: 因子拥挤度过滤
+     * 调用 FactorCorrelationService.detectCrowding()，将冗余因子的 status 设为 CROWDING_DROPPED
+     */
+    private Set<String> applyCrowdingFilter(
+            List<String> factorCodes, LocalDate refDate,
+            Map<String, com.quant.platform.factor.service.FactorAnalysisService.FactorIcSnapshot> snapshots) {
+        Set<String> dropped = new HashSet<>();
+        try {
+            LocalDate startDate = refDate.minusDays(60);
+            // 构建 icSnapshot Map（只传 KEPT 因子）
+            Map<String, Double> icMap = new HashMap<>();
+            for (Map.Entry<String, com.quant.platform.factor.service.FactorAnalysisService.FactorIcSnapshot> e : snapshots.entrySet()) {
+                if ("KEPT".equals(e.getValue().status)) {
+                    icMap.put(e.getKey(), e.getValue().icMean);
+                }
+            }
+            List<com.quant.platform.factor.service.FactorCorrelationService.FactorCluster> clusters =
+                    factorCorrelationService.detectCrowding(factorCodes, startDate, refDate, 0.70, icMap);
+            for (com.quant.platform.factor.service.FactorCorrelationService.FactorCluster cluster : clusters) {
+                for (String redundant : cluster.redundantFactors) {
+                    com.quant.platform.factor.service.FactorAnalysisService.FactorIcSnapshot snap = snapshots.get(redundant);
+                    if (snap != null && "KEPT".equals(snap.status)) {
+                        snap.status = "CROWDING_DROPPED";
+                        snap.assessment = "拥挤度剔除: 与" + cluster.representative + "相关性过高(corr≥" + String.format("%.2f", cluster.maxCorrelation) + ")";
+                        dropped.add(redundant);
+                    }
+                }
+            }
+            log.info("[DynamicWeight] P3 拥挤度过滤: {}个簇, 剔除{}个冗余因子", clusters.size(), dropped.size());
+        } catch (Exception e) {
+            log.warn("[DynamicWeight] P3 拥挤度过滤失败: {}", e.getMessage());
+        }
+        return dropped;
+    }
+
+    // ==================== P2/P3/P4 辅助方法 ====================
+
+    /**
+     * P4: 财务因子季频IC校正
+     * 对 FIN_* 前缀的因子，用季频IC替换日频IC（更符合财务数据公告节奏）
+     *
+     * @return 被校正的因子数量
+     */
+    private int applyQuarterlyIcCorrection(
+            List<String> factorCodes, LocalDate refDate,
+            Map<String, com.quant.platform.factor.service.FactorAnalysisService.FactorIcSnapshot> snapshots) {
+        int corrected = 0;
+        for (String fc : factorCodes) {
+            if (!fc.startsWith("FIN_")) continue;
+            try {
+                com.quant.platform.factor.service.QuarterlyFactorAnalysisService.QuarterlyIcResult qr =
+                        quarterlyFactorAnalysisService.computeQuarterlyIc(fc, refDate.minusMonths(18), refDate, 5, true);
+                if (qr != null && qr.quarterCount >= 3) {
+                    com.quant.platform.factor.service.FactorAnalysisService.FactorIcSnapshot snap = snapshots.get(fc);
+                    if (snap != null && Math.abs(qr.icMean) > Math.abs(snap.icMean) * 0.5) {
+                        // 用季频IC替换（要求季频IC信号不能太弱）
+                        double oldIc = snap.icMean;
+                        snap.icMean = qr.icMean;
+                        snap.icStd = qr.icStd;
+                        snap.assessment = (snap.assessment != null ? snap.assessment + "; " : "") + "季频IC校正(" + String.format("%.4f", oldIc) + "→" + String.format("%.4f", qr.icMean) + ")";
+                        corrected++;
+                        log.info("[DynamicWeight] P4 季频IC校正: {} 日频IC={} → 季频IC={} ({}个季度)",
+                                fc, oldIc, qr.icMean, qr.quarterCount);
+                    }
+                }
+            } catch (Exception e) {
+                log.debug("[DynamicWeight] P4 季频IC校正跳过: {} error={}", fc, e.getMessage());
+            }
+        }
+        if (corrected > 0) {
+            log.info("[DynamicWeight] P4 季频IC校正完成: {}/{}个FIN因子已校正", corrected, factorCodes.stream().filter(fc -> fc.startsWith("FIN_")).count());
+        }
+        return corrected;
+    }
+
+    /**
      * 因子动态权重诊断信息
      */
     public static class FactorDiagnostic {
@@ -2650,121 +2769,5 @@ public class RecommendationService {
         double momentum20d;        // 行业近20日动量（累计涨跌幅%）
         double momentumScore;      // 动量综合评分（0~1）
         String momentumTrend;      // 动量趋势: ACCELERATING / DECELERATING / FLAT
-    }
-
-    // ==================== P2/P3/P4 辅助方法 ====================
-
-    /**
-     * P2: 动态半衰期计算
-     * 基于沪深300收益率波动率分位数，调用 FactorAnalysisService.adaptiveHalflife()
-     */
-    private int computeAdaptiveHalflife(LocalDate refDate) {
-        try {
-            List<com.quant.platform.market.domain.MarketDailyBar> hist =
-                    marketDataService.getBarsBySymbol(SSE300_CODE, refDate.minusDays(60), refDate);
-            if (hist == null || hist.size() < 20) {
-                log.warn("[DynamicWeight] P2 沪深300历史数据不足({}), 使用默认半衰期{}天",
-                        hist == null ? "null" : hist.size(), DEFAULT_HALFLIFE_DAYS);
-                return DEFAULT_HALFLIFE_DAYS;
-            }
-            // 计算20日收益率(seq: close[t]/close[t-1] - 1)
-            double[] returns = new double[hist.size() - 1];
-            for (int i = 1; i < hist.size(); i++) {
-                double prev = hist.get(i - 1).getClose().doubleValue();
-                double curr = hist.get(i).getClose().doubleValue();
-                returns[i - 1] = (prev > 0) ? (curr / prev - 1) : 0;
-            }
-            double vol = std(returns);
-            // 波动率分位数估算（假设市场波动率中值~12%，范围5%~25%）
-            double volatilityPercentile = Math.max(0, Math.min(1, (vol - 0.05) / 0.20 + 0.375));
-            int halflife = com.quant.platform.factor.service.FactorAnalysisService.adaptiveHalflife(volatilityPercentile);
-            log.info("[DynamicWeight] P2 动态半衰期: 20日波动率={:.4f}, 分位数~{:.2f}, 半衰期={}天",
-                    vol, volatilityPercentile, halflife);
-            return halflife;
-        } catch (Exception e) {
-            log.warn("[DynamicWeight] P2 动态半衰期计算失败: {}, 使用默认值", e.getMessage());
-            return DEFAULT_HALFLIFE_DAYS;
-        }
-    }
-
-    /**
-     * P3: 因子拥挤度过滤
-     * 调用 FactorCorrelationService.detectCrowding()，将冗余因子的 status 设为 CROWDING_DROPPED
-     */
-    private Set<String> applyCrowdingFilter(
-            List<String> factorCodes, LocalDate refDate,
-            Map<String, com.quant.platform.factor.service.FactorAnalysisService.FactorIcSnapshot> snapshots) {
-        Set<String> dropped = new HashSet<>();
-        try {
-            LocalDate startDate = refDate.minusDays(60);
-            // 构建 icSnapshot Map（只传 KEPT 因子）
-            Map<String, Double> icMap = new HashMap<>();
-            for (Map.Entry<String, com.quant.platform.factor.service.FactorAnalysisService.FactorIcSnapshot> e : snapshots.entrySet()) {
-                if ("KEPT".equals(e.getValue().status)) {
-                    icMap.put(e.getKey(), e.getValue().icMean);
-                }
-            }
-            List<com.quant.platform.factor.service.FactorCorrelationService.FactorCluster> clusters =
-                    factorCorrelationService.detectCrowding(factorCodes, startDate, refDate, 0.70, icMap);
-            for (com.quant.platform.factor.service.FactorCorrelationService.FactorCluster cluster : clusters) {
-                for (String redundant : cluster.redundantFactors) {
-                    com.quant.platform.factor.service.FactorAnalysisService.FactorIcSnapshot snap = snapshots.get(redundant);
-                    if (snap != null && "KEPT".equals(snap.status)) {
-                        snap.status = "CROWDING_DROPPED";
-                        snap.assessment = "拥挤度剔除: 与" + cluster.representative + "相关性过高(corr≥" + String.format("%.2f", cluster.maxCorrelation) + ")";
-                        dropped.add(redundant);
-                    }
-                }
-            }
-            log.info("[DynamicWeight] P3 拥挤度过滤: {}个簇, 剔除{}个冗余因子", clusters.size(), dropped.size());
-        } catch (Exception e) {
-            log.warn("[DynamicWeight] P3 拥挤度过滤失败: {}", e.getMessage());
-        }
-        return dropped;
-    }
-
-    /**
-     * P4: 财务因子季频IC校正
-     * 对 FIN_* 前缀的因子，用季频IC替换日频IC（更符合财务数据公告节奏）
-     * @return 被校正的因子数量
-     */
-    private int applyQuarterlyIcCorrection(
-            List<String> factorCodes, LocalDate refDate,
-            Map<String, com.quant.platform.factor.service.FactorAnalysisService.FactorIcSnapshot> snapshots) {
-        int corrected = 0;
-        for (String fc : factorCodes) {
-            if (!fc.startsWith("FIN_")) continue;
-            try {
-                com.quant.platform.factor.service.QuarterlyFactorAnalysisService.QuarterlyIcResult qr =
-                        quarterlyFactorAnalysisService.computeQuarterlyIc(fc, refDate.minusMonths(18), refDate, 5, true);
-                if (qr != null && qr.quarterCount >= 3) {
-                    com.quant.platform.factor.service.FactorAnalysisService.FactorIcSnapshot snap = snapshots.get(fc);
-                    if (snap != null && Math.abs(qr.icMean) > Math.abs(snap.icMean) * 0.5) {
-                        // 用季频IC替换（要求季频IC信号不能太弱）
-                        double oldIc = snap.icMean;
-                        snap.icMean = qr.icMean;
-                        snap.icStd = qr.icStd;
-                        snap.assessment = (snap.assessment != null ? snap.assessment + "; " : "") + "季频IC校正(" + String.format("%.4f", oldIc) + "→" + String.format("%.4f", qr.icMean) + ")";
-                        corrected++;
-                        log.info("[DynamicWeight] P4 季频IC校正: {} 日频IC={} → 季频IC={} ({}个季度)",
-                                fc, oldIc, qr.icMean, qr.quarterCount);
-                    }
-                }
-            } catch (Exception e) {
-                log.debug("[DynamicWeight] P4 季频IC校正跳过: {} error={}", fc, e.getMessage());
-            }
-        }
-        if (corrected > 0) {
-            log.info("[DynamicWeight] P4 季频IC校正完成: {}/{}个FIN因子已校正", corrected, factorCodes.stream().filter(fc -> fc.startsWith("FIN_")).count());
-        }
-        return corrected;
-    }
-
-    /** 计算数组标准差 */
-    private static double std(double[] values) {
-        if (values.length == 0) return 0;
-        double mean = Arrays.stream(values).average().orElse(0);
-        double variance = Arrays.stream(values).map(x -> (x - mean) * (x - mean)).average().orElse(0);
-        return Math.sqrt(variance);
     }
 }
