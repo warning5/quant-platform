@@ -24,9 +24,7 @@ assert DB_BACKEND in ("clickhouse", "mysql"), f"DB_BACKEND 必须是 clickhouse 
 # 本地开发请在项目根目录创建 .env 文件（已有 .env.example 模板）
 _mysql_password = os.environ.get("MYSQL_PASSWORD")
 if not _mysql_password:
-    # 本地开发环境默认密码（与 ClickHouse 一致）
-    _mysql_password = "123456"
-    warnings.warn(f"MYSQL_PASSWORD 未设置，使用默认密码（本地开发）")
+    raise ValueError("MYSQL_PASSWORD 未设置！请在 .env 文件中设置，或设置环境变量")
 
 MYSQL_CONFIG = dict(
     host=os.environ.get("MYSQL_HOST", "localhost"),
@@ -41,9 +39,7 @@ MYSQL_CONFIG = dict(
 # ─── ClickHouse 配置（从环境变量读取，无硬编码密码）────────────
 _clickhouse_password = os.environ.get("CLICKHOUSE_PASSWORD")
 if not _clickhouse_password:
-    # 本地开发环境默认密码（与 MySQL 一致）
-    _clickhouse_password = "123456"
-    warnings.warn(f"CLICKHOUSE_PASSWORD 未设置，使用默认密码（本地开发）")
+    raise ValueError("CLICKHOUSE_PASSWORD 未设置！请在 .env 文件中设置，或设置环境变量")
 
 # 本地开发默认 host（仅 host 有默认值，密码必须显式设置）
 # 注意：默认改为 172.19.72.140（内网 ClickHouse 地址），localhost 可能无法访问
