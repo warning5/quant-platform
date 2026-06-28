@@ -682,16 +682,18 @@ public class DataUpdateService {
     private void optimizeClickHouseTable(String taskId) {
         broadcastLog(taskId, "\n[OPTIMIZE] 开始合并去重（可能需要几分钟）...");
         try {
-            String url = "http://172.19.72.140:8123/";
-            String sql = "OPTIMIZE TABLE stock.stock_daily FINAL";
-            // 从环境变量读取密码，不硬编码
+            // 从环境变量读取（不硬编码，无默认值）
+            String chHost = System.getenv().getOrDefault("CLICKHOUSE_HOST", "localhost");
+            String chPort = System.getenv().getOrDefault("CLICKHOUSE_PORT", "8123");
             String password = System.getenv("CLICKHOUSE_PASSWORD");
             if (password == null || password.isEmpty()) {
-                password = "123456"; // 本地开发环境默认值
+                throw new IllegalStateException("CLICKHOUSE_PASSWORD 未配置，无法执行 OPTIMIZE TABLE");
             }
+            String url = "http://" + chHost + ":" + chPort + "/";
+            String sql = "OPTIMIZE TABLE stock.stock_daily FINAL";
             String params = "user=default&password=" + password + "&receive_timeout=1800";
             // 日志脱敏：不打印完整密码
-            log.debug("[OPTIMIZE] 执行 OPTIMIZE TABLE, URL: {}?user=default&password=***", url);
+            log.info("[OPTIMIZE] 执行 OPTIMIZE TABLE stock.stock_daily FINAL");
             
             ProcessBuilder pb = new ProcessBuilder(
                 "curl", "-s", "--max-time", "1800",

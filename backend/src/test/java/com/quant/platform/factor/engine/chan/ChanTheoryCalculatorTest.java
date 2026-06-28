@@ -24,9 +24,9 @@ import static org.junit.jupiter.api.Assertions.*;
 @Slf4j
 class ChanTheoryCalculatorTest {
 
-    private static final String CH_URL = "http://172.19.72.140:8123";
-    private static final String CH_USER = "default";
-    private static final String CH_PASS = "123456";
+    private static final String CH_URL = System.getenv().getOrDefault("CLICKHOUSE_HOST", "http://localhost:8123");
+    private static final String CH_USER = System.getenv().getOrDefault("CLICKHOUSE_USER", "default");
+    private static final String CH_PASS = System.getenv().getOrDefault("CLICKHOUSE_PASSWORD", "");  // 必须配置环境变量，否则跳过集成测试
 
     // ═══════════════════════════════════════════════════════════
     // 合成数据测试
