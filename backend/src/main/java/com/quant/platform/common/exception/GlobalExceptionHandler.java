@@ -45,9 +45,9 @@ public class GlobalExceptionHandler {
      * 处理参数验证错误（如非法factorCode）
      * 返回400 Bad Request，日志记录为WARN级别
      */
-    @ExceptionHandler(IllegalArgumentException.class)
+    @ExceptionHandler(ValidationException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
-    public ApiResponse<Void> handleIllegalArgumentException(IllegalArgumentException ex) {
+    public ApiResponse<Void> handleValidationException(ValidationException ex) {
         log.warn("参数验证错误: {}", ex.getMessage());
         return ApiResponse.error(400, ex.getMessage());
     }

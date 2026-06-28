@@ -2,6 +2,7 @@ package com.quant.platform.factor.controller;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.quant.platform.common.dto.ApiResponse;
+import com.quant.platform.common.exception.ValidationException;
 import com.quant.platform.factor.domain.FactorDefinition;
 import com.quant.platform.factor.domain.FactorTestReport;
 import com.quant.platform.factor.domain.FactorValue;
@@ -44,11 +45,11 @@ public class FactorController {
     /**
      * 校验 factorCode（防御 SQL 注入）
      * @param factorCode 因子代码
-     * @throws IllegalArgumentException 如果 factorCode 包含非法字符
+     * @throws ValidationException 如果 factorCode 包含非法字符
      */
     private void validateFactorCode(String factorCode) {
         if (factorCode == null || !FACTOR_CODE_PATTERN.matcher(factorCode).matches()) {
-            throw new IllegalArgumentException("Invalid factorCode: " + factorCode);
+            throw new ValidationException("Invalid factorCode: " + factorCode);
         }
     }
 
