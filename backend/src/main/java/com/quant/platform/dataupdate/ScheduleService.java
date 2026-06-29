@@ -46,8 +46,8 @@ public class ScheduleService implements SchedulingConfigurer {
 
     /** 依赖链：任务完成后自动触发下游任务（延迟毫秒数） */
     private static final Map<String, List<String>> DEPENDENCY_CHAIN = Map.of(
-        "DAILY",    List.of("FINANCIAL", "BIDASK"),
-        "FINANCIAL", List.of("DAILY_RECOMMENDATION")
+        "DAILY",          List.of("FINANCIAL", "BIDASK"),
+        "FACTOR_COMPUTE", List.of("DAILY_RECOMMENDATION")
     );
     /** 依赖触发延迟（毫秒）：FINANCIAL 等 DAILY 写完 5 分钟后再跑 */
     private static final long DEPENDENCY_DELAY_MS = 5 * 60 * 1000;
@@ -466,6 +466,7 @@ public class ScheduleService implements SchedulingConfigurer {
                 req.setFetchNews(true);
                 yield req;
             }
+            case "FACTOR_COMPUTE" -> { req.setUpdateType("FACTOR_COMPUTE"); yield req; }
             case "RESEARCH"      -> { req.setUpdateType("RESEARCH");      yield req; }
             case "DATA_FRESHNESS"   -> { /* 质量检查: 已在executeTask中特殊处理 */ yield null; }
             case "PRICE_ANOMALY"    -> { /* 质量检查: 已在executeTask中特殊处理 */ yield null; }

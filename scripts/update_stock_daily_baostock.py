@@ -228,14 +228,81 @@ def build_daily_rows(db, code, name, market, df):
     return rows
 
 
+# ─── 串行处理（主进程内，用于失败重分配）───────────────────────────
+def _run_sequential(stocks, start_date, end_date, force, inter_stock_delay,
+                    progress_queue=None, worker_id=-1):
+    """
+    在当前进程内串行处理一批股票。用于并行 worker 失败后的 fallback。
+    返回 stats dict，与 worker 返回格式一致。
+    """
+    import baostock as _bs
+    from db_helper import StockDailyDB
+
+    lg = _bs.login()
+    if lg.error_code != '0':
+        return {"success": 0, "skipped": 0, "failed": len(stocks), "no_data": 0,
+                "processed": [], "error": f"Baostock login failed: {lg.error_msg}"}
+
+    db = StockDailyDB()
+    stats = {"success": 0, "skipped": 0, "failed": 0, "no_data": 0, "processed": []}
+    consecutive_no_data = 0
+
+    try:
+        for i, (code, name, market) in enumerate(stocks):
+            try:
+                # 每50只重登
+                if i > 0 and i % 50 == 0:
+                    _bs.logout()
+                    time.sleep(1)
+                    rl = _bs.login()
+                    if rl.error_code != '0':
+                        stats["failed"] += len(stocks) - i
+                        break
+
+                df = fetch_stock_history(code, name, market, start_date, end_date)
+
+                if df is not None and len(df) > 0:
+                    rows = build_daily_rows(db, code, name, market, df)
+                    n = db.upsert_daily(rows, force=force)
+                    stats["success"] += n
+                    stats["skipped"] += len(df) - n
+                    stats["processed"].append((code, market))
+                    consecutive_no_data = 0
+                else:
+                    stats["no_data"] += 1
+                    consecutive_no_data += 1
+                    if consecutive_no_data >= 20:
+                        print(f"[串行] 连续20只无数据，终止", flush=True)
+                        break
+
+                if inter_stock_delay > 0 and i < len(stocks) - 1:
+                    time.sleep(inter_stock_delay)
+
+            except Exception:
+                stats["failed"] += 1
+                continue
+
+            # 进度汇报（每10只）
+            if progress_queue and (i + 1) % 10 == 0:
+                progress_queue.put((worker_id if worker_id >= 0 else 99,
+                                    i + 1, len(stocks), stats, "fallback"))
+    finally:
+        db.close()
+        _bs.logout()
+
+    return stats
+
+
 # ─── 多进程 Worker ────────────────────────────────────────────────
-def _mp_worker_process_chunk(args):
+def _mp_worker_process_chunk(args, progress_queue=None):
     """
     多进程 worker：在子进程中处理一批股票，每个 worker 独立登录 Baostock。
     绕过 Baostock 单 socket 串行限制，实现真正的并行。
 
-    args: (chunk, start_date_str, end_date_str, force, inter_stock_delay)
+    args: (chunk, start_date_str, end_date_str, force, inter_stock_delay, worker_id)
         chunk: [(code, name, market), ...]
+        worker_id: worker编号（用于日志标识）
+    progress_queue: multiprocessing.Queue，定期向主进程推送进度
     """
     import datetime as _dt
     import time as _time
@@ -255,32 +322,56 @@ def _mp_worker_process_chunk(args):
             _sys.stdout.close()
             _sys.stdout = orig
 
-    chunk, start_date_str, end_date_str, force, inter_stock_delay = args
+    chunk, start_date_str, end_date_str, force, inter_stock_delay, worker_id = args
     start_date = _dt.datetime.strptime(start_date_str, "%Y-%m-%d").date()
     end_date = _dt.datetime.strptime(end_date_str, "%Y-%m-%d").date()
 
-    # 每个子进程独立登录 Baostock（独立 TCP Socket）
-    with _suppress_stdout():
-        lg = _bs.login()
-    if lg.error_code != '0':
+    # 错开启动：每个 worker 按 worker_id * 5s 延迟，避免同时冲击 Baostock 登录
+    if worker_id > 0:
+        stagger_delay = worker_id * 5
+        if progress_queue:
+            progress_queue.put(f"[W{worker_id}] 等待{stagger_delay}s后启动...")
+        _time.sleep(stagger_delay)
+
+    # 每个子进程独立登录 Baostock（独立 TCP Socket），登录失败自动重试5次
+    login_max_retries = 5
+    lg = None
+    for _retry in range(login_max_retries):
+        with _suppress_stdout():
+            lg = _bs.login()
+        if lg.error_code == '0':
+            break
+        if _retry < login_max_retries - 1:
+            delay = 5 * (_retry + 1) + worker_id * 2  # 递增延迟: 5+2wid, 10+2wid, 15+2wid...
+            _time.sleep(delay)
+            if progress_queue:
+                progress_queue.put(f"[W{worker_id}] 登录失败(第{_retry+1}次): {lg.error_msg}, {delay}s后重试...")
+    if lg is None or lg.error_code != '0':
         return {"success": 0, "skipped": 0, "failed": len(chunk), "no_data": 0,
-                "processed": [], "error": f"Baostock login failed: {lg.error_msg}"}
+                "processed": [], "error": f"Baostock login failed after {login_max_retries} retries: {lg.error_msg if lg else 'unknown'}"}
 
     db = StockDailyDB()
     stats = {"success": 0, "skipped": 0, "failed": 0, "no_data": 0, "processed": []}
     _consecutive_no_data = 0
+    _progress_interval = 5  # 每5只股票汇报一次进度
 
     try:
         for i, (code, name, market) in enumerate(chunk):
             try:
-                # 每 50 只重登一次，防止连接超时
+                # 每 50 只重登一次，防止连接超时（带重试）
                 if i > 0 and i % 50 == 0:
                     with _suppress_stdout():
                         _bs.logout()
                     _time.sleep(1)
-                    with _suppress_stdout():
-                        lg = _bs.login()
-                    if lg.error_code != '0':
+                    _relogin_ok = False
+                    for _rl in range(5):
+                        with _suppress_stdout():
+                            lg = _bs.login()
+                        if lg.error_code == '0':
+                            _relogin_ok = True
+                            break
+                        _time.sleep(5 * (_rl + 1) + worker_id * 2)
+                    if not _relogin_ok:
                         stats["failed"] += len(chunk) - i
                         break
 
@@ -300,8 +391,13 @@ def _mp_worker_process_chunk(args):
                         # Worker 内连续20只无数据 → 提前终止，不处理剩余
                         stats["failed"] += len(chunk) - i - 1
                         stats["no_data"] += len(chunk) - i - 1
-                        print(f"[Worker] 连续20只无数据，提前终止本 worker", flush=True)
+                        if progress_queue:
+                            progress_queue.put((worker_id, i+1, len(chunk), dict(stats)))
                         break
+
+                # 每 _progress_interval 只向主进程汇报进度
+                if progress_queue and (i + 1) % _progress_interval == 0:
+                    progress_queue.put((worker_id, i+1, len(chunk), dict(stats)))
 
                 # 股票间微延迟，避免冲击服务器
                 if inter_stock_delay > 0 and i < len(chunk) - 1:
@@ -309,6 +405,8 @@ def _mp_worker_process_chunk(args):
 
             except TimeoutError:
                 stats["failed"] += len(chunk) - i
+                if progress_queue:
+                    progress_queue.put((worker_id, i+1, len(chunk), dict(stats), "TIMEOUT"))
                 break
             except Exception:
                 stats["failed"] += 1
@@ -337,7 +435,7 @@ def main():
                        choices=["SH300", "SZ50", "ZZ500", "ZZ1000", "STAR50"],
                        help="股票池筛选 (SH300/SZ50/ZZ500/ZZ1000/STAR50)")
     parser.add_argument("--workers", type=int, default=1,
-                       help="并行进程数 (default:1 串行; 推荐2-8, 数量=并发Baostock连接)")
+                       help="并行进程数 (default:1 串行; Baostock并发限制低, 多worker易失败)")
     args = parser.parse_args()
 
     if args.end_date:
@@ -450,11 +548,43 @@ def main():
             import multiprocessing as _mp
 
             workers = min(args.workers, total_count)
+            if workers > 2:
+                print(f"        ⚠️ Baostock 并发限制低, workers={workers} 易失败, 建议用 --workers 1 或 2", flush=True)
             print(f"\n[并行] {workers} worker × {total_count} 只股票...", flush=True)
 
             chunk_size = (total_count + workers - 1) // workers
             chunks = [stocks[i:i + chunk_size] for i in range(0, total_count, chunk_size)]
             print(f"        每个 worker ~{chunk_size} 只，预计加速 ~{workers}×", flush=True)
+
+            # 创建进度队列（子进程→主进程）
+            # Manager().Queue() 是代理对象，可序列化传递给 spawn 子进程
+            # （_mp.Queue() 只能通过继承共享，submit() 无法传递）
+            _mgr = _mp.Manager()
+            progress_queue = _mgr.Queue()
+            # 主进程轮询进度，实时打印
+            _stop_poll = threading.Event()
+            def _poll_progress():
+                while not _stop_poll.is_set():
+                    try:
+                        msg = progress_queue.get(timeout=2)
+                        if isinstance(msg, str):
+                            # 字符串消息：直接打印（启动延迟、登录重试等）
+                            print(msg, flush=True)
+                        else:
+                            # 元组消息：格式化进度
+                            wid, done, total, st = msg[0], msg[1], msg[2], msg[3]
+                            tag = msg[4] if len(msg) > 4 else ""
+                            pct = done * 100 / total
+                            prefix = f"[W{wid}]" if not tag else f"[W{wid}]"
+                            extra = f" ({tag})" if tag else ""
+                            print(f"{prefix} {done}/{total} ({pct:.0f}%) "
+                                  f"写入{st['success']} 跳过{st['skipped']} "
+                                  f"无数据{st['no_data']} 失败{st['failed']}{extra}",
+                                  flush=True)
+                    except:
+                        pass  # queue.get timeout → continue polling
+            poll_thread = threading.Thread(target=_poll_progress, daemon=True)
+            poll_thread.start()
 
             ctx = _mp.get_context('spawn')
             parallel_start = time.time()
@@ -464,30 +594,70 @@ def main():
                     f = executor.submit(
                         _mp_worker_process_chunk,
                         (chunk, start_date.strftime("%Y-%m-%d"),
-                         end_date.strftime("%Y-%m-%d"), args.force, 0.05)
+                         end_date.strftime("%Y-%m-%d"), args.force, 0.05, j),
+                        progress_queue
                     )
                     futures[f] = j
 
                 completed_w = 0
+                failed_chunks = []  # 收集失败的 chunk，后续重新分配
                 for f in as_completed(futures):
                     completed_w += 1
                     try:
                         r = f.result()
                         if "error" in r:
-                            print(f"[ERROR] Worker{futures[f]} 失败: {r['error']}")
-                        total_success += r["success"]
-                        total_skipped += r["skipped"]
-                        total_failed += r["failed"]
-                        total_no_data += r["no_data"]
+                            wid = futures[f]
+                            print(f"[ERROR] Worker{wid} 失败: {r['error']}", flush=True)
+                            # 登录类失败 → 标记该 chunk 待重分配
+                            if "login" in r.get("error", "").lower():
+                                failed_chunks.append((wid, chunks[wid], r.get("processed", [])))
+                            else:
+                                total_failed += r["failed"]
+                                total_no_data += r.get("no_data", 0)
+                        else:
+                            total_success += r["success"]
+                            total_skipped += r["skipped"]
+                            total_failed += r["failed"]
+                            total_no_data += r["no_data"]
                         processed_codes.extend(r.get("processed", []))
                         elapsed_w = time.time() - parallel_start
-                        print(f"[并行] Worker{futures[f]} 完成: {r['success']}条写入 "
+                        print(f"[并行] Worker{futures[f]} 完成: {r.get('success', 0)}条写入 "
                               f"({completed_w}/{workers}, "
                               f"已耗时{elapsed_w:.0f}s, 预计剩余~{elapsed_w/completed_w*(workers-completed_w):.0f}s)",
                               flush=True)
                     except Exception as e:
-                        print(f"[ERROR] Worker{futures[f]} 异常: {e}")
+                        print(f"[ERROR] Worker{futures[f]} 异常: {e}", flush=True)
+                        failed_chunks.append((futures[f], chunks[futures[f]], []))
                         total_failed += len(chunks[futures[f]])
+
+                # ── 失败 chunk 重分配（登录失败时）──
+                if failed_chunks:
+                    remaining = []
+                    for wid, orig_chunk, done_codes in failed_chunks:
+                        # 排除已处理过的股票
+                        done_set = set(done_codes)
+                        retry_chunk = [(c, n, m) for c, n, m in orig_chunk if (c, m) not in done_set]
+                        if retry_chunk:
+                            remaining.extend(retry_chunk)
+                            print(f"[重分配] Worker{wid} 剩余 {len(retry_chunk)} 只待重试", flush=True)
+
+                    if remaining and total_success > 0:
+                        print(f"\n[重分配] 共 {len(remaining)} 只失败股票，用串行模式补跑...", flush=True)
+                        # 用串行模式逐只处理（避免再次并发冲突）
+                        _retry_stats = _run_sequential(remaining, start_date, end_date,
+                                                       args.force, 0.05, progress_queue, -1)
+                        total_success += _retry_stats["success"]
+                        total_skipped += _retry_stats["skipped"]
+                        total_failed += _retry_stats["failed"]
+                        total_no_data += _retry_stats["no_data"]
+                        processed_codes.extend(_retry_stats.get("processed", []))
+                    elif remaining:
+                        print(f"\n[重分配] {len(remaining)} 只股票全部跳过（无可用 worker）", flush=True)
+
+            # 停止进度轮询线程
+            _stop_poll.set()
+            poll_thread.join(timeout=5)
+            _mgr.shutdown()
 
         else:
             # ──────────── 串行模式（原有逻辑） ────────────

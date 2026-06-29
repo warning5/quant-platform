@@ -201,6 +201,38 @@ def _bs_login():
     return lg
 
 
+def run_optimize_stock_daily():
+    """
+    执行 OPTIMIZE TABLE stock.stock_daily FINAL 去重合并。
+    ReplacingMergeTree 自动合并太慢，需手动强制合并确保去重。
+    使用 clickhouse_connect 库（与 db_helper 一致）。
+    """
+    print(f"\n[OPTIMIZE] 开始合并去重 stock_daily（可能需要几分钟）...", flush=True)
+    try:
+        import clickhouse_connect
+        from db_config import CLICKHOUSE_CONFIG
+
+        # 连接时设置 send_receive_timeout=3600（1小时），影响该连接的所有操作
+        connect_args = dict(CLICKHOUSE_CONFIG)
+        connect_args["send_receive_timeout"] = 3600
+
+        ch = clickhouse_connect.get_client(**connect_args)
+        t0 = time.time()
+        # OPTIMIZE FINAL 需要同时设置服务器端 max_execution_time 和客户端 receive_timeout
+        ch.command("OPTIMIZE TABLE stock.stock_daily FINAL",
+                   settings={"receive_timeout": 3600,
+                             "max_execution_time": 3600})
+        elapsed = time.time() - t0
+
+        # 验证去重效果
+        r = ch.query("SELECT count() AS total FROM stock.stock_daily")
+        total = r.result_rows[0][0]
+        print(f"[OPTIMIZE] ✅ 合并去重完成 (耗时 {elapsed:.1f}s, 总行 {total:,})", flush=True)
+    except Exception as e:
+        print(f"[OPTIMIZE] ⚠️ 合并失败: {e}", flush=True)
+        print(f"[OPTIMIZE] 数据写入不受影响，请稍后手动执行: OPTIMIZE TABLE stock.stock_daily FINAL", flush=True)
+
+
 def fix_valuation_by_qq(db, codes=None, batch_size=200, delay=0.1, max_workers=30, target_dates=None, max_stocks=None, scan_mode="full"):
     """
     通过 Baostock 历史接口补全 pe_ttm / pb（按日历史序列，不依赖腾讯快照）。
@@ -463,25 +495,9 @@ def fix_valuation_by_qq(db, codes=None, batch_size=200, delay=0.1, max_workers=3
 
     print(f"[fix_valuation_by_qq] DONE | total_fixed={total_fixed}")
 
-    # ── 自动执行 OPTIMIZE TABLE FINAL 去重 ─────────────────────
-    print(f"\n[OPTIMIZE] 开始合并去重（可能需要几分钟）...")
-    try:
-        import requests as _req
-        ch_url = f"http://{CLICKHOUSE_CONFIG['host']}:{CLICKHOUSE_CONFIG['port']}/"
-        ch_params = {
-            'user': CLICKHOUSE_CONFIG['username'],
-            'password': CLICKHOUSE_CONFIG['password'],
-            'receive_timeout': 1800  # 30分钟超时
-        }
-        optimize_sql = "OPTIMIZE TABLE stock.stock_daily FINAL"
-        resp = _req.post(ch_url, params=ch_params, data=optimize_sql, timeout=1800)
-        if resp.status_code == 200:
-            print(f"[OPTIMIZE] ✅ 合并去重完成")
-        else:
-            print(f"[OPTIMIZE] ⚠️ 合并失败: {resp.text}")
-    except Exception as e:
-        print(f"[OPTIMIZE] ⚠️ 合并失败: {e}")
-        print(f"[OPTIMIZE] 请稍后手动执行: OPTIMIZE TABLE stock.stock_daily FINAL")
+    # ── OPTIMIZE TABLE FINAL 去重合并 ─────────────────────
+    # ReplacingMergeTree 自动合并太慢，手动 OPTIMIZE 强制去重
+    run_optimize_stock_daily()
 
     return total_fixed
 

@@ -593,37 +593,10 @@ def main():
         except Exception as e:
             print(f"\n[WARN] 字段补全异常: {e}")
 
-    # ─── Part 4: ClickHouse OPTIMIZE（去重合并 / PE/PB补全后统一执行一次）───
+    # ─── Part 4: ClickHouse OPTIMIZE（去重合并）───
     if DB_BACKEND == "clickhouse" and do_daily:
-        try:
-            import clickhouse_connect
-            from db_config import CLICKHOUSE_CONFIG
-            for _retry in range(3):
-                try:
-                    ch = clickhouse_connect.get_client(**CLICKHOUSE_CONFIG)
-                    print(f"\n{'=' * 70}")
-                    print(f"  ClickHouse OPTIMIZE TABLE FINAL（去重合并）")
-                    print(f"{'=' * 70}")
-                    t0 = time.time()
-                    # 加大 receive_timeout（默认300s），大表 OPTIMIZE FINAL 可能超过5分钟
-                    ch.command("OPTIMIZE TABLE stock.stock_daily FINAL",
-                               settings={"receive_timeout": 1800})
-                    elapsed = time.time() - t0
-                    r = ch.query("SELECT count() AS total, countDistinct(code, trade_date) AS distinct_rows FROM stock.stock_daily")
-                    total, distinct = r.result_rows[0]
-                    dups = total - distinct
-                    print(f"  完成 (耗时 {elapsed:.1f}s): 总行 {total:,}, 去重后 {distinct:,}, 重复 {dups:,}")
-                    print(f"{'=' * 70}")
-                    break
-                except Exception as e:
-                    if _retry < 2:
-                        print(f"  [WARN] ClickHouse OPTIMIZE 失败 (第{_retry+1}次): {e}，2s 后重试...")
-                        time.sleep(2)
-                    else:
-                        print(f"  [WARN] ClickHouse OPTIMIZE 失败（已重试3次）: {e}")
-                        print(f"  [INFO] OPTIMIZE 失败不影响数据正确性，ReplacingMergeTree 查询时自动去重")
-        except ImportError:
-            print(f"\n[WARN] clickhouse_connect 未安装，跳过 OPTIMIZE")
+        from field_completer import run_optimize_stock_daily
+        run_optimize_stock_daily()
 
     # ─── Part 5: 价格异常检测（单日涨跌幅 >50%）───
     if DB_BACKEND == "clickhouse" and do_daily:

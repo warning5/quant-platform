@@ -5,6 +5,9 @@ import com.quant.platform.stock.entity.StockInfo;
 import com.quant.platform.stock.mapper.StockInfoMapper;
 import com.quant.platform.stock.service.ClickHouseStockService;
 import com.quant.platform.calendar.service.TradeCalendarService;
+import com.quant.platform.factor.domain.FactorDefinition;
+import com.quant.platform.factor.mapper.FactorDefinitionMapper;
+import com.quant.platform.factor.service.FactorService;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.Getter;
@@ -52,6 +55,10 @@ public class DataUpdateService {
     private final StockInfoMapper stockInfoMapper;
     private final ClickHouseStockService clickHouseStockService;
     private final JdbcTemplate jdbcTemplate;
+    private final FactorService factorService;
+
+    @Autowired
+    private FactorDefinitionMapper factorDefinitionMapper;
 
     @Autowired(required = false)
     private TradeCalendarService tradeCalendarService;
@@ -484,6 +491,39 @@ public class DataUpdateService {
                         broadcastStatus(task);
                     }
                 }
+            } else if ("FACTOR_COMPUTE".equals(updateType)) {
+                // 因子计算：直接调 Java 端 FactorService（进程内，无需启 Python 子进程）
+                // FactorService 内部已实现：全量K线预加载、增量模式、WebSocket 实时广播
+                task.setCurrentStep("因子计算");
+                broadcastStatus(task);
+                try {
+                    LocalDate endDate = (request.getEndDate() != null && !request.getEndDate().isEmpty())
+                        ? LocalDate.parse(request.getEndDate()) : LocalDate.now();
+                    LocalDate startDate = (request.getStartDate() != null && !request.getStartDate().isEmpty())
+                        ? LocalDate.parse(request.getStartDate()) : endDate.minusDays(defaultStartDays);
+                    List<FactorDefinition> activeFactors =
+                        factorDefinitionMapper.selectList(new LambdaQueryWrapper<FactorDefinition>()
+                            .eq(FactorDefinition::getStatus,
+                                FactorDefinition.FactorStatus.ACTIVE)
+                            .orderByAsc(FactorDefinition::getFactorCode));
+                    List<String> factorCodes = activeFactors.stream()
+                        .map(FactorDefinition::getFactorCode)
+                        .collect(java.util.stream.Collectors.toList());
+                    task.setTotalStocks(factorCodes.size());
+                    broadcastStatus(task);
+                    java.util.Map<String, Object> result = factorService.triggerBatchCompute(
+                        factorCodes, startDate, endDate, true, false);
+                    long submitted = ((Number) result.getOrDefault("submitted", 0)).longValue();
+                    long skipped = ((Number) result.getOrDefault("skipped", 0)).longValue();
+                    task.setCurrentStep(String.format("计算完成（提交 %d, 跳过 %d）", submitted, skipped));
+                    task.setStatus("SUCCESS");
+                } catch (Exception e) {
+                    log.error("[因子计算] 失败", e);
+                    task.setCurrentStep("计算失败: " + e.getMessage());
+                    task.setStatus("FAILED");
+                }
+                task.setProgress(100);
+                task.setCurrentStep("计算完成");
             } else if (cmd == null) {
                 // ALL → 依次执行 SH、SZ、BJ
                 executeAllMarkets(taskId, request);
@@ -604,8 +644,8 @@ public class DataUpdateService {
         boolean hasPoolFilter = pool != null && !"ALL".equals(pool);
 
         if (!"BJ".equals(request.getMarket())) {
-            // BAOSTOCK 或 ALL → 并行更新沪深（--workers 4 多进程加速）
-            marketScripts.add(new String[]{"沪深", "update_stock_daily_baostock.py", "--workers", "4"});
+            // BAOSTOCK 或 ALL → 串行更新沪深（Baostock不支持多并发连接）
+            marketScripts.add(new String[]{"沪深", "update_stock_daily_baostock.py", "--workers", "1"});
         }
         // 指定股票池时只更新池内股票池（SH/SZ），跳过北交所
         if (!"BAOSTOCK".equals(request.getSource()) && !hasPoolFilter) {
@@ -689,32 +729,29 @@ public class DataUpdateService {
 
     /**
      * 执行 ClickHouse OPTIMIZE TABLE FINAL 去重
+     * 通过 Python clickhouse_connect 库执行（比 curl 更可靠，正确传递 receive_timeout/max_execution_time）
      */
     private void optimizeClickHouseTable(String taskId) {
         broadcastLog(taskId, "\n[OPTIMIZE] 开始合并去重（可能需要几分钟）...");
         try {
-            String chHost = System.getenv().getOrDefault("CLICKHOUSE_HOST", "localhost");
-            String chPort = System.getenv().getOrDefault("CLICKHOUSE_PORT", "8123");
-            String password = clickhousePassword;
-            String url = "http://" + chHost + ":" + chPort + "/";
-            String sql = "OPTIMIZE TABLE stock.stock_daily FINAL";
-            String params = "user=default&password=" + password + "&receive_timeout=1800";
-            // 日志脱敏：不打印完整密码
-            log.info("[OPTIMIZE] 执行 OPTIMIZE TABLE stock.stock_daily FINAL");
+            List<String> cmd = new ArrayList<>();
+            cmd.add(pythonPath);
+            cmd.add("-u");
+            cmd.add("-c");
+            cmd.add("from field_completer import run_optimize_stock_daily; run_optimize_stock_daily()");
             
-            ProcessBuilder pb = new ProcessBuilder(
-                "curl", "-s", "--max-time", "1800",
-                url + "?" + params,
-                "--data", sql
-            );
+            ProcessBuilder pb = new ProcessBuilder(cmd);
+            pb.directory(new File(scriptDir));
             pb.redirectErrorStream(true);
+            pb.environment().put("PYTHONIOENCODING", "utf-8");
+            pb.environment().put("DB_BACKEND", "clickhouse");
             Process proc = pb.start();
             
             try (BufferedReader reader = new BufferedReader(
                     new InputStreamReader(proc.getInputStream(), StandardCharsets.UTF_8))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
-                    broadcastLog(taskId, "[OPTIMIZE] " + line);
+                    broadcastLog(taskId, line);
                 }
             }
             
@@ -724,6 +761,7 @@ public class DataUpdateService {
                 log.info("[DataUpdate] OPTIMIZE TABLE stock_daily FINAL 完成");
             } else {
                 broadcastLog(taskId, "[OPTIMIZE] ⚠️ 合并失败，退出码: " + exitCode);
+                broadcastLog(taskId, "[OPTIMIZE] 数据写入不受影响，可稍后手动执行");
             }
         } catch (Exception e) {
             broadcastLog(taskId, "[OPTIMIZE] ⚠️ 合并失败: " + e.getMessage());
