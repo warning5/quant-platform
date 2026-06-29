@@ -796,7 +796,7 @@ def main():
                     total_inserted += n
                     if err and err != 'no_data':
                         error_count += 1
-                    if done_count % 200 == 0 or done_count == len(codes):
+                    if done_count % 50 == 0 or done_count == len(codes):
                         elapsed = time.time() - t0
                         rate = done_count / elapsed if elapsed > 0 else 0
                         eta = (len(codes) - done_count) / rate if rate > 0 else 0
@@ -814,7 +814,7 @@ def main():
             # ── 原串行模式（单只股票或 ths_workers=0）──
             total_inserted = 0
             for i, code in enumerate(codes):
-                if (i + 1) % 50 == 0:
+                if (i + 1) % 10 == 0:
                     print(f"  进度: {i+1}/{len(codes)}，已插入 {total_inserted} 条")
                 if (i + 1) % 10 == 0:
                     time.sleep(1)  # 控制频率
@@ -847,7 +847,7 @@ def main():
 
         total_inserted = 0
         for i, code in enumerate(codes):
-            if (i + 1) % 20 == 0:
+            if (i + 1) % 5 == 0:
                 print(f"  进度: {i+1}/{len(codes)}，已插入 {total_inserted} 条")
             if (i + 1) % 5 == 0:
                 time.sleep(2)  # 新浪限制更严

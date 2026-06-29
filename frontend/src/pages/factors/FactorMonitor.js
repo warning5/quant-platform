@@ -90,6 +90,48 @@ function FactorMonitor() {
     try { sessionStorage.setItem('factor_compute_logs', JSON.stringify(computeLogs)); } catch { /* quota exceeded，忽略 */ }
   }, [computeLogs]);
 
+  // 拉取监控数据（必须在 handleBatchLog 之前定义，后者依赖 fetchData）
+  const fetchData = useCallback(async () => {
+    // 保存当前滚动位置
+    const scrollY = window.scrollY;
+    try {
+      setLoading(true);
+      const res = await factorApi.monitor();
+      const data = res;
+      setMonitorData(data);
+
+      // 每次刷新监控数据时，同步后端正在计算的因子状态（解决重启后状态不一致）
+      try {
+        const runningRes = await factorApi.running();
+        const codes = runningRes?.data || runningRes || [];
+        if (Array.isArray(codes)) {
+          setRunningFactorCodes(new Set(codes));
+        }
+      } catch { /* 忽略，不影响主流程 */ }
+
+      // 更新速度采样
+      const now = Date.now();
+      const total = data.totalRecords || 0;
+      setSpeedSamples(prev => {
+        const next = [...prev, { t: now, v: total }];
+        return next.length > 6 ? next.slice(-6) : next;
+      });
+
+      // 更新趋势历史
+      const ts = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      setTrendHistory(prev => {
+        const next = [...prev, { ts, total }];
+        return next.length > 40 ? next.slice(-40) : next;
+      });
+    } catch (e) {
+      console.error('获取监控数据失败:', e);
+    } finally {
+      setLoading(false);
+      // 恢复滚动位置
+      window.scrollTo(0, scrollY);
+    }
+  }, []);
+
   // ── 统一 WebSocket（useStompWebSocket Hook）──
   // 批量日志回调：处理 BATCH_START / BATCH_SUBMITTED / FACTOR_PROGRESS 消息
   const handleBatchLog = useCallback((data) => {
@@ -169,48 +211,6 @@ function FactorMonitor() {
         setFactorsLoading(false);
       }
     })();
-  }, []);
-
-  // 拉取监控数据
-  const fetchData = useCallback(async () => {
-    // 保存当前滚动位置
-    const scrollY = window.scrollY;
-    try {
-      setLoading(true);
-      const res = await factorApi.monitor();
-      const data = res;
-      setMonitorData(data);
-
-      // 每次刷新监控数据时，同步后端正在计算的因子状态（解决重启后状态不一致）
-      try {
-        const runningRes = await factorApi.running();
-        const codes = runningRes?.data || runningRes || [];
-        if (Array.isArray(codes)) {
-          setRunningFactorCodes(new Set(codes));
-        }
-      } catch { /* 忽略，不影响主流程 */ }
-
-      // 更新速度采样
-      const now = Date.now();
-      const total = data.totalRecords || 0;
-      setSpeedSamples(prev => {
-        const next = [...prev, { t: now, v: total }];
-        return next.length > 6 ? next.slice(-6) : next;
-      });
-
-      // 更新趋势历史
-      const ts = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      setTrendHistory(prev => {
-        const next = [...prev, { ts, total }];
-        return next.length > 40 ? next.slice(-40) : next;
-      });
-    } catch (e) {
-      console.error('获取监控数据失败:', e);
-    } finally {
-      setLoading(false);
-      // 恢复滚动位置
-      window.scrollTo(0, scrollY);
-    }
   }, []);
 
   // 设置定时刷新

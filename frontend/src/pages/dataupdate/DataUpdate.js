@@ -834,7 +834,7 @@ function DataUpdate() {
   }, [dividendTask?.status, fetchDividendCoverage]);
 
   useEffect(() => {
-    // 初始化时恢复各Tab最近的任务状态
+    // 初始化时恢复各Tab最近的任务状态 + 历史日志
     dataUpdateApi.getRecentTasks().then(res => {
       if (res && Array.isArray(res)) {
         for (const t of res) {
@@ -843,6 +843,29 @@ function DataUpdate() {
           // 只恢复非 IDLE 状态且非 CANCELLED 状态的任务
           if (t.status && t.status !== 'IDLE' && t.status !== 'CANCELLED') {
             getTaskUpdater(ut)(prev => ({ ...prev, ...t, updateType: ut }));
+            // 同时补拉历史日志（刷新页面后日志丢失的根本原因）
+            if (t.taskId) {
+              dataUpdateApi.getTaskLogs(t.taskId).then(logs => {
+                const logUpdater = getLogUpdater(ut);
+                if (logs && logs.length > 0) {
+                  logUpdater(prev => {
+                    // 去重：按 text 内容去重，避免和实时推送重复
+                    const existingTexts = new Set(prev.map(l => l.text));
+                    const newEntries = logs
+                      .filter(l => !existingTexts.has(l.line))
+                      .map(l => ({ id: Date.now() + Math.random(), time: l.time || '', text: l.line || '' }));
+                    return newEntries.length > 0 ? [...prev, ...newEntries] : prev;
+                  });
+                } else if (t.status === 'RUNNING') {
+                  // 后端重启后日志缓存清空，给用户一个提示
+                  logUpdater(prev => [...prev, {
+                    id: Date.now(),
+                    time: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
+                    text: `[系统] 任务正在运行(后端重启后日志缓存已清空，后续日志会实时推送)`,
+                  }]);
+                }
+              }).catch(() => {});
+            }
           }
         }
       }
