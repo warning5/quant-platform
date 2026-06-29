@@ -1142,7 +1142,25 @@ export default function RecommendationList() {
                     fontSize: 12, color: '#389e0d',
                   }}>
                     <span style={{ fontWeight: 600 }}>因子加权增强：</span>
-                    {halflifeDays && <span style={{ marginRight: 16 }}>IC衰减半衰期 <b>{halflifeDays}天</b></span>}
+                    {halflifeDays && (
+                      <span style={{ marginRight: 16 }}>
+                        IC衰减半衰期 <b>{halflifeDays}天</b>
+                        <Tooltip title={
+                          <div style={{ maxWidth: 320 }}>
+                            <div style={{ fontWeight:600, marginBottom:6 }}>IC指数衰减加权</div>
+                            <div style={{ lineHeight:1.8, fontSize:12 }}>
+                              计算因子权重时，近期的IC值权重更高，越远期的权重越低。<br/>
+                              <b>半衰期{halflifeDays}天</b>表示{halflifeDays}天前的IC值按50%权重参与计算。
+                            </div>
+                            <div style={{ marginTop:8, borderTop:'1px solid #eee', paddingTop:6, color:'#888', fontSize:11 }}>
+                              半衰期由沪深300波动率自适应决定：高波动→10天 / 中波动→20天 / 低波动→30天。当前为中波动市场，取默认值{halflifeDays}天。
+                            </div>
+                          </div>
+                        }>
+                          <QuestionCircleOutlined style={{ marginLeft:4, cursor:'help', color:'#1677ff', opacity:.7 }} />
+                        </Tooltip>
+                      </span>
+                    )}
                     {crowdingCount > 0 && <span style={{ marginRight: 16 }}>拥挤度剔除 <b>{crowdingCount}个</b></span>}
                     {quarterlyCount > 0 && <span>财务因子季频校正 <b>{quarterlyCount}个</b></span>}
                   </div>
