@@ -62,6 +62,8 @@ public class IntradayMonitorService {
     private final CopyOnWriteArrayList<Map<String, Object>> signalHistory = new CopyOnWriteArrayList<>();
 
     private volatile boolean monitoring = false;
+    /** 今日是否已发送收盘事件（防止重复） */
+    private volatile boolean marketClosedSent = false;
     /** 轮询计数器（用于控制日志输出频率） */
     private int pollCount = 0;
 
@@ -164,14 +166,19 @@ public class IntradayMonitorService {
         int hour = now.getHour();
         int minute = now.getMinute();
 
-        boolean inTradingHours = (hour == 9 && minute >= 30) || (hour >= 10 && hour < 15);
+        // A股交易时段：09:30~11:30 和 13:00~15:00（午休 11:30~13:00 不监控）
+        boolean inMorningSession = (hour == 9 && minute >= 30) || hour == 10
+                || (hour == 11 && minute < 30);
+        boolean inAfternoonSession = hour == 13 || hour == 14;
+        boolean inTradingHours = inMorningSession || inAfternoonSession;
         if (!inTradingHours) return;
 
         boolean inAuction = (hour == 9 && minute >= 25 && minute < 30) || (hour == 14 && minute >= 55);
 
-        // 每日重置推送记录
+        // 每日重置推送记录 + 收盘标志
         if (hour == 9 && minute == 30 && now.getSecond() < 10) {
             pushedWithTime.clear();
+            marketClosedSent = false;
         }
 
         if (!monitoring) {
@@ -200,6 +207,40 @@ public class IntradayMonitorService {
 
         // 并行分析所有触发区间的股票
         analyzePricesParallel(prices, inAuction);
+    }
+
+    /**
+     * 收盘后清理：15:01 触发，广播 market_closed 事件并关闭所有 SSE 连接
+     * 仅交易日执行，每天最多执行一次（marketClosedSent 防重复）
+     */
+    @Scheduled(cron = "0 1 15 * * MON-FRI")
+    public void closeMarket() {
+        LocalDate today = LocalDate.now();
+        // 非交易日跳过
+        if (isNonTradingDay(today)) return;
+        // 已发送过收盘事件，跳过
+        if (marketClosedSent) return;
+
+        marketClosedSent = true;
+        monitoring = false;
+        log.info("[IntradayMonitor] ===== 收盘清理 ===== 当前连接数: {}", sseEmitters.size());
+
+        // 广播收盘事件
+        Map<String, Object> closeEvent = new HashMap<>();
+        closeEvent.put("type", "market_closed");
+        closeEvent.put("message", "今日交易已结束，盘中监控停止");
+        closeEvent.put("time", LocalDateTime.now().toString());
+        broadcastSse(closeEvent);
+
+        // 关闭所有 SSE 连接
+        for (SseEmitter emitter : sseEmitters) {
+            try {
+                emitter.complete();
+            } catch (Exception ignored) {
+            }
+        }
+        sseEmitters.clear();
+        log.info("[IntradayMonitor] ===== 收盘清理完成 ===== 所有SSE连接已关闭");
     }
 
     /**
@@ -743,6 +784,7 @@ public class IntradayMonitorService {
             Map<String, Object> statusEvent = new HashMap<>();
             statusEvent.put("type", "status");
             statusEvent.put("monitoring", monitoring);
+            statusEvent.put("marketClosed", marketClosedSent);
             statusEvent.put("watchingCount", targetPriceCache.size());
             statusEvent.put("dataDate", dataDate != null ? dataDate.toString() : null);
             emitter.send(SseEmitter.event().name("monitor").data(statusEvent));

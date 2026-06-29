@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Card, Table, Button, Tag, Space, Alert, Typography, Tooltip, Modal, Input, InputNumber, Form, Popover } from 'antd';
+import { Card, Table, Button, Tag, Space, Alert, Typography, Tooltip, Modal, Input, InputNumber, Form, Popover, Switch, Dropdown } from 'antd';
 import { message, notification } from '../../utils/messageUtil';
-import { ReloadOutlined, PlayCircleOutlined, EyeOutlined, ThunderboltOutlined, QuestionCircleOutlined, PlusOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons';
+import { ReloadOutlined, PlayCircleOutlined, EyeOutlined, ThunderboltOutlined, QuestionCircleOutlined, PlusOutlined, DeleteOutlined, EditOutlined, BellOutlined, MoreOutlined } from '@ant-design/icons';
 import api, { silentConfig } from '../../api';
 
 const { Text } = Typography;
@@ -46,6 +46,7 @@ export default function MonitorPage() {
   const [realtimePrices, setRealtimePrices] = useState({});
   const [realtimeChangePct, setRealtimeChangePct] = useState({});
   const [sseConnected, setSseConnected] = useState(false);
+  const [marketClosed, setMarketClosed] = useState(false);     // 是否已收盘
   const [sseSignals, setSseSignals] = useState([]);
   const [lastPriceUpdate, setLastPriceUpdate] = useState(null);  // 最后价格更新时间
   const [customModalOpen, setCustomModalOpen] = useState(false);
@@ -54,6 +55,9 @@ export default function MonitorPage() {
   const [customForm] = Form.useForm();
   const [autoNameLoading, setAutoNameLoading] = useState(false);
   const eventSourceRef = useRef(null);
+  const marketClosedRef = useRef(false);    // ref 避免闭包旧值问题
+  const [notificationsPaused, setNotificationsPaused] = useState(false);
+  const notificationsPausedRef = useRef(false);  // ref 避免 SSE 闭包问题
 
   const fetchStatus = useCallback(async () => {
     setLoading(true);
@@ -111,6 +115,27 @@ export default function MonitorPage() {
         try {
           const data = JSON.parse(e.data);
 
+          // 收盘事件：关闭连接，不再重连
+          if (data.type === 'market_closed') {
+            setMarketClosed(true);
+            marketClosedRef.current = true;
+            setSseConnected(false);
+            es.close();
+            return;
+          }
+
+          if (data.type === 'status') {
+            // 连接时后端已收盘 → 直接标记
+            if (data.marketClosed) {
+              setMarketClosed(true);
+              marketClosedRef.current = true;
+              setSseConnected(false);
+              es.close();
+              return;
+            }
+            return;
+          }
+
           if (data.type === 'price') {
             // 实时价格更新
             setRealtimePrices(prev => ({ ...prev, ...data.prices }));
@@ -133,17 +158,19 @@ export default function MonitorPage() {
             // 添加到信号历史
             setSseSignals(prev => [data, ...prev].slice(0, 50));
 
-            // 弹出通知 + 播放声音
-            playAlertSound(isBuy ? 'BUY' : isStop ? 'STOP' : 'WATCH');
-            notification.open({
-              message: isBuy ? '🟢 买入信号' : isStop ? '🔴 止损警告' : '信号通知',
-              description: data.message,
-              duration: isStop ? 0 : 10,
-              style: {
-                borderColor: isBuy ? '#52c41a' : isStop ? '#ff4d4f' : '#1890ff',
-                borderWidth: 2,
-              },
-            });
+            // 暂停通知时：不弹窗、不响铃，但仍然更新信号列表和价格
+            if (!notificationsPausedRef.current) {
+              playAlertSound(isBuy ? 'BUY' : isStop ? 'STOP' : 'WATCH');
+              notification.open({
+                message: isBuy ? '🟢 买入信号' : isStop ? '🔴 止损警告' : '信号通知',
+                description: data.message,
+                duration: isStop ? 0 : 10,
+                style: {
+                  borderColor: isBuy ? '#52c41a' : isStop ? '#ff4d4f' : '#1890ff',
+                  borderWidth: 2,
+                },
+              });
+            }
 
             // 同步刷新状态
             fetchStatus();
@@ -156,8 +183,10 @@ export default function MonitorPage() {
       es.onerror = () => {
         setSseConnected(false);
         es.close();
-        // 5秒后重连
-        setTimeout(connectSSE, 5000);
+        // 收盘后不再重连
+        if (!marketClosedRef.current) {
+          setTimeout(connectSSE, 5000);
+        }
       };
     };
 
@@ -169,6 +198,21 @@ export default function MonitorPage() {
       }
     };
   }, []);
+
+  // 合并刷新：同时刷新状态和目标价
+  const handleRefresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      await api.post('/monitor/refresh-targets');
+      await fetchStatus();
+      message.success('已刷新');
+    } catch (err) {
+      const msg = err.response?.data?.message || err.message || '请求失败';
+      message.error('刷新失败: ' + msg);
+    } finally {
+      setLoading(false);
+    }
+  }, [fetchStatus]);
 
   // 手动触发扫描
   const handleTriggerScan = async () => {
@@ -253,14 +297,14 @@ export default function MonitorPage() {
         stopLoss: values.stopLoss || null,
         targetPrice: values.targetPrice || null,
       });
-      antMessage.success(editingStock ? `已更新: ${values.stockCode}` : `已添加自定义股票: ${values.stockCode}`);
+      message.success(editingStock ? `已更新: ${values.stockCode}` : `已添加自定义股票: ${values.stockCode}`);
       setCustomModalOpen(false);
       setEditingStock(null);
       customForm.resetFields();
       fetchStatus();
     } catch (err) {
       const msg = err.response?.data?.message || err.message;
-      antMessage.error((editingStock ? '更新失败: ' : '添加失败: ') + msg);
+      message.error((editingStock ? '更新失败: ' : '添加失败: ') + msg);
     } finally {
       setCustomLoading(false);
     }
@@ -308,10 +352,10 @@ export default function MonitorPage() {
   const handleRemoveCustomStock = async (stockCode) => {
     try {
       await api.delete(`/monitor/custom-stock?stockCode=${encodeURIComponent(stockCode)}`);
-      antMessage.success('已移除');
+      message.success('已移除');
       fetchStatus();
     } catch (err) {
-      antMessage.error('移除失败: ' + (err.response?.data?.message || err.message));
+      message.error('移除失败: ' + (err.response?.data?.message || err.message));
     }
   };
 
@@ -556,28 +600,49 @@ export default function MonitorPage() {
           <Tooltip title={status?.monitoring ? '盘中监控运行中' : '交易时段(9:30-15:00)内自动启动，当前处于非交易时段或服务刚重启'}>
             <Tag color={status?.monitoring ? 'success' : 'default'}>{status?.monitoring ? '运行中' : '未启动'}</Tag>
           </Tooltip>
-          <Tooltip title={sseConnected ? 'SSE实时推送已连接' : 'SSE未连接，5秒后自动重连'}>
-            <Tag color={sseConnected ? 'cyan' : 'default'}>{sseConnected ? '推送已连接' : '推送未连接'}</Tag>
-          </Tooltip>
+          {marketClosed ? (
+            <Tooltip title="今日交易已结束，监控已自动停止，推送已关闭">
+              <Tag color="volcano">已收盘</Tag>
+            </Tooltip>
+          ) : (
+            <Tooltip title={sseConnected ? 'SSE实时推送已连接' : 'SSE未连接，5秒后自动重连'}>
+              <Tag color={sseConnected ? 'cyan' : 'default'}>{sseConnected ? '推送已连接' : '推送未连接'}</Tag>
+            </Tooltip>
+          )}
           {lastPriceUpdate && sseConnected && (
             <Text type="secondary" style={{ fontSize: 11 }}>
               行情更新: {new Date(lastPriceUpdate).toLocaleTimeString()}
             </Text>
           )}
+          <Tooltip title={notificationsPaused ? '通知已暂停：不弹窗、不响铃，数据与信号列表仍在更新' : '通知开启中，点击暂停'}>
+            <span style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <BellOutlined style={{ color: notificationsPaused ? '#8c8c8c' : '#faad14', fontSize: 15 }} />
+              <Switch
+                size="small"
+                checked={!notificationsPaused}
+                onChange={(v) => { setNotificationsPaused(!v); notificationsPausedRef.current = !v; }}
+                checkedChildren="通知"
+                unCheckedChildren="静音"
+              />
+            </span>
+          </Tooltip>
         </Space>
         <Space>
-          <Button icon={<ReloadOutlined />} onClick={fetchStatus} loading={loading}>刷新状态</Button>
-          <Button icon={<ReloadOutlined />} onClick={handleRefreshTargets}>刷新目标价</Button>
+          <Button icon={<ReloadOutlined />} onClick={handleRefresh} loading={loading}>刷新</Button>
           <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleTriggerScan} loading={scanLoading}>
             手动触发扫描
           </Button>
-          <Button icon={<ThunderboltOutlined />} onClick={handleSimulateCycle} loading={simulateLoading}>
-            模拟交易周期
-          </Button>
-          <Button icon={<EyeOutlined />} onClick={handleShowRealtime}>手动查价</Button>
           <Button type="dashed" icon={<PlusOutlined />} onClick={() => { setEditingStock(null); setCustomModalOpen(true); }}>
             添加自定义
           </Button>
+          <Dropdown menu={{ items: [
+            { key: 'realtime', icon: <EyeOutlined />, label: '手动查价', onClick: handleShowRealtime },
+            { key: 'simulate', icon: <ThunderboltOutlined />, label: '模拟交易周期', onClick: handleSimulateCycle },
+            { type: 'divider' },
+            { key: 'clear', icon: <DeleteOutlined />, label: '清除信号历史', onClick: handleClearSignals },
+          ]}} trigger={['click']}>
+            <Button icon={<MoreOutlined />}>更多</Button>
+          </Dropdown>
         </Space>
       </div>
 

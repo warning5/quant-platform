@@ -38,6 +38,14 @@
         ORDER BY trade_date
     </select>
 
+    <!-- 统计区间内节假日数量（is_trading=0，排除周末由 Java 侧处理） -->
+    <select id="countHolidaysBetween" resultType="long">
+        SELECT COUNT(*)
+        FROM trade_calendar
+        WHERE trade_date &gt; #{startDate} AND trade_date &lt;= #{endDate}
+          AND is_trading = 0
+    </select>
+
     <!-- 手动标记：存在则更新，不存在则插入 -->
     <insert id="upsertByDate">
         INSERT INTO trade_calendar (trade_date, is_trading, reason, source)

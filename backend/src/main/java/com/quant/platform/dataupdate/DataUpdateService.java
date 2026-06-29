@@ -1847,7 +1847,7 @@ public class DataUpdateService {
             Object sdMax = clickHouseStockService.queryForObject(
                 "SELECT max(trade_date) FROM stock_daily WHERE code NOT LIKE '399%' AND code NOT LIKE '000%' AND length(code)=6");
             LocalDate sdDate = sdMax != null ? LocalDate.parse(sdMax.toString()) : null;
-            long sdDays = sdDate != null ? latestTradeDate.toEpochDay() - sdDate.toEpochDay() : 999;
+            long sdDays = sdDate != null ? tradeCalendarService.countTradingDays(sdDate, latestTradeDate) : 999;
             Map<String, Object> sdStatus = new LinkedHashMap<>();
             sdStatus.put("latestDate", sdDate != null ? sdDate.toString() : "N/A");
             sdStatus.put("daysBehind", sdDays);
@@ -1867,7 +1867,7 @@ public class DataUpdateService {
             Object fvMax = clickHouseStockService.queryForObject(
                 "SELECT max(calc_date) FROM factor_value");
             LocalDate fvDate = fvMax != null ? LocalDate.parse(fvMax.toString()) : null;
-            long fvDays = fvDate != null ? latestTradeDate.toEpochDay() - fvDate.toEpochDay() : 999;
+            long fvDays = fvDate != null ? tradeCalendarService.countTradingDays(fvDate, latestTradeDate) : 999;
             Map<String, Object> fvStatus = new LinkedHashMap<>();
             fvStatus.put("latestDate", fvDate != null ? fvDate.toString() : "N/A");
             fvStatus.put("daysBehind", fvDays);

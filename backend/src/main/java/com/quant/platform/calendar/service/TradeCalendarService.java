@@ -77,6 +77,33 @@ public class TradeCalendarService {
     }
 
     /**
+     * 计算两个日期之间（不含起始日，含结束日）的交易日个数
+     * 例如：from=周五, to=周一 → 周末2天非交易，周一1天交易 → 返回1
+     * 算法：总日历日 - 周末 - 节假日(从 trade_calendar 批量查询)
+     */
+    public long countTradingDays(LocalDate from, LocalDate to) {
+        if (from == null || to == null || !to.isAfter(from)) return 0;
+
+        long totalDays = to.toEpochDay() - from.toEpochDay();
+
+        // 统计周末天数（数学计算，无 DB 查询）
+        long weekendDays = 0;
+        LocalDate d = from.plusDays(1);
+        while (!d.isAfter(to)) {
+            DayOfWeek dow = d.getDayOfWeek();
+            if (dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY) {
+                weekendDays++;
+            }
+            d = d.plusDays(1);
+        }
+
+        // 批量查询区间内节假日（1次 SQL）
+        long holidays = tradeCalendarMapper.countHolidaysBetween(from, to);
+
+        return totalDays - weekendDays - holidays;
+    }
+
+    /**
      * 手动标记某天
      * 规则：标记为交易日时删除该日记录（恢复默认）；标记为非交易日时插入/更新记录
      */

@@ -36,6 +36,13 @@ public interface TradeCalendarMapper extends BaseMapper<TradeCalendar> {
                                                @Param("endDate") LocalDate endDate);
 
     /**
+     * 统计指定范围内的节假日（非交易日）数量，不含 startDate，含 endDate
+     * trade_calendar 只存例外日（is_trading=0），配合周末计算可得出精确交易日数
+     */
+    long countHolidaysBetween(@Param("startDate") LocalDate startDate,
+                              @Param("endDate") LocalDate endDate);
+
+    /**
      * 插入或更新（ON DUPLICATE KEY UPDATE）
      */
     int upsertByDate(TradeCalendar cal);
