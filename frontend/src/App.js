@@ -66,7 +66,7 @@ function OldRollingRedirect() {
 function PageLoading() {
   return (
     <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}>
-      <Spin size="large" tip="加载中..." />
+      <Spin size="large"><div style={{ minHeight: 200 }} /></Spin>
     </div>
   );
 }

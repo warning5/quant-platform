@@ -283,7 +283,7 @@ export default function WalkForward() {
       {/* ── 加载中 ── */}
       {running && (
         <Card style={{ textAlign: 'center', padding: 40 }}>
-          <Spin size="large" tip="Walk-Forward 验证中，请稍候..." />
+          <Spin size="large"><div style={{ minHeight: 200 }} /></Spin>
           <div style={{ marginTop: 8, color: '#999', fontSize: 13 }}>滚动窗口验证可能需要几分钟，请耐心等待</div>
         </Card>
       )}

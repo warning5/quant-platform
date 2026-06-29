@@ -228,12 +228,106 @@ def build_daily_rows(db, code, name, market, df):
     return rows
 
 
+# ─── 多进程 Worker ────────────────────────────────────────────────
+def _mp_worker_process_chunk(args):
+    """
+    多进程 worker：在子进程中处理一批股票，每个 worker 独立登录 Baostock。
+    绕过 Baostock 单 socket 串行限制，实现真正的并行。
+
+    args: (chunk, start_date_str, end_date_str, force, inter_stock_delay)
+        chunk: [(code, name, market), ...]
+    """
+    import datetime as _dt
+    import time as _time
+    import sys as _sys
+    import os as _os
+    from contextlib import contextmanager
+    import baostock as _bs
+    from db_helper import StockDailyDB
+
+    @contextmanager
+    def _suppress_stdout():
+        orig = _sys.stdout
+        _sys.stdout = open(_os.devnull, 'w')
+        try:
+            yield
+        finally:
+            _sys.stdout.close()
+            _sys.stdout = orig
+
+    chunk, start_date_str, end_date_str, force, inter_stock_delay = args
+    start_date = _dt.datetime.strptime(start_date_str, "%Y-%m-%d").date()
+    end_date = _dt.datetime.strptime(end_date_str, "%Y-%m-%d").date()
+
+    # 每个子进程独立登录 Baostock（独立 TCP Socket）
+    with _suppress_stdout():
+        lg = _bs.login()
+    if lg.error_code != '0':
+        return {"success": 0, "skipped": 0, "failed": len(chunk), "no_data": 0,
+                "processed": [], "error": f"Baostock login failed: {lg.error_msg}"}
+
+    db = StockDailyDB()
+    stats = {"success": 0, "skipped": 0, "failed": 0, "no_data": 0, "processed": []}
+    _consecutive_no_data = 0
+
+    try:
+        for i, (code, name, market) in enumerate(chunk):
+            try:
+                # 每 50 只重登一次，防止连接超时
+                if i > 0 and i % 50 == 0:
+                    with _suppress_stdout():
+                        _bs.logout()
+                    _time.sleep(1)
+                    with _suppress_stdout():
+                        lg = _bs.login()
+                    if lg.error_code != '0':
+                        stats["failed"] += len(chunk) - i
+                        break
+
+                df = fetch_stock_history(code, name, market, start_date, end_date)
+
+                if df is not None and len(df) > 0:
+                    rows = build_daily_rows(db, code, name, market, df)
+                    n = db.upsert_daily(rows, force=force)
+                    stats["success"] += n
+                    stats["skipped"] += len(df) - n
+                    stats["processed"].append((code, market))
+                    _consecutive_no_data = 0  # 重置
+                else:
+                    stats["no_data"] += 1
+                    _consecutive_no_data += 1
+                    if _consecutive_no_data == 20:
+                        # Worker 内连续20只无数据 → 提前终止，不处理剩余
+                        stats["failed"] += len(chunk) - i - 1
+                        stats["no_data"] += len(chunk) - i - 1
+                        print(f"[Worker] 连续20只无数据，提前终止本 worker", flush=True)
+                        break
+
+                # 股票间微延迟，避免冲击服务器
+                if inter_stock_delay > 0 and i < len(chunk) - 1:
+                    _time.sleep(inter_stock_delay)
+
+            except TimeoutError:
+                stats["failed"] += len(chunk) - i
+                break
+            except Exception:
+                stats["failed"] += 1
+                continue
+    finally:
+        db.close()
+        with _suppress_stdout():
+            _bs.logout()
+
+    return stats
+
+
 def main():
     parser = argparse.ArgumentParser(description="使用 Baostock 获取沪深股票历史数据")
     parser.add_argument("--start-date", type=str, default="2026-03-01", help="开始日期 (默认: 2026-03-01)")
     parser.add_argument("--end-date", type=str, default=None, help="结束日期 (默认: 今天)")
     parser.add_argument("--code", type=str, help="只处理指定股票 (测试用)")
-    parser.add_argument("--market", choices=["SH", "SZ"], default="SZ", help="只处理指定市场")
+    parser.add_argument("--market", choices=["SH", "SZ", "ALL"], default=None,
+                       help="只处理指定市场 (不指定=全市场)")
     parser.add_argument("--limit", type=int, default=0, help="只处理前N只股票 (测试用)")
     parser.add_argument("--batch-size", type=int, default=10, help="每批处理的股票数 (默认:10)")
     parser.add_argument("--delay", type=float, default=0.3, help="批次间延迟秒数 (默认:0.3)")
@@ -242,6 +336,8 @@ def main():
     parser.add_argument("--pool", type=str, default=None,
                        choices=["SH300", "SZ50", "ZZ500", "ZZ1000", "STAR50"],
                        help="股票池筛选 (SH300/SZ50/ZZ500/ZZ1000/STAR50)")
+    parser.add_argument("--workers", type=int, default=1,
+                       help="并行进程数 (default:1 串行; 推荐2-8, 数量=并发Baostock连接)")
     args = parser.parse_args()
 
     if args.end_date:
@@ -256,11 +352,13 @@ def main():
     print(f"数据源: Baostock")
     print(f"存储后端: {get_backend_label()}")
     print(f"日期范围: {start_date} ~ {end_date}")
-    print(f"市场: {args.market}")
+    print(f"市场: {args.market if args.market else '全市场'}")
     print(f"批次大小: {args.batch_size}")
     print(f"批次延迟: {args.delay}秒")
     print(f"断点续传: {'是' if args.resume else '否'}")
     print(f"强制写入: {'是' if args.force else '否'}")
+    if args.workers > 1:
+        print(f"并行模式: {args.workers} workers（加速 ~{args.workers}×）")
     print("-" * 70)
 
     # 登录 Baostock
@@ -289,12 +387,13 @@ def main():
                 # pool 模式下：先查完整池，再在 Python 层按 market 过滤
                 # 避免 SQL 层 market + pool 交叉导致市场内股票数量减少
                 all_pool_stocks = db.get_stocks(pool=args.pool)
-                if args.market:
+                if args.market and args.market != "ALL":
                     stocks = [(c, n, m) for (c, n, m) in all_pool_stocks if m == args.market]
                 else:
                     stocks = all_pool_stocks
             else:
-                stocks = db.get_stocks(market=args.market, limit=args.limit)
+                market_filter = args.market if args.market and args.market != "ALL" else None
+                stocks = db.get_stocks(market=market_filter, limit=args.limit)
 
         print(f"        待处理股票: {len(stocks)} 只")
         if args.pool:
@@ -334,72 +433,137 @@ def main():
                 # Baostock 按股票请求，跳过已有数据的不会加速单股查询
                 stocks = pending
 
-        # ── [3/4] 遍历股票，插入数据 ─────────────────────────────────
-        print(f"\n[4/4] 获取历史行情并写入...")
+        # ── 遍历股票，插入数据 ─────────────────────────────────────
+        total_count = len(stocks)
         total_success = 0
         total_skipped = 0
         total_failed = 0
         total_no_data = 0
-
+        consecutive_no_data = 0        # 连续无数据计数器
+        CONSECUTIVE_WARN = 10          # 连续N只无数据→警告
+        CONSECUTIVE_ABORT = 50         # 连续N只无数据→终止
         processed_codes = []
-        for i, (code, name, market) in enumerate(stocks, 1):
-            try:
-                # 每50只重新登录 Baostock
-                if i > 1 and (i - 1) % 50 == 0:
+
+        if args.workers > 1 and total_count > 0:
+            # ──────────── 并行模式：多进程同时请求 Baostock ────────────
+            from concurrent.futures import ProcessPoolExecutor, as_completed
+            import multiprocessing as _mp
+
+            workers = min(args.workers, total_count)
+            print(f"\n[并行] {workers} worker × {total_count} 只股票...", flush=True)
+
+            chunk_size = (total_count + workers - 1) // workers
+            chunks = [stocks[i:i + chunk_size] for i in range(0, total_count, chunk_size)]
+            print(f"        每个 worker ~{chunk_size} 只，预计加速 ~{workers}×", flush=True)
+
+            ctx = _mp.get_context('spawn')
+            parallel_start = time.time()
+            with ProcessPoolExecutor(max_workers=workers, mp_context=ctx) as executor:
+                futures = {}
+                for j, chunk in enumerate(chunks):
+                    f = executor.submit(
+                        _mp_worker_process_chunk,
+                        (chunk, start_date.strftime("%Y-%m-%d"),
+                         end_date.strftime("%Y-%m-%d"), args.force, 0.05)
+                    )
+                    futures[f] = j
+
+                completed_w = 0
+                for f in as_completed(futures):
+                    completed_w += 1
                     try:
-                        with suppress_stdout():
-                            bs.logout()
-                        time.sleep(1)
-                        with suppress_stdout():
-                            lg = bs.login()
-                        if lg.error_code != '0':
-                            print(f"[WARN] Baostock 重登失败: {lg.error_msg}, 3秒后重试...")
-                            time.sleep(3)
+                        r = f.result()
+                        if "error" in r:
+                            print(f"[ERROR] Worker{futures[f]} 失败: {r['error']}")
+                        total_success += r["success"]
+                        total_skipped += r["skipped"]
+                        total_failed += r["failed"]
+                        total_no_data += r["no_data"]
+                        processed_codes.extend(r.get("processed", []))
+                        elapsed_w = time.time() - parallel_start
+                        print(f"[并行] Worker{futures[f]} 完成: {r['success']}条写入 "
+                              f"({completed_w}/{workers}, "
+                              f"已耗时{elapsed_w:.0f}s, 预计剩余~{elapsed_w/completed_w*(workers-completed_w):.0f}s)",
+                              flush=True)
+                    except Exception as e:
+                        print(f"[ERROR] Worker{futures[f]} 异常: {e}")
+                        total_failed += len(chunks[futures[f]])
+
+        else:
+            # ──────────── 串行模式（原有逻辑） ────────────
+            print(f"\n[4/4] 获取历史行情并写入（共 {total_count} 只股票）...", flush=True)
+            for i, (code, name, market) in enumerate(stocks, 1):
+                try:
+                    # 每5只或每50只打印进度（防止长时间无输出）
+                    if (i - 1) % 50 == 0 or i <= 3 or i % 200 == 0:
+                        pct = i * 100 / total_count
+                        print(f"[进度] {i}/{total_count} ({pct:.1f}%) 正在 {code} {name}...", flush=True)
+                    # 每50只重新登录 Baostock
+                    if i > 1 and (i - 1) % 50 == 0:
+                        try:
+                            with suppress_stdout():
+                                bs.logout()
+                            time.sleep(1)
                             with suppress_stdout():
                                 lg = bs.login()
                             if lg.error_code != '0':
-                                print(f"[ERROR] Baostock 重登彻底失败: {lg.error_msg}，终止脚本")
-                                sys.exit(1)
-                    except Exception as e:
-                        print(f"[WARN] 重登异常: {e}")
+                                print(f"[WARN] Baostock 重登失败: {lg.error_msg}, 3秒后重试...")
+                                time.sleep(3)
+                                with suppress_stdout():
+                                    lg = bs.login()
+                                if lg.error_code != '0':
+                                    print(f"[ERROR] Baostock 重登彻底失败: {lg.error_msg}，终止脚本")
+                                    sys.exit(1)
+                        except Exception as e:
+                            print(f"[WARN] 重登异常: {e}")
 
-                # 断点续传：根据已有数据调整实际起始日期
-                actual_start = start_date
-                if args.resume:
-                    latest_date = code_latest_map.get(code)
-                    if latest_date is not None and latest_date < actual_end_date:
-                        actual_start = latest_date + timedelta(days=1)
-                        print(f"  [resume] {code} 已有数据至 {latest_date}，从 {actual_start} 开始补全")
-                    elif latest_date is not None and latest_date >= actual_end_date:
-                        # 该股票已完整，理论上不应进入此循环，防御性 continue
-                        print(f"  [resume] {code} 数据已完整({latest_date} >= {actual_end_date})，跳过")
-                        continue
+                    # 断点续传：根据已有数据调整实际起始日期
+                    actual_start = start_date
+                    if args.resume:
+                        latest_date = code_latest_map.get(code)
+                        if latest_date is not None and latest_date < actual_end_date:
+                            actual_start = latest_date + timedelta(days=1)
+                            print(f"  [resume] {code} 已有数据至 {latest_date}，从 {actual_start} 开始补全")
+                        elif latest_date is not None and latest_date >= actual_end_date:
+                            # 该股票已完整，理论上不应进入此循环，防御性 continue
+                            print(f"  [resume] {code} 数据已完整({latest_date} >= {actual_end_date})，跳过")
+                            continue
 
-                df = fetch_stock_history(code, name, market, actual_start, end_date)
+                    df = fetch_stock_history(code, name, market, actual_start, end_date)
 
-                if df is not None and len(df) > 0:
-                    rows = build_daily_rows(db, code, name, market, df)
-                    n = db.upsert_daily(rows, force=args.force)
-                    total_success += n
-                    total_skipped += len(df) - n
-                    processed_codes.append((code, market))
-                    print(f"[{i}/{len(stocks)}] {code} {name}: 写入 {n} 条")
-                else:
-                    # df is None 或 df 为空（如所有行 tradestatus=0 被过滤）
-                    total_no_data += 1
+                    if df is not None and len(df) > 0:
+                        rows = build_daily_rows(db, code, name, market, df)
+                        n = db.upsert_daily(rows, force=args.force)
+                        total_success += n
+                        total_skipped += len(df) - n
+                        processed_codes.append((code, market))
+                        print(f"[{i}/{len(stocks)}] {code} {name}: 写入 {n} 条")
+                        consecutive_no_data = 0  # 重置
+                    else:
+                        # df is None 或 df 为空（如所有行 tradestatus=0 被过滤）
+                        total_no_data += 1
+                        consecutive_no_data += 1
+                        if consecutive_no_data == CONSECUTIVE_WARN:
+                            print(f"[WARN] 连续 {consecutive_no_data} 只股票无数据返回！"
+                                  f"数据源可能尚未更新 {actual_start}~{end_date} 的行情，"
+                                  f"继续等待可能白跑 {total_count - i} 只...", flush=True)
+                        elif consecutive_no_data == CONSECUTIVE_ABORT:
+                            print(f"[ABORT] 连续 {consecutive_no_data} 只股票无数据，"
+                                  f"确认数据源暂无 {actual_start}~{end_date} 的行情，终止脚本。", flush=True)
+                            sys.exit(0)
 
-                if i % args.batch_size == 0 and i < len(stocks):
-                    if total_success > 0:
-                        print(f"[累计] 写入记录: {total_success:,} 条")
-                    time.sleep(args.delay)
+                    if i % args.batch_size == 0 and i < len(stocks):
+                        if total_success > 0:
+                            print(f"[累计] 写入记录: {total_success:,} 条")
+                        time.sleep(args.delay)
 
-            except TimeoutError:
-                print(f"[FATAL] 发生超时，脚本终止")
-                sys.exit(1)
-            except Exception as e:
-                print(f"[ERROR] {code} 处理异常: {e}")
-                total_failed += 1
-                continue
+                except TimeoutError:
+                    print(f"[FATAL] 发生超时，脚本终止")
+                    sys.exit(1)
+                except Exception as e:
+                    print(f"[ERROR] {code} 处理异常: {e}")
+                    total_failed += 1
+                    continue
 
         # 统计
         elapsed = time.time() - start_time

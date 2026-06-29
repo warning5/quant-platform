@@ -48,6 +48,26 @@ const TASK_ITEMS = [
     key: 'RESEARCH', name: '研报数据', desc: '券商研报评级与盈利预测',
     icon: '📝', defaultEnabled: false, color: '#faad14',
   },
+  {
+    key: 'RECOMMENDATION_TRACK', name: '推荐追踪', desc: '计算昨日推荐股票的当日收益率，用于复盘策略效果。依赖当日收盘数据生成，建议 16:00 后自动执行',
+    icon: '🎯', defaultEnabled: true, color: '#13c2c2',
+  },
+  {
+    key: 'DATA_FRESHNESS', name: '数据新鲜度检查', desc: '检查各数据源最新日期是否落后，超过阈值则告警。非数据更新任务，纯监控',
+    icon: '🩺', defaultEnabled: true, color: '#1677ff',
+  },
+  {
+    key: 'PRICE_ANOMALY', name: '价格异常检测', desc: '扫描近7天涨跌幅>50%的异常K线，发现脏数据。非数据更新任务，纯监控',
+    icon: '🔍', defaultEnabled: true, color: '#722ed1',
+  },
+  {
+    key: 'FACTOR_NULL_CHECK', name: '因子NULL检测', desc: '检查各因子最新日期的NULL比例，>50%触发告警。非数据更新任务，纯监控',
+    icon: '⚠️', defaultEnabled: true, color: '#fa8c16',
+  },
+  {
+    key: 'FINANCIAL_ANOMALY', name: '财务突变检测', desc: '用LAG窗口函数检测营收/净利润环比跳变>100%的异常记录。非数据更新任务，纯监控',
+    icon: '📉', defaultEnabled: true, color: '#eb2f96',
+  },
 ];
 
 // 频率选项 → 转cron
@@ -95,7 +115,9 @@ function resolveCron(freqValue, customTime) {
  */
 function inferFreqFromCron(cronExpr) {
   if (!cronExpr) return '__GLOBAL__';
-  const parts = cronExpr.split(/\s+/);
+  let parts = cronExpr.split(/\s+/);
+  // 兼容6字段cron（秒 分 时 日 月 周），去掉秒字段
+  if (parts.length === 6) parts = parts.slice(1);
   if (parts.length !== 5) return '__CUSTOM__';
   const [min, hour, dom, month, dow] = parts;
 
@@ -118,9 +140,11 @@ function inferFreqFromCron(cronExpr) {
 function extractTimeFromCron(cronExpr) {
   if (!cronExpr) return dayjs('16:00', 'HH:mm');
   const parts = cronExpr.split(/\s+/);
-  if (parts.length < 2) return dayjs('16:00', 'HH:mm');
-  const h = parseInt(parts[1], 10);
-  const m = parseInt(parts[0], 10);
+  // 兼容6字段cron，索引偏移
+  const offset = parts.length === 6 ? 1 : 0;
+  if (parts.length < 2 + offset) return dayjs('16:00', 'HH:mm');
+  const h = parseInt(parts[1 + offset], 10);
+  const m = parseInt(parts[0 + offset], 10);
   if (isNaN(h) || isNaN(m)) return dayjs('16:00', 'HH:mm');
   return dayjs().hour(h).minute(m).second(0);
 }
@@ -176,6 +200,11 @@ const FIELD_DEFS = [
 ];
 
 /** 解析单个 cron field 为 Set<number> */
+/** 星期文本 → 数字映射（Spring cron: 1=MON ... 7=SUN/0=SUN） */
+const DOW_NAME_MAP = {
+  'MON': 1, 'TUE': 2, 'WED': 3, 'THU': 4, 'FRI': 5, 'SAT': 6, 'SUN': 7, '0': 0,
+};
+
 function parseCronField(expr, min, max) {
   const result = new Set();
   if (!expr || expr === '*') {
@@ -204,6 +233,24 @@ function parseCronField(expr, min, max) {
       const e = parseInt(rangeStepMatch[2], 10);
       const step = parseInt(rangeStepMatch[3], 10);
       for (let i = Math.max(s, min); i <= Math.min(e, max); i += step) result.add(i);
+      return;
+    }
+    // 文本星期范围：MON-FRI, MON-WED 等
+    const textRangeMatch = part.match(/^([A-Z]{3})-([A-Z]{3})$/i);
+    if (textRangeMatch) {
+      const s = DOW_NAME_MAP[textRangeMatch[1].toUpperCase()];
+      const e = DOW_NAME_MAP[textRangeMatch[2].toUpperCase()];
+      if (s !== undefined && e !== undefined) {
+        for (let i = s; i <= e; i++) result.add(i);
+        // SUN=7，也支持 0 表示周日
+        if (e === 7 && result.has(7)) result.add(0);
+        return;
+      }
+    }
+    // 单文本星期：MON, TUE 等
+    const textName = part.toUpperCase();
+    if (DOW_NAME_MAP[textName] !== undefined) {
+      result.add(DOW_NAME_MAP[textName]);
       return;
     }
     const num = parseInt(part, 10);
@@ -276,7 +323,7 @@ function getNextRunTimes(cronExpr, count = 3) {
   const arrays = fieldSets.map(s => Array.from(s).sort((a, b) => a - b));
   const results = [];
   const now = dayjs();
-  let cursor = now.startOf('second').add(1, 'second');
+  let cursor = now.add(1, 'second').millisecond(0);
   const limit = now.add(4, 'year');
 
   function findNextOrEqual(arr, val) {
@@ -290,54 +337,53 @@ function getNextRunTimes(cronExpr, count = 3) {
   }
 
   while (results.length < count && cursor.isBefore(limit)) {
-    const curS = cursor.second();
-    const curM = cursor.minute();
-    const curH = cursor.hour();
-    const curDom = cursor.date();
-    const curMonth = cursor.month() + 1;
-    const curDow = cursor.day();
-
     // 秒
-    let s = findNextOrEqual(arrays[0], curS);
-    if (s === null) { /* 不可能：秒字段总有值 */ }
-    if (s > curS) {
-      cursor = cursor.second(s).startOf('second');
-      // 重置更小粒度为最小值
-      cursor = cursor.minute(arrays[1][0]).hour(arrays[2][0]);
-      // 继续检查后续字段...
+    let s = findNextOrEqual(arrays[0], cursor.second());
+    if (s === null) {
+      // 当前分钟没有更多匹配的秒，进位到下一分钟
+      cursor = cursor.add(1, 'minute').second(arrays[0][0]).millisecond(0);
+      continue;
+    }
+    if (s > cursor.second()) {
+      cursor = cursor.second(s).millisecond(0);
+      continue;
     }
 
     // 分
     let m = findNextOrEqual(arrays[1], cursor.minute());
     if (m === null) {
       // 进位到下一小时
-      cursor = cursor.add(1, 'hour').minute(arrays[1][0]).second(arrays[0][0]).startOf('second');
+      cursor = cursor.add(1, 'hour').minute(arrays[1][0]).second(arrays[0][0]).millisecond(0);
       continue;
     }
     if (m > cursor.minute()) {
-      cursor = cursor.minute(m).second(arrays[0][0]).startOf('second');
+      cursor = cursor.minute(m).second(arrays[0][0]).millisecond(0);
       continue;
     }
 
     // 时
     let h = findNextOrEqual(arrays[2], cursor.hour());
     if (h === null) {
-      cursor = cursor.add(1, 'day').hour(arrays[2][0]).minute(arrays[1][0]).second(arrays[0][0]).startOf('second');
+      cursor = cursor.add(1, 'day').hour(arrays[2][0]).minute(arrays[1][0]).second(arrays[0][0]).millisecond(0);
       continue;
     }
     if (h > cursor.hour()) {
-      cursor = cursor.hour(h).minute(arrays[1][0]).second(arrays[0][0]).startOf('second');
+      cursor = cursor.hour(h).minute(arrays[1][0]).second(arrays[0][0]).millisecond(0);
       continue;
     }
 
     // 月
     let mon = findNextOrEqual(arrays[4], cursor.month() + 1);
     if (mon === null) {
-      cursor = cursor.add(1, 'year').month(arrays[4][0] - 1).date(1).hour(arrays[2][0]).minute(arrays[1][0]).second(arrays[0][0]).startOf('second');
+      cursor = cursor.add(1, 'year').month(arrays[4][0] - 1).date(1).hour(arrays[2][0]).minute(arrays[1][0]).second(arrays[0][0]).millisecond(0);
+      continue;
+    }
+    if (mon > cursor.month() + 1) {
+      cursor = cursor.month(mon - 1).date(1).hour(arrays[2][0]).minute(arrays[1][0]).second(arrays[0][0]).millisecond(0);
       continue;
     }
 
-    // 日 —— 需要逐日尝试（最多31次/月）
+    // 日 —— 需过滤掉超出本月天数的值
     const maxDay = cursor.daysInMonth();
     let d = findNextOrEqual(
       arrays[3].filter(v => v <= maxDay),
@@ -345,34 +391,78 @@ function getNextRunTimes(cronExpr, count = 3) {
     );
     if (d === null || d > maxDay) {
       // 进位到下月
-      const nextMonth = mon === cursor.month() + 1 ? mon + 1 : mon;
-      const nmArr = findNextOrEqual(arrays[4], nextMonth);
-      if (nmArr === null) {
-        cursor = cursor.add(1, 'year').month(arrays[4][0] - 1).date(1);
-      } else {
-        cursor = cursor.month(nmArr - 1).date(1);
-      }
-      cursor = cursor.hour(arrays[2][0]).minute(arrays[1][0]).second(arrays[0][0]).startOf('second');
+      cursor = cursor.add(1, 'month').date(1).hour(arrays[2][0]).minute(arrays[1][0]).second(arrays[0][0]).millisecond(0);
       continue;
     }
     if (d > cursor.date()) {
-      cursor = cursor.date(d).hour(arrays[2][0]).minute(arrays[1][0]).second(arrays[0][0]).startOf('second');
+      cursor = cursor.date(d).hour(arrays[2][0]).minute(arrays[1][0]).second(arrays[0][0]).millisecond(0);
       continue;
     }
 
     // 星期几（dow）—— 如果不匹配则跳到第二天
     const dow = cursor.day();
     if (!fieldSets[5].has(dow)) {
-      cursor = cursor.add(1, 'day').hour(arrays[2][0]).minute(arrays[1][0]).second(arrays[0][0]).startOf('second');
+      cursor = cursor.add(1, 'day').hour(arrays[2][0]).minute(arrays[1][0]).second(arrays[0][0]).millisecond(0);
       continue;
     }
 
     // 所有字段都匹配！
     results.push(cursor);
-    cursor = cursor.add(1, 'second'); // 找到一个后前进1秒继续找下一个
+    // 找到一个后进位到下一分钟继续找（不能只加1秒，否则秒字段可能不匹配）
+    cursor = cursor.add(1, 'minute').second(arrays[0][0]).millisecond(0);
   }
 
   return results;
+}
+
+// ========== Cron 人类可读说明 ==========
+/**
+ * 将 cron 表达式转为人类可读的中文说明
+ * 支持 5字段（分 时 日 月 周）和 6字段（秒 分 时 日 月 周）
+ */
+function explainCron(cronExpr) {
+  if (!cronExpr) return '';
+
+  let parts = cronExpr.trim().split(/\s+/);
+  if (parts.length === 6) parts = parts.slice(1); // 去掉秒字段
+  if (parts.length !== 5) return cronExpr;
+
+  const [min, hour, dom, month, dow] = parts;
+  const h = parseInt(hour, 10);
+  const m = parseInt(min, 10);
+  const timeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+
+  // 工作日
+  if (dow === '1-5' && dom === '*' && month === '*') {
+    return `每个工作日 ${timeStr} 执行`;
+  }
+  // 每周特定日
+  const dowNum = parseInt(dow, 10);
+  if (!isNaN(dowNum) && dom === '*' && month === '*') {
+    const dayNames = ['', '周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+    if (dowNum >= 0 && dowNum <= 7) {
+      return `每${dayNames[dowNum]} ${timeStr} 执行`;
+    }
+  }
+  // 每天
+  if (dow === '*' && dom === '*' && month === '*') {
+    if (hour === '*') {
+      if (min.match(/^\d+$/)) return `每小时 ${String(m).padStart(2, '0')} 分执行`;
+      return `每小时执行`;
+    }
+    return `每天 ${timeStr} 执行`;
+  }
+  // 每月特定日
+  const domNum = parseInt(dom, 10);
+  if (!isNaN(domNum) && month === '*' && dow === '*') {
+    return `每月 ${domNum} 号 ${timeStr} 执行`;
+  }
+  // 特定月份日期
+  if (dom !== '*' && month !== '*' && dow === '*') {
+    return `每年 ${month}月${dom}日 ${timeStr} 执行`;
+  }
+
+  return cronExpr; // 无法识别时返回原始表达式
 }
 
 // ========== 可视化编辑器弹窗（含 Cron + 任务配置 双 Tab） ==========
@@ -590,178 +680,168 @@ function CronVisualEditor({ open, initialValue, initialExtraConfig, taskKey, onO
   })), [fields]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ★ 第一层：两个大 Tab（任务配置 | Cron 配置）
-  const mainTabItems = useMemo(() => [
-    {
-      key: 'config',
-      label: <span><SettingOutlined /> 任务配置</span>,
-      children: (
-        <div style={{ padding: '16px 0' }}>
-          {/* 增量/全量 */}
-          <div style={{ marginBottom: 20 }}>
-            <Text strong style={{ fontSize: 13, display: 'block', marginBottom: 8 }}>更新模式</Text>
-            <Space align="center">
-              <Switch
-                checked={incremental}
-                onChange={setIncremental}
-                checkedChildren="增量"
-                unCheckedChildren="全量"
-              />
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                {incremental
-                  ? '增量模式：仅更新新增/变更的数据（不使用 --force）'
-                  : '全量模式：强制重新写入覆盖已有数据（使用 --force）'}
-              </Text>
-            </Space>
-          </div>
+  // ========== Tab 内容渲染函数（内联，不用 useMemo 避免数组重建导致卡切换） ==========
+  const renderConfigTab = () => (
+    <div style={{ padding: '16px 0' }}>
+      {/* 增量/全量 */}
+      <div style={{ marginBottom: 20 }}>
+        <Text strong style={{ fontSize: 13, display: 'block', marginBottom: 8 }}>更新模式</Text>
+        <Space align="center">
+          <Switch
+            checked={incremental}
+            onChange={setIncremental}
+            checkedChildren="增量"
+            unCheckedChildren="全量"
+          />
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {incremental
+              ? '增量模式：仅更新新增/变更的数据（不使用 --force）'
+              : '全量模式：强制重新写入覆盖已有数据（使用 --force）'}
+          </Text>
+        </Space>
+      </div>
 
-          {/* 日期范围 */}
-          <div>
-            <Text strong style={{ fontSize: 13, display: 'block', marginBottom: 8 }}>日期范围</Text>
-            <Space direction="vertical" size={8} style={{ width: '100%' }}>
-              <Select
-                value={dateMode}
-                onChange={v => setDateMode(v)}
-                options={DATE_MODE_OPTIONS}
-                style={{ width: 200 }}
-              />
-
-              {dateMode === 'custom' ? (
-                <RangePicker
-                  value={customDates}
-                  onChange={(dates) => setCustomDates(dates)}
-                  format="YYYY-MM-DD"
-                  placeholder={['开始日期', '结束日期']}
-                />
-              ) : (
-                <div style={{
-                  padding: '8px 12px',
-                  background: '#fafafa',
-                  borderRadius: 6,
-                  border: '1px solid #f0f0f0',
-                  maxWidth: 360,
-                }}>
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    {dateMode === 'today' && (
-                      <>自动使用 <Tag color="blue">当天</Tag>（启动时传当天日期）</>
-                    )}
-                    {dateMode === 'recent_1' && (
-                      <>自动使用 <Tag color="blue">昨天</Tag>（仅最近1个交易日）</>
-                    )}
-                    {dateMode === 'recent_3' && (
-                      <>自动使用 <Tag color="blue">3天前 ~ 昨天</Tag>（最近3个交易日）</>
-                    )}
-                  </Text>
-                </div>
-              )}
-            </Space>
-          </div>
-
-          {/* 推荐任务专属配置 */}
-          {taskKey === 'DAILY_RECOMMENDATION' && (
-            <div style={{ marginTop: 20 }}>
-              <Text strong style={{ fontSize: 13, display: 'block', marginBottom: 8 }}>策略选择</Text>
-              <Select
-                mode="multiple"
-                value={strategyIds}
-                onChange={setStrategyIds}
-                placeholder="选择要执行的策略"
-                style={{ width: '100%', marginBottom: 12 }}
-                options={allStrategies.map(s => ({
-                  value: s.id,
-                  label: `${s.strategyName}（#${s.id}）`,
-                }))}
-                maxTagCount={5}
-                maxTagTextLength={12}
-              />
-              {strategyIds.length > 0 && (
-                <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
-                  已选 {strategyIds.length} 个策略：{strategyIds.map(id => {
-                    const s = allStrategies.find(x => x.id === id);
-                    return s?.strategyName || `#${id}`;
-                  }).join('、')}
-                </Text>
-              )}
-
-              <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
-                <div>
-                  <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>每策略推荐数</Text>
-                  <InputNumber min={5} max={50} value={topN} onChange={setTopN} style={{ width: 100 }} />
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, justifyContent: 'center' }}>
-                  <Switch checked={enableConfidenceControl} onChange={setEnableConfidenceControl} size="small"
-                    checkedChildren="置信度控制" unCheckedChildren="固定TopN" />
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      ),
-    },
-    {
-      key: 'cron',
-      label: <span><ClockCircleOutlined /> Cron 配置</span>,
-      children: (
-        <div>
-          {/* 内层：6个 cron 字段子 Tab */}
-          <Tabs
-            activeKey={activeCronFieldIdx}
-            onChange={setActiveCronFieldIdx}
-            items={cronFieldTabs}
-            size="small"
-            type="card"
+      {/* 日期范围 */}
+      <div>
+        <Text strong style={{ fontSize: 13, display: 'block', marginBottom: 8 }}>日期范围</Text>
+        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+          <Select
+            value={dateMode}
+            onChange={v => setDateMode(v)}
+            options={DATE_MODE_OPTIONS}
+            style={{ width: 200 }}
           />
 
-          {/* ★ Cron 预览区（可编辑 + 最近3次执行）— 放在 Cron 配置内部 */}
-          <div style={{
-            marginTop: 12,
-            padding: '10px 16px', background: '#f0f5ff',
-            borderRadius: 6, border: '1px solid #d6e4ff'
-          }}>
-            <Space align="center" size={8}>
-              <Text type="secondary" style={{ flexShrink: 0 }}>生成的 Cron:</Text>
-              <Input
-                value={manualEditCron}
-                onChange={(e) => handleManualCronChange(e.target.value)}
-                onBlur={() => { /* blur 时已通过 onChange 处理 */ }}
-                onPressEnter={() => {}}
-                placeholder="秒 分 时 日 月 周"
-                style={{ fontFamily: 'monospace', fontSize: 14, letterSpacing: 1, width: 280 }}
-              />
-              {manualEditCron !== previewCron && manualEditCron && (
-                <Button size="small" type="link"
-                  onClick={() => setManualEditCron(previewCron)}
-                  style={{ padding: 0 }}
-                >
-                  还原为选中值
-                </Button>
-              )}
-            </Space>
+          {dateMode === 'custom' ? (
+            <RangePicker
+              value={customDates}
+              onChange={(dates) => setCustomDates(dates)}
+              format="YYYY-MM-DD"
+              placeholder={['开始日期', '结束日期']}
+            />
+          ) : (
+            <div style={{
+              padding: '8px 12px',
+              background: '#fafafa',
+              borderRadius: 6,
+              border: '1px solid #f0f0f0',
+              maxWidth: 360,
+            }}>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {dateMode === 'today' && (
+                  <>自动使用 <Tag color="blue">当天</Tag>（启动时传当天日期）</>
+                )}
+                {dateMode === 'recent_1' && (
+                  <>自动使用 <Tag color="blue">昨天</Tag>（仅最近1个交易日）</>
+                )}
+                {dateMode === 'recent_3' && (
+                  <>自动使用 <Tag color="blue">3天前 ~ 昨天</Tag>（最近3个交易日）</>
+                )}
+              </Text>
+            </div>
+          )}
+        </Space>
+      </div>
 
-            {nextRuns.length > 0 ? (
-              <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px dashed #d6e4ff' }}>
-                <Text type="secondary" style={{ fontSize: 12 }}>最近 3 次执行：</Text>
-                {nextRuns.map((t, i) => (
-                  <Tag
-                    key={i}
-                    color={i === 0 ? 'blue' : 'default'}
-                    style={{ marginLeft: 8, fontSize: 12 }}
-                  >
-                    {t.format('YYYY-MM-DD HH:mm:ss')}
-                  </Tag>
-                ))}
-              </div>
-            ) : open && (
-              <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px dashed #d6e4ff' }}>
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  <LoadingOutlined style={{ marginRight: 4 }} /> 计算执行时间...
-                </Text>
-              </div>
-            )}
+      {/* 推荐任务专属配置 */}
+      {taskKey === 'DAILY_RECOMMENDATION' && (
+        <div style={{ marginTop: 20 }}>
+          <Text strong style={{ fontSize: 13, display: 'block', marginBottom: 8 }}>策略选择</Text>
+          <Select
+            mode="multiple"
+            value={strategyIds}
+            onChange={setStrategyIds}
+            placeholder="选择要执行的策略"
+            style={{ width: '100%', marginBottom: 12 }}
+            options={allStrategies.map(s => ({
+              value: s.id,
+              label: `${s.strategyName}（#${s.id}）`,
+            }))}
+            maxTagCount={5}
+            maxTagTextLength={12}
+          />
+          {strategyIds.length > 0 && (
+            <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
+              已选 {strategyIds.length} 个策略：{strategyIds.map(id => {
+                const s = allStrategies.find(x => x.id === id);
+                return s?.strategyName || `#${id}`;
+              }).join('、')}
+            </Text>
+          )}
+
+          <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+            <div>
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>每策略推荐数</Text>
+              <InputNumber min={5} max={50} value={topN} onChange={setTopN} style={{ width: 100 }} />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, justifyContent: 'center' }}>
+              <Switch checked={enableConfidenceControl} onChange={setEnableConfidenceControl} size="small"
+                checkedChildren="置信度控制" unCheckedChildren="固定TopN" />
+            </div>
           </div>
         </div>
-      ),
-    },
-  ], [cronFieldTabs, incremental, dateMode, customDates, taskKey, strategyIds, topN, enableConfidenceControl, allStrategies]);
+      )}
+    </div>
+  );
+
+  const renderCronTab = () => (
+    <div>
+      {/* 内层：6个 cron 字段子 Tab */}
+      <Tabs
+        activeKey={activeCronFieldIdx}
+        onChange={setActiveCronFieldIdx}
+        items={cronFieldTabs}
+        size="small"
+        type="card"
+      />
+
+      {/* ★ Cron 预览区（可编辑 + 最近3次执行） */}
+      <div style={{
+        marginTop: 12,
+        padding: '10px 16px', background: '#f0f5ff',
+        borderRadius: 6, border: '1px solid #d6e4ff'
+      }}>
+        <Space align="center" size={8}>
+          <Text type="secondary" style={{ flexShrink: 0 }}>生成的 Cron:</Text>
+          <Input
+            value={manualEditCron}
+            onChange={(e) => handleManualCronChange(e.target.value)}
+            placeholder="秒 分 时 日 月 周"
+            style={{ fontFamily: 'monospace', fontSize: 14, letterSpacing: 1, width: 280 }}
+          />
+          {manualEditCron !== previewCron && manualEditCron && (
+            <Button size="small" type="link"
+              onClick={() => setManualEditCron(previewCron)}
+              style={{ padding: 0 }}
+            >
+              还原为选中值
+            </Button>
+          )}
+        </Space>
+
+        {nextRuns.length > 0 ? (
+          <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px dashed #d6e4ff' }}>
+            <Text type="secondary" style={{ fontSize: 12 }}>最近 3 次执行：</Text>
+            {nextRuns.map((t, i) => (
+              <Tag
+                key={i}
+                color={i === 0 ? 'blue' : 'default'}
+                style={{ marginLeft: 8, fontSize: 12 }}
+              >
+                {t.format('YYYY-MM-DD HH:mm:ss')}
+              </Tag>
+            ))}
+          </div>
+        ) : open && (
+          <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px dashed #d6e4ff' }}>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              <LoadingOutlined style={{ marginRight: 4 }} /> 计算执行时间...
+            </Text>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 
   /** 构建最终的 extra_config */
   const buildExtraConfig = useCallback(() => {
@@ -795,11 +875,17 @@ function CronVisualEditor({ open, initialValue, initialExtraConfig, taskKey, onO
       <Tabs
         activeKey={activeMainTab}
         onChange={setActiveMainTab}
-        items={mainTabItems}
         size="middle"
         type="card"
         style={{ marginBottom: 16 }}
-      />
+      >
+        <Tabs.TabPane tab={<span><SettingOutlined /> 任务配置</span>} key="config">
+          {renderConfigTab()}
+        </Tabs.TabPane>
+        <Tabs.TabPane tab={<span><ClockCircleOutlined /> Cron 配置</span>} key="cron">
+          {renderCronTab()}
+        </Tabs.TabPane>
+      </Tabs>
 
       {/* ★ 公共区域（不随 Tab 切换变化） */}
       <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px dashed #e8e8e8' }}>
@@ -1159,25 +1245,35 @@ export default function ScheduledTasks() {
     {
       title: '定时规则',
       key: 'cron',
-      width: 260,
-      render: (_, record) => (
-        <Space size={8} wrap>
-          <Space size={4}>
-            <Switch
-              size="small"
-              checked={!!record.use_global_cron}
-              onChange={(v) => updateLocalConfig(record.task_key, 'use_global_cron', v ? 1 : 0)}
-            />
-            <Text type="secondary" style={{ fontSize: 11 }}>使用全局</Text>
+      width: 280,
+      render: (_, record) => {
+        const effectiveCron = record.use_global_cron
+          ? (globalConfig?.cron_expression || '—')
+          : (record.cron_expression || '—');
+        const explanation = effectiveCron !== '—' ? explainCron(effectiveCron) : '';
+        return (
+          <Space direction="vertical" size={2} style={{ width: '100%' }}>
+            <Space size={4} wrap>
+              <Space size={4}>
+                <Switch
+                  size="small"
+                  checked={!!record.use_global_cron}
+                  onChange={(v) => updateLocalConfig(record.task_key, 'use_global_cron', v ? 1 : 0)}
+                />
+                <Text type="secondary" style={{ fontSize: 11 }}>使用全局</Text>
+              </Space>
+              <Text code style={{ fontSize: 11, letterSpacing: 0.5 }}>
+                {effectiveCron}
+              </Text>
+            </Space>
+            {explanation && (
+              <Text type="secondary" style={{ fontSize: 11, color: '#52c41a' }}>
+                {explanation}
+              </Text>
+            )}
           </Space>
-
-          <Text code style={{ fontSize: 11, letterSpacing: 0.5 }}>
-            {record.use_global_cron
-              ? (globalConfig?.cron_expression || '—')
-              : (record.cron_expression || '—')}
-          </Text>
-        </Space>
-      ),
+        );
+      },
     },
     {
       title: '最近执行',
@@ -1278,7 +1374,7 @@ export default function ScheduledTasks() {
   const clearAllRunning = () => setTriggeringKeys(new Set());
 
   return (
-    <div style={{ padding: '16px 24px', maxWidth: 1400 }}>
+    <div style={{ padding: '16px' }}>
       {/* 全局配置行 */}
       {globalConfig && (
         <div style={{

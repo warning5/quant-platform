@@ -537,12 +537,12 @@ class StockDailyDB:
         """
         返回 end_date 之前（含）的最后一个交易日。
         直接查全表 MAX(trade_date) WHERE trade_date <= end_date，
-        不依赖特定指数是否有数据。
+        不依赖特定指数是否有数据。不用 FINAL（7M+ 行表极慢，MAX 不受重复行影响）。
         如果查不到，返回 end_date 本身（兜底）。
         """
         if self.backend == "clickhouse":
             r = self.ch_client.query(
-                f"SELECT MAX(trade_date) AS d FROM {self.CH_TABLE} FINAL "
+                f"SELECT MAX(trade_date) AS d FROM {self.CH_TABLE} "
                 f"WHERE trade_date <= %(d)s",
                 parameters={"d": end_date},
             )

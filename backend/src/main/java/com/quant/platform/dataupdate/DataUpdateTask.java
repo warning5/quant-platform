@@ -1,5 +1,6 @@
 package com.quant.platform.dataupdate;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -88,6 +89,16 @@ public class DataUpdateTask {
      * 创建时间
      */
     private LocalDateTime createTime = LocalDateTime.now();
+
+    /**
+     * 当前任务关联的 Python 子进程（用于取消时精确杀进程）
+     * 每个任务独立持有，解决多任务并发时共享变量被覆盖导致杀错进程的 bug
+     */
+    @JsonIgnore
+    private transient Process process;
+    /** Python 子进程 PID */
+    @JsonIgnore
+    private transient long processPid = -1;
 
     public boolean isRunning() {
         return "RUNNING".equals(status);

@@ -73,7 +73,7 @@ export default function AttributionHub({ taskId }) {
   if (loading) {
     return (
       <div style={{ textAlign: 'center', padding: 40 }}>
-        <Spin size="large" tip="加载归因分析..." />
+        <Spin size="large"><div style={{ minHeight: 200 }} /></Spin>
         <div style={{ marginTop: 8, color: '#999', fontSize: 13 }}>正在计算 Brinson + 因子归因 + 交易分析...</div>
       </div>
     );
@@ -1084,7 +1084,7 @@ function BrinsonDetail({ taskId }) {
     };
   }, [periods]);
 
-  if (loading) return <div style={{textAlign:'center',padding:40}}><Spin tip="加载 Brinson 归因..." /></div>;
+  if (loading) return <div style={{textAlign:'center',padding:40}}><Spin><div style={{ minHeight: 200 }} /></Spin></div>;
   if (error) return <Alert type="error" message={error} showIcon />;
   if (!data) return <Alert type="info" message="暂无 Brinson 归因数据" showIcon />;
 
@@ -1737,7 +1737,7 @@ function FactorDetail({ taskId }) {
     };
   }, [betas]);
 
-  if (loading) return <div style={{textAlign:'center',padding:40}}><Spin tip="加载因子归因..." /></div>;
+  if (loading) return <div style={{textAlign:'center',padding:40}}><Spin><div style={{ minHeight: 200 }} /></Spin></div>;
   if (error) return <Alert type="error" message={error} showIcon />;
   if (!data) return <Alert type="info" message="暂无因子归因数据" showIcon />;
 
@@ -2399,7 +2399,7 @@ function FF3Detail({ taskId }) {
     };
   }, [styleContributions, summary.residual]);
 
-  if (loading) return <div style={{textAlign:'center',padding:40}}><Spin tip="加载 FF3 归因..." /></div>;
+  if (loading) return <div style={{textAlign:'center',padding:40}}><Spin><div style={{ minHeight: 200 }} /></Spin></div>;
   if (error) return <Alert type="error" message={error} showIcon />;
   if (!data) return <Alert type="info" message="暂无 FF3 归因数据" showIcon />;
 
@@ -2562,7 +2562,7 @@ function AlphaMonitorPanel({ taskId }) {
     };
   }, [data]);
 
-  if (loading) return <div style={{textAlign:'center',padding:40}}><Spin tip="加载 Alpha 监控..." /></div>;
+  if (loading) return <div style={{textAlign:'center',padding:40}}><Spin><div style={{ minHeight: 200 }} /></Spin></div>;
   if (error) return <Alert type="error" message={error} showIcon />;
   if (!data) return <Alert type="info" message="暂无 Alpha 监控数据" showIcon />;
 
@@ -2685,7 +2685,7 @@ function StyleMonitorPanel({ taskId }) {
     };
   }, [data]);
 
-  if (loading) return <div style={{textAlign:'center',padding:40}}><Spin tip="加载风格监控..." /></div>;
+  if (loading) return <div style={{textAlign:'center',padding:40}}><Spin><div style={{ minHeight: 200 }} /></Spin></div>;
   if (error) return <Alert type="error" message={error} showIcon />;
   if (!data) return <Alert type="info" message="暂无风格监控数据" showIcon />;
 

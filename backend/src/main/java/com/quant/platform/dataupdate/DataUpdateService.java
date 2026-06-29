@@ -79,10 +79,11 @@ public class DataUpdateService {
     @Getter
     @Value("${quant.data-update.default-start-days:3}")
     private int defaultStartDays;
-    private Process currentProcess;
+
+    @Value("${clickhouse.password}")
+    private String clickhousePassword;
+    /** 脚本目录（绝对路径，启动时从相对路径解析） */
     private String resolvedScriptDir;
-    /** PID of the Python process (for process-group kill on cancel) */
-    private volatile long currentProcessPid = -1;
 
     /**
      * 初始化：将相对路径解析为绝对路径并验证
@@ -226,23 +227,23 @@ public class DataUpdateService {
         task.setEndTime(LocalDateTime.now());
         task.setCurrentStep("用户取消");
 
-        if (currentProcess != null && currentProcess.isAlive()) {
-            long pid = currentProcessPid;
-            if (pid > 0) {
-                // 杀整个进程树：Windows 用 taskkill /T，Unix 用 kill -TERM
-                try {
-                    boolean isWindows = System.getProperty("os.name").toLowerCase().contains("win");
-                    if (isWindows) {
-                        new ProcessBuilder("taskkill", "/F", "/T", "/PID", String.valueOf(pid)).start();
-                    } else {
-                        Runtime.getRuntime().exec(new String[]{"kill", "-TERM", "-" + pid});
-                    }
-                } catch (IOException ignored) {
+        // 使用任务自身持有的进程引用（不再依赖共享的 currentProcess 变量，
+        // 解决多任务并发时共享变量被覆盖导致杀错进程的 bug）
+        Process targetProcess = task.getProcess();
+        long targetPid = task.getProcessPid();
+        if (targetProcess != null && targetProcess.isAlive() && targetPid > 0) {
+            try {
+                boolean isWindows = System.getProperty("os.name").toLowerCase().contains("win");
+                if (isWindows) {
+                    new ProcessBuilder("taskkill", "/F", "/T", "/PID", String.valueOf(targetPid)).start();
+                } else {
+                    Runtime.getRuntime().exec(new String[]{"kill", "-TERM", "-" + targetPid});
                 }
+            } catch (IOException ignored) {
             }
             // 等待进程真正退出（最多 3 秒）
             try {
-                currentProcess.waitFor(3, java.util.concurrent.TimeUnit.SECONDS);
+                targetProcess.waitFor(3, java.util.concurrent.TimeUnit.SECONDS);
             } catch (InterruptedException ignored) {
             }
         }
@@ -253,6 +254,20 @@ public class DataUpdateService {
             recentFinishedTasks.put(ut, task);
         }
         activeTasks.remove(taskId);
+
+        // ★ 直接更新 DB 状态为 CANCELLED（不依赖后台线程 finally 块，
+        // 避免 finally 被异常路径覆盖或线程卡住导致 DB 永远停留在 RUNNING）
+        if (ut != null && !ut.isEmpty()) {
+            try {
+                int rows = jdbcTemplate.update(
+                    "UPDATE data_schedule_config SET last_run_status='CANCELLED', updated_at=? WHERE task_key=?",
+                    LocalDateTime.now(), ut
+                );
+                log.info("[DataUpdate] ★ cancelTask 直接回写 DB: task_key={}, rows={}", ut, rows);
+            } catch (Exception dbEx) {
+                log.error("[DataUpdate] ★★ cancelTask 回写 DB 失败!! task_key={}, error: {}", ut, dbEx.getMessage());
+            }
+        }
 
         broadcastStatus(task);
         return true;
@@ -507,9 +522,12 @@ public class DataUpdateService {
             }
         } catch (Exception e) {
             log.error("[DataUpdate] 任务 {} 异常", taskId, e);
-            task.setStatus("FAILED");
-            task.setError(e.getMessage());
-            task.setCurrentStep("执行异常: " + e.getMessage());
+            // 不覆盖 CANCELLED 状态（用户已手动取消时保留取消状态）
+            if (!"CANCELLED".equals(task.getStatus())) {
+                task.setStatus("FAILED");
+                task.setError(e.getMessage());
+                task.setCurrentStep("执行异常: " + e.getMessage());
+            }
             broadcastLog(taskId, "[ERROR] " + e.getMessage());
         } finally {
             task.setEndTime(LocalDateTime.now());
@@ -520,8 +538,9 @@ public class DataUpdateService {
             }
             // 从活跃任务中移除（避免阻止新任务启动）
             activeTasks.remove(taskId);
-            currentProcess = null;
-            currentProcessPid = -1;
+            // 清理进程引用
+            task.setProcess(null);
+            task.setProcessPid(-1);
             broadcastStatus(task);
             log.info("[DataUpdate] 任务 {} 结束, 状态: {}", taskId, task.getStatus());
 
@@ -585,9 +604,8 @@ public class DataUpdateService {
         boolean hasPoolFilter = pool != null && !"ALL".equals(pool);
 
         if (!"BJ".equals(request.getMarket())) {
-            // BAOSTOCK 或 ALL → 更新沪市和深市（不再使用 akshare 备用）
-            marketScripts.add(new String[]{"沪市", "update_stock_daily_baostock.py", "--market", "SH"});
-            marketScripts.add(new String[]{"深市", "update_stock_daily_baostock.py", "--market", "SZ"});
+            // BAOSTOCK 或 ALL → 并行更新沪深（--workers 4 多进程加速）
+            marketScripts.add(new String[]{"沪深", "update_stock_daily_baostock.py", "--workers", "4"});
         }
         // 指定股票池时只更新池内股票池（SH/SZ），跳过北交所
         if (!"BAOSTOCK".equals(request.getSource()) && !hasPoolFilter) {
@@ -609,16 +627,9 @@ public class DataUpdateService {
             scriptCmd.add(pythonPath);
             scriptCmd.add("-u");
             scriptCmd.add(ms[1]);
-            int marketArgIndex = -1;
+            // 添加所有额外参数（--market SH, --workers 4 等）
             for (int i = 2; i < ms.length; i++) {
-                if ("--market".equals(ms[i])) {
-                    marketArgIndex = i;
-                    break;
-                }
-            }
-            if (marketArgIndex > 0) {
-                scriptCmd.add(ms[marketArgIndex]);
-                scriptCmd.add(ms[marketArgIndex + 1]);
+                scriptCmd.add(ms[i]);
             }
             addCommonArgs(scriptCmd, request);
             boolean ok = runSingleScript(taskId, task, scriptCmd, ms[0]);
@@ -682,13 +693,9 @@ public class DataUpdateService {
     private void optimizeClickHouseTable(String taskId) {
         broadcastLog(taskId, "\n[OPTIMIZE] 开始合并去重（可能需要几分钟）...");
         try {
-            // 从环境变量读取（不硬编码，无默认值）
             String chHost = System.getenv().getOrDefault("CLICKHOUSE_HOST", "localhost");
             String chPort = System.getenv().getOrDefault("CLICKHOUSE_PORT", "8123");
-            String password = System.getenv("CLICKHOUSE_PASSWORD");
-            if (password == null || password.isEmpty()) {
-                throw new IllegalStateException("CLICKHOUSE_PASSWORD 未配置，无法执行 OPTIMIZE TABLE");
-            }
+            String password = clickhousePassword;
             String url = "http://" + chHost + ":" + chPort + "/";
             String sql = "OPTIMIZE TABLE stock.stock_daily FINAL";
             String params = "user=default&password=" + password + "&receive_timeout=1800";
@@ -747,8 +754,10 @@ public class DataUpdateService {
         pb.environment().put("PYTHONIOENCODING", "utf-8");
         pb.environment().put("DB_BACKEND", "clickhouse");
         Process process = pb.start();
-        currentProcess = process;
-        currentProcessPid = process.pid();
+        // 存储到任务对象自身（不再使用共享变量 currentProcess/currentProcessPid，
+        // 避免多任务并发时互相覆盖）
+        task.setProcess(process);
+        task.setProcessPid(process.pid());
         // 进程已启动，不再覆盖 currentStep，保留市场前缀直到 parseProgress 更新
         log.info("[DataUpdate] 进程已启动, PID={}, cmd={}", process.pid(), cmd);
 
@@ -763,8 +772,8 @@ public class DataUpdateService {
         }
 
         int exitCode = process.waitFor();
-        currentProcess = null;
-        currentProcessPid = -1;
+        task.setProcess(null);
+        task.setProcessPid(-1);
         if ("CANCELLED".equals(task.getStatus())) return false;
         if (exitCode == 0) {
             broadcastLog(taskId, "[OK] 脚本执行成功");
@@ -1987,8 +1996,12 @@ public class DataUpdateService {
 
     @PreDestroy
     public void cleanup() {
-        if (currentProcess != null && currentProcess.isAlive()) {
-            currentProcess.destroyForcibly();
+        // 关闭时杀掉所有仍在运行的子进程（不再依赖共享的 currentProcess 变量）
+        for (DataUpdateTask task : activeTasks.values()) {
+            Process p = task.getProcess();
+            if (p != null && p.isAlive()) {
+                p.destroyForcibly();
+            }
         }
     }
 }

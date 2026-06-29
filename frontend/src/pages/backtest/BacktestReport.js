@@ -2848,7 +2848,7 @@ export default function BacktestReport() {
       {/* 运行中占位提示 */}
       {(task.status === 'RUNNING' || task.status === 'PENDING') && tabItems.length === 0 && (
         <Card size="small" style={{ textAlign: 'center', padding: 40 }}>
-          <Spin size="large" tip="回测计算中，完成后自动显示报告..." />
+          <Spin size="large"><div style={{ minHeight: 200 }} /></Spin>
         </Card>
       )}
     </div>
