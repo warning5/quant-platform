@@ -76,7 +76,7 @@ logging:
 
 # DeepSeek LLM 统一配置（OpenAI 兼容接口，支持 DeepSeek / Ollama / Qwen 等）
 llm:
-  enabled: false                                   # 开发环境禁用LLM（需要环境变量LLM_API_KEY）
+  enabled: true                                   # 开发环境禁用LLM（需要环境变量LLM_API_KEY）
   base-url: ${LLM_BASE_URL:https://api.deepseek.com/v1}             # API 地址（Ollama: http://localhost:11434/v1）
   api-key: ${LLM_API_KEY:sk-3bedb909271f49d59edbb2c1e5ab989d}  # 本地开发可留空（LLM 默认禁用），生产通过环境变量配置
   model: ${LLM_MODEL:deepseek-v4-flash}                          # 模型名（deepseek-v4-flash / deepseek-v4-pro）

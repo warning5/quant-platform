@@ -116,4 +116,30 @@ public class PaperTradingScheduler {
 
         log.info("========== 模拟盘定时任务结束 ==========");
     }
+
+    // ── Fix #3: 条件单自动触发（盘中每分钟检查一次） ────────────────────
+
+    /**
+     * 盘中每分钟自动检查并执行所有运行中的模拟盘条件单
+     * cron: 每分钟（9:00~14:59）周一至周五
+     */
+    @Scheduled(cron = "0 * 9-14 * * MON-FRI", zone = "Asia/Shanghai")
+    public void autoCheckConditionalOrders() {
+        List<PaperTrading> runningPapers = paperTradingMapper.selectList(
+                new LambdaQueryWrapper<PaperTrading>()
+                        .eq(PaperTrading::getStatus, "RUNNING"));
+
+        if (runningPapers.isEmpty()) return;
+
+        for (PaperTrading pt : runningPapers) {
+            try {
+                int executed = paperTradingService.checkAndExecuteConditionalOrders(pt.getId());
+                if (executed > 0) {
+                    log.info("条件单自动触发: paperId={} executed={}", pt.getId(), executed);
+                }
+            } catch (Exception e) {
+                log.warn("条件单自动检查失败: paperId={} err={}", pt.getId(), e.getMessage());
+            }
+        }
+    }
 }

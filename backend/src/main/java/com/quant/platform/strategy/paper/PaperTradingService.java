@@ -3,6 +3,7 @@ package com.quant.platform.strategy.paper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quant.platform.factor.service.FactorService;
+import com.quant.platform.recommendation.mapper.RecommendationMapper;
 import com.quant.platform.stock.analysis.service.MarketThermometerService;
 import com.quant.platform.calendar.service.TradeCalendarService;
 import lombok.RequiredArgsConstructor;
@@ -54,6 +55,9 @@ public class PaperTradingService {
 
     @Autowired(required = false)
     private PositionAlertService positionAlertService;
+
+    @Autowired(required = false)
+    private RecommendationMapper recommendationMapper;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -689,8 +693,21 @@ public class PaperTradingService {
             if (heldCodes.contains(e.getKey())) continue;
             if (skippedCodes.contains(e.getKey())) continue;
 
-            // 始终用 stock_daily 最新开盘价（而非收盘价），模拟开盘成交
-            BigDecimal price = getOpenPrice(e.getKey(), null);
+            // Fix #4: 优先使用推荐表的 suggestedBuyPrice，回退到开盘价
+            BigDecimal price = null;
+            if (recommendationMapper != null) {
+                try {
+                    BigDecimal recPrice = recommendationMapper.findLatestSuggestedBuyPrice(e.getKey());
+                    if (recPrice != null && recPrice.compareTo(BigDecimal.ZERO) > 0) {
+                        price = recPrice;
+                    }
+                } catch (Exception ex) {
+                    log.warn("generateSignals: 查询 suggestedBuyPrice 失败 code={} err={}", e.getKey(), ex.getMessage());
+                }
+            }
+            if (price == null) {
+                price = getOpenPrice(e.getKey(), null);
+            }
             PaperSignal buySignal = PaperSignal.builder()
                 .paperId(paperId)
                 .signalDate(LocalDate.parse(signalDate))
@@ -1954,5 +1971,61 @@ public class PaperTradingService {
             log.info("条件单执行完成: paperId={} executed={}/{}", paperId, executedCount, pendingOrders.size());
         }
         return executedCount;
+    }
+
+    // ── Fix #2: 一键买入（从推荐页快速建仓） ──────────────────────────────
+
+    /**
+     * 一键买入：创建 MARKET BUY 信号并立即执行
+     * 优先使用 recommended.suggestedBuyPrice，回退到当前市场价
+     */
+    @Transactional
+    public PaperPosition quickBuy(Long paperId, String code, String name, BigDecimal price) {
+        PaperTrading pt = paperTradingMapper.selectById(paperId);
+        if (pt == null) throw new IllegalArgumentException("模拟盘不存在");
+        if (!"RUNNING".equals(pt.getStatus())) throw new IllegalArgumentException("模拟盘未运行");
+
+        if (name == null) name = getStockName(code);
+
+        // 优先使用传入的 price（前端可从 recommendation 取 suggestedBuyPrice）
+        // 若未传入，则查询推荐表的最新 suggested_buy_price
+        if (price == null) {
+            try {
+                BigDecimal recPrice = recommendationMapper.findLatestSuggestedBuyPrice(code);
+                if (recPrice != null && recPrice.compareTo(BigDecimal.ZERO) > 0) {
+                    price = recPrice;
+                }
+            } catch (Exception e) {
+                log.warn("quickBuy: 查询 suggestedBuyPrice 失败 code={} err={}", code, e.getMessage());
+            }
+        }
+        if (price == null) {
+            price = getExecutionPrice(code, paperId);
+        }
+        if (price == null || price.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new IllegalStateException("无法获取有效买入价格: " + code);
+        }
+
+        // 创建 PENDING MARKET BUY 信号
+        PaperSignal signal = PaperSignal.builder()
+                .paperId(paperId)
+                .signalDate(LocalDate.now())
+                .factorDate(LocalDate.now())
+                .code(code)
+                .name(name)
+                .direction("BUY")
+                .orderType("MARKET")
+                .signalPrice(price)
+                .reason("一键买入（推荐页）")
+                .status("PENDING")
+                .build();
+        paperSignalMapper.insert(signal);
+        log.info("quickBuy: 信号已创建 paperId={} code={} price={}", paperId, code, price);
+
+        // 立即执行
+        PaperPosition position = executeSignal(signal.getId());
+        log.info("quickBuy: 执行完成 paperId={} code={} positionId={}", paperId, code,
+                position != null ? position.getId() : "null");
+        return position;
     }
 }

@@ -9,6 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -56,7 +57,7 @@ public class LlmAnalysisController {
 
         // 1. 先生成推荐候选
         List<StockRecommendation> recommendations =
-                recommendationService.generateRecommendations(null, topN, strategyId, null, List.of(), true);
+                recommendationService.generateRecommendations(null, topN, strategyId, null, new ArrayList<>(), true);
 
         // 2. 对候选执行LLM推理
         List<LlmAnalysis> analyses = llmAnalysisService.analyzeRecommendations(recommendations);

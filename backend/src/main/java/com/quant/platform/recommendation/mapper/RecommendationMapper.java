@@ -7,6 +7,7 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
@@ -65,4 +66,10 @@ public interface RecommendationMapper extends BaseMapper<StockRecommendation> {
      */
     @Select("SELECT DISTINCT recommend_date FROM stock_recommendation WHERE strategy_id = #{strategyId} ORDER BY recommend_date DESC LIMIT #{limit}")
     List<LocalDate> findDatesByStrategyId(@Param("strategyId") Long strategyId, @Param("limit") int limit);
+
+    /**
+     * 查询指定股票最新一条推荐的买入建议价（用于模拟盘信号价对齐）
+     */
+    @Select("SELECT suggested_buy_price FROM stock_recommendation WHERE code = #{code} ORDER BY recommend_date DESC, id DESC LIMIT 1")
+    BigDecimal findLatestSuggestedBuyPrice(@Param("code") String code);
 }

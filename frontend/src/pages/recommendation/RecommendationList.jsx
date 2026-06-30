@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { Card, Table, Button, Tag, Select, Space, Statistic, Row, Col, Typography, Tooltip, Spin, Progress, DatePicker, Divider, Modal, Popconfirm, Switch } from 'antd';
+import { Card, Table, Button, Tag, Select, Space, Statistic, Row, Col, Typography, Tooltip, Spin, Progress, DatePicker, Divider, Modal, Popconfirm, Switch, Dropdown } from 'antd';
 import { message } from '../../utils/messageUtil';
 import dayjs from 'dayjs';
 import { ThunderboltOutlined, ReloadOutlined, LineChartOutlined, StockOutlined, RiseOutlined, FallOutlined, MinusOutlined, QuestionCircleOutlined, RadarChartOutlined, StopOutlined, UnlockOutlined, DownloadOutlined } from '@ant-design/icons';
@@ -116,6 +116,12 @@ export default function RecommendationList() {
   // ── 交易日历状态 ──
   const [calendarData, setCalendarData] = useState(null);
 
+  // ── Fix #2: 快速买入 ──
+  const [paperAccounts, setPaperAccounts] = useState([]);
+  const [quickBuyLoading, setQuickBuyLoading] = useState(false);
+  const [selectedRowKeys, setSelectedRowKeys] = useState([]);
+  const [batchLoading, setBatchLoading] = useState(false);
+
   // 加载交易日历 + 校正 screenDate 到最近交易日
   useEffect(() => {
     const year = dayjs().year();
@@ -123,27 +129,95 @@ export default function RecommendationList() {
       const map = {};
       data.forEach(item => { map[item.tradeDate] = item.isTrading; });
       setCalendarData(map);
-      // 校正 screenDate 到最近交易日
       let d = dayjs();
       while (true) {
         const ds = d.format('YYYY-MM-DD');
         if (map[ds] !== undefined) {
-          if (map[ds]) break; // 是交易日
+          if (map[ds]) break;
           d = d.subtract(1, 'day');
         } else {
-          // fallback: weekend
           if (d.day() === 0 || d.day() === 6) { d = d.subtract(1, 'day'); continue; }
           break;
         }
       }
       setScreenDate(d);
     }).catch(() => {
-      // fallback: 找最近的非周末
       let d = dayjs();
       while (d.day() === 0 || d.day() === 6) d = d.subtract(1, 'day');
       setScreenDate(d);
     });
   }, []);
+
+  // 加载模拟盘列表
+  useEffect(() => {
+    api.get('/paper-trading/list')
+      .then(res => setPaperAccounts(res.data || []))
+      .catch(() => setPaperAccounts([]));
+  }, []);
+
+  // 快速买入处理函数
+  const handleQuickBuy = async (rec, paperId) => {
+    setQuickBuyLoading(true);
+    try {
+      const payload = { code: rec.stockCode, name: rec.stockName };
+      if (rec.suggestedBuyPrice) payload.price = rec.suggestedBuyPrice;
+      await api.post(`/paper-trading/${paperId}/quick-buy`, payload);
+      message.success(`快速买入成功: ${rec.stockName}`);
+    } catch (err) {
+      message.error(`快速买入失败: ${err.message || '未知错误'}`);
+    } finally {
+      setQuickBuyLoading(false);
+    }
+  };
+
+  // ── 批量操作处理函数 ─────────────────────────────────────
+  const handleBatchQuickBuy = async (paperId) => {
+    if (selectedRowKeys.length === 0) return;
+    setBatchLoading(true);
+    const selectedRecs = recommendations.filter(r => selectedRowKeys.includes(r.id));
+    let success = 0, fail = 0;
+    for (const rec of selectedRecs) {
+      try {
+        const payload = { code: rec.stockCode, name: rec.stockName };
+        if (rec.suggestedBuyPrice) payload.price = rec.suggestedBuyPrice;
+        await api.post(`/paper-trading/${paperId}/quick-buy`, payload);
+        success++;
+      } catch {
+        fail++;
+      }
+    }
+    setBatchLoading(false);
+    setSelectedRowKeys([]);
+    if (fail === 0) {
+      message.success(`批量买入成功: ${success} 只`);
+    } else {
+      message.warning(`批量买入完成: 成功${success}只，失败${fail}只`);
+    }
+  };
+
+  const handleBatchBlacklist = async () => {
+    if (selectedRowKeys.length === 0) return;
+    setBatchLoading(true);
+    const selectedRecs = recommendations.filter(r => selectedRowKeys.includes(r.id));
+    let success = 0;
+    for (const rec of selectedRecs) {
+      try {
+        await blacklistApi.add(
+          selectedStrategyId,
+          rec.stockCode.replace(/\.(SH|SZ)$/i, ''),
+          rec.stockName,
+          addBlacklistReason || '批量屏蔽',
+          addBlacklistDays
+        );
+        success++;
+      } catch { /* ignore */ }
+    }
+    setBatchLoading(false);
+    setSelectedRowKeys([]);
+    loadBlacklist();
+    message.success(`批量屏蔽成功: ${success} 只`);
+  };
+
 
   // 判断某天是否非交易日
   function isNonTradingDay(current) {
@@ -185,6 +259,8 @@ export default function RecommendationList() {
       factors = Array.isArray(parsed) ? parsed : (parsed.factors || []);
     } catch { return null; }
     if (factors.length === 0) return null;
+
+
 
     return (
       <div style={{ fontSize: 12, lineHeight: '20px' }}>
@@ -358,7 +434,7 @@ export default function RecommendationList() {
   };
 
   // ── 方案B: 黑名单操作函数 ──
-  const handleManualBlacklist = async (rec) => {
+  const handleManualBlacklist = async (rec, silent = false) => {
     if (!selectedStrategyId) {
       message.warning('请先选择策略');
       return;
@@ -371,10 +447,10 @@ export default function RecommendationList() {
         addBlacklistReason || '手动屏蔽',
         addBlacklistDays
       );
-      message.success(`${rec.stockName} 已加入黑名单`);
+      if (!silent) message.success(`${rec.stockName} 已加入黑名单`);
       loadBlacklist();
     } catch (e) {
-      message.error('加入黑名单失败: ' + (e.message || '未知错误'));
+      if (!silent) message.error('加入黑名单失败: ' + (e.message || '未知错误'));
     }
   };
 
@@ -724,25 +800,6 @@ export default function RecommendationList() {
         const color = v > 0 ? '#cf1322' : v < 0 ? '#3f8600' : undefined;
         return <Text style={{ color, fontSize: 12 }}>{v > 0 ? '+' : ''}{v.toFixed(2)}%</Text>;
       },
-    },
-    {
-      title: '操作',
-      key: 'action',
-      width: 70,
-      fixed: 'right',
-      render: (_, rec) => (
-        <Popconfirm
-          title={`确认将 ${rec.stockName}(${rec.stockCode}) 加入黑名单？`}
-          description="加入后默认30天内不再推荐该股票"
-          onConfirm={() => handleManualBlacklist(rec)}
-          okText="确认"
-          cancelText="取消"
-        >
-          <Button type="link" size="small" danger icon={<StopOutlined />} style={{ padding: 0, fontSize: 11 }}>
-            屏蔽
-          </Button>
-        </Popconfirm>
-      ),
     },
   ];
 
@@ -1242,27 +1299,64 @@ export default function RecommendationList() {
         title={`🎯 推荐结果（共 ${recommendations.length} 只）`}
         extra={
           recommendations.length > 0 && (
-            <Button
-              size="small"
-              icon={<DownloadOutlined />}
-              onClick={() => exportCsv(
-                recommendations.map(r => ({
-                  股票代码: r.stockCode,
-                  股票名称: r.stockName,
-                  推荐评分: r.totalScore,
-                  技术评分: r.technicalScore,
-                  资金评分: r.capitalScore,
-                  事件评分: r.eventScore,
-                  基本面评分: r.fundamentalScore,
-                  风险评分: r.riskScore,
-                  流动性评分: r.liquidityScore,
-                  推荐理由: r.reason,
-                })),
-                `推荐结果_${selectedStrategyId}_${dayjs().format('YYYYMMDD')}`
+            <Space size={8}>
+              {selectedRowKeys.length > 0 && (
+                <>
+                  <Dropdown
+                    menu={{
+                      items: paperAccounts.length > 0 ? paperAccounts.map(acc => ({
+                        key: acc.id,
+                        label: acc.name || `模拟盘#${acc.id}`,
+                        onClick: () => handleBatchQuickBuy(acc.id),
+                      })) : [{
+                        key: '_none',
+                        label: '暂无模拟盘，请先在模拟盘页面创建',
+                        disabled: true,
+                      }]
+                    }}
+                    disabled={batchLoading}
+                  >
+                    <Button size="small" type="primary" loading={batchLoading} icon={<StockOutlined />}>
+                      批量买入 ({selectedRowKeys.length})
+                    </Button>
+                  </Dropdown>
+                  <Popconfirm
+                    title={`确认批量屏蔽 ${selectedRowKeys.length} 只股票？`}
+                    onConfirm={() => handleBatchBlacklist()}
+                    okText="确认"
+                    cancelText="取消"
+                  >
+                    <Button size="small" danger icon={<StopOutlined />}>
+                      批量屏蔽 ({selectedRowKeys.length})
+                    </Button>
+                  </Popconfirm>
+                  <Button size="small" onClick={() => setSelectedRowKeys([])}>
+                    取消选择
+                  </Button>
+                </>
               )}
-            >
-              导出 CSV
-            </Button>
+              <Button
+                size="small"
+                icon={<DownloadOutlined />}
+                onClick={() => exportCsv(
+                  recommendations.map(r => ({
+                    股票代码: r.stockCode,
+                    股票名称: r.stockName,
+                    推荐评分: r.totalScore,
+                    技术评分: r.technicalScore,
+                    资金评分: r.capitalScore,
+                    事件评分: r.eventScore,
+                    基本面评分: r.fundamentalScore,
+                    风险评分: r.riskScore,
+                    流动性评分: r.liquidityScore,
+                    推荐理由: r.reason,
+                  })),
+                  `推荐结果_${selectedStrategyId}_${dayjs().format('YYYYMMDD')}`
+                )}
+              >
+                导出 CSV
+              </Button>
+            </Space>
           )
         }
         styles={{ body: { padding: 0 } }}
@@ -1332,6 +1426,11 @@ export default function RecommendationList() {
           <Table
             dataSource={recommendations}
             columns={columns}
+            rowSelection={{
+              selectedRowKeys,
+              onChange: (keys) => setSelectedRowKeys(keys),
+              columnWidth: 32,
+            }}
             rowKey="id"
             size="small"
             scroll={{ x: 1400 }}

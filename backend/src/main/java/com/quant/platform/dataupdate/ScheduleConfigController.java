@@ -379,6 +379,7 @@ public class ScheduleConfigController {
                 req.setFetchNews(true);
                 break;
             case "RESEARCH":       req.setUpdateType("RESEARCH"); break;
+            case "FACTOR_COMPUTE": req.setUpdateType("FACTOR_COMPUTE"); break;
             case "DATA_FRESHNESS": /* 质量检查: 已在 ScheduleService 中特殊处理 */ break;
             case "PRICE_ANOMALY":  /* 质量检查: 已在 ScheduleService 中特殊处理 */ break;
             default: throw new IllegalArgumentException("未知的任务类型: " + taskKey);

@@ -53,6 +53,19 @@ public class PaperTradingController {
         return ApiResponse.success("信号生成成功", paperTradingService.generateSignals(paperId));
     }
 
+    /** Fix #2：一键买入（从推荐页快速建仓） */
+    @PostMapping("/{paperId}/quick-buy")
+    @Operation(summary = "一键买入（推荐页→模拟盘）")
+    public ApiResponse<PaperPosition> quickBuy(
+            @PathVariable Long paperId,
+            @Parameter(description = "股票代码") @RequestParam String code,
+            @Parameter(description = "股票名称（可选）") @RequestParam(required = false) String name,
+            @Parameter(description = "建议买入价（可选，不传则自动获取）") @RequestParam(required = false) BigDecimal price) {
+        return ApiResponse.success("买入成功",
+                paperTradingService.quickBuy(paperId, code,
+                        name, price != null ? price : null));
+    }
+
     @PostMapping("/signals/{signalId}/execute")
     @Operation(summary = "执行信号（买入/卖出）")
     public ApiResponse<PaperPosition> executeSignal(@PathVariable Long signalId) {
