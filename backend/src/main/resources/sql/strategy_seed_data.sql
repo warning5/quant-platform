@@ -31,13 +31,15 @@ VALUES ('BALANCED_CONFIG', '均衡配置',
         '{"factors":[{"code":"MOM20","weight":0.20,"direction":1},{"code":"VAL_PE_TTM","weight":0.20,"direction":-1},{"code":"VOL20","weight":0.20,"direction":-1},{"code":"MACD","weight":0.20,"direction":1},{"code":"VPCORR20","weight":0.20,"direction":1}]}',
         'system');
 
--- 4. 新质生产力
+-- 4. 新质生产力（因子必须使用factor_definition表中实际存在的ACTIVE因子，且能通过IC>=0.03预筛选和0.70拥挤度过滤）
+-- 当前配置：3因子跨3维度（趋势/研发强度/利润增长），日频+季频天然不拥挤，FIN_RD_REVENUE_RATIO是新质生产力核心因子
+-- MACD(0.35,dir=1,TECHNICAL,decayIC=0.1003) FIN_RD_REVENUE_RATIO(0.35,dir=1,FINANCIAL,decayIC=0.3100) FIN_NET_PROFIT_YOY(0.30,dir=1,FINANCIAL,decayIC=0.0915)
 INSERT IGNORE INTO strategy_definition (strategy_code, strategy_name, description, strategy_type, status, rebalance_frequency, max_position_count, position_size_type, stop_loss_pct, factor_config_json, filter_config_json, author)
 VALUES ('NEW_PRODUCTIVITY', '新质生产力',
-        '聚焦成长加速+技术突破+量价配合，捕捉处于高速成长期和科技突破期的公司',
+        '聚焦趋势突破+研发投入强度+净利润增速，研发费用率(|IC|=0.31)是创新驱动增长的最强先行指标，三大维度互补捕捉技术驱动成长公司',
         'FACTOR_LONG', 'ACTIVE', 'MONTHLY', 15, 'EQUAL', 0.10,
-        '{"factors":[{"code":"MOM20","weight":0.25,"direction":1},{"code":"PRICE_MOM_ACC","weight":0.20,"direction":1},{"code":"MACD","weight":0.25,"direction":1},{"code":"BOLL_POS","weight":0.15,"direction":1},{"code":"VPCORR20","weight":0.15,"direction":1}]}',
-        '{"excludeIndustries":["证券","银行","保险","信托","期货","房地产开发","房地产服务","钢铁","煤炭开采","电力","水务","港口","高速公路","铁路运输"]}',
+        '{"factors":[{"code":"MACD","weight":0.35,"direction":1},{"code":"FIN_RD_REVENUE_RATIO","weight":0.35,"direction":1},{"code":"FIN_NET_PROFIT_YOY","weight":0.30,"direction":1}]}',
+        '{"includeIndustries":["半导体","元件","光学光电子","消费电子","其他电子","电子化学品","光伏设备","电池","风电设备","电网设备","其他电源设备","计算机设备","软件开发","IT服务","通信服务","通信设备","军工电子","军工装备","自动化设备","专用设备","通用设备","医疗器械","生物制品","化学制药","汽车零部件","能源金属","金属新材料","电机"],"excludeIndustries":["证券","银行","保险","信托","期货","房地产开发","房地产服务","钢铁","煤炭开采","电力","水务","港口","高速公路","铁路运输"]}',
         'system');
 
 -- 5. 热点追踪

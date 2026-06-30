@@ -8,6 +8,8 @@ import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.sql.*;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -33,6 +35,27 @@ public class ClickHouseFactorValueService {
     private static void checkFactorCode(String factorCode) {
         if (factorCode == null || !FACTOR_CODE_PATTERN.matcher(factorCode).matches()) {
             throw new IllegalArgumentException("Invalid factorCode: " + factorCode);
+        }
+    }
+
+    /**
+     * 计算因子代码列表的 SHA-256 摘要，用于稳定缓存键（替代 hashCode，避免碰撞）
+     */
+    public static String factorCodesHash(List<String> factorCodes) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            for (String code : factorCodes) {
+                md.update((code == null ? "" : code).getBytes(StandardCharsets.UTF_8));
+                md.update((byte) ',');
+            }
+            byte[] hash = md.digest();
+            StringBuilder sb = new StringBuilder(64);
+            for (byte b : hash) {
+                sb.append(String.format("%02x", b));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to compute factorCodes hash", e);
         }
     }
 
@@ -193,7 +216,7 @@ public class ClickHouseFactorValueService {
      * 按因子代码列表批量查询统计（只查CH，不降级到MySQL）
      * 用于因子列表页的计算状态展示
      */
-    @Cacheable(value = "factorValue", key = "'status:' + #factorCodes.hashCode()",
+    @Cacheable(value = "factorValue", key = "'status:' + T(com.quant.platform.factor.service.ClickHouseFactorValueService).factorCodesHash(#factorCodes)",
                cacheManager = "factorValueCacheManager",
                unless = "#result == null || #result.isEmpty()")
     public Map<String, Map<String, Object>> batchGetStatusFromCH(List<String> factorCodes) {
@@ -1242,7 +1265,7 @@ public class ClickHouseFactorValueService {
      * 批量获取多因子的日度截面中位数（CH 侧聚合，避免拉取全量数据）
      * @return Map<factorCode, Map<日期, 中位数>>
      */
-    @Cacheable(value = "factorValue", key = "'med:' + #factorCodes.hashCode() + ':' + #startDate + ':' + #endDate",
+    @Cacheable(value = "factorValue", key = "'med:' + T(com.quant.platform.factor.service.ClickHouseFactorValueService).factorCodesHash(#factorCodes) + ':' + #startDate + ':' + #endDate",
                cacheManager = "factorValueCacheManager",
                unless = "#result == null || #result.isEmpty()")
     public Map<String, Map<java.time.LocalDate, Double>> getDailyMedians(
@@ -1295,7 +1318,7 @@ public class ClickHouseFactorValueService {
      * 用于权重优化等需要因子截面排名的场景
      * @return Map<factorCode, Map<日期, rank_value中位数>>
      */
-    @Cacheable(value = "factorValue", key = "'rmed:' + #factorCodes.hashCode() + ':' + #startDate + ':' + #endDate",
+    @Cacheable(value = "factorValue", key = "'rmed:' + T(com.quant.platform.factor.service.ClickHouseFactorValueService).factorCodesHash(#factorCodes) + ':' + #startDate + ':' + #endDate",
                cacheManager = "factorValueCacheManager",
                unless = "#result == null || #result.isEmpty()")
     public Map<String, Map<java.time.LocalDate, Double>> getDailyRankMedians(

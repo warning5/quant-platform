@@ -327,6 +327,16 @@
         ORDER BY sc.concept_name, sc.code
     </select>
 
+    <!-- 查询指定概念板块的成分股代码 -->
+    <select id="selectConceptStocksByName" resultType="java.util.Map">
+        SELECT
+            sc.concept_name as conceptName,
+            sc.code
+        FROM stock_concept sc
+        WHERE sc.concept_name = #{conceptName}
+        ORDER BY sc.code
+    </select>
+
     <!-- 融资余额变化百分比（最新 vs 前一交易日，日环比） -->
     <select id="selectMarginChangePct" resultType="java.math.BigDecimal">
         SELECT

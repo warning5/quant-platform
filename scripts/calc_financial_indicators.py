@@ -100,7 +100,7 @@ def main():
     print("加载 income 数据...")
     cur.execute("SELECT code, report_date, total_revenue, operating_profit, operating_cost, "
                 "net_profit_incl_minority, net_profit, total_profit, finance_expense, income_tax, eps_basic, "
-                "deducted_np_parent_company, np_parent_company_owners FROM stock_income")
+                "deducted_np_parent_company, np_parent_company_owners, rd_expense FROM stock_income")
     income_data = {}
     for r in cur.fetchall():
         income_data[(r[0], r[1])] = {
@@ -115,6 +115,7 @@ def main():
             'eps_basic': to_float(r[10]),
             'deducted_np_parent_company': to_float(r[11]),
             'np_parent_company_owners': to_float(r[12]),
+            'rd_expense': to_float(r[13]),
         }
 
     # 加载 balance 数据
@@ -316,9 +317,19 @@ def main():
         else:
             ar_to_np_ratio = None
 
+        # 24. rd_revenue_ratio = 研发费用 / 营业总收入（创新投入强度）
+        rd_expense = inc.get('rd_expense')
+        if rd_expense and total_revenue and total_revenue != 0:
+            rd_revenue_ratio = rd_expense / total_revenue
+        else:
+            rd_revenue_ratio = None
+
         # 四舍五入
         def r4(v):
             return round(v, 4) if v is not None else None
+
+        def r6(v):
+            return round(v, 6) if v is not None else None
 
         updates = {
             'roa': r4(roa),
@@ -346,6 +357,7 @@ def main():
             'ar_to_np_ratio': r4(ar_to_np_ratio),
             'net_operate_cf': cf.get('net_operate_cf'),
             'free_cash_flow': cf.get('free_cash_flow'),
+            'rd_revenue_ratio': r6(rd_revenue_ratio),
         }
 
         # 只更新非空的值

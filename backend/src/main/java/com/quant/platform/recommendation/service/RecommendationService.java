@@ -17,6 +17,7 @@ import com.quant.platform.stock.analysis.domain.ScoreDetail;
 import com.quant.platform.stock.analysis.service.AnalysisService;
 import com.quant.platform.stock.analysis.service.EventSignalService;
 import com.quant.platform.stock.analysis.service.NewsEventParser;
+import com.quant.platform.stock.analysis.mapper.StockAnalysisMapper;
 import com.quant.platform.stock.entity.StockDaily;
 import com.quant.platform.stock.entity.StockInfo;
 import com.quant.platform.stock.mapper.StockInfoMapper;
@@ -167,6 +168,7 @@ public class RecommendationService {
     private final FactorCorrelationService factorCorrelationService;
     private final QuarterlyFactorAnalysisService quarterlyFactorAnalysisService;
     private final javax.sql.DataSource dataSource;
+    private final StockAnalysisMapper stockAnalysisMapper;
 
     public RecommendationService(StockScreenService stockScreenService,
                                  AnalysisService analysisService,
@@ -186,7 +188,8 @@ public class RecommendationService {
                                  com.quant.platform.market.MarketSentimentService marketSentimentService,
                                  FactorCorrelationService factorCorrelationService,
                                  QuarterlyFactorAnalysisService quarterlyFactorAnalysisService,
-                                 javax.sql.DataSource dataSource) {
+                                 javax.sql.DataSource dataSource,
+                                 StockAnalysisMapper stockAnalysisMapper) {
         this.stockScreenService = stockScreenService;
         this.analysisService = analysisService;
         this.marketDataService = marketDataService;
@@ -206,6 +209,7 @@ public class RecommendationService {
         this.factorCorrelationService = factorCorrelationService;
         this.quarterlyFactorAnalysisService = quarterlyFactorAnalysisService;
         this.dataSource = dataSource;
+        this.stockAnalysisMapper = stockAnalysisMapper;
     }
 
     /**
@@ -360,6 +364,63 @@ public class RecommendationService {
         if (candidates == null || candidates.isEmpty()) {
             log.warn("[Recommendation] 因子选股结果为空，无法生成推荐");
             return List.of();
+        }
+
+        // Step 1.3: 行业白名单 + 概念股过滤（从策略 filterConfigJson 读取）
+        // 只保留属于白名单行业或概念成分股的候选（优先级：概念股 > 行业白名单 > 全市场）
+        List<String> includeIndustries = getIncludeIndustries(strategyId);
+        List<String> conceptNames = getConceptNames(strategyId);
+        if (!includeIndustries.isEmpty() || !conceptNames.isEmpty()) {
+            List<String> candidateCodes = candidates.stream()
+                    .map(s -> stripSuffix(s.getSymbol()))
+                    .collect(Collectors.toList());
+            List<StockInfo> infos = stockInfoMapper.selectList(
+                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<StockInfo>()
+                            .in(StockInfo::getCode, candidateCodes)
+                            .select(StockInfo::getCode, StockInfo::getIndustry, StockInfo::getName));
+            Map<String, StockInfo> codeInfoMap = infos.stream()
+                    .filter(i -> i.getCode() != null)
+                    .collect(Collectors.toMap(StockInfo::getCode, i -> i, (a, b) -> a));
+
+            // 构建概念股代码集合（从 stock_concept 表加载）
+            Set<String> conceptCodes = new HashSet<>();
+            if (!conceptNames.isEmpty()) {
+                for (String conceptName : conceptNames) {
+                    List<Map<String, Object>> rows = stockAnalysisMapper.selectConceptStocksByName(conceptName);
+                    for (Map<String, Object> row : rows) {
+                        Object codeObj = row.get("code");
+                        if (codeObj != null) conceptCodes.add(codeObj.toString());
+                    }
+                }
+                log.info("[Recommendation] 概念股过滤: 概念={}, 加载成分股数={}", conceptNames, conceptCodes.size());
+            }
+
+            int before = candidates.size();
+            candidates = candidates.stream()
+                    .filter(s -> {
+                        String pureCode = stripSuffix(s.getSymbol());
+                        StockInfo info = codeInfoMap.get(pureCode);
+                        String ind = info != null && info.getIndustry() != null ? info.getIndustry() : "";
+
+                        // 优先级1: 概念股白名单（如果配置了概念名，只要在概念成分股内就保留）
+                        if (!conceptNames.isEmpty() && conceptCodes.contains(pureCode)) {
+                            return true;
+                        }
+                        // 优先级2: 行业白名单（行业关键词子串匹配）
+                        if (!includeIndustries.isEmpty()) {
+                            return includeIndustries.stream().anyMatch(ind::contains);
+                        }
+                        // 没有配置任何白名单 → 全市场保留
+                        return true;
+                    })
+                    .collect(Collectors.toList());
+
+            log.info("[Recommendation] 行业/概念白名单过滤 [strategyId={}]: 行业白名单={}, 概念={}, 过滤前={}, 过滤后={}",
+                    strategyId, includeIndustries.size(), conceptNames, before, candidates.size());
+            if (candidates.isEmpty()) {
+                log.warn("[Recommendation] 白名单过滤后候选池为空，跳过生成");
+                return List.of();
+            }
         }
 
         // Step 1.5: 行业排除过滤（从策略 filterConfigJson 读取）
@@ -2319,6 +2380,64 @@ public class RecommendationService {
             }
         } catch (Exception e) {
             log.warn("[Recommendation] 策略过滤配置解析失败 strategyId={}", strategyId, e);
+        }
+        return List.of();
+    }
+
+    /**
+     * 从策略 filterConfigJson 获取行业白名单（includeIndustries）
+     * 配置白名单后，只有属于白名单行业的股票才能进入候选池
+     */
+    @SuppressWarnings("unchecked")
+    private List<String> getIncludeIndustries(Long strategyId) {
+        if (strategyId == null) {
+            return List.of();
+        }
+        StrategyDefinition strategy = strategyDefinitionMapper.selectById(strategyId);
+        if (strategy == null || strategy.getFilterConfigJson() == null || strategy.getFilterConfigJson().isEmpty()) {
+            return List.of();
+        }
+        try {
+            Map<String, Object> filterConfig = objectMapper.readValue(strategy.getFilterConfigJson(), Map.class);
+            Object include = filterConfig.get("includeIndustries");
+            if (include instanceof List && !((List<?>) include).isEmpty()) {
+                List<String> result = ((List<?>) include).stream()
+                        .map(Object::toString)
+                        .collect(Collectors.toList());
+                log.info("[Recommendation] 从策略[{}]加载行业白名单: {}个", strategy.getStrategyName(), result.size());
+                return result;
+            }
+        } catch (Exception e) {
+            log.warn("[Recommendation] 策略行业白名单解析失败 strategyId={}", strategyId, e);
+        }
+        return List.of();
+    }
+
+    /**
+     * 从策略 filterConfigJson 获取概念板块名称列表（conceptNames）
+     * 配置后，从 stock_concept 表加载对应概念成分股作为候选池白名单
+     */
+    @SuppressWarnings("unchecked")
+    private List<String> getConceptNames(Long strategyId) {
+        if (strategyId == null) {
+            return List.of();
+        }
+        StrategyDefinition strategy = strategyDefinitionMapper.selectById(strategyId);
+        if (strategy == null || strategy.getFilterConfigJson() == null || strategy.getFilterConfigJson().isEmpty()) {
+            return List.of();
+        }
+        try {
+            Map<String, Object> filterConfig = objectMapper.readValue(strategy.getFilterConfigJson(), Map.class);
+            Object concepts = filterConfig.get("conceptNames");
+            if (concepts instanceof List && !((List<?>) concepts).isEmpty()) {
+                List<String> result = ((List<?>) concepts).stream()
+                        .map(Object::toString)
+                        .collect(Collectors.toList());
+                log.info("[Recommendation] 从策略[{}]加载概念板块: {}", strategy.getStrategyName(), result);
+                return result;
+            }
+        } catch (Exception e) {
+            log.warn("[Recommendation] 策略概念板块配置解析失败 strategyId={}", strategyId, e);
         }
         return List.of();
     }

@@ -56,6 +56,12 @@ public class StockFinancialIndicator implements Serializable {
     @TableField("total_assets_yoy")
     private BigDecimal totalAssetsYoy;
 
+    @TableField("total_equity_yoy")
+    private BigDecimal totalEquityYoy;
+
+    @TableField("rd_revenue_ratio")
+    private BigDecimal rdRevenueRatio;
+
     // 偿债能力
     @TableField("current_ratio")
     private BigDecimal currentRatio;

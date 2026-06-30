@@ -309,6 +309,64 @@ public class FinancialFactors {
     }
 
     // ====================================================================
+    // Phase 2+3 新增因子（2026-06-30）
+    // ====================================================================
+
+    /**
+     * 研发费用率 = rd_expense / total_revenue
+     * 从 stock_financial_indicator.rd_revenue_ratio 读取（由 calc_financial_indicators.py 预计算）
+     */
+    public static class RdRevenueRatioCalc implements FinancialFactorCalculator {
+        @Override
+        public String getFactorCode() { return "FIN_RD_REVENUE_RATIO"; }
+
+        @Override
+        public BigDecimal calculate(String code, StockFinancialIndicator ind) {
+            if (ind == null || ind.getRdRevenueRatio() == null) return null;
+            return ind.getRdRevenueRatio().setScale(SCALE, RoundingMode.HALF_UP);
+        }
+    }
+
+    /**
+     * 营业利润同比增长率 (%)
+     */
+    public static class OperatingProfitYoyCalc implements FinancialFactorCalculator {
+        @Override
+        public String getFactorCode() { return "FIN_OPERATING_PROFIT_YOY"; }
+
+        @Override
+        public BigDecimal calculate(String code, StockFinancialIndicator ind) {
+            return ind.getOperatingProfitYoy();
+        }
+    }
+
+    /**
+     * 总资产同比增长率 (%)
+     */
+    public static class TotalAssetsYoyCalc implements FinancialFactorCalculator {
+        @Override
+        public String getFactorCode() { return "FIN_TOTAL_ASSETS_YOY"; }
+
+        @Override
+        public BigDecimal calculate(String code, StockFinancialIndicator ind) {
+            return ind.getTotalAssetsYoy();
+        }
+    }
+
+    /**
+     * 净资产同比增长率 (%)
+     */
+    public static class TotalEquityYoyCalc implements FinancialFactorCalculator {
+        @Override
+        public String getFactorCode() { return "FIN_TOTAL_EQUITY_YOY"; }
+
+        @Override
+        public BigDecimal calculate(String code, StockFinancialIndicator ind) {
+            return ind.getTotalEquityYoy();
+        }
+    }
+
+    // ====================================================================
     // ACTIVE 估值因子（联表查询，需 Spring Bean 注入）
     // ====================================================================
 

@@ -124,6 +124,12 @@ public interface StockAnalysisMapper {
     List<Map<String, Object>> selectAllConcepts();
 
     /**
+     * 查询指定概念板块的成分股代码
+     * 返回：conceptName, code
+     */
+    List<Map<String, Object>> selectConceptStocksByName(@Param("conceptName") String conceptName);
+
+    /**
      * 大盘蓝筹事件面：融资余额变化百分比（最新 vs 5日前）
      * 返回：chgPct（百分比）
      */

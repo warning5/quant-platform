@@ -35,7 +35,7 @@ import math
 import sys
 import time
 from collections import defaultdict
-from datetime import date
+from datetime import date, datetime
 
 import pymysql
 import clickhouse_connect
@@ -63,10 +63,15 @@ FIN_FACTORS = [
     # 成长能力
     "FIN_REVENUE_YOY",       # 营收同比增长率
     "FIN_NET_PROFIT_YOY",    # 净利润同比增长率
+    "FIN_OPERATING_PROFIT_YOY",  # 营业利润同比增长率
+    "FIN_TOTAL_ASSETS_YOY",  # 总资产同比增长率
+    "FIN_TOTAL_EQUITY_YOY",  # 净资产同比增长率
     # TTM指标 — 滚动12个月，消除单季度季节性
     "FIN_ROE_TTM",           # ROE(TTM)
     "FIN_REVENUE_TTM_YOY",   # 营收同比(TTM)
-]  # 共6个财务因子
+    # 创新投入
+    "FIN_RD_REVENUE_RATIO",  # 研发费用率 = rd_expense / total_revenue
+]  # 共11个财务因子
 
 
 def load_stock_daily():
@@ -192,7 +197,8 @@ def load_financial_data():
             SELECT fi.code, fi.report_date, fi.report_type, fi.end_date,
                    fi.gross_profit_margin, fi.net_profit_margin, fi.roe, fi.roa,
                    fi.revenue_yoy, fi.net_profit_yoy, fi.operating_profit_yoy,
-                   fi.total_assets_yoy,
+                   fi.total_assets_yoy, fi.total_equity_yoy,
+                   fi.rd_revenue_ratio,
                    fi.current_ratio, fi.quick_ratio,
                    fi.debt_to_asset_ratio, fi.debt_to_equity_ratio,
                    fi.accounts_receivable_turnover, fi.ar_turnover_days,
@@ -628,10 +634,15 @@ def compute_finance_factors(fin_data, fin_factor_codes, start_date, end_date, ma
         # 成长能力
         "FIN_REVENUE_YOY":           (lambda r: _fval(r, "revenue_yoy"),                  "营收增速"),
         "FIN_NET_PROFIT_YOY":        (lambda r: _fval(r, "net_profit_yoy"),               "净利润增速"),
+        "FIN_OPERATING_PROFIT_YOY":  (lambda r: _fval(r, "operating_profit_yoy"),         "营业利润增速"),
+        "FIN_TOTAL_ASSETS_YOY":      (lambda r: _fval(r, "total_assets_yoy"),             "总资产增速"),
+        "FIN_TOTAL_EQUITY_YOY":      (lambda r: _fval(r, "total_equity_yoy"),             "净资产增速"),
         # TTM 指标
         "FIN_ROE_TTM":               (lambda r: _fval(r, "roe_ttm"),                       "ROE(TTM)"),
         "FIN_REVENUE_TTM_YOY":       (lambda r: _fval(r, "revenue_ttm_yoy"),               "营收增速(TTM)"),
-    }  # 共6个财务因子
+        # 创新投入
+        "FIN_RD_REVENUE_RATIO":      (lambda r: _fval(r, "rd_revenue_ratio"),             "研发费用率"),
+    }  # 共11个财务因子
 
     for code, reports in fin_data.items():
         for rpt in reports:
@@ -836,19 +847,21 @@ def normalize_and_write(factor_data, code_market_map, batch_size=5000):
 
 def _insert_batch(ch_client, batch):
     """写入一批因子值到 ClickHouse，含 announce_date（第7列，可 None）"""
+    if not batch:
+        return
     rows = []
     for item in batch:
         fc, symbol, td, val, pct, z, announce_d = item
-        row = {
-            "factor_code": fc,
-            "symbol": symbol,
-            "calc_date": td.isoformat() if hasattr(td, 'isoformat') else str(td),
-            "factor_val": val,
-            "rank_value": pct,
-            "z_score": z,
-            "announce_date": announce_d.isoformat() if announce_d and hasattr(announce_d, 'isoformat') else None,
-        }
-        rows.append(row)
+        # 统一转 date 对象，避免 str vs date 类型混用
+        if isinstance(td, str):
+            td = date.fromisoformat(td) if '-' in td else datetime.strptime(td, '%Y%m%d').date()
+        ad = None
+        if announce_d:
+            if isinstance(announce_d, str):
+                ad = date.fromisoformat(announce_d) if '-' in announce_d else datetime.strptime(announce_d, '%Y%m%d').date()
+            elif isinstance(announce_d, (date, datetime)):
+                ad = announce_d if isinstance(announce_d, date) else announce_d.date()
+        rows.append((fc, symbol, td, val, pct, z, ad))
     ch_client.insert("factor_value", rows, column_names=["factor_code", "symbol", "calc_date", "factor_val", "rank_value", "z_score", "announce_date"])
 
 

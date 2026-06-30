@@ -143,7 +143,7 @@ public class FactorComputeEngine {
         registerBuiltin(new ChanTheoryFactors.PenCountCalculator());
         registerBuiltin(new ChanTheoryFactors.PenDirCalculator());
 
-        // 注册财务因子（静态内部类，8个ACTIVE）
+        // 注册财务因子（静态内部类，12个ACTIVE）
         registerFinancial(new FinancialFactors.RoeCalc());
         registerFinancial(new FinancialFactors.RevenueYoyCalc());
         registerFinancial(new FinancialFactors.NetProfitYoyCalc());
@@ -152,6 +152,12 @@ public class FactorComputeEngine {
         registerFinancial(new FinancialFactors.RoeTtmCalc());
         registerFinancial(new FinancialFactors.RevenueTtmYoyCalc());
         registerFinancial(new FinancialFactors.NetProfitTtmYoyCalc());
+        // Phase 2: 研发费用率
+        registerFinancial(new FinancialFactors.RdRevenueRatioCalc());
+        // Phase 3: 营业利润/总资产/净资产增速
+        registerFinancial(new FinancialFactors.OperatingProfitYoyCalc());
+        registerFinancial(new FinancialFactors.TotalAssetsYoyCalc());
+        registerFinancial(new FinancialFactors.TotalEquityYoyCalc());
         log.info("Registered {} financial factor calculators (static)", financialCalculators.size());
     }
 

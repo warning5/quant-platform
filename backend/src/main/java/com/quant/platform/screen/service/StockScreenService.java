@@ -1256,7 +1256,24 @@ public class StockScreenService {
             }
         }
 
-        // 1. 行业排除
+        // 1a. 行业白名单（includeIndustries）—— 只保留属于白名单行业的股票
+        Object includeIndustries = filterConfig.get("includeIndustries");
+        if (includeIndustries instanceof List) {
+            Set<String> includeSet = new HashSet<>((List<String>) includeIndustries);
+            if (!includeSet.isEmpty()) {
+                Map<String, String> codeIndustryMap = batchLoadIndustryInfo(new ArrayList<>(result));
+                int before = result.size();
+                result.removeIf(code -> {
+                    String ind = codeIndustryMap.get(code);
+                    if (ind == null) return true; // 无行业信息→排除
+                    return includeSet.stream().noneMatch(ind::contains);
+                });
+                log.info("[FilterConfig] Industry include: whitelist={}, before={}, after={}",
+                        includeSet.size(), before, result.size());
+            }
+        }
+
+        // 1b. 行业排除
         Object excludeIndustries = filterConfig.get("excludeIndustries");
         if (excludeIndustries instanceof List) {
             Set<String> excludeSet = new HashSet<>((List<String>) excludeIndustries);
