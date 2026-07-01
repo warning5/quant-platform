@@ -76,6 +76,18 @@ public class StockRecommendation {
     /** 推荐买入价格（基于MA20支撑位，若无法获取则=close×0.95） */
     private Double suggestedBuyPrice;
 
+    /** 建议止损价（基于ATR 2倍宽度，回退buyPrice×0.92） */
+    private Double suggestedStopLoss;
+
+    /** 建议止盈价（盈亏比 1:2） */
+    private Double suggestedTakeProfit;
+
+    /** 建议目标价（盈亏比 1:3，中期目标） */
+    private Double suggestedTargetPrice;
+
+    /** 建议仓位比例（0~1，基于riskScore+liquidityScore，上限10%） */
+    private Double suggestedPositionPct;
+
     /** 当日涨跌幅% */
     private Double changePercent;
 

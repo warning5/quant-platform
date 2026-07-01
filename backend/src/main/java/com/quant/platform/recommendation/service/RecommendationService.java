@@ -2052,6 +2052,58 @@ public class RecommendationService {
     }
 
     /**
+     * 计算价格计划：止损价、止盈价、目标价、建议仓位 (#5 + #9)
+     * <p>
+     * 止损价：基于 ATR 2倍宽度，回退 buyPrice×0.92，下限 buyPrice×0.88
+     * 止盈价：盈亏比 R:R = 1:2，即 buyPrice + 2 × (buyPrice - stopLoss)
+     * 目标价：盈亏比 R:R = 1:3，即 buyPrice + 3 × (buyPrice - stopLoss)
+     * 建议仓位：riskScore(0-15) + liquidityScore(0-10) 映射，范围 2.1%~10%
+     *   - basePct = 0.03 + (riskScore/15) × 0.07  → 3%~10%（风险越低仓位越高）
+     *   - liquidityFactor = 0.7 + 0.3 × (liquidityScore/10)  → 0.7~1.0（流动性补偿）
+     *   - finalPct = min(0.10, basePct × liquidityFactor)
+     */
+    private void calcPricePlan(StockRecommendation rec, AnalysisOverview overview) {
+        Double buyPrice = rec.getSuggestedBuyPrice();
+        if (buyPrice == null || buyPrice <= 0) return;
+
+        Double atr = (overview != null) ? overview.getAtr() : null;
+
+        // ── 止损价 ──
+        double stopLoss;
+        if (atr != null && atr > 0) {
+            stopLoss = buyPrice - 2.0 * atr;
+        } else {
+            stopLoss = buyPrice * 0.92; // 回退8%止损
+        }
+        // 止损下限：不低于买入价的-12%（避免异常ATR导致止损过远）
+        stopLoss = Math.max(stopLoss, buyPrice * 0.88);
+        rec.setSuggestedStopLoss(Math.round(stopLoss * 100.0) / 100.0);
+
+        // ── 止盈价 (R:R = 1:2) ──
+        double risk = buyPrice - stopLoss;
+        double takeProfit = buyPrice + 2.0 * risk;
+        rec.setSuggestedTakeProfit(Math.round(takeProfit * 100.0) / 100.0);
+
+        // ── 目标价 (R:R = 1:3) ──
+        double targetPrice = buyPrice + 3.0 * risk;
+        rec.setSuggestedTargetPrice(Math.round(targetPrice * 100.0) / 100.0);
+
+        // ── 建议仓位 ──
+        Integer riskScore = rec.getRiskScore();
+        Integer liquidityScore = rec.getLiquidityScore();
+        int rs = (riskScore != null) ? riskScore : 7;       // 默认中等风险
+        int ls = (liquidityScore != null) ? liquidityScore : 5; // 默认中等流动性
+        double basePct = 0.03 + (rs / 15.0) * 0.07;          // 3%~10%
+        double liquidityFactor = 0.7 + 0.3 * (ls / 10.0);    // 0.7~1.0
+        double positionPct = Math.min(0.10, basePct * liquidityFactor);
+        rec.setSuggestedPositionPct(Math.round(positionPct * 10000.0) / 10000.0);
+
+        log.debug("[PricePlan] code={} buy={} stop={} takeProfit={} target={} pos={}%",
+                rec.getStockCode(), buyPrice, stopLoss, takeProfit, targetPrice,
+                String.format("%.1f", positionPct * 100));
+    }
+
+    /**
      * 多因子选股
      *
      * @param strategyId 策略ID（必须）
@@ -2518,6 +2570,9 @@ public class RecommendationService {
 
         // P1-2: 计算风险和流动性评分
         calculateRiskAndLiquidityScore(rec, overview, stock.getCurrentPrice());
+
+        // #5+#9: 计算价格计划（止损/止盈/目标价/仓位），依赖 riskScore+liquidityScore
+        calcPricePlan(rec, overview);
 
         // 新闻事件加分：估值修复/事件驱动策略，如果近30天有利好事件(增持/回购/业绩预增)，额外加分
         String strategyCode = "";

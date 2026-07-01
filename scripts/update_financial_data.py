@@ -108,18 +108,21 @@ def fetch_yjbb(year):
     current_year = datetime.now().year
     if year >= current_year:
         print(f"  跳过 {year} 年报（尚未发布）")
+        sys.stdout.flush()
         return None
     date_str = f'{year}1231'
-    print(f"  拉取东方财富业绩报表 {date_str} ...")
+    print(f"  拉取东方财富业绩报表 {date_str} ...", end=" ", flush=True)
     for attempt in range(3):
         try:
             df = ak.stock_yjbb_em(date=date_str)
-            print(f"  获取到 {len(df)} 条记录")
+            print(f"获取到 {len(df)} 条记录")
             return df
         except Exception as e:
-            print(f"  第{attempt+1}次失败: {e}")
+            print(f"第{attempt+1}次失败: {e}")
+            sys.stdout.flush()
             if attempt < 2:
                 time.sleep(5)
+    print("全部尝试失败")
     return None
 
 def save_yjbb_to_indicator(df, conn, report_year, force=False):
@@ -190,24 +193,20 @@ def fetch_ths_abstract(code):
         return None
 
 def save_ths_to_tables(df, code, conn, force=False):
-    """将同花顺摘要数据存入 financial_indicator + income"""
+    """将同花顺摘要数据存入 financial_indicator + income
+
+    死锁重试：并发写入时 INSERT ON DUPLICATE KEY UPDATE 可能因
+    InnoDB gap lock 导致死锁(1213)，捕获后回滚并重试最多3次。
+    """
     if df is None or df.empty:
         return 0
 
-    cursor = conn.cursor()
-
-    # 获取已有记录
-    existing = set()
-    if not force:
-        cursor.execute("SELECT code, report_date FROM stock_financial_indicator WHERE code = %s", (code,))
-        existing = {(r[0], r[1]) for r in cursor.fetchall()}
-
-    # 列名映射到数据库字段
+    # ── 第一遍：收集所有需要插入的行（只解析，不写库，避免重试时丢失数据）──
     COL_MAP_INDICATOR = {
         '销售净利率': 'net_profit_margin',
         '销售毛利率': 'gross_profit_margin',
         '净资产收益率': 'roe',
-        '净资产收益率-摊薄': 'roe',  # 优先用摊薄
+        '净资产收益率-摊薄': 'roe',
         '存货周转率': 'inventory_turnover',
         '存货周转天数': 'inventory_turnover_days',
         '应收账款周转天数': 'ar_turnover_days',
@@ -217,31 +216,25 @@ def save_ths_to_tables(df, code, conn, force=False):
     }
 
     COL_MAP_INCOME = {
-        '净利润-净利润': 'net_profit',            # akshare年报返回的母公司净利润
-        '净利润': 'net_profit',                    # 同花顺摘要的母公司净利润
+        '净利润-净利润': 'net_profit',
+        '净利润': 'net_profit',
         '营业总收入': 'total_revenue',
         '扣非净利润': 'deducted_np_parent_company',
         '基本每股收益': 'eps_basic',
     }
 
-    inserted = 0
+    rows_to_insert = []
     for _, row in df.iterrows():
         report_date_raw = str(row.get('报告期', ''))
         if not report_date_raw:
             continue
-
-        # 标准化: '2024-12-31' -> '20241231'
         rd = report_date_raw.replace('-', '')[:8]
         if len(rd) != 8:
-            continue
-
-        if (code, rd) in existing:
             continue
 
         rt = report_type_from_date(rd)
         ed = end_date_from_report(rd)
 
-        # 解析指标值
         indicator_vals = {}
         income_vals = {}
         for col_name, db_field in COL_MAP_INDICATOR.items():
@@ -256,63 +249,108 @@ def save_ths_to_tables(df, code, conn, force=False):
                 if val is not None:
                     income_vals[db_field] = val
 
-        # ─── 写入 stock_financial_indicator ───
-        indicator_cols = ['net_profit_margin', 'gross_profit_margin', 'roe',
-                          'inventory_turnover', 'inventory_turnover_days', 'ar_turnover_days',
-                          'current_ratio', 'quick_ratio', 'debt_to_asset_ratio', 'source']
-        if indicator_vals:
-            indicator_vals.setdefault('source', 'akshare_ths')
-            # 构建 UPDATE 部分
-            set_parts = []
-            insert_cols = []
-            insert_vals = []
-            for col in indicator_cols:
-                if col in indicator_vals:
-                    set_parts.append(f"{col} = VALUES({col})")
-                    insert_cols.append(col)
-                    insert_vals.append(indicator_vals[col])
+        rows_to_insert.append((rd, rt, ed, indicator_vals, income_vals))
 
-            if insert_cols:
-                sql = f"""
-                    INSERT INTO stock_financial_indicator
-                        (code, report_date, report_type, end_date, {', '.join(insert_cols)})
-                    VALUES (%s,%s,%s,%s, {', '.join(['%s']*len(insert_cols))})
-                    ON DUPLICATE KEY UPDATE {', '.join(set_parts)}
-                """
-                try:
-                    cursor.execute(sql, [code, rd, rt, ed] + insert_vals)
-                    inserted += 1
-                except Exception as e:
-                    print(f"    ERR indicator {code} {rd}: {e}")
+    if not rows_to_insert:
+        return 0
 
-        # ─── 写入 stock_income（补充关键指标）───
-        if income_vals:
-            income_vals.setdefault('source', 'akshare_ths')
-            # 动态包含所有已映射的 income 字段（而非写死列表）
-            income_cols = [col for col in income_vals.keys()]
-            set_parts = []
-            insert_cols = []
-            insert_vals = []
-            for col in income_cols:
-                if col in income_vals:
-                    set_parts.append(f"{col} = VALUES({col})")
-                    insert_cols.append(col)
-                    insert_vals.append(income_vals[col])
+    # ── 第二遍：死锁重试写入 ──
+    MAX_RETRIES = 3
+    indicator_cols = ['net_profit_margin', 'gross_profit_margin', 'roe',
+                      'inventory_turnover', 'inventory_turnover_days', 'ar_turnover_days',
+                      'current_ratio', 'quick_ratio', 'debt_to_asset_ratio', 'source']
 
-            if insert_cols:
-                sql = f"""
-                    INSERT INTO stock_income
-                        (code, report_date, report_type, end_date, {', '.join(insert_cols)})
-                    VALUES (%s,%s,%s,%s, {', '.join(['%s']*len(insert_cols))})
-                    ON DUPLICATE KEY UPDATE {', '.join(set_parts)}
-                """
-                try:
-                    cursor.execute(sql, [code, rd, rt, ed] + insert_vals)
-                except Exception as e:
-                    print(f"    ERR income {code} {rd}: {e}")
+    for attempt in range(MAX_RETRIES):
+        cursor = conn.cursor()
+        try:
+            # 每条重试都重查已有记录（上次重试可能已写入部分数据）
+            existing = set()
+            if not force:
+                cursor.execute("SELECT code, report_date FROM stock_financial_indicator WHERE code = %s", (code,))
+                existing = {(r[0], r[1]) for r in cursor.fetchall()}
 
-    conn.commit()
-    return inserted
+            inserted = 0
+            for rd, rt, ed, indicator_vals, income_vals in rows_to_insert:
+                if (code, rd) in existing:
+                    continue
+
+                # ─── 写入 stock_financial_indicator ───
+                if indicator_vals:
+                    indicator_vals.setdefault('source', 'akshare_ths')
+                    set_parts = []
+                    insert_cols = []
+                    insert_vals_local = []
+                    for col in indicator_cols:
+                        if col in indicator_vals:
+                            set_parts.append(f"{col} = VALUES({col})")
+                            insert_cols.append(col)
+                            insert_vals_local.append(indicator_vals[col])
+
+                    if insert_cols:
+                        sql = f"""
+                            INSERT INTO stock_financial_indicator
+                                (code, report_date, report_type, end_date, {', '.join(insert_cols)})
+                            VALUES (%s,%s,%s,%s, {', '.join(['%s']*len(insert_cols))})
+                            ON DUPLICATE KEY UPDATE {', '.join(set_parts)}
+                        """
+                        try:
+                            cursor.execute(sql, [code, rd, rt, ed] + insert_vals_local)
+                            inserted += 1
+                        except pymysql.err.OperationalError as e:
+                            if e.args[0] == 1213:
+                                raise  # 死锁 → 回滚整个事务并重试
+                            print(f"    ERR indicator {code} {rd}: {e}")
+                        except Exception as e:
+                            print(f"    ERR indicator {code} {rd}: {e}")
+
+                # ─── 写入 stock_income ───
+                if income_vals:
+                    income_vals.setdefault('source', 'akshare_ths')
+                    income_cols = [col for col in income_vals.keys()]
+                    set_parts = []
+                    insert_cols = []
+                    insert_vals_local = []
+                    for col in income_cols:
+                        if col in income_vals:
+                            set_parts.append(f"{col} = VALUES({col})")
+                            insert_cols.append(col)
+                            insert_vals_local.append(income_vals[col])
+
+                    if insert_cols:
+                        sql = f"""
+                            INSERT INTO stock_income
+                                (code, report_date, report_type, end_date, {', '.join(insert_cols)})
+                            VALUES (%s,%s,%s,%s, {', '.join(['%s']*len(insert_cols))})
+                            ON DUPLICATE KEY UPDATE {', '.join(set_parts)}
+                        """
+                        try:
+                            cursor.execute(sql, [code, rd, rt, ed] + insert_vals_local)
+                        except pymysql.err.OperationalError as e:
+                            if e.args[0] == 1213:
+                                raise  # 死锁 → 回滚整个事务并重试
+                            print(f"    ERR income {code} {rd}: {e}")
+                        except Exception as e:
+                            print(f"    ERR income {code} {rd}: {e}")
+
+            conn.commit()
+            return inserted
+
+        except pymysql.err.OperationalError as e:
+            if e.args[0] == 1213 and attempt < MAX_RETRIES - 1:
+                conn.rollback()
+                time.sleep(0.1 * (2 ** attempt))
+                continue
+            else:
+                if e.args[0] == 1213:
+                    print(f"    ERR indicator {code}: (1213 死锁重试 {MAX_RETRIES} 次仍失败)")
+                else:
+                    print(f"    ERR indicator {code}: {e}")
+                conn.rollback()
+                return 0
+        except Exception as e:
+            print(f"    ERR indicator {code}: {e}")
+            conn.rollback()
+            return 0
 
 
 def _process_ths_stock(code, force, existing_set):
@@ -499,34 +537,24 @@ CASHFLOW_MAP = {
 }
 
 def save_sina_to_table(df, code, table_name, col_map, conn, force=False):
-    """将新浪报表数据存入指定表"""
+    """将新浪报表数据存入指定表（含死锁重试）"""
     if df is None or df.empty:
         return 0
-
-    cursor = conn.cursor()
-
-    existing = set()
-    if not force:
-        cursor.execute(f"SELECT code, report_date FROM {table_name} WHERE code = %s", (code,))
-        existing = {(r[0], r[1]) for r in cursor.fetchall()}
 
     # 只取映射中存在的列
     target_cols = [db_field for _, db_field in col_map.items() if db_field is not None]
 
-    inserted = 0
+    # ── 第一遍：收集所有需要插入的行 ──
+    rows_to_insert = []
     for _, row in df.iterrows():
         report_date_raw = str(row.get('报告日', ''))
         rd = report_date_raw.replace('-', '')[:8]
         if len(rd) != 8:
             continue
 
-        if (code, rd) in existing:
-            continue
-
         rt = report_type_from_date(rd)
         ed = end_date_from_report(rd)
 
-        # 解析值（同列取第一个非空值，优先匹配排在前面的别名）
         insert_cols = []
         insert_vals = []
         seen_fields = set()
@@ -534,7 +562,7 @@ def save_sina_to_table(df, code, table_name, col_map, conn, force=False):
             if db_field is None:
                 continue
             if db_field in seen_fields:
-                continue  # 同一db_field只取第一个有值的
+                continue
             if src_col in row.index:
                 val = parse_number(row[src_col])
                 if val is not None:
@@ -545,39 +573,79 @@ def save_sina_to_table(df, code, table_name, col_map, conn, force=False):
         if not insert_cols:
             continue
 
-        # 标注数据来源
         insert_cols.append('source')
         insert_vals.append('akshare_sina')
 
-        set_parts = [f"{c} = VALUES({c})" for c in insert_cols]
-        sql = f"""
-            INSERT INTO {table_name}
-                (code, report_date, report_type, end_date, {', '.join(insert_cols)})
-            VALUES (%s,%s,%s,%s, {', '.join(['%s']*len(insert_cols))})
-            ON DUPLICATE KEY UPDATE {', '.join(set_parts)}
-        """
-        try:
-            cursor.execute(sql, [code, rd, rt, ed] + insert_vals)
-            inserted += 1
-        except Exception as e:
-            print(f"    ERR {table_name} {code} {rd}: {e}")
+        rows_to_insert.append((rd, rt, ed, insert_cols, insert_vals))
 
-    conn.commit()
+    if not rows_to_insert:
+        return 0
 
-    # 写入后计算 free_cash_flow = net_operate_cf + net_invest_cf
-    if table_name == 'stock_cashflow' and inserted > 0:
+    # ── 第二遍：死锁重试写入 ──
+    MAX_RETRIES = 3
+    for attempt in range(MAX_RETRIES):
+        cursor = conn.cursor()
         try:
-            cursor.execute("""
-                UPDATE stock_cashflow
-                SET free_cash_flow = COALESCE(net_operate_cf, 0) + COALESCE(net_invest_cf, 0)
-                WHERE code = %s AND free_cash_flow IS NULL
-                  AND net_operate_cf IS NOT NULL AND net_invest_cf IS NOT NULL
-            """, (code,))
+            existing = set()
+            if not force:
+                cursor.execute(f"SELECT code, report_date FROM {table_name} WHERE code = %s", (code,))
+                existing = {(r[0], r[1]) for r in cursor.fetchall()}
+
+            inserted = 0
+            for rd, rt, ed, insert_cols, insert_vals in rows_to_insert:
+                if (code, rd) in existing:
+                    continue
+
+                set_parts = [f"{c} = VALUES({c})" for c in insert_cols]
+                sql = f"""
+                    INSERT INTO {table_name}
+                        (code, report_date, report_type, end_date, {', '.join(insert_cols)})
+                    VALUES (%s,%s,%s,%s, {', '.join(['%s']*len(insert_cols))})
+                    ON DUPLICATE KEY UPDATE {', '.join(set_parts)}
+                """
+                try:
+                    cursor.execute(sql, [code, rd, rt, ed] + insert_vals)
+                    inserted += 1
+                except pymysql.err.OperationalError as e:
+                    if e.args[0] == 1213:
+                        raise  # 死锁 → 回滚整个事务并重试
+                    print(f"    ERR {table_name} {code} {rd}: {e}")
+                except Exception as e:
+                    print(f"    ERR {table_name} {code} {rd}: {e}")
+
             conn.commit()
-        except Exception:
-            pass  # FCF 计算失败不影响主流程
 
-    return inserted
+            # 写入后计算 free_cash_flow
+            if table_name == 'stock_cashflow' and inserted > 0:
+                try:
+                    cursor.execute("""
+                        UPDATE stock_cashflow
+                        SET free_cash_flow = COALESCE(net_operate_cf, 0) + COALESCE(net_invest_cf, 0)
+                        WHERE code = %s AND free_cash_flow IS NULL
+                          AND net_operate_cf IS NOT NULL AND net_invest_cf IS NOT NULL
+                    """, (code,))
+                    conn.commit()
+                except Exception:
+                    pass
+
+            return inserted
+
+        except pymysql.err.OperationalError as e:
+            if e.args[0] == 1213 and attempt < MAX_RETRIES - 1:
+                conn.rollback()
+                time.sleep(0.1 * (2 ** attempt))
+                continue
+            else:
+                if e.args[0] == 1213:
+                    print(f"    ERR {table_name} {code}: (1213 死锁重试 {MAX_RETRIES} 次仍失败)")
+                else:
+                    print(f"    ERR {table_name} {code}: {e}")
+                conn.rollback()
+                return 0
+        except Exception as e:
+            print(f"    ERR {table_name} {code}: {e}")
+            conn.rollback()
+            return 0
 
 
 # ─────────────────────────────────────────────
@@ -741,11 +809,12 @@ def main():
 
     # ─── Step 1: 东方财富业绩报表（批量） ───
     if args.step is None or args.step == 'yjbb':
-        print("=" * 60)
-        print("Step 1: 东方财富业绩报表（批量）")
-        print("=" * 60)
+        print("=" * 60, flush=True)
+        print("Step 1: 东方财富业绩报表（批量）", flush=True)
+        print("=" * 60, flush=True)
         global year
         for year in years:
+            print(f"[INFO] 开始处理 {year} 年报...", flush=True)
             df = fetch_yjbb(year)
             if df is not None:
                 save_yjbb_to_indicator(df, conn, year, args.force)
@@ -754,9 +823,9 @@ def main():
     # ─── Step 2: 同花顺财务摘要（逐只 / 并发） ───
     if args.step is None or args.step == 'ths':
         print()
-        print("=" * 60)
-        print("Step 2: 同花顺财务摘要")
-        print("=" * 60)
+        print("=" * 60, flush=True)
+        print("Step 2: 同花顺财务摘要", flush=True)
+        print("=" * 60, flush=True)
 
         cursor = conn.cursor()
         if args.code:
@@ -796,7 +865,7 @@ def main():
                     total_inserted += n
                     if err and err != 'no_data':
                         error_count += 1
-                    if done_count % 50 == 0 or done_count == len(codes):
+                    if done_count % 10 == 0 or done_count == len(codes):
                         elapsed = time.time() - t0
                         rate = done_count / elapsed if elapsed > 0 else 0
                         eta = (len(codes) - done_count) / rate if rate > 0 else 0
@@ -805,7 +874,7 @@ def main():
                               f"插入 {total_inserted} 条 "
                               f"错误 {error_count} "
                               f"速度 {rate:.1f}/s "
-                              f"ETA {eta:.0f}s")
+                              f"ETA {eta:.0f}s", flush=True)
 
             elapsed = time.time() - t0
             print(f"  同花顺摘要完成(并发): 共新增/更新 {total_inserted} 条, "

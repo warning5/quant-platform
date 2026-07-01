@@ -318,7 +318,8 @@ public class ScheduleConfigController {
                 @SuppressWarnings("unchecked")
                 Map<String, Object> ec = mapper.readValue(extraConfigJson, Map.class);
                 if (ec != null) {
-                    incremental = Boolean.TRUE.equals(ec.get("incremental"));
+                    // 默认增量模式（未配 incremental 时为 true）；显式配 false 才走全量
+                    incremental = !Boolean.FALSE.equals(ec.get("incremental"));
                     dateMode = ec.get("dateMode") != null ? ec.get("dateMode").toString() : "today";
                     customStartDate = ec.get("startDate") != null ? ec.get("startDate").toString() : null;
                     customEndDate = ec.get("endDate") != null ? ec.get("endDate").toString() : null;

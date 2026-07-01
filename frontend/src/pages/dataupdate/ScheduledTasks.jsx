@@ -153,20 +153,21 @@ function extractTimeFromCron(cronExpr) {
 
 /** 解析 DB 中的 extra_config JSON 字符串 */
 function parseExtraConfig(raw) {
-  if (!raw) return { incremental: false, dateMode: 'today', startDate: null, endDate: null, strategyIds: [], topN: 15, enableConfidenceControl: true };
+  if (!raw) return { incremental: true, dateMode: 'today', startDate: null, endDate: null, strategyIds: [], weightMode: 'ICW', topN: 15, enableConfidenceControl: true };
   try {
     const obj = typeof raw === 'string' ? JSON.parse(raw) : raw;
     return {
-      incremental: !!obj.incremental,
+      incremental: obj.incremental !== false,  // 未配置时默认增量模式
       dateMode: obj.dateMode || 'today',
       startDate: obj.startDate || null,
       endDate: obj.endDate || null,
       strategyIds: obj.strategyIds || (obj.strategyId ? [obj.strategyId] : []),
+      weightMode: obj.weightMode || 'ICW',
       topN: obj.topN || 15,
       enableConfidenceControl: obj.enableConfidenceControl !== false,
     };
   } catch {
-    return { incremental: false, dateMode: 'today', startDate: null, endDate: null, strategyIds: [], topN: 15, enableConfidenceControl: true };
+    return { incremental: true, dateMode: 'today', startDate: null, endDate: null, strategyIds: [], weightMode: 'ICW', topN: 15, enableConfidenceControl: true };
   }
 }
 
@@ -183,6 +184,12 @@ function stringifyExtraConfig(config) {
     result.strategyIds = config.strategyIds;
     result.topN = config.topN || 15;
     result.enableConfidenceControl = config.enableConfidenceControl !== false;
+  }
+  // 权重模式（非默认 ICW 时才写入，保持向后兼容）
+  if (config.weightMode && config.weightMode !== 'ICW') {
+    result.weightMode = config.weightMode;
+  } else if (config.weightMode === 'ICW') {
+    result.weightMode = 'ICW';
   }
   return JSON.stringify(result);
 }
@@ -479,11 +486,12 @@ function CronVisualEditor({ open, initialValue, initialExtraConfig, taskKey, onO
   const [manualEditCron, setManualEditCron] = useState(initialValue || '');
 
   // --- 任务配置 state ---
-  const [incremental, setIncremental] = useState(false);
+  const [incremental, setIncremental] = useState(true);
   const [dateMode, setDateMode] = useState('today');
   const [customDates, setCustomDates] = useState(null); // [dayjs, dayjs]
   // --- 推荐任务专属 state ---
   const [strategyIds, setStrategyIds] = useState([]);
+  const [weightMode, setWeightMode] = useState('ICW');
   const [topN, setTopN] = useState(15);
   const [enableConfidenceControl, setEnableConfidenceControl] = useState(true);
   const [allStrategies, setAllStrategies] = useState([]);
@@ -506,6 +514,7 @@ function CronVisualEditor({ open, initialValue, initialExtraConfig, taskKey, onO
         setCustomDates(null);
       }
       setStrategyIds(ec.strategyIds || []);
+      setWeightMode(ec.weightMode || 'ICW');
       setTopN(ec.topN || 15);
       setEnableConfidenceControl(ec.enableConfidenceControl !== false);
       // 推荐任务时加载策略列表
@@ -683,7 +692,8 @@ function CronVisualEditor({ open, initialValue, initialExtraConfig, taskKey, onO
   // ========== Tab 内容渲染函数（内联，不用 useMemo 避免数组重建导致卡切换） ==========
   const renderConfigTab = () => (
     <div style={{ padding: '16px 0' }}>
-      {/* 增量/全量 */}
+      {/* 增量/全量 — 推荐任务不需要 */}
+      {taskKey !== 'DAILY_RECOMMENDATION' && (
       <div style={{ marginBottom: 20 }}>
         <Text strong style={{ fontSize: 13, display: 'block', marginBottom: 8 }}>更新模式</Text>
         <Space align="center">
@@ -700,87 +710,117 @@ function CronVisualEditor({ open, initialValue, initialExtraConfig, taskKey, onO
           </Text>
         </Space>
       </div>
-
-      {/* 日期范围 */}
-      <div>
-        <Text strong style={{ fontSize: 13, display: 'block', marginBottom: 8 }}>日期范围</Text>
-        <Space direction="vertical" size={8} style={{ width: '100%' }}>
-          <Select
-            value={dateMode}
-            onChange={v => setDateMode(v)}
-            options={DATE_MODE_OPTIONS}
-            style={{ width: 200 }}
-          />
-
-          {dateMode === 'custom' ? (
-            <RangePicker
-              value={customDates}
-              onChange={(dates) => setCustomDates(dates)}
-              format="YYYY-MM-DD"
-              placeholder={['开始日期', '结束日期']}
-            />
-          ) : (
-            <div style={{
-              padding: '8px 12px',
-              background: '#fafafa',
-              borderRadius: 6,
-              border: '1px solid #f0f0f0',
-              maxWidth: 360,
-            }}>
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                {dateMode === 'today' && (
-                  <>自动使用 <Tag color="blue">当天</Tag>（启动时传当天日期）</>
-                )}
-                {dateMode === 'recent_1' && (
-                  <>自动使用 <Tag color="blue">昨天</Tag>（仅最近1个交易日）</>
-                )}
-                {dateMode === 'recent_3' && (
-                  <>自动使用 <Tag color="blue">3天前 ~ 昨天</Tag>（最近3个交易日）</>
-                )}
-              </Text>
-            </div>
-          )}
-        </Space>
-      </div>
-
-      {/* 推荐任务专属配置 */}
-      {taskKey === 'DAILY_RECOMMENDATION' && (
-        <div style={{ marginTop: 20 }}>
-          <Text strong style={{ fontSize: 13, display: 'block', marginBottom: 8 }}>策略选择</Text>
-          <Select
-            mode="multiple"
-            value={strategyIds}
-            onChange={setStrategyIds}
-            placeholder="选择要执行的策略"
-            style={{ width: '100%', marginBottom: 12 }}
-            options={allStrategies.map(s => ({
-              value: s.id,
-              label: `${s.strategyName}（#${s.id}）`,
-            }))}
-            maxTagCount={5}
-            maxTagTextLength={12}
-          />
-          {strategyIds.length > 0 && (
-            <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 12 }}>
-              已选 {strategyIds.length} 个策略：{strategyIds.map(id => {
-                const s = allStrategies.find(x => x.id === id);
-                return s?.strategyName || `#${id}`;
-              }).join('、')}
-            </Text>
-          )}
-
-          <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
-            <div>
-              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>每策略推荐数</Text>
-              <InputNumber min={5} max={50} value={topN} onChange={setTopN} style={{ width: 100 }} />
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, justifyContent: 'center' }}>
-              <Switch checked={enableConfidenceControl} onChange={setEnableConfidenceControl} size="small"
-                checkedChildren="置信度控制" unCheckedChildren="固定TopN" />
-            </div>
-          </div>
-        </div>
       )}
+
+      {/* 任务参数：两列布局 */}
+      <Row gutter={24}>
+        {/* 左列：日期范围 + 每策略推荐数 */}
+        <Col span={12}>
+          <div>
+            <Text strong style={{ fontSize: 13, display: 'block', marginBottom: 8 }}>日期范围</Text>
+            <Space direction="vertical" size={8} style={{ width: '100%' }}>
+              <Select
+                value={dateMode}
+                onChange={v => setDateMode(v)}
+                options={DATE_MODE_OPTIONS}
+                style={{ width: '100%' }}
+              />
+              {dateMode === 'custom' ? (
+                <RangePicker
+                  value={customDates}
+                  onChange={(dates) => setCustomDates(dates)}
+                  format="YYYY-MM-DD"
+                  placeholder={['开始日期', '结束日期']}
+                  style={{ width: '100%' }}
+                />
+              ) : (
+                <div style={{
+                  padding: '8px 12px',
+                  background: '#fafafa',
+                  borderRadius: 6,
+                  border: '1px solid #f0f0f0',
+                }}>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {dateMode === 'today' && (
+                      <>自动使用 <Tag color="blue">当天</Tag>（启动时传当天日期）</>
+                    )}
+                    {dateMode === 'recent_1' && (
+                      <>自动使用 <Tag color="blue">昨天</Tag>（仅最近1个交易日）</>
+                    )}
+                    {dateMode === 'recent_3' && (
+                      <>自动使用 <Tag color="blue">3天前 ~ 昨天</Tag>（最近3个交易日）</>
+                    )}
+                  </Text>
+                </div>
+              )}
+            </Space>
+
+            {/* 推荐任务专属：每策略推荐数 + 置信度控制 — 放左列底部 */}
+            {taskKey === 'DAILY_RECOMMENDATION' && (
+            <div style={{ marginTop: 20 }}>
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>每策略推荐数</Text>
+              <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+                <InputNumber min={5} max={50} value={topN} onChange={setTopN} style={{ width: 100 }} />
+                <Switch checked={enableConfidenceControl} onChange={setEnableConfidenceControl} size="small"
+                  checkedChildren="置信度控制" unCheckedChildren="固定TopN" />
+              </div>
+            </div>
+            )}
+          </div>
+        </Col>
+
+        {/* 右列：策略选择 + 权重模式 */}
+        {taskKey === 'DAILY_RECOMMENDATION' ? (
+        <Col span={12}>
+          <div>
+            {/* 策略选择 — 全选放在标题右侧 */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
+              <Text strong style={{ fontSize: 13 }}>策略选择</Text>
+              {strategyIds.length === allStrategies.length && allStrategies.length > 0 ? (
+                <a onClick={() => setStrategyIds([])} style={{ cursor: 'pointer', fontSize: 12 }}>取消全选</a>
+              ) : (
+                <a onClick={() => setStrategyIds(allStrategies.map(s => s.id))} style={{ cursor: 'pointer', fontSize: 12 }}>全选</a>
+              )}
+            </div>
+            <Select
+              mode="multiple"
+              value={strategyIds}
+              onChange={setStrategyIds}
+              placeholder="选择要执行的策略（可多选）"
+              style={{ width: '100%', marginBottom: 8 }}
+              options={allStrategies.map(s => ({
+                value: s.id,
+                label: `${s.strategyName}（#${s.id}）`,
+              }))}
+              maxTagCount={3}
+              maxTagTextLength={10}
+            />
+            {strategyIds.length > 0 && (
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 16 }}>
+                已选 {strategyIds.length}/{allStrategies.length} 个策略：{strategyIds.map(id => {
+                  const s = allStrategies.find(x => x.id === id);
+                  return s?.strategyName || `#${id}`;
+                }).join('、')}
+              </Text>
+            )}
+
+            {/* 权重模式选择 */}
+            <Text strong style={{ fontSize: 13, display: 'block', marginBottom: 8 }}>权重模式</Text>
+            <Select
+              value={weightMode}
+              onChange={setWeightMode}
+              placeholder="选择因子权重模式"
+              style={{ width: '100%', marginBottom: 16 }}
+              options={[
+                { value: 'ICW', label: 'IC动态加权（默认，根据因子预测能力自动调整）' },
+                { value: 'STATIC', label: '固定等权（策略配置中的固定权重）' },
+                { value: 'EQUAL', label: '简单等权（所有因子权重相同）' },
+              ]}
+            />
+          </div>
+        </Col>
+        ) : /* 非推荐任务：右列为空 */ <Col span={12} />}
+      </Row>
     </div>
   );
 
@@ -856,10 +896,11 @@ function CronVisualEditor({ open, initialValue, initialExtraConfig, taskKey, onO
       startDate: sd,
       endDate: ed,
       strategyIds,
+      weightMode,
       topN,
       enableConfidenceControl,
     });
-  }, [incremental, dateMode, customDates, strategyIds, topN, enableConfidenceControl]);
+  }, [incremental, dateMode, customDates, strategyIds, weightMode, topN, enableConfidenceControl]);
 
   return (
     <Modal

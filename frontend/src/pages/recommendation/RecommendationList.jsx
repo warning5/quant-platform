@@ -747,6 +747,54 @@ export default function RecommendationList() {
       },
     },
     {
+      title: (
+        <Tooltip title="建议止损价：基于ATR 2倍宽度，不低于买入价×0.88">
+          止损价 <QuestionCircleOutlined style={{ color: '#8c8c8c', fontSize: 12, marginLeft: 2 }} />
+        </Tooltip>
+      ),
+      dataIndex: 'suggestedStopLoss',
+      width: 80,
+      render: (v) => {
+        if (v == null) return '-';
+        return <Text type="danger" style={{ fontSize: 12 }}>{v.toFixed(2)}</Text>;
+      },
+    },
+    {
+      title: (
+        <Tooltip title="建议止盈价：盈亏比R:R=1:2">
+          止盈价 <QuestionCircleOutlined style={{ color: '#8c8c8c', fontSize: 12, marginLeft: 2 }} />
+        </Tooltip>
+      ),
+      dataIndex: 'suggestedTakeProfit',
+      width: 80,
+      render: (v) => v != null ? <Text style={{ color: '#cf1322', fontSize: 12 }}>{v.toFixed(2)}</Text> : '-',
+    },
+    {
+      title: (
+        <Tooltip title="中期目标价：盈亏比R:R=1:3">
+          目标价 <QuestionCircleOutlined style={{ color: '#8c8c8c', fontSize: 12, marginLeft: 2 }} />
+        </Tooltip>
+      ),
+      dataIndex: 'suggestedTargetPrice',
+      width: 80,
+      render: (v) => v != null ? <Text style={{ color: '#cf1322', fontSize: 12 }}>{v.toFixed(2)}</Text> : '-',
+    },
+    {
+      title: (
+        <Tooltip title="建议仓位：基于风险评分+流动性评分映射，上限10%">
+          仓位 <QuestionCircleOutlined style={{ color: '#8c8c8c', fontSize: 12, marginLeft: 2 }} />
+        </Tooltip>
+      ),
+      dataIndex: 'suggestedPositionPct',
+      width: 70,
+      render: (v) => {
+        if (v == null) return '-';
+        const pct = (v * 100).toFixed(1);
+        const color = v >= 0.08 ? '#cf1322' : v >= 0.05 ? '#fa8c16' : '#8c8c8c';
+        return <Text style={{ color, fontWeight: 500, fontSize: 12 }}>{pct}%</Text>;
+      },
+    },
+    {
       title: '买入理由',
       dataIndex: 'buyReason',
       width: 200,
@@ -1433,7 +1481,7 @@ export default function RecommendationList() {
             }}
             rowKey="id"
             size="small"
-            scroll={{ x: 1400 }}
+            scroll={{ x: 1750 }}
             pagination={false}
             expandable={{
               expandedRowRender: (rec) => {
@@ -1469,10 +1517,11 @@ export default function RecommendationList() {
                 };
                 const total6d = dims.reduce((s, d) => s + d.val, 0);
                 return (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 24, padding: '8px 16px', background: '#fafafa' }}>
+                  <div style={{ padding: '8px 16px', background: '#fafafa' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
                     <ReactECharts option={radarOption} style={{ width: 280, height: 220 }} />
                     <div style={{ flex: 1, fontSize: 13 }}>
-                      <div style={{ fontWeight: 600, marginBottom: 12, fontSize: 14 }}>📊 {rec.stockName}（{rec.stockCode}）六维度评分详情</div>
+                      <div style={{ fontWeight: 600, marginBottom: 12, fontSize: 14 }}>{rec.stockName}（{rec.stockCode}）六维度评分详情</div>
                       <Row gutter={[16, 8]}>
                         {dims.map((d) => {
                           const pct = d.max > 0 ? Math.round(d.val / d.max * 100) : 0;
@@ -1499,11 +1548,73 @@ export default function RecommendationList() {
                       </div>
                     </div>
                   </div>
+                  {/* 交易计划 */}
+                  {rec.suggestedStopLoss != null && (
+                    <div style={{ marginTop: 12, padding: '10px 16px', background: '#fff', borderRadius: 8, border: '1px solid #e8e8e8' }}>
+                      <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ color: '#722ed1' }}>交易计划</span>
+                        <Divider type="vertical" style={{ margin: 0 }} />
+                        <Text type="secondary" style={{ fontSize: 11 }}>R:R 止盈1:2 / 目标1:3</Text>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                        {/* 买入价 */}
+                        <div style={{ textAlign: 'center', padding: '6px 12px', background: '#f6ffed', borderRadius: 6, border: '1px solid #b7eb8f' }}>
+                          <Text type="secondary" style={{ fontSize: 11 }}>买入价</Text>
+                          <div style={{ fontWeight: 600, color: '#3f8600', fontSize: 14 }}>{rec.suggestedBuyPrice?.toFixed(2) || '-'}</div>
+                        </div>
+                        <Text type="secondary" style={{ fontSize: 16 }}>→</Text>
+                        {/* 止盈价 */}
+                        <div style={{ textAlign: 'center', padding: '6px 12px', background: '#fff1f0', borderRadius: 6, border: '1px solid #ffa39e' }}>
+                          <Text type="secondary" style={{ fontSize: 11 }}>止盈价</Text>
+                          <div style={{ fontWeight: 600, color: '#cf1322', fontSize: 14 }}>{rec.suggestedTakeProfit?.toFixed(2) || '-'}</div>
+                          <Text type="secondary" style={{ fontSize: 10 }}>
+                            {rec.suggestedBuyPrice && rec.suggestedTakeProfit
+                              ? `+${((rec.suggestedTakeProfit / rec.suggestedBuyPrice - 1) * 100).toFixed(1)}%`
+                              : ''}
+                          </Text>
+                        </div>
+                        <Text type="secondary" style={{ fontSize: 16 }}>→</Text>
+                        {/* 目标价 */}
+                        <div style={{ textAlign: 'center', padding: '6px 12px', background: '#fff2e8', borderRadius: 6, border: '1px solid #ffbb96' }}>
+                          <Text type="secondary" style={{ fontSize: 11 }}>目标价</Text>
+                          <div style={{ fontWeight: 600, color: '#fa541c', fontSize: 14 }}>{rec.suggestedTargetPrice?.toFixed(2) || '-'}</div>
+                          <Text type="secondary" style={{ fontSize: 10 }}>
+                            {rec.suggestedBuyPrice && rec.suggestedTargetPrice
+                              ? `+${((rec.suggestedTargetPrice / rec.suggestedBuyPrice - 1) * 100).toFixed(1)}%`
+                              : ''}
+                          </Text>
+                        </div>
+                        <Divider type="vertical" style={{ height: 40 }} />
+                        {/* 止损价 */}
+                        <div style={{ textAlign: 'center', padding: '6px 12px', background: '#fff7e6', borderRadius: 6, border: '1px solid #ffd591' }}>
+                          <Text type="secondary" style={{ fontSize: 11 }}>止损价</Text>
+                          <div style={{ fontWeight: 600, color: '#fa8c16', fontSize: 14 }}>{rec.suggestedStopLoss?.toFixed(2) || '-'}</div>
+                          <Text type="secondary" style={{ fontSize: 10 }}>
+                            {rec.suggestedBuyPrice && rec.suggestedStopLoss
+                              ? `${((rec.suggestedStopLoss / rec.suggestedBuyPrice - 1) * 100).toFixed(1)}%`
+                              : ''}
+                          </Text>
+                        </div>
+                        <Divider type="vertical" style={{ height: 40 }} />
+                        {/* 建议仓位 */}
+                        <div style={{ textAlign: 'center', padding: '6px 14px', background: rec.suggestedPositionPct >= 0.08 ? '#fff1f0' : rec.suggestedPositionPct >= 0.05 ? '#fff7e6' : '#f0f0f0', borderRadius: 6, border: '1px solid #d9d9d9' }}>
+                          <Text type="secondary" style={{ fontSize: 11 }}>建议仓位</Text>
+                          <div style={{ fontWeight: 600, color: rec.suggestedPositionPct >= 0.08 ? '#cf1322' : rec.suggestedPositionPct >= 0.05 ? '#fa8c16' : '#595959', fontSize: 16 }}>
+                            {rec.suggestedPositionPct != null ? (rec.suggestedPositionPct * 100).toFixed(1) + '%' : '-'}
+                          </div>
+                          <Text type="secondary" style={{ fontSize: 10 }}>
+                            {rec.suggestedPositionPct >= 0.08 ? '重仓' : rec.suggestedPositionPct >= 0.05 ? '中仓' : rec.suggestedPositionPct != null ? '轻仓' : ''}
+                          </Text>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  </div>
                 );
               },
-              rowExpandable: (rec) => rec.technicalScore != null || rec.riskScore != null,
+              rowExpandable: (rec) => rec.technicalScore != null || rec.riskScore != null || rec.suggestedStopLoss != null,
               expandIcon: ({ expanded, onExpand, record }) => {
-                if (record.technicalScore == null && record.riskScore == null) return null;
+                if (record.technicalScore == null && record.riskScore == null && record.suggestedStopLoss == null) return null;
                 return (
                   <span
                     onClick={e => onExpand(record, e)}

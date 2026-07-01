@@ -167,7 +167,7 @@ const renderProgressBar = (task) => {
 };
 
 // ========== 通用：日志区域 ==========
-const renderLogs = (logs, logRef) => (
+const renderLogs = (logs, logRef, taskStatus) => (
   <div ref={logRef}
     style={{
       height: 200, overflowY: 'auto', backgroundColor: '#1a1a2e',
@@ -175,7 +175,14 @@ const renderLogs = (logs, logRef) => (
       fontSize: 12, lineHeight: '18px',
     }}>
     {logs.length === 0 ? (
-      <Text type="secondary" style={{ color: '#555' }}>等待任务启动...</Text>
+      taskStatus === 'RUNNING' ? (
+        <Text type="secondary" style={{ color: '#888' }}>
+          <span style={{ animation: 'pulse 1.5s infinite' }}>●</span> 任务运行中，等待脚本输出日志...
+          <br /><span style={{ color: '#555', fontSize: 11 }}>（财务数据采集可能需要较长时间才有输出）</span>
+        </Text>
+      ) : (
+        <Text type="secondary" style={{ color: '#555' }}>等待任务启动...</Text>
+      )
     ) : (
       logs.map(l => (
         <div key={l.id} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
@@ -630,6 +637,27 @@ function DataUpdate() {
   useEffect(() => {
     if (financialLogRef.current) financialLogRef.current.scrollTop = financialLogRef.current.scrollHeight;
   }, [financialLogs]);
+
+  // 财务任务运行中但日志为空时，自动定期补拉（解决定时任务触发后无日志的问题）
+  useEffect(() => {
+    if (financialTask?.status !== 'RUNNING' || financialLogs.length > 0) return;
+    const timer = setInterval(async () => {
+      if (!financialTask?.taskId) return;
+      try {
+        const logs = await dataUpdateApi.getTaskLogs(financialTask.taskId);
+        if (logs && logs.length > 0) {
+          setFinancialLogs(prev => {
+            const existingTexts = new Set(prev.map(l => l.text));
+            const newEntries = logs
+              .filter(l => !existingTexts.has(l.line))
+              .map(l => ({ id: Date.now() + Math.random(), time: l.time || '', text: l.line || '' }));
+            return newEntries.length > 0 ? [...prev, ...newEntries] : prev;
+          });
+        }
+      } catch (_) {}
+    }, 10000);
+    return () => clearInterval(timer);
+  }, [financialTask?.status, financialTask?.taskId, financialLogs.length]);
 
   useEffect(() => {
     if (sentimentLogRef.current) sentimentLogRef.current.scrollTop = sentimentLogRef.current.scrollHeight;
@@ -1477,7 +1505,7 @@ function DataUpdate() {
         {/* 日志 */}
         <Card title={<span>采集日志 <Text type="secondary" style={{ fontSize: 12 }}>({financialLogs.length} 条)</Text>{renderTaskConfig(financialTask, 'FINANCIAL')}</span>}
           size="small" extra={<Button size="small" onClick={() => setFinancialLogs([])}>清空</Button>}>
-          {renderLogs(financialLogs, financialLogRef)}
+          {renderLogs(financialLogs, financialLogRef, financialTask?.status)}
         </Card>
         {/* 校验报告 */}
         {financialValidateResult && renderFinancialValidateCard()}

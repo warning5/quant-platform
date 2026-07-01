@@ -382,7 +382,8 @@ public class ScheduleService implements SchedulingConfigurer {
                 @SuppressWarnings("unchecked")
                 Map<String, Object> ec = mapper.readValue(extraConfigJson, Map.class);
                 if (ec != null) {
-                    incremental = Boolean.TRUE.equals(ec.get("incremental"));
+                    // 默认增量模式（未配 incremental 时为 true）；显式配 false 才走全量
+                    incremental = !Boolean.FALSE.equals(ec.get("incremental"));
                     dateMode = ec.get("dateMode") != null ? ec.get("dateMode").toString() : "today";
                     customStartDate = ec.get("startDate") != null ? ec.get("startDate").toString() : null;
                     customEndDate = ec.get("endDate") != null ? ec.get("endDate").toString() : null;
@@ -488,6 +489,7 @@ public class ScheduleService implements SchedulingConfigurer {
         // 读取推荐配置
         Integer topN = 15;                       // 默认推荐15只
         String weightMode = null;
+        String dateMode = "today";               // 日期模式
         List<Long> strategyIds = new java.util.ArrayList<>();
         boolean enableConfidenceControl = true;
 
@@ -507,6 +509,7 @@ public class ScheduleService implements SchedulingConfigurer {
                     if (ec.get("topN") != null) topN = Integer.parseInt(ec.get("topN").toString());
                     if (ec.get("weightMode") != null) weightMode = ec.get("weightMode").toString();
                     if (ec.get("enableConfidenceControl") != null) enableConfidenceControl = Boolean.parseBoolean(ec.get("enableConfidenceControl").toString());
+                    if (ec.get("dateMode") != null) dateMode = ec.get("dateMode").toString();
                     // 支持多策略: strategyIds 数组优先，向后兼容 strategyId
                     if (ec.get("strategyIds") instanceof java.util.List<?> list) {
                         for (Object id : list) {
@@ -520,6 +523,31 @@ public class ScheduleService implements SchedulingConfigurer {
         } catch (Exception e) {
             log.warn("[ScheduleService] 解析DAILY_RECOMMENDATION配置失败，使用默认值: {}", e.getMessage());
         }
+
+        // 根据 dateMode 计算实际日期（不再传 null）
+        LocalDate runDate = null;
+        try {
+            switch (dateMode == null ? "today" : dateMode.toLowerCase()) {
+                case "today":
+                    runDate = LocalDate.now();
+                    break;
+                case "recent_1":
+                    runDate = LocalDate.now().minusDays(1);
+                    break;
+                case "recent_3":
+                    runDate = LocalDate.now().minusDays(3);
+                    break;
+                default:
+                    runDate = LocalDate.now();
+                    break;
+            }
+        } catch (Exception e) {
+            log.warn("[ScheduleService] 解析日期失败，使用当天: {}", e.getMessage());
+            runDate = LocalDate.now();
+        }
+
+        log.info("[ScheduleService] 推荐参数: date={}, dateMode={}, topN={}, strategyIds={}, weightMode={}",
+                runDate, dateMode, topN, strategyIds, weightMode);
 
         // 逐策略生成推荐
         java.util.List<com.quant.platform.recommendation.domain.StockRecommendation> allRecommendations = new java.util.ArrayList<>();
@@ -537,7 +565,7 @@ public class ScheduleService implements SchedulingConfigurer {
             try {
                 List<com.quant.platform.recommendation.domain.StockRecommendation> recommendations =
                     recommendationService.generateRecommendations(
-                        null, topN, strategyId, weightMode,
+                        runDate, topN, strategyId, weightMode,
                         new java.util.ArrayList<>(), enableConfidenceControl);
 
                 log.info("[ScheduleService] 策略[{}]推荐完成: 推荐数量={}", strategyId, recommendations.size());

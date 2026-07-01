@@ -416,7 +416,8 @@ public class IntradayMonitorService {
             // 数据源2: stock_recommendation 智能推荐（用推荐自己的最新日期）
             if (recDate != null) {
                 String recSql = 
-                        "SELECT r.stock_code, r.stock_name, r.suggested_buy_price, r.close_price " +
+                        "SELECT r.stock_code, r.stock_name, r.suggested_buy_price, r.close_price, " +
+                                "r.suggested_stop_loss, r.suggested_take_profit, r.suggested_target_price " +
                                 "FROM stock_recommendation r " +
                                 "WHERE r.recommend_date = ? AND r.action_tag = 'BUY' " +
                                 "AND r.suggested_buy_price IS NOT NULL";
@@ -432,8 +433,17 @@ public class IntradayMonitorService {
                     info.setStockName(rs.getString("stock_name"));
                     info.setBuyPriceLow(BigDecimal.valueOf(buyPrice * 0.95));
                     info.setBuyPriceHigh(BigDecimal.valueOf(buyPrice * 1.05));
-                    info.setStopLoss(BigDecimal.valueOf(buyPrice * 0.92));
-                    info.setTargetPrice(closePrice > 0 ? BigDecimal.valueOf(closePrice * 1.20) : null);
+                    // #6: 从推荐实体读取止损价/目标价，不再硬编码
+                    double stopLoss = rs.getDouble("suggested_stop_loss");
+                    info.setStopLoss(!rs.wasNull() && stopLoss > 0
+                            ? BigDecimal.valueOf(stopLoss)
+                            : BigDecimal.valueOf(buyPrice * 0.92)); // 回退8%止损
+                    double targetPrice = rs.getDouble("suggested_target_price");
+                    if (!rs.wasNull() && targetPrice > 0) {
+                        info.setTargetPrice(BigDecimal.valueOf(targetPrice));
+                    } else {
+                        info.setTargetPrice(closePrice > 0 ? BigDecimal.valueOf(closePrice * 1.20) : null);
+                    }
                     info.setSource("推荐");
                     targetPriceCache.put(code, info);
                 });
