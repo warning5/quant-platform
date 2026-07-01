@@ -75,6 +75,10 @@ public class DataUpdateService {
      * 各任务最近 500 条日志缓存（taskId -> 日志列表），供前端断线后补拉
      */
     private final ConcurrentHashMap<String, java.util.List<Map<String, Object>>> taskLogCache = new ConcurrentHashMap<>();
+    /**
+     * taskId -> updateType 映射（即使任务从 activeTasks 移除后仍可查到，确保日志分流正确）
+     */
+    private final ConcurrentHashMap<String, String> taskUpdateTypes = new ConcurrentHashMap<>();
     @Value("${quant.data-update.python-path:python}")
     private String pythonPath;
     @Value("${quant.data-update.script-dir:scripts}")
@@ -175,6 +179,10 @@ public class DataUpdateService {
         task.setStartTime(LocalDateTime.now());
         task.setCurrentStep("准备启动...");
         activeTasks.put(taskId, task);
+        // 记录 updateType 映射（即使任务从 activeTasks 移除后仍可查到，确保日志分流正确）
+        if (request.getUpdateType() != null) {
+            taskUpdateTypes.put(taskId, request.getUpdateType());
+        }
 
         // 在新线程中执行
         Thread worker = new Thread(() -> executeTask(taskId, request), "data-update-" + taskId);
@@ -578,6 +586,11 @@ public class DataUpdateService {
             }
             // 从活跃任务中移除（避免阻止新任务启动）
             activeTasks.remove(taskId);
+            // 延迟清理 taskUpdateTypes（5分钟后移除，确保任务结束后残留日志仍能正确分流）
+            final String taskIdFinal = taskId;
+            new java.util.Timer().schedule(new java.util.TimerTask() {
+                @Override public void run() { taskUpdateTypes.remove(taskIdFinal); }
+            }, 5 * 60 * 1000L);
             // 清理进程引用
             task.setProcess(null);
             task.setProcessPid(-1);
@@ -1424,9 +1437,15 @@ public class DataUpdateService {
             msg.put("line", line);
             msg.put("time", LocalDateTime.now().format(TIME_FMT));
             // 附带 updateType 让前端按类型分流日志
+            // 优先从 activeTasks 取，取不到则从 taskUpdateTypes 兜底（任务结束后仍可分流）
             DataUpdateTask task = activeTasks.get(taskId);
             if (task != null && task.getRequest() != null) {
                 msg.put("updateType", task.getRequest().getUpdateType());
+            } else {
+                String ut = taskUpdateTypes.get(taskId);
+                if (ut != null) {
+                    msg.put("updateType", ut);
+                }
             }
             // 写入缓存（最多保留 500 条）
             taskLogCache.compute(taskId, (k, list) -> {
