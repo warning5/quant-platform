@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Card, Table, Switch, Button, Tag, Typography, Space, Select, TimePicker, Input, InputNumber, Row, Col, Popconfirm, Badge, Spin, Modal, Tabs, Checkbox, Tooltip, DatePicker } from 'antd';
+import { Card, Table, Switch, Button, Tag, Typography, Space, Select, TimePicker, Input, InputNumber, Row, Col, Popconfirm, Badge, Spin, Modal, Tabs, Checkbox, Tooltip, DatePicker, Form } from 'antd';
 import { message } from '../../utils/messageUtil';
 import {
   PlayCircleOutlined, ClockCircleOutlined,
   CheckCircleOutlined, CloseCircleOutlined, SyncOutlined,
   ThunderboltOutlined, GlobalOutlined, HistoryOutlined,
   ReloadOutlined, StopOutlined, DeleteOutlined,
-  EditOutlined, CheckOutlined, ClearOutlined, SettingOutlined, LoadingOutlined
+  EditOutlined, CheckOutlined, ClearOutlined, SettingOutlined, LoadingOutlined, LinkOutlined, ApartmentOutlined
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import api, { scheduleApi } from '../../api/index';
@@ -51,6 +51,14 @@ const TASK_ITEMS = [
   {
     key: 'RECOMMENDATION_TRACK', name: '推荐追踪', desc: '计算昨日推荐股票的当日收益率，用于复盘策略效果。依赖当日收盘数据生成，建议 16:00 后自动执行',
     icon: '🎯', defaultEnabled: true, color: '#13c2c2',
+  },
+  {
+    key: 'FACTOR_COMPUTE', name: '因子计算', desc: '根据策略配置的因子公式，每日日终批量计算因子值',
+    icon: '🔢', defaultEnabled: true, color: '#1677ff',
+  },
+  {
+    key: 'DAILY_RECOMMENDATION', name: '每日推荐', desc: '',
+    icon: '⭐', defaultEnabled: true, color: '#faad14',
   },
   {
     key: 'DATA_FRESHNESS', name: '数据新鲜度检查', desc: '检查各数据源最新日期是否落后，超过阈值则告警。非数据更新任务，纯监控',
@@ -824,6 +832,243 @@ function CronVisualEditor({ open, initialValue, initialExtraConfig, taskKey, onO
     </div>
   );
 
+
+  // ── 任务关系 Tab ──────────────────────────────────────────
+  const [deps, setDeps] = useState([]);
+  const [taskKeyOptions, setTaskKeyOptions] = useState([]);
+  const [depLoading, setDepLoading] = useState(false);
+  const [depModalOpen, setDepModalOpen] = useState(false);
+  const [depSubmitLoading, setDepSubmitLoading] = useState(false);
+  const [depForm] = Form.useForm();
+
+  const loadDeps = useCallback(async () => {
+    setDepLoading(true);
+    try {
+      const data = await scheduleApi.getDependencies();
+      setDeps(data || []);
+    } catch { /* ignore */ } finally { setDepLoading(false); }
+  }, []);
+
+  const loadTaskKeys = useCallback(async () => {
+    try {
+      const data = await scheduleApi.getTaskKeys();
+      setTaskKeyOptions(data || []);
+    } catch { /* ignore */ }
+  }, []);
+
+  // 当前编辑弹窗选中的任务 key
+  const currentTaskKey = taskKey;
+
+  // 过滤与当前任务相关的依赖
+  const relatedDeps = useMemo(() => {
+    if (!currentTaskKey) return deps;
+    return deps.filter(
+      d => d.upstream_key === currentTaskKey || d.downstream_key === currentTaskKey
+    );
+  }, [deps, currentTaskKey]);
+
+  // 新增依赖时：上游任务候选（排除自己 + 已存在的上游）
+  const upstreamOptions = useMemo(() => {
+    const existingUpstreams = new Set(
+      deps
+        .filter(d => d.downstream_key === currentTaskKey)
+        .map(d => d.upstream_key)
+    );
+    return taskKeyOptions.filter(
+      opt => opt.value !== currentTaskKey && !existingUpstreams.has(opt.value)
+    );
+  }, [taskKeyOptions, deps, currentTaskKey]);
+
+  const handleOpenAddDep = () => {
+    depForm.setFieldsValue({
+      upstreamKey: undefined,
+      downstreamKey: currentTaskKey,
+      delaySeconds: 300,
+    });
+    setDepModalOpen(true);
+  };
+
+  useEffect(() => {
+    if (activeMainTab === 'dependency') {
+      loadDeps();
+      loadTaskKeys();
+    }
+  }, [activeMainTab, loadDeps, loadTaskKeys]);
+
+  const handleAddDep = async () => {
+    if (depSubmitLoading) return;
+    setDepSubmitLoading(true);
+    try {
+      await depForm.validateFields();
+      const vals = depForm.getFieldsValue();
+      await scheduleApi.addDependency(vals);
+      message.success('添加成功');
+      setDepModalOpen(false);
+      depForm.resetFields();
+      loadDeps();
+    } catch (err) {
+      message.error(err?.message || '添加失败');
+    } finally {
+      setDepSubmitLoading(false);
+    }
+  };
+
+  const handleDeleteDep = async (id) => {
+    try {
+      await scheduleApi.deleteDependency(id);
+      message.success('删除成功');
+      loadDeps();
+    } catch (err) {
+      message.error(err?.message || '删除失败');
+    }
+  };
+
+  const depColumns = [
+    {
+      title: '上游任务',
+      dataIndex: 'upstream_key',
+      width: 180,
+      render: (v, r) => (
+        <Space direction="vertical" size={0}>
+          <Tag color="blue">{v}</Tag>
+          <Text type="secondary" style={{ fontSize: 11 }}>{r.upstream_name || ''}</Text>
+        </Space>
+      ),
+    },
+    {
+      title: '下游任务',
+      dataIndex: 'downstream_key',
+      width: 180,
+      render: (v, r) => (
+        <Space direction="vertical" size={0}>
+          <Tag color="green">{v}</Tag>
+          <Text type="secondary" style={{ fontSize: 11 }}>{r.downstream_name || ''}</Text>
+        </Space>
+      ),
+    },
+    {
+      title: '触发延迟',
+      dataIndex: 'delay_seconds',
+      width: 100,
+      render: (v) => v ? `约 ${Math.round(v / 60)} 分钟` : '5 分钟',
+    },
+    {
+      title: '操作',
+      width: 80,
+      render: (_, r) => (
+        <Popconfirm
+          title="确认删除该依赖关系？"
+          onConfirm={() => handleDeleteDep(r.id)}
+          okText="确认"
+          cancelText="取消"
+        >
+          <Button type="link" danger size="small" icon={<DeleteOutlined />}>
+            删除
+          </Button>
+        </Popconfirm>
+      ),
+    },
+  ];
+
+  const renderDependencyTab = () => (
+    <div>
+      <Card size="small" style={{ marginBottom: 12 }}>
+        <Space style={{ marginBottom: 8 }}>
+          <Text strong>任务依赖关系</Text>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            上游任务完成后，将自动触发下游任务。可添加/删除依赖关系，系统自动校验循环依赖。
+          </Text>
+        </Space>
+        <div style={{ marginBottom: 8 }}>
+          <Text type="secondary" style={{ fontSize: 11 }}>
+            注意：删除依赖后，该触发链路将不再自动执行。
+          </Text>
+        </div>
+      </Card>
+
+      <Card size="small" style={{ marginBottom: 12 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <Text strong>依赖列表（{relatedDeps.length} 条）</Text>
+          <Button
+            type="primary"
+            size="small"
+            icon={<LinkOutlined />}
+            onClick={handleOpenAddDep}
+          >
+            新增依赖
+          </Button>
+        </div>
+
+        <Table
+          columns={depColumns}
+          dataSource={relatedDeps}
+          rowKey="id"
+          size="small"
+          loading={depLoading}
+          pagination={false}
+          scroll={{ x: 700 }}
+          locale={{ emptyText: '暂无依赖关系，点击"新增依赖"添加' }}
+        />
+      </Card>
+
+      <Modal
+        title={<><LinkOutlined /> 新增任务依赖</>}
+        open={depModalOpen}
+        onOk={handleAddDep}
+        onCancel={() => { setDepModalOpen(false); depForm.resetFields(); }}
+        okText="确认添加"
+        cancelText="取消"
+        confirmLoading={depSubmitLoading}
+        destroyOnClose
+      >
+        <Form form={depForm} layout="vertical" style={{ marginTop: 16 }}>
+          <Form.Item
+            name="upstreamKey"
+            label="上游任务（完成后触发）"
+            rules={[{ required: true, message: '请选择上游任务' }]}
+          >
+            <Select
+              showSearch
+              allowClear
+              placeholder="请选择上游任务"
+              options={upstreamOptions}
+              filterOption={(input, opt) =>
+                opt.label.toLowerCase().includes(input.toLowerCase())
+              }
+            />
+          </Form.Item>
+          <Form.Item
+            name="downstreamKey"
+            label="下游任务（被触发）"
+            rules={[{ required: true, message: '请选择下游任务' }]}
+          >
+            <Select
+              showSearch
+              disabled
+              placeholder="下游任务"
+              options={taskKeyOptions}
+              filterOption={(input, opt) =>
+                opt.label.toLowerCase().includes(input.toLowerCase())
+              }
+            />
+          </Form.Item>
+          <Form.Item
+            name="delaySeconds"
+            label="触发延迟（秒）"
+            initialValue={300}
+            rules={[{ required: true, message: '请输入延迟秒数' }]}
+          >
+            <InputNumber min={0} max={3600} style={{ width: 200 }} addonAfter="秒" />
+          </Form.Item>
+          <Text type="secondary" style={{ fontSize: 11 }}>
+            延迟时间：上游任务完成后，等待指定秒数再触发下游任务（避免上游数据尚未完全写入）。
+          </Text>
+        </Form>
+      </Modal>
+    </div>
+  );
+
+
   const renderCronTab = () => (
     <div>
       {/* 内层：6个 cron 字段子 Tab */}
@@ -920,8 +1165,11 @@ function CronVisualEditor({ open, initialValue, initialExtraConfig, taskKey, onO
         type="card"
         style={{ marginBottom: 16 }}
       >
-        <Tabs.TabPane tab={<span><SettingOutlined /> 任务配置</span>} key="config">
+        <Tabs.TabPane tab={<span><SettingOutlined /> 参数配置</span>} key="config">
           {renderConfigTab()}
+        </Tabs.TabPane>
+        <Tabs.TabPane tab={<span><LinkOutlined /> 任务关系</span>} key="dependency">
+          {renderDependencyTab()}
         </Tabs.TabPane>
         <Tabs.TabPane tab={<span><ClockCircleOutlined /> Cron 配置</span>} key="cron">
           {renderCronTab()}
@@ -1036,6 +1284,24 @@ export default function ScheduledTasks() {
   // Cron 可视化编辑器状态
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorTarget, setEditorTarget] = useState(null); // { type: 'global'|'sub', taskKey, initialValue, initialExtraConfig }
+
+  // 任务关系图状态
+  const [graphOpen, setGraphOpen] = useState(false);
+  const [graphDeps, setGraphDeps] = useState([]);
+  const [graphLoading, setGraphLoading] = useState(false);
+
+  const loadGraphDeps = useCallback(async () => {
+    setGraphLoading(true);
+    try {
+      const data = await scheduleApi.getDependencies();
+      setGraphDeps(data || []);
+    } catch { /* ignore */ } finally { setGraphLoading(false); }
+  }, []);
+
+  const handleOpenGraph = () => {
+    loadGraphDeps();
+    setGraphOpen(true);
+  };
 
   // 加载配置
   const fetchConfig = useCallback(async () => {
@@ -1475,7 +1741,10 @@ export default function ScheduledTasks() {
           </Space>
         }
         extra={
-          <Button icon={<ReloadOutlined />} onClick={() => { fetchConfig(); clearAllRunning(); }}>刷新</Button>
+          <Space>
+            <Button icon={<ApartmentOutlined />} onClick={handleOpenGraph}>任务关系图</Button>
+            <Button icon={<ReloadOutlined />} onClick={() => { fetchConfig(); clearAllRunning(); }}>刷新</Button>
+          </Space>
         }
       >
         <Table
@@ -1505,6 +1774,230 @@ export default function ScheduledTasks() {
         onOk={handleEditorOk}
         onCancel={() => { setEditorOpen(false); setEditorTarget(null); }}
       />
+
+      {/* 任务关系图弹窗 */}
+      <Modal
+        title={<Space><ApartmentOutlined /> 任务调度关系图</Space>}
+        open={graphOpen}
+        onCancel={() => setGraphOpen(false)}
+        footer={null}
+        width={900}
+        destroyOnClose
+      >
+        <TaskDependencyGraph deps={graphDeps} loading={graphLoading} taskItems={TASK_ITEMS} />
+      </Modal>
+    </div>
+  );
+}
+
+// ========== 任务关系图组件 ==========
+function TaskDependencyGraph({ deps, loading, taskItems }) {
+  // 构建节点和边
+  const { nodes, edges, layers } = useMemo(() => {
+    const taskMap = new Map();
+    taskItems.forEach(t => taskMap.set(t.key, t));
+
+    // 收集所有涉及的 task key
+    const allKeys = new Set();
+    deps.forEach(d => {
+      allKeys.add(d.upstream_key);
+      allKeys.add(d.downstream_key);
+    });
+
+    // 拓扑排序分层
+    const inDegree = new Map();
+    const adj = new Map(); // upstream -> [downstreams]
+    allKeys.forEach(k => {
+      inDegree.set(k, 0);
+      adj.set(k, []);
+    });
+    deps.forEach(d => {
+      adj.get(d.upstream_key)?.push(d.downstream_key);
+      inDegree.set(d.downstream_key, (inDegree.get(d.downstream_key) || 0) + 1);
+    });
+
+    // BFS 分层
+    const layerMap = new Map(); // key -> layer
+    let queue = [];
+    allKeys.forEach(k => {
+      if ((inDegree.get(k) || 0) === 0) {
+        queue.push(k);
+        layerMap.set(k, 0);
+      }
+    });
+    let layer = 1;
+    while (queue.length > 0) {
+      const next = [];
+      for (const k of queue) {
+        for (const child of (adj.get(k) || [])) {
+          const newLayer = Math.max(layerMap.get(k) + 1, layer);
+          layerMap.set(child, newLayer);
+          next.push(child);
+        }
+      }
+      // 去重
+      queue = [...new Set(next)];
+      layer++;
+      if (layer > 20) break; // 安全上限
+    }
+
+    // 没有入度的节点也兜底设为 0
+    allKeys.forEach(k => {
+      if (!layerMap.has(k)) layerMap.set(k, 0);
+    });
+
+    // 按 layer 分组
+    const maxLayer = Math.max(...layerMap.values(), 0);
+    const layerGroups = [];
+    for (let i = 0; i <= maxLayer; i++) {
+      layerGroups.push([...allKeys].filter(k => layerMap.get(k) === i));
+    }
+
+    // 计算节点坐标
+    const colWidth = 200;
+    const rowHeight = 80;
+    const nodeWidth = 150;
+    const nodeHeight = 50;
+    const startX = 40;
+    const startY = 40;
+
+    const nodePos = new Map();
+    layerGroups.forEach((group, colIdx) => {
+      group.forEach((key, rowIdx) => {
+        nodePos.set(key, {
+          x: startX + colIdx * colWidth,
+          y: startY + rowIdx * rowHeight,
+        });
+      });
+    });
+
+    const nodeList = allKeys.size > 0
+      ? [...allKeys].map(k => {
+          const pos = nodePos.get(k);
+          const item = taskMap.get(k);
+          return {
+            key: k,
+            name: item?.name || k,
+            x: pos.x,
+            y: pos.y,
+            width: nodeWidth,
+            height: nodeHeight,
+          };
+        })
+      : [];
+
+    const edgeList = deps.map((d, i) => {
+      const from = nodePos.get(d.upstream_key);
+      const to = nodePos.get(d.downstream_key);
+      if (!from || !to) return null;
+      return {
+        id: i,
+        from: d.upstream_key,
+        to: d.downstream_key,
+        x1: from.x + nodeWidth,
+        y1: from.y + nodeHeight / 2,
+        x2: to.x,
+        y2: to.y + nodeHeight / 2,
+      };
+    }).filter(Boolean);
+
+    const svgWidth = Math.max(...nodeList.map(n => n.x + n.width), 200) + 60;
+    const svgHeight = Math.max(...nodeList.map(n => n.y + n.height), 100) + 40;
+
+    return { nodes: nodeList, edges: edgeList, layers: { width: svgWidth, height: svgHeight } };
+  }, [deps, taskItems]);
+
+  if (loading) {
+    return (
+      <div style={{ textAlign: 'center', padding: 60 }}>
+        <Spin tip="加载中..." />
+      </div>
+    );
+  }
+
+  if (deps.length === 0) {
+    return (
+      <div style={{ textAlign: 'center', padding: 60 }}>
+        <Text type="secondary">暂无任务依赖关系</Text>
+      </div>
+    );
+  }
+
+  const colorMap = {};
+  taskItems.forEach(t => { colorMap[t.key] = t.color; });
+
+  return (
+    <div style={{ overflow: 'auto', maxHeight: 500 }}>
+      <svg width={layers.width} height={layers.height} style={{ minWidth: '100%' }}>
+        <defs>
+          <marker
+            id="arrowhead"
+            markerWidth="10"
+            markerHeight="7"
+            refX="9"
+            refY="3.5"
+            orient="auto"
+          >
+            <polygon points="0 0, 10 3.5, 0 7" fill="#8c8c8c" />
+          </marker>
+        </defs>
+
+        {/* 边 */}
+        {edges.map(e => (
+          <g key={`edge-${e.id}`}>
+            <path
+              d={`M ${e.x1} ${e.y1} C ${e.x1 + 40} ${e.y1}, ${e.x2 - 40} ${e.y2}, ${e.x2} ${e.y2}`}
+              fill="none"
+              stroke="#8c8c8c"
+              strokeWidth={1.5}
+              markerEnd="url(#arrowhead)"
+            />
+          </g>
+        ))}
+
+        {/* 节点 */}
+        {nodes.map(n => (
+          <g key={`node-${n.key}`}>
+            <rect
+              x={n.x}
+              y={n.y}
+              width={n.width}
+              height={n.height}
+              rx={6}
+              ry={6}
+              fill={colorMap[n.key] || '#1677ff'}
+              fillOpacity={0.1}
+              stroke={colorMap[n.key] || '#1677ff'}
+              strokeWidth={1.5}
+            />
+            <text
+              x={n.x + n.width / 2}
+              y={n.y + 18}
+              textAnchor="middle"
+              fontSize={12}
+              fontWeight={600}
+              fill={colorMap[n.key] || '#1677ff'}
+            >
+              {n.key}
+            </text>
+            <text
+              x={n.x + n.width / 2}
+              y={n.y + 36}
+              textAnchor="middle"
+              fontSize={11}
+              fill="#595959"
+            >
+              {n.name.length > 8 ? n.name.slice(0, 7) + '…' : n.name}
+            </text>
+          </g>
+        ))}
+      </svg>
+
+      <div style={{ marginTop: 12, padding: '8px 12px', background: '#f5f5f5', borderRadius: 6 }}>
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          箭头方向：上游任务 → 下游任务（上游完成后自动触发下游）
+        </Text>
+      </div>
     </div>
   );
 }

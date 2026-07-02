@@ -1,6 +1,7 @@
 package com.quant.platform.stock.controller;
 
 import com.quant.platform.stock.analysis.domain.AnalysisOverview;
+import com.quant.platform.stock.analysis.engine.SellSignalEngine;
 import com.quant.platform.stock.analysis.engine.TradingSignalEngine;
 import com.quant.platform.stock.analysis.service.AnalysisService;
 import com.quant.platform.stock.analysis.service.BidAskService;
@@ -10,6 +11,7 @@ import com.quant.platform.stock.analysis.service.MarketThermometerService;
 import com.quant.platform.stock.analysis.service.NewsEventParser;
 import com.quant.platform.stock.analysis.service.NewsService;
 import com.quant.platform.stock.analysis.service.WorkflowReportService;
+import com.quant.platform.factor.engine.PatternDetector;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -70,6 +72,9 @@ public class StockAnalysisController {
 
     @Autowired(required = false)
     private TradingSignalEngine tradingSignalEngine;
+
+    @Autowired(required = false)
+    private SellSignalEngine sellSignalEngine;
 
     @Autowired(required = false)
     private MarketThermometerService marketThermometerService;
@@ -481,6 +486,67 @@ public class StockAnalysisController {
         } catch (Exception e) {
             log.error("缠论K线图查询失败: code={}, error={}", code, e.getMessage(), e);
             return ResponseEntity.internalServerError().body(errorBody("缠论K线图查询失败：" + e.getMessage()));
+        }
+    }
+
+    /**
+     * 形态检测
+     * GET /api/analysis/pattern-detect?code=600519
+     * 返回：5大起涨形态检测结果
+     */
+    @GetMapping("/pattern-detect")
+    public ResponseEntity<?> detectPatterns(@RequestParam String code) {
+        if (analysisService == null) {
+            return ResponseEntity.status(503).body(errorBody("分析服务不可用，ClickHouse未启用"));
+        }
+        if (code == null || code.trim().isEmpty()) {
+            return ResponseEntity.badRequest().body(errorBody("股票代码不能为空"));
+        }
+        try {
+            double[][] ohlcv = analysisService.fetchKlineData(code.trim(), 120);
+            if (ohlcv == null || ohlcv[3].length < 30) {
+                return ResponseEntity.ok(new ApiResponse<>(Map.of("detected", List.of(), "message", "K线数据不足")));
+            }
+            List<PatternDetector.PatternResult> results = PatternDetector.detectAll(
+                    ohlcv[1], ohlcv[2], ohlcv[0], ohlcv[3], ohlcv[4]);
+            PatternDetector.PatternResult strongest = PatternDetector.getStrongestPattern(
+                    ohlcv[1], ohlcv[2], ohlcv[0], ohlcv[3], ohlcv[4]);
+            Map<String, Object> data = new HashMap<>();
+            data.put("detected", results);
+            data.put("strongest", strongest);
+            data.put("code", code.trim());
+            return ResponseEntity.ok(new ApiResponse<>(data));
+        } catch (Exception e) {
+            log.error("形态检测失败: code={}, error={}", code, e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(errorBody("形态检测失败：" + e.getMessage()));
+        }
+    }
+
+    /**
+     * 卖出信号检测
+     * GET /api/analysis/sell-signals?code=600519
+     * 返回：7种卖点信号检测结果 + 建议
+     */
+    @GetMapping("/sell-signals")
+    public ResponseEntity<?> detectSellSignals(@RequestParam String code) {
+        if (sellSignalEngine == null) {
+            return ResponseEntity.status(503).body(errorBody("卖点引擎未启用"));
+        }
+        if (code == null || code.trim().isEmpty()) {
+            return ResponseEntity.badRequest().body(errorBody("股票代码不能为空"));
+        }
+        try {
+            double[][] ohlcv = analysisService.fetchKlineData(code.trim(), 120);
+            if (ohlcv == null || ohlcv[3].length < 30) {
+                return ResponseEntity.ok(new ApiResponse<>(
+                        Map.of("action", "HOLD", "score", 0, "message", "K线数据不足")));
+            }
+            SellSignalEngine.SellSignalResult result = sellSignalEngine.checkSellSignals(
+                    ohlcv[3], ohlcv[1], ohlcv[2], ohlcv[0], ohlcv[4]);
+            return ResponseEntity.ok(new ApiResponse<>(result));
+        } catch (Exception e) {
+            log.error("卖点检测失败: code={}, error={}", code, e.getMessage(), e);
+            return ResponseEntity.internalServerError().body(errorBody("卖点检测失败：" + e.getMessage()));
         }
     }
 

@@ -130,7 +130,13 @@ function SectorDetail({ conceptName, onBack }) {
       </Card>)}
       <Card title="成分股排名" size="small">
         <Table dataSource={stocks} columns={detailColumns} rowKey="code" size="small"
-          pagination={{ pageSize: 15, showTotal: t => `共 ${t} 只` }} scroll={{ x: 700 }} />
+          pagination={{
+            total: stocks.length,
+            pageSize: 15,
+            showSizeChanger: true,
+            showTotal: (t) => `共 ${t} 只`,
+            pageSizeOptions: ['10', '20', '50', '100'],
+          }} scroll={{ x: 700 }} />
       </Card>
     </div>
   );
@@ -172,6 +178,7 @@ export default function SectorRanking() {
   const [stocks, setStocks] = useState([]);
   const [stocksLoading, setStocksLoading] = useState(false);
   const [sortBy, setSortBy] = useState('changePercent');
+  const [stockPageSize, setStockPageSize] = useState(20);
   // 热门板块视图
   const [viewMode, setViewMode] = useState('table'); // 'table' | 'card'
   const [hotSectors, setHotSectors] = useState([]);
@@ -302,7 +309,16 @@ export default function SectorRanking() {
         <Card size="small">
           {stocksLoading ? <Spin /> : (
             <Table size="small" dataSource={stocks} columns={stockColumns} rowKey="code"
-              pagination={{ pageSize: 20, size: 'small' }} scroll={{ x: 700 }} />
+              pagination={{
+                current: 1,
+                pageSize: stockPageSize,
+                total: stocks.length,
+                showSizeChanger: true,
+                showTotal: (total) => `共 ${total} 只`,
+                pageSizeOptions: ['10', '20', '50', '100'],
+                size: 'small',
+                onChange: (page, size) => setStockPageSize(size),
+              }} scroll={{ x: 700 }} />
           )}
         </Card>
       </div>

@@ -9,12 +9,12 @@ import { exportCsv } from '../../utils/exportUtil';
 const { Title } = Typography;
 const { Option } = Select;
 
-const TYPE_OPTIONS = ['FACTOR_LONG','LONG_SHORT','MARKET_NEUTRAL','MOMENTUM','MEAN_REVERSION','CUSTOM'];
+const TYPE_OPTIONS = ['FACTOR_LONG','LONG_SHORT','MARKET_NEUTRAL','MOMENTUM','MEAN_REVERSION','PATTERN','CUSTOM'];
 const STATUS_COLORS = { DRAFT:'default', TESTING:'processing', ACTIVE:'success', DEPRECATED:'default' };
 const STATUS_LABELS = { DRAFT:'草稿', TESTING:'测试中', ACTIVE:'已激活', DEPRECATED:'已废弃' };
 const TYPE_LABELS = {
   FACTOR_LONG:'因子多头', LONG_SHORT:'多空策略', MARKET_NEUTRAL:'市场中性',
-  MOMENTUM:'动量策略', MEAN_REVERSION:'均值回归', CUSTOM:'自定义脚本'
+  MOMENTUM:'动量策略', MEAN_REVERSION:'均值回归', PATTERN:'形态驱动', CUSTOM:'自定义脚本'
 };
 const FREQ_LABELS = { DAILY:'日频', WEEKLY:'周频', MONTHLY:'月频', QUARTERLY:'季频' };
 

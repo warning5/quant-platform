@@ -18,6 +18,7 @@ import com.quant.platform.stock.analysis.service.AnalysisService;
 import com.quant.platform.stock.analysis.service.EventSignalService;
 import com.quant.platform.stock.analysis.service.NewsEventParser;
 import com.quant.platform.stock.analysis.mapper.StockAnalysisMapper;
+import com.quant.platform.factor.engine.PatternDetector;
 import com.quant.platform.stock.entity.StockDaily;
 import com.quant.platform.stock.entity.StockInfo;
 import com.quant.platform.stock.mapper.StockInfoMapper;
@@ -2118,6 +2119,12 @@ public class RecommendationService {
     private ScreenResult screenStocks(LocalDate date, Long strategyId,
                                       boolean useDynamicIc, String effectiveWeightMode,
                                       List<FactorDiagnostic> diagnostics) {
+        // 检查是否为形态驱动策略
+        StrategyDefinition strategy = strategyDefinitionMapper.selectById(strategyId);
+        if (strategy != null && strategy.getStrategyType() == StrategyDefinition.StrategyType.PATTERN) {
+            return screenByPattern(date, strategyId);
+        }
+
         // 从策略因子配置获取因子列表
         List<ScreenRequest.FactorWeight> factors = getFactorConfig(strategyId);
 
@@ -2142,6 +2149,78 @@ public class RecommendationService {
         };
         req.setWeightMode(screenWeightMode);
         return stockScreenService.screen(req);
+    }
+
+    /**
+     * 形态驱动选股：使用 PatternDetector 检测全市场股票形态
+     * 从 filterConfigJson 读取 patternType（可选，不指定则检测全部形态）
+     */
+    private ScreenResult screenByPattern(LocalDate date, Long strategyId) {
+        log.info("[Recommendation] 形态驱动选股开始, strategyId={}", strategyId);
+        StrategyDefinition strategy = strategyDefinitionMapper.selectById(strategyId);
+
+        // 解析 filterConfigJson 获取形态类型和股票池
+        String patternTypeFilter = null;
+        if (strategy.getFilterConfigJson() != null) {
+            try {
+                Map<String, Object> filter = objectMapper.readValue(strategy.getFilterConfigJson(), Map.class);
+                patternTypeFilter = (String) filter.get("patternType");
+            } catch (Exception e) {
+                log.warn("[Recommendation] 解析filterConfigJson失败: {}", e.getMessage());
+            }
+        }
+
+        // 获取候选股票池（排除ST、退市）
+        List<StockInfo> allStocks = stockInfoMapper.selectList(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<StockInfo>()
+                        .isNull(StockInfo::getDelistDate)
+                        .eq(StockInfo::getIsSt, 0));
+        log.info("[Recommendation] 形态选股候选池: {} 只", allStocks.size());
+
+        // 批量获取全市场K线数据（一次ClickHouse查询）
+        Map<String, double[][]> klineMap = analysisService.batchFetchKlineData(120);
+        log.info("[Recommendation] 批量K线数据: {} 只股票", klineMap.size());
+
+        List<ScreenResult.StockScore> results = new ArrayList<>();
+        for (StockInfo stock : allStocks) {
+            try {
+                double[][] ohlcv = klineMap.get(stock.getCode());
+                if (ohlcv == null || ohlcv[3].length < 30) continue;
+
+                    PatternDetector.PatternResult strongest = PatternDetector.getStrongestPattern(
+                            ohlcv[1], ohlcv[2], ohlcv[0], ohlcv[3], ohlcv[4]);
+                    if (strongest == null) continue;
+
+                    // 如果指定了形态类型，只保留匹配的
+                    if (patternTypeFilter != null && !patternTypeFilter.isEmpty()
+                            && !strongest.getPatternType().name().equals(patternTypeFilter)) continue;
+
+                    Map<String, Double> patternInfo = new HashMap<>();
+                    patternInfo.put(strongest.getPatternType().name(), strongest.getScore());
+                    ScreenResult.StockScore ss = ScreenResult.StockScore.builder()
+                            .symbol(stock.getCode())
+                            .name(stock.getName())
+                            .compositeScore(strongest.getScore() / 100.0)
+                            .factorValues(patternInfo)
+                            .build();
+                    results.add(ss);
+            } catch (Exception e) {
+                // 单只股票失败跳过
+            }
+        }
+        log.info("[Recommendation] 形态选股扫描完成: 命中 {} 只", results.size());
+
+        // 按形态得分排序取 TopN
+        results.sort((a, b) -> Double.compare(b.getCompositeScore(), a.getCompositeScore()));
+        int topN = Math.min(SCREEN_TOP_N, results.size());
+        results = results.subList(0, topN);
+
+        ScreenResult result = ScreenResult.builder()
+                .stocks(results)
+                .candidateCount(results.size())
+                .build();
+        log.info("[Recommendation] 形态选股完成: 命中 {} 只, 取 Top {}", results.size(), topN);
+        return result;
     }
 
     /**

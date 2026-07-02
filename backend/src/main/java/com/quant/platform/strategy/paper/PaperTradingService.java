@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quant.platform.factor.service.FactorService;
 import com.quant.platform.recommendation.mapper.RecommendationMapper;
+import com.quant.platform.stock.analysis.engine.SellSignalEngine;
 import com.quant.platform.stock.analysis.service.MarketThermometerService;
 import com.quant.platform.calendar.service.TradeCalendarService;
 import lombok.RequiredArgsConstructor;
@@ -58,6 +59,9 @@ public class PaperTradingService {
 
     @Autowired(required = false)
     private RecommendationMapper recommendationMapper;
+
+    @Autowired(required = false)
+    private SellSignalEngine sellSignalEngine;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -636,6 +640,31 @@ public class PaperTradingService {
                 if (score == null || score < 0.3) {
                     triggerType = "因子轮出";
                     reason = score == null ? "无因子得分" : String.format("因子得分%.2f低于阈值", score);
+                }
+            }
+
+            // 无风控/因子触发时，检查技术面卖点信号
+            if (triggerType == null && sellSignalEngine != null) {
+                try {
+                    double[][] ohlcv = fetchKlineForSellCheck(pos.getCode());
+                    if (ohlcv != null && ohlcv[3].length >= 30) {
+                        SellSignalEngine.SellSignalResult sellResult = sellSignalEngine.checkSellSignals(
+                                ohlcv[3], ohlcv[1], ohlcv[2], ohlcv[0], ohlcv[4]);
+                        if (sellResult.getAction() == SellSignalEngine.SellAction.SELL) {
+                            triggerType = "技术卖点";
+                            StringBuilder sb = new StringBuilder("技术面卖出信号(强度" + sellResult.getScore() + "): ");
+                            for (SellSignalEngine.SellSignalItem item : sellResult.getSignals()) {
+                                if (sb.length() > 20) sb.append("; ");
+                                sb.append(item.getName());
+                            }
+                            reason = sb.toString();
+                        } else if (sellResult.getAction() == SellSignalEngine.SellAction.REDUCE) {
+                            triggerType = "技术减仓";
+                            reason = "技术面减仓信号(强度" + sellResult.getScore() + ")";
+                        }
+                    }
+                } catch (Exception e) {
+                    log.warn("[PaperTrading] 卖点检测异常: {} - {}", pos.getCode(), e.getMessage());
                 }
             }
 
@@ -1446,6 +1475,36 @@ public class PaperTradingService {
             return rows.isEmpty() ? code : (String) rows.getFirst().get("name");
         } catch (Exception e) {
             return code;
+        }
+    }
+
+    /**
+     * 从ClickHouse拉取K线数据用于卖点检测
+     * @return [open[], high[], low[], close[], volume[]] 或 null
+     */
+    private double[][] fetchKlineForSellCheck(String code) {
+        if (clickHouseJdbcTemplate == null) return null;
+        try {
+            String pureCode = code.split("\\.")[0];
+            List<Map<String, Object>> rows = clickHouseJdbcTemplate.queryForList(
+                "SELECT open_price, high_price, low_price, close_price, volume FROM stock.stock_daily FINAL " +
+                "WHERE code = ? ORDER BY trade_date DESC LIMIT 120",
+                pureCode);
+            if (rows.isEmpty()) return null;
+            int n = rows.size();
+            double[] open = new double[n], high = new double[n], low = new double[n], close = new double[n], volume = new double[n];
+            for (int i = 0; i < n; i++) {
+                Map<String, Object> row = rows.get(n - 1 - i);
+                open[i] = ((Number) row.get("open_price")).doubleValue();
+                high[i] = ((Number) row.get("high_price")).doubleValue();
+                low[i] = ((Number) row.get("low_price")).doubleValue();
+                close[i] = ((Number) row.get("close_price")).doubleValue();
+                volume[i] = ((Number) row.get("volume")).doubleValue();
+            }
+            return new double[][] { open, high, low, close, volume };
+        } catch (Exception e) {
+            log.warn("[PaperTrading] 拉取K线失败: {} - {}", code, e.getMessage());
+            return null;
         }
     }
 

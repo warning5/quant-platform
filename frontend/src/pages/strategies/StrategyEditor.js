@@ -368,7 +368,8 @@ export default function StrategyEditor() {
                         {[
                           ['FACTOR_LONG','因子多头选股'],['LONG_SHORT','多空策略'],
                           ['MARKET_NEUTRAL','市场中性'],['MOMENTUM','动量策略'],
-                          ['MEAN_REVERSION','均值回归'],['CUSTOM','自定义脚本']
+                          ['MEAN_REVERSION','均值回归'],['PATTERN','形态驱动'],
+                          ['CUSTOM','自定义脚本']
                         ].map(([v, l]) => <Option key={v} value={v}>{l}</Option>)}
                       </Select>
                     </Form.Item>

@@ -691,7 +691,7 @@ export default function RecommendationList() {
     {
       title: (
         <Tooltip
-          styles={{ root: {maxWidth: 360} }}
+          styles={{ root: {maxWidth: 520} }}
           title={
             <div style={{ fontSize: 12, lineHeight: '20px' }}>
               <div style={{ fontWeight: 'bold', marginBottom: 6, fontSize: 13 }}>行业 Regime 图标说明</div>

@@ -461,6 +461,11 @@ export default function StockAnalysis() {
       children: <ChanChartTab data={chanChartData} code={overview.code} />,
     },
     {
+      key: 'pattern-sell',
+      label: tabLabel('形态与卖点', '基于MACD/BOLL/KDJ/均线/量价等标准技术指标，检测5大起涨形态和7种卖点信号，不依赖缠论。'),
+      children: <PatternSellTab code={overview.code} />,
+    },
+    {
       key: 'relative-strength',
       label: tabLabel('相对强弱', '对比个股与同行业等权组合的累计收益，计算RS Ratio。RS>1表示跑赢行业，<1表示跑输。'),
       children: <RelativeStrengthTab data={relativeStrengthData} code={overview.code} />,
@@ -3302,6 +3307,129 @@ function RelativeStrengthTab({ data, code }) {
         description={`RS Ratio ${latestRsRatio || 0}，超额收益 ${latestExcessRet || 0}%，跑赢行业 ${exceedRatio || 0}% 的交易日`}
       />
       <ReactECharts option={option} style={{ height: 500 }} notMerge lazyUpdate />
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
+// 形态与卖点 Tab
+// ══════════════════════════════════════════════════════════════
+
+const PATTERN_INFO = {
+  BOTTOM_REVERSAL: { name: '底部反转', color: '#52c41a', desc: '双底/W底 + MACD底背离 + 放量突破' },
+  MAIN_TREND: { name: '主升浪', color: '#f5222d', desc: '突破平台 + 均线多头排列 + 放量' },
+  BREAKOUT: { name: '变盘突破', color: '#faad14', desc: '布林带收窄后突破 + 量能配合' },
+  SMALL_SWING: { name: '小波段', color: '#1677ff', desc: '均线金叉 + 量价配合 + 短期趋势' },
+  BOTTOM_CONFIRMED: { name: '底部探明', color: '#722ed1', desc: '长下影线探底 + 缩量 + MACD底背离' },
+};
+
+const SELL_ACTION_COLOR = { HOLD: 'default', REDUCE: 'orange', SELL: 'red' };
+const SELL_ACTION_NAME = { HOLD: '持有', REDUCE: '减仓', SELL: '卖出' };
+
+function PatternSellTab({ code }) {
+  const [patternData, setPatternData] = useState(null);
+  const [sellData, setSellData] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const fetchData = useCallback(async () => {
+    if (!code) return;
+    setLoading(true);
+    try {
+      const [patternRes, sellRes] = await Promise.all([
+        stockAnalysisApi.detectPatterns(code).catch(() => null),
+        stockAnalysisApi.detectSellSignals(code).catch(() => null),
+      ]);
+      setPatternData(patternRes || null);
+      setSellData(sellRes || null);
+    } catch (e) { /* ignore */ }
+    setLoading(false);
+  }, [code]);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  if (loading) return <Spin style={{ display: 'block', margin: '40px auto' }} />;
+
+  const detected = patternData?.detected || [];
+  const strongest = patternData?.strongest;
+  const sellAction = sellData?.action || 'HOLD';
+  const sellScore = sellData?.score || 0;
+  const sellSignals = sellData?.signals || [];
+
+  return (
+    <div>
+      <Row gutter={16} style={{ marginBottom: 16 }}>
+        <Col span={12}>
+          <Card size="small" title="形态检测结果" extra={
+            <Button size="small" onClick={fetchData} loading={loading}>刷新</Button>
+          }>
+            {detected.length === 0 ? (
+              <Empty description="未检测到起涨形态" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+            ) : (
+              <div>
+                {strongest && (
+                  <Alert
+                    type="success"
+                    showIcon
+                    style={{ marginBottom: 12 }}
+                    message={`最强形态: ${PATTERN_INFO[strongest.patternType]?.name || strongest.patternType} (强度${strongest.score}分)`}
+                    description={PATTERN_INFO[strongest.patternType]?.desc || ''}
+                  />
+                )}
+                {detected.map((r, i) => (
+                  <div key={i} style={{ marginBottom: 8 }}>
+                    <Tag color={PATTERN_INFO[r.patternType]?.color || 'blue'}>
+                      {PATTERN_INFO[r.patternType]?.name || r.patternType}
+                    </Tag>
+                    <span style={{ marginLeft: 8, fontSize: 13, color: '#595959' }}>
+                      强度 {r.score}分
+                    </span>
+                    <br />
+                    <span style={{ fontSize: 12, color: '#8c8c8c' }}>
+                      {r.signals?.join(' / ')}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        </Col>
+        <Col span={12}>
+          <Card size="small" title="卖出信号检测">
+            <div style={{ marginBottom: 12 }}>
+              <Tag color={SELL_ACTION_COLOR[sellAction]} style={{ fontSize: 14, padding: '4px 12px' }}>
+                {SELL_ACTION_NAME[sellAction]}
+              </Tag>
+              <span style={{ marginLeft: 12, fontSize: 13, color: '#595959' }}>
+                卖出信号强度: {sellScore}分
+              </span>
+            </div>
+            {sellSignals.length === 0 ? (
+              <Empty description="无卖出信号" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+            ) : (
+              <div>
+                {sellSignals.map((s, i) => (
+                  <div key={i} style={{ marginBottom: 6, fontSize: 13 }}>
+                    <Tag color="volcano" style={{ fontSize: 12 }}>{s.name}</Tag>
+                    <span style={{ marginLeft: 4, color: '#8c8c8c' }}>{s.description}</span>
+                    <Tag style={{ marginLeft: 8 }}>权重{s.weight}</Tag>
+                  </div>
+                ))}
+                <Alert
+                  type="info"
+                  style={{ marginTop: 12 }}
+                  message={sellData?.summary || ''}
+                />
+              </div>
+            )}
+          </Card>
+        </Col>
+      </Row>
+      <Alert
+        type="info"
+        showIcon
+        message="说明"
+        description="形态检测基于MACD/BOLL/KDJ/均线/量价等标准技术指标，不依赖缠论。5大起涨形态：底部反转、主升浪、变盘突破、小波段、底部探明。7种卖点信号：二度冲高不破前高、放量滞涨、长上影线、KDJ超买死叉、MACD顶背离、跌破MA20/MA60、跌破布林中轨。"
+      />
     </div>
   );
 }

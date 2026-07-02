@@ -44,16 +44,11 @@ public class ScheduleService implements SchedulingConfigurer {
     // taskKey → 失败重试计数（key = taskKey + ":" + scheduledTime.toLocalDate()，同一天只重试一次）
     private final Map<String, Boolean> retryTracker = new ConcurrentHashMap<>();
 
-    /** 依赖链：任务完成后自动触发下游任务（延迟毫秒数） */
-    private static final Map<String, List<String>> DEPENDENCY_CHAIN = Map.of(
-        "DAILY",          List.of("FINANCIAL", "BIDASK"),
-        "FACTOR_COMPUTE", List.of("DAILY_RECOMMENDATION")
-    );
-    /** 依赖触发延迟（毫秒）：FINANCIAL 等 DAILY 写完 5 分钟后再跑 */
-    private static final long DEPENDENCY_DELAY_MS = 5 * 60 * 1000;
-
     /** 今日已完成任务集合（用于依赖编排：避免重复触发） */
     private final Map<String, Boolean> todayCompleted = new ConcurrentHashMap<>();
+
+    /** 内存缓存：从 DB 加载的依赖链（upstream → List<{downstream, delayMs}>），定时刷新 */
+    private volatile Map<String, List<Map<String, Object>>> dependencyChainCache = Map.of();
 
     private NotificationService getNotificationService() {
         if (notificationService == null) {
@@ -130,6 +125,35 @@ public class ScheduleService implements SchedulingConfigurer {
             }
         }
         log.info("[ScheduleService] 刷新完成，当前调度任务数: {}", scheduledTasks.size());
+
+        // 刷新依赖链缓存
+        loadDependencyChain();
+    }
+
+    /**
+     * 从 DB 加载任务依赖链到内存缓存，供 triggerDependents 使用
+     */
+    private void loadDependencyChain() {
+        try {
+            List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "SELECT upstream_key, downstream_key, delay_seconds FROM data_task_dependency"
+            );
+            Map<String, List<Map<String, Object>>> chain = new java.util.HashMap<>();
+            for (Map<String, Object> row : rows) {
+                String upstream = (String) row.get("upstream_key");
+                chain.computeIfAbsent(upstream, k -> new java.util.ArrayList<>()).add(row);
+            }
+            dependencyChainCache = chain;
+            log.info("[ScheduleService] 依赖链已刷新，共 {} 条依赖关系", rows.size());
+        } catch (Exception e) {
+            log.warn("[ScheduleService] 加载依赖链失败，将使用空依赖: {}", e.getMessage());
+            dependencyChainCache = Map.of();
+        }
+    }
+
+    /** 供 Controller 调用，新增/删除依赖后刷新缓存（不重新注册 cron） */
+    public void refreshDependencyChain() {
+        loadDependencyChain();
     }
 
     /**
@@ -326,10 +350,17 @@ public class ScheduleService implements SchedulingConfigurer {
         String doneKey = "DONE_" + taskKey + "_" + LocalDate.now();
         todayCompleted.put(doneKey, true);
 
-        List<String> dependents = DEPENDENCY_CHAIN.get(taskKey);
+        // 从 DB 读取依赖链
+        Map<String, List<Map<String, Object>>> chain = dependencyChainCache;
+        List<Map<String, Object>> dependents = chain.get(taskKey);
         if (dependents == null || dependents.isEmpty()) return;
 
-        for (String depKey : dependents) {
+        for (Map<String, Object> dep : dependents) {
+            String depKey = (String) dep.get("downstream_key");
+            int delaySeconds = dep.get("delay_seconds") != null
+                ? ((Number) dep.get("delay_seconds")).intValue() : 300;
+            long delayMs = delaySeconds * 1000L;
+
             String depDoneKey = "DONE_" + depKey + "_" + LocalDate.now();
             if (todayCompleted.containsKey(depDoneKey)) {
                 log.info("[ScheduleService] 依赖任务 {} 今日已执行，跳过触发", depKey);
@@ -346,17 +377,18 @@ public class ScheduleService implements SchedulingConfigurer {
                 }
             } catch (Exception ignored) {}
 
-            log.info("[ScheduleService] {} 完成，{}ms 后触发下游: {}", taskKey, DEPENDENCY_DELAY_MS, depKey);
+            final String fDepKey = depKey;
+            log.info("[ScheduleService] {} 完成，{}ms 后触发下游: {}", taskKey, delayMs, depKey);
             taskScheduler.schedule(
                 () -> {
                     try {
-                        log.info("[ScheduleService] 依赖触发: {} (from {})", depKey, taskKey);
-                        executeTask(depKey);
+                        log.info("[ScheduleService] 依赖触发: {} (from {})", fDepKey, taskKey);
+                        executeTask(fDepKey);
                     } catch (Exception ex) {
-                        log.error("[ScheduleService] 依赖触发失败: {} (from {})", depKey, taskKey, ex);
+                        log.error("[ScheduleService] 依赖触发失败: {} (from {})", fDepKey, taskKey, ex);
                     }
                 },
-                new java.util.Date(System.currentTimeMillis() + DEPENDENCY_DELAY_MS)
+                new java.util.Date(System.currentTimeMillis() + delayMs)
             );
         }
     }

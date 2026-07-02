@@ -1580,7 +1580,6 @@ public class AnalysisService {
                       AND si.market NOT IN ('BJ','北交所')
                     GROUP BY si.industry
                     ORDER BY avgChangePct DESC
-                    LIMIT 30
                     """, latestTradeDate);
                 List<Map<String, Object>> rows = clickHouseStockService.queryForList(sql);
                 industryList = new ArrayList<>();
@@ -1615,16 +1614,17 @@ public class AnalysisService {
                 // 从 MySQL 取概念-股票映射
                 List<Map<String, Object>> concepts = stockAnalysisMapper.selectAllConcepts();
                 if (concepts != null && !concepts.isEmpty()) {
-                    // 收集所有涉及股票代码，构建 code→conceptName 的反向映射
-                    Map<String, String> codeToConcept = new LinkedHashMap<>();
+                    // 构建 concept→codes 映射（一只股票可属于多个概念，不能去重）
+                    Map<String, Set<String>> conceptToCodes = new LinkedHashMap<>();
+                    Set<String> allCodes = new LinkedHashSet<>();
                     for (Map<String, Object> c : concepts) {
                         String cname = (String) c.get("conceptName");
                         String ccode = (String) c.get("code");
-                        codeToConcept.put(ccode, cname);
+                        conceptToCodes.computeIfAbsent(cname, k -> new LinkedHashSet<>()).add(ccode);
+                        allCodes.add(ccode);
                     }
 
                     // 一次查出所有涉及股票的涨跌幅（限最新日期）
-                    Set<String> allCodes = codeToConcept.keySet();
                     List<Map<String, Object>> conceptListRaw = new ArrayList<>();
 
                     // CH IN 子句有长度限制，分批查询（每批500）
@@ -1637,10 +1637,12 @@ public class AnalysisService {
                     for (int i = 0; i < codeList.size(); i += 500) {
                         List<String> batch = codeList.subList(i, Math.min(i + 500, codeList.size()));
                         String inClause = String.join("','", batch);
+                        // 与下钻查询 getConceptStocks() 统一口径：必须同时存在于 stock_info + stock_daily
                         String batchSql = String.format("""
-                            SELECT code, change_percent as chg, pe_ttm, pb
-                            FROM stock.stock_daily FINAL
-                            WHERE code IN ('%s') AND trade_date = '%s'
+                            SELECT sd.code, sd.change_percent as chg, sd.pe_ttm, sd.pb
+                            FROM stock.stock_daily sd FINAL
+                            INNER JOIN stock.stock_info si ON si.code = sd.code
+                            WHERE sd.code IN ('%s') AND sd.trade_date = '%s'
                             """, inClause, maxDate);
                         List<Map<String, Object>> rows = clickHouseJdbcTemplate.query(batchSql,
                             (rs, rowNum) -> {
@@ -1656,26 +1658,28 @@ public class AnalysisService {
                         }
                     }
 
-                    // 按概念聚合
+                    // 按概念聚合（一只股票可属于多个概念，每个概念都要计入）
                     Map<String, List<Double>> conceptChgs = new LinkedHashMap<>();
                     Map<String, List<Double>> conceptPes = new LinkedHashMap<>();
                     Map<String, List<Double>> conceptPbs = new LinkedHashMap<>();
                     Map<String, Integer> conceptCounts = new LinkedHashMap<>();
-                    for (Map.Entry<String, String> e : codeToConcept.entrySet()) {
-                        String code = e.getKey();
-                        String cname = e.getValue();
-                        Map<String, Object> chgData = codeChgMap.get(code);
-                        if (chgData != null) {
-                            conceptChgs.computeIfAbsent(cname, k -> new ArrayList<>());
-                            conceptPes.computeIfAbsent(cname, k -> new ArrayList<>());
-                            conceptPbs.computeIfAbsent(cname, k -> new ArrayList<>());
-                            Object chg = chgData.get("chg");
-                            if (chg instanceof Number) conceptChgs.get(cname).add(((Number) chg).doubleValue());
-                            Object pe = chgData.get("pe");
-                            if (pe instanceof Number && ((Number) pe).doubleValue() > 0) conceptPes.get(cname).add(((Number) pe).doubleValue());
-                            Object pb = chgData.get("pb");
-                            if (pb instanceof Number && ((Number) pb).doubleValue() > 0) conceptPbs.get(cname).add(((Number) pb).doubleValue());
-                            conceptCounts.merge(cname, 1, Integer::sum);
+                    for (Map.Entry<String, Set<String>> e : conceptToCodes.entrySet()) {
+                        String cname = e.getKey();
+                        Set<String> codes = e.getValue();
+                        for (String code : codes) {
+                            Map<String, Object> chgData = codeChgMap.get(code);
+                            if (chgData != null) {
+                                conceptChgs.computeIfAbsent(cname, k -> new ArrayList<>());
+                                conceptPes.computeIfAbsent(cname, k -> new ArrayList<>());
+                                conceptPbs.computeIfAbsent(cname, k -> new ArrayList<>());
+                                Object chg = chgData.get("chg");
+                                if (chg instanceof Number) conceptChgs.get(cname).add(((Number) chg).doubleValue());
+                                Object pe = chgData.get("pe");
+                                if (pe instanceof Number && ((Number) pe).doubleValue() > 0) conceptPes.get(cname).add(((Number) pe).doubleValue());
+                                Object pb = chgData.get("pb");
+                                if (pb instanceof Number && ((Number) pb).doubleValue() > 0) conceptPbs.get(cname).add(((Number) pb).doubleValue());
+                                conceptCounts.merge(cname, 1, Integer::sum);
+                            }
                         }
                     }
 
@@ -1749,7 +1753,7 @@ public class AnalysisService {
             WHERE si.industry = ?
               AND si.market NOT IN ('BJ','北交所')
             ORDER BY %s %s
-            LIMIT 100
+            LIMIT 500
             """, chSortCol, order);
 
         return clickHouseJdbcTemplate.query(sql,
@@ -2163,7 +2167,7 @@ public class AnalysisService {
               ) sd ON sd.code = si.code
             WHERE si.code IN ('%s')
             ORDER BY %s %s
-            LIMIT 100
+            LIMIT 500
             """, inClause, chSortCol, order);
 
         return clickHouseJdbcTemplate.query(sql,
@@ -2218,7 +2222,8 @@ public class AnalysisService {
             try {
                 Map<String, Object> sector = new LinkedHashMap<>();
                 sector.put("conceptName", conceptName);
-                sector.put("stockCount", codes.size());
+                // stockCount 延后设置：先放原始数量，查完 CH 后更新为实际有行情的数量
+                sector.put("stockCount", 0);
 
                 // 批量查 CH：涨跌幅/PE/PB/市值
                 String inClause = codes.stream()
@@ -2228,6 +2233,7 @@ public class AnalysisService {
 
                 String sql = String.format("""
                     SELECT
+                        COUNT(*) as stockCount,
                         AVG(sd.change_percent) as avgChange,
                         median(sd.pe_ttm) as medianPe,
                         median(sd.pb) as medianPb,
@@ -2238,16 +2244,18 @@ public class AnalysisService {
                     """, inClause, latestDate);
 
                 clickHouseJdbcTemplate.query(sql, (rs) -> {
-                    Object avgChg = rs.getObject(1);
+                    Object cnt = rs.getObject(1);
+                    sector.put("stockCount", cnt instanceof Number ? ((Number) cnt).intValue() : 0);
+                    Object avgChg = rs.getObject(2);
                     sector.put("avgChange", avgChg instanceof Number ?
                         BigDecimal.valueOf(((Number) avgChg).doubleValue()).setScale(2, RoundingMode.HALF_UP) : null);
-                    Object medPe = rs.getObject(2);
+                    Object medPe = rs.getObject(3);
                     sector.put("medianPe", medPe instanceof Number ?
                         BigDecimal.valueOf(((Number) medPe).doubleValue()).setScale(1, RoundingMode.HALF_UP) : null);
-                    Object medPb = rs.getObject(3);
+                    Object medPb = rs.getObject(4);
                     sector.put("medianPb", medPb instanceof Number ?
                         BigDecimal.valueOf(((Number) medPb).doubleValue()).setScale(2, RoundingMode.HALF_UP) : null);
-                    Object totalCap = rs.getObject(4);
+                    Object totalCap = rs.getObject(5);
                     sector.put("totalMarketCap", totalCap instanceof Number ?
                         BigDecimal.valueOf(((Number) totalCap).doubleValue()).setScale(0, RoundingMode.HALF_UP) : null);
                 });
@@ -2298,7 +2306,7 @@ public class AnalysisService {
                 if (code != null && code.matches("\\d{6}")) codes.add(code);
             }
         }
-        result.put("stockCount", codes.size());
+        result.put("stockCount", codes.size());  // 初始值，下面查完后更新为实际有行情的数量
         if (codes.isEmpty()) {
             result.put("error", "无成分股数据");
             return result;
@@ -2333,6 +2341,7 @@ public class AnalysisService {
                 return m;
             });
         result.put("stocks", stocks);
+        result.put("stockCount", stocks.size());  // 更新为实际查询到的有行情且未退市的股票数
 
         // 概览统计
         if (!stocks.isEmpty()) {
@@ -2398,6 +2407,91 @@ public class AnalysisService {
      * 缠论K线图数据（实时计算）
      * 获取近250个交易日K线 → ChanTheoryCalculator 计算 → 返回可视化数据
      */
+    /**
+     * 拉取K线数据，返回原始double数组
+     * @param code 股票代码
+     * @param days 拉取天数
+     * @return [open[], high[], low[], close[], volume[]] 或 null
+     */
+    public double[][] fetchKlineData(String code, int days) {
+        try {
+            List<DailyBarRow> bars = analysisChMapper.selectRecentDailyBars(code, days);
+            if (bars == null || bars.size() < 10) return null;
+            int n = bars.size();
+            double[] open = new double[n], high = new double[n], low = new double[n], close = new double[n], volume = new double[n];
+            for (int i = 0; i < n; i++) {
+                DailyBarRow bar = bars.get(i);
+                open[i] = bar.getOpenPrice() != null ? bar.getOpenPrice().doubleValue() : 0;
+                high[i] = bar.getHighPrice() != null ? bar.getHighPrice().doubleValue() : 0;
+                low[i] = bar.getLowPrice() != null ? bar.getLowPrice().doubleValue() : 0;
+                close[i] = bar.getClosePrice() != null ? bar.getClosePrice().doubleValue() : 0;
+                volume[i] = bar.getVolume() != null ? bar.getVolume() : 0;
+            }
+            return new double[][] { open, high, low, close, volume };
+        } catch (Exception e) {
+            log.warn("拉取K线数据失败: {} - {}", code, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 批量获取全市场K线数据（一次ClickHouse查询，用于形态选股等全市场扫描场景）
+     * @param days 需要的交易日天数
+     * @return Map: code -> double[][] {open, high, low, close, volume}（按日期升序）
+     */
+    public Map<String, double[][]> batchFetchKlineData(int days) {
+        Map<String, double[][]> result = new HashMap<>();
+        if (clickHouseJdbcTemplate == null) return result;
+        try {
+            // 多取日历日确保有足够交易日
+            int calDays = (int) Math.ceil(days * 7.0 / 5) + 10;
+            LocalDate start = LocalDate.now().minusDays(calDays);
+            String startStr = start.format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd"));
+
+            // 一次查询全市场，用argMax去重(ReplacingMergeTree)
+            String sql = "SELECT code, trade_date, " +
+                    "argMax(open_price, update_time) AS open_price, " +
+                    "argMax(high_price, update_time) AS high_price, " +
+                    "argMax(low_price, update_time) AS low_price, " +
+                    "argMax(close_price, update_time) AS close_price, " +
+                    "argMax(volume, update_time) AS volume " +
+                    "FROM stock.stock_daily " +
+                    "WHERE trade_date >= ? " +
+                    "GROUP BY code, trade_date " +
+                    "ORDER BY code, trade_date";
+
+            List<Map<String, Object>> rows = clickHouseJdbcTemplate.queryForList(sql, startStr);
+            log.info("[BatchKline] 查询到 {} 行K线数据 (start={})", rows.size(), startStr);
+
+            // 按code分组组装
+            Map<String, List<Map<String, Object>>> grouped = new LinkedHashMap<>();
+            for (Map<String, Object> row : rows) {
+                String code = String.valueOf(row.get("code"));
+                grouped.computeIfAbsent(code, k -> new ArrayList<>()).add(row);
+            }
+
+            for (Map.Entry<String, List<Map<String, Object>>> entry : grouped.entrySet()) {
+                List<Map<String, Object>> codeRows = entry.getValue();
+                int n = codeRows.size();
+                if (n < 30) continue;  // 数据不足跳过
+                double[] open = new double[n], high = new double[n], low = new double[n], close = new double[n], volume = new double[n];
+                for (int i = 0; i < n; i++) {
+                    Map<String, Object> r = codeRows.get(i);
+                    open[i] = r.get("open_price") != null ? ((Number) r.get("open_price")).doubleValue() : 0;
+                    high[i] = r.get("high_price") != null ? ((Number) r.get("high_price")).doubleValue() : 0;
+                    low[i] = r.get("low_price") != null ? ((Number) r.get("low_price")).doubleValue() : 0;
+                    close[i] = r.get("close_price") != null ? ((Number) r.get("close_price")).doubleValue() : 0;
+                    volume[i] = r.get("volume") != null ? ((Number) r.get("volume")).doubleValue() : 0;
+                }
+                result.put(entry.getKey(), new double[][] { open, high, low, close, volume });
+            }
+            log.info("[BatchKline] 组装完成: {} 只股票", result.size());
+        } catch (Exception e) {
+            log.error("[BatchKline] 批量查询K线数据失败: {}", e.getMessage(), e);
+        }
+        return result;
+    }
+
     public Map<String, Object> getChanChart(String code) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("code", code);

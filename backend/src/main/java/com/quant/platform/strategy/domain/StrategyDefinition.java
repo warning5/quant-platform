@@ -142,6 +142,7 @@ public class StrategyDefinition implements Serializable {
         MARKET_NEUTRAL,     // 市场中性
         MOMENTUM,           // 动量策略
         MEAN_REVERSION,     // 均值回归
+        PATTERN,            // 形态驱动策略
         CUSTOM              // 自定义脚本策略
     }
 

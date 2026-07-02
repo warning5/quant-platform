@@ -3,6 +3,7 @@ package com.quant.platform.monitor;
 import com.quant.platform.notification.NotificationService;
 import com.quant.platform.calendar.service.TradeCalendarService;
 import com.quant.platform.strategy.paper.PaperTradingService;
+import com.quant.platform.stock.analysis.engine.SellSignalEngine;
 import lombok.Data;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
@@ -43,6 +44,11 @@ public class IntradayMonitorService {
     private final PaperTradingService paperTradingService;
     private final EntrySignalAnalyzer signalAnalyzer;
     private final TradeCalendarService tradeCalendarService;
+    private final SellSignalEngine sellSignalEngine;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    @org.springframework.beans.factory.annotation.Qualifier("clickHouseJdbcTemplate")
+    private JdbcTemplate clickHouseJdbcTemplate;
 
     /** K线并行拉取线程池 */
     private final ExecutorService klinePool;
@@ -82,12 +88,14 @@ public class IntradayMonitorService {
     public IntradayMonitorService(JdbcTemplate jdbcTemplate, NotificationService notificationService,
                                   PaperTradingService paperTradingService,
                                   EntrySignalAnalyzer signalAnalyzer, TradeCalendarService tradeCalendarService,
+                                  SellSignalEngine sellSignalEngine,
                                   @Value("${quant.monitor.kline-thread-pool-size:4}") int klinePoolSize) {
         this.jdbcTemplate = jdbcTemplate;
         this.notificationService = notificationService;
         this.paperTradingService = paperTradingService;
         this.signalAnalyzer = signalAnalyzer;
         this.tradeCalendarService = tradeCalendarService;
+        this.sellSignalEngine = sellSignalEngine;
         this.klinePool = Executors.newFixedThreadPool(klinePoolSize,
                 r -> {
                     Thread t = new Thread(r, "kline-analyze");
@@ -322,8 +330,84 @@ public class IntradayMonitorService {
                     .get(5, TimeUnit.SECONDS);
         } catch (TimeoutException e) {
             log.warn("[IntradayMonitor] 部分K线分析超时，已降级处理");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("[IntradayMonitor] K线分析被中断");
         } catch (Exception e) {
-            log.warn("[IntradayMonitor] 并行分析异常: {}", e.getMessage());
+            log.warn("[IntradayMonitor] K线分析异常: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 定时卖点检测：每5分钟检查一次所有监控股票的技术面卖点
+     * 独立于买入监控循环，避免频繁拉取K线
+     */
+    @Scheduled(cron = "0 */5 9-14 * * MON-FRI")
+    public void checkSellSignalsPeriodic() {
+        LocalDateTime now = LocalDateTime.now();
+        if (isNonTradingDay(now.toLocalDate())) return;
+        int hour = now.getHour();
+        boolean inTradingHours = (hour == 9 && now.getMinute() >= 30) || hour == 10
+                || (hour == 11 && now.getMinute() < 30) || hour == 13 || hour == 14;
+        if (!inTradingHours) return;
+        if (targetPriceCache.isEmpty()) return;
+
+        log.info("[IntradayMonitor] 定时卖点检测开始, 共{}只股票", targetPriceCache.size());
+
+        for (String code : targetPriceCache.keySet()) {
+            String key = code + "_SELL";
+            if (!canPush(key, 15)) continue; // 15分钟冷却
+
+            try {
+                double[][] ohlcv = fetchKlineData(code);
+                if (ohlcv == null || ohlcv[3].length < 30) continue;
+
+                SellSignalEngine.SellSignalResult sellResult = sellSignalEngine.checkSellSignals(
+                        ohlcv[3], ohlcv[1], ohlcv[2], ohlcv[0], ohlcv[4]);
+
+                if (sellResult.getAction() != SellSignalEngine.SellAction.HOLD) {
+                    TargetPriceInfo target = targetPriceCache.get(code);
+                    String name = target != null ? target.getStockName() : code;
+                    Double currentPrice = latestPrices.get(code);
+                    if (currentPrice == null) currentPrice = ohlcv[3][ohlcv[3].length - 1];
+                    pushSellSignal(code, name, sellResult, currentPrice);
+                    markPushed(key);
+                }
+            } catch (Exception e) {
+                log.warn("[IntradayMonitor] 卖点检测异常: {} - {}", code, e.getMessage());
+            }
+        }
+
+        log.info("[IntradayMonitor] 定时卖点检测完成");
+    }
+
+    /**
+     * 从ClickHouse拉取K线数据
+     * @return [open[], high[], low[], close[], volume[]]
+     */
+    private double[][] fetchKlineData(String code) {
+        if (clickHouseJdbcTemplate == null) return null;
+        try {
+            String pureCode = code.split("\\.")[0];
+            List<Map<String, Object>> rows = clickHouseJdbcTemplate.queryForList(
+                "SELECT open_price, high_price, low_price, close_price, volume FROM stock.stock_daily FINAL " +
+                "WHERE code = ? ORDER BY trade_date DESC LIMIT 120",
+                pureCode);
+            if (rows.isEmpty()) return null;
+            int n = rows.size();
+            double[] open = new double[n], high = new double[n], low = new double[n], close = new double[n], volume = new double[n];
+            for (int i = 0; i < n; i++) {
+                Map<String, Object> row = rows.get(n - 1 - i);
+                open[i] = ((Number) row.get("open_price")).doubleValue();
+                high[i] = ((Number) row.get("high_price")).doubleValue();
+                low[i] = ((Number) row.get("low_price")).doubleValue();
+                close[i] = ((Number) row.get("close_price")).doubleValue();
+                volume[i] = ((Number) row.get("volume")).doubleValue();
+            }
+            return new double[][] { open, high, low, close, volume };
+        } catch (Exception e) {
+            log.warn("[IntradayMonitor] 拉取K线失败: {} - {}", code, e.getMessage());
+            return null;
         }
     }
 
@@ -375,7 +459,7 @@ public class IntradayMonitorService {
         // 诊断：先查推荐BUY记录
         if (recDate != null) {
             try {
-                String diagSql = 
+                String diagSql =
                         "SELECT r.stock_code, r.stock_name, r.suggested_buy_price " +
                                 "FROM stock_recommendation r " +
                                 "WHERE r.recommend_date = ? AND r.action_tag = 'BUY'";
@@ -393,7 +477,7 @@ public class IntradayMonitorService {
         try {
             // 数据源1: llm_analysis BUY推荐（用LLM自己的最新日期）
             if (llmDate != null) {
-                String llmSql = 
+                String llmSql =
                         "SELECT a.stock_code, a.stock_name, a.buy_price_low, a.buy_price_high, " +
                                 "a.stop_loss, a.target_price " +
                                 "FROM llm_analysis a " +
@@ -415,7 +499,7 @@ public class IntradayMonitorService {
 
             // 数据源2: stock_recommendation 智能推荐（用推荐自己的最新日期）
             if (recDate != null) {
-                String recSql = 
+                String recSql =
                         "SELECT r.stock_code, r.stock_name, r.suggested_buy_price, r.close_price, " +
                                 "r.suggested_stop_loss, r.suggested_take_profit, r.suggested_target_price " +
                                 "FROM stock_recommendation r " +
@@ -746,6 +830,70 @@ public class IntradayMonitorService {
             }
         } catch (Exception e) {
             log.warn("[IntradayMonitor] 自动止损执行失败: {} - {}", stockCode, e.getMessage());
+        }
+    }
+
+    /**
+     * 推送技术面卖点信号
+     * 由 SellSignalEngine 检测7种卖点：MACD顶背离/KDJ死叉/放量滞涨/长上影/跌破均线/布林中轨等
+     */
+    private void pushSellSignal(String stockCode, String stockName, SellSignalEngine.SellSignalResult sellResult, double currentPrice) {
+        SellSignalEngine.SellAction action = sellResult.getAction();
+        if (action == SellSignalEngine.SellAction.HOLD) return;
+
+        String actionText = action == SellSignalEngine.SellAction.SELL ? "卖出" : "减仓";
+        StringBuilder sb = new StringBuilder();
+        for (SellSignalEngine.SellSignalItem item : sellResult.getSignals()) {
+            if (sb.length() > 0) sb.append("; ");
+            sb.append(item.getName());
+        }
+        String msg = String.format("卖点提示: %s(%s) 当前价 %.2f, 建议%s, 信号: %s",
+                stockName, stockCode, currentPrice, actionText, sb);
+        log.info("[IntradayMonitor] {}", msg);
+
+        try {
+            notificationService.sendAlert(msg);
+        } catch (Exception e) {
+            log.warn("[IntradayMonitor] 推送卖点信号失败: {}", e.getMessage());
+        }
+
+        Map<String, Object> sseEvent = new HashMap<>();
+        sseEvent.put("type", "signal");
+        sseEvent.put("signalType", "SELL_SIGNAL");
+        sseEvent.put("stockCode", stockCode);
+        sseEvent.put("stockName", stockName);
+        sseEvent.put("currentPrice", currentPrice);
+        sseEvent.put("sellAction", action.getName());
+        sseEvent.put("sellScore", sellResult.getScore());
+        sseEvent.put("sellSignals", sellResult.getSignals());
+        sseEvent.put("message", msg);
+        sseEvent.put("time", LocalDateTime.now().toString());
+        broadcastSse(sseEvent);
+        recordSignalHistory(sseEvent);
+
+        // SELL 级别自动执行模拟盘减仓
+        if (action == SellSignalEngine.SellAction.SELL) {
+            try {
+                List<Map<String, Object>> paperPositions = jdbcTemplate.query(
+                    "SELECT pt.id as paper_id, pp.code " +
+                    "FROM paper_trading pt JOIN paper_position pp ON pt.id = pp.paper_id " +
+                    "WHERE pt.status = 'RUNNING' AND pp.code = ?",
+                    (rs, rowNum) -> {
+                        Map<String, Object> m = new HashMap<>();
+                        m.put("paperId", rs.getLong("paper_id"));
+                        m.put("code", rs.getString("code"));
+                        return m;
+                    }, stockCode);
+                for (Map<String, Object> pos : paperPositions) {
+                    Long paperId = (Long) pos.get("paperId");
+                    paperTradingService.autoSellByStopLoss(paperId, stockCode, "技术面卖点: " + sb);
+                }
+                if (!paperPositions.isEmpty()) {
+                    log.info("[IntradayMonitor] 卖点自动卖出: {} 在 {} 个模拟盘中执行", stockCode, paperPositions.size());
+                }
+            } catch (Exception e) {
+                log.warn("[IntradayMonitor] 卖点自动卖出失败: {} - {}", stockCode, e.getMessage());
+            }
         }
     }
 

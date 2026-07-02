@@ -23,6 +23,7 @@ import com.quant.platform.screen.service.StockScreenService;
 import com.quant.platform.stock.entity.StockInfo;
 import com.quant.platform.stock.mapper.StockInfoMapper;
 import com.quant.platform.stock.service.DividendService;
+import com.quant.platform.stock.analysis.engine.SellSignalEngine;
 import com.quant.platform.strategy.domain.StrategyDefinition;
 import com.quant.platform.strategy.service.StrategyService;
 import groovy.lang.Binding;
@@ -85,6 +86,8 @@ public class BacktestEngine {
     private EquityCurveMapper equityCurveMapper;
     @Autowired(required = false)
     private SimpMessagingTemplate messagingTemplate;
+    @Autowired(required = false)
+    private SellSignalEngine sellSignalEngine;
     @Resource
     private DataSource dataSource;
 
@@ -249,6 +252,8 @@ public class BacktestEngine {
         // 解析止损止盈参数（参数优化使用）
         double stopLossPct = task.getStopLossPct() != null ? task.getStopLossPct().doubleValue() : 0.0;
         double stopProfitPct = task.getStopProfitPct() != null ? task.getStopProfitPct().doubleValue() : 0.0;
+        // 技术面卖点信号退出开关（默认开启）
+        boolean sellSignalEnabled = true;
 
         // 回测状态
         double cash = initialCapital;
@@ -457,6 +462,64 @@ public class BacktestEngine {
                         positions.remove(symbol);
                         positionCosts.remove(symbol);
                     }
+                }
+            }
+
+            // ── 技术面卖点信号检查（可选，通过参数 sellSignalEnabled 控制）─────────
+            if (sellSignalEngine != null && sellSignalEnabled && !positions.isEmpty()) {
+                List<String> toSellBySignal = new ArrayList<>();
+                for (String symbol : positions.keySet()) {
+                    try {
+                        List<MarketDailyBar> histBars = marketDataService.getBarsBySymbol(
+                                symbol, today.minusDays(90), today);
+                        if (histBars == null || histBars.size() < 30) continue;
+                        int n = histBars.size();
+                        double[] hClose = new double[n], hHigh = new double[n], hLow = new double[n], hOpen = new double[n], hVol = new double[n];
+                        for (int i = 0; i < n; i++) {
+                            MarketDailyBar b = histBars.get(i);
+                            hClose[i] = b.getClose().doubleValue();
+                            hHigh[i] = b.getHigh().doubleValue();
+                            hLow[i] = b.getLow().doubleValue();
+                            hOpen[i] = b.getOpen().doubleValue();
+                            hVol[i] = b.getVol() != null ? b.getVol().doubleValue() : 0;
+                        }
+                        SellSignalEngine.SellAction action = sellSignalEngine.getSellAction(hClose, hHigh, hLow, hOpen, hVol);
+                        if (action == SellSignalEngine.SellAction.SELL) {
+                            toSellBySignal.add(symbol);
+                        }
+                    } catch (Exception e) {
+                        // 卖点检测失败不影响回测主流程
+                    }
+                }
+                for (String symbol : toSellBySignal) {
+                    MarketDailyBar bar = barMap.get(symbol);
+                    if (bar == null) continue;
+                    if (suspendFilter && isSuspended(bar)) continue;
+                    if (limitFilter && isLimitDown(bar)) continue;
+                    double shares = positions.get(symbol);
+                    double cost = positionCosts.getOrDefault(symbol, 0.0);
+                    double execPrice = getExecutionPrice(bar, tradingDates, di, orderType, nextDayBarMap);
+                    double closePrice = bar.getClose().doubleValue();
+                    double amount = shares * closePrice;
+                    double dayAmount = bar.getAmount() != null ? bar.getAmount().doubleValue() * 1000 : 0;
+                    double price = applySlippage(execPrice, false, slippage, amount, dayAmount, slippageModel);
+                    double fee = BacktestUtils.calcFee(amount, true, commission, stampTaxRate, minCommission, symbol, transferFeeRate);
+                    Map<String, Object> trade = new HashMap<>();
+                    trade.put("date", today.toString());
+                    trade.put("symbol", symbol);
+                    trade.put("name", bar.getName());
+                    trade.put("action", "SELL_SIGNAL");
+                    trade.put("price", round(price, 4));
+                    trade.put("amount", round(shares, 2));
+                    trade.put("total", round(amount - fee, 2));
+                    trade.put("commission", round(fee, 2));
+                    trade.put("fee", round(fee, 2));
+                    trade.put("returnPct", cost > 0 ? round(returnPct(amount, cost), 4) : 0);
+                    tradeLog.add(trade);
+                    cash += (shares * price) - fee;
+                    totalTrades++;
+                    positions.remove(symbol);
+                    positionCosts.remove(symbol);
                 }
             }
 

@@ -118,3 +118,35 @@ VALUES ('EVENT_DRIVEN_DOWNGRADED', '事件驱动（降级版）',
         'FACTOR_LONG', 'ACTIVE', 'MONTHLY', 15, 'EQUAL', 0.08,
         '{"factors":[{"code":"FIN_NET_PROFIT_YOY","weight":0.30,"direction":1},{"code":"FIN_REVENUE_YOY","weight":0.30,"direction":1},{"code":"FIN_EARNINGS_QUALITY","weight":0.20,"direction":1},{"code":"FIN_ROE","weight":0.20,"direction":1}]}',
         'system');
+
+-- ============================================================
+-- 14~16: 形态驱动策略 (PATTERN)
+-- 基于《稳中求胜》5大起涨形态，使用MACD/BOLL/KDJ/均线/量价标准技术指标
+-- ============================================================
+
+-- 14. 底部反转
+INSERT IGNORE INTO strategy_definition (strategy_code, strategy_name, description, strategy_type, status, rebalance_frequency, max_position_count, position_size_type, stop_loss_pct, factor_config_json, filter_config_json, author)
+VALUES ('PATTERN_BOTTOM_REVERSAL', '底部反转形态',
+        '双底/W底结构 + MACD底背离 + 放量突破颈线 + KDJ低位金叉，捕捉底部反转机会',
+        'PATTERN', 'ACTIVE', 'WEEKLY', 10, 'EQUAL', 0.08,
+        '{}',
+        '{"patternType":"BOTTOM_REVERSAL"}',
+        'system');
+
+-- 15. 主升浪
+INSERT IGNORE INTO strategy_definition (strategy_code, strategy_name, description, strategy_type, status, rebalance_frequency, max_position_count, position_size_type, stop_loss_pct, factor_config_json, filter_config_json, author)
+VALUES ('PATTERN_MAIN_TREND', '主升浪形态',
+        '突破平台整理区 + 均线多头排列(MA5>MA10>MA20>MA60) + 放量配合 + MACD多头信号',
+        'PATTERN', 'ACTIVE', 'WEEKLY', 10, 'EQUAL', 0.08,
+        '{}',
+        '{"patternType":"MAIN_TREND"}',
+        'system');
+
+-- 16. 变盘突破
+INSERT IGNORE INTO strategy_definition (strategy_code, strategy_name, description, strategy_type, status, rebalance_frequency, max_position_count, position_size_type, stop_loss_pct, factor_config_json, filter_config_json, author)
+VALUES ('PATTERN_BREAKOUT', '变盘突破形态',
+        '布林带收窄后向上突破 + 放量配合 + MA5金叉MA10，捕捉变盘节点',
+        'PATTERN', 'ACTIVE', 'WEEKLY', 10, 'EQUAL', 0.08,
+        '{}',
+        '{"patternType":"BREAKOUT"}',
+        'system');

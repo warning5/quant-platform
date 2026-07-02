@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -440,6 +441,112 @@ public class ScheduleConfigController {
         log.info("[ScheduleConfig] 删除任务配置: {}", taskKey);
         scheduleService.refreshFromDb();
         return ApiResponse.success(true);
+    }
+
+    // ==================== 任务依赖关系管理 ====================
+
+    /**
+     * 获取所有任务依赖关系
+     */
+    @GetMapping("/dependencies")
+    public ApiResponse<List<Map<String, Object>>> getDependencies() {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+            "SELECT d.id, d.upstream_key, d.downstream_key, d.delay_seconds, " +
+            "u.task_name AS upstream_name, v.task_name AS downstream_name, " +
+            "d.created_at, d.updated_at " +
+            "FROM data_task_dependency d " +
+            "LEFT JOIN data_schedule_config u ON u.task_key = d.upstream_key " +
+            "LEFT JOIN data_schedule_config v ON v.task_key = d.downstream_key " +
+            "ORDER BY d.upstream_key, d.downstream_key"
+        );
+        return ApiResponse.success(rows);
+    }
+
+    /**
+     * 获取所有可选任务（用于下拉框）
+     */
+    @GetMapping("/task-keys")
+    public ApiResponse<List<Map<String, Object>>> getTaskKeys() {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+            "SELECT task_key AS value, CONCAT(task_key, ' - ', task_name) AS label FROM data_schedule_config ORDER BY task_key"
+        );
+        return ApiResponse.success(rows);
+    }
+
+    /**
+     * 新增任务依赖关系
+     * 包含循环依赖校验
+     */
+    @PostMapping("/dependencies")
+    public ApiResponse<?> addDependency(@RequestBody Map<String, Object> body) {
+        String upstream = (String) body.get("upstreamKey");
+        String downstream = (String) body.get("downstreamKey");
+        Integer delaySeconds = body.get("delaySeconds") != null
+            ? ((Number) body.get("delaySeconds")).intValue() : 300;
+
+        if (upstream == null || downstream == null || upstream.isBlank() || downstream.isBlank()) {
+            return ApiResponse.error("上游和下游任务不能为空");
+        }
+        if (upstream.equals(downstream)) {
+            return ApiResponse.error("不能建立任务对自身的依赖");
+        }
+
+        // 检查是否已存在
+        Integer exists = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM data_task_dependency WHERE upstream_key = ? AND downstream_key = ?",
+            Integer.class, upstream, downstream);
+        if (exists != null && exists > 0) {
+            return ApiResponse.error("该依赖关系已存在");
+        }
+
+        // 循环依赖校验：从 downstream 出发 DFS 遍历，若能回到 upstream 则存在循环
+        if (hasCycle(upstream, downstream)) {
+            return ApiResponse.error("禁止创建循环依赖：添加后会导致 " + upstream + " → ... → " + downstream + " → " + upstream + " 闭环");
+        }
+
+        jdbcTemplate.update(
+            "INSERT INTO data_task_dependency (upstream_key, downstream_key, delay_seconds) VALUES (?, ?, ?)",
+            upstream, downstream, delaySeconds);
+        log.info("[ScheduleConfig] 新增依赖: {} → {} (延迟{}秒)", upstream, downstream, delaySeconds);
+        scheduleService.refreshDependencyChain();
+        return ApiResponse.success(true);
+    }
+
+    /**
+     * 删除任务依赖关系
+     */
+    @DeleteMapping("/dependencies/{id}")
+    public ApiResponse<?> deleteDependency(@PathVariable("id") Long id) {
+        int rows = jdbcTemplate.update("DELETE FROM data_task_dependency WHERE id = ?", id);
+        if (rows == 0) return ApiResponse.error("依赖关系不存在");
+        log.info("[ScheduleConfig] 删除依赖关系 id={}", id);
+        scheduleService.refreshDependencyChain();
+        return ApiResponse.success(true);
+    }
+
+    /**
+     * DFS 检测循环依赖：从 startKey 出发能否通过已有依赖到达 targetKey
+     * 若把 startKey → targetKey 加入后，是否形成环
+     */
+    private boolean hasCycle(String startKey, String targetKey) {
+        // 从 targetKey 出发，DFS 遍历所有可达节点，看是否能回到 startKey
+        java.util.Set<String> visited = new java.util.HashSet<>();
+        java.util.Stack<String> stack = new java.util.Stack<>();
+        stack.push(targetKey);
+        while (!stack.isEmpty()) {
+            String cur = stack.pop();
+            if (cur.equals(startKey)) return true; // 找到了！说明加这条边会成环
+            if (visited.contains(cur)) continue;
+            visited.add(cur);
+            // 查 cur 的下游
+            List<String> deps = jdbcTemplate.queryForList(
+                "SELECT downstream_key FROM data_task_dependency WHERE upstream_key = ?",
+                String.class, cur);
+            for (String dep : deps) {
+                if (!visited.contains(dep)) stack.push(dep);
+            }
+        }
+        return false;
     }
 
     /**

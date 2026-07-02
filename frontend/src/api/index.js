@@ -319,6 +319,11 @@ export const scheduleApi = {
   cancel: (taskKey) => api.post(`/schedule-config/cancel/${taskKey}`),
   getHistory: () => api.get('/schedule-config/history'),
   delete: (taskKey) => api.delete(`/schedule-config/${taskKey}`),
+  // 任务依赖
+  getDependencies: () => api.get('/schedule-config/dependencies'),
+  getTaskKeys: () => api.get('/schedule-config/task-keys'),
+  addDependency: (body) => api.post('/schedule-config/dependencies', body, { _silent: true }),
+  deleteDependency: (id) => api.delete(`/schedule-config/dependencies/${id}`),
 };
 
 // ===== 数据质量 API =====
@@ -358,6 +363,9 @@ export const stockAnalysisApi = {
   getMarketThermometer: () => api.get('/analysis/market-thermometer'),
   // P0 新增
   getChanChart: (code) => api.get('/analysis/chan-chart', { params: { code } }),
+  // 形态检测 + 卖出信号检测
+  detectPatterns: (code) => api.get('/analysis/pattern-detect', { params: { code } }),
+  detectSellSignals: (code) => api.get('/analysis/sell-signals', { params: { code } }),
   getMoneyFlowHistory: (code, days = 120) => api.get('/analysis/money-flow-history', { params: { code, days } }),
   getRelativeStrength: (code) => api.get('/analysis/relative-strength', { params: { code } }),
   getKLine: (code, days = 60) => api.get('/analysis/kline', { params: { code, days } }),
