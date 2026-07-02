@@ -48,7 +48,7 @@ public class RecommendationController {
             Integer topN = req != null ? req.getTopN() : null;
             Long strategyId = req != null ? req.getStrategyId() : null;
             String weightMode = req != null ? req.getWeightMode() : null;
-            Boolean enableConfidenceControl = req != null && req.getEnableConfidenceControl() != null
+            boolean enableConfidenceControl = req != null && req.getEnableConfidenceControl() != null
                     ? req.getEnableConfidenceControl() : true; // 默认开启
 
             List<RecommendationService.FactorDiagnostic> diagnostics = new ArrayList<>();
@@ -122,6 +122,16 @@ public class RecommendationController {
     @GetMapping("/strategy-date-combos")
     public ApiResponse<List<Map<String, Object>>> getStrategyDateCombos(@RequestParam(defaultValue = "20") int limit) {
         return ApiResponse.success(recommendationService.getStrategyDateCombos(limit));
+    }
+
+    /**
+     * 获取指定策略在最近 N 天内有推荐数据的日期列表（倒序），用于前端日期筛选
+     */
+    @GetMapping("/dates-by-strategy")
+    public ApiResponse<List<String>> getDatesByStrategy(
+            @RequestParam Long strategyId,
+            @RequestParam(defaultValue = "30") int days) {
+        return ApiResponse.success(recommendationService.getDatesByStrategy(strategyId, days));
     }
 
     /**

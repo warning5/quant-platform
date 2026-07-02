@@ -389,6 +389,8 @@ export const recommendationApi = {
   getByStrategyAndDate: (strategyId, date) => api.get(`/recommendations/strategy/${strategyId}/date/${date}`),
   /** 获取有推荐记录的策略+日期组合列表 */
   getStrategyDateCombos: (limit = 20) => api.get('/recommendations/strategy-date-combos', { params: { limit } }),
+  /** 获取指定策略在最近 N 天内有推荐数据的日期列表（倒序） */
+  getDatesByStrategy: (strategyId, days = 30) => api.get('/recommendations/dates-by-strategy', { params: { strategyId, days } }),
   /** 获取所有有推荐记录的策略ID列表（用于筛选下拉） */
   strategiesWithData: () => api.get('/recommendations/strategies-with-data'),
   /** 计算并存储因子IC值（需先计算IC，再使用动态IC加权生成推荐）

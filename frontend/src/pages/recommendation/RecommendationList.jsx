@@ -229,17 +229,42 @@ export default function RecommendationList() {
     return false;
   }
 
-  // 加载策略列表（含复盘筛选用）
+  // 加载策略列表并初始化推荐数据
   useEffect(() => {
-    api.get('/strategies', { params: { status: 'ACTIVE', size: 100 } })
-      .then(res => {
+    const initRecommendations = async () => {
+      try {
+        const res = await api.get('/strategies', { params: { status: 'ACTIVE', size: 100 } });
         const list = res?.records || [];
         setStrategies(list);
-        if (list.length > 0 && !selectedStrategyId) {
-          setSelectedStrategyId(list[0].id);
+        if (list.length === 0) return;
+
+        // 取第一个策略作为默认
+        const firstStrategy = list[0];
+        setSelectedStrategyId(firstStrategy.id);
+
+        // 查该策略最近30天内有数据的日期
+        let dates = [];
+        try {
+          dates = await recommendationApi.getDatesByStrategy(firstStrategy.id, 30);
+        } catch { /* ignore */ }
+        setStrategyDates(dates);
+
+        if (dates.length > 0) {
+          // 取最近的一个有数据的日期
+          const latestDate = dates[0];
+          setScreenDate(latestDate);
+          await loadRecommendations(firstStrategy.id, latestDate);
+        } else {
+          // 没有数据，表格展示空状态
+          setRecommendations([]);
+          setRegime(null);
+          setIndexInfo(null);
         }
-      })
-      .catch(() => {});
+      } catch { /* ignore */ }
+    };
+
+    initRecommendations();
+
     // 加载有推荐数据的策略列表（用于复盘筛选下拉，含名称）
     recommendationApi.strategiesWithData()
       .then(list => {
@@ -322,9 +347,38 @@ export default function RecommendationList() {
     setLoading(false);
   }, []);
 
-  useEffect(() => {
-    loadRecommendations(null);
-  }, [loadRecommendations]);
+  // ── 策略切换：刷新可用日期列表，自动选最近日期，加载推荐 ──
+  const handleStrategyChange = async (value) => {
+    setSelectedStrategyId(value);
+    setStrategyDates([]);
+    setRecommendations([]);
+    if (!value) return;
+    try {
+      const dates = await recommendationApi.getDatesByStrategy(value, 30);
+      setStrategyDates(dates);
+      if (dates.length > 0) {
+        const latestDate = dates[0];
+        setScreenDate(latestDate);
+        await loadRecommendations(value, latestDate);
+      } else {
+        setScreenDate(null);
+        setRegime(null);
+        setIndexInfo(null);
+      }
+    } catch { /* ignore */ }
+  };
+
+  // ── 日期切换：用当前策略+新日期加载推荐 ──
+  const handleDateChange = async (dateStr) => {
+    setScreenDate(dateStr);
+    if (selectedStrategyId && dateStr) {
+      await loadRecommendations(selectedStrategyId, dateStr);
+    } else {
+      setRecommendations([]);
+      setRegime(null);
+      setIndexInfo(null);
+    }
+  };
 
   // 生成推荐
   const handleGenerate = async () => {
@@ -339,7 +393,12 @@ export default function RecommendationList() {
       message.success(`推荐列表生成成功: ${result.count} 只`);
       setFactorDiagnostics(weightMode === 'IC' ? (result.factorDiagnostics || null) : null);
       setIcDataDate(weightMode === 'IC' ? (result.icDataDate || null) : null);
-      await loadRecommendations(null);
+      // 生成完成后刷新可用日期列表并加载当前策略+日期的推荐
+      try {
+        const newDates = await recommendationApi.getDatesByStrategy(selectedStrategyId, 30);
+        setStrategyDates(newDates);
+      } catch { /* ignore */ }
+      await loadRecommendations(selectedStrategyId, dateStr);
     } catch (e) {
       message.error('生成失败: ' + (e.message || '未知错误'));
     }
@@ -414,8 +473,8 @@ export default function RecommendationList() {
     try {
       const res = await recommendationApi.trackPerformance();
       message.success(`表现追踪完成，更新 ${res.updated} 条记录`);
-      // 刷新推荐列表（主列表始终加载最新数据，复盘区域单独刷新）
-      loadRecommendations(null);
+      // 刷新推荐列表（用当前策略+日期刷新）
+      loadRecommendations(selectedStrategyId, screenDate);
       // 刷新历史命中率趋势图、质量标签、复盘数据
       try {
         const hist = await recommendationApi.getBatchHistory(20, reviewStrategyId);
@@ -925,20 +984,17 @@ export default function RecommendationList() {
           )}
         </Space>
         <Space>
-          <DatePicker
-            value={screenDate ? dayjs(screenDate) : null}
-            onChange={date => setScreenDate(date ? date.format('YYYY-MM-DD') : null)}
-            placeholder="选择日期"
-            style={{ width: 170 }}
-            disabledDate={(current) => {
-            if (!current) return false;
-            if (current.isAfter(dayjs().endOf('day'))) return true;
-            return isNonTradingDay(current);
-          }}
+          <Select
+            value={screenDate}
+            onChange={handleDateChange}
+            placeholder={strategyDates.length === 0 ? '暂无可用日期' : '选择日期'}
+            style={{ width: 150 }}
+            notFoundContent="最近30天内无推荐数据"
+            options={strategyDates.map(d => ({ value: d, label: d }))}
           />
           <Select
             value={selectedStrategyId}
-            onChange={value => setSelectedStrategyId(value)}
+            onChange={handleStrategyChange}
             style={{ width: 260 }}
             placeholder="选择策略"
             showSearch

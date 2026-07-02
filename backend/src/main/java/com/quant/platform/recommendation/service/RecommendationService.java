@@ -252,14 +252,6 @@ public class RecommendationService {
         }
     }
 
-    private static ScreenRequest.FactorWeight newFactor(String code, int direction, double weight) {
-        ScreenRequest.FactorWeight fw = new ScreenRequest.FactorWeight();
-        fw.setFactorCode(code);
-        fw.setDirection(direction);
-        fw.setWeight(weight);
-        return fw;
-    }
-
     /**
      * 计算数组标准差
      */
@@ -826,6 +818,21 @@ public class RecommendationService {
      */
     public List<Map<String, Object>> getStrategyDateCombos(int limit) {
         return recommendationMapper.findRecentStrategyDates(limit);
+    }
+
+    /**
+     * 获取指定策略在最近 days 天内有推荐数据的日期列表（倒序）
+     */
+    public List<String> getDatesByStrategy(Long strategyId, int days) {
+        List<java.time.LocalDate> dates = recommendationMapper.findDatesByStrategyId(strategyId, days);
+        List<String> result = new java.util.ArrayList<>(dates.size());
+        for (java.time.LocalDate d : dates) {
+            // 只保留最近 days 天内的日期
+            if (!d.isBefore(java.time.LocalDate.now().minusDays(days))) {
+                result.add(d.toString());
+            }
+        }
+        return result;
     }
 
     /**
