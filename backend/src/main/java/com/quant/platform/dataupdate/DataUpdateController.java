@@ -114,6 +114,19 @@ public class DataUpdateController {
         return ApiResponse.success(dataUpdateService.getRecentTasks());
     }
 
+    @GetMapping("/scheduled-running")
+    @Operation(summary = "检测 DB 中孤儿 RUNNING 定时任务（页面刷新后恢复状态用）")
+    public ApiResponse<List<Map<String, Object>>> getScheduledRunningTasks() {
+        return ApiResponse.success(dataUpdateService.getScheduledRunningTasks());
+    }
+
+    @PostMapping("/cancel-orphan/{taskKey}")
+    @Operation(summary = "清理孤儿 RUNNING 任务的 DB 状态")
+    public ApiResponse<Map<String, Object>> cancelOrphanTask(@PathVariable String taskKey) {
+        boolean ok = dataUpdateService.cancelOrphanTask(taskKey);
+        return ApiResponse.success(ok ? "已清理孤儿任务状态" : "清理失败", Map.of("cleaned", ok));
+    }
+
     @PostMapping("/cancel/{taskId}")
     @Operation(summary = "取消任务")
     public ApiResponse<Map<String, Object>> cancelTask(@PathVariable String taskId) {

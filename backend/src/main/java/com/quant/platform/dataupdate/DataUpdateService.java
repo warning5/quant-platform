@@ -91,8 +91,6 @@ public class DataUpdateService {
     @Value("${quant.data-update.default-start-days:3}")
     private int defaultStartDays;
 
-    @Value("${clickhouse.password}")
-    private String clickhousePassword;
     /** 脚本目录（绝对路径，启动时从相对路径解析） */
     private String resolvedScriptDir;
 
@@ -232,6 +230,39 @@ public class DataUpdateService {
     }
 
     /**
+     * 检测 DB 中的孤儿 RUNNING 定时任务（进程已死但 DB 状态未清理）
+     * 用于 DataUpdate 页面刷新后恢复状态显示
+     */
+    public List<Map<String, Object>> getScheduledRunningTasks() {
+        List<Map<String, Object>> result = new ArrayList<>();
+        try {
+            List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "SELECT task_key, name, last_run_time, last_run_status, extra_config " +
+                "FROM data_schedule_config WHERE last_run_status = 'RUNNING'"
+            );
+            for (Map<String, Object> row : rows) {
+                String taskKey = (String) row.get("task_key");
+                // 如果内存中已有该类型的运行中任务，说明不是孤儿，跳过
+                boolean hasInMemory = activeTasks.values().stream()
+                    .anyMatch(t -> t.getRequest() != null && taskKey.equals(t.getRequest().getUpdateType()));
+                if (hasInMemory) {
+                    continue;
+                }
+                Map<String, Object> info = new LinkedHashMap<>();
+                info.put("taskKey", taskKey);
+                info.put("name", row.get("name"));
+                info.put("lastRunTime", row.get("last_run_time").toString());
+                info.put("status", "RUNNING");
+                info.put("isOrphan", true);  // 标记为孤儿（DB 说在跑但内存中没有）
+                result.add(info);
+            }
+        } catch (Exception e) {
+            log.warn("[DataUpdate] 查询孤儿 RUNNING 任务失败: {}", e.getMessage());
+        }
+        return result;
+    }
+
+    /**
      * 取消任务
      */
     public synchronized boolean cancelTask(String taskId) {
@@ -286,6 +317,30 @@ public class DataUpdateService {
 
         broadcastStatus(task);
         return true;
+    }
+
+    /**
+     * 清理孤儿 RUNNING 任务（DB 状态卡在 RUNNING 但内存中无对应任务）
+     * 前端传入 taskKey（如 DAILY、FINANCIAL），直接更新 DB
+     */
+    public boolean cancelOrphanTask(String taskKey) {
+        try {
+            int rows = jdbcTemplate.update(
+                "UPDATE data_schedule_config SET last_run_status='INTERRUPTED', updated_at=? " +
+                "WHERE task_key=? AND last_run_status='RUNNING'",
+                LocalDateTime.now(), taskKey
+            );
+            if (rows > 0) {
+                log.info("[DataUpdate] ★ 清理孤儿任务 DB 状态: task_key={}, rows={}", taskKey, rows);
+                return true;
+            } else {
+                log.warn("[DataUpdate] 清理孤儿任务未匹配（可能已被其他请求清理）: task_key={}", taskKey);
+                return false;
+            }
+        } catch (Exception e) {
+            log.error("[DataUpdate] ★★ 清理孤儿任务失败!! task_key={}, error: {}", taskKey, e.getMessage());
+            return false;
+        }
     }
 
     /**

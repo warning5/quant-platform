@@ -898,6 +898,36 @@ function DataUpdate() {
         }
       }
     }).catch(() => {});
+
+    // 检测 DB 中孤儿 RUNNING 定时任务（进程已死但状态卡在 RUNNING）
+    dataUpdateApi.getScheduledRunningTasks().then(orphanTasks => {
+      if (orphanTasks && Array.isArray(orphanTasks) && orphanTasks.length > 0) {
+        for (const ot of orphanTasks) {
+          const taskKey = ot.taskKey; // DAILY, FINANCIAL 等
+          const updater = getTaskUpdater(taskKey);
+          updater(prev => prev?.status === 'RUNNING' ? prev : { // 不覆盖内存中已有的运行中任务
+            taskId: 'ORPHAN-' + taskKey,
+            status: 'RUNNING',
+            currentStep: `[孤儿] ${ot.name || taskKey} 于 ${ot.lastRunTime} 启动，进程可能已退出`,
+            progress: null,
+            processedStocks: 0,
+            totalStocks: 0,
+            startTime: ot.lastRunTime,
+            error: null,
+            isOrphan: true,
+            updateType: taskKey,
+          });
+          // 给对应 tab 的日志区加一条提示
+          const logUpdater = getLogUpdater(taskKey);
+          logUpdater(prev => [...prev, {
+            id: Date.now(),
+            time: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
+            text: `[警告] 检测到孤儿运行任务: ${ot.name || taskKey}，启动时间 ${ot.lastRunTime}。该任务的执行进程可能已异常退出（后端重启/进程被杀），DB 状态未正确清理。如确认任务已结束，可点击"取消"清理状态。`,
+          }]);
+        }
+      }
+    }).catch(() => {});
+
     fetchCoverage();
     fetchIndexCoverage();
     fetchDividendCoverage();
@@ -1082,6 +1112,13 @@ function DataUpdate() {
       : dailyTask;
     if (!task || !task.taskId) return;
     try {
+      // 孤儿任务：taskId 以 'ORPHAN-' 开头，直接清理 DB 状态
+      if (task.taskId.startsWith('ORPHAN-')) {
+        await dataUpdateApi.cancelOrphanTask(updateType);
+        message.info('已清理孤儿任务状态');
+        getTaskUpdater(updateType)(prev => prev ? { ...prev, status: 'INTERRUPTED', endTime: new Date().toISOString() } : prev);
+        return;
+      }
       await dataUpdateApi.cancelTask(task.taskId);
       message.info('任务已取消');
       // 立即更新本地状态，防止 WS 推送延迟导致按钮卡住
