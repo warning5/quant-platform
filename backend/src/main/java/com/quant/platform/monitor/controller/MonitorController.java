@@ -300,6 +300,18 @@ public class MonitorController {
     }
 
     /**
+     * 获取大盘指数实时行情（上证、深证、创业板、科创50、上证50、沪深300、中证500、中证1000、北证50）
+     * 后端每10秒自动刷新缓存，前端调用直接返回
+     */
+    @GetMapping("/indices")
+    public ResponseEntity<Map<String, Object>> getIndexQuotes() {
+        Map<String, Object> result = new HashMap<>();
+        result.put("code", 200);
+        result.put("data", intradayMonitorService.getIndexQuotes());
+        return ResponseEntity.ok(result);
+    }
+
+    /**
      * 移除自定义监控股票
      * DELETE /api/monitor/custom-stock?stockCode=xxx
      */

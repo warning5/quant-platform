@@ -38,6 +38,11 @@ public class EntrySignalAnalyzer {
     /** 腾讯分钟K线接口（mkline支持m5，newfqkline只支持day/week/month） */
     private static final String KLINE_URL = "https://ifzq.gtimg.cn/appstock/app/kline/mkline?param=%s&_var=m5_today&r=%f";
 
+    /** 复用HttpClient避免每次新建（连接池+keep-alive） */
+    private final java.net.http.HttpClient httpClient = java.net.http.HttpClient.newBuilder()
+            .connectTimeout(java.time.Duration.ofSeconds(5))
+            .build();
+
     /** 信号权重配置 */
     private static final int W_BREAKOUT = 35;
     private static final int W_MA = 20;
@@ -258,17 +263,13 @@ public class EntrySignalAnalyzer {
             String param = String.format("%s,m5,,320", tencentCode);
             String url = String.format(KLINE_URL, param, Math.random());
 
-            java.net.http.HttpClient client = java.net.http.HttpClient.newBuilder()
-                    .connectTimeout(java.time.Duration.ofSeconds(5))
-                    .build();
-
             java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
                     .uri(java.net.URI.create(url))
                     .timeout(java.time.Duration.ofSeconds(8))
                     .GET()
                     .build();
 
-            java.net.http.HttpResponse<String> response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+            java.net.http.HttpResponse<String> response = httpClient.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
 
             if (response.statusCode() != 200) return null;
 
@@ -283,7 +284,7 @@ public class EntrySignalAnalyzer {
             return parseM5Kline(body, tencentCode);
 
         } catch (Exception e) {
-            log.debug("[EntrySignal] 获取m5 K线失败: code={}, error={}", stockCode, e.getMessage());
+            log.warn("[EntrySignal] 获取m5 K线失败: code={}, error={}", stockCode, e.getMessage());
             return null;
         }
     }
@@ -345,7 +346,7 @@ public class EntrySignalAnalyzer {
             return bars;
 
         } catch (Exception e) {
-            log.debug("[EntrySignal] 解析m5 K线失败: {}", e.getMessage());
+            log.warn("[EntrySignal] 解析m5 K线失败: {}", e.getMessage());
             return null;
         }
     }

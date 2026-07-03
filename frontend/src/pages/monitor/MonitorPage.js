@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Card, Table, Button, Tag, Space, Alert, Typography, Tooltip, Modal, Input, InputNumber, Form, Popover, Switch, Dropdown } from 'antd';
+import { Card, Table, Button, Tag, Space, Alert, Typography, Tooltip, Modal, Input, InputNumber, Form, Popover, Switch, Dropdown, Row, Col } from 'antd';
 import { message, notification } from '../../utils/messageUtil';
-import { ReloadOutlined, PlayCircleOutlined, EyeOutlined, ThunderboltOutlined, QuestionCircleOutlined, PlusOutlined, DeleteOutlined, EditOutlined, BellOutlined, MoreOutlined } from '@ant-design/icons';
+import { ReloadOutlined, PlayCircleOutlined, EyeOutlined, ThunderboltOutlined, QuestionCircleOutlined, PlusOutlined, DeleteOutlined, EditOutlined, BellOutlined, MoreOutlined, FundOutlined } from '@ant-design/icons';
 import api, { silentConfig } from '../../api';
 
 const { Text } = Typography;
@@ -54,6 +54,8 @@ export default function MonitorPage() {
   const [editingStock, setEditingStock] = useState(null); // null=新增, 有值=编辑
   const [customForm] = Form.useForm();
   const [autoNameLoading, setAutoNameLoading] = useState(false);
+  const [indexQuotes, setIndexQuotes] = useState([]);           // 大盘指数实时行情
+  const [lastIndexUpdate, setLastIndexUpdate] = useState(null); // 指数最后更新时间
   const eventSourceRef = useRef(null);
   const marketClosedRef = useRef(false);    // ref 避免闭包旧值问题
   const [notificationsPaused, setNotificationsPaused] = useState(false);
@@ -94,9 +96,27 @@ export default function MonitorPage() {
     }
   }, []);
 
+  // 拉取大盘指数实时行情（每5秒）
+  const fetchIndices = useCallback(async () => {
+    try {
+      const data = await api.get('/monitor/indices');
+      setIndexQuotes(data || []);
+      setLastIndexUpdate(new Date().toISOString());
+    } catch {
+      // 静默失败，下次再重试
+    }
+  }, []);
+
   useEffect(() => {
     fetchStatus();
   }, [fetchStatus]);
+
+  // 指数实时行情：每5秒拉取一次
+  useEffect(() => {
+    fetchIndices();
+    const t = setInterval(fetchIndices, 5 * 1000);
+    return () => clearInterval(t);
+  }, [fetchIndices]);
 
   // SSE实时信号推送 + 实时价格更新
   useEffect(() => {
@@ -655,6 +675,45 @@ export default function MonitorPage() {
               message={`当前监控基于 ${d.toLocaleDateString('zh-CN')} 的数据，非交易日自动取最近一个交易日`} />
           : null;
       })()}
+
+      {/* 大盘指数实时面板（每5秒自动刷新） */}
+      {indexQuotes.length > 0 && (
+        <Card size="small" style={{ marginBottom: 10 }} bodyStyle={{ padding: '8px 12px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>
+              <FundOutlined style={{ marginRight: 4 }} />
+              大盘指数
+            </span>
+            {lastIndexUpdate && (
+              <Text type="secondary" style={{ fontSize: 11 }}>
+                更新: {new Date(lastIndexUpdate).toLocaleTimeString()}
+              </Text>
+            )}
+          </div>
+          <Row gutter={[8, 8]}>
+            {indexQuotes.map(idx => {
+              const pct = Number(idx.changePct ?? 0);
+              const color = pct > 0 ? '#cf1322' : pct < 0 ? '#3f8600' : '#8c8c8c';  // 红涨绿跌（中国惯例）
+              const amount = Number(idx.changeAmount ?? 0);
+              const sign = amount > 0 ? '+' : '';
+              return (
+                <Col key={idx.code} xs={12} sm={8} md={6} lg={4} xl={3}>
+                  <div style={{ padding: '4px 6px', background: '#fafafa', borderRadius: 4, border: '1px solid #f0f0f0' }}>
+                    <div style={{ fontSize: 12, color: '#595959', marginBottom: 2 }}>{idx.name}</div>
+                    <div style={{ fontSize: 15, fontWeight: 600, color, lineHeight: 1.2 }}>
+                      {idx.price ? Number(idx.price).toFixed(2) : '-'}
+                    </div>
+                    <div style={{ fontSize: 11, color, marginTop: 1 }}>
+                      {pct > 0 ? '+' : ''}{pct.toFixed(2)}%
+                      <span style={{ color: '#bfbfbf', marginLeft: 4 }}>{sign}{amount.toFixed(2)}</span>
+                    </div>
+                  </div>
+                </Col>
+              );
+            })}
+          </Row>
+        </Card>
+      )}
 
       {/* 主表格 */}
       <Card styles={{ body: {padding: 0} }}>

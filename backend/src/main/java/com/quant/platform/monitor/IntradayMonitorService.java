@@ -62,6 +62,27 @@ public class IntradayMonitorService {
     /** 最新实时价格缓存: stockCode -> price（供SSE推送和手动查询用） */
     private final Map<String, Double> latestPrices = new ConcurrentHashMap<>();
     private final Map<String, Double> latestChangePct = new ConcurrentHashMap<>();
+    /** 指数实时行情缓存: code -> {name, price, changePct, changeAmount, time} */
+    private final Map<String, Map<String, Object>> indexQuoteCache = new ConcurrentHashMap<>();
+    /** 指数代码到名称映射 */
+    private static final Map<String, String> INDEX_NAME_MAP = new LinkedHashMap<>();
+    static {
+        INDEX_NAME_MAP.put("sh000001", "上证指数");
+        INDEX_NAME_MAP.put("sz399001", "深证成指");
+        INDEX_NAME_MAP.put("sh000300", "沪深300");
+        INDEX_NAME_MAP.put("sh000016", "上证50");
+        INDEX_NAME_MAP.put("sh000905", "中证500");
+        INDEX_NAME_MAP.put("sh000852", "中证1000");
+        INDEX_NAME_MAP.put("sz399303", "国证2000");      // 微盘股代表（中证2000 CSI内部码932302，腾讯不支持）
+        INDEX_NAME_MAP.put("sz399006", "创业板指");
+        INDEX_NAME_MAP.put("sh000688", "科创50");
+        INDEX_NAME_MAP.put("bj899050", "北证50");
+        INDEX_NAME_MAP.put("sz399808", "中证新能源");
+        INDEX_NAME_MAP.put("sz399975", "证券公司");
+        INDEX_NAME_MAP.put("sz399967", "中证军工");
+        INDEX_NAME_MAP.put("sh000985", "中证全指");
+        INDEX_NAME_MAP.put("sh000906", "中证800");
+    }
     /** 用户自定义股票: stockCode -> TargetPriceInfo（刷新目标价时不被覆盖） */
     private final Map<String, TargetPriceInfo> customStocks = new ConcurrentHashMap<>();
     /** 信号历史记录（最近50条，供/status接口返回） */
@@ -218,6 +239,72 @@ public class IntradayMonitorService {
     }
 
     /**
+     * 定时刷新大盘指数行情（每5秒一次）
+     * 复用 qt.gtimg.cn 报价接口，指数代码如 sh000001、sz399001 等
+     */
+    @Scheduled(cron = "0/5 * 9-15 * * MON-FRI")
+    public void refreshIndexQuotes() {
+        if (isNonTradingDay(LocalDate.now())) return;
+        try {
+            String codesParam = String.join(",", INDEX_NAME_MAP.keySet());
+            String url = String.format(QUOTE_URL, codesParam);
+            java.net.http.HttpClient client = java.net.http.HttpClient.newBuilder()
+                    .connectTimeout(java.time.Duration.ofSeconds(3))
+                    .build();
+            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create(url))
+                    .timeout(java.time.Duration.ofSeconds(5))
+                    .GET()
+                    .build();
+            java.net.http.HttpResponse<String> response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() == 200) {
+                parseIndexQuotes(response.body());
+            }
+        } catch (Exception e) {
+            // 静默失败，下次再重试
+        }
+    }
+
+    /**
+     * 解析指数行情（与个股共用 qt.gtimg.cn，字段顺序相同：fields[3]现价, fields[32]涨跌幅%）
+     */
+    private void parseIndexQuotes(String body) {
+        if (body == null || body.isEmpty()) return;
+        String[] lines = body.split(";");
+        for (String line : lines) {
+            if (line.isEmpty()) continue;
+            try {
+                int eqIdx = line.indexOf('=');
+                if (eqIdx < 0) continue;
+                String varName = line.substring(0, eqIdx).trim();
+                String value = line.substring(eqIdx + 1).trim();
+                if (value.isEmpty() || value.equals("\"\"")) continue;
+
+                String code = varName.replace("v_", "").replace("s_", "");
+                String content = value.replace("\"", "");
+                String[] fields = content.split("~");
+                if (fields.length < 6) continue;
+
+                Map<String, Object> info = new LinkedHashMap<>();
+                info.put("code", code);
+                info.put("name", INDEX_NAME_MAP.getOrDefault(code, fields[1]));
+                try { info.put("price", Double.parseDouble(fields[3])); } catch (Exception e) { continue; }
+                try { info.put("changePct", Double.parseDouble(fields[32])); } catch (Exception e) { info.put("changePct", 0.0); }
+                try { info.put("changeAmount", Double.parseDouble(fields[31])); } catch (Exception e) { info.put("changeAmount", 0.0); }
+                info.put("time", LocalDateTime.now().toString());
+
+                indexQuoteCache.put(code, info);
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    /** 获取所有指数实时行情（提供给前端和Controller） */
+    public List<Map<String, Object>> getIndexQuotes() {
+        return new ArrayList<>(indexQuoteCache.values());
+    }
+
+    /**
      * 收盘后清理：15:01 触发，广播 market_closed 事件并关闭所有 SSE 连接
      * 仅交易日执行，每天最多执行一次（marketClosedSent 防重复）
      */
@@ -317,17 +404,27 @@ public class IntradayMonitorService {
                                 target.getStockName(), code, currentPrice, signal.getTotalScore());
                     }
                 } catch (Exception e) {
-                    log.warn("[IntradayMonitor] 并行分析异常: {} - {}", code, e.getMessage());
+                    // K线分析异常时走降级逻辑（价格已在触发区间内）
+                    EntrySignalAnalyzer.BreakoutSignal fallback = signalAnalyzer.fallbackPriceOnly(currentPrice, target, code);
+                    if (fallback.isActionable()) {
+                        pushBuySignal(code, target, currentPrice, fallback);
+                        markPushed(code + "_BUY");
+                    } else {
+                        pushWatchSignal(code, target, currentPrice, fallback);
+                        log.info("[IntradayMonitor] 观察(降级): {}({}) 现价{} 评分{}/100",
+                                target.getStockName(), code, currentPrice, fallback.getTotalScore());
+                    }
+                    log.warn("[IntradayMonitor] K线分析异常→降级: {} - {}", code, e.getMessage());
                 }
             }, klinePool);
 
             futures.add(future);
         }
 
-        // 等待所有分析完成（最多等5秒）
+        // 等待所有分析完成（最多等15秒，比单只股票K线拉取8秒×并发数更宽裕）
         try {
             CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
-                    .get(5, TimeUnit.SECONDS);
+                    .get(15, TimeUnit.SECONDS);
         } catch (TimeoutException e) {
             log.warn("[IntradayMonitor] 部分K线分析超时，已降级处理");
         } catch (InterruptedException e) {
@@ -1079,8 +1176,12 @@ public class IntradayMonitorService {
                             stockInfo.setMessage("观察中: " + signal.getReason());
                         }
                     } catch (Exception e) {
-                        stockInfo.setSignalType("ERROR");
-                        stockInfo.setMessage("分析异常: " + e.getMessage());
+                        // K线分析异常时走降级逻辑
+                        EntrySignalAnalyzer.BreakoutSignal fallback = signalAnalyzer.fallbackPriceOnly(currentPrice, target, code);
+                        stockInfo.setScore(fallback.getTotalScore());
+                        stockInfo.setSignalType(fallback.getSignalType());
+                        stockInfo.setMessage(fallback.toPushMessage());
+                        log.warn("[IntradayMonitor] 手动扫描K线异常→降级: {} - {}", code, e.getMessage());
                     }
                     return stockInfo;
                 }, klinePool);
@@ -1099,7 +1200,7 @@ public class IntradayMonitorService {
         // 等待所有并行分析完成
         try {
             CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
-                    .get(10, TimeUnit.SECONDS);
+                    .get(20, TimeUnit.SECONDS);
         } catch (Exception e) {
             log.warn("[IntradayMonitor] 部分手动扫描分析超时: {}", e.getMessage());
         }
