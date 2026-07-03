@@ -390,7 +390,7 @@ export const recommendationApi = {
    * @param {number} topN - 推荐数量
    * @param {number} strategyId - 策略ID（从策略列表选择）
    */
-  generate: (date, topN, strategyId, weightMode, enableConfidenceControl) => api.post('/recommendations/generate', { date, topN, strategyId, weightMode, enableConfidenceControl }),
+  generate: (date, topN, strategyId, weightMode, enableConfidenceControl, advancedOptions) => api.post('/recommendations/generate', { date, topN, strategyId, weightMode, enableConfidenceControl, ...advancedOptions }),
   /** 获取最新推荐列表 */
   getLatest: () => api.get('/recommendations/latest'),
   /** 获取指定策略+日期的推荐列表 */

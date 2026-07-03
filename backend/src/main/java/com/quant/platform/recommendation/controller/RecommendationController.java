@@ -51,10 +51,30 @@ public class RecommendationController {
             boolean enableConfidenceControl = req != null && req.getEnableConfidenceControl() != null
                     ? req.getEnableConfidenceControl() : true; // 默认开启
 
+        // 高级选项：手动触发时支持覆盖，调度任务触发时传 null（保持默认行为）
+        RecommendationService.AdvancedScreenOptions advancedOptions = null;
+        if (req != null && req.hasAdvancedOptions()) {
+            advancedOptions = new RecommendationService.AdvancedScreenOptions();
+            advancedOptions.setNeutralizationMethod(req.getNeutralizationMethod());
+            advancedOptions.setOrthogonalizationMethod(req.getOrthogonalizationMethod());
+            advancedOptions.setGlobalOutlierMethod(req.getGlobalOutlierMethod());
+            advancedOptions.setGlobalNormalizeMethod(req.getGlobalNormalizeMethod());
+            // 转换 DTO 类型
+            if (req.getMaPositionFilter() != null) {
+                MaPositionFilterDto src = req.getMaPositionFilter();
+                com.quant.platform.screen.dto.ScreenRequest.MaPositionFilter dst =
+                        new com.quant.platform.screen.dto.ScreenRequest.MaPositionFilter();
+                dst.setAboveMA30(src.getAboveMA30());
+                dst.setAboveMA60(src.getAboveMA60());
+                dst.setAboveMA100(src.getAboveMA100());
+                advancedOptions.setMaPositionFilter(dst);
+            }
+        }
+
             List<RecommendationService.FactorDiagnostic> diagnostics = new ArrayList<>();
 
             List<StockRecommendation> recommendations = recommendationService.generateRecommendations(
-                    date, topN, strategyId, weightMode, diagnostics, enableConfidenceControl);
+                    date, topN, strategyId, weightMode, diagnostics, enableConfidenceControl, advancedOptions);
 
             Map<String, Object> result = new HashMap<>();
             if (!recommendations.isEmpty()) {
@@ -282,9 +302,47 @@ public class RecommendationController {
         private String factorProfile;  // @Deprecated 已废弃，请使用 strategyId
         /** 策略ID，从策略列表选择（因子配置从数据库读取） */
         private Long strategyId;
-        /** 权重模式: STATIC(固定权重) / IC(动态IC加权) */
+        /**
+         * 权重模式: STATIC(固定权重) / IC(动态IC加权) / EQW(等权)
+         * 默认根据策略配置自动选择
+         */
         private String weightMode;
         /** 是否启用置信度控制（默认 true） */
         private Boolean enableConfidenceControl;
+
+        // ── 高级选项（手动触发时覆盖使用，调度任务传 null）──
+
+        /** 中性化方法: NONE / INDUSTRY / MARKET_CAP / BOTH */
+        private String neutralizationMethod;
+        /** 正交化方法: NONE / SCHMIDT */
+        private String orthogonalizationMethod;
+        /** 极值处理方法: NONE / MAD / SIGMA3 / PERCENTILE */
+        private String globalOutlierMethod;
+        /** 标准化方法: NONE / ZSCORE / MINMAX / RANK */
+        private String globalNormalizeMethod;
+        /** 均线位置过滤（多头排列） */
+        private MaPositionFilterDto maPositionFilter;
+
+        /**
+         * 是否设置了任何高级选项（用于判断是否需要覆盖默认行为）
+         */
+        public boolean hasAdvancedOptions() {
+            return neutralizationMethod != null || orthogonalizationMethod != null
+                    || globalOutlierMethod != null || globalNormalizeMethod != null
+                    || maPositionFilter != null;
+        }
+    }
+
+    /**
+     * 均线位置过滤（前端 DTO，与 ScreenRequest.MaPositionFilter 解耦）
+     */
+    @Data
+    public static class MaPositionFilterDto {
+        /** 要求价格在 MA30 上方 */
+        private Boolean aboveMA30;
+        /** 要求价格在 MA60 上方 */
+        private Boolean aboveMA60;
+        /** 要求价格在 MA100 上方 */
+        private Boolean aboveMA100;
     }
 }

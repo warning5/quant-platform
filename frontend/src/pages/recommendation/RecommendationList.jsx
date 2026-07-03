@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { Card, Table, Button, Tag, Select, Space, Statistic, Row, Col, Typography, Tooltip, Spin, Progress, DatePicker, Divider, Modal, Popconfirm, Switch, Dropdown } from 'antd';
+import { Card, Table, Button, Tag, Select, Space, Statistic, Row, Col, Typography, Tooltip, Spin, Progress, DatePicker, Divider, Modal, Popconfirm, Switch, Dropdown, Collapse, Checkbox } from 'antd';
 import { message } from '../../utils/messageUtil';
 import dayjs from 'dayjs';
-import { ThunderboltOutlined, ReloadOutlined, LineChartOutlined, StockOutlined, RiseOutlined, FallOutlined, MinusOutlined, QuestionCircleOutlined, RadarChartOutlined, StopOutlined, UnlockOutlined, DownloadOutlined } from '@ant-design/icons';
+import { ThunderboltOutlined, ReloadOutlined, LineChartOutlined, StockOutlined, RiseOutlined, FallOutlined, MinusOutlined, QuestionCircleOutlined, RadarChartOutlined, StopOutlined, UnlockOutlined, DownloadOutlined, SettingOutlined } from '@ant-design/icons';
 import api, { recommendationApi, blacklistApi, confidenceApi, calendarApi } from '../../api';
 import useFactorStore from '../../stores/factorStore';
 import ReactECharts from '../../components/LazyECharts';
@@ -91,6 +91,12 @@ export default function RecommendationList() {
     const saved = localStorage.getItem('confidenceControlEnabled');
     return saved !== null ? JSON.parse(saved) : true; // 默认开启
   }); // 置信度控制开关
+  // 高级选项（中性化/正交化/极值/标准化/均线），默认不覆盖
+  const [neutralizationMethod, setNeutralizationMethod] = useState(null);
+  const [orthogonalizationMethod, setOrthogonalizationMethod] = useState(null);
+  const [globalOutlierMethod, setGlobalOutlierMethod] = useState(null);
+  const [globalNormalizeMethod, setGlobalNormalizeMethod] = useState(null);
+  const [maFilter, setMaFilter] = useState({ ma30: false, ma60: false, ma100: false });
   const [batchHistory, setBatchHistory] = useState(null); // 历史表现汇总（按策略+日期）
   const [topBottom, setTopBottom] = useState(null); // 当前策略+日期的最佳/最差
   const [trackingLoading, setTrackingLoading] = useState(false); // 追踪触发中
@@ -389,7 +395,22 @@ export default function RecommendationList() {
     setGenerating(true);
     try {
       const dateStr = screenDate ? dayjs(screenDate).format('YYYY-MM-DD') : null;
-      const result = await recommendationApi.generate(dateStr, 20, selectedStrategyId, weightMode, enableConfidenceControl);
+      // 构造高级选项（仅当用户主动设置时才传，null 表示使用默认）
+      const maPositionFilter = (maFilter.ma30 || maFilter.ma60 || maFilter.ma100)
+        ? {
+            aboveMA30: maFilter.ma30 || null,
+            aboveMA60: maFilter.ma60 || null,
+            aboveMA100: maFilter.ma100 || null,
+          }
+        : null;
+      const advancedOptions = {
+        neutralizationMethod,
+        orthogonalizationMethod,
+        globalOutlierMethod,
+        globalNormalizeMethod,
+        maPositionFilter,
+      };
+      const result = await recommendationApi.generate(dateStr, 20, selectedStrategyId, weightMode, enableConfidenceControl, advancedOptions);
       message.success(`推荐列表生成成功: ${result.count} 只`);
       setFactorDiagnostics(weightMode === 'IC' ? (result.factorDiagnostics || null) : null);
       setIcDataDate(weightMode === 'IC' ? (result.icDataDate || null) : null);
@@ -1081,6 +1102,77 @@ export default function RecommendationList() {
           </Button>
         </Space>
       </div>
+
+      {/* 高级选项折叠区（不影响默认行为） */}
+      <Collapse
+        ghost
+        size="small"
+        style={{ marginTop: 8 }}
+        items={[{
+          key: 'advanced',
+          label: <span><SettingOutlined /> 高级选项（中性化 / 正交化 / 极值 / 标准化 / 均线过滤）</span>,
+          children: (
+            <Space size="middle" wrap style={{ padding: '0 12px' }}>
+              <span>
+                <span style={{ marginRight: 4 }}>中性化:</span>
+                <Select
+                  size="small" style={{ width: 130 }} value={neutralizationMethod} placeholder="默认(NONE)"
+                  onChange={v => setNeutralizationMethod(v === '__none__' ? null : v)}
+                  allowClear
+                >
+                  <Select.Option value="__none__">默认(NONE)</Select.Option>
+                  <Select.Option value="INDUSTRY">行业中性化</Select.Option>
+                  <Select.Option value="MARKET_CAP">市值中性化</Select.Option>
+                  <Select.Option value="BOTH">行业+市值</Select.Option>
+                </Select>
+              </span>
+              <span>
+                <span style={{ marginRight: 4 }}>正交化:</span>
+                <Select
+                  size="small" style={{ width: 120 }} value={orthogonalizationMethod} placeholder="默认(NONE)"
+                  onChange={v => setOrthogonalizationMethod(v === '__none__' ? null : v)}
+                  allowClear
+                >
+                  <Select.Option value="__none__">默认(NONE)</Select.Option>
+                  <Select.Option value="SCHMIDT">Schmidt</Select.Option>
+                </Select>
+              </span>
+              <span>
+                <span style={{ marginRight: 4 }}>极值:</span>
+                <Select
+                  size="small" style={{ width: 130 }} value={globalOutlierMethod} placeholder="默认(MAD)"
+                  onChange={v => setGlobalOutlierMethod(v === '__none__' ? null : v)}
+                  allowClear
+                >
+                  <Select.Option value="__none__">默认(MAD)</Select.Option>
+                  <Select.Option value="NONE">不处理</Select.Option>
+                  <Select.Option value="SIGMA3">3σ法</Select.Option>
+                  <Select.Option value="PERCENTILE">百分位</Select.Option>
+                </Select>
+              </span>
+              <span>
+                <span style={{ marginRight: 4 }}>标准化:</span>
+                <Select
+                  size="small" style={{ width: 130 }} value={globalNormalizeMethod} placeholder="默认(ZSCORE)"
+                  onChange={v => setGlobalNormalizeMethod(v === '__none__' ? null : v)}
+                  allowClear
+                >
+                  <Select.Option value="__none__">默认(ZSCORE)</Select.Option>
+                  <Select.Option value="NONE">不处理</Select.Option>
+                  <Select.Option value="MINMAX">Min-Max</Select.Option>
+                  <Select.Option value="RANK">百分位排名</Select.Option>
+                </Select>
+              </span>
+              <span>
+                <span style={{ marginRight: 4 }}>均线过滤:</span>
+                <Checkbox size="small" checked={maFilter.ma30} onChange={e => setMaFilter({ ...maFilter, ma30: e.target.checked })}>MA30</Checkbox>
+                <Checkbox size="small" checked={maFilter.ma60} onChange={e => setMaFilter({ ...maFilter, ma60: e.target.checked })}>MA60</Checkbox>
+                <Checkbox size="small" checked={maFilter.ma100} onChange={e => setMaFilter({ ...maFilter, ma100: e.target.checked })}>MA100</Checkbox>
+              </span>
+            </Space>
+          ),
+        }]}
+      />
 
       {/* 市场环境概览 */}
       {regime && (

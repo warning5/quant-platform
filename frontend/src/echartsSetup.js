@@ -12,7 +12,7 @@
 import * as echarts from 'echarts/core';
 
 // ── 图表类型 ──
-import { BarChart, LineChart, PieChart, ScatterChart, HeatmapChart, RadarChart, GaugeChart } from 'echarts/charts';
+import { BarChart, LineChart, PieChart, ScatterChart, HeatmapChart, RadarChart, GaugeChart, CandlestickChart } from 'echarts/charts';
 
 // ── 组件 ──
 import {
@@ -35,7 +35,7 @@ import { CanvasRenderer } from 'echarts/renderers';
 
 // 注册所有需要的内容
 echarts.use([
-  BarChart, LineChart, PieChart, ScatterChart, HeatmapChart, RadarChart, GaugeChart,
+  BarChart, LineChart, PieChart, ScatterChart, HeatmapChart, RadarChart, GaugeChart, CandlestickChart,
   TitleComponent, TooltipComponent, LegendComponent, GridComponent,
   DatasetComponent, TransformComponent, ToolboxComponent, DataZoomComponent,
   VisualMapComponent, MarkLineComponent, MarkPointComponent, GraphicComponent,

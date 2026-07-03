@@ -11,6 +11,7 @@ import com.quant.platform.market.domain.MarketDailyBar;
 import com.quant.platform.market.service.MarketDataService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.quant.platform.recommendation.service.StockBlacklistService;
 import com.quant.platform.screen.dto.ScreenRequest;
 import com.quant.platform.screen.dto.ScreenResult;
 import com.quant.platform.strategy.domain.StrategyDefinition;
@@ -45,6 +46,7 @@ public class StockScreenService {
     private final StrategyDefinitionMapper strategyDefMapper;
     private final ObjectMapper objectMapper;
     private final FactorIcService factorIcService;
+    private final StockBlacklistService stockBlacklistService;
 
     @Resource
     private DataSource dataSource;
@@ -53,13 +55,13 @@ public class StockScreenService {
      * 多日模式下的因子趋势动量缓存：factorCode -> (symbol -> trend)
      * trend = (latestVal - earliestVal) / |earliestVal|
      */
-    private Map<String, Map<String, Double>> multiDayTrendCache = new HashMap<>();
+    private final Map<String, Map<String, Double>> multiDayTrendCache = new HashMap<>();
 
     /**
      * 多日模式下被 CV 过滤掉的原始因子值（不参与排名，仅用于展示）
      * factorCode -> (symbol -> rawValue)
      */
-    private Map<String, Map<String, Double>> multiDayUnstableCache = new HashMap<>();
+    private final Map<String, Map<String, Double>> multiDayUnstableCache = new HashMap<>();
 
     /**
      * 执行多因子选股
@@ -161,6 +163,25 @@ public class StockScreenService {
 
         log.info("Candidate stocks after ST filter: {}", candidatesRaw.size());
 
+        // ── 2.0b 黑名单过滤（研究/回测场景套用当前黑名单，默认关闭）──
+        if (Boolean.TRUE.equals(req.getBlacklistFilter()) && req.getStrategyId() != null) {
+            Set<String> blacklist = stockBlacklistService.getActiveBlacklistCodes(req.getStrategyId());
+            if (!blacklist.isEmpty()) {
+                int before = candidatesRaw.size();
+                candidatesRaw = candidatesRaw.stream()
+                        .filter(code -> !blacklist.contains(code))
+                        .collect(Collectors.toSet());
+                log.info("[Screen] blacklist filter applied: {} -> {} (filtered {} blacklisted stocks)",
+                        before, candidatesRaw.size(), before - candidatesRaw.size());
+            }
+        }
+
+        // ── 2.0c 市场环境覆盖（仅日志记录，不影响选股逻辑）──
+        if (req.getRegimeOverride() != null && !req.getRegimeOverride().isBlank()) {
+            log.info("[Screen] regimeOverride={} (note: screen stage does not use regime, override is for downstream recommendation pipeline)",
+                    req.getRegimeOverride());
+        }
+
         // ── 2.1 filterConfigJson 过滤（行业排除、上市天数、自定义因子条件）──
         Set<String> candidates;
         if (filterConfig != null) {
@@ -209,14 +230,12 @@ public class StockScreenService {
                     int paramIdx = 1;
                     ps.setString(paramIdx++, screenDate.toString());
                     for (Object p : sqlParams) {
-                        if (p instanceof String) {
-                            ps.setString(paramIdx++, (String) p);
-                        } else if (p instanceof Number) {
-                            ps.setBigDecimal(paramIdx++, BigDecimal.valueOf(((Number) p).doubleValue()));
-                        } else if (p instanceof java.time.LocalDate) {
-                            ps.setString(paramIdx++, p.toString());
-                        } else {
-                            ps.setObject(paramIdx++, p);
+                        switch (p) {
+                            case String s -> ps.setString(paramIdx++, s);
+                            case Number number ->
+                                    ps.setBigDecimal(paramIdx++, BigDecimal.valueOf(number.doubleValue()));
+                            case LocalDate ignored -> ps.setString(paramIdx++, p.toString());
+                            case null, default -> ps.setObject(paramIdx++, p);
                         }
                     }
                     try (ResultSet rs = ps.executeQuery()) {
@@ -374,7 +393,7 @@ public class StockScreenService {
             if (normalized.size() > 10) {
                 double skewness = calcSkewness(normalized);
                 if (Math.abs(skewness) > 2.0) {
-                    log.warn("[Screen] Factor {} 标准化后偏度={:.2f}，分布严重偏斜，建议检查因子值", code, skewness);
+                    log.warn("[Screen] Factor {} 标准化后偏度={}，分布严重偏斜，建议检查因子值", code, skewness);
                 }
             }
 
@@ -415,9 +434,6 @@ public class StockScreenService {
         double totalAbsWeight = req.getFactors().stream()
                 .mapToDouble(fw -> Math.abs(fw.getWeight())).sum();
         if (totalAbsWeight == 0) totalAbsWeight = 1.0;
-
-        // 只选在所有因子中都有值的股票（或放宽到至少有 50% 因子有值）
-        int minFactors = Math.max(1, (int) Math.ceil(req.getFactors().size() * 0.5));
 
         // 统计每个因子的筛选通过数
         Map<String, Integer> filterPassCount = new LinkedHashMap<>();
@@ -506,7 +522,6 @@ public class StockScreenService {
         for (String sym : passedSymbols) {
             Map<String, Double> rankMap = new LinkedHashMap<>();
             Map<String, Double> valueMap = passedRawValues.get(sym);
-            int validCount = valueMap.size();
             double compositeScore = 0.0;
 
             for (ScreenRequest.FactorWeight fw : req.getFactors()) {
@@ -529,7 +544,6 @@ public class StockScreenService {
                 // direction: 1=正向（越高越好），-1=反向（越低越好）
                 double factorScore = fw.getDirection() >= 0 ? normalized : (1.0 - normalized);
                 compositeScore += normalizedWeight * factorScore;
-                validCount++;
             }
 
             // 从 valueMap 中剥离 __rank_ 前缀的临时数据
@@ -777,8 +791,8 @@ public class StockScreenService {
             values = deduped;
             if (values.isEmpty()) continue;
 
-            FactorValue earliest = values.get(0);
-            FactorValue latest = values.get(values.size() - 1);
+            FactorValue earliest = values.getFirst();
+            FactorValue latest = values.getLast();
             double latestVal = latest.getFactorVal().doubleValue();
             double earliestVal = earliest.getFactorVal().doubleValue();
 
@@ -1471,7 +1485,6 @@ public class StockScreenService {
 
     /**
      * 中性化处理
-     * 
      * 在行业或市值分组内，将因子值减去组内均值，消除行业/市值偏差
      * 
      * @param filtered 原始因子值列表（与outlierProcessed一一对应）
@@ -1557,7 +1570,7 @@ public class StockScreenService {
                         .filter(e -> e.getValue() == groupId)
                         .map(e -> symbolIndex.get(e.getKey()))
                         .filter(Objects::nonNull)
-                        .collect(Collectors.toList());
+                        .toList();
                     
                     if (indices.size() < 3) continue;
                     
@@ -1581,7 +1594,6 @@ public class StockScreenService {
 
     /**
      * 获取动态权重（基于IC/IR）—— IC加权综合得分（P0需求）
-     *
      * 规则：
      * - 获取每个因子最近60天的IC序列，计算IC均值（保留正负号）
      * - 只取IC均值 > 0的因子参与加权（有正向预测能力的因子）
@@ -1652,8 +1664,7 @@ public class StockScreenService {
                         if (fw.getFactorCode().equals(fc)) {
                             int oldDir = fw.getDirection();
                             fw.setDirection(-oldDir);
-                            log.info("[DynamicWeight] 因子 {} IC为负({:.4f})，反转方向: {} -> {}",
-                                fc, ic, oldDir, fw.getDirection());
+                            log.info("[DynamicWeight] 因子 {} IC为负({})，反转方向: {} -> {}", fc, ic, oldDir, fw.getDirection());
                             break;
                         }
                     }

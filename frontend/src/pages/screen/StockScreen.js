@@ -255,6 +255,7 @@ export default function StockScreen() {
   const [topN, setTopN] = useState(10);
   const [direction, setDirection] = useState('LONG');
   const [excludeSt, setExcludeSt] = useState(true);
+  const [blacklistFilter, setBlacklistFilter] = useState(true);
   const [valuationWeight, setValuationWeight] = useState(40);
   const [customSqlWhere, setCustomSqlWhere] = useState('');
   const [maAbove30, setMaAbove30] = useState(false);
@@ -493,6 +494,7 @@ export default function StockScreen() {
       valuationWeight: valuationWeight / 100,
       customSqlWhere: customSqlWhere || null,
       strategyId: selectedStrategyId || null,
+      blacklistFilter: blacklistFilter || null,
       maPositionFilter: (maAbove30 || maAbove60 || maAbove100) ? {
         aboveMA30:  maAbove30  || null,
         aboveMA60:  maAbove60  || null,
@@ -542,6 +544,7 @@ export default function StockScreen() {
     valuationWeight: valuationWeight / 100,
     customSqlWhere: customSqlWhere || null,
     strategyId: selectedStrategyId || null,
+    blacklistFilter: blacklistFilter || null,
     strategyName: selectedStrategyId
       ? (strategies.find(p => p.id === selectedStrategyId)?.strategyName || null)
       : null,
@@ -819,7 +822,7 @@ export default function StockScreen() {
                   placeholder="选择策略加载因子配置"
                   allowClear
                   popupMatchSelectWidth={false}
-                  dropdownRender={(menu) => <div style={{ paddingBottom: 16 }}>{menu}</div>}
+                  popupRender={(menu) => <div style={{ paddingBottom: 16 }}>{menu}</div>}
                 >
                   {strategies.map(s => (
                     <Option key={s.id} value={s.id}>
@@ -1122,7 +1125,7 @@ export default function StockScreen() {
                 </Select>
               </Col>
 
-              {/* 第四行：剔除ST股（独占或可扩展） */}
+              {/* 第四行：剔除ST股 | 过滤黑名单 */}
               <Col span={12}>
                 <div style={paramLabelStyle}>剔除ST股</div>
                 <Button
@@ -1132,6 +1135,22 @@ export default function StockScreen() {
                   style={{ width: '100%' }}
                 >
                   {excludeSt ? '✓ 剔除' : '不剔除'}
+                </Button>
+              </Col>
+              <Col span={12}>
+                <div style={paramLabelStyle}>
+                  过滤黑名单
+                  <Tooltip title="排除已加入黑名单的股票（黑名单管理在「数据管理 → 黑名单管理」）">
+                    <QuestionCircleOutlined style={{ color: '#bbb', marginLeft: 4 }} />
+                  </Tooltip>
+                </div>
+                <Button
+                  size="small"
+                  type={blacklistFilter ? 'primary' : 'default'}
+                  onClick={() => setBlacklistFilter(v => !v)}
+                  style={{ width: '100%' }}
+                >
+                  {blacklistFilter ? '✓ 过滤' : '不过滤'}
                 </Button>
               </Col>
               <Col span={12}>

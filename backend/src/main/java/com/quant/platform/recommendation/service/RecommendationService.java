@@ -26,6 +26,7 @@ import com.quant.platform.stock.service.ClickHouseStockService;
 import com.quant.platform.stock.service.DividendService;
 import com.quant.platform.strategy.domain.StrategyDefinition;
 import com.quant.platform.strategy.mapper.StrategyDefinitionMapper;
+import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -277,6 +278,18 @@ public class RecommendationService {
     public List<StockRecommendation> generateRecommendations(LocalDate date, Integer topN,
                                                              Long strategyId, String weightMode, List<FactorDiagnostic> diagnostics,
                                                              boolean enableConfidenceControl) {
+        return generateRecommendations(date, topN, strategyId, weightMode, diagnostics, enableConfidenceControl, null);
+    }
+
+    /**
+     * 生成推荐列表（支持高级选项覆盖）
+     *
+     * @param advancedOptions 高级选股选项（null=使用推荐管线默认行为）
+     */
+    public List<StockRecommendation> generateRecommendations(LocalDate date, Integer topN,
+                                                             Long strategyId, String weightMode, List<FactorDiagnostic> diagnostics,
+                                                             boolean enableConfidenceControl,
+                                                             AdvancedScreenOptions advancedOptions) {
         // date=null 时 StockScreenService.screen() 会自动取最新日期
         if (topN == null || topN <= 0) {
             topN = ANALYSIS_TOP_N;
@@ -286,8 +299,9 @@ public class RecommendationService {
         String effectiveWeightMode = resolveWeightMode(strategyId, weightMode);
         boolean useDynamicIc = !"STATIC".equalsIgnoreCase(effectiveWeightMode);
 
-        log.info("[Recommendation] 开始生成推荐列表: date={}, topN={}, strategyId={}, weightMode={} (resolved={}), confidenceControl={}",
-                date, topN, strategyId, weightMode, effectiveWeightMode, enableConfidenceControl);
+        log.info("[Recommendation] 开始生成推荐列表: date={}, topN={}, strategyId={}, weightMode={} (resolved={}), confidenceControl={}, hasAdvanced={}",
+                date, topN, strategyId, weightMode, effectiveWeightMode, enableConfidenceControl,
+                advancedOptions != null);
 
         // 诊断：加载策略详情
         if (strategyId != null) {
@@ -352,7 +366,7 @@ public class RecommendationService {
 
         // Step 1: 多因子选股（广筛 Top 50）
         // date=null 时 StockScreenService.screen() 内部自动 resolveLatestDate()
-        ScreenResult screenResult = screenStocks(date, strategyId, useDynamicIc, effectiveWeightMode, diagnostics);
+        ScreenResult screenResult = screenStocks(date, strategyId, useDynamicIc, effectiveWeightMode, diagnostics, advancedOptions);
         List<ScreenResult.StockScore> candidates = screenResult.getStocks();
         if (candidates == null || candidates.isEmpty()) {
             log.warn("[Recommendation] 因子选股结果为空，无法生成推荐");
@@ -2119,6 +2133,19 @@ public class RecommendationService {
     private ScreenResult screenStocks(LocalDate date, Long strategyId,
                                       boolean useDynamicIc, String effectiveWeightMode,
                                       List<FactorDiagnostic> diagnostics) {
+        return screenStocks(date, strategyId, useDynamicIc, effectiveWeightMode, diagnostics, null);
+    }
+
+    /**
+     * 多因子选股（支持高级选项覆盖）
+     *
+     * @param strategyId 策略ID（必须）
+     * @param advancedOptions 高级选项（中性化/正交化/极值/标准化/均线），null 则使用默认
+     */
+    private ScreenResult screenStocks(LocalDate date, Long strategyId,
+                                      boolean useDynamicIc, String effectiveWeightMode,
+                                      List<FactorDiagnostic> diagnostics,
+                                      AdvancedScreenOptions advancedOptions) {
         // 检查是否为形态驱动策略
         StrategyDefinition strategy = strategyDefinitionMapper.selectById(strategyId);
         if (strategy != null && strategy.getStrategyType() == StrategyDefinition.StrategyType.PATTERN) {
@@ -2140,15 +2167,53 @@ public class RecommendationService {
         req.setTopN(SCREEN_TOP_N);
         req.setDirection("LONG");
         req.setExcludeSt(true);
-        req.setGlobalOutlierMethod("MAD");
-        req.setGlobalNormalizeMethod("ZSCORE");
         // 智能推荐使用IC加权或等权
         String screenWeightMode = switch (effectiveWeightMode) {
             case "EQW", "STATIC" -> "EQUAL";
             default -> "IC";
         };
         req.setWeightMode(screenWeightMode);
+
+        // 高级选项覆盖（默认行为不变）
+        if (advancedOptions != null) {
+            if (advancedOptions.neutralizationMethod != null) {
+                req.setNeutralizationMethod(advancedOptions.neutralizationMethod);
+            }
+            if (advancedOptions.orthogonalizationMethod != null) {
+                req.setOrthogonalizationMethod(advancedOptions.orthogonalizationMethod);
+            }
+            if (advancedOptions.globalOutlierMethod != null) {
+                req.setGlobalOutlierMethod(advancedOptions.globalOutlierMethod);
+            }
+            if (advancedOptions.globalNormalizeMethod != null) {
+                req.setGlobalNormalizeMethod(advancedOptions.globalNormalizeMethod);
+            }
+            if (advancedOptions.maPositionFilter != null) {
+                req.setMaPositionFilter(advancedOptions.maPositionFilter);
+            }
+            log.info("[Recommendation] advanced options applied: neutralization={}, orthogonal={}, outlier={}, normalize={}, maFilter={}",
+                    advancedOptions.neutralizationMethod, advancedOptions.orthogonalizationMethod,
+                    advancedOptions.globalOutlierMethod, advancedOptions.globalNormalizeMethod,
+                    advancedOptions.maPositionFilter != null);
+        }
         return stockScreenService.screen(req);
+    }
+
+    /**
+     * 高级选股选项（仅手动触发推荐时由前端传入）
+     */
+    @Data
+    public static class AdvancedScreenOptions {
+        /** 中性化方法：NONE / INDUSTRY / MARKET_CAP / BOTH */
+        private String neutralizationMethod;
+        /** 正交化方法：NONE / SCHMIDT */
+        private String orthogonalizationMethod;
+        /** 极值处理方法：NONE / MAD / SIGMA3 / PERCENTILE */
+        private String globalOutlierMethod;
+        /** 标准化方法：NONE / ZSCORE / MINMAX / RANK */
+        private String globalNormalizeMethod;
+        /** 均线过滤（多头排列） */
+        private ScreenRequest.MaPositionFilter maPositionFilter;
     }
 
     /**
@@ -2216,6 +2281,7 @@ public class RecommendationService {
         results = results.subList(0, topN);
 
         ScreenResult result = ScreenResult.builder()
+                .screenDate(date != null ? date : LocalDate.now())
                 .stocks(results)
                 .candidateCount(results.size())
                 .build();

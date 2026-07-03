@@ -124,6 +124,20 @@ public class ScreenRequest {
      */
     private MaPositionFilter maPositionFilter;
 
+    /**
+     * 市场环境覆盖（仅研究/回测用）
+     * 不传则使用当日实际市场环境（BULL/BEAR/SIDEWAYS）
+     * 用途：研究"如果当时是熊市，会选出哪些股票"
+     * 可选值：BULL(牛市) / BEAR(熊市) / SIDEWAYS(震荡) / null(使用实际)
+     */
+    private String regimeOverride;
+
+    /**
+     * 是否应用黑名单过滤（默认 false）
+     * 用途：回测时套用当前黑名单，验证历史推荐在黑名单下表现
+     */
+    private Boolean blacklistFilter = false;
+
     @Data
     public static class MaPositionFilter {
         /**

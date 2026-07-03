@@ -85,28 +85,29 @@ export default function StrategyList() {
       </div>
 
       <Card style={{ marginBottom: 16, border: '1px solid #d9d9d9' }}>
-        <Space wrap>
-          <Input.Search
-            placeholder="搜索策略代码/名称"
-            allowClear style={{ width: 240 }}
-            onSearch={v => { const p = { ...params, keyword: v, page: 0 }; setParams(p); fetchData(p); }}
-          />
-          <Select
-            placeholder="策略类型" allowClear style={{ width: 140 }}
-            onChange={v => { const p = { ...params, type: v, page: 0 }; setParams(p); fetchData(p); }}>
-            {TYPE_OPTIONS.map(t => <Option key={t} value={t}>{TYPE_LABELS[t]}</Option>)}
-          </Select>
-          <Select
-            placeholder="状态" allowClear style={{ width: 110 }}
-            onChange={v => { const p = { ...params, status: v, page: 0 }; setParams(p); fetchData(p); }}>
-            {Object.entries(STATUS_LABELS).map(([k, v]) => <Option key={k} value={k}>{v}</Option>)}
-          </Select>
-        </Space>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+          <Space wrap>
+            <Input.Search
+              placeholder="搜索策略代码/名称"
+              allowClear style={{ width: 240 }}
+              onSearch={v => { const p = { ...params, keyword: v, page: 0 }; setParams(p); fetchData(p); }}
+            />
+            <Select
+              placeholder="策略类型" allowClear style={{ width: 140 }}
+              onChange={v => { const p = { ...params, type: v, page: 0 }; setParams(p); fetchData(p); }}>
+              {TYPE_OPTIONS.map(t => <Option key={t} value={t}>{TYPE_LABELS[t]}</Option>)}
+            </Select>
+            <Select
+              placeholder="状态" allowClear style={{ width: 110 }}
+              onChange={v => { const p = { ...params, status: v, page: 0 }; setParams(p); fetchData(p); }}>
+              {Object.entries(STATUS_LABELS).map(([k, v]) => <Option key={k} value={k}>{v}</Option>)}
+            </Select>
+          </Space>
+          <Button icon={<DownloadOutlined />} onClick={() => exportCsv({ data: data?.records || [], columns, filename: '策略列表' })} disabled={!data?.records?.length}>导出CSV</Button>
+        </div>
       </Card>
 
-      <Card style={{ border: '1px solid #d9d9d9' }} extra={
-        <Button size="small" icon={<DownloadOutlined />} onClick={() => exportCsv({ data: data?.records || [], columns, filename: '策略列表' })} disabled={!data?.records?.length}>导出CSV</Button>
-      }>
+      <Card style={{ border: '1px solid #d9d9d9' }}>
         <Table
           dataSource={data.records}
           columns={columns}
