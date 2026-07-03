@@ -61,7 +61,17 @@ public class MarketSentimentService {
             }
             QvixData data = new QvixData();
             data.setIndicator((String) row.get("indicator"));
-            data.setTradeDate(((java.sql.Date) row.get("trade_date")).toLocalDate());
+            // ClickHouse JDBC 可能返回 java.time.LocalDate 或 java.sql.Date
+            Object tradeDateObj = row.get("trade_date");
+            LocalDate tradeDate;
+            if (tradeDateObj instanceof java.sql.Date) {
+                tradeDate = ((java.sql.Date) tradeDateObj).toLocalDate();
+            } else if (tradeDateObj instanceof LocalDate) {
+                tradeDate = (LocalDate) tradeDateObj;
+            } else {
+                tradeDate = LocalDate.parse(tradeDateObj.toString());
+            }
+            data.setTradeDate(tradeDate);
             data.setValue(BigDecimal.valueOf(((Number) row.get("value")).doubleValue()));
             data.setLevel(interpretQvix(data.getValue()));
             return data;

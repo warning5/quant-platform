@@ -364,21 +364,20 @@ public class ScheduleConfigController {
                 req.setFetchBlockTrade(false); req.setFetchActivity(false); req.setFetchZtPool(false);
                 req.setFetchNotice(false); req.setFetchFundHolder(false); req.setFetchShareholder(false);
                 req.setFetchNews(false); req.setFetchMoneyflow(true);
+                // SENTIMENT_MF 仅保留资金流向，关闭其余情绪子项
+                req.setFetchBondYield(false); req.setFetchShenwanIndex(false); req.setFetchConsensusEstimate(false);
+                req.setFetchEarningsReport(false); req.setFetchQvix(false);
                 break;
             case "SENTIMENT_OTHER":
                 req.setUpdateType("SENTIMENT");
                 // 其它情绪数据：关掉资金流向，开启其余
                 req.setFetchMoneyflow(false);
-                req.setFetchLhb(true);
-                req.setFetchMargin(true);
-                req.setFetchSurvey(true);
-                req.setFetchBlockTrade(true);
-                req.setFetchActivity(true);
-                req.setFetchZtPool(true);
-                req.setFetchNotice(true);
-                req.setFetchFundHolder(true);
-                req.setFetchShareholder(true);
+                req.setFetchLhb(true); req.setFetchMargin(true); req.setFetchSurvey(true);
+                req.setFetchBlockTrade(true); req.setFetchActivity(true); req.setFetchZtPool(true);
+                req.setFetchNotice(true); req.setFetchFundHolder(true); req.setFetchShareholder(true);
                 req.setFetchNews(true);
+                req.setFetchBondYield(true); req.setFetchShenwanIndex(true); req.setFetchConsensusEstimate(true);
+                req.setFetchEarningsReport(true); req.setFetchQvix(true);
                 break;
             case "RESEARCH":       req.setUpdateType("RESEARCH"); break;
             case "FACTOR_COMPUTE": req.setUpdateType("FACTOR_COMPUTE"); break;
