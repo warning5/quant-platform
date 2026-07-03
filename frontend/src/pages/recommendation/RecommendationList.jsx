@@ -104,7 +104,6 @@ export default function RecommendationList() {
   // 复盘筛选状态（按策略隔离）
   const [reviewStrategyId, setReviewStrategyId] = useState(null);
   const [reviewDate, setReviewDate] = useState(null);
-  const [strategyDates, setStrategyDates] = useState([]); // 筛选策略对应的可用日期列表
   const [strategiesWithData, setStrategiesWithData] = useState([]); // 有推荐数据的策略列表
 
   // ── 方案B: 黑名单状态 ──
@@ -253,13 +252,12 @@ export default function RecommendationList() {
         try {
           dates = await recommendationApi.getDatesByStrategy(firstStrategy.id, 30);
         } catch { /* ignore */ }
-        setStrategyDates(dates);
 
         if (dates.length > 0) {
           // 取最近的一个有数据的日期
           const latestDate = dates[0];
-          setScreenDate(latestDate);
-          await loadRecommendations(firstStrategy.id, latestDate);
+          setScreenDate(dayjs(latestDate));
+          await loadRecommendations(firstStrategy.id, dayjs(latestDate));
         } else {
           // 没有数据，表格展示空状态
           setRecommendations([]);
@@ -323,8 +321,9 @@ export default function RecommendationList() {
     setLoading(true);
     try {
       let data;
-      if (sid && date) {
-        data = await recommendationApi.getByStrategyAndDate(sid, date);
+      const dateStr = date ? dayjs(date).format('YYYY-MM-DD') : null;
+      if (sid && dateStr) {
+        data = await recommendationApi.getByStrategyAndDate(sid, dateStr);
       } else {
         data = await recommendationApi.getLatest();
       }
@@ -356,16 +355,14 @@ export default function RecommendationList() {
   // ── 策略切换：刷新可用日期列表，自动选最近日期，加载推荐 ──
   const handleStrategyChange = async (value) => {
     setSelectedStrategyId(value);
-    setStrategyDates([]);
     setRecommendations([]);
     if (!value) return;
     try {
       const dates = await recommendationApi.getDatesByStrategy(value, 30);
-      setStrategyDates(dates);
       if (dates.length > 0) {
         const latestDate = dates[0];
-        setScreenDate(latestDate);
-        await loadRecommendations(value, latestDate);
+        setScreenDate(dayjs(latestDate));
+        await loadRecommendations(value, dayjs(latestDate));
       } else {
         setScreenDate(null);
         setRegime(null);
@@ -375,10 +372,10 @@ export default function RecommendationList() {
   };
 
   // ── 日期切换：用当前策略+新日期加载推荐 ──
-  const handleDateChange = async (dateStr) => {
-    setScreenDate(dateStr);
-    if (selectedStrategyId && dateStr) {
-      await loadRecommendations(selectedStrategyId, dateStr);
+  const handleDateChange = async (date) => {
+    setScreenDate(date);
+    if (selectedStrategyId && date) {
+      await loadRecommendations(selectedStrategyId, date);
     } else {
       setRecommendations([]);
       setRegime(null);
@@ -414,11 +411,7 @@ export default function RecommendationList() {
       message.success(`推荐列表生成成功: ${result.count} 只`);
       setFactorDiagnostics(weightMode === 'IC' ? (result.factorDiagnostics || null) : null);
       setIcDataDate(weightMode === 'IC' ? (result.icDataDate || null) : null);
-      // 生成完成后刷新可用日期列表并加载当前策略+日期的推荐
-      try {
-        const newDates = await recommendationApi.getDatesByStrategy(selectedStrategyId, 30);
-        setStrategyDates(newDates);
-      } catch { /* ignore */ }
+      // 生成完成后刷新当前策略+日期的推荐
       await loadRecommendations(selectedStrategyId, dateStr);
     } catch (e) {
       message.error('生成失败: ' + (e.message || '未知错误'));
@@ -465,8 +458,10 @@ export default function RecommendationList() {
         let tb = await recommendationApi.getBatchTopBottom(reviewStrategyId, reviewDate);
         // 如果选中日期尚未追踪（best3/worst3为空），自动回退到最近已追踪批次
         if (tb && (!tb.best3 || tb.best3.length === 0) && (!tb.worst3 || tb.worst3.length === 0)) {
-          // 从 batchHistory 中找该策略最近的一个已追踪批次
-          const trackedEntry = (batchHistory || []).find(b => b.recommendDate !== reviewDate && b.tracked > 0);
+          // 从 batchHistory 中找该策略最近的一个已追踪批次（按日期倒序，避免找到最旧批次）
+          const trackedEntry = [...(batchHistory || [])]
+            .sort((a, b) => dayjs(b.recommendDate).diff(dayjs(a.recommendDate)))
+            .find(b => b.recommendDate !== reviewDate && b.tracked > 0);
           if (trackedEntry) {
             tb = await recommendationApi.getBatchTopBottom(reviewStrategyId, trackedEntry.recommendDate);
             tb._fallbackDate = trackedEntry.recommendDate;
@@ -503,7 +498,17 @@ export default function RecommendationList() {
       } catch { /* ignore */ }
       if (reviewStrategyId && reviewDate) {
         try {
-          const tb = await recommendationApi.getBatchTopBottom(reviewStrategyId, reviewDate);
+          let tb = await recommendationApi.getBatchTopBottom(reviewStrategyId, reviewDate);
+          // 如果当前日期尚未追踪，回退到最近已追踪批次
+          if (tb && (!tb.best3 || tb.best3.length === 0) && (!tb.worst3 || tb.worst3.length === 0)) {
+            const trackedEntry = [...(batchHistory || [])]
+              .sort((a, b) => dayjs(b.recommendDate).diff(dayjs(a.recommendDate)))
+              .find(b => b.recommendDate !== reviewDate && b.tracked > 0);
+            if (trackedEntry) {
+              tb = await recommendationApi.getBatchTopBottom(reviewStrategyId, trackedEntry.recommendDate);
+              tb._fallbackDate = trackedEntry.recommendDate;
+            }
+          }
           setTopBottom(tb);
         } catch { /* ignore */ }
       }
@@ -1005,13 +1010,12 @@ export default function RecommendationList() {
           )}
         </Space>
         <Space>
-          <Select
+          <DatePicker
             value={screenDate}
             onChange={handleDateChange}
-            placeholder={strategyDates.length === 0 ? '暂无可用日期' : '选择日期'}
+            placeholder="选择日期"
             style={{ width: 150 }}
-            notFoundContent="最近30天内无推荐数据"
-            options={strategyDates.map(d => ({ value: d, label: d }))}
+            disabledDate={isNonTradingDay}
           />
           <Select
             value={selectedStrategyId}
