@@ -1,0 +1,52 @@
+.score-bar {
+  display: flex;
+  align-items: center;
+  margin-bottom: 16rpx;
+}
+
+.bar-label {
+  width: 120rpx;
+  font-size: 24rpx;
+  color: #888;
+  flex-shrink: 0;
+}
+
+.bar-track {
+  flex: 1;
+  height: 12rpx;
+  background: #f0f0f0;
+  border-radius: 6rpx;
+  margin: 0 16rpx;
+  overflow: hidden;
+}
+
+.bar-fill {
+  height: 100%;
+  border-radius: 6rpx;
+  transition: width 0.3s ease;
+}
+
+.bar-red {
+  background: #c0392b;
+}
+
+.bar-orange {
+  background: #e67e22;
+}
+
+.bar-green {
+  background: #27ae60;
+}
+
+.bar-purple {
+  background: #8e44ad;
+}
+
+.bar-value {
+  width: 60rpx;
+  text-align: right;
+  font-size: 24rpx;
+  font-weight: 500;
+  color: #333;
+  flex-shrink: 0;
+}

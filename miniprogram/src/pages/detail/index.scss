@@ -1,0 +1,346 @@
+.detail-page {
+  padding: 16rpx;
+  min-height: 100vh;
+}
+
+.card {
+  background: #fff;
+  border-radius: 16rpx;
+  padding: 24rpx;
+  margin-bottom: 16rpx;
+}
+
+.section-title {
+  font-size: 28rpx;
+  font-weight: 500;
+  color: #333;
+  margin-bottom: 20rpx;
+}
+
+/* 头部 */
+.detail-header {
+  padding: 28rpx 24rpx;
+}
+
+.header-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 20rpx;
+}
+
+.header-left {
+  flex: 1;
+}
+
+.stock-name {
+  display: block;
+  font-size: 36rpx;
+  font-weight: 500;
+  color: #333;
+  margin-bottom: 8rpx;
+}
+
+.stock-code {
+  font-size: 24rpx;
+  color: #999;
+}
+
+.header-right {
+  text-align: right;
+}
+
+.price {
+  display: block;
+  font-size: 44rpx;
+  font-weight: 500;
+  color: #333;
+  margin-bottom: 4rpx;
+}
+
+.change {
+  font-size: 28rpx;
+  color: #999;
+}
+
+.header-right .text-red {
+  color: #c0392b;
+}
+
+.header-right .text-green {
+  color: #27ae60;
+}
+
+.header-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+}
+
+.tag {
+  font-size: 22rpx;
+  padding: 6rpx 16rpx;
+  border-radius: 8rpx;
+}
+
+.tag-buy {
+  background: #fcebeb;
+  color: #c0392b;
+}
+
+.tag-hold {
+  background: #fff3e0;
+  color: #e67e22;
+}
+
+.tag-sell {
+  background: #e8f5e9;
+  color: #27ae60;
+}
+
+.tag-score {
+  background: #f0f0f0;
+  color: #666;
+}
+
+.tag-rank {
+  background: #e8f0fe;
+  color: #185fa5;
+}
+
+.tag-regime {
+  background: #f5f0e8;
+  color: #8e44ad;
+}
+
+/* 交易计划 */
+.plan-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20rpx;
+}
+
+.plan-item {
+  width: calc(33.33% - 14rpx);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.plan-label {
+  font-size: 22rpx;
+  color: #999;
+  margin-bottom: 8rpx;
+}
+
+.plan-value {
+  font-size: 30rpx;
+  font-weight: 500;
+  color: #333;
+}
+
+.plan-value.text-red {
+  color: #c0392b;
+}
+
+.plan-value.text-green {
+  color: #27ae60;
+}
+
+/* 因子得分 */
+.factor-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20rpx;
+}
+
+.factor-item {
+  width: calc(50% - 10rpx);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12rpx 0;
+  border-bottom: 1rpx solid #f5f5f5;
+}
+
+.factor-label {
+  font-size: 26rpx;
+  color: #888;
+}
+
+.factor-value {
+  font-size: 28rpx;
+  font-weight: 500;
+  color: #333;
+}
+
+/* 基本面信息 */
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12rpx 0;
+  border-bottom: 1rpx solid #f5f5f5;
+}
+
+.info-row:last-child {
+  border-bottom: none;
+}
+
+.info-label {
+  font-size: 26rpx;
+  color: #888;
+}
+
+.info-value {
+  font-size: 28rpx;
+  font-weight: 500;
+  color: #333;
+}
+
+/* 买入理由 */
+.reason-summary {
+  font-size: 26rpx;
+  color: #333;
+  line-height: 1.7;
+  font-weight: 500;
+  padding: 16rpx 20rpx;
+  background: linear-gradient(135deg, #fdf6ec 0%, #fef9f1 100%);
+  border-left: 4rpx solid #e67e22;
+  border-radius: 8rpx;
+  margin-bottom: 20rpx;
+}
+
+.reason-dimensions {
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+}
+
+.reason-dim-row {
+  display: flex;
+  flex-direction: column;
+  padding: 16rpx 18rpx;
+  background: #fafafa;
+  border-radius: 10rpx;
+}
+
+.reason-dim-head {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  margin-bottom: 6rpx;
+}
+
+.reason-dim-name {
+  font-size: 26rpx;
+  font-weight: 500;
+  color: #333;
+}
+
+.reason-dim-level {
+  font-size: 22rpx;
+  padding: 2rpx 12rpx;
+  border-radius: 6rpx;
+}
+
+.reason-dim-level.level-strong {
+  background: #fcebeb;
+  color: #c0392b;
+}
+
+.reason-dim-level.level-mid {
+  background: #fff3e0;
+  color: #e67e22;
+}
+
+.reason-dim-level.level-weak {
+  background: #e8f5e9;
+  color: #27ae60;
+}
+
+.reason-dim-content {
+  font-size: 24rpx;
+  color: #666;
+  line-height: 1.6;
+}
+
+.reason-risk {
+  margin-top: 20rpx;
+  padding: 16rpx 18rpx;
+  background: #fef0f0;
+  border-radius: 10rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+
+.reason-risk-label {
+  font-size: 24rpx;
+  font-weight: 500;
+  color: #c0392b;
+}
+
+.reason-risk-text {
+  font-size: 24rpx;
+  color: #666;
+  line-height: 1.6;
+}
+
+/* 收益追踪 */
+.track-grid {
+  display: flex;
+  justify-content: space-around;
+}
+
+.track-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.track-label {
+  font-size: 24rpx;
+  color: #999;
+  margin-bottom: 8rpx;
+}
+
+.track-value {
+  font-size: 32rpx;
+  font-weight: 500;
+  color: #333;
+}
+
+.track-value.text-red {
+  color: #c0392b;
+}
+
+.track-value.text-green {
+  color: #27ae60;
+}
+
+/* 元信息 */
+.meta-section {
+  text-align: center;
+  padding: 16rpx 0 40rpx;
+}
+
+.meta-text {
+  display: block;
+  font-size: 22rpx;
+  color: #ccc;
+  margin-bottom: 4rpx;
+}
+
+/* 空状态 */
+.empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 200rpx 0;
+}
+
+.empty-text {
+  font-size: 28rpx;
+  color: #999;
+}

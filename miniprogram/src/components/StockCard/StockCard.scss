@@ -1,0 +1,122 @@
+.stock-card {
+  display: flex;
+  align-items: center;
+  padding: 24rpx;
+  background: #fff;
+  border-radius: 16rpx;
+  margin-bottom: 12rpx;
+}
+
+.card-left {
+  margin-right: 20rpx;
+}
+
+.rank-badge {
+  width: 48rpx;
+  height: 48rpx;
+  border-radius: 50%;
+  background: #f0f0f0;
+  color: #999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24rpx;
+  font-weight: 500;
+}
+
+.rank-badge.rank-top {
+  background: #fcebeb;
+  color: #c0392b;
+}
+
+.card-center {
+  flex: 1;
+  min-width: 0;
+}
+
+.stock-name {
+  font-size: 30rpx;
+  font-weight: 500;
+  color: #333;
+  margin-bottom: 4rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stock-code {
+  font-size: 22rpx;
+  color: #999;
+}
+
+.card-right {
+  text-align: right;
+  margin-right: 16rpx;
+  min-width: 140rpx;
+}
+
+.price-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  margin-bottom: 4rpx;
+}
+
+.price-tag {
+  font-size: 18rpx;
+  color: #bbb;
+  margin-right: 6rpx;
+}
+
+.price {
+  font-size: 32rpx;
+  font-weight: 500;
+  color: #333;
+}
+
+.change {
+  font-size: 24rpx;
+  color: #999;
+}
+
+.card-right .text-red {
+  color: #c0392b;
+}
+
+.card-right .text-green {
+  color: #27ae60;
+}
+
+.card-tag {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.tag {
+  font-size: 20rpx;
+  padding: 4rpx 12rpx;
+  border-radius: 8rpx;
+}
+
+.tag-buy {
+  background: #fcebeb;
+  color: #c0392b;
+}
+
+.tag-hold {
+  background: #fff3e0;
+  color: #e67e22;
+}
+
+.tag-sell {
+  background: #e8f5e9;
+  color: #27ae60;
+}
+
+.score {
+  font-size: 24rpx;
+  font-weight: 500;
+  color: #666;
+}

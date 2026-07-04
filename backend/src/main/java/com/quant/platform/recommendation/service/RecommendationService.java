@@ -696,8 +696,12 @@ public class RecommendationService {
      * @return 更新的记录数
      */
     public int trackRecommendationPerformance() {
-        // 找到所有需要更新的策略+日期组合（最近5组未完全追踪的）
-        List<Map<String, Object>> recentCombos = recommendationMapper.findRecentStrategyDates(5);
+        // 优先拉取还有 nextDayReturn IS NULL 的组合（追踪专用方法，limit 放大到 200 覆盖所有近期未追批次）
+        List<Map<String, Object>> recentCombos = recommendationMapper.findUntrackedStrategyDates(200);
+        if (recentCombos.isEmpty()) {
+            log.info("[Recommendation] 所有近期组合均已追踪，跳过");
+            return 0;
+        }
         int totalUpdated = 0;
 
         LocalDate today = LocalDate.now();

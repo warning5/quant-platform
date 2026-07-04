@@ -1,0 +1,251 @@
+.history-page {
+  padding: 16rpx;
+  min-height: 100vh;
+}
+
+.card {
+  background: #fff;
+  border-radius: 16rpx;
+  padding: 24rpx;
+  margin-bottom: 16rpx;
+}
+
+/* 策略选择 */
+.picker-bar {
+  display: flex;
+  align-items: center;
+}
+
+.picker-label {
+  font-size: 24rpx;
+  color: #999;
+  margin-right: 12rpx;
+}
+
+.picker-value {
+  flex: 1;
+  font-size: 28rpx;
+  font-weight: 500;
+  color: #333;
+}
+
+.picker-arrow {
+  font-size: 24rpx;
+  color: #ccc;
+}
+
+/* 置信度卡片 */
+.confidence-card {
+  padding: 24rpx;
+}
+
+.conf-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20rpx;
+}
+
+.conf-title {
+  font-size: 28rpx;
+  font-weight: 500;
+  color: #333;
+}
+
+.conf-level {
+  font-size: 24rpx;
+  font-weight: 500;
+  padding: 6rpx 16rpx;
+  border-radius: 8rpx;
+}
+
+.conf-high {
+  background: #fcebeb;
+  color: #c0392b;
+}
+
+.conf-normal {
+  background: #fff3e0;
+  color: #e67e22;
+}
+
+.conf-low {
+  background: #e8f5e9;
+  color: #27ae60;
+}
+
+.conf-suspended {
+  background: #f0f0f0;
+  color: #999;
+}
+
+.conf-score-row {
+  display: flex;
+  justify-content: space-around;
+  margin-top: 16rpx;
+  margin-bottom: 20rpx;
+}
+
+.conf-score-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.conf-hint {
+  font-size: 22rpx;
+  color: #999;
+  text-align: center;
+  margin-top: 8rpx;
+  padding: 0 16rpx;
+}
+
+.conf-score-label {
+  font-size: 22rpx;
+  color: #999;
+  margin-bottom: 8rpx;
+}
+
+.conf-score-value {
+  font-size: 32rpx;
+  font-weight: 500;
+  color: #333;
+}
+
+.conf-score-value.text-red {
+  color: #c0392b;
+}
+
+.conf-score-value.text-green {
+  color: #27ae60;
+}
+
+.conf-dim {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16rpx;
+  padding-top: 16rpx;
+  border-top: 1rpx solid #f0f0f0;
+}
+
+.dim-item {
+  width: calc(50% - 8rpx);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.dim-label {
+  font-size: 24rpx;
+  color: #888;
+}
+
+.dim-value {
+  font-size: 26rpx;
+  font-weight: 500;
+  color: #333;
+}
+
+.conf-date {
+  display: block;
+  text-align: right;
+  font-size: 20rpx;
+  color: #ccc;
+  margin-top: 12rpx;
+}
+
+/* 批次历史 */
+.batch-section {
+  margin-top: 8rpx;
+}
+
+.section-title {
+  display: block;
+  font-size: 28rpx;
+  font-weight: 500;
+  color: #333;
+  margin-bottom: 16rpx;
+  padding-left: 8rpx;
+}
+
+.batch-card {
+  padding: 20rpx 24rpx;
+}
+
+.batch-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16rpx;
+}
+
+.batch-date {
+  font-size: 26rpx;
+  font-weight: 500;
+  color: #333;
+}
+
+.batch-tag {
+  font-size: 20rpx;
+  padding: 4rpx 12rpx;
+  border-radius: 8rpx;
+}
+
+.batch-high_quality {
+  background: #fcebeb;
+  color: #c0392b;
+}
+
+.batch-normal {
+  background: #f0f0f0;
+  color: #999;
+}
+
+.batch-low_quality {
+  background: #e8f5e9;
+  color: #27ae60;
+}
+
+.batch-stats {
+  display: flex;
+  justify-content: space-around;
+}
+
+.stat-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.stat-label {
+  font-size: 22rpx;
+  color: #999;
+  margin-bottom: 6rpx;
+}
+
+.stat-value {
+  font-size: 28rpx;
+  font-weight: 500;
+  color: #333;
+}
+
+.stat-value.text-red {
+  color: #c0392b;
+}
+
+.stat-value.text-green {
+  color: #27ae60;
+}
+
+/* 空状态 */
+.empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 120rpx 0;
+}
+
+.empty-text {
+  font-size: 28rpx;
+  color: #999;
+}

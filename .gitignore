@@ -33,3 +33,7 @@ Thumbs.db
 Desktop.ini
 nul
 nul*
+/miniprogram/node_modules/
+/miniprogram/.swc/
+/backend-mp/target/
+/common/target/

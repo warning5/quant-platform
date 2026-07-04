@@ -1,16 +1,13 @@
 package com.quant.platform.recommendation.domain;
 
-import com.baomidou.mybatisplus.annotation.IdType;
-import com.baomidou.mybatisplus.annotation.TableField;
-import com.baomidou.mybatisplus.annotation.TableId;
-import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.annotation.*;
 import lombok.Data;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 /**
- * 股票推荐记录
+ * 股票推荐记录（共享实体，backend 和 backend-mp 共用）
  */
 @Data
 @TableName("stock_recommendation")
@@ -73,28 +70,28 @@ public class StockRecommendation {
     /** 当日收盘价 */
     private Double closePrice;
 
-    /** 推荐买入价格（基于MA20支撑位，若无法获取则=close×0.95） */
+    /** 推荐买入价格 */
     private Double suggestedBuyPrice;
 
-    /** 建议止损价（基于ATR 2倍宽度，回退buyPrice×0.92） */
+    /** 建议止损价 */
     private Double suggestedStopLoss;
 
-    /** 建议止盈价（盈亏比 1:2） */
+    /** 建议止盈价 */
     private Double suggestedTakeProfit;
 
-    /** 建议目标价（盈亏比 1:3，中期目标） */
+    /** 建议目标价 */
     private Double suggestedTargetPrice;
 
-    /** 建议仓位比例（0~1，基于riskScore+liquidityScore，上限10%） */
+    /** 建议仓位比例（0~1） */
     private Double suggestedPositionPct;
 
     /** 当日涨跌幅% */
     private Double changePercent;
 
-    /** 行业相对强度(Phase A+C: z-score, 越大越强势) */
+    /** 行业相对强度 */
     private Double industryMomentum;
 
-    /** 行业Regime(Phase A): BULL/BEAR/SIDEWAYS */
+    /** 行业Regime */
     private String industryRegime;
 
     /** 技术面得分 */
@@ -141,7 +138,7 @@ public class StockRecommendation {
     @TableField(exist = false)
     private Boolean diversificationDemoted;
 
-    /** 该批次推荐质量标签: HIGH_QUALITY / NORMAL / LOW_QUALITY（瞬态，不持久化） */
+    /** 该批次推荐质量标签（瞬态，不持久化） */
     @TableField(exist = false)
     private String qualityTag;
 

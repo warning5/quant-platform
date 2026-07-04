@@ -13,18 +13,6 @@ import java.time.LocalDateTime;
  * 策略置信度
  * 基于历史追踪表现，为每个策略计算置信度分数，
  * 低置信度时自动降低推荐数量或提示用户风险。
- *
- * 置信度计算（满分100）：
- *   - 近10期命中率 (0~40分)
- *   - 平均收益率正负 (0~25分)
- *   - 最大回撤控制 (0~20分)
- *   - 收益稳定性/波动率 (0~15分)
- *
- * 等级划分：
- *   - HIGH:    70~100  → 正常推荐
- *   - NORMAL:  50~69   → 正常推荐（显示提醒）
- *   - LOW:     30~49   → 降低topN、提高入选门槛
- *   - SUSPENDED: <30   → 建议暂停使用该策略
  */
 @Data
 @TableName("strategy_confidence")
@@ -43,8 +31,6 @@ public class StrategyConfidence {
 
     /** 综合置信度分数 (0~100) */
     private Integer score;
-
-    // ── 维度得分 ──
 
     /** 近10期命中率维度得分 (0~40) */
     private Integer hitRateScore;
@@ -70,12 +56,10 @@ public class StrategyConfidence {
     /** 近10期收益标准差% */
     private BigDecimal volatilityValue;
 
-    // ── 元信息 ──
-
     /** 用于计算的推荐记录数 */
     private Integer sampleSize;
 
-    /** 数据截止日期（最近一次追踪的推荐日期） */
+    /** 数据截止日期 */
     private LocalDate dataAsOfDate;
 
     /** 创建时间 */
@@ -84,9 +68,6 @@ public class StrategyConfidence {
     /** 更新时间 */
     private LocalDateTime updatedAt;
 
-    // ── 辅助方法 ──
-
-    /** 根据分数获取等级 */
     public static String getLevelByScore(int score) {
         if (score >= 70) return "HIGH";
         if (score >= 50) return "NORMAL";
@@ -94,7 +75,6 @@ public class StrategyConfidence {
         return "SUSPENDED";
     }
 
-    /** 获取等级的中文名称 */
     public static String getLevelLabel(String level) {
         return switch (level) {
             case "HIGH" -> "高";
@@ -105,7 +85,6 @@ public class StrategyConfidence {
         };
     }
 
-    /** 获取等级对应的颜色 */
     public static String getLevelColor(String level) {
         return switch (level) {
             case "HIGH" -> "#3f8600";

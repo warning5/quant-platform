@@ -1,0 +1,151 @@
+.list-page {
+  padding: 16rpx;
+  min-height: 100vh;
+}
+
+/* 大盘指数 */
+.index-bar {
+  white-space: nowrap;
+  margin-bottom: 16rpx;
+  padding: 16rpx 0;
+  background: #fff;
+  border-radius: 16rpx;
+}
+
+.index-item {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0 24rpx;
+  border-right: 1rpx solid #f0f0f0;
+}
+
+.index-item:last-child {
+  border-right: none;
+}
+
+.index-name {
+  font-size: 20rpx;
+  color: #999;
+  margin-bottom: 4rpx;
+}
+
+.index-price {
+  font-size: 26rpx;
+  font-weight: 500;
+  color: #333;
+}
+
+.index-change {
+  font-size: 22rpx;
+  color: #999;
+}
+
+.index-bar .text-red {
+  color: #c0392b;
+}
+
+.index-bar .text-green {
+  color: #27ae60;
+}
+
+/* 选择栏 */
+.selector-bar {
+  display: flex;
+  gap: 16rpx;
+  margin-bottom: 16rpx;
+}
+
+.picker-item {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  background: #fff;
+  border-radius: 16rpx;
+  padding: 20rpx 24rpx;
+}
+
+.picker-label {
+  font-size: 24rpx;
+  color: #999;
+  margin-right: 12rpx;
+}
+
+.picker-value {
+  flex: 1;
+  font-size: 28rpx;
+  font-weight: 500;
+  color: #333;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.picker-arrow {
+  font-size: 24rpx;
+  color: #ccc;
+}
+
+/* 概览栏 */
+.overview-bar {
+  display: flex;
+  background: #fff;
+  border-radius: 16rpx;
+  padding: 24rpx 0;
+  margin-bottom: 16rpx;
+}
+
+.overview-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  border-right: 1rpx solid #f0f0f0;
+}
+
+.overview-item:last-child {
+  border-right: none;
+}
+
+.overview-label {
+  font-size: 22rpx;
+  color: #999;
+  margin-bottom: 8rpx;
+}
+
+.overview-value {
+  font-size: 36rpx;
+  font-weight: 500;
+  color: #333;
+}
+
+.overview-value.text-red {
+  color: #c0392b;
+}
+
+.overview-value.text-orange {
+  color: #e67e22;
+}
+
+.overview-value.text-muted {
+  color: #bbb;
+  font-size: 28rpx;
+}
+
+/* 推荐列表 */
+.recommend-list {
+  padding-bottom: 32rpx;
+}
+
+/* 空状态 */
+.empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 120rpx 0;
+}
+
+.empty-text {
+  font-size: 28rpx;
+  color: #999;
+}
