@@ -1,31 +1,18 @@
-server:
-  port: 8082
-  servlet:
-    context-path: /api
-
-mp:
-  token: quant-mp-2026-secret
-
 spring:
+  profiles:
+    active: dev
   application:
     name: quant-platform-mp
-  datasource:
-    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:stock}?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&tinyInt1isBit=false
-    driver-class-name: com.mysql.cj.jdbc.Driver
-    username: ${MYSQL_USER:admin}
-    password: ${MYSQL_PASSWORD:Hanlu@123}
-    hikari:
-      maximum-pool-size: 20
-      minimum-idle: 5
-      connection-timeout: 60000
-      idle-timeout: 300000
-      max-lifetime: 600000
-
   jackson:
     time-zone: Asia/Shanghai
     date-format: yyyy-MM-dd HH:mm:ss
     serialization:
       write-dates-as-timestamps: false
+
+server:
+  port: 8082
+  servlet:
+    context-path: /api
 
 # MyBatis-Plus 配置
 mybatis-plus:
