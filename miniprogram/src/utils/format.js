@@ -102,7 +102,7 @@ export function regimeText(regime) {
  * 置信度等级中文
  */
 export function confidenceText(level) {
-  const map = { HIGH: '高', NORMAL: '中', LOW: '低', SUSPENDED: '暂停', UNTRAINED: '待训练' };
+  const map = { HIGH: '高置信', NORMAL: '中等', LOW: '偏低', SUSPENDED: '建议暂停', UNTRAINED: '待训练' };
   return map[level] || level || '--';
 }
 

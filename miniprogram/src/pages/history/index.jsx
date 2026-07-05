@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { View, Text, Picker } from '@tarojs/components';
 import Taro, { usePullDownRefresh } from '@tarojs/taro';
 import { recommendationApi, confidenceApi } from '../../api';
-import { formatPercent, formatDate, priceColor } from '../../utils/format';
+import { formatPercent, formatDate, priceColor, confidenceText } from '../../utils/format';
 import './index.scss';
 
 export default function HistoryPage() {
@@ -115,7 +115,7 @@ export default function HistoryPage() {
             <View className='conf-header'>
               <Text className='conf-title'>策略置信度</Text>
               <Text className={`conf-level conf-${(conf.level || '').toLowerCase()}`}>
-                {conf.level === 'UNTRAINED' ? '待训练' : (conf.level || '--')}
+                {confidenceText(conf.level)}
               </Text>
             </View>
             {conf.level === 'UNTRAINED' && (
