@@ -22,12 +22,17 @@ export default function DetailPage(props) {
   const router = props.router || (typeof getCurrentPages === 'function' && getCurrentPages().length > 0 ? getCurrentPages()[getCurrentPages().length - 1].router : null);
 
   let item = {};
+  let quote = {};
   try {
     const pages = getCurrentPages();
     const currentPage = pages[pages.length - 1];
     const raw = currentPage?.options?.data;
+    const quoteRaw = currentPage?.options?.quote;
     if (raw) {
       item = JSON.parse(decodeURIComponent(raw));
+    }
+    if (quoteRaw) {
+      quote = JSON.parse(decodeURIComponent(quoteRaw));
     }
   } catch (e) {
     console.error('解析详情数据失败', e);
@@ -43,7 +48,10 @@ export default function DetailPage(props) {
     );
   }
 
-  const colorClass = priceColor(item.changePercent);
+  // 优先用实时行情（列表页带过来的），没有再用推荐里的收盘价/涨跌幅
+  const displayPrice = quote?.price ?? item.closePrice;
+  const displayChangePercent = quote?.changePct ?? item.changePercent;
+  const colorClass = priceColor(displayChangePercent);
   const buyReason = parseBuyReason(item.buyReason);
 
   return (
@@ -56,9 +64,9 @@ export default function DetailPage(props) {
             <Text className='stock-code'>{item.stockCode} · {item.industry || '--'}</Text>
           </View>
           <View className='header-right'>
-            <Text className={`price ${colorClass}`}>{formatPrice(item.closePrice)}</Text>
+            <Text className={`price ${colorClass}`}>{formatPrice(displayPrice)}</Text>
             <Text className={`change ${colorClass}`}>
-              {formatPercent(item.changePercent)}
+              {formatPercent(displayChangePercent)}
             </Text>
           </View>
         </View>

@@ -190,8 +190,16 @@ export default function ListPage() {
 
   // 跳转详情页
   const goDetail = (item) => {
+    const quote = quotes[item.stockCode];
+    const params = {
+      data: JSON.stringify(item),
+      ...(quote ? { quote: JSON.stringify(quote) } : {})
+    };
+    const query = Object.entries(params)
+      .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
+      .join('&');
     Taro.navigateTo({
-      url: `/pages/detail/index?data=${encodeURIComponent(JSON.stringify(item))}`
+      url: `/pages/detail/index?${query}`
     });
   };
 

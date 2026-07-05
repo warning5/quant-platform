@@ -3,6 +3,6 @@ module.exports = {
     NODE_ENV: '"development"'
   },
   defineConstants: {
-    BASE_URL: '"https://stock.hwtx.site/api"'
+    BASE_URL: '"https://localhost:8080/api"'
   }
 };
