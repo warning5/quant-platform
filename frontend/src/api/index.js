@@ -176,8 +176,8 @@ export const strategyApi = {
 
 // ===== 模拟盘 API =====
 export const paperTradingApi = {
-  create: (strategyId, strategyCode, initialCapital) =>
-    api.post('/paper-trading/create', null, { params: { strategyId, strategyCode, initialCapital } }),
+  create: (strategyId, strategyCode, initialCapital, backtestId) =>
+    api.post('/paper-trading/create', null, { params: { strategyId, strategyCode, initialCapital, backtestId } }),
   list: () => api.get('/paper-trading/list'),
   getDetail: (paperId) => api.get(`/paper-trading/${paperId}`),
   generateSignals: (paperId) => api.post(`/paper-trading/${paperId}/generate-signals`),
@@ -206,6 +206,9 @@ export const paperTradingApi = {
   // 条件单（限价/止损/追踪止损）
   createConditionalOrder: (paperId, params) => api.post(`/paper-trading/${paperId}/conditional-order`, null, { params }),
   checkConditionalOrders: (paperId) => api.post(`/paper-trading/${paperId}/check-conditional-orders`),
+  // 一键买入
+  quickBuy: (paperId, code, name, price) =>
+    api.post(`/paper-trading/${paperId}/quick-buy`, null, { params: { code, name, price } }),
 };
 
 // ===== 回测 API =====
@@ -214,6 +217,7 @@ export const backtestApi = {
   list: (params) => api.get('/backtests', { params }),
   getTask: (taskId) => api.get(`/backtests/${taskId}`),
   getReport: (taskId) => api.get(`/backtests/${taskId}/report`),
+  getRecommendedConfig: (taskId) => api.get(`/backtests/${taskId}/recommended-config`),
   getReportById: (reportId) => api.get(`/backtests/reports/${reportId}`),
   getCurve: (taskId) => api.get(`/backtests/${taskId}/curve`),
   getAttribution: (taskId) => api.get(`/backtests/${taskId}/attribution`, { timeout: 300000 }),

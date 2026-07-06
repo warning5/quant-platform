@@ -1,16 +1,16 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   Card, Row, Col, Tabs, Input, AutoComplete, Button, Spin, Empty, Tooltip, Tag, Progress,
-  Typography, Alert, Statistic, Table, Descriptions,
+  Typography, Alert, Statistic, Table, Descriptions, Dropdown, Space,
 } from 'antd';
 import {
   QuestionCircleOutlined, SearchOutlined,
   ArrowUpOutlined, ArrowDownOutlined,
   FileTextOutlined, DownloadOutlined,
-  InfoCircleOutlined,
+  InfoCircleOutlined, ThunderboltOutlined, EyeOutlined, DownOutlined,
 } from '@ant-design/icons';
 import { useSearchParams, Link } from 'react-router-dom';
-import { stockAnalysisApi, silentConfig } from '../../api';
+import { stockAnalysisApi, silentConfig, paperTradingApi } from '../../api';
 import api from '../../api';
 import { useMarketThermometer } from '../../hooks/useMarketThermometer';
 import ReactECharts from '../../components/LazyECharts';
@@ -20,6 +20,7 @@ import { InstitutionCoverageTab } from './InstitutionCoverageTab';
 import { StockPerformanceTab } from './StockPerformanceTab';
 import { ShareholderStructureTab } from './ShareholderStructureTab';
 import { TriggerDashboard } from './TriggerDashboard';
+import { message } from '../../utils/messageUtil';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -92,6 +93,53 @@ export default function StockAnalysis() {
   const [searchLoading, setSearchLoading] = useState(false);
   const searchTimerRef = useRef(null);
   const { data: thData, status: thStatus } = useMarketThermometer();
+
+  // 模拟盘 & 监控
+  const [paperAccounts, setPaperAccounts] = useState([]);
+  const [quickBuyLoading, setQuickBuyLoading] = useState(false);
+  const [monitorLoading, setMonitorLoading] = useState(false);
+
+  useEffect(() => {
+    paperTradingApi.list().then(d => setPaperAccounts(d || [])).catch(() => {});
+  }, []);
+
+  // 加入模拟盘（一键买入）
+  const handleQuickBuy = async (paperId) => {
+    if (!overview?.code) return;
+    setQuickBuyLoading(true);
+    try {
+      await paperTradingApi.quickBuy(paperId, overview.code, overview.name, overview.price);
+      message.success(`${overview.name} 已加入模拟盘`);
+    } catch (e) {
+      message.error('加入模拟盘失败');
+    } finally {
+      setQuickBuyLoading(false);
+    }
+  };
+
+  // 加入监控
+  const handleAddToMonitor = async () => {
+    if (!overview?.code) return;
+    setMonitorLoading(true);
+    try {
+      const price = overview.price ? parseFloat(overview.price) : 0;
+      const buyPriceLow = price > 0 ? (price * 0.98).toFixed(2) : 0;
+      const buyPriceHigh = price > 0 ? (price * 1.02).toFixed(2) : 0;
+      await api.post('/monitor/add-custom-stock', {
+        stockCode: overview.code,
+        stockName: overview.name,
+        buyPriceLow,
+        buyPriceHigh,
+        stopLoss: overview.stopLossPrice || null,
+        targetPrice: overview.targetPrice || null,
+      });
+      message.success(`${overview.name} 已加入监控`);
+    } catch (e) {
+      message.error('加入监控失败');
+    } finally {
+      setMonitorLoading(false);
+    }
+  };
 
   // 最近查询历史
   const [recentQueries, setRecentQueries] = useState(loadRecent);
@@ -616,6 +664,40 @@ export default function StockAnalysis() {
                   }}
                 >
                   下载
+                </Button>
+                {/* 加入模拟盘（仅买入/强烈买入评级显示） */}
+                {(overview.actionName === '买入' || overview.actionName === '强烈买入') && (
+                  <Dropdown
+                    menu={{
+                      items: paperAccounts.length > 0
+                        ? paperAccounts.map(acc => ({
+                            key: acc.id,
+                            label: `${acc.strategyCode || '模拟盘'} #${acc.id}`,
+                          }))
+                        : [{ key: 'empty', label: '暂无模拟盘，请先创建', disabled: true }],
+                      onClick: ({ key }) => { if (key !== 'empty') handleQuickBuy(key); },
+                    }}
+                    trigger={['click']}
+                  >
+                    <Button
+                      style={{ marginLeft: 4 }}
+                      type="primary"
+                      ghost
+                      icon={<ThunderboltOutlined />}
+                      loading={quickBuyLoading}
+                    >
+                      加入模拟盘 <DownOutlined />
+                    </Button>
+                  </Dropdown>
+                )}
+                {/* 加入监控（所有评级可用） */}
+                <Button
+                  style={{ marginLeft: 4 }}
+                  icon={<EyeOutlined />}
+                  onClick={handleAddToMonitor}
+                  loading={monitorLoading}
+                >
+                  加入监控
                 </Button>
               </>
             )}

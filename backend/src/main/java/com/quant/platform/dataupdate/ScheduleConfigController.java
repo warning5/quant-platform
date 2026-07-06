@@ -245,52 +245,25 @@ public class ScheduleConfigController {
     public ApiResponse<Map<String, Object>> triggerTask(@PathVariable String taskKey) {
         try {
             String upper = taskKey.toUpperCase();
+            // 所有手动触发统一走 ScheduleService.executeTask，确保依赖链生效。
+            // 用异步线程执行，避免 HTTP 长时间阻塞（DAILY_RECOMMENDATION 等同步任务需要）。
+            CompletableFuture.runAsync(() -> {
+                try {
+                    scheduleService.executeTask(upper);
+                } catch (Exception e) {
+                    log.error("[ScheduleConfig] 异步执行 {} 失败: {}", upper, e.getMessage(), e);
+                }
+            });
 
-            // DAILY_RECOMMENDATION 和 RECOMMENDATION_TRACK 走 ScheduleService 特殊处理
-            if ("DAILY_RECOMMENDATION".equals(upper) || "RECOMMENDATION_TRACK".equals(upper)) {
-                CompletableFuture.runAsync(() -> {
-                    try {
-                        scheduleService.executeTask(upper);
-                    } catch (Exception e) {
-                        log.error("[ScheduleConfig] 异步执行 {} 失败: {}", upper, e.getMessage());
-                    }
-                });
-                jdbcTemplate.update(
-                    "UPDATE data_schedule_config SET last_run_time = ?, last_run_status = 'RUNNING' WHERE task_key = ?",
-                    LocalDateTime.now(), taskKey
-                );
-                log.info("[ScheduleConfig] 手动触发(异步): {}", taskKey);
-                Map<String, Object> result = new java.util.HashMap<>();
-                result.put("taskKey", taskKey);
-                result.put("status", "RUNNING");
-                result.put("message", "任务已异步提交执行");
-                return ApiResponse.success(result);
-            }
-
-            // 读取任务的 extra_config
-            Map<String, Object> configRow = null;
-            try {
-                configRow = jdbcTemplate.queryForMap(
-                    "SELECT extra_config FROM data_schedule_config WHERE task_key = ?", taskKey);
-            } catch (Exception ignored) {}
-
-            String extraConfigJson = configRow != null ? (String) configRow.get("extra_config") : null;
-            DataUpdateRequest request = buildRequestFromKey(taskKey, extraConfigJson);
-            // 使用并发提交，不限制单任务
-            DataUpdateTask task = dataUpdateService.submitTaskConcurrent(request);
-
-            // 记录触发时间
             jdbcTemplate.update(
                 "UPDATE data_schedule_config SET last_run_time = ?, last_run_status = 'RUNNING' WHERE task_key = ?",
                 LocalDateTime.now(), taskKey
             );
-
-            log.info("[ScheduleConfig] 手动触发: {}", taskKey);
+            log.info("[ScheduleConfig] 手动触发(异步): {}", taskKey);
             Map<String, Object> result = new java.util.HashMap<>();
-            result.put("taskId", task.getTaskId());
             result.put("taskKey", taskKey);
-            result.put("status", task.getStatus());
-            result.put("message", "任务已提交执行");
+            result.put("status", "RUNNING");
+            result.put("message", "任务已异步提交执行");
             return ApiResponse.success(result);
         } catch (Exception e) {
             log.error("[ScheduleConfig] 触发失败: {}", taskKey, e);

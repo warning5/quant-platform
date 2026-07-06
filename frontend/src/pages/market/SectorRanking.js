@@ -87,6 +87,7 @@ function SectorCard({ sector, onClick }) {
 function SectorDetail({ conceptName, onBack }) {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(null);
+  const [pageSize, setPageSize] = useState(15);
   useEffect(() => {
     setLoading(true);
     stockAnalysisApi.getHotSectorDetail(conceptName)
@@ -132,10 +133,12 @@ function SectorDetail({ conceptName, onBack }) {
         <Table dataSource={stocks} columns={detailColumns} rowKey="code" size="small"
           pagination={{
             total: stocks.length,
-            pageSize: 15,
+            current: 1,
+            pageSize,
             showSizeChanger: true,
             showTotal: (t) => `共 ${t} 只`,
             pageSizeOptions: ['10', '20', '50', '100'],
+            onShowSizeChange: (_, size) => setPageSize(size),
           }} scroll={{ x: 700 }} />
       </Card>
     </div>

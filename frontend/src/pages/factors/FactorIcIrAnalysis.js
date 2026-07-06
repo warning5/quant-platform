@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
 import {
   Card, Row, Col, Select, Button, Tag, Spin, Alert, Space, Switch,
@@ -7,7 +8,7 @@ import {
 import {
   BarChartOutlined, LineChartOutlined, ReloadOutlined, InfoCircleOutlined,
   CheckCircleOutlined, WarningOutlined, CloseCircleOutlined, QuestionCircleOutlined,
-  ArrowUpOutlined, ArrowDownOutlined, MinusOutlined, DownloadOutlined,
+  ArrowUpOutlined, ArrowDownOutlined, MinusOutlined, DownloadOutlined, RocketOutlined,
 } from '@ant-design/icons';
 import ReactECharts from '../../components/LazyECharts';
 import { factorApi, strategyApi, recommendationApi } from '../../api';
@@ -399,6 +400,7 @@ function IcCumulativeChart({ icTimeline, factorCode }) {
 // ─── 主组件 ─────────────────────────────────────────────────────────────────────
 export default function FactorIcIrAnalysis() {
   const { message } = App.useApp();
+  const navigate = useNavigate();
   const [factorList, setFactorList] = useState([]);
   const [selectedCodes, setSelectedCodes] = useState([]);
   const [dateRange, setDateRange] = useState([dayjs().subtract(1, 'year'), dayjs()]);
@@ -480,6 +482,41 @@ export default function FactorIcIrAnalysis() {
       value: s.id ?? s.strategyId,
     }));
   }, [strategies]);
+
+  // 一键创建策略：从IC分析结果中筛选有效因子，按|IC|归一化生成权重，跳转策略编辑页预填
+  const handleCreateStrategy = () => {
+    if (!results || results.length === 0) {
+      message.warning('请先执行IC分析');
+      return;
+    }
+    // 筛选有效因子（|icMean| >= icThreshold），按 |icMean| 降序
+    const effective = results
+      .filter(r => r.icMean != null && Math.abs(r.icMean) >= icThreshold)
+      .sort((a, b) => Math.abs(b.icMean) - Math.abs(a.icMean))
+      .slice(0, 10);
+
+    if (effective.length === 0) {
+      message.warning('没有有效因子（|IC| >= 阈值），请调整阈值后重试');
+      return;
+    }
+
+    // |IC| 归一化作为初始权重，icMean 符号决定方向
+    const totalAbsIc = effective.reduce((s, r) => s + Math.abs(r.icMean), 0);
+    const prefilledFactors = effective.map(r => ({
+      code: r.factorCode,
+      direction: r.icMean >= 0 ? 1 : -1,
+      weight: totalAbsIc > 0 ? +(Math.abs(r.icMean) / totalAbsIc).toFixed(4) : +(1 / effective.length).toFixed(4),
+    }));
+
+    navigate('/strategies/new', {
+      state: {
+        prefilledFactors,
+        source: 'ic-analysis',
+        forwardDays,
+        dateRange: dateRange.map(d => d?.format('YYYY-MM-DD')),
+      }
+    });
+  };
 
   const factorOptions = useMemo(() => {
     return factorList.map(f => ({
@@ -1400,7 +1437,12 @@ export default function FactorIcIrAnalysis() {
                     ? <Tooltip title="Pearson线性相关系数：基于原始值计算，对异常值敏感，需假设正态分布"><Tag color="cyan" style={{ fontSize: 11 }}>Pearson <QuestionCircleOutlined style={{ fontSize: 10 }} /></Tag></Tooltip>
                     : <Tooltip title="Spearman秩相关系数：基于排名计算，对异常值不敏感，A股最常用"><Tag color="default" style={{ fontSize: 11 }}>Spearman <QuestionCircleOutlined style={{ fontSize: 10 }} /></Tag></Tooltip>
                   }<Text type="secondary" style={{ fontSize: 12 }}>（点击因子代码查看IC趋势）</Text></Space>} size="small" style={{ marginBottom: 16 }}
-          extra={<Button size="small" icon={<DownloadOutlined />} onClick={() => exportResultsCsv(results)} disabled={!results || results.length === 0}>导出CSV</Button>}
+          extra={<Space>
+            <Button size="small" type="primary" ghost icon={<RocketOutlined />} onClick={handleCreateStrategy} disabled={!results || results.length === 0}>
+              一键创建策略
+            </Button>
+            <Button size="small" icon={<DownloadOutlined />} onClick={() => exportResultsCsv(results)} disabled={!results || results.length === 0}>导出CSV</Button>
+          </Space>}
         >
           <Table
             dataSource={results}

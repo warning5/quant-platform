@@ -3,6 +3,7 @@ package com.quant.platform.dataupdate;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationContext;
+import org.springframework.context.event.EventListener;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.annotation.SchedulingConfigurer;
@@ -207,7 +208,6 @@ public class ScheduleService implements SchedulingConfigurer {
      * 完成后自动触发依赖链下游任务
      */
     public void executeTask(String taskKey) {
-        boolean success = true;
         try {
             // 质量检查任务：数据新鲜度
             if ("DATA_FRESHNESS".equals(taskKey)) {
@@ -215,7 +215,7 @@ public class ScheduleService implements SchedulingConfigurer {
                 log.info("[ScheduleService] 数据新鲜度检查完成: hasWarning={}", result.get("hasWarning"));
                 updateTaskStatus(taskKey, "SUCCESS");
                 // 质量检查结果通过 DataQualityService 内部推送
-                success = true;
+                triggerDependents(taskKey);
                 return;
             }
 
@@ -224,7 +224,7 @@ public class ScheduleService implements SchedulingConfigurer {
                 Map<String, Object> result = getDataQualityService().checkPriceAnomalies(7);
                 log.info("[ScheduleService] 价格异常检测完成: count={}", result.get("anomalyCount"));
                 updateTaskStatus(taskKey, "SUCCESS");
-                success = true;
+                triggerDependents(taskKey);
                 return;
             }
 
@@ -233,7 +233,7 @@ public class ScheduleService implements SchedulingConfigurer {
                 Map<String, Object> result = getDataQualityService().checkFactorNullRatio();
                 log.info("[ScheduleService] 因子NULL检测完成: nullFactorCount={}", result.get("nullFactorCount"));
                 updateTaskStatus(taskKey, "SUCCESS");
-                success = true;
+                triggerDependents(taskKey);
                 return;
             }
 
@@ -242,7 +242,7 @@ public class ScheduleService implements SchedulingConfigurer {
                 Map<String, Object> result = getDataQualityService().checkFinancialAnomalies();
                 log.info("[ScheduleService] 财务突变检测完成: count={}", result.get("anomalyCount"));
                 updateTaskStatus(taskKey, "SUCCESS");
-                success = true;
+                triggerDependents(taskKey);
                 return;
             }
 
@@ -251,7 +251,7 @@ public class ScheduleService implements SchedulingConfigurer {
                 int updated = recommendationService.trackRecommendationPerformance();
                 log.info("[ScheduleService] 推荐追踪完成: 更新{}条", updated);
                 updateTaskStatus(taskKey, "SUCCESS");
-                success = true;
+                triggerDependents(taskKey);
                 return;
             }
 
@@ -259,7 +259,7 @@ public class ScheduleService implements SchedulingConfigurer {
             if ("DAILY_RECOMMENDATION".equals(taskKey)) {
                 executeDailyRecommendation();
                 // executeDailyRecommendation 内部已更新状态
-                success = true;
+                triggerDependents(taskKey);
                 return;
             }
 
@@ -287,7 +287,6 @@ public class ScheduleService implements SchedulingConfigurer {
                 LocalDateTime.now(), taskKey
             );
             log.error("[ScheduleService] 定时执行失败: {}", taskKey, e);
-            success = false;
 
             // P1-2.2: 失败后5分钟自动重试一次（同一天同一任务只重试一次）
             String retryKey = taskKey + ":" + LocalDate.now();
@@ -311,17 +310,12 @@ public class ScheduleService implements SchedulingConfigurer {
             // 10: 失败告警推送通知
             sendFailureAlert(taskKey, e);
         }
-
-        // 9: 依赖编排 — 成功后触发下游任务
-        if (success) {
-            triggerDependents(taskKey);
-        }
     }
 
     /** 更新任务状态 */
     private void updateTaskStatus(String taskKey, String status) {
         jdbcTemplate.update(
-            "UPDATE data_schedule_config SET last_run_time = ?, last_run_status = ? WHERE task_key = ?",
+            "UPDATE data_schedule_config SET last_run_time = ?, last_run_status = ?, last_run_duration_sec = 0 WHERE task_key = ?",
             LocalDateTime.now(), status, taskKey
         );
     }
@@ -391,6 +385,17 @@ public class ScheduleService implements SchedulingConfigurer {
                 new java.util.Date(System.currentTimeMillis() + delayMs)
             );
         }
+    }
+
+    /** 数据更新任务完成事件监听：实际完成后触发下游依赖 */
+    @EventListener
+    public void onDataUpdateCompleted(DataUpdateCompletedEvent event) {
+        if (!event.isSuccess()) {
+            log.warn("[ScheduleService] 任务 {} 执行失败，不触发下游依赖", event.getTaskKey());
+            return;
+        }
+        log.info("[ScheduleService] 收到任务完成事件: {}, 耗时{}s", event.getTaskKey(), event.getDurationSeconds());
+        triggerDependents(event.getTaskKey());
     }
 
     /**
@@ -516,6 +521,7 @@ public class ScheduleService implements SchedulingConfigurer {
      * 3. 调用通知服务推送结果
      */
     private void executeDailyRecommendation() {
+        long startTime = System.currentTimeMillis();
         log.info("[ScheduleService] 开始执行每日自动推荐");
 
         // 读取推荐配置
@@ -622,9 +628,12 @@ public class ScheduleService implements SchedulingConfigurer {
         }
 
         // 更新调度状态
+        long durationSec = (System.currentTimeMillis() - startTime) / 1000;
         jdbcTemplate.update(
-            "UPDATE data_schedule_config SET last_run_time = ?, last_run_status = ? " +
+            "UPDATE data_schedule_config SET last_run_time = ?, last_run_status = ?, last_run_duration_sec = ? " +
             "WHERE task_key = 'DAILY_RECOMMENDATION'",
-            LocalDateTime.now(), allSuccess ? "SUCCESS" : "PARTIAL");
+            LocalDateTime.now(), allSuccess ? "SUCCESS" : "PARTIAL", durationSec);
+        log.info("[ScheduleService] 每日自动推荐完成: 策略数={}, 推荐总数={}, 耗时={}s, 状态={}",
+            strategyIds.size(), allRecommendations.size(), durationSec, allSuccess ? "SUCCESS" : "PARTIAL");
     }
 }

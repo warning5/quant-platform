@@ -10,7 +10,7 @@ import {
   FundOutlined, SafetyCertificateOutlined, BarChartOutlined, DownloadOutlined,
 } from '@ant-design/icons';
 import ReactECharts from '../../components/LazyECharts';
-import { paperTradingApi, strategyApi } from '../../api';
+import { paperTradingApi, strategyApi, backtestApi } from '../../api';
 import { useMarketThermometer } from '../../hooks/useMarketThermometer';
 
 const { Text, Title } = Typography;
@@ -139,6 +139,12 @@ function CreateModal({ visible, onClose, onCreated }) {
   const [selectedStrategy, setSelectedStrategy] = useState(null);
   const [capital, setCapital] = useState(1000000);
   const [creating, setCreating] = useState(false);
+  // 从回测导入参数
+  const [importFromBacktest, setImportFromBacktest] = useState(false);
+  const [backtests, setBacktests] = useState([]);
+  const [selectedBacktestId, setSelectedBacktestId] = useState(null);
+  const [recommendedConfig, setRecommendedConfig] = useState(null);
+  const [configLoading, setConfigLoading] = useState(false);
 
   useEffect(() => {
     strategyApi.list({ page: 0, size: 100 }).then(res => {
@@ -147,13 +153,46 @@ function CreateModal({ visible, onClose, onCreated }) {
     }).catch(() => {});
   }, []);
 
+  // 加载已完成回测列表
+  useEffect(() => {
+    if (importFromBacktest && backtests.length === 0) {
+      backtestApi.list({ status: 'COMPLETED', page: 0, size: 50 }).then(res => {
+        const content = res?.records || res?.content || res?.content?.records || [];
+        setBacktests(Array.isArray(content) ? content : []);
+      }).catch(() => {});
+    }
+  }, [importFromBacktest]);
+
+  // 选择回测后获取推荐参数
+  const handleBacktestSelect = async (taskId) => {
+    setSelectedBacktestId(taskId);
+    if (!taskId) { setRecommendedConfig(null); return; }
+    setConfigLoading(true);
+    try {
+      const cfg = await backtestApi.getRecommendedConfig(taskId);
+      setRecommendedConfig(cfg);
+    } catch {
+      setRecommendedConfig(null);
+      message.error('获取回测推荐参数失败');
+    } finally {
+      setConfigLoading(false);
+    }
+  };
+
   const handleCreate = async () => {
     if (!selectedStrategy) { message.warning('请选择策略'); return; }
     setCreating(true);
     try {
       const s = strategies.find(s => s.id === selectedStrategy);
-      await paperTradingApi.create(selectedStrategy, s?.strategyCode, capital);
+      await paperTradingApi.create(
+        selectedStrategy, s?.strategyCode, capital,
+        importFromBacktest ? selectedBacktestId : null
+      );
       message.success('模拟盘创建成功');
+      // 重置状态
+      setImportFromBacktest(false);
+      setSelectedBacktestId(null);
+      setRecommendedConfig(null);
       onCreated();
       onClose();
     } catch (e) {
@@ -164,7 +203,7 @@ function CreateModal({ visible, onClose, onCreated }) {
   };
 
   return (
-    <Modal title="新建模拟盘" open={visible} onOk={handleCreate} onCancel={onClose} confirmLoading={creating} okText="创建">
+    <Modal title="新建模拟盘" open={visible} onOk={handleCreate} onCancel={onClose} confirmLoading={creating} okText="创建" width={560}>
       <div style={{ marginBottom: 16 }}>
         <Text>选择策略</Text>
         <Select
@@ -177,10 +216,53 @@ function CreateModal({ visible, onClose, onCreated }) {
           filterOption={(input, option) => (option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
         />
       </div>
-      <div>
+      <div style={{ marginBottom: 16 }}>
         <Text>初始资金（元）</Text>
         <InputNumber style={{ width: '100%', marginTop: 4 }} value={capital} onChange={setCapital} min={100000} max={100000000} step={100000} />
       </div>
+      <Divider style={{ margin: '12px 0' }} />
+      <div style={{ marginBottom: 12 }}>
+        <Space>
+          <Switch checked={importFromBacktest} onChange={(v) => { setImportFromBacktest(v); if (!v) { setSelectedBacktestId(null); setRecommendedConfig(null); } }} />
+          <Text strong>从回测导入风控参数</Text>
+          <Tooltip title="开启后可选择已完成的回测任务，系统根据回测表现自动计算推荐止损/止盈/最大回撤等参数，替代默认值">
+            <InfoCircleOutlined style={{ color: '#bbb', cursor: 'help' }} />
+          </Tooltip>
+        </Space>
+      </div>
+      {importFromBacktest && (
+        <>
+          <div style={{ marginBottom: 12 }}>
+            <Select
+              style={{ width: '100%' }}
+              placeholder="选择已完成的回测任务"
+              value={selectedBacktestId}
+              onChange={handleBacktestSelect}
+              options={backtests.map(bt => ({
+                label: `#${bt.id} ${bt.taskName || bt.strategyCode || ''} (${(bt.annualReturn * 100).toFixed(1)}%)`,
+                value: bt.id,
+              }))}
+              showSearch
+              filterOption={(input, option) => (option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
+              loading={backtests.length === 0}
+            />
+          </div>
+          {configLoading && <Spin size="small" />}
+          {recommendedConfig && (
+            <Card size="small" style={{ background: '#fafafa', marginBottom: 8 }}>
+              <Text type="secondary" style={{ fontSize: 12 }}>{recommendedConfig.reason}</Text>
+              <Row gutter={[8, 8]} style={{ marginTop: 8 }}>
+                <Col span={8}><Statistic title="止损" value={(recommendedConfig.stopLossPct * 100).toFixed(1)} suffix="%" valueStyle={{ fontSize: 16 }} /></Col>
+                <Col span={8}><Statistic title="止盈" value={(recommendedConfig.takeProfitPct * 100).toFixed(1)} suffix="%" valueStyle={{ fontSize: 16 }} /></Col>
+                <Col span={8}><Statistic title="最大回撤限制" value={(recommendedConfig.maxDrawdownPct * 100).toFixed(1)} suffix="%" valueStyle={{ fontSize: 16 }} /></Col>
+                <Col span={8}><Statistic title="最大持仓" value={recommendedConfig.maxPositions} suffix="只" valueStyle={{ fontSize: 16 }} /></Col>
+                <Col span={8}><Statistic title="单股仓位上限" value={(recommendedConfig.maxPositionPct * 100).toFixed(1)} suffix="%" valueStyle={{ fontSize: 16 }} /></Col>
+                <Col span={8}><Statistic title="大盘择时" value={recommendedConfig.timingEnabled === 1 ? '开启' : '关闭'} valueStyle={{ fontSize: 16 }} /></Col>
+              </Row>
+            </Card>
+          )}
+        </>
+      )}
     </Modal>
   );
 }

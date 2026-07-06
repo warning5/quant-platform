@@ -9,6 +9,7 @@ import com.quant.platform.backtest.domain.EquityCurve;
 import com.quant.platform.backtest.domain.ParamOptimizeReport;
 import com.quant.platform.backtest.domain.RebalanceRecord;
 import com.quant.platform.backtest.domain.WalkForwardResult;
+import com.quant.platform.backtest.dto.BacktestRecommendedConfig;
 import com.quant.platform.backtest.mapper.EquityCurveMapper;
 import com.quant.platform.backtest.mapper.ParamOptimizeReportMapper;
 import com.quant.platform.backtest.mapper.RebalanceRecordMapper;
@@ -76,6 +77,12 @@ public class BacktestController {
     @Operation(summary = "获取回测报告")
     public ApiResponse<BacktestReport> getReport(@PathVariable Long taskId) {
         return ApiResponse.success(backtestService.getReport(taskId));
+    }
+
+    @GetMapping("/{taskId}/recommended-config")
+    @Operation(summary = "获取回测推荐的模拟盘参数（根据回测表现自适应计算）")
+    public ApiResponse<BacktestRecommendedConfig> getRecommendedConfig(@PathVariable Long taskId) {
+        return ApiResponse.success(backtestService.calculateRecommendedConfig(taskId));
     }
 
     @GetMapping("/reports/{reportId}")

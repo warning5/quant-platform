@@ -25,14 +25,15 @@ public class PaperTradingController {
     private final ExecutionQualityService executionQualityService;
 
     @PostMapping("/create")
-    @Operation(summary = "创建模拟盘（支持单策略或多策略组合）")
+    @Operation(summary = "创建模拟盘（支持单策略或多策略组合，可选从回测导入参数）")
     public ApiResponse<PaperTrading> create(
             @RequestParam(required = false) Long strategyId,
             @RequestParam(required = false) String strategyCode,
             @RequestParam(defaultValue = "1000000") BigDecimal initialCapital,
-            @RequestParam(required = false) String strategyConfigJson) {
+            @RequestParam(required = false) String strategyConfigJson,
+            @Parameter(description = "回测任务ID（可选，传入后自动从回测报告导入推荐风控参数）") @RequestParam(required = false) Long backtestId) {
         return ApiResponse.success("模拟盘创建成功",
-            paperTradingService.createPaperTrading(strategyId, strategyCode, initialCapital, strategyConfigJson));
+            paperTradingService.createPaperTrading(strategyId, strategyCode, initialCapital, strategyConfigJson, backtestId));
     }
 
     @GetMapping("/list")

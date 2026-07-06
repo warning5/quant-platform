@@ -7,6 +7,7 @@ import com.quant.platform.backtest.domain.BacktestReport;
 import com.quant.platform.backtest.domain.BacktestTask;
 import com.quant.platform.backtest.domain.EquityCurve;
 import com.quant.platform.backtest.domain.RebalanceRecord;
+import com.quant.platform.backtest.dto.BacktestRecommendedConfig;
 import com.quant.platform.backtest.engine.BacktestEngine;
 import com.quant.platform.backtest.mapper.BacktestReportMapper;
 import com.quant.platform.backtest.mapper.BacktestTaskMapper;
@@ -16,6 +17,9 @@ import com.quant.platform.common.exception.BusinessException;
 import com.quant.platform.common.exception.ResourceNotFoundException;
 import com.quant.platform.strategy.service.StrategyService;
 import lombok.RequiredArgsConstructor;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.util.ArrayList;
 import java.util.List;
 
 import lombok.extern.slf4j.Slf4j;
@@ -188,5 +192,99 @@ public class BacktestService {
      */
     public List<EquityCurve> getEquityCurves(Long taskId) {
         return equityCurveMapper.findByTaskId(taskId);
+    }
+
+    /**
+     * 根据回测结果计算推荐的模拟盘参数。
+     * 基本参数取自回测任务配置，再根据回测绩效指标（最大回撤、盈亏比、波动率）做自适应微调。
+     */
+    public BacktestRecommendedConfig calculateRecommendedConfig(Long taskId) {
+        BacktestTask task = getTask(taskId);
+        BacktestReport report = getReport(taskId);
+
+        List<String> reasons = new ArrayList<>();
+
+        // ---- 基本参数：从回测任务取，兜底默认值 ----
+        BigDecimal stopLoss = task.getStopLossPct() != null ? task.getStopLossPct() : new BigDecimal("0.05");
+        BigDecimal takeProfit = task.getStopProfitPct() != null ? task.getStopProfitPct() : new BigDecimal("0.10");
+        Integer maxPositions = task.getMaxPositionCount() != null ? task.getMaxPositionCount() : 8;
+        String rebalanceFreq = task.getRebalanceFreq() != null ? task.getRebalanceFreq() : "MONTHLY";
+        BigDecimal commissionRate = task.getCommissionRate() != null ? task.getCommissionRate() : new BigDecimal("0.0003");
+        BigDecimal slippageRate = task.getSlippageRate() != null ? task.getSlippageRate() : new BigDecimal("0.001");
+        String benchmarkCode = task.getBenchmarkCode() != null ? task.getBenchmarkCode() : "000300";
+
+        // ---- 根据回测表现微调止损 ----
+        if (report.getMaxDrawdown() != null) {
+            BigDecimal maxDD = report.getMaxDrawdown().abs();
+            if (maxDD.compareTo(new BigDecimal("0.15")) > 0) {
+                BigDecimal tightened = maxDD.multiply(new BigDecimal("0.8")).min(new BigDecimal("0.12"));
+                stopLoss = tightened;
+                reasons.add(String.format("回测最大回撤 %.1f%%，止损收紧至 %.1f%%",
+                        maxDD.multiply(BigDecimal.valueOf(100)).doubleValue(),
+                        stopLoss.multiply(BigDecimal.valueOf(100)).doubleValue()));
+            }
+        }
+
+        // ---- 止盈调整：盈亏比 < 2 时按 R:R=2 调整 ----
+        if (report.getProfitLossRatio() != null) {
+            BigDecimal plr = report.getProfitLossRatio();
+            if (plr.compareTo(new BigDecimal("2.0")) < 0) {
+                takeProfit = stopLoss.multiply(new BigDecimal("2.0"));
+                reasons.add(String.format("回测盈亏比 %.1f 偏低，止盈调整为止损的 2 倍 (%.1f%%)",
+                        plr.doubleValue(),
+                        takeProfit.multiply(BigDecimal.valueOf(100)).doubleValue()));
+            }
+        }
+
+        // ---- 最大回撤限制：回测最大回撤 × 1.2，留 20% 余量 ----
+        BigDecimal maxDrawdownPct = new BigDecimal("0.15");
+        if (report.getMaxDrawdown() != null) {
+            BigDecimal maxDD = report.getMaxDrawdown().abs();
+            maxDrawdownPct = maxDD.multiply(new BigDecimal("1.2"))
+                    .max(new BigDecimal("0.10"))
+                    .min(new BigDecimal("0.25"));
+            reasons.add(String.format("基于回测最大回撤 %.1f%%，风控限制设为 %.1f%%",
+                    maxDD.multiply(BigDecimal.valueOf(100)).doubleValue(),
+                    maxDrawdownPct.multiply(BigDecimal.valueOf(100)).doubleValue()));
+        }
+
+        // ---- 大盘择时：年化波动率 > 25% 建议开启 ----
+        int timingEnabled = 0;
+        if (report.getVolatility() != null && report.getVolatility().compareTo(new BigDecimal("0.25")) > 0) {
+            timingEnabled = 1;
+            reasons.add(String.format("年化波动率 %.1f%% 较高，建议开启大盘择时",
+                    report.getVolatility().multiply(BigDecimal.valueOf(100)).doubleValue()));
+        }
+
+        // ---- 单股仓位上限：等权 1/maxPositions，上限 20% ----
+        BigDecimal maxPositionPct = BigDecimal.ONE.divide(BigDecimal.valueOf(maxPositions), 4, RoundingMode.HALF_UP);
+        if (maxPositionPct.compareTo(new BigDecimal("0.20")) > 0) {
+            maxPositionPct = new BigDecimal("0.20");
+        }
+
+        // ---- 资金分配模式 ----
+        String allocationMode = "equal";
+        if ("SCORE_PROPORTIONAL".equals(task.getWeightMode())) {
+            allocationMode = "dynamic";
+        }
+
+        if (reasons.isEmpty()) {
+            reasons.add("参数取自回测配置，表现稳定无需调整");
+        }
+
+        return BacktestRecommendedConfig.builder()
+                .stopLossPct(stopLoss)
+                .takeProfitPct(takeProfit)
+                .maxPositions(maxPositions)
+                .rebalanceFreq(rebalanceFreq)
+                .commissionRate(commissionRate)
+                .slippageRate(slippageRate)
+                .benchmarkCode(benchmarkCode)
+                .maxPositionPct(maxPositionPct)
+                .maxDrawdownPct(maxDrawdownPct)
+                .timingEnabled(timingEnabled)
+                .allocationMode(allocationMode)
+                .reason(String.join("；", reasons))
+                .build();
     }
 }

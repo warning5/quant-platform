@@ -15,6 +15,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
@@ -59,6 +60,9 @@ public class DataUpdateService {
 
     @Autowired
     private FactorDefinitionMapper factorDefinitionMapper;
+
+    @Autowired(required = false)
+    private ApplicationEventPublisher eventPublisher;
 
     @Autowired(required = false)
     private TradeCalendarService tradeCalendarService;
@@ -237,7 +241,7 @@ public class DataUpdateService {
         List<Map<String, Object>> result = new ArrayList<>();
         try {
             List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-                "SELECT task_key, name, last_run_time, last_run_status, extra_config " +
+                "SELECT task_key, task_name, last_run_time, last_run_status, extra_config " +
                 "FROM data_schedule_config WHERE last_run_status = 'RUNNING'"
             );
             for (Map<String, Object> row : rows) {
@@ -250,7 +254,7 @@ public class DataUpdateService {
                 }
                 Map<String, Object> info = new LinkedHashMap<>();
                 info.put("taskKey", taskKey);
-                info.put("name", row.get("name"));
+                info.put("name", row.get("task_name"));
                 info.put("lastRunTime", row.get("last_run_time").toString());
                 info.put("status", "RUNNING");
                 info.put("isOrphan", true);  // 标记为孤儿（DB 说在跑但内存中没有）
@@ -576,8 +580,11 @@ public class DataUpdateService {
                     broadcastStatus(task);
                     java.util.Map<String, Object> result = factorService.triggerBatchCompute(
                         factorCodes, startDate, endDate, true, false);
-                    long submitted = ((Number) result.getOrDefault("submitted", 0)).longValue();
-                    long skipped = ((Number) result.getOrDefault("skipped", 0)).longValue();
+                    // triggerBatchCompute 返回 submitted/skipped 为 List<String>（因子代码列表），取 size
+                    Object subObj = result.getOrDefault("submitted", java.util.Collections.emptyList());
+                    long submitted = subObj instanceof Number ? ((Number) subObj).longValue() : subObj instanceof List<?> l ? l.size() : 0;
+                    Object skipObj = result.getOrDefault("skipped", java.util.Collections.emptyList());
+                    long skipped = skipObj instanceof Number ? ((Number) skipObj).longValue() : skipObj instanceof List<?> l ? l.size() : 0;
                     task.setCurrentStep(String.format("计算完成（提交 %d, 跳过 %d）", submitted, skipped));
                     task.setStatus("SUCCESS");
                 } catch (Exception e) {
@@ -653,9 +660,10 @@ public class DataUpdateService {
             log.info("[DataUpdate] 任务 {} 结束, 状态: {}", taskId, task.getStatus());
 
             // ★ 回写 data_schedule_config 的 last_run_status（让定时任务页面能正确显示最终状态）
+            long durationSec = 0;
             try {
                 String finalStatus = task.getStatus();
-                long durationSec = java.time.Duration.between(task.getStartTime(), task.getEndTime()).getSeconds();
+                durationSec = java.time.Duration.between(task.getStartTime(), task.getEndTime()).getSeconds();
                 // 直接按 task_key 更新，不依赖 RUNNING 条件（更健壮）
                 int rows = jdbcTemplate.update(
                     "UPDATE data_schedule_config SET last_run_status=?, last_run_duration_sec=?, updated_at=? " +
@@ -679,6 +687,12 @@ public class DataUpdateService {
                 }
             } catch (Exception dbEx) {
                 log.error("[DataUpdate] ★★ 回写 schedule_config 失败!! task_key={}, error: {}", ut, dbEx.getMessage());
+            }
+
+            // ★ 发布任务完成事件，供依赖调度使用
+            if (eventPublisher != null && ut != null && !ut.isEmpty()) {
+                boolean taskOk = "SUCCESS".equals(task.getStatus());
+                eventPublisher.publishEvent(new DataUpdateCompletedEvent(this, ut, taskOk, durationSec));
             }
         }
     }

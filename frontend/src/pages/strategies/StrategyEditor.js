@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
   Card, Form, Input, Select, InputNumber, Button, Space, Typography, Spin, App, Tabs, Row, Col,
   Table, Tag, Tooltip, Modal, InputNumber as AntInputNumber
@@ -18,6 +18,7 @@ export default function StrategyEditor() {
   const { message } = App.useApp();
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(!!id);
   const [saving, setSaving] = useState(false);
@@ -115,6 +116,29 @@ export default function StrategyEditor() {
         setFactorConfig(s.factorConfigJson || '');
       }).finally(() => setLoading(false));
     } else {
+      // 新建模式：检查是否从IC分析页跳转过来，预填因子
+      const state = location.state;
+      if (state?.prefilledFactors && Array.isArray(state.prefilledFactors) && state.prefilledFactors.length > 0) {
+        const factors = state.prefilledFactors.map(f => ({
+          code: f.code,
+          weight: f.weight,
+          direction: f.direction ?? 1,
+          filterOp: 'NONE',
+          filterValue: '',
+        }));
+        const prefilledConfig = JSON.stringify({
+          weightMode: 'ICW',
+          factors,
+        }, null, 2);
+        setFactorConfig(prefilledConfig);
+        // 预填策略名称提示来源
+        if (state.source === 'ic-analysis') {
+          form.setFieldsValue({
+            strategyName: `IC策略_${new Date().toLocaleDateString('zh-CN')}`,
+            description: `基于IC分析自动生成（forwardDays=${state.forwardDays || ''}，共${factors.length}个因子）`,
+          });
+        }
+      }
       setLoading(false);
     }
   }, [id]);

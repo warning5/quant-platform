@@ -63,13 +63,17 @@ public class PaperTradingService {
     @Autowired(required = false)
     private SellSignalEngine sellSignalEngine;
 
+    @Autowired(required = false)
+    private com.quant.platform.backtest.service.BacktestService backtestService;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
      * 创建模拟盘
+     * @param backtestId 可选：从回测报告导入推荐风控参数（打通回测->模拟盘链路）
      */
     @Transactional
-    public PaperTrading createPaperTrading(Long strategyId, String strategyCode, BigDecimal initialCapital, String strategyConfigJson) {
+    public PaperTrading createPaperTrading(Long strategyId, String strategyCode, BigDecimal initialCapital, String strategyConfigJson, Long backtestId) {
         // 组合模式校验：strategyConfigJson必须有效，权重之和≈1
         if (strategyConfigJson != null && !strategyConfigJson.isBlank()) {
             double weightSum = parseStrategyWeights(strategyConfigJson).values().stream().mapToDouble(Double::doubleValue).sum();
@@ -104,8 +108,34 @@ public class PaperTradingService {
             .build();
         paperNavMapper.insert(nav);
 
-        // 自动创建默认风控配置
+        // 风控配置：默认值，若指定 backtestId 则从回测推荐参数覆盖
         PaperRiskConfig riskConfig = PaperRiskConfig.defaults(pt.getId());
+        if (backtestId != null && backtestService != null) {
+            try {
+                var recommended = backtestService.calculateRecommendedConfig(backtestId);
+                riskConfig.setStopLossPct(recommended.getStopLossPct());
+                riskConfig.setTakeProfitPct(recommended.getTakeProfitPct());
+                riskConfig.setMaxPositionPct(recommended.getMaxPositionPct());
+                riskConfig.setMaxDrawdownPct(recommended.getMaxDrawdownPct());
+                riskConfig.setTimingEnabled(recommended.getTimingEnabled());
+                riskConfig.setBenchmarkCode(recommended.getBenchmarkCode());
+                riskConfig.setAllocationMode(recommended.getAllocationMode());
+                // 回测频率映射：WEEKLY->WEEKLY, MONTHLY->MONTHLY, BIWEEKLY->WEEKLY, 其他保持DAILY
+                String freq = recommended.getRebalanceFreq();
+                if (freq != null) {
+                    if ("MONTHLY".equalsIgnoreCase(freq)) {
+                        riskConfig.setRebalanceFreq("MONTHLY");
+                    } else if ("WEEKLY".equalsIgnoreCase(freq) || "BIWEEKLY".equalsIgnoreCase(freq)) {
+                        riskConfig.setRebalanceFreq("WEEKLY");
+                    }
+                }
+                log.info("模拟盘 {} 从回测 taskId={} 导入风控参数: stopLoss={}, takeProfit={}, maxDrawdown={}, timing={}",
+                    pt.getId(), backtestId, recommended.getStopLossPct(), recommended.getTakeProfitPct(),
+                    recommended.getMaxDrawdownPct(), recommended.getTimingEnabled());
+            } catch (Exception e) {
+                log.warn("从回测 taskId={} 导入参数失败，使用默认风控配置: {}", backtestId, e.getMessage());
+            }
+        }
         paperRiskConfigMapper.insert(riskConfig);
 
         return pt;
