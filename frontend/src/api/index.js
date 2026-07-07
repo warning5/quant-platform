@@ -457,6 +457,8 @@ export const confidenceApi = {
 
 /** LLM分析 API */
 export const llmApi = {
+  /** 检查LLM是否启用及连通性 */
+  getStatus: () => api.get('/llm/status'),
   /** 获取今日LLM分析结果 */
   getAnalyses: () => api.get('/llm/analyses'),
   /** 获取指定股票的LLM分析 */
@@ -464,6 +466,9 @@ export const llmApi = {
   /** 手动触发LLM推理 */
   triggerAnalysis: (strategyId = 77, topN = 15) =>
     api.post('/llm/analyze', null, { params: { strategyId, topN }, timeout: 300000 }),
+  /** 对单只股票执行LLM深度分析 */
+  analyzeSingleStock: (stockCode) =>
+    api.post(`/llm/analyze/${stockCode}`, null, { timeout: 120000 }),
 };
 
 /** 交易日历 API */

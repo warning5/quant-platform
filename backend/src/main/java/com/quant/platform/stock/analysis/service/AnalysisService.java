@@ -442,9 +442,14 @@ public class AnalysisService {
             overview.setExtremeTargetPrice(extremeTgt != null ? extremeTgt.setScale(2, RoundingMode.HALF_UP).toString() : null);
         }
 
-        // 7.5 分批执行方案
+        // 7.4b 投资分析摘要表：建议仓位 + 减仓价区间 + 风险等级（须先算 riskLevel 供 executionPlan 使用）
+        overview.setSuggestedPositionPct(calcSuggestedPositionPct(signal, overview.getConfidenceLevel(), fundamentalSignal, isBlueChip));
+        overview.setReducePriceRange(calcReducePriceRange(currentPrice, resistancePrice, signal));
+        overview.setRiskLevel(calcRiskLevel(signal, fundamentalSignal, moneySignal, currentPrice));
+
+        // 7.5 分批执行方案（根据风险等级+信心水平动态调整批次比例）
         overview.setExecutionPlan(buildExecutionPlan(signal, currentPrice, targetPriceStr, stopLossPriceStr,
-                overview.getTargetPrice2()));
+                overview.getTargetPrice2(), overview.getRiskLevel(), overview.getConfidenceLevel()));
 
         // 7.6 三方分析师独立评分（保守/中性/激进）
         calcMultiAnalystScores(overview, techSignal, moneySignal, sentimentSignal, fundamentalSignal,
@@ -456,10 +461,15 @@ public class AnalysisService {
         // 7.8 催化剂追踪矩阵
         overview.setCatalysts(buildCatalysts(code, fundamentalSignal, sentimentSignal, researchSignal));
 
-        log.info("个股分析完成: code={}, totalScore={}, action={}, isBlueChip={}, tailRisks={}, catalysts={}",
+        // 7.9 多空辩论：生成论据列表 + 结论文本（供前端"核心结论"和"多空交锋"区域）
+        buildBullBearDebate(overview, signal);
+
+        log.info("个股分析完成: code={}, totalScore={}, action={}, isBlueChip={}, tailRisks={}, catalysts={}, bullArgs={}, bearArgs={}",
                 code, overview.getTotalScore(), overview.getAction(), isBlueChip,
                 overview.getTailRisks() != null ? overview.getTailRisks().size() : 0,
-                overview.getCatalysts() != null ? overview.getCatalysts().size() : 0);
+                overview.getCatalysts() != null ? overview.getCatalysts().size() : 0,
+                overview.getBullArguments() != null ? overview.getBullArguments().size() : 0,
+                overview.getBearArguments() != null ? overview.getBearArguments().size() : 0);
         // 诊断：打印各维度得分明细
         if (overview.getScoreDetails() != null) {
             for (ScoreDetail d : overview.getScoreDetails()) {
@@ -3197,29 +3207,365 @@ public class AnalysisService {
 
     /**
      * P2: 分批执行方案
-     * 根据操作方向（买入/卖出）生成多批操作指令
+     * 根据操作方向（买入/卖出）+ 风险等级 + 信心水平 生成多批操作指令
+     * 风险越高→首批越大（买入更谨慎/卖出更果断）；风险越低→首批越小（分批更均匀）
      */
     private String buildExecutionPlan(TradingSignal signal, BigDecimal currentPrice,
-                                       String targetPrice, String stopLossPrice, String targetPrice2) {
+                                       String targetPrice, String stopLossPrice, String targetPrice2,
+                                       String riskLevel, String confidenceLevel) {
         if (signal == null || signal.getAction() == null) return null;
         String action = signal.getAction();
 
+        // 根据风险等级确定批次比例
+        int b1, b2, b3;
+        if ("高".equals(riskLevel)) {
+            b1 = 50; b2 = 30; b3 = 20; // 高风险：首批更大（买入更谨慎/卖出更果断）
+        } else if ("低".equals(riskLevel)) {
+            b1 = 30; b2 = 35; b3 = 35; // 低风险：首批更小（分批更均匀）
+        } else {
+            b1 = 40; b2 = 30; b3 = 30; // 中风险：默认比例
+        }
+        // 信心低 → 首批再缩小10%
+        if ("低".equals(confidenceLevel)) {
+            b1 = Math.max(20, b1 - 10);
+            b2 = b2 + 5;
+            b3 = b3 + 5;
+        }
+
         if ("CLEAR".equals(action) || "REDUCE".equals(action)) {
-            // 卖出执行方案
+            // 卖出执行方案：风险越高首批越大
+            int sellB1 = "高".equals(riskLevel) ? 70 : "低".equals(riskLevel) ? 50 : 60;
+            int sellB2 = 100 - sellB1 - 15;
+            int sellB3 = 15;
             StringBuilder sb = new StringBuilder();
-            sb.append("第一批60%立即卖出");
-            if (targetPrice != null) sb.append("；第二批25%反弹至").append(targetPrice).append("卖出");
+            sb.append("第一批").append(sellB1).append("%立即卖出");
+            if (targetPrice != null) sb.append("；第二批").append(sellB2)
+                    .append("%反弹至").append(targetPrice).append("卖出");
             if (targetPrice2 != null) sb.append("，跌破").append(targetPrice2).append("清仓剩余");
-            else sb.append("；第三批15%止损位").append(stopLossPrice != null ? stopLossPrice : "自定").append("清仓");
+            else sb.append("；第三批").append(sellB3).append("%止损位")
+                    .append(stopLossPrice != null ? stopLossPrice : "自定").append("清仓");
             return sb.toString();
         } else if ("BUY".equals(action) || "STRONG_BUY".equals(action)) {
             StringBuilder sb = new StringBuilder();
-            sb.append("第一批40%当前价建仓");
-            if (stopLossPrice != null) sb.append("；第二批30%回调至").append(stopLossPrice).append("加仓");
-            if (targetPrice2 != null) sb.append("；第三批30%突破").append(targetPrice2).append("追击");
+            sb.append("第一批").append(b1).append("%当前价建仓");
+            if (stopLossPrice != null) sb.append("；第二批").append(b2)
+                    .append("%回调至").append(stopLossPrice).append("加仓");
+            if (targetPrice2 != null) sb.append("；第三批").append(b3)
+                    .append("%突破").append(targetPrice2).append("追击");
             return sb.toString();
         }
         return "暂无明显买卖信号，建议观望";
+    }
+
+    /**
+     * 多空辩论：从四维度信号提取多空论据，生成结论文本
+     * 逻辑与 WorkflowReportService.evaluateBullBear 一致，但内联在 AnalysisService 中
+     * 避免循环依赖（WorkflowReportService 依赖 AnalysisService）
+     */
+    private void buildBullBearDebate(AnalysisOverview overview, TradingSignal signal) {
+        List<BullBearArgument> bullArgs = new ArrayList<>();
+        List<BullBearArgument> bearArgs = new ArrayList<>();
+
+        TechSignal tech = overview.getTechSignal();
+        MoneyFlowSignal money = overview.getMoneySignal();
+        FundamentalSignal fundamental = overview.getFundamentalSignal();
+        SentimentSignal sentiment = overview.getSentimentSignal();
+        ResearchSignal research = overview.getResearchSignal();
+
+        // --- 技术面规则 ---
+        if (tech != null) {
+            if ("BUY".equals(tech.getChanSignal())) {
+                bullArgs.add(new BullBearArgument("缠论买点", "技术", "缠论出现买入信号", 5));
+            }
+            if ("SELL".equals(tech.getChanSignal())) {
+                bearArgs.add(new BullBearArgument("缠论卖点", "技术", "缠论出现卖出信号", 4));
+            }
+            if (Boolean.TRUE.equals(tech.getMaBullish())) {
+                bullArgs.add(new BullBearArgument("均线多头", "技术", "MA5>MA10>MA20>MA60，均线多头排列", 4));
+            }
+            if (Boolean.TRUE.equals(tech.getMacdGolden())) {
+                bullArgs.add(new BullBearArgument("MACD金叉", "技术", "MACD出现金叉，短期动能转强", 3));
+            }
+            if (tech.getRsi() != null) {
+                double rsi = tech.getRsi().doubleValue();
+                if (rsi < 30) {
+                    bullArgs.add(new BullBearArgument("RSI超卖", "技术",
+                            "RSI=" + formatD(rsi) + "，超卖区间存在反弹可能", 3));
+                } else if (rsi > 70) {
+                    bearArgs.add(new BullBearArgument("RSI超买", "技术",
+                            "RSI=" + formatD(rsi) + "，超买区间注意回调", 3));
+                }
+            }
+        }
+
+        // --- 基本面规则 ---
+        if (fundamental != null) {
+            if (fundamental.getPeTtm() != null) {
+                double pe = fundamental.getPeTtm().doubleValue();
+                if (pe > 0 && pe < 15) {
+                    bullArgs.add(new BullBearArgument("低PE估值", "基本面",
+                            "PE(TTM)=" + formatD(pe) + "，估值偏低", 4));
+                } else if (pe > 50) {
+                    bearArgs.add(new BullBearArgument("高PE估值", "基本面",
+                            "PE(TTM)=" + formatD(pe) + "，估值偏高", 4));
+                }
+            }
+            if (fundamental.getPb() != null) {
+                double pb = fundamental.getPb().doubleValue();
+                if (pb > 0 && pb < 1.5) {
+                    bullArgs.add(new BullBearArgument("低PB估值", "基本面",
+                            "PB=" + formatD(pb) + "，破净风险低", 3));
+                } else if (pb > 8) {
+                    bearArgs.add(new BullBearArgument("高PB估值", "基本面",
+                            "PB=" + formatD(pb) + "，市净率偏高", 3));
+                }
+            }
+            if (fundamental.getRoe() != null) {
+                double roe = fundamental.getRoe().doubleValue();
+                if (roe > 15) {
+                    bullArgs.add(new BullBearArgument("高ROE", "基本面",
+                            "ROE=" + formatD(roe) + "%，盈利能力优秀", 4));
+                } else if (roe < 5) {
+                    bearArgs.add(new BullBearArgument("低ROE", "基本面",
+                            "ROE=" + formatD(roe) + "%，盈利能力偏弱", 3));
+                }
+            }
+            if (fundamental.getRevenueYoy() != null) {
+                double rev = fundamental.getRevenueYoy().doubleValue();
+                if (rev > 20) {
+                    bullArgs.add(new BullBearArgument("营收高增", "基本面",
+                            "营收同比+" + formatD(rev) + "%，成长性突出", 4));
+                } else if (rev < -10) {
+                    bearArgs.add(new BullBearArgument("营收下滑", "基本面",
+                            "营收同比" + formatD(rev) + "%，增长承压", 3));
+                }
+            }
+            if (fundamental.getNetProfitYoy() != null) {
+                double profit = fundamental.getNetProfitYoy().doubleValue();
+                if (profit > 30) {
+                    bullArgs.add(new BullBearArgument("利润高增", "基本面",
+                            "净利润同比+" + formatD(profit) + "%，盈利爆发", 4));
+                } else if (profit < -20) {
+                    bearArgs.add(new BullBearArgument("利润下滑", "基本面",
+                            "净利润同比" + formatD(profit) + "%，盈利恶化", 3));
+                }
+            }
+            if (fundamental.getDebtRatio() != null) {
+                double debt = fundamental.getDebtRatio().doubleValue();
+                if (debt > 80) {
+                    bearArgs.add(new BullBearArgument("高负债率", "基本面",
+                            "资产负债率" + formatD(debt) + "%，杠杆过高", 3));
+                } else if (debt < 30) {
+                    bullArgs.add(new BullBearArgument("低负债率", "基本面",
+                            "资产负债率" + formatD(debt) + "%，财务稳健", 2));
+                }
+            }
+        }
+
+        // --- 资金面规则 ---
+        if (money != null) {
+            if (money.getNetMain() != null) {
+                double netMain = money.getNetMain().doubleValue();
+                if (netMain > 0) {
+                    bullArgs.add(new BullBearArgument("主力流入", "资金",
+                            "主力净流入" + formatMoney(netMain) + "，资金积极介入", 4));
+                } else if (netMain < 0) {
+                    bearArgs.add(new BullBearArgument("主力流出", "资金",
+                            "主力净流出" + formatMoney(Math.abs(netMain)) + "，资金撤退", 4));
+                }
+            }
+            if (money.getVolumeRatio() != null) {
+                double vr = money.getVolumeRatio().doubleValue();
+                if (vr >= 2.0) {
+                    bullArgs.add(new BullBearArgument("量能放大", "资金",
+                            "量比=" + formatD(vr) + "，成交活跃", 3));
+                } else if (vr < 0.5) {
+                    bearArgs.add(new BullBearArgument("量能萎缩", "资金",
+                            "量比=" + formatD(vr) + "，成交清淡", 2));
+                }
+            }
+        }
+
+        // --- 情绪面规则 ---
+        if (sentiment != null) {
+            if (Boolean.TRUE.equals(sentiment.getIsStrongStock())) {
+                bullArgs.add(new BullBearArgument("强势股", "情绪", "近20日涨幅>30%，强势状态", 3));
+            }
+            if (sentiment.getLimitUpDays() != null && sentiment.getLimitUpDays() > 0) {
+                bullArgs.add(new BullBearArgument("涨停基因", "情绪",
+                        "近20日涨停" + sentiment.getLimitUpDays() + "次", 3));
+            }
+        }
+
+        // --- 研报规则 ---
+        if (research != null) {
+            if (research.getResearchScore() >= 4) {
+                bullArgs.add(new BullBearArgument("机构看好", "研报",
+                        "最新评级" + research.getLatestRating() + "，机构积极", 3));
+            }
+            if (research.getReportCount() >= 5) {
+                bullArgs.add(new BullBearArgument("研报密集", "研报",
+                        "近90天" + research.getReportCount() + "份研报覆盖", 2));
+            }
+        }
+
+        // --- 综合评分规则 ---
+        if (overview.getTotalScore() != null) {
+            int score = overview.getTotalScore();
+            if (score >= 75) {
+                bullArgs.add(new BullBearArgument("高分综合", "综合",
+                        "四维度综合评分" + score + "分，整体优秀", 5));
+            } else if (score <= 35) {
+                bearArgs.add(new BullBearArgument("低分综合", "综合",
+                        "四维度综合评分" + score + "分，整体偏弱", 4));
+            }
+        }
+
+        // 按强度排序
+        bullArgs.sort((a, b) -> Integer.compare(b.getStrength(), a.getStrength()));
+        bearArgs.sort((a, b) -> Integer.compare(b.getStrength(), a.getStrength()));
+
+        overview.setBullArguments(bullArgs);
+        overview.setBearArguments(bearArgs);
+
+        // 生成结论文本
+        overview.setBullBearConclusion(buildBullBearConclusionText(overview, bullArgs, bearArgs));
+    }
+
+    /**
+     * 生成多空辩论结论文本（精炼投资逻辑句式）
+     */
+    private String buildBullBearConclusionText(AnalysisOverview overview,
+                                                List<BullBearArgument> bullArgs,
+                                                List<BullBearArgument> bearArgs) {
+        String name = overview.getName() != null ? overview.getName() : overview.getCode();
+        int bullCount = bullArgs.size();
+        int bearCount = bearArgs.size();
+        int bullStars = bullArgs.stream().mapToInt(a -> a.getStrength()).sum();
+        int bearStars = bearArgs.stream().mapToInt(a -> a.getStrength()).sum();
+
+        // 偏向判定（基于强度而非条数）
+        String bias;
+        if (bullStars > bearStars + 5) bias = "偏多";
+        else if (bearStars > bullStars + 5) bias = "偏空";
+        else if (bullStars > bearStars) bias = "中性偏多";
+        else if (bearStars > bullStars) bias = "中性偏空";
+        else bias = "中性";
+
+        // 核心看多因据（取前2条简述）
+        String bullReason = bullArgs.isEmpty() ? ""
+                : bullArgs.stream().limit(2).map(a -> a.getRule()).collect(Collectors.joining("、"));
+        // 核心看空因据（取前2条简述）
+        String bearReason = bearArgs.isEmpty() ? ""
+                : bearArgs.stream().limit(2).map(a -> a.getRule()).collect(Collectors.joining("、"));
+
+        // 构建"因为…所以…"句式
+        StringBuilder sb = new StringBuilder();
+        sb.append(name).append("多空强度 ").append(bullStars).append("★:").append(bearStars).append("★，").append(bias).append("。");
+
+        if (!bullReason.isEmpty()) {
+            sb.append("看多因：").append(bullReason).append("；");
+        }
+        if (!bearReason.isEmpty()) {
+            sb.append("看空因：").append(bearReason).append("；");
+        }
+        // 操作建议
+        if (overview.getActionName() != null) {
+            sb.append("建议【").append(overview.getActionName()).append("】");
+            if (overview.getRiskLevel() != null) {
+                sb.append("，风险").append(overview.getRiskLevel());
+            }
+        }
+        return sb.toString();
+    }
+
+    private String formatD(double value) {
+        return BigDecimal.valueOf(value).setScale(2, RoundingMode.HALF_UP).toString();
+    }
+
+    private String formatMoney(double value) {
+        if (Math.abs(value) >= 1_0000_0000) {
+            return BigDecimal.valueOf(value / 1_0000_0000).setScale(2, RoundingMode.HALF_UP) + "亿";
+        } else if (Math.abs(value) >= 10000) {
+            return BigDecimal.valueOf(value / 10000).setScale(2, RoundingMode.HALF_UP) + "万";
+        }
+        return BigDecimal.valueOf(value).setScale(2, RoundingMode.HALF_UP).toString();
+    }
+    private String calcSuggestedPositionPct(TradingSignal signal, String confidenceLevel,
+                                            FundamentalSignal fundamental, boolean isBlueChip) {
+        if (signal == null) return null;
+        String action = signal.getAction();
+        if (action == null) return null;
+        double baseLow, baseHigh;
+        switch (action) {
+            case "STRONG_BUY": baseLow = 8; baseHigh = 10; break;
+            case "BUY":        baseLow = 5; baseHigh = 8;  break;
+            case "HOLD":       baseLow = 3; baseHigh = 5;  break;
+            case "REDUCE":     baseLow = 0; baseHigh = 3;  break;
+            case "CLEAR":      return "0%";
+            default:           return null;
+        }
+        double confidenceCoef = "高".equals(confidenceLevel) ? 1.0
+                : "中".equals(confidenceLevel) ? 0.85 : 0.6;
+        double blueChipCoef = isBlueChip ? 1.1 : 1.0;
+        if (fundamental != null && fundamental.getDebtRatio() != null
+                && fundamental.getDebtRatio().compareTo(BigDecimal.valueOf(80)) > 0) {
+            blueChipCoef *= 0.8;
+        }
+        double low = baseLow * confidenceCoef * blueChipCoef;
+        double high = baseHigh * confidenceCoef * blueChipCoef;
+        if (high > 15) high = 15;
+        if (low > high) low = high;
+        if (low < 0) low = 0;
+        return String.format("%.0f-%.0f%%", low, high);
+    }
+
+    /**
+     * 投资分析摘要表：减仓价区间（建议持有者分批减仓的价格带）
+     */
+    private String calcReducePriceRange(BigDecimal currentPrice, BigDecimal resistancePrice, TradingSignal signal) {
+        if (currentPrice == null || signal == null) return null;
+        String action = signal.getAction();
+        if ("CLEAR".equals(action) || "REDUCE".equals(action)) {
+            return "建议立即减仓";
+        }
+        BigDecimal anchor = resistancePrice != null ? resistancePrice : currentPrice;
+        BigDecimal low = anchor.multiply(BigDecimal.valueOf(0.99)).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal high = anchor.multiply(BigDecimal.valueOf(1.02)).setScale(2, RoundingMode.HALF_UP);
+        return low.toString() + "-" + high.toString();
+    }
+
+    /**
+     * 投资分析摘要表：风险等级
+     * 算法：基础分（action反转） + 估值加分 + 负债加分 + 主力流出加分
+     * 0~3 低 / 4~6 中 / 7+ 高
+     */
+    private String calcRiskLevel(TradingSignal signal, FundamentalSignal fundamental,
+                                 MoneyFlowSignal money, BigDecimal currentPrice) {
+        if (signal == null) return "中";
+        int risk = 0;
+        String action = signal.getAction();
+        if ("CLEAR".equals(action) || "REDUCE".equals(action)) risk += 3;
+        else if ("HOLD".equals(action)) risk += 1;
+        if (fundamental != null) {
+            if (fundamental.getPeTtm() != null) {
+                double pe = fundamental.getPeTtm().doubleValue();
+                if (pe > 100) risk += 3;
+                else if (pe > 50) risk += 2;
+                else if (pe > 30) risk += 1;
+            }
+            if (fundamental.getDebtRatio() != null
+                    && fundamental.getDebtRatio().compareTo(BigDecimal.valueOf(70)) > 0) {
+                risk += 2;
+            }
+        }
+        if (money != null && money.getNetMain() != null
+                && money.getNetMain().doubleValue() < 0) {
+            risk += 1;
+        }
+        if (risk <= 3) return "低";
+        if (risk <= 6) return "中";
+        return "高";
     }
 
     /**

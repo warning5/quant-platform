@@ -125,6 +125,11 @@ public class AnalysisOverview {
      */
     private String confidenceLevel;
 
+    /**
+     * 风险等级（低/中/高）— 投资分析摘要表用
+     */
+    private String riskLevel;
+
     // ========== P0-P2 新增字段 ==========
 
     /**
@@ -136,6 +141,16 @@ public class AnalysisOverview {
      * 极端目标价（PB=1x极端估值）
      */
     private String extremeTargetPrice;
+
+    /**
+     * 建议仓位（百分比区间，如 "0-10%"）
+     */
+    private String suggestedPositionPct;
+
+    /**
+     * 减仓价格区间（建议持有者分批减仓的价格带，如 "12.40-12.53"）
+     */
+    private String reducePriceRange;
 
     /**
      * 分批执行方案描述
@@ -201,6 +216,16 @@ public class AnalysisOverview {
      * 多空辩论结论文本
      */
     private String bullBearConclusion;
+
+    /**
+     * 多头论据列表（供前端动态渲染多空交锋区域）
+     */
+    private List<BullBearArgument> bullArguments;
+
+    /**
+     * 空头论据列表
+     */
+    private List<BullBearArgument> bearArguments;
 
     // ========== P1-2 风险/流动性评分字段 ==========
 

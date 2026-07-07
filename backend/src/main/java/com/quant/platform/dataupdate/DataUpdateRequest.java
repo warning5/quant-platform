@@ -15,6 +15,11 @@ public class DataUpdateRequest {
     private String updateType = "DAILY";
 
     /**
+     * 调度任务原始 taskKey（与 updateType 不一定相同，例如 SENTIMENT_MF / SENTIMENT_OTHER）
+     */
+    private String taskKey;
+
+    /**
      * 数据源: BAOSTOCK (SH/SZ), TENCENT (BJ), ALL
      */
     private String source = "ALL";

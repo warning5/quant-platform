@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
@@ -20,7 +21,7 @@ import java.util.*;
 @Service
 public class LlmService {
 
-    private final RestTemplate restTemplate;
+    private RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
 
     @Value("${llm.base-url:https://api.deepseek.com/v1}")
@@ -45,8 +46,20 @@ public class LlmService {
     private boolean enabled;
 
     public LlmService() {
-        this.restTemplate = new RestTemplate();
         this.objectMapper = new ObjectMapper();
+    }
+
+    /**
+     * @PostConstruct 初始化 RestTemplate，将 timeout-seconds 配置应用到连接和读取超时
+     */
+    @jakarta.annotation.PostConstruct
+    private void initRestTemplate() {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(timeoutSeconds * 1000);
+        factory.setReadTimeout(timeoutSeconds * 1000);
+        this.restTemplate = new RestTemplate(factory);
+        log.info("[LlmService] RestTemplate初始化: connectTimeout={}ms, readTimeout={}ms",
+                timeoutSeconds * 1000, timeoutSeconds * 1000);
     }
 
     /**
@@ -369,7 +382,12 @@ public class LlmService {
     }
 
     public boolean isEnabled() {
-        return enabled && apiKey != null && !apiKey.isEmpty();
+        return enabled && apiKey != null && !apiKey.trim().isEmpty();
+    }
+
+    /** API Key 是否已配置（不暴露 key 内容，仅用于状态诊断） */
+    public boolean isApiKeyConfigured() {
+        return apiKey != null && !apiKey.trim().isEmpty();
     }
 
     public String getDefaultModel() {

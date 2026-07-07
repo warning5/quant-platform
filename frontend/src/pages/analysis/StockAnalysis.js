@@ -1,16 +1,16 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   Card, Row, Col, Tabs, Input, AutoComplete, Button, Spin, Empty, Tooltip, Tag, Progress,
-  Typography, Alert, Statistic, Table, Descriptions, Dropdown, Space,
+  Typography, Alert, Statistic, Table, Descriptions, Dropdown, Space, theme,
 } from 'antd';
 import {
   QuestionCircleOutlined, SearchOutlined,
   ArrowUpOutlined, ArrowDownOutlined,
   FileTextOutlined, DownloadOutlined,
-  InfoCircleOutlined, ThunderboltOutlined, EyeOutlined, DownOutlined,
+  InfoCircleOutlined, ThunderboltOutlined, EyeOutlined, DownOutlined, ReloadOutlined,
 } from '@ant-design/icons';
 import { useSearchParams, Link } from 'react-router-dom';
-import { stockAnalysisApi, silentConfig, paperTradingApi } from '../../api';
+import { stockAnalysisApi, silentConfig, paperTradingApi, llmApi } from '../../api';
 import api from '../../api';
 import { useMarketThermometer } from '../../hooks/useMarketThermometer';
 import ReactECharts from '../../components/LazyECharts';
@@ -44,7 +44,7 @@ const scoreColor = (score, max) => {
   if (pct >= 0.6) return '#fa8c16';
   if (pct >= 0.4) return '#1890ff';
   if (pct >= 0.2) return '#52c41a';
-  return '#999';
+  return 'var(--sa-text-tertiary)';
 };
 
 // ── 辅助：指标值颜色（涨红跌绿） ────────────────────────────────────────────
@@ -66,6 +66,7 @@ const saveRecent = (list) => {
 
 // ── 主页面 ──────────────────────────────────────────────────────────────────
 export default function StockAnalysis() {
+  const { token } = theme.useToken();
   const [searchParams, setSearchParams] = useSearchParams();
   const [inputCode, setInputCode] = useState('');
   const [loading, setLoading] = useState(false);
@@ -97,6 +98,13 @@ export default function StockAnalysis() {
   // 模拟盘 & 监控
   const [paperAccounts, setPaperAccounts] = useState([]);
   const [quickBuyLoading, setQuickBuyLoading] = useState(false);
+
+  // LLM 深度解读
+  const [llmData, setLlmData] = useState(null);
+  const [llmLoading, setLlmLoading] = useState(false);
+  const [llmEnabled, setLlmEnabled] = useState(null); // null=未检测, true/false
+  const [llmApiKeyConfigured, setLlmApiKeyConfigured] = useState(null);
+  const [llmStatusMsg, setLlmStatusMsg] = useState('');
   const [monitorLoading, setMonitorLoading] = useState(false);
 
   useEffect(() => {
@@ -359,6 +367,71 @@ export default function StockAnalysis() {
       .catch(() => setBullBearData(null));
   }, [overview?.code]);
 
+  // 检测LLM是否启用（静默，只设置状态）
+  const checkLlmStatus = useCallback(() => {
+    llmApi.getStatus()
+      .then(res => {
+        // axios拦截器已返回 res.data.data，res 直接就是数据对象
+        const d = res || {};
+        const ok = d.enabled === true;
+        setLlmEnabled(ok);
+        setLlmApiKeyConfigured(d.apiKeyConfigured === true);
+        setLlmStatusMsg(d.message || '');
+        // eslint-disable-next-line no-console
+        console.log('[LLM status]', d);
+      })
+      .catch(err => {
+        // eslint-disable-next-line no-console
+        console.error('[LLM status failed]', err);
+        setLlmEnabled(false);
+        setLlmApiKeyConfigured(false);
+        setLlmStatusMsg(err?.response?.status
+          ? `连接后端失败 (HTTP ${err.response.status})`
+          : '无法连接到后端服务，请检查服务是否启动');
+      });
+  }, []);
+
+  useEffect(() => {
+    checkLlmStatus();
+  }, [checkLlmStatus]);
+
+  // 加载已有LLM分析结果（静默，不报错）
+  useEffect(() => {
+    if (!overview?.code) { setLlmData(null); return; }
+    llmApi.getAnalysis(overview.code)
+      .then(res => setLlmData(res || null))
+      .catch(() => setLlmData(null));
+  }, [overview?.code]);
+
+  // 触发单股LLM深度分析
+  const handleLlmAnalyze = useCallback(async () => {
+    if (!overview?.code) return;
+    if (llmEnabled === false) {
+      const hint = llmStatusMsg?.includes('连接')
+        ? llmStatusMsg
+        : llmApiKeyConfigured === false
+          ? 'LLM API Key未配置，请在 application.yml 或环境变量 LLM_API_KEY 中设置'
+          : 'LLM未启用，请检查 application.yml 中 llm.enabled 配置';
+      message.warning(hint);
+      return;
+    }
+    setLlmLoading(true);
+    try {
+      const res = await llmApi.analyzeSingleStock(overview.code);
+      if (res) {
+        setLlmData(res);
+        message.success('LLM深度解读完成');
+      } else {
+        message.warning('LLM分析返回空结果，请查看后端日志中 [LlmService] 相关信息');
+      }
+    } catch (e) {
+      const errMsg = e.response?.data?.message || e.message;
+      message.error('LLM分析失败：' + errMsg);
+    } finally {
+      setLlmLoading(false);
+    }
+  }, [overview?.code, llmEnabled, llmApiKeyConfigured, llmStatusMsg]);
+
   // 加载股东结构数据
   useEffect(() => {
     if (!overview?.code) { setShareholderData(null); return; }
@@ -393,7 +466,7 @@ export default function StockAnalysis() {
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
       {label}
       <Tooltip title={tooltip} placement="top" className="tip-light">
-        <QuestionCircleOutlined style={{ fontSize: 12, color: '#bbb', cursor: 'pointer' }} />
+        <QuestionCircleOutlined style={{ fontSize: 12, color: 'var(--sa-text-quaternary)', cursor: 'pointer' }} />
       </Tooltip>
     </span>
   );
@@ -538,11 +611,11 @@ export default function StockAnalysis() {
               <Card title={"多方论据 (" + (bullBearData.bullArguments?.length || 0) + ")"} size="small">
                 {bullBearData.bullArguments?.length > 0 ? bullBearData.bullArguments.map((arg, i) => (
                   <div key={i} style={{ marginBottom: 8 }}>
-                    <Text style={{ color: arg.strength >= 4 ? '#f5222d' : arg.strength >= 3 ? '#fa8c16' : '#999' }}>
+                    <Text style={{ color: arg.strength >= 4 ? '#f5222d' : arg.strength >= 3 ? '#fa8c16' : 'var(--sa-text-tertiary)' }}>
                       {'★'.repeat(arg.strength)}{'☆'.repeat(5 - arg.strength)}
                     </Text>
                     <Text strong style={{ marginLeft: 8 }}>{arg.rule}</Text>
-                    <div style={{ fontSize: 12, color: '#666', marginLeft: 24 }}>{arg.description}</div>
+                    <div style={{ fontSize: 12, color: 'var(--sa-text-secondary)', marginLeft: 24 }}>{arg.description}</div>
                   </div>
                 )) : <Text type="secondary">暂无多方论据</Text>}
               </Card>
@@ -551,11 +624,11 @@ export default function StockAnalysis() {
               <Card title={"空方论据 (" + (bullBearData.bearArguments?.length || 0) + ")"} size="small">
                 {bullBearData.bearArguments?.length > 0 ? bullBearData.bearArguments.map((arg, i) => (
                   <div key={i} style={{ marginBottom: 8 }}>
-                    <Text style={{ color: arg.strength >= 4 ? '#f5222d' : arg.strength >= 3 ? '#fa8c16' : '#999' }}>
+                    <Text style={{ color: arg.strength >= 4 ? '#f5222d' : arg.strength >= 3 ? '#fa8c16' : 'var(--sa-text-tertiary)' }}>
                       {'★'.repeat(arg.strength)}{'☆'.repeat(5 - arg.strength)}
                     </Text>
                     <Text strong style={{ marginLeft: 8 }}>{arg.rule}</Text>
-                    <div style={{ fontSize: 12, color: '#666', marginLeft: 24 }}>{arg.description}</div>
+                    <div style={{ fontSize: 12, color: 'var(--sa-text-secondary)', marginLeft: 24 }}>{arg.description}</div>
                   </div>
                 )) : <Text type="secondary">暂无空方论据</Text>}
               </Card>
@@ -602,7 +675,36 @@ export default function StockAnalysis() {
   const changePct = overview ? parseChangePct(overview.changePercent) : 0;
 
   return (
-    <div style={{ width: '100%', padding: 0 }}>
+    <div
+        style={{
+          width: '100%',
+          padding: 0,
+          background: token.colorBgLayout,
+          minHeight: 'calc(100vh - 64px)',
+          // 动态CSS变量，跟随全局主题（亮/暗自动切换）
+          '--sa-text': token.colorText,
+          '--sa-text-secondary': token.colorTextSecondary,
+          '--sa-text-tertiary': token.colorTextTertiary,
+          '--sa-text-quaternary': token.colorTextQuaternary,
+          '--sa-bg-container': token.colorBgContainer,
+          '--sa-bg-elevated': token.colorBgElevated,
+          '--sa-bg-layout': token.colorBgLayout,
+          '--sa-bg-fill': token.colorFillQuaternary,
+          '--sa-border': token.colorBorder,
+          '--sa-border-secondary': token.colorBorderSecondary,
+          '--sa-up-bg': token.colorErrorBg,
+          '--sa-down-bg': token.colorSuccessBg,
+          '--sa-warning-bg': token.colorWarningBg,
+          '--sa-info-bg': token.colorInfoBg,
+          '--sa-primary-bg': token.colorPrimaryBg,
+          '--sa-up': '#f5222d',
+          '--sa-down': '#52c41a',
+          '--sa-primary': token.colorPrimary,
+          '--sa-warning': token.colorWarning,
+          '--sa-error': token.colorError,
+          '--sa-success': token.colorSuccess,
+        }}
+      >
       {/* ── 搜索栏 ────────────────────────────────────────────────────── */}
       <Card size="small" style={{ marginBottom: 16 }}>
         <Row align="middle" gutter={12}>
@@ -705,7 +807,7 @@ export default function StockAnalysis() {
         </Row>
         {/* ── 最近查询历史 ──────────────────────────────────────────────── */}
         {recentQueries.length > 0 && (
-          <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid #f0f0f0', whiteSpace: 'nowrap', overflow: 'hidden' }}>
+          <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--sa-border-secondary)', whiteSpace: 'nowrap', overflow: 'hidden' }}>
             <Text type="secondary" style={{ fontSize: 12, marginRight: 8 }}>最近:</Text>
             {recentQueries.map(item => (
               <Tag
@@ -717,7 +819,7 @@ export default function StockAnalysis() {
                   setInputCode(item.code);
                   doSearch(item.code);
                 }}
-                onMouseEnter={(e) => { e.currentTarget.style.color = '#1890ff'; }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--sa-primary)'; }}
                 onMouseLeave={(e) => { e.currentTarget.style.color = ''; }}
               >
                 {item.name}({item.code})
@@ -759,49 +861,376 @@ export default function StockAnalysis() {
                   {Math.abs(changePct).toFixed(2)}%
                 </Text>
               </Col>
-              <Col flex="auto" style={{ textAlign: 'right' }}>
-                <Tooltip title={overview.risks || ''} className="tip-light">
-                  <Tag
-                    color={actionColor(overview.actionName)}
-                    style={{ fontSize: 16, padding: '4px 16px' }}
-                  >
-                    {overview.actionName || '-'}
-                  </Tag>
-                </Tooltip>
-              </Col>
             </Row>
 
-            {/* 决策卡片：当前价 / 介入价 / 第一目标价 / 第二目标价 / 止损价 / 极端目标价 / 仓位 */}
-            {(overview.targetPrice || overview.stopLossPrice || overview.targetPrice2 || overview.extremeTargetPrice) && (
+            {/* 投资分析摘要：价格目标 + 决策摘要（合并为一行横条） */}
+            {(overview.price || overview.targetPrice || overview.stopLossPrice || overview.targetPrice2 || overview.extremeTargetPrice || overview.actionName || overview.confidenceLevel || overview.riskLevel || overview.reducePriceRange) && (
               <div style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(7, 1fr)',
-                gap: 0,
-                border: '1px solid #f0f0f0',
+                border: '1px solid var(--sa-border-secondary)',
                 borderRadius: 8,
                 overflow: 'hidden',
                 marginBottom: 16,
-                background: '#fafafa',
+                background: 'var(--sa-bg-fill)',
               }}>
-                {[
-                  { label: '当前价', value: overview.price || '-', sub: '', color: changePct >= 0 ? '#f5222d' : '#52c41a' },
-                  { label: '介入价', value: overview.entryPrice || '-', sub: 'MA20支撑位', color: overview.entryPrice && overview.price && parseFloat(overview.entryPrice) < parseFloat(overview.price) ? '#f5222d' : '#333' },
-                  { label: '第一目标价', value: overview.targetPrice || '-', sub: '阻力×1.05', color: '#1890ff' },
-                  { label: '第二目标价', value: overview.targetPrice2 || '-', sub: 'PE均值回归', color: '#722ed1' },
-                  { label: '止损价', value: overview.stopLossPrice || '-', sub: overview.targetPrice ? `距${((1 - parseFloat(overview.stopLossPrice || 0) / parseFloat(overview.price || 1)) * 100).toFixed(1)}%` : 'ATR×1.5', color: '#f5222d' },
-                  { label: '极端目标价', value: overview.extremeTargetPrice || '-', sub: 'PB=1x估值', color: '#eb2f96' },
-                  { label: '建议仓位', value: overview.position != null ? overview.position + '%' : '-', sub: overview.confidenceLevel ? `信心:${overview.confidenceLevel}` : '', color: '#333' },
-                ].map((item, idx) => (
-                  <div key={idx} style={{
-                    textAlign: 'center',
-                    padding: '10px 8px',
-                    borderRight: idx < 6 ? '1px solid #f0f0f0' : 'none',
-                  }}>
-                    <div style={{ fontSize: 11, color: '#999', marginBottom: 2 }}>{item.label}</div>
-                    <div style={{ fontSize: 22, fontWeight: 600, color: item.color, lineHeight: 1 }}>{item.value}</div>
-                    {item.sub && <div style={{ fontSize: 10, color: '#bbb', marginTop: 2 }}>{item.sub}</div>}
+                <div style={{
+                  padding: '8px 16px',
+                  borderBottom: '1px solid var(--sa-border-secondary)',
+                  fontWeight: 600,
+                  fontSize: 14,
+                  color: 'var(--sa-text)',
+                  background: 'var(--sa-bg-container)',
+                }}>
+                  📊 投资决策
+                </div>
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(11, 1fr)',
+                  gap: 0,
+                }}>
+                  {[
+                    { label: '当前价', value: overview.price || '-', sub: '', color: changePct >= 0 ? '#f5222d' : '#52c41a' },
+                    { label: '介入价', value: overview.entryPrice || '-', sub: 'MA20支撑位', color: overview.entryPrice && overview.price && parseFloat(overview.entryPrice) < parseFloat(overview.price) ? '#f5222d' : 'var(--sa-text)' },
+                    { label: '第一目标价', value: overview.targetPrice || '-', sub: '阻力×1.05', color: '#1890ff' },
+                    { label: '第二目标价', value: overview.targetPrice2 || '-', sub: 'PE均值回归', color: '#722ed1' },
+                    { label: '止损价', value: overview.stopLossPrice || '-', sub: overview.stopLossPrice && overview.price ? `距${((1 - parseFloat(overview.stopLossPrice || 0) / parseFloat(overview.price || 1)) * 100).toFixed(1)}%` : 'ATR×1.5', color: '#f5222d' },
+                    { label: '极端目标价', value: overview.extremeTargetPrice || '-', sub: 'PB=1x估值', color: '#eb2f96' },
+                    { label: '最终决策', value: overview.actionName || '-', color: '#f5222d' },
+                    { label: '信心水平', value: overview.confidenceLevel || '-', color: overview.confidenceLevel === '高' ? '#f5222d' : overview.confidenceLevel === '中' ? '#fa8c16' : '#52c41a' },
+                    { label: '风险等级', value: overview.riskLevel || '-', color: overview.riskLevel === '高' ? '#f5222d' : overview.riskLevel === '中' ? '#fa8c16' : '#52c41a' },
+                    { label: '建议仓位', value: overview.suggestedPositionPct || '-', color: 'var(--sa-text)' },
+                    { label: '减仓价（持有者）', value: overview.reducePriceRange || '-', color: 'var(--sa-text)' },
+                  ].map((item, idx) => (
+                    <div key={idx} style={{
+                      textAlign: 'center',
+                      padding: '10px 4px',
+                      borderRight: idx < 10 ? '1px solid var(--sa-border-secondary)' : 'none',
+                    }}>
+                      <div style={{ fontSize: 11, color: 'var(--sa-text-tertiary)', marginBottom: 2 }}>{item.label}</div>
+                      <div style={{ fontSize: 18, fontWeight: 600, color: item.color, lineHeight: 1 }}>{item.value}</div>
+                      {item.sub && <div style={{ fontSize: 10, color: 'var(--sa-text-quaternary)', marginTop: 2 }}>{item.sub}</div>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 投资分析叙述块：核心结论 + 多空交锋 + 风险提示 + 关键风险 + 执行方案 + 介入参考 + LLM深度解读 */}
+            {(overview.bullBearConclusion || overview.bullArguments?.length > 0 || overview.bearArguments?.length > 0 || overview.executionPlan || overview.tailRisks?.length > 0 || overview.risks || overview.reversalConditions) && (
+              <div style={{ padding: '16px 16px 0', borderTop: '1px solid var(--sa-border-secondary)' }}>
+                {/* 核心结论 — 精炼投资逻辑 */}
+                {overview.bullBearConclusion && (
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--sa-text)', marginBottom: 6 }}>📌 核心结论</div>
+                    <div style={{ fontSize: 13, color: 'var(--sa-text)', lineHeight: 1.6 }}>
+                      {(() => {
+                        const text = overview.bullBearConclusion || '';
+                        // 高亮关键片段：建议【…】、看多因/看空因、偏多/偏空/中性
+                        const parts = [];
+                        let remaining = text;
+                        const highlights = [
+                          { pattern: /建议【(.+?)】/, type: 'action' },
+                          { pattern: /看多因：/, type: 'bull' },
+                          { pattern: /看空因：/, type: 'bear' },
+                          { pattern: /偏多|中性偏多/, type: 'bullTag' },
+                          { pattern: /偏空|中性偏空/, type: 'bearTag' },
+                          { pattern: /中性/, type: 'neutralTag' },
+                          { pattern: /风险高|风险中|风险低/, type: 'risk' },
+                        ];
+                        highlights.forEach(h => {
+                          const match = remaining.match(h.pattern);
+                          if (match) {
+                            const idx = remaining.indexOf(match[0]);
+                            if (idx > 0) parts.push({ text: remaining.slice(0, idx), type: 'normal' });
+                            if (h.type === 'action') {
+                              parts.push({ text: '建议【', type: 'normal' });
+                              parts.push({ text: match[1], type: 'actionValue' });
+                              parts.push({ text: '】', type: 'normal' });
+                            } else {
+                              parts.push({ text: match[0], type: h.type });
+                            }
+                            remaining = remaining.slice(idx + match[0].length);
+                          }
+                        });
+                        if (remaining) parts.push({ text: remaining, type: 'normal' });
+                        if (parts.length === 0) return text;
+                        const colorMap = {
+                          action: '#f5222d', actionValue: '#f5222d',
+                          bull: '#f5222d', bullTag: '#f5222d',
+                          bear: '#52c41a', bearTag: '#52c41a',
+                          neutralTag: '#fa8c16', risk: '#fa8c16',
+                        };
+                        return parts.map((p, i) => {
+                          const c = colorMap[p.type] || 'var(--sa-text)';
+                          const bold = p.type !== 'normal';
+                          return <span key={i} style={{ color: c, fontWeight: bold ? 600 : 400 }}>{p.text}</span>;
+                        });
+                      })()}
+                    </div>
                   </div>
-                ))}
+                )}
+
+                {/* 多空交锋 */}
+                {((overview.bullArguments && overview.bullArguments.length > 0) ||
+                  (overview.bearArguments && overview.bearArguments.length > 0)) && (
+                  <div style={{ marginBottom: 12 }}>
+                    {/* 标题行 + 强度对比条 */}
+                    <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--sa-text)' }}>⚔️ 多空交锋</span>
+                      <span style={{ fontSize: 11, color: 'var(--sa-text-tertiary)', fontWeight: 400, marginLeft: 8 }}>
+                        多{overview.bullArguments?.length || 0}条/{overview.bullArguments?.reduce((s, a) => s + (a.strength || 1), 0) || 0}★
+                        : 空{overview.bearArguments?.length || 0}条/{overview.bearArguments?.reduce((s, a) => s + (a.strength || 1), 0) || 0}★
+                      </span>
+                    </div>
+                    {/* 多空强度对比条 */}
+                    {(() => {
+                      const bullStars = overview.bullArguments?.reduce((s, a) => s + (a.strength || 1), 0) || 0;
+                      const bearStars = overview.bearArguments?.reduce((s, a) => s + (a.strength || 1), 0) || 0;
+                      const total = bullStars + bearStars || 1;
+                      const bullPct = (bullStars / total * 100).toFixed(0);
+                      const bearPct = (bearStars / total * 100).toFixed(0);
+                      const bias = bullStars > bearStars + 5 ? '偏多' : bearStars > bullStars + 5 ? '偏空' : bullStars > bearStars ? '中性偏多' : bearStars > bullStars ? '中性偏空' : '中性';
+                      const biasColor = bias.includes('多') ? '#f5222d' : bias.includes('空') ? '#52c41a' : '#fa8c16';
+                      return total > 1 ? (
+                        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
+                          <div style={{ flex: 1, height: 6, borderRadius: 3, background: 'var(--sa-border-secondary)', overflow: 'hidden', position: 'relative' }}>
+                            <div style={{ position: 'absolute', left: 0, top: 0, width: `${bullPct}%`, height: '100%', background: '#f5222d', borderRadius: 3 }} />
+                            <div style={{ position: 'absolute', right: 0, top: 0, width: `${bearPct}%`, height: '100%', background: '#52c41a', borderRadius: 3 }} />
+                          </div>
+                          <Tag color={biasColor} style={{ fontSize: 10, marginLeft: 6, padding: '0 6px', lineHeight: '16px' }}>{bias}</Tag>
+                        </div>
+                      ) : null;
+                    })()}
+                    <Row gutter={16}>
+                      <Col span={12}>
+                        <div style={{ padding: 8, background: 'var(--sa-up-bg)', borderRadius: 4, fontSize: 12, lineHeight: 1.5 }}>
+                          <div style={{ color: '#f5222d', fontWeight: 600, marginBottom: 4 }}>多头论据</div>
+                          {overview.bullArguments && overview.bullArguments.length > 0 ? (
+                            <ul style={{ margin: 0, paddingLeft: 12, color: 'var(--sa-text-secondary)' }}>
+                              {overview.bullArguments.slice(0, 5).map((arg, i) => (
+                                <li key={i} style={{ marginBottom: 2 }}>
+                                  <Tag color="red" style={{ fontSize: 10, marginRight: 2, padding: '0 4px', lineHeight: '16px' }}>{arg.dimension}</Tag>
+                                  {arg.description}
+                                  {'★'.repeat(Math.min(arg.strength || 1, 5))}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : <span style={{ color: 'var(--sa-text-tertiary)' }}>暂无明显多头信号</span>}
+                        </div>
+                      </Col>
+                      <Col span={12}>
+                        <div style={{ padding: 8, background: 'var(--sa-down-bg)', borderRadius: 4, fontSize: 12, lineHeight: 1.5 }}>
+                          <div style={{ color: '#52c41a', fontWeight: 600, marginBottom: 4 }}>空头论据</div>
+                          {overview.bearArguments && overview.bearArguments.length > 0 ? (
+                            <ul style={{ margin: 0, paddingLeft: 12, color: 'var(--sa-text-secondary)' }}>
+                              {overview.bearArguments.slice(0, 5).map((arg, i) => (
+                                <li key={i} style={{ marginBottom: 2 }}>
+                                  <Tag color="green" style={{ fontSize: 10, marginRight: 2, padding: '0 4px', lineHeight: '16px' }}>{arg.dimension}</Tag>
+                                  {arg.description}
+                                  {'★'.repeat(Math.min(arg.strength || 1, 5))}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : <span style={{ color: 'var(--sa-text-tertiary)' }}>暂无明显空头信号</span>}
+                        </div>
+                      </Col>
+                    </Row>
+                  </div>
+                )}
+
+                {/* 交易计划：风险 + 执行方案 + 介入参考 */}
+                {(overview.risks || overview.tailRisks?.length > 0 || overview.executionPlan || overview.reversalConditions) && (
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--sa-text)', marginBottom: 6 }}>🎯 交易计划</div>
+                    <Row gutter={16}>
+                      <Col span={8}>
+                        <div style={{ fontSize: 12, color: 'var(--sa-text-secondary)', lineHeight: 1.6 }}>
+                          <div style={{ fontWeight: 600, color: 'var(--sa-warning)', marginBottom: 4 }}>⚠️ 风险</div>
+                          {overview.risks && <div style={{ marginBottom: 6, color: 'var(--sa-warning)', padding: '4px 8px', background: 'var(--sa-warning-bg)', borderRadius: 4 }}>{overview.risks}</div>}
+                          {overview.tailRisks?.length > 0 && (
+                            <ul style={{ margin: 0, paddingLeft: 16 }}>
+                              {overview.tailRisks.slice(0, 3).map((risk, idx) => (
+                                <li key={idx} style={{ marginBottom: 2 }}>
+                                  <strong style={{ color: '#f5222d' }}>{risk.riskName || risk.name || `风险${idx + 1}`}</strong>
+                                  {risk.description && <span> — {risk.description}</span>}
+                                  {risk.probability != null && <span style={{ color: 'var(--sa-text-tertiary)' }}>（概率{typeof risk.probability === 'number' ? Math.round(risk.probability * 100) : risk.probability}%）</span>}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      </Col>
+                      <Col span={8}>
+                        <div style={{ fontSize: 12, color: 'var(--sa-text)', lineHeight: 1.6 }}>
+                          <div style={{ fontWeight: 600, color: 'var(--sa-text)', marginBottom: 4 }}>执行方案</div>
+                          <div style={{ padding: 8, background: 'var(--sa-bg-container)', border: '1px dashed var(--sa-border)', borderRadius: 4 }}>
+                            {overview.executionPlan}
+                            {/* 价位联动提示 */}
+                            {(() => {
+                              const price = parseFloat(overview.price) || 0;
+                              if (!price) return null;
+                              const entry = parseFloat(overview.entryPrice) || 0;
+                              const stopLoss = parseFloat(overview.stopLossPrice) || 0;
+                              const target = parseFloat(overview.targetPrice) || 0;
+                              const target2 = parseFloat(overview.targetPrice2) || 0;
+                              const alerts = [];
+                              if (entry && Math.abs(price - entry) / entry <= 0.02) {
+                                alerts.push({ text: `⚠️ 当前价已接近介入价(${entry})，适合第一批建仓`, color: '#f5222d' });
+                              }
+                              if (stopLoss && price <= stopLoss * 1.02 && price > stopLoss) {
+                                alerts.push({ text: `⚠️ 当前价逼近止损价(${stopLoss})，注意风控`, color: '#f5222d' });
+                              }
+                              if (stopLoss && price <= stopLoss) {
+                                alerts.push({ text: `🔴 当前价已跌破止损价(${stopLoss})，应考虑减仓`, color: '#f5222d' });
+                              }
+                              if (target && Math.abs(price - target) / target <= 0.02) {
+                                alerts.push({ text: `✅ 当前价接近第一目标价(${target})，可部分止盈`, color: '#1890ff' });
+                              }
+                              if (target && price > target) {
+                                alerts.push({ text: `✅ 已突破第一目标价(${target})，进入第二目标区间`, color: '#1890ff' });
+                              }
+                              if (target2 && Math.abs(price - target2) / target2 <= 0.02) {
+                                alerts.push({ text: `✅ 当前价接近第二目标价(${target2})，可考虑分批减仓`, color: '#722ed1' });
+                              }
+                              if (alerts.length === 0) return null;
+                              return (
+                                <div style={{ marginTop: 6, padding: 6, background: 'var(--sa-warning-bg)', borderRadius: 4, fontSize: 12 }}>
+                                  {alerts.map((a, i) => (
+                                    <div key={i} style={{ color: a.color, fontWeight: 500, marginBottom: i < alerts.length - 1 ? 4 : 0 }}>{a.text}</div>
+                                  ))}
+                                </div>
+                              );
+                            })()}
+                          </div>
+                        </div>
+                      </Col>
+                      <Col span={8}>
+                        {overview.reversalConditions && (
+                          <div style={{ fontSize: 12, color: 'var(--sa-success)', lineHeight: 1.6 }}>
+                            <div style={{ fontWeight: 600, color: 'var(--sa-success)', marginBottom: 4 }}>介入参考</div>
+                            <div style={{ padding: 8, background: 'var(--sa-info-bg)', borderRadius: 4 }}>{overview.reversalConditions}</div>
+                          </div>
+                        )}
+                      </Col>
+                    </Row>
+                  </div>
+                )}
+
+                {/* LLM 深度解读 */}
+                <div style={{ marginTop: 4 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--sa-text)' }}>
+                      🤖 LLM 深度解读
+                      {llmEnabled === true && (
+                        <Tag color="green" style={{ marginLeft: 6, fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>已启用</Tag>
+                      )}
+                      {llmEnabled === false && (
+                        <Tag color="red" style={{ marginLeft: 6, fontSize: 10, lineHeight: '16px', padding: '0 4px' }}>
+                          {llmStatusMsg?.includes('连接') ? '连接失败' : '未启用'}
+                        </Tag>
+                      )}
+                    </span>
+                    <Space size={4}>
+                      {llmEnabled === false && (
+                        <Button
+                          size="small"
+                          onClick={checkLlmStatus}
+                          icon={<ReloadOutlined />}
+                        >重试</Button>
+                      )}
+                      <Tooltip title={llmEnabled === false ? (llmStatusMsg || 'LLM未启用') : ''}>
+                        <Button
+                          size="small"
+                          type="primary"
+                          ghost
+                          loading={llmLoading}
+                          onClick={handleLlmAnalyze}
+                          icon={<ThunderboltOutlined />}
+                          disabled={llmEnabled === false}
+                        >
+                          {llmData ? '重新分析' : (llmEnabled === false ? 'LLM未启用' : 'AI分析')}
+                        </Button>
+                      </Tooltip>
+                    </Space>
+                  </div>
+                  {llmData ? (
+                    <div style={{ padding: 12, background: 'var(--sa-bg-container)', borderRadius: 4, border: '1px solid var(--sa-border-secondary)', fontSize: 13, lineHeight: 1.7 }}>
+                      <Row gutter={16} style={{ marginBottom: 8 }}>
+                        <Col span={4}>
+                          <div style={{ fontSize: 11, color: 'var(--sa-text-tertiary)' }}>AI建议</div>
+                          <Tag color={llmData.recommendation === 'BUY' ? 'red' : llmData.recommendation === 'SKIP' ? 'green' : 'orange'}>
+                            {llmData.recommendation || '-'}
+                          </Tag>
+                        </Col>
+                        <Col span={4}>
+                          <div style={{ fontSize: 11, color: 'var(--sa-text-tertiary)' }}>风险等级</div>
+                          <Tag color={llmData.riskLevel === 'HIGH' ? 'red' : llmData.riskLevel === 'LOW' ? 'green' : 'orange'}>
+                            {llmData.riskLevel || '-'}
+                          </Tag>
+                        </Col>
+                        <Col span={4}>
+                          <div style={{ fontSize: 11, color: 'var(--sa-text-tertiary)' }}>买入区间</div>
+                          <span style={{ fontSize: 12, fontWeight: 500 }}>
+                            {llmData.buyPriceLow && llmData.buyPriceHigh
+                              ? `${llmData.buyPriceLow} ~ ${llmData.buyPriceHigh}`
+                              : '不适用'}
+                          </span>
+                        </Col>
+                        <Col span={4}>
+                          <div style={{ fontSize: 11, color: 'var(--sa-text-tertiary)' }}>止损价</div>
+                          <span style={{ fontSize: 12, fontWeight: 500, color: '#f5222d' }}>
+                            {llmData.stopLoss || '不适用'}
+                          </span>
+                        </Col>
+                        <Col span={4}>
+                          <div style={{ fontSize: 11, color: 'var(--sa-text-tertiary)' }}>目标价</div>
+                          <span style={{ fontSize: 12, fontWeight: 500, color: '#f5222d' }}>
+                            {llmData.targetPrice || '不适用'}
+                          </span>
+                        </Col>
+                        <Col span={4}>
+                          <div style={{ fontSize: 11, color: 'var(--sa-text-tertiary)' }}>投资周期</div>
+                          <span style={{ fontSize: 12 }}>{llmData.timeHorizon || '-'}</span>
+                        </Col>
+                      </Row>
+                      {llmData.positionAdvice && (
+                        <div style={{ marginBottom: 4 }}>
+                          <span style={{ color: 'var(--sa-text-tertiary)', fontSize: 12 }}>仓位建议：</span>
+                          <span style={{ fontWeight: 500 }}>{llmData.positionAdvice}</span>
+                        </div>
+                      )}
+                      {llmData.logic && (
+                        <div style={{ marginBottom: 4, color: 'var(--sa-text)', textIndent: '2em' }}>
+                          {llmData.logic}
+                        </div>
+                      )}
+                      {llmData.catalysts && (
+                        <div style={{ marginBottom: 4 }}>
+                          <span style={{ color: '#f5222d', fontSize: 12 }}>催化剂：</span>
+                          <span style={{ color: 'var(--sa-text-secondary)' }}>{llmData.catalysts.split(';').join('、')}</span>
+                        </div>
+                      )}
+                      {llmData.risks && (
+                        <div>
+                          <span style={{ color: '#faad14', fontSize: 12 }}>风险点：</span>
+                          <span style={{ color: 'var(--sa-text-secondary)' }}>{llmData.risks.split(';').join('、')}</span>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div style={{ padding: 12, background: 'var(--sa-bg-container)', borderRadius: 4, border: '1px dashed var(--sa-border)', fontSize: 12, color: 'var(--sa-text-tertiary)', textAlign: 'center' }}>
+                      {llmLoading ? '正在调用AI分析，请稍候...' : (
+                        llmEnabled === false
+                          ? <span>
+                              ⚠️ {llmStatusMsg || (llmApiKeyConfigured === false
+                                ? 'LLM API Key未配置，无法执行AI分析'
+                                : 'LLM未启用，无法执行AI分析')}
+                              <a onClick={checkLlmStatus} style={{ marginLeft: 8, fontSize: 12 }}>重新检测</a>
+                            </span>
+                          : '点击"AI分析"按钮，由大模型生成深度投资解读'
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
@@ -809,7 +1238,7 @@ export default function StockAnalysis() {
             <Row gutter={24} style={{ marginBottom: 16, textAlign: 'center' }}>
               {/* 左：综合评分数字 */}
               <Col span={4} style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
-                <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>
+                <div style={{ fontSize: 12, color: 'var(--sa-text-tertiary)', marginBottom: 4 }}>
                   综合评分
                   <Tooltip title="查看评分规则" className="tip-light">
                     <QuestionCircleOutlined
@@ -821,7 +1250,7 @@ export default function StockAnalysis() {
                 <div style={{ fontSize: 36, fontWeight: 500, color: scoreColor(overview.totalScore, 100), lineHeight: 1 }}>
                   {overview.totalScore}
                 </div>
-                <div style={{ fontSize: 12, color: '#999', marginTop: 2 }}>/ 100</div>
+                <div style={{ fontSize: 12, color: 'var(--sa-text-tertiary)', marginTop: 2 }}>/ 100</div>
               </Col>
               {/* 中：雷达图 */}
               <Col span={10}>
@@ -831,7 +1260,7 @@ export default function StockAnalysis() {
               </Col>
               {/* 右：操作时机 + 三方分析师三角 */}
               <Col span={10} style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', alignItems: 'center' }}>
-                <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>操作时机</div>
+                <div style={{ fontSize: 12, color: 'var(--sa-text-tertiary)', marginBottom: 4 }}>操作时机</div>
                 <Tag
                   color={actionColor(overview.actionName)}
                   style={{ fontSize: 16, padding: '4px 16px', marginTop: 4 }}
@@ -842,7 +1271,7 @@ export default function StockAnalysis() {
                 {/* 三方分析师三角 */}
                 {(overview.conservativeScore != null || overview.neutralScore != null || overview.aggressiveScore != null) && (
                   <div style={{ marginTop: 16, width: '100%' }}>
-                    <div style={{ fontSize: 12, color: '#999', marginBottom: 8, textAlign: 'center' }}>
+                    <div style={{ fontSize: 12, color: 'var(--sa-text-tertiary)', marginBottom: 8, textAlign: 'center' }}>
                       三方分析师独立评分
                       <Tooltip
                         styles={{ root: { maxWidth: 'none' }, body: { padding: 0, width: 650 } }}
@@ -850,40 +1279,40 @@ export default function StockAnalysis() {
                           <div style={{ padding: '12px 16px', minWidth: 650 }}>
                             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                               <thead>
-                                <tr style={{ background: '#fafafa' }}>
-                                  <th style={{ border: '1px solid #f0f0f0', padding: '6px 10px', textAlign: 'left', fontWeight: 600, width: '72px' }}>分析师</th>
-                                  <th style={{ border: '1px solid #f0f0f0', padding: '6px 10px', textAlign: 'left', fontWeight: 600, whiteSpace: 'nowrap' }}>策略</th>
-                                  <th style={{ border: '1px solid #f0f0f0', padding: '6px 10px', textAlign: 'left', fontWeight: 600 }}>{overview.code || ''} 结果</th>
+                                <tr style={{ background: 'var(--sa-bg-fill)' }}>
+                                  <th style={{ border: '1px solid var(--sa-border-secondary)', padding: '6px 10px', textAlign: 'left', fontWeight: 600, width: '72px' }}>分析师</th>
+                                  <th style={{ border: '1px solid var(--sa-border-secondary)', padding: '6px 10px', textAlign: 'left', fontWeight: 600, whiteSpace: 'nowrap' }}>策略</th>
+                                  <th style={{ border: '1px solid var(--sa-border-secondary)', padding: '6px 10px', textAlign: 'left', fontWeight: 600 }}>{overview.code || ''} 结果</th>
                                 </tr>
                               </thead>
                               <tbody>
                                 <tr>
-                                  <td style={{ border: '1px solid #f0f0f0', padding: '5px 10px', color: '#f5222d', fontWeight: 600, width: '72px' }}>保守</td>
-                                  <td style={{ border: '1px solid #f0f0f0', padding: '5px 10px', color: '#666', whiteSpace: 'nowrap' }}>重估值(PE/PB)和负债率防守，轻趋势</td>
-                                  <td style={{ border: '1px solid #f0f0f0', padding: '5px 10px' }}>
+                                  <td style={{ border: '1px solid var(--sa-border-secondary)', padding: '5px 10px', color: '#f5222d', fontWeight: 600, width: '72px' }}>保守</td>
+                                  <td style={{ border: '1px solid var(--sa-border-secondary)', padding: '5px 10px', color: 'var(--sa-text-secondary)', whiteSpace: 'nowrap' }}>重估值(PE/PB)和负债率防守，轻趋势</td>
+                                  <td style={{ border: '1px solid var(--sa-border-secondary)', padding: '5px 10px' }}>
                                     <span style={{ color: '#f5222d', fontWeight: 700, fontSize: 13 }}>{overview.conservativeScore ?? '-'}</span>
-                                    <span style={{ color: '#999', marginLeft: 4 }}>分（{overview.conservativeDesc || '-'}）</span>
+                                    <span style={{ color: 'var(--sa-text-tertiary)', marginLeft: 4 }}>分（{overview.conservativeDesc || '-'}）</span>
                                   </td>
                                 </tr>
                                 <tr>
-                                  <td style={{ border: '1px solid #f0f0f0', padding: '5px 10px', color: '#fa8c16', fontWeight: 600, width: '72px' }}>中性</td>
-                                  <td style={{ border: '1px solid #f0f0f0', padding: '5px 10px', color: '#666', whiteSpace: 'nowrap' }}>四维度均衡加权 = 综合评分 / 13.5 归一化到 0-10</td>
-                                  <td style={{ border: '1px solid #f0f0f0', padding: '5px 10px' }}>
+                                  <td style={{ border: '1px solid var(--sa-border-secondary)', padding: '5px 10px', color: '#fa8c16', fontWeight: 600, width: '72px' }}>中性</td>
+                                  <td style={{ border: '1px solid var(--sa-border-secondary)', padding: '5px 10px', color: 'var(--sa-text-secondary)', whiteSpace: 'nowrap' }}>四维度均衡加权 = 综合评分 / 13.5 归一化到 0-10</td>
+                                  <td style={{ border: '1px solid var(--sa-border-secondary)', padding: '5px 10px' }}>
                                     <span style={{ color: '#fa8c16', fontWeight: 700, fontSize: 13 }}>{overview.neutralScore ?? '-'}</span>
-                                    <span style={{ color: '#999', marginLeft: 4 }}>分（综合{overview.totalScore ?? '-'}分→{overview.neutralScore ?? '-'}）</span>
+                                    <span style={{ color: 'var(--sa-text-tertiary)', marginLeft: 4 }}>分（综合{overview.totalScore ?? '-'}分→{overview.neutralScore ?? '-'}）</span>
                                   </td>
                                 </tr>
                                 <tr>
-                                  <td style={{ border: '1px solid #f0f0f0', padding: '5px 10px', color: '#52c41a', fontWeight: 600, width: '72px' }}>激进</td>
-                                  <td style={{ border: '1px solid #f0f0f0', padding: '5px 10px', color: '#666', whiteSpace: 'nowrap' }}>重趋势+资金+情绪进攻，容忍高估值</td>
-                                  <td style={{ border: '1px solid #f0f0f0', padding: '5px 10px' }}>
+                                  <td style={{ border: '1px solid var(--sa-border-secondary)', padding: '5px 10px', color: '#52c41a', fontWeight: 600, width: '72px' }}>激进</td>
+                                  <td style={{ border: '1px solid var(--sa-border-secondary)', padding: '5px 10px', color: 'var(--sa-text-secondary)', whiteSpace: 'nowrap' }}>重趋势+资金+情绪进攻，容忍高估值</td>
+                                  <td style={{ border: '1px solid var(--sa-border-secondary)', padding: '5px 10px' }}>
                                     <span style={{ color: '#52c41a', fontWeight: 700, fontSize: 13 }}>{overview.aggressiveScore ?? '-'}</span>
-                                    <span style={{ color: '#999', marginLeft: 4 }}>分（{overview.aggressiveDesc || '-'}）</span>
+                                    <span style={{ color: 'var(--sa-text-tertiary)', marginLeft: 4 }}>分（{overview.aggressiveDesc || '-'}）</span>
                                   </td>
                                 </tr>
                               </tbody>
                             </table>
-                            <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid #f0f0f0', fontSize: 11, color: '#999', lineHeight: 1.8 }}>
+                            <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--sa-border-secondary)', fontSize: 11, color: 'var(--sa-text-tertiary)', lineHeight: 1.8 }}>
                               <div><strong>具体逻辑：</strong></div>
                               <div>● <strong>保守</strong>（起点5）：PE&gt;100 扣3分，PE&gt;50 扣2，PE&gt;30 扣1；PB&gt;8 扣2；负债率&gt;80 扣2；只有缠论BUY信号才+1</div>
                               <div>● <strong>中性</strong>：直接 totalScore / 13.5（135满分→10）</div>
@@ -892,32 +1321,32 @@ export default function StockAnalysis() {
                           </div>
                         }
                       >
-                        <QuestionCircleOutlined style={{ marginLeft: 4, cursor: 'pointer', color: '#bbb' }} />
+                        <QuestionCircleOutlined style={{ marginLeft: 4, cursor: 'pointer', color: 'var(--sa-text-quaternary)' }} />
                       </Tooltip>
                     </div>
                     <Row gutter={8} style={{ textAlign: 'center' }}>
                       {/* 保守 */}
                       <Col span={8}>
                         <Tooltip title={overview.conservativeDesc || ''}>
-                          <div style={{ fontSize: 11, color: '#999' }}>🔴 保守</div>
+                          <div style={{ fontSize: 11, color: 'var(--sa-text-tertiary)' }}>🔴 保守</div>
                           <div style={{ fontSize: 24, fontWeight: 700, color: '#f5222d', lineHeight: 1 }}>{overview.conservativeScore ?? '-'}</div>
-                          <div style={{ fontSize: 10, color: '#666' }}>{overview.conservativePosition || '-'}</div>
+                          <div style={{ fontSize: 10, color: 'var(--sa-text-secondary)' }}>{overview.conservativePosition || '-'}</div>
                         </Tooltip>
                       </Col>
                       {/* 中性 */}
                       <Col span={8}>
                         <Tooltip title={overview.neutralDesc || ''}>
-                          <div style={{ fontSize: 11, color: '#999' }}>🟡 中性</div>
+                          <div style={{ fontSize: 11, color: 'var(--sa-text-tertiary)' }}>🟡 中性</div>
                           <div style={{ fontSize: 24, fontWeight: 700, color: '#fa8c16', lineHeight: 1 }}>{overview.neutralScore ?? '-'}</div>
-                          <div style={{ fontSize: 10, color: '#666' }}>{overview.neutralPosition || '-'}</div>
+                          <div style={{ fontSize: 10, color: 'var(--sa-text-secondary)' }}>{overview.neutralPosition || '-'}</div>
                         </Tooltip>
                       </Col>
                       {/* 激进 */}
                       <Col span={8}>
                         <Tooltip title={overview.aggressiveDesc || ''}>
-                          <div style={{ fontSize: 11, color: '#999' }}>🟢 激进</div>
+                          <div style={{ fontSize: 11, color: 'var(--sa-text-tertiary)' }}>🟢 激进</div>
                           <div style={{ fontSize: 24, fontWeight: 700, color: '#52c41a', lineHeight: 1 }}>{overview.aggressiveScore ?? '-'}</div>
-                          <div style={{ fontSize: 10, color: '#666' }}>{overview.aggressivePosition || '-'}</div>
+                          <div style={{ fontSize: 10, color: 'var(--sa-text-secondary)' }}>{overview.aggressivePosition || '-'}</div>
                         </Tooltip>
                       </Col>
                     </Row>
@@ -926,34 +1355,8 @@ export default function StockAnalysis() {
               </Col>
             </Row>
 
-            {/* 风险提示 - 紧凑行内样式 */}
-            {overview.risks && (
-              <div style={{ marginTop: 12, padding: '8px 12px', background: '#fffbe6', borderRadius: 4, fontSize: 13, color: '#d48806' }}>
-                <span style={{ fontWeight: 500 }}>风险提示：</span>{overview.risks}
-              </div>
-            )}
 
-            {/* 分批执行方案 */}
-            {overview.executionPlan && (
-              <div style={{ marginTop: 8, padding: '8px 12px', background: '#e6fffb', borderRadius: 4, fontSize: 13, color: '#08979c' }}>
-                <span style={{ fontWeight: 500 }}>分批执行：</span>{overview.executionPlan}
-              </div>
-            )}
-
-            {/* 反转条件 - 减仓/清仓时显示介入参考 */}
-            {overview.reversalConditions && (
-              <div style={{ marginTop: 8, padding: '8px 12px', background: '#e6fffb', borderRadius: 4, fontSize: 13, color: '#08979c' }}>
-                <span style={{ fontWeight: 500 }}>介入参考：</span>{overview.reversalConditions}
-              </div>
-            )}
           </Card>
-
-          {/* ── 分析结论 ─────────────────────────────────────────────── */}
-          {overview.conclusion && (
-            <div style={{ marginBottom: 16, padding: '10px 12px', background: '#e6f7ff', borderRadius: 4, fontSize: 13, color: '#096dd9' }}>
-              <span style={{ fontWeight: 500 }}>分析结论：</span>{overview.conclusion}
-            </div>
-          )}
 
           {/* ── 四维度 Tab ─────────────────────────────────────────────── */}
           <Card>
@@ -977,19 +1380,19 @@ export default function StockAnalysis() {
             position: 'fixed', top: 100, right: 50,
             width: 680, zIndex: 1000,
             boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-            background: '#fff',
+            background: 'var(--sa-bg-container)',
             borderRadius: 6,
-            border: '1px solid #f0f0f0',
+            border: '1px solid var(--sa-border-secondary)',
             padding: '12px 16px',
             maxHeight: 'calc(100vh - 140px)',
             overflowY: 'auto',
           }}
         >
-          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 10, color: '#333' }}>评分规则说明</div>
+          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 10, color: 'var(--sa-text)' }}>评分规则说明</div>
           {rules?.map((rule, idx) => (
             <div key={idx} style={{ marginBottom: 10 }}>
               <Text strong>{rule.dimension}（满分{rule.maxScore}）：</Text>
-              <div style={{ fontSize: 13, whiteSpace: 'pre-wrap', marginLeft: 8, color: '#444', lineHeight: 1.7 }}>
+              <div style={{ fontSize: 13, whiteSpace: 'pre-wrap', marginLeft: 8, color: 'var(--sa-text)', lineHeight: 1.7 }}>
                 {rule.rule.split('\n').map((line, li) => (
                   <div key={li} style={{ display: 'flex' }}>
                     <span style={{ marginRight: 6, flexShrink: 0, color: '#1890ff' }}>•</span>
@@ -1043,13 +1446,13 @@ function ScoreRadarChart({ scoreDetails }) {
   // 网格圈
   const gridPolygons = [0.25, 0.5, 0.75, 1].map(f => {
     const pts = dims.map((_, i) => { const p = toXY(i, R * f); return `${p.x},${p.y}`; }).join(' ');
-    return <polygon key={f} points={pts} fill="none" stroke="#e8e8e8" strokeWidth={1} />;
+    return <polygon key={f} points={pts} fill="none" style={{ stroke: 'var(--sa-border-secondary)' }} strokeWidth={1} />;
   });
 
   // 轴线
   const axisLines = dims.map(({ i }) => {
     const p = toXY(i, R);
-    return <line key={i} x1={cx} y1={cy} x2={p.x} y2={p.y} stroke="#e8e8e8" strokeWidth={1} />;
+    return <line key={i} x1={cx} y1={cy} x2={p.x} y2={p.y} style={{ stroke: 'var(--sa-border-secondary)' }} strokeWidth={1} />;
   });
 
   const hoverData = hoverRef.current;
@@ -1102,8 +1505,8 @@ function ScoreRadarChart({ scoreDetails }) {
         {dims.map(({ i, labelPos, tx, d }) => (
           <text key={i} x={labelPos.x} y={labelPos.y}
             textAnchor={tx} dominantBaseline="middle"
-            fontSize={12} fill="#333" fontWeight={500}
-            style={{ pointerEvents: 'none', userSelect: 'none' }}>
+            fontSize={12} fontWeight={500}
+            style={{ fill: 'var(--sa-text)', pointerEvents: 'none', userSelect: 'none' }}>
             {d.dimensionName || d.dimension}
           </text>
         ))}
@@ -1112,9 +1515,9 @@ function ScoreRadarChart({ scoreDetails }) {
         <div
           style={{
             position: 'absolute', top: 8, left: 0,
-            background: '#fff',
-            border: '1px solid #d9d9d9', borderRadius: 8,
-            padding: '8px 12px', fontSize: 12, color: '#333',
+            background: 'var(--sa-bg-container)',
+            border: '1px solid var(--sa-border)', borderRadius: 8,
+            padding: '8px 12px', fontSize: 12, color: 'var(--sa-text)',
             boxShadow: '0 4px 16px rgba(0,0,0,0.12)', zIndex: 100, minWidth: 160,
           }}
           onMouseEnter={() => setTooltipLocked(true)}
@@ -1139,6 +1542,7 @@ function ScoreRadarChart({ scoreDetails }) {
 
 // ── K线图 ────────────────────────────────────────────────────────────────────
 function KLineChart({ data }) {
+  const { token } = theme.useToken();
   if (!data || data.length === 0) return null;
 
   const dates = data.map(d => d.date);
@@ -1179,15 +1583,15 @@ function KLineChart({ data }) {
           ${vol ? `<br/>成交量：${(d.volume / 10000).toFixed(0)}万` : ''}`;
       },
     },
-    legend: { data: ['K线', 'MA5', 'MA10', 'MA20', 'MA60'], bottom: -5, type: 'scroll', itemGap: 16 },
+    legend: { data: ['K线', 'MA5', 'MA10', 'MA20', 'MA60'], bottom: -5, type: 'scroll', itemGap: 16, textStyle: { color: token.colorTextSecondary } },
     grid: [{ left: 60, right: 20, top: 20, height: '52%', bottom: '28%' }, { left: 60, right: 20, top: '72%', height: '12%', bottom: '14%' }],
     xAxis: [
-      { type: 'category', data: dates, gridIndex: 0, boundaryGap: false, axisLine: { lineStyle: { color: '#e8e8e8' } }, axisLabel: { show: false } },
-      { type: 'category', data: dates, gridIndex: 1, boundaryGap: false, axisLine: { lineStyle: { color: '#e8e8e8' } }, axisLabel: { fontSize: 10 } },
+      { type: 'category', data: dates, gridIndex: 0, boundaryGap: false, axisLine: { lineStyle: { color: token.colorBorderSecondary } }, axisLabel: { show: false } },
+      { type: 'category', data: dates, gridIndex: 1, boundaryGap: false, axisLine: { lineStyle: { color: token.colorBorderSecondary } }, axisLabel: { fontSize: 10, color: token.colorTextTertiary } },
     ],
     yAxis: [
-      { scale: true, gridIndex: 0, axisLine: { lineStyle: { color: '#e8e8e8' } }, axisLabel: { fontSize: 10 } },
-      { scale: true, gridIndex: 1, axisLine: { lineStyle: { color: '#e8e8e8' } }, axisLabel: { fontSize: 10, formatter: v => (v / 10000).toFixed(0) + '万' } },
+      { scale: true, gridIndex: 0, axisLine: { lineStyle: { color: token.colorBorderSecondary } }, axisLabel: { fontSize: 10, color: token.colorTextTertiary } },
+      { scale: true, gridIndex: 1, axisLine: { lineStyle: { color: token.colorBorderSecondary } }, axisLabel: { fontSize: 10, color: token.colorTextTertiary, formatter: v => (v / 10000).toFixed(0) + '万' } },
     ],
     dataZoom: [{ type: 'inside', xAxisIndex: [0, 1], start: 50, end: 100 }, { type: 'slider', xAxisIndex: [0, 1], start: 50, end: 100 }],
     series: [
@@ -1215,6 +1619,7 @@ function KLineChart({ data }) {
 
 // ── 多空论点对比图 ──────────────────────────────────────────────────────────
 function BullBearChart({ bull, bear }) {
+  const { token } = theme.useToken();
   // 按维度聚合强度
   const dimMap = {};
   const bullIdx = new Set(bull.map((_, i) => i));
@@ -1245,8 +1650,8 @@ function BullBearChart({ bull, bear }) {
       },
     },
     grid: { left: 60, right: 40, top: 20, bottom: 40 },
-    xAxis: { type: 'category', data: dims, axisLine: { lineStyle: { color: '#e8e8e8' } }, axisLabel: { fontSize: 12 } },
-    yAxis: { type: 'value', min: -maxAbs, max: maxAbs, axisLine: { lineStyle: { color: '#e8e8e8' } }, axisLabel: { fontSize: 10 } },
+    xAxis: { type: 'category', data: dims, axisLine: { lineStyle: { color: token.colorBorderSecondary } }, axisLabel: { fontSize: 12, color: token.colorTextSecondary } },
+    yAxis: { type: 'value', min: -maxAbs, max: maxAbs, axisLine: { lineStyle: { color: token.colorBorderSecondary } }, axisLabel: { fontSize: 10, color: token.colorTextTertiary } },
     series: [
       {
         type: 'bar', name: '多头', data: bullScores,
@@ -2137,9 +2542,9 @@ function IndicatorRow({ label, value, score, maxScore, desc, color }) {
   return (
     <div style={{
       display: 'flex', alignItems: 'center', padding: '6px 0',
-      borderBottom: '1px solid #f0f0f0', gap: 12,
+      borderBottom: '1px solid var(--sa-border-secondary)', gap: 12,
     }}>
-      <span style={{ width: 120, flexShrink: 0, color: '#333', fontWeight: 500 }}>{label}</span>
+      <span style={{ width: 120, flexShrink: 0, color: 'var(--sa-text)', fontWeight: 500 }}>{label}</span>
       <span style={{ width: 130, flexShrink: 0, textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
         <Tag color={color || 'default'} style={{
           margin: 0, fontSize: 13, padding: '2px 8px',
@@ -2152,14 +2557,14 @@ function IndicatorRow({ label, value, score, maxScore, desc, color }) {
           placement="top"
           styles={{ root: {maxWidth: 320} }}
         >
-          <QuestionCircleOutlined style={{ fontSize: 12, color: '#bfbfbf', cursor: 'pointer' }} />
+          <QuestionCircleOutlined style={{ fontSize: 12, color: 'var(--sa-text-quaternary)', cursor: 'pointer' }} />
         </Tooltip>
       </span>
-      <span style={{ width: 50, flexShrink: 0, textAlign: 'center', fontSize: 13, color: '#666' }}>
+      <span style={{ width: 50, flexShrink: 0, textAlign: 'center', fontSize: 13, color: 'var(--sa-text-secondary)' }}>
         {score !== undefined && maxScore > 0 ? `${score}/${maxScore}` :
          score !== undefined && score < 0 ? `${score}` : ''}
       </span>
-      <span style={{ flex: 1, fontSize: 12, color: '#999' }}>{desc || ''}</span>
+      <span style={{ flex: 1, fontSize: 12, color: 'var(--sa-text-tertiary)' }}>{desc || ''}</span>
     </div>
   );
 }
@@ -2177,7 +2582,7 @@ function ScoreDetailTab({ detail, reportPeriod }) {
         <div style={{
           marginBottom: 8,
           padding: '6px 12px',
-          background: '#f6ffed',
+          background: 'var(--sa-down-bg)',
           borderRadius: 4,
           fontSize: 12,
           color: '#52c41a',
@@ -2191,7 +2596,7 @@ function ScoreDetailTab({ detail, reportPeriod }) {
         <div style={{
           marginBottom: 8,
           padding: '6px 12px',
-          background: '#f0f5ff',
+          background: 'var(--sa-primary-bg)',
           borderRadius: 4,
           fontSize: 12,
           color: '#1890ff',
@@ -2204,7 +2609,7 @@ function ScoreDetailTab({ detail, reportPeriod }) {
       {/* 表头 */}
       <div style={{
         display: 'flex', padding: '4px 0', gap: 12,
-        borderBottom: '2px solid #e8e8e8', fontWeight: 600, fontSize: 12, color: '#999',
+        borderBottom: '2px solid var(--sa-border-secondary)', fontWeight: 600, fontSize: 12, color: 'var(--sa-text-tertiary)',
       }}>
         <span style={{ width: 120, flexShrink: 0 }}>指标</span>
         <span style={{ width: 130, flexShrink: 0, textAlign: 'center' }}>当前值</span>
@@ -2226,7 +2631,7 @@ function ScoreDetailTab({ detail, reportPeriod }) {
       ))}
       {/* 分隔：扣分项 */}
       {detail.items.filter(it => it.score < 0 && it.maxScore === 0).length > 0 && (
-        <div style={{ marginTop: 8, padding: '4px 0', borderTop: '1px dashed #ff4d4f', fontSize: 11, color: '#ff4d4f' }}>
+        <div style={{ marginTop: 8, padding: '4px 0', borderTop: '1px dashed #ff4d4f', fontSize: 11, color: 'var(--sa-error)' }}>
           — 扣分项 —
         </div>
       )}
@@ -2243,7 +2648,7 @@ function ScoreDetailTab({ detail, reportPeriod }) {
       ))}
       {/* 分隔：参考指标 */}
       {detail.items.filter(it => it.score === 0 && it.maxScore === 0).length > 0 && (
-        <div style={{ marginTop: 8, padding: '4px 0', borderTop: '1px dashed #d9d9d9', fontSize: 11, color: '#999' }}>
+        <div style={{ marginTop: 8, padding: '4px 0', borderTop: '1px dashed var(--sa-border)', fontSize: 11, color: 'var(--sa-text-tertiary)' }}>
           — 参考指标 —
         </div>
       )}
@@ -2260,7 +2665,7 @@ function ScoreDetailTab({ detail, reportPeriod }) {
       ))}
 
       {/* 总分 */}
-      <div style={{ marginTop: 12, padding: '8px 0', borderTop: '2px solid #e8e8e8' }}>
+      <div style={{ marginTop: 12, padding: '8px 0', borderTop: '2px solid var(--sa-border-secondary)' }}>
         <Text strong style={{ fontSize: 14 }}>
           {detail.dimensionName}：{detail.score ?? '-'}/{detail.maxScore}
         </Text>
@@ -2329,11 +2734,11 @@ function ResearchReportTab({ data, code }) {
             <Row gutter={12}>
               {epsList.map((ep, i) => (
                 <Col span={8} key={ep.year || i} style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: 11, color: '#999', marginBottom: 4 }}>{ep.year} 年预测</div>
-                  <div style={{ fontWeight: 600, fontSize: 17, color: '#333' }}>
+                  <div style={{ fontSize: 11, color: 'var(--sa-text-tertiary)', marginBottom: 4 }}>{ep.year} 年预测</div>
+                  <div style={{ fontWeight: 600, fontSize: 17, color: 'var(--sa-text)' }}>
                     ¥{ep.avgEps != null ? Number(ep.avgEps).toFixed(2) : '-'}
                   </div>
-                  <div style={{ fontSize: 11, color: '#999' }}>
+                  <div style={{ fontSize: 11, color: 'var(--sa-text-tertiary)' }}>
                     PE: {ep.avgPe != null ? Number(ep.avgPe).toFixed(1) + 'x' : '-'}
                   </div>
                 </Col>
@@ -2384,7 +2789,7 @@ function ResearchReportTab({ data, code }) {
         <Col span={12}>
           <Card size="small" title="发布频率（近6个月）">
             {reportTrend.length > 0 ? (
-              <div style={{ display: 'flex', alignItems: 'flex-end', height: 140, paddingBottom: 12, borderBottom: '1px solid #f0f0f0' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-end', height: 140, paddingBottom: 12, borderBottom: '1px solid var(--sa-border-secondary)' }}>
                 {reportTrend.map((t, i) => (
                   <div key={i} style={{ flex: 1, textAlign: 'center', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end' }}>
                     <div style={{
@@ -2394,7 +2799,7 @@ function ResearchReportTab({ data, code }) {
                       borderRadius: '2px 2px 0 0',
                       minHeight: 2,
                     }} />
-                    <div style={{ fontSize: 10, color: '#999', marginTop: 4 }}>{t.month}</div>
+                    <div style={{ fontSize: 10, color: 'var(--sa-text-tertiary)', marginTop: 4 }}>{t.month}</div>
                   </div>
                 ))}
               </div>
@@ -2556,7 +2961,7 @@ function ValuationTab({ data, code }) {
 
   // 分位→颜色
   const colorOf = (p) =>
-    p >= 80 ? '#cf1322' : p >= 50 ? '#fa8c16' : p >= 20 ? '#1890ff' : '#389e0d';
+    p >= 80 ? 'var(--sa-error)' : p >= 50 ? '#fa8c16' : p >= 20 ? '#1890ff' : 'var(--sa-success)';
 
   // 分位→文字标签
   const labelOf = (p) =>
@@ -2564,18 +2969,18 @@ function ValuationTab({ data, code }) {
 
   // ── PE 解释 Tooltip ──
   const peTooltip = (
-    <div style={{ width: 480, fontSize: 12, lineHeight: '20px', color: '#333' }}>
+    <div style={{ width: 480, fontSize: 12, lineHeight: '20px', color: 'var(--sa-text)' }}>
       <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>PE(TTM) 是什么？</div>
       <div style={{ marginBottom: 8 }}>
         <span style={{ fontWeight: 500 }}>市盈率（滚动）</span>＝ 股价 ÷ 近12个月每股收益
       </div>
       <div style={{ marginBottom: 4, fontWeight: 500 }}>怎么看分位？</div>
-      <div style={{ color: '#666', marginBottom: 8 }}>
-        显示当前PE在<span style={{ color: '#999' }}>过去N年</span>所有交易日中的历史位置。<br/>
-        <span style={{ color: '#389e0d' }}>分位越低</span>＝相对历史越便宜；<span style={{ color: '#cf1322' }}>分位越高</span>＝相对历史越贵。
+      <div style={{ color: 'var(--sa-text-secondary)', marginBottom: 8 }}>
+        显示当前PE在<span style={{ color: 'var(--sa-text-tertiary)' }}>过去N年</span>所有交易日中的历史位置。<br/>
+        <span style={{ color: 'var(--sa-success)' }}>分位越低</span>＝相对历史越便宜；<span style={{ color: 'var(--sa-error)' }}>分位越高</span>＝相对历史越贵。
       </div>
       <div style={{ marginBottom: 4, fontWeight: 500 }}>参考意义</div>
-      <div style={{ color: '#666' }}>
+      <div style={{ color: 'var(--sa-text-secondary)' }}>
         • 分位 &lt; 20%：处于历史底部区域，安全边际较高<br/>
         • 分位 20%~50%：估值偏低，可考虑布局<br/>
         • 分位 50%~80%：估值偏高，谨慎追高<br/>
@@ -2586,18 +2991,18 @@ function ValuationTab({ data, code }) {
 
   // ── PB 解释 Tooltip ──
   const pbTooltip = (
-    <div style={{ width: 480, fontSize: 12, lineHeight: '20px', color: '#333' }}>
+    <div style={{ width: 480, fontSize: 12, lineHeight: '20px', color: 'var(--sa-text)' }}>
       <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>PB 是什么？</div>
       <div style={{ marginBottom: 8 }}>
         <span style={{ fontWeight: 500 }}>市净率</span>＝ 股价 ÷ 每股净资产（账面价值）
       </div>
       <div style={{ marginBottom: 4, fontWeight: 500 }}>怎么看分位？</div>
-      <div style={{ color: '#666', marginBottom: 8 }}>
-        显示当前PB在<span style={{ color: '#999' }}>过去N年</span>所有交易日中的历史位置。<br/>
-        PB适合评估<span style={{ color: '#666' }}>金融、重资产</span>行业（银行/钢铁/煤炭等）。
+      <div style={{ color: 'var(--sa-text-secondary)', marginBottom: 8 }}>
+        显示当前PB在<span style={{ color: 'var(--sa-text-tertiary)' }}>过去N年</span>所有交易日中的历史位置。<br/>
+        PB适合评估<span style={{ color: 'var(--sa-text-secondary)' }}>金融、重资产</span>行业（银行/钢铁/煤炭等）。
       </div>
       <div style={{ marginBottom: 4, fontWeight: 500 }}>参考意义</div>
-      <div style={{ color: '#666' }}>
+      <div style={{ color: 'var(--sa-text-secondary)' }}>
         • 分位 &lt; 20%：破净或接近破净，安全边际高<br/>
         • 分位 20%~50%：净资产折价，适合价值投资<br/>
         • 分位 &gt; 80%：市价远超净资产，警惕泡沫
@@ -2609,13 +3014,13 @@ function ValuationTab({ data, code }) {
   const Row = ({ label, tooltip, pct, current, precision, tooltipStyle }) => (
     <div style={{
       display: 'flex', alignItems: 'center',
-      padding: '12px 0', borderBottom: '1px solid #f5f5f5', gap: 12,
+      padding: '12px 0', borderBottom: '1px solid var(--sa-border-secondary)', gap: 12,
     }}>
       {/* 指标名 + 问号 */}
-      <span style={{ width: 90, flexShrink: 0, fontWeight: 500, color: '#333', display: 'flex', alignItems: 'center', gap: 2 }}>
+      <span style={{ width: 90, flexShrink: 0, fontWeight: 500, color: 'var(--sa-text)', display: 'flex', alignItems: 'center', gap: 2 }}>
         {label}
-        <Tooltip title={tooltip} placement="right" styles={{ body: { width: 500, maxWidth: 520, background: '#fff', color: '#333', fontSize: 12, lineHeight: '20px', boxShadow: '0 6px 16px rgba(0,0,0,0.12), 0 3px 6px rgba(0,0,0,0.08)', borderRadius: 10, padding: '10px 14px', border: '1px solid #e8e8e8' } }}>
-          <QuestionCircleOutlined style={{ fontSize: 12, color: '#bbb', cursor: 'pointer' }} />
+        <Tooltip title={tooltip} placement="right" styles={{ body: { width: 500, maxWidth: 520, background: 'var(--sa-bg-container)', color: 'var(--sa-text)', fontSize: 12, lineHeight: '20px', boxShadow: '0 6px 16px rgba(0,0,0,0.12), 0 3px 6px rgba(0,0,0,0.08)', borderRadius: 10, padding: '10px 14px', border: '1px solid var(--sa-border-secondary)' } }}>
+          <QuestionCircleOutlined style={{ fontSize: 12, color: 'var(--sa-text-quaternary)', cursor: 'pointer' }} />
         </Tooltip>
       </span>
 
@@ -2629,7 +3034,7 @@ function ValuationTab({ data, code }) {
       </span>
 
       {/* 当前值 */}
-      <span style={{ width: 100, flexShrink: 0, textAlign: 'center', fontSize: 14, color: '#333' }}>
+      <span style={{ width: 100, flexShrink: 0, textAlign: 'center', fontSize: 14, color: 'var(--sa-text)' }}>
         {current != null ? Number(current).toFixed(precision) : '-'}
       </span>
 
@@ -2650,7 +3055,7 @@ function ValuationTab({ data, code }) {
       {/* 表头 */}
       <div style={{
         display: 'flex', padding: '4px 0 6px', gap: 12,
-        borderBottom: '2px solid #e8e8e8', fontWeight: 600, fontSize: 12, color: '#999',
+        borderBottom: '2px solid var(--sa-border-secondary)', fontWeight: 600, fontSize: 12, color: 'var(--sa-text-tertiary)',
       }}>
         <span style={{ width: 90, flexShrink: 0 }}>指标</span>
         <span style={{ width: 100, flexShrink: 0, textAlign: 'center' }}>历史分位</span>
@@ -2661,7 +3066,7 @@ function ValuationTab({ data, code }) {
       <Row label="PE(TTM)" tooltip={peTooltip} pct={pePct} current={data.peCurrent} precision={1} />
       <Row label="PB"       tooltip={pbTooltip}  pct={pbPct} current={data.pbCurrent} precision={2} />
 
-      <div style={{ marginTop: 8, fontSize: 11, color: '#bbb', lineHeight: '18px' }}>
+      <div style={{ marginTop: 8, fontSize: 11, color: 'var(--sa-text-quaternary)', lineHeight: '18px' }}>
         {code} · 近{data.years || 3}年历史分位 · PE样本{data.peHistoryCount || 0}日 / PB样本{data.pbHistoryCount || 0}日<br/>
         分位定义：当前值在历史数据中的相对位置，&lt;20%低估 · 20%~50%合理 · 50%~80%偏贵 · &gt;80%高估
       </div>
@@ -2696,42 +3101,42 @@ function IndustryCorrelationTab({ data, code }) {
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={8}>
           <Card size="small" styles={{ body: {padding: '12px 16px', textAlign: 'center'} }}>
-            <div style={{ fontSize: 12, color: '#999', marginBottom: 4, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 4 }}>
+            <div style={{ fontSize: 12, color: 'var(--sa-text-tertiary)', marginBottom: 4, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 4 }}>
               Beta系数
               <Tooltip title="衡量个股相对于所属行业的波动敏感度。Beta>1 表示个股波动大于行业（高弹性），Beta<1 表示波动小于行业（防御性）。例如 Beta=0.63 意味着行业涨跌1%时，个股平均波动0.63%。">
-                <QuestionCircleOutlined style={{ fontSize: 11, color: '#bbb', cursor: 'pointer' }} />
+                <QuestionCircleOutlined style={{ fontSize: 11, color: 'var(--sa-text-quaternary)', cursor: 'pointer' }} />
               </Tooltip>
             </div>
             <div style={{ fontSize: 28, fontWeight: 600, color: betaColor }}>{beta}</div>
-            <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>{data.betaDesc || '-'}</div>
+            <div style={{ fontSize: 12, color: 'var(--sa-text-secondary)', marginTop: 4 }}>{data.betaDesc || '-'}</div>
           </Card>
         </Col>
         <Col span={8}>
           <Card size="small" styles={{ body: {padding: '12px 16px', textAlign: 'center'} }}>
-            <div style={{ fontSize: 12, color: '#999', marginBottom: 4, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 4 }}>
+            <div style={{ fontSize: 12, color: 'var(--sa-text-tertiary)', marginBottom: 4, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 4 }}>
               行业相关系数
               <Tooltip title="衡量个股与行业指数价格走势的线性相关程度，范围 -1 到 1。>0.7 强联动（几乎同步），0.3~0.7 中等相关，<0.3 弱相关（有独立行情）。例如 0.4 表示个股不完全跟随行业，有自己的独立逻辑。">
-                <QuestionCircleOutlined style={{ fontSize: 11, color: '#bbb', cursor: 'pointer' }} />
+                <QuestionCircleOutlined style={{ fontSize: 11, color: 'var(--sa-text-quaternary)', cursor: 'pointer' }} />
               </Tooltip>
             </div>
             <div style={{ fontSize: 28, fontWeight: 600, color: corrColor }}>{corr}</div>
-            <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>{data.corrDesc || '-'}</div>
+            <div style={{ fontSize: 12, color: 'var(--sa-text-secondary)', marginTop: 4 }}>{data.corrDesc || '-'}</div>
           </Card>
         </Col>
         <Col span={8}>
           <Card size="small" styles={{ body: {padding: '12px 16px', textAlign: 'center'} }}>
-            <div style={{ fontSize: 12, color: '#999', marginBottom: 4, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 4 }}>
+            <div style={{ fontSize: 12, color: 'var(--sa-text-tertiary)', marginBottom: 4, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 4 }}>
               行业分布（今日）
               <Tooltip title="所属行业今日整体涨跌分布。涨/跌家数反映板块情绪，可用于判断个股是否跑赢板块内多数股票。">
-                <QuestionCircleOutlined style={{ fontSize: 11, color: '#bbb', cursor: 'pointer' }} />
+                <QuestionCircleOutlined style={{ fontSize: 11, color: 'var(--sa-text-quaternary)', cursor: 'pointer' }} />
               </Tooltip>
             </div>
             <div style={{ fontSize: 16, fontWeight: 500 }}>
               <span style={{ color: '#f5222d' }}>{upCount}涨</span>
-              <span style={{ color: '#999', margin: '0 6px' }}>·</span>
+              <span style={{ color: 'var(--sa-text-tertiary)', margin: '0 6px' }}>·</span>
               <span style={{ color: '#52c41a' }}>{downCount}跌</span>
             </div>
-            <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
+            <div style={{ fontSize: 12, color: 'var(--sa-text-secondary)', marginTop: 4 }}>
               {industry} · 共{total}只
             </div>
           </Card>
@@ -2747,7 +3152,7 @@ function IndustryCorrelationTab({ data, code }) {
             scroll={{ x: 'max-content' }}
             dataSource={recentAlign}
             rowKey="dayIndex"
-            style={{ border: '1px solid #f0f0f0', borderRadius: 6 }}
+            style={{ border: '1px solid var(--sa-border-secondary)', borderRadius: 6 }}
             className="industry-excess-table"
             columns={[
               {
@@ -2755,7 +3160,7 @@ function IndustryCorrelationTab({ data, code }) {
                 render: (v, row) => (
                   <div>
                     <div>第{v}日</div>
-                    <div style={{ fontSize: 11, color: '#999' }}>{row.tradeDate || '-'}</div>
+                    <div style={{ fontSize: 11, color: 'var(--sa-text-tertiary)' }}>{row.tradeDate || '-'}</div>
                   </div>
                 ),
               },
@@ -2782,7 +3187,7 @@ function IndustryCorrelationTab({ data, code }) {
                   const t = Number(v);
                   if (t > 3) return <span style={{ color: '#f5222d' }}>大幅跑赢</span>;
                   if (t > 1) return <span style={{ color: '#fa8c16' }}>跑赢行业</span>;
-                  if (t > -1) return <span style={{ color: '#999' }}>基本同步</span>;
+                  if (t > -1) return <span style={{ color: 'var(--sa-text-tertiary)' }}>基本同步</span>;
                   if (t > -3) return <span style={{ color: '#1890ff' }}>跑输行业</span>;
                   return <span style={{ color: '#52c41a' }}>大幅跑输</span>;
                 },
@@ -2792,13 +3197,13 @@ function IndustryCorrelationTab({ data, code }) {
         </Card>
       )}
 
-      <div style={{ fontSize: 11, color: '#bbb' }}>
+      <div style={{ fontSize: 11, color: 'var(--sa-text-quaternary)' }}>
         {code} · 行业: {industry} · 样本: {sampleDays}日 · Beta基于个股收益对行业等权收益回归
       </div>
       <style>{`
         .industry-excess-table .ant-table-thead > tr > th,
         .industry-excess-table .ant-table-tbody > tr > td {
-          border-right: 1px solid #f0f0f0;
+          border-right: 1px solid var(--sa-border-secondary);
         }
         .industry-excess-table .ant-table-thead > tr > th:last-child,
         .industry-excess-table .ant-table-tbody > tr > td:last-child {
@@ -2835,26 +3240,26 @@ function LimitUpTab({ data, code }) {
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={6}>
           <Card size="small" styles={{ body: {padding: '12px 16px', textAlign: 'center'} }}>
-            <div style={{ fontSize: 12, color: '#999' }}>涨停次数</div>
+            <div style={{ fontSize: 12, color: 'var(--sa-text-tertiary)' }}>涨停次数</div>
             <div style={{ fontSize: 24, fontWeight: 600, color: '#f5222d' }}>{stats.limitUpCount || 0}</div>
           </Card>
         </Col>
         <Col span={6}>
           <Card size="small" styles={{ body: {padding: '12px 16px', textAlign: 'center'} }}>
-            <div style={{ fontSize: 12, color: '#999' }}>跌停次数</div>
+            <div style={{ fontSize: 12, color: 'var(--sa-text-tertiary)' }}>跌停次数</div>
             <div style={{ fontSize: 24, fontWeight: 600, color: '#52c41a' }}>{stats.limitDownCount || 0}</div>
           </Card>
         </Col>
         <Col span={6}>
           <Card size="small" styles={{ body: {padding: '12px 16px', textAlign: 'center'} }}>
-            <div style={{ fontSize: 12, color: '#999' }}>炸板次数</div>
+            <div style={{ fontSize: 12, color: 'var(--sa-text-tertiary)' }}>炸板次数</div>
             <div style={{ fontSize: 24, fontWeight: 600, color: '#fa8c16' }}>{stats.brokenCount || 0}</div>
           </Card>
         </Col>
         <Col span={6}>
           <Card size="small" styles={{ body: {padding: '12px 16px', textAlign: 'center'} }}>
-            <div style={{ fontSize: 12, color: '#999' }}>统计区间</div>
-            <div style={{ fontSize: 13, fontWeight: 500, color: '#333' }}>
+            <div style={{ fontSize: 12, color: 'var(--sa-text-tertiary)' }}>统计区间</div>
+            <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--sa-text)' }}>
               {stats.firstDate ? stats.firstDate.toString().slice(0,10) : '-'} ~ {stats.lastDate ? stats.lastDate.toString().slice(0,10) : '-'}
             </div>
           </Card>
@@ -2942,19 +3347,19 @@ function BlockTradeTab({ data, code }) {
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={6}>
           <Card size="small" styles={{ body: {padding: '12px 16px', textAlign: 'center'} }}>
-            <div style={{ fontSize: 12, color: '#999' }}>交易笔数</div>
-            <div style={{ fontSize: 24, fontWeight: 600, color: '#333' }}>{stats.totalCount || 0}</div>
+            <div style={{ fontSize: 12, color: 'var(--sa-text-tertiary)' }}>交易笔数</div>
+            <div style={{ fontSize: 24, fontWeight: 600, color: 'var(--sa-text)' }}>{stats.totalCount || 0}</div>
           </Card>
         </Col>
         <Col span={6}>
           <Card size="small" styles={{ body: {padding: '12px 16px', textAlign: 'center'} }}>
-            <div style={{ fontSize: 12, color: '#999' }}>累计金额</div>
-            <div style={{ fontSize: 20, fontWeight: 600, color: '#333' }}>{formatAmt(stats.totalAmount)}</div>
+            <div style={{ fontSize: 12, color: 'var(--sa-text-tertiary)' }}>累计金额</div>
+            <div style={{ fontSize: 20, fontWeight: 600, color: 'var(--sa-text)' }}>{formatAmt(stats.totalAmount)}</div>
           </Card>
         </Col>
         <Col span={6}>
           <Card size="small" styles={{ body: {padding: '12px 16px', textAlign: 'center'} }}>
-            <div style={{ fontSize: 12, color: '#999' }}>平均折价率</div>
+            <div style={{ fontSize: 12, color: 'var(--sa-text-tertiary)' }}>平均折价率</div>
             <div style={{ fontSize: 24, fontWeight: 600, color: avgDiscount != null && avgDiscount < 0 ? '#52c41a' : '#f5222d' }}>
               {avgDiscount != null ? (avgDiscount * 100).toFixed(2) + '%' : '-'}
             </div>
@@ -2962,8 +3367,8 @@ function BlockTradeTab({ data, code }) {
         </Col>
         <Col span={6}>
           <Card size="small" styles={{ body: {padding: '12px 16px', textAlign: 'center'} }}>
-            <div style={{ fontSize: 12, color: '#999' }}>统计区间</div>
-            <div style={{ fontSize: 13, fontWeight: 500, color: '#333' }}>
+            <div style={{ fontSize: 12, color: 'var(--sa-text-tertiary)' }}>统计区间</div>
+            <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--sa-text)' }}>
               {stats.firstDate ? stats.firstDate.toString().slice(0,10) : '-'} ~ {stats.lastDate ? stats.lastDate.toString().slice(0,10) : '-'}
             </div>
           </Card>
@@ -3049,6 +3454,7 @@ function BlockTradeTab({ data, code }) {
  * 缠论K线图 Tab — K线 + 笔 + 中枢 + 买卖点
  */
 function ChanChartTab({ data, code }) {
+  const { token } = theme.useToken();
   if (!data) return <Spin style={{ display: 'block', margin: '40px auto' }} />;
   if (data.error) return <Alert type="warning" message={data.error} />;
 
@@ -3113,7 +3519,7 @@ function ChanChartTab({ data, code }) {
     legend: {
       data: ['K线', '笔', '一买', '二买', '三买', '一卖', '二卖', '三卖'],
       bottom: 0,
-      textStyle: { fontSize: 11 },
+      textStyle: { fontSize: 11, color: token.colorTextSecondary },
     },
     grid: [
       { left: 60, right: 30, top: 30, height: '58%' },
@@ -3121,11 +3527,11 @@ function ChanChartTab({ data, code }) {
     ],
     xAxis: [
       { type: 'category', data: dates, gridIndex: 0, axisLabel: { show: false }, axisTick: { show: false }, splitLine: { show: false } },
-      { type: 'category', data: dates, gridIndex: 1, axisLabel: { fontSize: 10, rotate: 30 } },
+      { type: 'category', data: dates, gridIndex: 1, axisLabel: { fontSize: 10, rotate: 30, color: token.colorTextTertiary } },
     ],
     yAxis: [
-      { type: 'value', gridIndex: 0, scale: true, splitArea: { show: true } },
-      { type: 'value', gridIndex: 1, scale: true, splitNumber: 2 },
+      { type: 'value', gridIndex: 0, scale: true, splitArea: { show: true }, axisLabel: { color: token.colorTextTertiary } },
+      { type: 'value', gridIndex: 1, scale: true, splitNumber: 2, axisLabel: { color: token.colorTextTertiary } },
     ],
     series: [
       {
@@ -3211,6 +3617,7 @@ function ChanChartTab({ data, code }) {
  * 资金流向历史趋势 Tab
  */
 function MoneyFlowHistoryTab({ data, bidAskData, code }) {
+  const { token } = theme.useToken();
   if (!data) return <Spin style={{ display: 'block', margin: '40px auto' }} />;
   if (data.error) return <Alert type="warning" message={data.error} />;
 
@@ -3221,18 +3628,18 @@ function MoneyFlowHistoryTab({ data, bidAskData, code }) {
 
   const option = {
     tooltip: { trigger: 'axis' },
-    legend: { data: ['主力净流入(亿)', '资金面评分', '净流入占比(%)'], bottom: 0, textStyle: { fontSize: 11 } },
+    legend: { data: ['主力净流入(亿)', '资金面评分', '净流入占比(%)'], bottom: 0, textStyle: { fontSize: 11, color: token.colorTextSecondary } },
     grid: [
       { left: 70, right: 70, top: 30, height: '52%' },
       { left: 70, right: 70, top: '70%', height: '20%' },
     ],
     xAxis: [
       { type: 'category', data: dates, gridIndex: 0, axisLabel: { show: false }, axisTick: { show: false } },
-      { type: 'category', data: dates, gridIndex: 1, axisLabel: { fontSize: 10, rotate: 45 } },
+      { type: 'category', data: dates, gridIndex: 1, axisLabel: { fontSize: 10, rotate: 45, color: token.colorTextTertiary } },
     ],
     yAxis: [
-      { type: 'value', gridIndex: 0, name: '净流入(亿)', axisLabel: { formatter: v => v.toFixed(1) } },
-      { type: 'value', gridIndex: 1, min: 0, max: 25, name: '评分', splitNumber: 3 },
+      { type: 'value', gridIndex: 0, name: '净流入(亿)', axisLabel: { formatter: v => v.toFixed(1), color: token.colorTextTertiary } },
+      { type: 'value', gridIndex: 1, min: 0, max: 25, name: '评分', splitNumber: 3, axisLabel: { color: token.colorTextTertiary } },
     ],
     series: [
       {
@@ -3279,7 +3686,7 @@ function MoneyFlowHistoryTab({ data, bidAskData, code }) {
     <div>
       {/* 数据日期提示 */}
       {latestDate && (
-        <div style={{ marginBottom: 12, color: '#888', fontSize: 12 }}>
+        <div style={{ marginBottom: 12, color: 'var(--sa-text-tertiary)', fontSize: 12 }}>
           数据日期：{latestDate}
         </div>
       )}
@@ -3303,6 +3710,7 @@ function MoneyFlowHistoryTab({ data, bidAskData, code }) {
  * 相对强弱 Tab — 个股 vs 行业累计收益 + RS Ratio
  */
 function RelativeStrengthTab({ data, code }) {
+  const { token } = theme.useToken();
   if (!data) return <Spin style={{ display: 'block', margin: '40px auto' }} />;
   if (data.error) return <Alert type="warning" message={data.error} />;
 
@@ -3313,18 +3721,18 @@ function RelativeStrengthTab({ data, code }) {
 
   const option = {
     tooltip: { trigger: 'axis' },
-    legend: { data: [code || '个股', `${industry || '行业'}等权`, 'RS Ratio'], bottom: 0, textStyle: { fontSize: 11 } },
+    legend: { data: [code || '个股', `${industry || '行业'}等权`, 'RS Ratio'], bottom: 0, textStyle: { fontSize: 11, color: token.colorTextSecondary } },
     grid: [
       { left: 70, right: 70, top: 30, height: '52%' },
       { left: 70, right: 70, top: '70%', height: '20%' },
     ],
     xAxis: [
       { type: 'category', data: shortDates, gridIndex: 0, axisLabel: { show: false }, axisTick: { show: false } },
-      { type: 'category', data: shortDates, gridIndex: 1, axisLabel: { fontSize: 10, rotate: 45 } },
+      { type: 'category', data: shortDates, gridIndex: 1, axisLabel: { fontSize: 10, rotate: 45, color: token.colorTextTertiary } },
     ],
     yAxis: [
-      { type: 'value', gridIndex: 0, name: '累计收益(%)', axisLabel: { formatter: v => v.toFixed(1) + '%' } },
-      { type: 'value', gridIndex: 1, name: 'RS Ratio', splitNumber: 3 },
+      { type: 'value', gridIndex: 0, name: '累计收益(%)', axisLabel: { formatter: v => v.toFixed(1) + '%', color: token.colorTextTertiary } },
+      { type: 'value', gridIndex: 1, name: 'RS Ratio', splitNumber: 3, axisLabel: { color: token.colorTextTertiary } },
     ],
     series: [
       {
@@ -3358,7 +3766,7 @@ function RelativeStrengthTab({ data, code }) {
         symbol: 'none',
         markLine: {
           silent: true,
-          data: [{ yAxis: 1, lineStyle: { color: '#999', type: 'dashed' }, label: { formatter: 'RS=1' } }],
+          data: [{ yAxis: 1, lineStyle: { color: token.colorTextTertiary, type: 'dashed' }, label: { formatter: 'RS=1' } }],
         },
       },
     ],
@@ -3462,11 +3870,11 @@ function PatternSellTab({ code }) {
                     <Tag color={PATTERN_INFO[r.patternType]?.color || 'blue'}>
                       {PATTERN_INFO[r.patternType]?.name || r.patternType}
                     </Tag>
-                    <span style={{ marginLeft: 8, fontSize: 13, color: '#595959' }}>
+                    <span style={{ marginLeft: 8, fontSize: 13, color: 'var(--sa-text-secondary)' }}>
                       强度 {r.score}分
                     </span>
                     <br />
-                    <span style={{ fontSize: 12, color: '#8c8c8c' }}>
+                    <span style={{ fontSize: 12, color: 'var(--sa-text-secondary)' }}>
                       {r.signals?.join(' / ')}
                     </span>
                   </div>
@@ -3481,7 +3889,7 @@ function PatternSellTab({ code }) {
               <Tag color={SELL_ACTION_COLOR[sellAction]} style={{ fontSize: 14, padding: '4px 12px' }}>
                 {SELL_ACTION_NAME[sellAction]}
               </Tag>
-              <span style={{ marginLeft: 12, fontSize: 13, color: '#595959' }}>
+              <span style={{ marginLeft: 12, fontSize: 13, color: 'var(--sa-text-secondary)' }}>
                 卖出信号强度: {sellScore}分
               </span>
             </div>
@@ -3492,7 +3900,7 @@ function PatternSellTab({ code }) {
                 {sellSignals.map((s, i) => (
                   <div key={i} style={{ marginBottom: 6, fontSize: 13 }}>
                     <Tag color="volcano" style={{ fontSize: 12 }}>{s.name}</Tag>
-                    <span style={{ marginLeft: 4, color: '#8c8c8c' }}>{s.description}</span>
+                    <span style={{ marginLeft: 4, color: 'var(--sa-text-secondary)' }}>{s.description}</span>
                     <Tag style={{ marginLeft: 8 }}>权重{s.weight}</Tag>
                   </div>
                 ))}

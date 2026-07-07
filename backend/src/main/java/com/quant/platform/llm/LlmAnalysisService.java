@@ -444,4 +444,56 @@ public class LlmAnalysisService {
     public LlmAnalysis getLatestAnalysis(String stockCode) {
         return llmAnalysisMapper.findLatestByStockCode(stockCode);
     }
+
+    /**
+     * 对单只股票执行LLM推理（供个股分析页"LLM深度解读"按钮调用）
+     * 1. 查 stock_info 获取名称
+     * 2. 查因子值 + 财务数据 组装 Prompt
+     * 3. 调用 LLM → 解析 → 持久化
+     */
+    public LlmAnalysis analyzeSingleStock(String stockCode) {
+        if (!llmService.isEnabled()) {
+            throw new IllegalStateException("LLM未启用或API Key未配置，请在 application.yml 或环境变量中配置 LLM_API_KEY");
+        }
+        String pureCode = stripSuffix(stockCode);
+        log.info("[LlmAnalysisService] 单股LLM分析: code={}", pureCode);
+
+        // 1. 获取股票名称
+        String stockName;
+        try {
+            stockName = jdbcTemplate.queryForObject(
+                    "SELECT name FROM stock_info WHERE code = ? LIMIT 1", String.class, pureCode);
+        } catch (Exception e) {
+            stockName = pureCode;
+        }
+
+        // 2. 构造最小 StockRecommendation 用于复用 buildUserPrompt/parseAnalysis
+        StockRecommendation rec = new StockRecommendation();
+        rec.setStockCode(pureCode);
+        rec.setStockName(stockName);
+        rec.setFinalScore(0.0); // 单股分析无推荐评分
+
+        // 3. 构建 Prompt
+        String userPrompt = buildUserPrompt(rec);
+
+        // 4. 调用 LLM
+        JsonNode jsonNode = llmService.chatAsJson(SYSTEM_PROMPT, userPrompt);
+        if (jsonNode == null) {
+            throw new RuntimeException("LLM调用失败，未返回有效JSON，请检查后端日志中 [LlmService] 相关错误");
+        }
+
+        // 5. 解析结果
+        LlmAnalysis analysis;
+        try {
+            analysis = parseAnalysis(rec, jsonNode);
+            // 删除该股票今天的旧记录，再插入新的
+            llmAnalysisMapper.deleteByStockCodeAndDate(pureCode, LocalDate.now());
+            llmAnalysisMapper.insert(analysis);
+            log.info("[LlmAnalysisService] 单股LLM分析完成: code={}, recommendation={}, risk={}",
+                    pureCode, analysis.getRecommendation(), analysis.getRiskLevel());
+        } catch (Exception e) {
+            throw new RuntimeException("LLM分析结果解析失败: " + e.getMessage(), e);
+        }
+        return analysis;
+    }
 }

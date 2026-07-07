@@ -120,6 +120,7 @@ public class MonitorController {
         result.put("code", 200);
         result.put("data", Map.of(
                 "monitoring", intradayMonitorService.isMonitoring(),
+                "initialized", !intradayMonitorService.getTargetPriceCache().isEmpty(),
                 "watchingCount", intradayMonitorService.getTargetPriceCache().size(),
                 "dataDate", intradayMonitorService.getDataDate().toString(),
                 "targetPrices", targetPrices,
@@ -132,6 +133,31 @@ public class MonitorController {
     @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter stream() {
         return intradayMonitorService.createSseEmitter();
+    }
+
+    /** 手动启动/恢复盘中监控 */
+    @PostMapping("/start")
+    public ResponseEntity<Map<String, Object>> startMonitoring() {
+        intradayMonitorService.startMonitoring();
+        Map<String, Object> result = new HashMap<>();
+        result.put("code", 200);
+        result.put("data", Map.of(
+                "monitoring", intradayMonitorService.isMonitoring(),
+                "watchingCount", intradayMonitorService.getTargetPriceCache().size()
+        ));
+        result.put("message", "监控已启动");
+        return ResponseEntity.ok(result);
+    }
+
+    /** 手动停止盘中监控 */
+    @PostMapping("/stop")
+    public ResponseEntity<Map<String, Object>> stopMonitoring() {
+        intradayMonitorService.stopMonitoring();
+        Map<String, Object> result = new HashMap<>();
+        result.put("code", 200);
+        result.put("data", Map.of("monitoring", false));
+        result.put("message", "监控已停止");
+        return ResponseEntity.ok(result);
     }
 
     /** 清除信号历史 */

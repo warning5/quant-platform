@@ -692,7 +692,10 @@ public class DataUpdateService {
             // ★ 发布任务完成事件，供依赖调度使用
             if (eventPublisher != null && ut != null && !ut.isEmpty()) {
                 boolean taskOk = "SUCCESS".equals(task.getStatus());
-                eventPublisher.publishEvent(new DataUpdateCompletedEvent(this, ut, taskOk, durationSec));
+                // 使用原始调度任务 key，确保 SENTIMENT_MF/SENTIMENT_OTHER 等子任务能正确触发依赖链
+                String eventKey = request.getTaskKey() != null && !request.getTaskKey().isEmpty()
+                        ? request.getTaskKey() : ut;
+                eventPublisher.publishEvent(new DataUpdateCompletedEvent(this, eventKey, taskOk, durationSec));
             }
         }
     }
@@ -1067,7 +1070,8 @@ public class DataUpdateService {
         if ("DIVIDEND".equals(updateType)) {
             cmd.add("update_dividend_baostock.py");
             if (request.isResume()) cmd.add("--resume");
-            if (request.isForce()) cmd.add("--force");
+            // update_dividend_baostock.py 不支持 --force 参数
+            // 全量/增量通过 --resume 区分：有 --resume 跳过已有数据，无则全量重新采集
             if (request.getLimit() != null && request.getLimit() > 0) {
                 cmd.add("--limit");
                 cmd.add(request.getLimit().toString());

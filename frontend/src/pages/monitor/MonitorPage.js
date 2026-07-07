@@ -88,6 +88,18 @@ export default function MonitorPage() {
       if (data?.signalHistory && Array.isArray(data.signalHistory) && data.signalHistory.length > 0) {
         setSseSignals(data.signalHistory);
       }
+      // 交易时段内自动恢复监控（系统休眠后 @Scheduled 可能失效）
+      if (data && !data.monitoring && data.initialized) {
+        const now = new Date();
+        const day = now.getDay(); // 0=周日, 6=周六
+        const hour = now.getHours();
+        const minute = now.getMinutes();
+        const inMorning = (hour === 9 && minute >= 30) || hour === 10 || (hour === 11 && minute < 30);
+        const inAfternoon = hour === 13 || hour === 14;
+        if (day >= 1 && day <= 5 && (inMorning || inAfternoon)) {
+          api.post('/monitor/start').catch(() => {});
+        }
+      }
     } catch (err) {
       const msg = err.response?.data?.message || err.message || '未知错误';
       message.error('获取监控状态失败: ' + msg);
@@ -617,8 +629,16 @@ export default function MonitorPage() {
             }>
             <QuestionCircleOutlined style={{ color: '#8c8c8c', fontSize: 16, cursor: 'pointer' }} />
           </Tooltip>
-          <Tooltip title={status?.monitoring ? '盘中监控运行中' : '交易时段(9:30-15:00)内自动启动，当前处于非交易时段或服务刚重启'}>
-            <Tag color={status?.monitoring ? 'success' : 'default'}>{status?.monitoring ? '运行中' : '未启动'}</Tag>
+          <Tooltip title={
+            status?.monitoring
+              ? '盘中监控运行中'
+              : (status?.initialized
+                ? '数据已加载，非交易时段或监控待启动'
+                : '交易时段(9:30-15:00)内自动启动，当前无监控数据')
+          }>
+            <Tag color={status?.monitoring ? 'success' : (status?.initialized ? 'gold' : 'default')}>
+              {status?.monitoring ? '运行中' : (status?.initialized ? '待机中' : '未启动')}
+            </Tag>
           </Tooltip>
           {marketClosed ? (
             <Tooltip title="今日交易已结束，监控已自动停止，推送已关闭">

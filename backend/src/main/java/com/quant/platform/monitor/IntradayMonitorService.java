@@ -52,6 +52,8 @@ public class IntradayMonitorService {
 
     /** K线并行拉取线程池 */
     private final ExecutorService klinePool;
+    /** 独立调度器（不受 Spring TaskScheduler 休眠损坏影响） */
+    private final ScheduledExecutorService monitorScheduler;
 
     /** 候选股目标价缓存: stockCode -> TargetPriceInfo */
     private final Map<String, TargetPriceInfo> targetPriceCache = new ConcurrentHashMap<>();
@@ -100,8 +102,7 @@ public class IntradayMonitorService {
     private int stopCooldownMinutes;
     @Value("${quant.monitor.signal.proximity-pct:0.02}")
     private double proximityPct;
-    @Value("${quant.monitor.poll-interval-seconds:10}")
-    private int pollIntervalSeconds;
+    private final int pollIntervalSeconds;
 
     @Getter
     private volatile LocalDate dataDate;
@@ -110,13 +111,15 @@ public class IntradayMonitorService {
                                   PaperTradingService paperTradingService,
                                   EntrySignalAnalyzer signalAnalyzer, TradeCalendarService tradeCalendarService,
                                   SellSignalEngine sellSignalEngine,
-                                  @Value("${quant.monitor.kline-thread-pool-size:4}") int klinePoolSize) {
+                                  @Value("${quant.monitor.kline-thread-pool-size:4}") int klinePoolSize,
+                                  @Value("${quant.monitor.poll-interval-seconds:10}") int pollIntervalSeconds) {
         this.jdbcTemplate = jdbcTemplate;
         this.notificationService = notificationService;
         this.paperTradingService = paperTradingService;
         this.signalAnalyzer = signalAnalyzer;
         this.tradeCalendarService = tradeCalendarService;
         this.sellSignalEngine = sellSignalEngine;
+        this.pollIntervalSeconds = pollIntervalSeconds;
         this.klinePool = Executors.newFixedThreadPool(klinePoolSize,
                 r -> {
                     Thread t = new Thread(r, "kline-analyze");
@@ -126,6 +129,18 @@ public class IntradayMonitorService {
         this.dataDate = LocalDate.now();
         // 启动时从数据库加载自定义股票
         loadCustomStocksFromDb();
+
+        // 独立调度器：不依赖 Spring @Scheduled，避免系统休眠后 TaskScheduler 损坏导致监控失效
+        this.monitorScheduler = Executors.newScheduledThreadPool(2, r -> {
+            Thread t = new Thread(r, "monitor-sched");
+            t.setDaemon(true);
+            return t;
+        });
+        // 每 pollIntervalSeconds 秒执行监控循环
+        this.monitorScheduler.scheduleAtFixedRate(this::safeMonitorLoop, 10, pollIntervalSeconds, TimeUnit.SECONDS);
+        // 每5秒刷新指数行情
+        this.monitorScheduler.scheduleAtFixedRate(this::safeRefreshIndexQuotes, 5, 5, TimeUnit.SECONDS);
+        log.info("[IntradayMonitor] 独立调度器已启动, pollInterval={}s", pollIntervalSeconds);
     }
 
     // ── 交易日判断（使用数据库交易日历） ──
@@ -183,8 +198,16 @@ public class IntradayMonitorService {
     /**
      * 高频轮询入口，每10秒执行一次
      * 仅在交易时段（09:30~15:00）内运行
+     * 由独立调度器触发（不使用 @Scheduled，避免系统休眠后失效）
      */
-    @Scheduled(cron = "0/10 * 9-14 * * MON-FRI")  // 周一到周五，9:00~14:59每10秒（MON-FRI 更安全）
+    private void safeMonitorLoop() {
+        try {
+            monitorLoop();
+        } catch (Exception e) {
+            log.error("[IntradayMonitor] 监控循环异常", e);
+        }
+    }
+
     public void monitorLoop() {
         LocalDateTime now = LocalDateTime.now();
         LocalDate today = now.toLocalDate();
@@ -240,9 +263,16 @@ public class IntradayMonitorService {
 
     /**
      * 定时刷新大盘指数行情（每5秒一次）
-     * 复用 qt.gtimg.cn 报价接口，指数代码如 sh000001、sz399001 等
+     * 由独立调度器触发
      */
-    @Scheduled(cron = "0/5 * 9-15 * * MON-FRI")
+    private void safeRefreshIndexQuotes() {
+        try {
+            refreshIndexQuotes();
+        } catch (Exception e) {
+            // 静默失败，下次再重试
+        }
+    }
+
     public void refreshIndexQuotes() {
         if (isNonTradingDay(LocalDate.now())) return;
         try {
@@ -1086,6 +1116,36 @@ public class IntradayMonitorService {
 
     public boolean isMonitoring() {
         return monitoring;
+    }
+
+    /**
+     * 手动启动/恢复监控（供 Controller 调用）
+     * 场景：系统休眠后 @Scheduled 失效、或非交易时段手动启动
+     */
+    public void startMonitoring() {
+        if (monitoring) {
+            log.info("[IntradayMonitor] 监控已在运行中，跳过启动");
+            return;
+        }
+        monitoring = true;
+        marketClosedSent = false;
+        log.info("[IntradayMonitor] ===== 手动启动监控 =====");
+        loadTargetPrices();
+    }
+
+    /**
+     * 手动停止监控
+     */
+    public void stopMonitoring() {
+        monitoring = false;
+        log.info("[IntradayMonitor] ===== 手动停止监控 =====");
+    }
+
+    @jakarta.annotation.PreDestroy
+    public void shutdown() {
+        log.info("[IntradayMonitor] 关闭调度器...");
+        monitorScheduler.shutdownNow();
+        klinePool.shutdownNow();
     }
 
     /** 获取最新实时价格缓存（供Controller查询） */

@@ -48,6 +48,9 @@ public class ScheduleService implements SchedulingConfigurer {
     /** 今日已完成任务集合（用于依赖编排：避免重复触发） */
     private final Map<String, Boolean> todayCompleted = new ConcurrentHashMap<>();
 
+    /** 手动触发的任务集合（key = taskKey + ":" + date），用于绕过下游 todayCompleted 去重 */
+    private final Map<String, Boolean> manualTriggeredToday = new ConcurrentHashMap<>();
+
     /** 内存缓存：从 DB 加载的依赖链（upstream → List<{downstream, delayMs}>），定时刷新 */
     private volatile Map<String, List<Map<String, Object>>> dependencyChainCache = Map.of();
 
@@ -204,6 +207,16 @@ public class ScheduleService implements SchedulingConfigurer {
     }
 
     /**
+     * 手动触发任务：标记为手动触发，完成后绕过下游 todayCompleted 去重
+     */
+    public void executeTaskManual(String taskKey) {
+        String manualKey = taskKey + ":" + LocalDate.now();
+        manualTriggeredToday.put(manualKey, true);
+        log.info("[ScheduleService] 手动触发任务: {} (将绕过下游去重)", taskKey);
+        executeTask(taskKey);
+    }
+
+    /**
      * 执行任务：构建 DataUpdateRequest → 提交给 DataUpdateService（支持并发）
      * 完成后自动触发依赖链下游任务
      */
@@ -344,6 +357,10 @@ public class ScheduleService implements SchedulingConfigurer {
         String doneKey = "DONE_" + taskKey + "_" + LocalDate.now();
         todayCompleted.put(doneKey, true);
 
+        // 检查上游是否为手动触发（手动触发绕过下游去重）
+        String manualKey = taskKey + ":" + LocalDate.now();
+        boolean upstreamManual = manualTriggeredToday.containsKey(manualKey);
+
         // 从 DB 读取依赖链
         Map<String, List<Map<String, Object>>> chain = dependencyChainCache;
         List<Map<String, Object>> dependents = chain.get(taskKey);
@@ -357,8 +374,14 @@ public class ScheduleService implements SchedulingConfigurer {
 
             String depDoneKey = "DONE_" + depKey + "_" + LocalDate.now();
             if (todayCompleted.containsKey(depDoneKey)) {
-                log.info("[ScheduleService] 依赖任务 {} 今日已执行，跳过触发", depKey);
-                continue;
+                if (upstreamManual) {
+                    // 手动触发：清除下游完成标记，允许重新执行
+                    todayCompleted.remove(depDoneKey);
+                    log.info("[ScheduleService] 手动触发：清除下游 {} 的今日完成标记，允许重新触发", depKey);
+                } else {
+                    log.info("[ScheduleService] 依赖任务 {} 今日已执行，跳过触发", depKey);
+                    continue;
+                }
             }
 
             // 检查该任务是否已启用
@@ -403,6 +426,7 @@ public class ScheduleService implements SchedulingConfigurer {
      */
     private DataUpdateRequest buildRequestFromKey(String taskKey, String extraConfigJson) {
         DataUpdateRequest req = new DataUpdateRequest();
+        req.setTaskKey(taskKey);  // 保存原始调度任务 key，用于依赖链事件触发
         String upper = taskKey.toUpperCase();
 
         // 解析 extra_config

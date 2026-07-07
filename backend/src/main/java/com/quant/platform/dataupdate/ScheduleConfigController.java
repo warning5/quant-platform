@@ -8,7 +8,6 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -245,11 +244,11 @@ public class ScheduleConfigController {
     public ApiResponse<Map<String, Object>> triggerTask(@PathVariable String taskKey) {
         try {
             String upper = taskKey.toUpperCase();
-            // 所有手动触发统一走 ScheduleService.executeTask，确保依赖链生效。
+            // 所有手动触发统一走 ScheduleService.executeTaskManual，确保依赖链生效且绕过下游去重。
             // 用异步线程执行，避免 HTTP 长时间阻塞（DAILY_RECOMMENDATION 等同步任务需要）。
             CompletableFuture.runAsync(() -> {
                 try {
-                    scheduleService.executeTask(upper);
+                    scheduleService.executeTaskManual(upper);
                 } catch (Exception e) {
                     log.error("[ScheduleConfig] 异步执行 {} 失败: {}", upper, e.getMessage(), e);
                 }
@@ -276,6 +275,7 @@ public class ScheduleConfigController {
      */
     private DataUpdateRequest buildRequestFromKey(String taskKey, String extraConfigJson) {
         DataUpdateRequest req = new DataUpdateRequest();
+        req.setTaskKey(taskKey);  // 保存原始调度任务 key，用于依赖链事件触发
         String upper = taskKey.toUpperCase();
 
         // 解析 extra_config（与 ScheduleService 保持一致）
