@@ -38,8 +38,10 @@ public class EntrySignalAnalyzer {
     /** 腾讯分钟K线接口（mkline支持m5，newfqkline只支持day/week/month） */
     private static final String KLINE_URL = "https://ifzq.gtimg.cn/appstock/app/kline/mkline?param=%s&_var=m5_today&r=%f";
 
-    /** 复用HttpClient避免每次新建（连接池+keep-alive） */
+    /** 复用HttpClient避免每次新建（连接池+keep-alive）
+     *  腾讯ifzq.gtimg.cn mkline接口不支持HTTP/2，会发送GOAWAY导致请求失败，强制HTTP/1.1 */
     private final java.net.http.HttpClient httpClient = java.net.http.HttpClient.newBuilder()
+            .version(java.net.http.HttpClient.Version.HTTP_1_1)
             .connectTimeout(java.time.Duration.ofSeconds(5))
             .build();
 

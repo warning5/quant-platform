@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Card, Table, Button, Tag, Space, Alert, Typography, Tooltip, Modal, Input, InputNumber, Form, Popover, Switch, Dropdown, Row, Col } from 'antd';
+import { Card, Table, Button, Tag, Space, Alert, Typography, Tooltip, Modal, Input, InputNumber, Form, Popover, Switch, Dropdown, Row, Col, theme } from 'antd';
 import { message, notification } from '../../utils/messageUtil';
 import { ReloadOutlined, PlayCircleOutlined, EyeOutlined, ThunderboltOutlined, QuestionCircleOutlined, PlusOutlined, DeleteOutlined, EditOutlined, BellOutlined, MoreOutlined, FundOutlined } from '@ant-design/icons';
 import api, { silentConfig } from '../../api';
@@ -60,6 +60,7 @@ export default function MonitorPage() {
   const marketClosedRef = useRef(false);    // ref 避免闭包旧值问题
   const [notificationsPaused, setNotificationsPaused] = useState(false);
   const notificationsPausedRef = useRef(false);  // ref 避免 SSE 闭包问题
+  const { token } = theme.useToken();
 
   const fetchStatus = useCallback(async () => {
     setLoading(true);
@@ -198,7 +199,7 @@ export default function MonitorPage() {
                 description: data.message,
                 duration: isStop ? 0 : 10,
                 style: {
-                  borderColor: isBuy ? '#52c41a' : isStop ? '#ff4d4f' : '#1890ff',
+                  borderColor: isBuy ? token.colorSuccess : isStop ? token.colorError : token.colorPrimary,
                   borderWidth: 2,
                 },
               });
@@ -463,7 +464,7 @@ export default function MonitorPage() {
             placement="rightTop"
             content={
               <Space>
-                <Button type="link" size="small" icon={<EditOutlined />} onClick={(e) => { e.stopPropagation(); handleEditCustomStock(r); }} style={{ padding: 0, fontSize: 12, color: '#1890ff' }}>编辑</Button>
+                <Button type="link" size="small" icon={<EditOutlined />} onClick={(e) => { e.stopPropagation(); handleEditCustomStock(r); }} style={{ padding: 0, fontSize: 12, color: 'var(--mp-primary)' }}>编辑</Button>
                 <Button type="link" danger size="small" icon={<DeleteOutlined />} onClick={(e) => { e.stopPropagation(); handleRemoveCustomStock(r.stockCode); }} style={{ padding: 0, fontSize: 12 }}>删除</Button>
               </Space>
             }
@@ -482,7 +483,7 @@ export default function MonitorPage() {
             placement="rightTop"
             content={
               <Space>
-                <Button type="link" size="small" icon={<EditOutlined />} onClick={(e) => { e.stopPropagation(); handleEditCustomStock(r); }} style={{ padding: 0, fontSize: 12, color: '#1890ff' }}>编辑</Button>
+                <Button type="link" size="small" icon={<EditOutlined />} onClick={(e) => { e.stopPropagation(); handleEditCustomStock(r); }} style={{ padding: 0, fontSize: 12, color: 'var(--mp-primary)' }}>编辑</Button>
                 <Button type="link" danger size="small" icon={<DeleteOutlined />} onClick={(e) => { e.stopPropagation(); handleRemoveCustomStock(r.stockCode); }} style={{ padding: 0, fontSize: 12 }}>删除</Button>
               </Space>
             }
@@ -558,7 +559,7 @@ export default function MonitorPage() {
       width: 140,
       render: (_, r) => {
         const sig = getSignalInfo(r);
-        if (!sig) return <Tag color="#999" size="small">未扫描</Tag>;
+        if (!sig) return <Tag color="default" size="small">未扫描</Tag>;
         const t = sig.signalType;
         // SSE / 扫描触发的买入信号
         if (t === 'BUY' || t === 'STRONG_BUY' || t === 'BUY_FALLBACK') return <Tooltip title={sig.message}><Tag color="red" size="small">买入信号</Tag></Tooltip>;
@@ -578,8 +579,8 @@ export default function MonitorPage() {
         if (pos === 'ABOVE') return <Tooltip title={sig.message}><Tag color="default" size="small">区间上方</Tag></Tooltip>;
         if (t === 'BELOW') return <Tooltip title={sig.message}><Tag color="green" size="small">区间下方</Tag></Tooltip>;
         if (t === 'ABOVE') return <Tooltip title={sig.message}><Tag color="default" size="small">区间上方</Tag></Tooltip>;
-        if (t === 'NO_PRICE') return <Tag color="#999" size="small">无价格</Tag>;
-        if (t === 'NO_RANGE') return <Tag color="#999" size="small">无区间</Tag>;
+        if (t === 'NO_PRICE') return <Tag color="default" size="small">无价格</Tag>;
+        if (t === 'NO_RANGE') return <Tag color="default" size="small">无区间</Tag>;
         return (
           <Tooltip title={sig.message}>
             <Tag color="default" size="small">{t}</Tag>
@@ -593,7 +594,24 @@ export default function MonitorPage() {
   const signalCount = scanResult?.signalCount ?? 0;
 
   return (
-    <div style={{ padding: '12px 8px' }}>
+    <div style={{
+      padding: '12px 8px',
+      '--mp-text': token.colorText,
+      '--mp-text-secondary': token.colorTextSecondary,
+      '--mp-text-tertiary': token.colorTextTertiary,
+      '--mp-text-quaternary': token.colorTextQuaternary,
+      '--mp-bg': token.colorBgLayout,
+      '--mp-bg-container': token.colorBgContainer,
+      '--mp-bg-secondary': token.colorFillTertiary,
+      '--mp-bg-tertiary': token.colorFillQuaternary,
+      '--mp-border': token.colorBorder,
+      '--mp-border-secondary': token.colorBorderSecondary,
+      '--mp-primary': token.colorPrimary,
+      '--mp-error-bg': token.colorErrorBg,
+      '--mp-warning-bg': token.colorWarningBg,
+      '--mp-info-bg': token.colorInfoBg,
+      '--mp-success-bg': token.colorSuccessBg,
+    }}>
       {/* 页头 */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <Space>
@@ -611,23 +629,23 @@ export default function MonitorPage() {
                 <div style={{ marginBottom: 4 }}><Tag color="green" size="small">区间下方</Tag> 未扫描/扫描后：实时价低于买入区间下沿</div>
                 <div style={{ marginBottom: 4 }}><Tag color="default" size="small">区间上方</Tag> 未扫描/扫描后：实时价高于买入区间上沿</div>
 
-                <div style={{ marginTop: 8, borderTop: '1px solid #e8e8e8', paddingTop: 6, fontWeight: 600 }}>价格判断 vs K线扫描</div>
+                <div style={{ marginTop: 8, borderTop: '1px solid var(--mp-border)', paddingTop: 6, fontWeight: 600 }}>价格判断 vs K线扫描</div>
                 <div>未点击「手动扫描」时，列表只根据<b>实时价</b>判断位置：区间内 / 区间上方 / 区间下方 / 止损警告。</div>
                 <div style={{ marginBottom: 6 }}>点击「手动扫描」后，对进入触发区间(±2%)的股票拉取<b>m5分钟K线</b>做4维评分，进一步细分为：买入信号 / 观察中 / 区间外。</div>
 
-                <div style={{ marginTop: 8, borderTop: '1px solid #e8e8e8', paddingTop: 6, fontWeight: 600 }}>分钟K线作用</div>
+                <div style={{ marginTop: 8, borderTop: '1px solid var(--mp-border)', paddingTop: 6, fontWeight: 600 }}>分钟K线作用</div>
                 <div>价格进入买入区间(±2%)时，自动拉取m5分钟K线做4维评分：</div>
-                <div style={{ paddingLeft: 12, color: '#595959', fontSize: 12 }}>
+                <div style={{ paddingLeft: 12, color: 'var(--mp-text-secondary)', fontSize: 12 }}>
                   突破确认(35) + 均线排列(20) + 量价配合(25) + 回踩确认(20)
                 </div>
                 <div style={{ marginBottom: 6 }}>总分≥80才触发买入信号。非交易时段降级为纯价格判断。</div>
 
-                <div style={{ marginTop: 8, borderTop: '1px solid #e8e8e8', paddingTop: 6, fontWeight: 600 }}>实时推送机制</div>
+                <div style={{ marginTop: 8, borderTop: '1px solid var(--mp-border)', paddingTop: 6, fontWeight: 600 }}>实时推送机制</div>
                 <div>后端每10秒轮询行情，价格变动通过SSE实时推送到页面，无需手动刷新。</div>
                 <div style={{ marginBottom: 6 }}>K线拉取已改为并行（线程池），多只股同时分析不叠加延迟。</div>
               </div>
             }>
-            <QuestionCircleOutlined style={{ color: '#8c8c8c', fontSize: 16, cursor: 'pointer' }} />
+            <QuestionCircleOutlined style={{ color: 'var(--mp-text-tertiary)', fontSize: 16, cursor: 'pointer' }} />
           </Tooltip>
           <Tooltip title={
             status?.monitoring
@@ -656,7 +674,7 @@ export default function MonitorPage() {
           )}
           <Tooltip title={notificationsPaused ? '通知已暂停：不弹窗、不响铃，数据与信号列表仍在更新' : '通知开启中，点击暂停'}>
             <span style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-              <BellOutlined style={{ color: notificationsPaused ? '#8c8c8c' : '#faad14', fontSize: 15 }} />
+              <BellOutlined style={{ color: notificationsPaused ? 'var(--mp-text-tertiary)' : '#faad14', fontSize: 15 }} />
               <Switch
                 size="small"
                 checked={!notificationsPaused}
@@ -698,7 +716,7 @@ export default function MonitorPage() {
 
       {/* 大盘指数实时面板（每5秒自动刷新） */}
       {indexQuotes.length > 0 && (
-        <Card size="small" style={{ marginBottom: 10 }} bodyStyle={{ padding: '8px 12px' }}>
+        <Card size="small" style={{ marginBottom: 10 }} styles={{ body: { padding: '8px 12px' } }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
             <span style={{ fontSize: 13, fontWeight: 600 }}>
               <FundOutlined style={{ marginRight: 4 }} />
@@ -718,14 +736,14 @@ export default function MonitorPage() {
               const sign = amount > 0 ? '+' : '';
               return (
                 <Col key={idx.code} xs={12} sm={8} md={6} lg={4} xl={3}>
-                  <div style={{ padding: '4px 6px', background: '#fafafa', borderRadius: 4, border: '1px solid #f0f0f0' }}>
-                    <div style={{ fontSize: 12, color: '#595959', marginBottom: 2 }}>{idx.name}</div>
+                  <div style={{ padding: '4px 6px', background: 'var(--mp-bg-secondary)', borderRadius: 4, border: '1px solid var(--mp-border-secondary)' }}>
+                    <div style={{ fontSize: 12, color: 'var(--mp-text-secondary)', marginBottom: 2 }}>{idx.name}</div>
                     <div style={{ fontSize: 15, fontWeight: 600, color, lineHeight: 1.2 }}>
                       {idx.price ? Number(idx.price).toFixed(2) : '-'}
                     </div>
                     <div style={{ fontSize: 11, color, marginTop: 1 }}>
                       {pct > 0 ? '+' : ''}{pct.toFixed(2)}%
-                      <span style={{ color: '#bfbfbf', marginLeft: 4 }}>{sign}{amount.toFixed(2)}</span>
+                      <span style={{ color: 'var(--mp-text-quaternary)', marginLeft: 4 }}>{sign}{amount.toFixed(2)}</span>
                     </div>
                   </div>
                 </Col>
@@ -742,7 +760,7 @@ export default function MonitorPage() {
           : <Table columns={stockColumns} dataSource={targetPrices} rowKey="stockCode" size="small"
               pagination={false} scroll={{ x: 1000 }}
               summary={() => scanResult && (
-                <tr style={{ background: '#fafafa' }}>
+                <tr style={{ background: 'var(--mp-bg-secondary)' }}>
                   <td colSpan={6} style={{ textAlign: 'right', paddingRight: 16, fontWeight: 500 }}>
                     扫描结果：
                   </td>
@@ -781,7 +799,7 @@ export default function MonitorPage() {
               return (
                 <div key={i} style={{
                   padding: '4px 8px',
-                  background: isBuy ? '#fff1f0' : isStop ? '#fff7e6' : isWatch ? '#e6f7ff' : (i % 2 === 0 ? '#fafafa' : 'transparent'),
+                  background: isBuy ? token.colorErrorBg : isStop ? token.colorWarningBg : isWatch ? token.colorInfoBg : (i % 2 === 0 ? token.colorFillTertiary : 'transparent'),
                   borderRadius: 4,
                   marginBottom: 2,
                   display: 'flex',

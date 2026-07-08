@@ -279,6 +279,7 @@ public class IntradayMonitorService {
             String codesParam = String.join(",", INDEX_NAME_MAP.keySet());
             String url = String.format(QUOTE_URL, codesParam);
             java.net.http.HttpClient client = java.net.http.HttpClient.newBuilder()
+                    .version(java.net.http.HttpClient.Version.HTTP_1_1)
                     .connectTimeout(java.time.Duration.ofSeconds(3))
                     .build();
             java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
@@ -782,6 +783,7 @@ public class IntradayMonitorService {
                 String url = String.format(QUOTE_URL, codesParam);
 
                 java.net.http.HttpClient client = java.net.http.HttpClient.newBuilder()
+                        .version(java.net.http.HttpClient.Version.HTTP_1_1)
                         .connectTimeout(java.time.Duration.ofSeconds(5))
                         .build();
 
