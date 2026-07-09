@@ -221,7 +221,7 @@ export default function FactorEditor() {
               step: 1,
               icon: <CodeOutlined />,
               title: '实现计算逻辑（后端 Java）',
-              desc: '在因子计算引擎中添加计算方法。例如缠论因子，需在 ChanTheoryCalculator 中新增方法实现算法。',
+              desc: '在因子计算引擎中添加计算方法。例如新增Java计算类实现因子算法。',
               color: '#1677ff',
             },
             {

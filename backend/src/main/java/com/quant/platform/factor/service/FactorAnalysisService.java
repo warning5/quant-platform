@@ -337,10 +337,10 @@ public class FactorAnalysisService {
         Map<String, Double> newMap = new HashMap<>();
         if (clickHouseJdbcTemplate != null) {
             try {
-                String sql = "SELECT code, market_cap FROM stock.stock_info WHERE market_cap IS NOT NULL AND market_cap > 0";
+                String sql = "SELECT code, total_market_cap FROM stock_info WHERE total_market_cap IS NOT NULL AND total_market_cap > 0";
                 clickHouseJdbcTemplate.query(sql, (rs) -> {
                     String code = rs.getString("code");
-                    double mcap = rs.getDouble("market_cap");
+                    double mcap = rs.getDouble("total_market_cap");
                     if (code != null && mcap > 0) {
                         String c = code.contains(".") ? code.split("\\.")[0] : code;
                         newMap.put(c, Math.log(mcap));

@@ -37,6 +37,7 @@ public class PaperTradingService {
     private final PaperNavMapper paperNavMapper;
     private final PaperRiskConfigMapper paperRiskConfigMapper;
     private final PaperCashFlowMapper paperCashFlowMapper;
+    private final com.quant.platform.factor.service.FactorMetaCacheService factorMetaCache;
     @Autowired(required = false)
     private PaperExecutionQualityMapper paperExecutionQualityMapper;
     private final JdbcTemplate jdbcTemplate;
@@ -546,12 +547,12 @@ public class PaperTradingService {
 
         Set<String> usedFactorCodes = combinedFactorWeights.keySet();
 
-        // 修复 Bug：signalDate 取日频因子的最大日期（排除 FIN_/CHAN_），不再取所有因子日期的最小值
+        // 修复 Bug：signalDate 取日频因子的最大日期（排除 FIN_），不再取所有因子日期的最小值
         // 这样 signalDate = 最新日频因子日期，与每个因子的截面查询日期一致
         String signalDate = null;
         LocalDate maxDailyDate = null;
         for (String fc : usedFactorCodes) {
-            if (fc.startsWith("FIN_") || fc.startsWith("CHAN_")) continue; // 排除财务/缠论因子
+            if (factorMetaCache.isFinancial(fc)) continue; // 排除财务因子（季频，不依赖日频行情）
             String d = getFactorLatestDate(fc);
             if (d != null) {
                 LocalDate ld = LocalDate.parse(d);
@@ -572,7 +573,7 @@ public class PaperTradingService {
             } catch (Exception ignored) {}
         }
         signalDate = maxDailyDate != null ? maxDailyDate.toString() : LocalDate.now().toString();
-        log.info("generateSignals: paperId={}, signalDate={}（日频因子最新，排除FIN_/CHAN_）, strategies={}, factorCount={}",
+        log.info("generateSignals: paperId={}, signalDate={}（日频因子最新，排除FIN_）, strategies={}, factorCount={}",
             paperId, signalDate, strategyWeights.size(), combinedFactorWeights.size());
 
         // 改造：每个因子用自己的最新日期，分别归一化后加权合并
@@ -1309,10 +1310,14 @@ public class PaperTradingService {
             }
         }
 
-        // 回退：全局 MAX 排除缠论和财务因子
+        // 回退：全局 MAX 排除季频因子（DB元数据驱动）
+        Set<String> quarterlyCodes = factorMetaCache.getQuarterlyCodes();
+        String excludeClause = quarterlyCodes.isEmpty()
+                ? ""
+                : " WHERE factor_code NOT IN (" + quarterlyCodes.stream()
+                        .map(c -> "'" + c + "'").collect(Collectors.joining(",")) + ")";
         List<String> dates = clickHouseJdbcTemplate.query(
-            "SELECT MAX(calc_date) FROM stock.factor_value FINAL " +
-            "WHERE factor_code NOT LIKE 'CHAN_%' AND factor_code NOT LIKE 'FIN_%'",
+            "SELECT MAX(calc_date) FROM stock.factor_value FINAL" + excludeClause,
             (rs, rowNum) -> rs.getString(1));
         if (dates.isEmpty() || dates.getFirst() == null) {
             dates = clickHouseJdbcTemplate.query(

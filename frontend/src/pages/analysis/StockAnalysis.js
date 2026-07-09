@@ -475,7 +475,7 @@ export default function StockAnalysis() {
   const tabItems = overview ? [
     {
       key: 'tech',
-      label: tabLabel('技术面', '通过均线排列、MACD、RSI等技术指标评分 + K线走势图 + 缠论信号，综合判断短期趋势和买卖时机。'),
+      label: tabLabel('技术面', '通过均线排列、MACD、RSI等技术指标评分 + K线走势图，综合判断短期趋势和买卖时机。'),
       children: (
         <div>
           <ScoreDetailTab detail={overview.scoreDetails?.find(d => d.dimension === 'tech')} />
@@ -1314,9 +1314,9 @@ export default function StockAnalysis() {
                             </table>
                             <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--sa-border-secondary)', fontSize: 11, color: 'var(--sa-text-tertiary)', lineHeight: 1.8 }}>
                               <div><strong>具体逻辑：</strong></div>
-                              <div>● <strong>保守</strong>（起点5）：PE&gt;100 扣3分，PE&gt;50 扣2，PE&gt;30 扣1；PB&gt;8 扣2；负债率&gt;80 扣2；只有缠论BUY信号才+1</div>
+                              <div>● <strong>保守</strong>（起点5）：PE&gt;100 扣3分，PE&gt;50 扣2，PE&gt;30 扣1；PB&gt;8 扣2；负债率&gt;80 扣2；趋势向上才+1</div>
                               <div>● <strong>中性</strong>：直接 totalScore / 13.5（135满分→10）</div>
-                              <div>● <strong>激进</strong>（起点5）：缠论信号加分多、资金面强势加分多、情绪面研报数量加分</div>
+                              <div>● <strong>激进</strong>（起点5）：趋势信号加分多、资金面强势加分多、情绪面研报数量加分</div>
                             </div>
                           </div>
                         }
@@ -1691,12 +1691,6 @@ function getValueInterpretation(label, value, score, maxScore) {
   // ═══════════════════════════════════════
   //  技术面
   // ═══════════════════════════════════════
-
-  if (label === '缠论信号') {
-    if (value.includes('买入')) return '缠论出现买入信号，中枢完成离开段，短期存在结构买点，但需量能配合确认（放量上涨才有效）。';
-    if (value.includes('卖出')) return '缠论出现卖出信号，注意中枢完成返回段带来的回调或趋势转折风险，可适当减仓。';
-    return '缠论未给出明确买卖信号，当前处于中枢震荡区间，方向未明，宜观望等待。';
-  }
 
   if (label === '趋势状态') {
     if (value === '上涨') return '股价处于明确上涨趋势中（短/中/长期高点依次抬高），顺势做多胜率更高，不要逆势猜顶。';

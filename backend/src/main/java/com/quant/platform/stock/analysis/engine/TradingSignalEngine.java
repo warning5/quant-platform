@@ -134,7 +134,7 @@ public class TradingSignalEngine {
     
     /**
      * 计算技术面得分（满分50）
-     * 指标：缠论信号(6) + 趋势状态(8) + MACD综合(8) + RSI14(6) + BOLL轨道(6) + DMI强度(3) + 量比(5) + 近高近低(6) + BOLL带宽(2) = 50
+     * 指标：趋势状态(10) + MACD综合(10) + RSI14(6) + BOLL轨道(6) + DMI强度(3) + 量比(5) + 近高近低(8) + BOLL带宽(2) = 50
      * 惩罚项（扣分）：量价背离(高位)/均线背离/均线空头/KDJ死叉/DMI空头/SAR翻空
      */
     private int calcTechScore(TechSignal tech) {
@@ -145,21 +145,14 @@ public class TradingSignalEngine {
         BigDecimal rsi = tech.getRsi();
         double rsiVal = rsi != null ? rsi.doubleValue() : 50;
 
-        // 1. 缠论买卖信号（6分）
-        if ("BUY".equals(tech.getChanSignal())) {
-            score += 6;
-        } else if ("SELL".equals(tech.getChanSignal())) {
-            score -= 3;
-        }
-
-        // 2. 趋势状态（8分）
+        // 1. 趋势状态（10分）
         if ("BULLISH".equals(tech.getTrend())) {
-            score += 8;
+            score += 10;
         } else if ("SIDEWAYS".equals(tech.getTrend())) {
             score += 4;
         }
 
-        // 3. MACD综合（8分）— 金叉/零轴/动能 三合一
+        // 2. MACD综合（10分）— 金叉/零轴/动能 三合一
         BigDecimal hist = tech.getMacdHistogram();
         BigDecimal histPrev = tech.getMacdHistogramPrev();
         boolean macdGolden = Boolean.TRUE.equals(tech.getMacdGolden());
@@ -169,8 +162,8 @@ public class TradingSignalEngine {
             double h = hist.doubleValue();
             double hp = histPrev.doubleValue();
             if (macdGolden) {
-                // 金叉 + 零轴位置 + 动能方向
-                int base = macdAboveZero ? 5 : 2;
+                // 金叉 + 零轴位置 + 动能方向（满分10分）
+                int base = macdAboveZero ? 7 : 3;
                 if (h > 0 && hp > 0) {
                     if (h >= hp) {
                         score += base + 2;  // 零轴上金叉+红柱扩张
@@ -183,7 +176,7 @@ public class TradingSignalEngine {
                     score += base - 1;  // 零轴下金叉，弱反弹
                 }
             } else if (macdDead) {
-                score -= macdAboveZero ? 2 : 1;  // 零轴上死叉更危险
+                score -= macdAboveZero ? 3 : 1;  // 零轴上死叉更危险
             } else {
                 // 无交叉：看动能
                 if (h > 0 && hp > 0) {
@@ -250,21 +243,21 @@ public class TradingSignalEngine {
             }
         }
 
-        // 8. 近高近低（6分）
+        // 8. 近高近低（8分）
         BigDecimal nearHighPct = tech.getNearHighPct();
         BigDecimal nearLowPct = tech.getNearLowPct();
         if (nearLowPct != null) {
             double lowPct = nearLowPct.doubleValue();
             if (lowPct < 3.0) {
-                score += 4;
+                score += 6;
             } else if (lowPct < 10.0) {
-                score += 2;
+                score += 3;
             }
         }
         if (nearHighPct != null) {
             double highPct = nearHighPct.doubleValue();
             if (highPct < 3.0) {
-                penalty += 2;  // 接近高点，阻力位
+                penalty += 3;  // 接近高点，阻力位
             } else if (highPct < 10.0) {
                 penalty += 1;
             }
@@ -792,7 +785,7 @@ public class TradingSignalEngine {
         techDetail.setScore(techScore);
         techDetail.setMaxScore(TECH_WEIGHT);
         techDetail.setItems(buildTechItems(tech));
-        techDetail.setDataRange("缠论最新1条 + 均线/MACD近120日 + RSI14日 + BOLL20日轨道 + 量价背离检测");
+        techDetail.setDataRange("均线/MACD近120日 + RSI14日 + BOLL20日轨道 + 量价背离检测");
         details.add(techDetail);
         
         // 资金面明细
@@ -831,26 +824,18 @@ public class TradingSignalEngine {
     private List<ScoreDetail.ScoreItem> buildTechItems(TechSignal tech) {
         List<ScoreDetail.ScoreItem> items = new ArrayList<>();
 
-        // 缠论信号（6分）— 降权
-        String chanSignal = tech != null ? tech.getChanSignal() : null;
-        String chanDisplay = "BUY".equals(chanSignal) ? "买入" : "SELL".equals(chanSignal) ? "卖出" : "持有";
-        int chanScore = "BUY".equals(chanSignal) ? 6 : "SELL".equals(chanSignal) ? -3 : 0;
-        String chanColor = "BUY".equals(chanSignal) ? "red" : "SELL".equals(chanSignal) ? "green" : "default";
-        items.add(buildItem("缠论信号", chanDisplay, chanScore, 6,
-                "缠论买卖信号：买入=6分, 卖出=-3分, 持有=0分", false, chanColor));
-
-        // 趋势状态（8分）
+        // 趋势状态（10分）
         String trend = tech != null ? tech.getTrend() : null;
         String trendDisplay = "BULLISH".equals(trend) ? "上涨" : "BEARISH".equals(trend) ? "下跌" : "SIDEWAYS".equals(trend) ? "盘整" : "-";
-        int trendScore = "BULLISH".equals(trend) ? 8 : "SIDEWAYS".equals(trend) ? 4 : 0;
+        int trendScore = "BULLISH".equals(trend) ? 10 : "SIDEWAYS".equals(trend) ? 4 : 0;
         String trendColor = "BULLISH".equals(trend) ? "red" : "BEARISH".equals(trend) ? "green" : "blue";
-        items.add(buildItem("趋势状态", trendDisplay, trendScore, 8,
-                "上涨=8分, 盘整=4分, 下跌=0分", false, trendColor));
+        items.add(buildItem("趋势状态", trendDisplay, trendScore, 10,
+                "上涨=10分, 盘整=4分, 下跌=0分", false, trendColor));
 
         // 均线多头 → 合并到趋势状态，此处移除独立计分项
         // （保留均线空头作为参考项，见下方）
 
-        // === MACD综合（8分）— 金叉 + 零轴位置 + 动能 三合一 ===
+        // === MACD综合（10分）— 金叉 + 零轴位置 + 动能 三合一 ===
         boolean macdGolden = tech != null && Boolean.TRUE.equals(tech.getMacdGolden());
         boolean macdAboveZero = Boolean.TRUE.equals(tech != null ? tech.getMacdAboveZero() : null);
         Boolean macdDead = tech != null ? tech.getMacdDeadCross() : null;
@@ -899,7 +884,7 @@ public class TradingSignalEngine {
                 }
             }
         }
-        items.add(buildItem("MACD综合", macdDisplay, macdScore, 8,
+        items.add(buildItem("MACD综合", macdDisplay, macdScore, 10,
                 "【三合一指标】MACD金叉+零轴位置+动能综合评分，满分8分。" +
                 "零轴上金叉+红柱扩张=8分最强；零轴上金叉+红柱缩=6分；零轴上金叉=5分；" +
                 "零轴下金叉=1分（弱反弹）；零轴上死叉=-2分；零轴下死叉=-1分；无交叉看动能。" +
@@ -1230,18 +1215,18 @@ public class TradingSignalEngine {
         }
         if (nearLowPct != null) {
             double lowPct = nearLowPct.doubleValue();
-            if (lowPct < 3.0) nearScore += 4;
-            else if (lowPct < 10.0) nearScore += 2;
+            if (lowPct < 3.0) nearScore += 6;
+            else if (lowPct < 10.0) nearScore += 3;
         }
         if (nearHighPct != null) {
             double highPct = nearHighPct.doubleValue();
-            if (highPct < 3.0) nearScore -= 2;
+            if (highPct < 3.0) nearScore -= 3;
             else if (highPct < 10.0) nearScore -= 1;
         }
-        items.add(buildItem("近高/低(60日)", nearDisplay, nearScore, 6,
+        items.add(buildItem("近高/低(60日)", nearDisplay, nearScore, 8,
                 "【含义】近60日最高价和最低价，代表近三个月内股价波动的上下边界。" +
-                "【评分规则】距低点<3%=+4分（强支撑，反弹概率高）；距低点<10%=+2分（低位区域）；" +
-                "距高点<3%=-2分（阻力附近，追高风险）；距高点<10%=-1分（上部区域，空间有限）。最大6分。", false, nearColor));
+                "【评分规则】距低点<3%=+6分（强支撑，反弹概率高）；距低点<10%=+3分（低位区域）；" +
+                "距高点<3%=-3分（阻力附近，追高风险）；距高点<10%=-1分（上部区域，空间有限）。最大8分。", false, nearColor));
 
         // === 量比（正向评分项，满分5分）===
         BigDecimal volRatio = tech != null ? tech.getVolumeRatio() : null;
@@ -2246,7 +2231,6 @@ public class TradingSignalEngine {
      */
     private String mapReversalLabel(String label) {
         return switch (label) {
-            case "缠论信号" -> "缠论信号转买入";
             case "趋势状态" -> "趋势转牛市";
             case "均线多头" -> "均线转多头排列";
             case "MACD金叉" -> "MACD金叉";
@@ -2279,17 +2263,16 @@ public class TradingSignalEngine {
         List<ScoreRule> rules = new ArrayList<>();
         
         rules.add(new ScoreRule("技术面", TECH_WEIGHT,
-                "缠论信号(6分)：买入=6分，卖出=-3分，持有=0分\n" +
-                "趋势状态(8分)：上涨=8分，盘整=4分，下跌=0分\n" +
-                "MACD综合(8分)：零轴上金叉+红柱扩张=8分；零轴上金叉+红柱缩=6分；零轴上金叉=5分；零轴下金叉=1分\n" +
+                "趋势状态(10分)：上涨=10分，盘整=4分，下跌=0分\n" +
+                "MACD综合(10分)：零轴上金叉+红柱扩张=9分；零轴上金叉+红柱缩=8分；零轴上金叉=7分；零轴下金叉=2分\n" +
                 "RSI14(6分)：<30超卖=6分，<50偏弱=4分，<70正常=2分，>70超买=1分\n" +
                 "BOLL轨道(6分)：突破上轨(RSI≤70)=6分，突破上轨(RSI>70)=2分，≥0.8上轨附近=4/2分，≥0.5中上=3分，≥0.2中下=2分\n" +
                 "DMI强度(3分)：ADX>30强趋势=3分，ADX>20弱趋势=1分（+DI/-DI方向由趋势状态覆盖，不重复计分）\n" +
                 "量比(5分)：≥2.0放量=5分，≥1.5温和=3分，≥1.0正常=2分，<0.5极度缩量=-1分\n" +
-                "近高近低(6分)：距60日低点<3%=+4分，距<10%=+2分；距高点<3%=-2分，距<10%=-1分\n" +
+                "近高近低(8分)：距60日低点<3%=+6分，距<10%=+3分；距高点<3%=-3分，距<10%=-1分\n" +
                 "BOLL带宽(2分)：<5%极度收敛=2分（变盘前兆）\n" +
                 "综合惩罚：高位背离(价涨主力出)扣6分，低位背离(价跌主力进)加2分；5日涨幅>>20日涨幅=反弹偏离扣2分；均线空头+3分；KDJ死叉+2分；DMI空头+1分；SAR翻空+2分；SAR翻多-2分",
-                "缠论最新1条 + 均线/MACD近120日 + RSI14日 + BOLL20日轨道 + DMI(ADX) + SAR(抛物线转向) + 量价背离检测 + 近60日高低价"));
+                "均线/MACD近120日 + RSI14日 + BOLL20日轨道 + DMI(ADX) + SAR(抛物线转向) + 量价背离检测 + 近60日高低价"));
         
         rules.add(new ScoreRule("资金面", MONEY_WEIGHT,
                 "主力净流入(10分)：>5亿=10分, >1亿=7分, >0=5分, >-1亿=2分\n" +

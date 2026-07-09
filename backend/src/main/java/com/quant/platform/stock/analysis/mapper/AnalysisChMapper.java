@@ -62,33 +62,22 @@ public class AnalysisChMapper {
     }
 
     /**
-     * 查询缠论因子（从 factor_value 表）
-     * 返回每个因子各自最新交易日的缠论信号
-     * 使用 argMax(factor_val, calc_date) 获取每个因子最新日期的值
-     * CH 列名: factor_code/symbol/calc_date/factor_val
-     * symbol 格式兼容：旧数据带后缀(600619.SH)，新数据无后缀(600619)
+     * 查询最新因子日期（从 factor_value 表）
+     * 缠论因子已废弃（2026-07-08），此方法仅用于获取最新因子计算日期
+     * trend/chanSignal/hubPos 由 AnalysisService 兜底逻辑提供（MA20/MA60）
      */
     public TechSignal selectLatestTechSignal(String code) {
         String withSuffix = normalizeCode(code);
         String noSuffix = normalizeCodeForDaily(code);
 
-        // 注意：SELECT 里全是聚合函数(MAX/argMax)，不需要 GROUP BY，天然返回一行
+        // 仅获取 factor_value 表的最新计算日期
         String sql = """
-            SELECT
-                '%s' as code,
-                MAX(calc_date) as trade_date,
-                argMax(CASE WHEN factor_code = 'CHAN_TREND' THEN factor_val END, calc_date) as trend,
-                argMax(CASE WHEN factor_code = 'CHAN_BUY_SELL' THEN factor_val END, calc_date) as chan_signal,
-                argMax(CASE WHEN factor_code = 'CHAN_HUB_POS' THEN factor_val END, calc_date) as hub_pos
+            SELECT '%s' as code, MAX(calc_date) as trade_date
             FROM stock.factor_value FINAL
             WHERE (symbol = ? OR symbol = ?)
-              AND factor_code IN ('CHAN_TREND','CHAN_BUY_SELL','CHAN_HUB_POS')
             """.formatted(noSuffix);
 
         try {
-            // 不用 BeanPropertyRowMapper：CH 返回 Float64，
-            // 但 TechSignal 的 penDir/trend/chanSignal/hubPos 是 String，
-            // penCount 是 Integer，直接映射会失败 → 手写 RowMapper 做类型转换
             List<TechSignal> results = clickHouseJdbcTemplate.query(sql, (rs, rowNum) -> {
                 TechSignal t = new TechSignal();
                 t.setCode(noSuffix);
@@ -97,20 +86,13 @@ public class AnalysisChMapper {
                     try { t.setTradeDate(java.time.LocalDate.parse(td.toString())); }
                     catch (Exception ignored) {}
                 }
-                // CH 返回 Float64 → 转 String（CHAN_TREND 等）
-                Object tr = rs.getObject("trend");
-                t.setTrend(tr != null ? String.valueOf(Math.round(((Number) tr).doubleValue())) : null);
-                Object cs = rs.getObject("chan_signal");
-                t.setChanSignal(cs != null ? String.valueOf(Math.round(((Number) cs).doubleValue())) : null);
-                Object hp = rs.getObject("hub_pos");
-                t.setHubPos(hp != null ? String.valueOf(((Number) hp).doubleValue()) : null);
                 return t;
             }, withSuffix, noSuffix);
             if (!results.isEmpty()) {
                 return results.getFirst();
             }
         } catch (Exception e) {
-            log.error("查询缠论因子失败: code={}, error={}", code, e.getMessage());
+            log.error("查询因子日期失败: code={}, error={}", code, e.getMessage());
         }
         return null;
     }

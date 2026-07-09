@@ -15,13 +15,8 @@ VALUES ('ALL_FACTOR_COMPOSITE', '全因子综合',
         '{"factors":[{"code":"MOM20","weight":0.25,"direction":1},{"code":"SIZE","weight":0.20,"direction":-1},{"code":"VOL20","weight":0.20,"direction":-1},{"code":"RSI14","weight":0.15,"direction":1},{"code":"VOLUME_RATIO","weight":0.20,"direction":1}]}',
         'system');
 
--- 2. 现有持仓增强
-INSERT IGNORE INTO strategy_definition (strategy_code, strategy_name, description, strategy_type, status, rebalance_frequency, max_position_count, position_size_type, stop_loss_pct, factor_config_json, author)
-VALUES ('POSITION_ENHANCE', '现有持仓增强',
-        '基于中期趋势确认+低估值保护+低波动控制，帮助已有持仓优化风险收益比',
-        'FACTOR_LONG', 'ACTIVE', 'MONTHLY', 15, 'EQUAL', 0.08,
-        '{"factors":[{"code":"MOM60","weight":0.30,"direction":1},{"code":"VAL_PB","weight":0.25,"direction":-1},{"code":"VOL20","weight":0.25,"direction":-1},{"code":"MACD","weight":0.20,"direction":1}]}',
-        'system');
+-- 2. 现有持仓增强（⚠️ 已废弃，2026-07-08 DELETED）
+-- POSITION_ENHANCE 已删除：命中率不稳定，持仓优化无独立策略价值
 
 -- 3. 均衡配置
 INSERT IGNORE INTO strategy_definition (strategy_code, strategy_name, description, strategy_type, status, rebalance_frequency, max_position_count, position_size_type, stop_loss_pct, factor_config_json, author)
@@ -42,13 +37,8 @@ VALUES ('NEW_PRODUCTIVITY', '新质生产力',
         '{"includeIndustries":["半导体","元件","光学光电子","消费电子","其他电子","电子化学品","光伏设备","电池","风电设备","电网设备","其他电源设备","计算机设备","软件开发","IT服务","通信服务","通信设备","军工电子","军工装备","自动化设备","专用设备","通用设备","医疗器械","生物制品","化学制药","汽车零部件","能源金属","金属新材料","电机"],"excludeIndustries":["证券","银行","保险","信托","期货","房地产开发","房地产服务","钢铁","煤炭开采","电力","水务","港口","高速公路","铁路运输"]}',
         'system');
 
--- 5. 热点追踪
-INSERT IGNORE INTO strategy_definition (strategy_code, strategy_name, description, strategy_type, status, rebalance_frequency, max_position_count, position_size_type, stop_loss_pct, factor_config_json, author)
-VALUES ('HOT_TRACKING', '热点追踪',
-        '基于短期动量+情绪热度+量价异动，捕捉资金涌入的市场热点和强势个股',
-        'MOMENTUM', 'ACTIVE', 'WEEKLY', 12, 'EQUAL', 0.10,
-        '{"factors":[{"code":"MOM5","weight":0.25,"direction":1},{"code":"MOM20","weight":0.20,"direction":1},{"code":"LIMIT_UP_COUNT","weight":0.20,"direction":1},{"code":"VOLUME_RATIO","weight":0.20,"direction":1},{"code":"VROC12","weight":0.15,"direction":1}]}',
-        'system');
+-- 5. 热点追踪（⚠️ 已废弃，2026-07-08 DELETED）
+-- HOT_TRACKING 已删除：依赖短期动量和情绪因子，极端行情下命中率暴跌
 
 -- 6. 低价优质（核心策略：三层漏斗）
 INSERT IGNORE INTO strategy_definition (strategy_code, strategy_name, description, strategy_type, status, rebalance_frequency, max_position_count, position_size_type, stop_loss_pct, factor_config_json, author)
@@ -86,14 +76,8 @@ VALUES ('LIMIT_UP_MOMENTUM', '涨停板',
         '{"factors":[{"code":"LIMIT_UP_COUNT","weight":0.40,"direction":1},{"code":"MOM5","weight":0.30,"direction":1},{"code":"VOLUME_RATIO","weight":0.30,"direction":1}]}',
         'system');
 
--- 10. 板块轮动（降级版）⚠️ 可绕过，用行业动量替代资金流
-INSERT IGNORE INTO strategy_definition (strategy_code, strategy_name, description, strategy_type, status, rebalance_frequency, max_position_count, position_size_type, stop_loss_pct, factor_config_json, filter_config_json, author)
-VALUES ('SECTOR_ROTATION', '板块轮动',
-        '基于行业动量轮动，选择近期表现最好的行业中的低估值优质股票。降级版：用个股动量代替行业资金流',
-        'FACTOR_LONG', 'ACTIVE', 'MONTHLY', 20, 'EQUAL', 0.08,
-        '{"factors":[{"code":"MOM20","weight":0.30,"direction":1},{"code":"VAL_PE_PERCENTILE","weight":0.25,"direction":-1},{"code":"VOL20","weight":0.20,"direction":-1},{"code":"FIN_ROE","weight":0.25,"direction":1}]}',
-        '{"excludeIndustries":["证券","银行","保险","信托","房地产开发","钢铁","煤炭开采","电力"]}',
-        'system');
+-- 10. 板块轮动（⚠️ 已废弃，2026-07-08 DELETED）
+-- SECTOR_ROTATION 已删除：行业动量替代资金流的降级版效果不佳
 
 -- 11. 市场情绪（降级版）⚠️ 可绕过，用技术指标准替代VIX
 INSERT IGNORE INTO strategy_definition (strategy_code, strategy_name, description, strategy_type, status, rebalance_frequency, max_position_count, position_size_type, stop_loss_pct, factor_config_json, author)
@@ -111,13 +95,8 @@ VALUES ('VALUATION_RECOVERY_LLM', '估值修复',
         '{"factors":[{"code":"VAL_PE_PERCENTILE","weight":0.30,"direction":-1},{"code":"VAL_PB_PERCENTILE","weight":0.20,"direction":-1},{"code":"PRICE_52W_HIGH_PCT","weight":0.20,"direction":-1},{"code":"FIN_EARNINGS_QUALITY","weight":0.15,"direction":1},{"code":"VAL_FCF_YIELD","weight":0.15,"direction":1}]}',
         'system');
 
--- 13. 事件驱动（降级版）❌ 核心阻塞，无一致预期数据
-INSERT IGNORE INTO strategy_definition (strategy_code, strategy_name, description, strategy_type, status, rebalance_frequency, max_position_count, position_size_type, stop_loss_pct, factor_config_json, author)
-VALUES ('EVENT_DRIVEN_DOWNGRADED', '事件驱动（降级版）',
-        '基于业绩增长+盈利质量，降级版无一致预期数据，无法判断超预期',
-        'FACTOR_LONG', 'ACTIVE', 'MONTHLY', 15, 'EQUAL', 0.08,
-        '{"factors":[{"code":"FIN_NET_PROFIT_YOY","weight":0.30,"direction":1},{"code":"FIN_REVENUE_YOY","weight":0.30,"direction":1},{"code":"FIN_EARNINGS_QUALITY","weight":0.20,"direction":1},{"code":"FIN_ROE","weight":0.20,"direction":1}]}',
-        'system');
+-- 13. 事件驱动（⚠️ 已废弃，2026-07-08 DELETED）
+-- EVENT_DRIVEN_DOWNGRADED 已删除：核心阻塞，无一致预期数据
 
 -- ============================================================
 -- 14~16: 形态驱动策略 (PATTERN)

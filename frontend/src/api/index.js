@@ -117,10 +117,6 @@ export const factorApi = {
       params: { factorCodes: factorCodes.join(','), startDate, endDate, method },
       timeout: 120000,
     }),
-  // P1: 缠论因子筛选
-  chanScreen: (params) => api.get('/factors/chan-screen', { params, timeout: 30000 }),
-  // 缠论筛选元数据（动态获取因子定义）
-  chanScreenMeta: () => api.get('/factors/chan-screen/meta'),
   // P1: 因子IC/IR批量分析
   batchIcIrAnalysis: (factorCodes, startDate, endDate, forwardDays = 5, neutralizeByIndustry = false, neutralizeByMarketCap = false, correlationType = 'spearman', icThreshold = 0.03) =>
     api.post('/factors/ic-ir-analysis', null, {

@@ -47,6 +47,7 @@ public class StockScreenService {
     private final ObjectMapper objectMapper;
     private final FactorIcService factorIcService;
     private final StockBlacklistService stockBlacklistService;
+    private final com.quant.platform.factor.service.FactorMetaCacheService factorMetaCache;
 
     @Resource
     private DataSource dataSource;
@@ -327,9 +328,8 @@ public class StockScreenService {
                         code, crossSection.size(), screenStartDate, screenEndDate);
             } else {
                 // ── 单日模式 ──
-                // P1-5: 季度因子按 announce_date 过滤，只用已发布的财报数据
-                boolean isQuarterly = factorDef != null && "QUARTERLY".equalsIgnoreCase(factorDef.getDataFrequency());
-                if (isQuarterly || code.startsWith("FIN_")) {
+                // P1-5: 季度因子按 announce_date 过滤，只用已发布的财报数据（DB元数据驱动）
+                if (factorMetaCache.isQuarterly(code)) {
                     // 季度财务因子：用 announce_date 过滤，只取已发布数据
                     crossSection = clickHouseFactorValueService.findQuarterlyByScreenDate(code, screenDate);
                     log.info("[Screen] 季度因子 {} screenDate={}: {} 条 (announce_date <= {})",

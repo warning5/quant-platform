@@ -89,9 +89,8 @@ public class AnalysisService {
             }
         }
         
-        // 2. 技术面信号（从CH查询缠论因子）
+        // 2. 技术面信号（从CH获取最新因子日期，缠论因子已废弃由兜底逻辑提供）
         TechSignal techSignal = analysisChMapper.selectLatestTechSignal(code);
-        normalizeChanStrings(techSignal);
         if (techSignal == null) {
             techSignal = new TechSignal();
         }
@@ -767,7 +766,7 @@ public class AnalysisService {
             tech.setVolumeRatio(BigDecimal.valueOf(vr).setScale(2, RoundingMode.HALF_UP));
         }
 
-        // ── 趋势状态兜底：当 CHAN_TREND 因子缺失时，用 MA20/MA60 判定 ──
+        // ── 趋势状态：用 MA20/MA60 判定 ──
         if (tech.getTrend() == null && n >= 60) {
             double ma20 = avg(closes, n - 20, n);
             double ma60 = avg(closes, n - 60, n);
@@ -1182,42 +1181,6 @@ public class AnalysisService {
         if (avgLoss == 0) return 100.0;
         double rs = avgGain / avgLoss;
         return 100.0 - 100.0 / (1.0 + rs);
-    }
-
-    /**
-     * 将 Chan 因子数据库数字值转换为评分引擎期望的字符串
-     * DB 存储格式（FactorService screen 配置一致）：
-     *   CHAN_PEN_DIR:  1=上升笔, -1=下降笔
-     *   CHAN_TREND:    1=上涨, 0=盘整, -1=下跌
-     *   CHAN_BUY_SELL: >0=买(1/2/3买), <0=卖(-1/-2/-3卖)
-     *   CHAN_HUB_POS:  0.0~1.0 浮点，按阈值转为 UPPER/MIDDLE/LOWER
-     */
-    private void normalizeChanStrings(TechSignal tech) {
-        if (tech == null) return;
-
-        // CHAN_TREND: 1 → "BULLISH", 0 → "SIDEWAYS", -1 → "BEARISH"
-        if (tech.getTrend() != null) {
-            try {
-                int v = (int) Math.round(Double.parseDouble(tech.getTrend()));
-                tech.setTrend(v == 1 ? "BULLISH" : v == 0 ? "SIDEWAYS" : v == -1 ? "BEARISH" : tech.getTrend());
-            } catch (NumberFormatException ignored) {}
-        }
-
-        // CHAN_BUY_SELL: >0 → "BUY", <0 → "SELL", 0 → "HOLD"
-        if (tech.getChanSignal() != null) {
-            try {
-                double v = Double.parseDouble(tech.getChanSignal());
-                tech.setChanSignal(v > 0 ? "BUY" : v < 0 ? "SELL" : "HOLD");
-            } catch (NumberFormatException ignored) {}
-        }
-
-        // CHAN_HUB_POS: 浮点 0.0~1.0 → LOWER/MIDDLE/UPPER
-        if (tech.getHubPos() != null) {
-            try {
-                double v = Double.parseDouble(tech.getHubPos());
-                tech.setHubPos(v < 0.33 ? "LOWER" : v < 0.66 ? "MIDDLE" : "UPPER");
-            } catch (NumberFormatException ignored) {}
-        }
     }
 
     /**
@@ -4040,7 +4003,7 @@ public class AnalysisService {
 
     /**
      * 信心水平：基于数据完整性评分（低/中/高）
-     * 研报覆盖 + 基本面数据完整度 + 缠论信号
+     * 研报覆盖 + 基本面数据完整度 + 技术信号
      */
     private String calcConfidenceLevel(FundamentalSignal fundamental, ResearchSignal research) {
         int score = 0;

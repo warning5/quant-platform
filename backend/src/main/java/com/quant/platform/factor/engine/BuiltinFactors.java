@@ -84,23 +84,6 @@ public class BuiltinFactors {
         }
     }
 
-    /**
-     * 6日动量指标 (MTM6) - 当前价 - 6日前价
-     */
-    public static class Mtm6Calculator implements FactorCalculator {
-        @Override
-        public String getFactorCode() { return "MTM6"; }
-
-        @Override
-        public BigDecimal calculate(String symbol, LocalDate calcDate,
-                                List<MarketDailyBar> history, java.util.Map<String, Object> context) {
-            if (history.size() < 7) return null;
-            double curr = history.getLast().getClose().doubleValue();
-            double past = history.get(history.size() - 7).getClose().doubleValue();
-            return BigDecimal.valueOf(curr - past).setScale(8, RoundingMode.HALF_UP);
-        }
-    }
-
     // ====================================================================
     // 波动率因子
     // ====================================================================
@@ -168,25 +151,6 @@ public class BuiltinFactors {
     // ====================================================================
     // 流动性 / 换手率因子
     // ====================================================================
-
-    /**
-     * 20日平均换手率 (TURN20)
-     */
-    public static class Turnover20Calculator implements FactorCalculator {
-        @Override
-        public String getFactorCode() { return "TURN20"; }
-
-        @Override
-        public BigDecimal calculate(String symbol, LocalDate calcDate,
-                                List<MarketDailyBar> history, java.util.Map<String, Object> context) {
-            if (history.size() < 20) return null;
-            var window = history.subList(history.size() - 20, history.size());
-            double sum = window.stream()
-                    .mapToDouble(b -> b.getTurnoverRate() == null ? 0 : b.getTurnoverRate().doubleValue())
-                    .sum();
-            return BigDecimal.valueOf(sum / 20).setScale(8, RoundingMode.HALF_UP);
-        }
-    }
 
     /**
      * 量比因子 (VOLUME_RATIO) - 近5日均量/前20日均量

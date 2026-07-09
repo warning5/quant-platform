@@ -58,7 +58,7 @@ export default function ManualStockAnalysisPage() {
             结合研报舆情、同业对比、估值分位、缠论图谱等多维数据，提供综合性的投资参考。
           </Paragraph>
           <Alert type="success" showIcon message="核心价值"
-            description="把缠论信号、均线趋势、资金流向、研报评级、财务健康度浓缩成一个百分制评分，1分钟完成一只股票的全方位体检。" />
+            description="把趋势信号、均线趋势、资金流向、研报评级、财务健康度浓缩成一个百分制评分，1分钟完成一只股票的全方位体检。" />
         </section>
 
         {/* 搜索股票 */}

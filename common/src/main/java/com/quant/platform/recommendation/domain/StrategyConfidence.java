@@ -69,9 +69,9 @@ public class StrategyConfidence {
     private LocalDateTime updatedAt;
 
     public static String getLevelByScore(int score) {
-        if (score >= 70) return "HIGH";
-        if (score >= 50) return "NORMAL";
-        if (score >= 30) return "LOW";
+        if (score >= 75) return "HIGH";
+        if (score >= 55) return "NORMAL";
+        if (score >= 35) return "LOW";
         return "SUSPENDED";
     }
 

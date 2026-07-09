@@ -81,8 +81,8 @@ public class StrategyConfidenceService {
         return switch (level) {
             case "HIGH" -> originalTopN;           // 高置信度：正常推荐
             case "NORMAL" -> originalTopN;         // 中等：正常（前端显示提醒）
-            case "LOW" -> Math.max(5, originalTopN - 8);  // 低：大幅缩减
-            case "SUSPENDED" -> -1;                // 建议暂停
+            case "LOW" -> Math.max(3, originalTopN / 3);  // 低：缩减至1/3
+            case "SUSPENDED" -> 0;                 // 暂停：不生成推荐
             default -> originalTopN;
         };
     }
@@ -167,8 +167,18 @@ public class StrategyConfidenceService {
                 .count();
         double hitRate = (double) positiveCount / n;
         calc.hitRateValue = BigDecimal.valueOf(hitRate).setScale(4, RoundingMode.HALF_UP);
-        // 线性映射: 0%→0分, 100%→40分（50%为基准线20分）
-        calc.hitRateScore = (int) Math.round(hitRate * MAX_HIT_RATE_SCORE);
+        // 非线性映射: 50%为随机基准，不超过10分
+        // hitRate < 35% → 0分(差于随机), 35-50% → 0-10分, 50-65% → 10-28分, 65%+ → 28-40分
+        if (hitRate < 0.35) {
+            calc.hitRateScore = 0;
+        } else if (hitRate < 0.50) {
+            calc.hitRateScore = (int) Math.round((hitRate - 0.35) / 0.15 * 10);
+        } else if (hitRate < 0.65) {
+            calc.hitRateScore = 10 + (int) Math.round((hitRate - 0.50) / 0.15 * 18);
+        } else {
+            calc.hitRateScore = 28 + (int) Math.round((hitRate - 0.65) / 0.35 * 12);
+            calc.hitRateScore = Math.min(MAX_HIT_RATE_SCORE, calc.hitRateScore);
+        }
 
         // ---- 维度2: 平均收益率正负 (0~25分) ----
         double avgReturn = recs.stream()

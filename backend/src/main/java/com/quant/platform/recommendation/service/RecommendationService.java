@@ -171,6 +171,8 @@ public class RecommendationService {
     private final QuarterlyFactorAnalysisService quarterlyFactorAnalysisService;
     private final javax.sql.DataSource dataSource;
     private final StockAnalysisMapper stockAnalysisMapper;
+    private final com.quant.platform.factor.ic.mapper.FactorIcRecordMapper factorIcRecordMapper;
+    private final com.quant.platform.factor.service.FactorMetaCacheService factorMetaCache;
 
     public RecommendationService(StockScreenService stockScreenService,
                                  AnalysisService analysisService,
@@ -191,7 +193,9 @@ public class RecommendationService {
                                  FactorCorrelationService factorCorrelationService,
                                  QuarterlyFactorAnalysisService quarterlyFactorAnalysisService,
                                  javax.sql.DataSource dataSource,
-                                 StockAnalysisMapper stockAnalysisMapper) {
+                                 StockAnalysisMapper stockAnalysisMapper,
+                                 com.quant.platform.factor.ic.mapper.FactorIcRecordMapper factorIcRecordMapper,
+                                 com.quant.platform.factor.service.FactorMetaCacheService factorMetaCache) {
         this.stockScreenService = stockScreenService;
         this.analysisService = analysisService;
         this.marketDataService = marketDataService;
@@ -212,6 +216,8 @@ public class RecommendationService {
         this.quarterlyFactorAnalysisService = quarterlyFactorAnalysisService;
         this.dataSource = dataSource;
         this.stockAnalysisMapper = stockAnalysisMapper;
+        this.factorIcRecordMapper = factorIcRecordMapper;
+        this.factorMetaCache = factorMetaCache;
     }
 
     /**
@@ -349,10 +355,9 @@ public class RecommendationService {
 
                     // 根据置信度调整 topN
                     int adjustedTopN = strategyConfidenceService.getAdjustedTopN(topN, conf);
-                    if (adjustedTopN == -1) {
-                        log.warn("[Recommendation] 策略置信度过低(SUSPENDED), 建议暂停使用该策略: strategyId={}, score={}", strategyId, score);
-                        // 不阻止生成，但大幅缩减
-                        topN = Math.max(3, topN / 3);
+                    if (adjustedTopN == 0) {
+                        log.warn("[Recommendation] 策略置信度过低(SUSPENDED), 跳过该策略: strategyId={}, score={}", strategyId, score);
+                        return List.of();
                     } else if (adjustedTopN < topN) {
                         int originalTopN = topN;
                         topN = adjustedTopN;
@@ -2339,10 +2344,13 @@ public class RecommendationService {
         Set<String> crowdingDropped = applyCrowdingFilter(factorCodes, refDate, snapshots);
         // P4: 财务因子季频IC校正（返回校正数量，snapshots 被原地修改）
         int quarterlyCorrected = applyQuarterlyIcCorrection(factorCodes, refDate, snapshots);
+        // P5: IC季度一致性校验（方向不稳定因子降权或剔除）
+        int consistencyDropped = applyIcConsistencyCheck(factorCodes, refDate, snapshots);
 
-        log.info("[DynamicWeight] IC快照完成: mode={}, {}个因子, 阈值={}, 半衰={}天, 保留{}个",
+        log.info("[DynamicWeight] IC快照完成: mode={}, {}个因子, 阈值={}, 半衰={}天, 保留{}个 (拥挤度剔除{}, 一致性剔除{})",
                 weightMode, factorCodes.size(), DEFAULT_IC_THRESHOLD, halflife,
-                snapshots.values().stream().filter(s -> "KEPT".equals(s.status)).count());
+                snapshots.values().stream().filter(s -> "KEPT".equals(s.status)).count(),
+                crowdingDropped.size(), consistencyDropped);
 
         // 筛选保留的因子
         List<FactorAnalysisService.FactorIcSnapshot> keptSnapshots = snapshots.values().stream()
@@ -2404,15 +2412,15 @@ public class RecommendationService {
                         Math.abs(snap.icMean), DEFAULT_IC_THRESHOLD, snap.icMean, halflife);
                 log.info("[DynamicWeight] 因子 {} |IC|={} < {}, 剔除", fc, Math.abs(snap.icMean), DEFAULT_IC_THRESHOLD);
                 droppedCount++;
-            } else if ("CROWDING_DROPPED".equals(snap.status)) {
-                // P3: 因子拥挤度剔除（相关性过高，保留IC更高的同类因子）
+            } else if ("CROWDING_DROPPED".equals(snap.status) || "CONSISTENCY_DROPPED".equals(snap.status)) {
+                // P3: 因子拥挤度剔除 / P5: IC一致性剔除
                 adjustedFw.setWeight(0.0);
                 adjustedFw.setDirection(originalDirection);
-                diag.action = "CROWDING_DROPPED";
+                diag.action = snap.status;
                 diag.icMean = snap.icMean;
                 diag.adjustedWeight = 0;
-                diag.reason = snap.assessment != null ? snap.assessment : "因子拥挤度过高，被同类高IC因子替代";
-                log.info("[DynamicWeight] 因子 {} 拥挤度剔除: {}", fc, diag.reason);
+                diag.reason = snap.assessment != null ? snap.assessment : "因子被剔除";
+                log.info("[DynamicWeight] 因子 {} {}: {}", fc, snap.status, diag.reason);
                 droppedCount++;
             } else {
                 // KEPT: 方向对齐 + |IC|加权
@@ -2737,7 +2745,6 @@ public class RecommendationService {
                 StrategyDefinition strat = strategyDefinitionMapper.selectById(strategyId);
                 strategyCode = strat != null ? strat.getStrategyCode() : "";
                 boolean useEventBoost = "VALUATION_RECOVERY_LLM".equals(strategyCode)
-                        || "EVENT_DRIVEN_DOWNGRADED".equals(strategyCode)
                         || "MARKET_SENTIMENT".equals(strategyCode);
                 if (useEventBoost) {
                     // A. 新闻事件加分
@@ -2756,33 +2763,6 @@ public class RecommendationService {
                     } else if (eventSentiment < -0.3) {
                         int currentEvent = rec.getEventScore() != null ? rec.getEventScore() : 0;
                         rec.setEventScore(Math.max(0, currentEvent - 5));
-                    }
-
-                    // B. 超预期信号加分（仅事件驱动策略）
-                    if ("EVENT_DRIVEN_DOWNGRADED".equals(strategyCode)) {
-                        EventSignalService.EventSignal earnSignal = eventSignalService.getEventSignal(pureCode);
-                        if ("EARN_BEAT".equals(earnSignal.getSignalType())) {
-                            // 超预期 → 大幅加分
-                            int currentEvent = rec.getEventScore() != null ? rec.getEventScore() : 0;
-                            int earnBonus = (int) (earnSignal.getBullishScore() * 10);
-                            rec.setEventScore(Math.min(25, currentEvent + earnBonus));
-                            String existing = rec.getBuyReason() != null ? rec.getBuyReason() : "";
-                            rec.setBuyReason(existing + " | " + earnSignal.getSignalDescription());
-                            log.info("[Recommendation] 超预期加分: code={}, signal={}, bonus=+{}",
-                                    pureCode, earnSignal.getSignalType(), earnBonus);
-                        } else if ("EARN_MISS".equals(earnSignal.getSignalType())) {
-                            // 不及预期 → 扣分
-                            int currentEvent = rec.getEventScore() != null ? rec.getEventScore() : 0;
-                            int earnPenalty = (int) (Math.abs(earnSignal.getBullishScore()) * 8);
-                            rec.setEventScore(Math.max(0, currentEvent - earnPenalty));
-                            log.info("[Recommendation] 不及预期扣分: code={}, signal={}, penalty=-{}",
-                                    pureCode, earnSignal.getSignalType(), earnPenalty);
-                        } else if ("EARN_NO_CONSENSUS".equals(earnSignal.getSignalType())
-                                && earnSignal.getBullishScore() > 0.4) {
-                            // 无一致预期但高增长 → 小幅加分
-                            int currentEvent = rec.getEventScore() != null ? rec.getEventScore() : 0;
-                            rec.setEventScore(Math.min(25, currentEvent + 3));
-                        }
                     }
                 }
             } catch (Exception e) {
@@ -3005,7 +2985,7 @@ public class RecommendationService {
             Map<String, com.quant.platform.factor.service.FactorAnalysisService.FactorIcSnapshot> snapshots) {
         int corrected = 0;
         for (String fc : factorCodes) {
-            if (!fc.startsWith("FIN_")) continue;
+            if (!factorMetaCache.isFinancial(fc)) continue;
             try {
                 com.quant.platform.factor.service.QuarterlyFactorAnalysisService.QuarterlyIcResult qr =
                         quarterlyFactorAnalysisService.computeQuarterlyIc(fc, refDate.minusMonths(18), refDate, 5, true);
@@ -3027,9 +3007,83 @@ public class RecommendationService {
             }
         }
         if (corrected > 0) {
-            log.info("[DynamicWeight] P4 季频IC校正完成: {}/{}个FIN因子已校正", corrected, factorCodes.stream().filter(fc -> fc.startsWith("FIN_")).count());
+            log.info("[DynamicWeight] P4 季频IC校正完成: {}/{}个财务因子已校正", corrected, factorCodes.stream().filter(fc -> factorMetaCache.isFinancial(fc)).count());
         }
         return corrected;
+    }
+
+    /**
+     * P5: IC季度一致性校验
+     * 检查因子近4个季度IC方向是否一致：
+     *   - IC正占比 < 25%（4季度中≤1个正）→ 剔除（IC方向不稳定，无预测价值）
+     *   - IC正占比 25-50% → 降权50%（方向不稳定但保留弱信号）
+     *   - IC正占比 >= 50% → 正常保留
+     *
+     * @return 被剔除的因子数量
+     */
+    private int applyIcConsistencyCheck(
+            List<String> factorCodes, LocalDate refDate,
+            Map<String, com.quant.platform.factor.service.FactorAnalysisService.FactorIcSnapshot> snapshots) {
+        int dropped = 0;
+        int penalized = 0;
+        for (String fc : factorCodes) {
+            com.quant.platform.factor.service.FactorAnalysisService.FactorIcSnapshot snap = snapshots.get(fc);
+            if (snap == null || !"KEPT".equals(snap.status)) continue;
+            try {
+                // 查询近15个月的IC记录（覆盖4-5个季度）
+                LocalDate startDate = refDate.minusMonths(15);
+                com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.quant.platform.factor.ic.domain.FactorIcRecord> wrapper =
+                        new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
+                wrapper.eq(com.quant.platform.factor.ic.domain.FactorIcRecord::getFactorCode, fc)
+                       .eq(com.quant.platform.factor.ic.domain.FactorIcRecord::getForwardDays, 5)
+                       .ge(com.quant.platform.factor.ic.domain.FactorIcRecord::getTradeDate, startDate)
+                       .le(com.quant.platform.factor.ic.domain.FactorIcRecord::getTradeDate, refDate)
+                       .orderByDesc(com.quant.platform.factor.ic.domain.FactorIcRecord::getTradeDate);
+                List<com.quant.platform.factor.ic.domain.FactorIcRecord> records =
+                        factorIcRecordMapper.selectList(wrapper);
+                if (records == null || records.size() < 4) continue; // 数据不足跳过
+
+                // 按季度分组，取每季度平均IC
+                Map<String, List<Double>> quarterlyIc = new LinkedHashMap<>();
+                for (var r : records) {
+                    if (r.getTradeDate() == null || r.getIcValue() == null) continue;
+                    String q = r.getTradeDate().getYear() + "-Q" + ((r.getTradeDate().getMonthValue() - 1) / 3 + 1);
+                    quarterlyIc.computeIfAbsent(q, k -> new ArrayList<>()).add(r.getIcValue());
+                }
+                if (quarterlyIc.size() < 2) continue;
+
+                long positiveQuarters = quarterlyIc.values().stream()
+                        .mapToDouble(qs -> qs.stream().mapToDouble(d -> d).average().orElse(0))
+                        .filter(avg -> avg > 0)
+                        .count();
+                int totalQuarters = quarterlyIc.size();
+                double positiveRatio = (double) positiveQuarters / totalQuarters;
+
+                if (positiveRatio < 0.25) {
+                    // 方向极不稳定，剔除
+                    snap.status = "CONSISTENCY_DROPPED";
+                    snap.assessment = String.format("IC季度一致性剔除: %d/%d季度IC为正(占比%.0f%%), 方向不稳定",
+                            positiveQuarters, totalQuarters, positiveRatio * 100);
+                    dropped++;
+                    log.info("[DynamicWeight] P5 一致性剔除: {} {}/{}季度正({:.0f}%)", fc, positiveQuarters, totalQuarters, positiveRatio * 100);
+                } else if (positiveRatio < 0.50) {
+                    // 方向不稳定，降权50%
+                    String oldAssessment = snap.assessment;
+                    snap.assessment = (oldAssessment != null ? oldAssessment + "; " : "") +
+                            String.format("IC一致性降权50%%: %d/%d季度正", positiveQuarters, totalQuarters);
+                    // 通过降低icMean来间接降权（ICW模式下权重∝|IC|）
+                    snap.icMean *= 0.5;
+                    penalized++;
+                    log.info("[DynamicWeight] P5 一致性降权50%%: {} {}/{}季度正", fc, positiveQuarters, totalQuarters);
+                }
+            } catch (Exception e) {
+                log.debug("[DynamicWeight] P5 一致性校验跳过: {} error={}", fc, e.getMessage());
+            }
+        }
+        if (dropped > 0 || penalized > 0) {
+            log.info("[DynamicWeight] P5 IC一致性校验: 剔除{}个, 降权{}个", dropped, penalized);
+        }
+        return dropped;
     }
 
     /**

@@ -30,7 +30,7 @@ export function ManualFactors() {
         <Col xs={24} md={8}>
           <Card type="inner" title={<><Tag color="blue">BUILTIN</Tag> 内置因子</>}>
             <Paragraph style={{ fontSize: 13 }}>
-              平台预置的因子，无法编辑和删除。包括8个常用因子：MOM20、MOM60、VOL20、TURN20、SIZE、RSI5、BOLL_POS、VPCORR20。
+              平台预置的因子，无法编辑和删除。包括7个常用因子：MOM20、MOM60、VOL20、SIZE、RSI5、BOLL_POS、VPCORR20。
             </Paragraph>
           </Card>
         </Col>
@@ -226,7 +226,7 @@ export function ManualFactorCreate() {
           n: 1,
           icon: <CodeOutlined />,
           title: '实现计算逻辑（后端 Java）',
-          desc: '在因子计算引擎中添加计算方法。例如缠论因子，需在 ChanTheoryCalculator 中新增方法实现算法。技术因子通过 Groovy 脚本直接在页面定义，无需修改后端代码。',
+          desc: '在因子计算引擎中添加计算方法。例如新增Java计算类实现因子算法。技术因子通过 Groovy 脚本直接在页面定义，无需修改后端代码。',
           color: '#1677ff',
         },
         {
@@ -240,7 +240,7 @@ export function ManualFactorCreate() {
           n: 3,
           icon: <PlusOutlined />,
           title: '创建因子记录（因子管理页面）',
-          desc: '在「因子管理 → 新建因子」页面填写基本信息：因子代码（唯一标识）、因子名称、因子分类（选「缠论 CHANTHEORY」即可纳入缠论筛选）、描述。保存后在因子定义表中创建记录，并设置为「已激活」状态。',
+          desc: '在「因子管理 → 新建因子」页面填写基本信息：因子代码（唯一标识）、因子名称、因子分类、描述。保存后在因子定义表中创建记录，并设置为「已激活」状态。',
           color: '#faad14',
         },
         {
@@ -279,16 +279,15 @@ export function ManualFactorCreate() {
         type="warning"
         showIcon
         style={{ marginTop: 8 }}
-        message="关于缠论因子"
+        message="关于 Java 内置因子"
         description={
           <div>
             <Paragraph style={{ marginBottom: 8 }}>
-              缠论因子属于特殊类别（CHANTHEORY），与普通因子有以下区别：
+              Java 内置因子（如 MOM20、VOL20、SIZE 等）属于特殊类别，与脚本因子有以下区别：
             </Paragraph>
             <ul style={{ paddingLeft: 20, marginBottom: 0 }}>
-              <li><Text strong>计算逻辑</Text>：必须用 Java 代码实现（ChanTheoryCalculator），无法用 Groovy 脚本</li>
-              <li><Text strong>自动感知</Text>：新增后会被「缠论结构筛选」页面自动感知——筛选维度和结果列动态出现，无需修改前端代码</li>
-              <li><Text strong>筛选控件</Text>：如果新因子的值是枚举型（如 1/0/-1），需要在因子记录的 parameters_json 字段中配置 controlType 和 options</li>
+              <li><Text strong>计算逻辑</Text>：必须用 Java 代码实现，无法用 Groovy 脚本</li>
+              <li><Text strong>预注册</Text>：在 FactorComputeEngine.registerBuiltin() 中注册，启动时自动生效</li>
             </ul>
           </div>
         }

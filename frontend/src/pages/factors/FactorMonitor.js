@@ -249,8 +249,7 @@ function FactorMonitor() {
     // 财务因子按报告期数量判断完成度；日频因子按交易日数量
     // fallback: category 为空时通过 factor_code 前缀识别（后端 selectFactorStats 未返回 category）
     const isFinancial = FINANCIAL_CATEGORIES.includes(f.category)
-      || f.code.startsWith('FIN_')
-      || f.code.startsWith('CHAN_');
+      || f.code.startsWith('FIN_');
     let pct, isDone;
     if (isFinancial) {
       // 财务因子：报告期数量 vs 目标报告期数（季报+年报约每年4期，2年=8期为合理目标）
@@ -286,7 +285,7 @@ function FactorMonitor() {
   });
 
   const totalRecords = monitorData?.totalRecords || 0;
-  // 正在计算的因子不算"已完成"（修复增量计算时 TURN20 等显示"已完成"的 bug）
+  // 正在计算的因子不算"已完成"
   const doneCount = factorsWithStats.filter(f => f.isDone && !f.isRunning).length;
   const runningCount = factorsWithStats.filter(f => f.isRunning).length;
   const pendingCount = factorsWithStats.filter(f => !f.isDone && !f.isRunning).length;

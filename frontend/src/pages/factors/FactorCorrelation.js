@@ -28,7 +28,7 @@ export default function FactorCorrelation() {
         const factors = res.records || [];
         setAllFactors(factors);
         // 默认选择已知有数据的因子（factor_value表实际计算过的）
-        const defaultCodes = ['RSI14', 'MACD', 'MOM20', 'MOM60', 'VOL20', 'TURN20'];
+        const defaultCodes = ['RSI14', 'MACD', 'MOM20', 'MOM60', 'VOL20', 'SIZE'];
         const codes = factors.map(f => f.factorCode);
         const selected = defaultCodes.filter(c => codes.includes(c));
         if (selected.length >= 2) {

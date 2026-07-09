@@ -153,7 +153,7 @@ public class LlmAnalysisService {
                 fmt(factorValues.get("FIN_EARNINGS_QUALITY")), fmt(factorValues.get("FIN_REVENUE_QUALITY")),
                 fmt(factorValues.get("RSI14")), fmt(factorValues.get("MOM20")),
                 fmt(factorValues.get("VOL20")), fmt(factorValues.get("PRICE_52W_HIGH_PCT")),
-                fmt(factorValues.get("TURN20")), fmt(factorValues.get("MACD")),
+                fmt(factorValues.get("MACD")),
                 String.valueOf(rec.getFinalScore() != null ? Math.round(rec.getFinalScore() * 100) : "N/A")
         );
 

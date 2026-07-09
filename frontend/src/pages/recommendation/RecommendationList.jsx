@@ -676,7 +676,7 @@ export default function RecommendationList() {
       title: <Tooltip styles={{ root: {maxWidth: 360} }} title={
         <div style={{ fontSize: 12, lineHeight: '20px' }}>
           <div style={{ fontWeight: 'bold', marginBottom: 6, fontSize: 13 }}>个股六维度综合得分（满分134）</div>
-          <div style={{ marginBottom: 4 }}>技术（满分30）：缠论信号+MACD+RSI+均线</div>
+          <div style={{ marginBottom: 4 }}>技术（满分30）：趋势信号+MACD+RSI+均线</div>
           <div style={{ marginBottom: 4 }}>资金（满分25）：主力净流入+换手率+资金流向</div>
           <div style={{ marginBottom: 4 }}>事件（满分25）：涨停炸板率+龙虎榜+舆情</div>
           <div style={{ marginBottom: 4 }}>基本面（满分29）：PE/PB估值+盈利质量+财务健康</div>
@@ -972,7 +972,7 @@ export default function RecommendationList() {
                   <div style={{ marginLeft: 8, marginBottom: 4 }}>• 市场宽度：涨跌家数比（扩散好 Risk-on，极端分化 Risk-off）</div>
                   <div style={{ fontWeight: 'bold', marginBottom: 4, fontSize: 13, borderTop: '1px solid #444', paddingTop: 6 }}>❹ 个股深度分析</div>
                   <div style={{ marginBottom: 2 }}>六维度评分（134分制，归一化到 0~1）：</div>
-                  <div style={{ marginLeft: 8, marginBottom: 2 }}>• 技术面（30分）：RSI、MACD、MTM6、缠论信号</div>
+                  <div style={{ marginLeft: 8, marginBottom: 2 }}>• 技术面（30分）：RSI、MACD、趋势信号、近高近低</div>
                   <div style={{ marginLeft: 8, marginBottom: 2 }}>• 资金面（25分）：主力净流入、换手率</div>
                   <div style={{ marginLeft: 8, marginBottom: 2 }}>• 事件面（25分）：利好事件驱动</div>
                   <div style={{ marginLeft: 8, marginBottom: 2 }}>• 基本面（29分）：盈利增速、估值、分红</div>

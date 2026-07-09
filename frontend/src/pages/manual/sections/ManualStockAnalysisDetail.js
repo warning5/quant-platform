@@ -64,7 +64,7 @@ export default function ManualStockAnalysisDetail() {
             <Paragraph style={{ fontSize: 12, margin: 0 }}>
               不同投资者可关注不同维度：
               <ul style={{ margin: '4px 0 0', paddingLeft: 16, fontSize: 11, lineHeight: 1.8 }}>
-                <li><Text strong>趋势交易者</Text>：技术面权重最高（关注均线+MACD+缠论信号）</li>
+                <li><Text strong>趋势交易者</Text>：技术面权重最高（关注均线+MACD+趋势信号）</li>
                 <li><Text strong>价值投资者</Text>：基本面权重最高（关注ROE+营收增速+估值分位）</li>
                 <li><Text strong>事件驱动者</Text>：事件面权重最高（关注研报评级+机构调研+大宗交易）</li>
                 <li><Text strong>资金流派</Text>：资金面权重最高（关注主力净流入+量比+换手率）</li>

@@ -58,6 +58,7 @@ public class FactorService {
     private final MarketDataService marketDataService;
     private final StockInfoMapper stockInfoMapper;
     private final org.springframework.messaging.simp.SimpMessagingTemplate messagingTemplate;
+    private final FactorMetaCacheService factorMetaCache;
 
     /**
      * 查询因子列表（分页+搜索）
@@ -626,12 +627,12 @@ public class FactorService {
         Set<String> existingCodes = new java.util.HashSet<>(
                 clickHouseFactorValueService.findFactorsWithDates(date.toString()));
 
-        // 3. 找出缺失因子（排除财务因子，财务因子非日频更新）
+        // 3. 找出缺失因子（排除季频财务因子，非日频更新）
         return allFactors.stream()
                 .filter(f -> !existingCodes.contains(f.getFactorCode()))
                 .filter(f -> {
                     String code = f.getFactorCode();
-                    return code != null && !code.startsWith("FIN_");
+                    return code != null && !factorMetaCache.isFinancial(code);
                 })
                 .map(f -> {
                     Map<String, Object> m = new java.util.LinkedHashMap<>();
@@ -734,184 +735,4 @@ public class FactorService {
         return Map.of("totalRecords", total, "factors", stats);
     }
 
-    /**
-     * 缠论因子筛选
-     *
-     * @param penDirList  笔方向过滤（+1/-1，null=不过滤）
-     * @param trendList   走势类型（1/0/-1，null=不过滤）
-     * @param buySellList 买卖点（1~3/-1~-3，null=不过滤）
-     * @param hubPosMin   中枢位置下限（0~1，null=不过滤）
-     * @param hubPosMax   中枢位置上限
-     * @param penCountMin 笔数量下限（null=不过滤）
-     * @param penCountMax 笔数量上限
-     * @param keyword     股票代码/名称关键词（null=不过滤）
-     * @param page        页码（0-based）
-     * @param size        每页条数
-     * @return { list: 当前页数据, total: 符合条件总数 }
-     */
-    public Map<String, Object> chanScreen(
-            List<Integer> penDirList,
-            List<Integer> trendList,
-            List<Integer> buySellList,
-            BigDecimal hubPosMin,
-            BigDecimal hubPosMax,
-            BigDecimal penCountMin,
-            BigDecimal penCountMax,
-            String keyword,
-            int page,
-            int size) {
-
-        // 从 factor_definition 动态查询所有激活的缠论因子代码
-        List<FactorDefinition> chanFactors = factorMapper.selectList(
-                new LambdaQueryWrapper<FactorDefinition>()
-                        .eq(FactorDefinition::getCategory, FactorDefinition.FactorCategory.CHANTHEORY)
-                        .eq(FactorDefinition::getStatus, FactorDefinition.FactorStatus.ACTIVE)
-                        .orderByAsc(FactorDefinition::getId)
-        );
-
-        if (chanFactors.isEmpty()) {
-            log.warn("[FactorService] chanScreen: 未找到激活的缠论因子，返回空结果");
-            return Map.of("list", List.of(), "total", 0);
-        }
-
-        List<String> factorCodes = chanFactors.stream()
-                .map(FactorDefinition::getFactorCode)
-                .toList();
-
-        List<Map<String, Object>> all = clickHouseFactorValueService.chanScreen(
-                penDirList, trendList, buySellList,
-                hubPosMin, hubPosMax, penCountMin, penCountMax, keyword,
-                factorCodes);
-
-        int total = all.size();
-        int fromIndex = Math.min(page * size, total);
-        int toIndex = Math.min((page + 1) * size, total);
-        List<Map<String, Object>> pageList = all.subList(fromIndex, toIndex);
-
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("list", pageList);
-        result.put("total", total);
-        return result;
-    }
-
-    /**
-     * 缠论筛选元数据：动态获取所有缠论因子定义，供前端动态渲染筛选控件和表格列
-     * 从 factor_definition 表查询 CHANTHEORY 类别的激活因子
-     * 因子配置从 parameters_json 字段读取，格式：
-     * { "screenable": true, "controlType": "enum|slider|input", "options": [...], "min": 0, "max": 1 }
-     */
-    public Map<String, Object> getChanScreenMeta() {
-        // 1. 查询所有激活的缠论因子
-        List<FactorDefinition> chanFactors = factorMapper.selectList(
-                new LambdaQueryWrapper<FactorDefinition>()
-                        .eq(FactorDefinition::getCategory, FactorDefinition.FactorCategory.CHANTHEORY)
-                        .eq(FactorDefinition::getStatus, FactorDefinition.FactorStatus.ACTIVE)
-                        .orderByAsc(FactorDefinition::getId)
-        );
-
-        if (chanFactors.isEmpty()) {
-            return Map.of("factors", List.of(), "columns", List.of());
-        }
-
-        // 2. 解析 parameters_json，构建前端控件配置
-        List<Map<String, Object>> factorConfigs = new ArrayList<>();
-        List<Map<String, Object>> columnConfigs = new ArrayList<>();
-
-        for (FactorDefinition f : chanFactors) {
-            String code = f.getFactorCode();
-            Map<String, Object> screenConfig = parseScreenConfig(f.getParametersJson(), code);
-
-            Map<String, Object> factorConfig = new LinkedHashMap<>();
-            factorConfig.put("code", code);
-            factorConfig.put("name", f.getFactorName());
-            factorConfig.put("description", f.getDescription());
-            factorConfig.put("controlType", screenConfig.get("controlType"));
-            factorConfig.put("options", screenConfig.get("options"));
-            factorConfig.put("min", screenConfig.get("min"));
-            factorConfig.put("max", screenConfig.get("max"));
-            factorConfigs.add(factorConfig);
-
-            // 表格列配置（固定基础列 + 动态因子列）
-            Map<String, Object> col = new LinkedHashMap<>();
-            col.put("key", code.toLowerCase().replace("chan_", "chan_"));
-            col.put("dataIndex", code.toLowerCase());
-            col.put("title", f.getFactorName());
-            col.put("controlType", screenConfig.get("controlType"));
-            columnConfigs.add(col);
-        }
-
-        // 3. 返回元数据
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("factors", factorConfigs);
-        result.put("columns", columnConfigs);
-        return result;
-    }
-
-    /**
-     * 解析因子的筛选配置
-     * 优先从 parameters_json 读取，否则根据因子代码约定推断
-     */
-    private Map<String, Object> parseScreenConfig(String paramsJson, String code) {
-        Map<String, Object> config = new LinkedHashMap<>();
-
-        // 默认：连续值滑块
-        config.put("controlType", "slider");
-        config.put("min", 0);
-        config.put("max", 100);
-        config.put("options", List.of());
-
-        if (paramsJson != null && !paramsJson.isBlank()) {
-            try {
-                com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-                Map<String, Object> params = mapper.readValue(paramsJson, Map.class);
-                Map<String, Object> screen = (Map<String, Object>) params.get("screen");
-                if (screen != null) {
-                    if (screen.get("controlType") != null) {
-                        config.put("controlType", screen.get("controlType"));
-                    }
-                    if (screen.get("options") != null) {
-                        config.put("options", screen.get("options"));
-                    }
-                    if (screen.get("min") != null) {
-                        config.put("min", ((Number) screen.get("min")).doubleValue());
-                    }
-                    if (screen.get("max") != null) {
-                        config.put("max", ((Number) screen.get("max")).doubleValue());
-                    }
-                    return config;
-                }
-            } catch (Exception e) {
-                log.warn("[getChanScreenMeta] 解析 parameters_json 失败: {} -> {}", code, e.getMessage());
-            }
-        }
-
-        // 根据因子代码约定推断（兼容现有因子）
-        switch (code) {
-            case "CHAN_TREND" -> {
-                config.put("controlType", "checkbox");
-                config.put("options", List.of(
-                        Map.of("label", "上涨", "value", 1),
-                        Map.of("label", "盘整", "value", 0),
-                        Map.of("label", "下跌", "value", -1)
-                ));
-            }
-            case "CHAN_BUY_SELL" -> {
-                config.put("controlType", "checkbox");
-                config.put("options", List.of(
-                        Map.of("label", "1买", "value", 1),
-                        Map.of("label", "2买", "value", 2),
-                        Map.of("label", "3买", "value", 3),
-                        Map.of("label", "1卖", "value", -1),
-                        Map.of("label", "2卖", "value", -2),
-                        Map.of("label", "3卖", "value", -3)
-                ));
-            }
-            case "CHAN_HUB_POS" -> {
-                config.put("controlType", "slider");
-                config.put("min", 0.0);
-                config.put("max", 1.0);
-            }
-        }
-        return config;
-    }
 }

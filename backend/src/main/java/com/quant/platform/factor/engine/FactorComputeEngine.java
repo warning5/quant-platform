@@ -42,18 +42,6 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class FactorComputeEngine {
 
-    /**
-     * 判断是否为财务因子：按 FIN_ 前缀或已注册的财务计算器
-     * 优先用前缀判断，确保新增 FIN_ 因子无需修改代码也能正确识别
-     * <p>
-     * 注意：以下 VAL_ 因子虽然是估值类，但依赖日频行情数据（stock_daily 的 pe_ttm/pb 等），
-     * 已改为日频计算（有 Java Calculator），不在此列：
-     * VAL_PE_TTM, VAL_PB, VAL_PE_PERCENTILE, VAL_PB_PERCENTILE, VAL_DIVIDEND_YIELD, VAL_FCF_YIELD
-     */
-    private static final Set<String> DAILY_VAL_FACTORS = Set.of(
-            "VAL_PE_TTM", "VAL_PB",
-            "VAL_PE_PERCENTILE", "VAL_PB_PERCENTILE", "VAL_DIVIDEND_YIELD", "VAL_FCF_YIELD"
-    );
     private final MarketDataService marketDataService;
     private final FactorValueMapper factorValueMapper;
     private final ClickHouseFactorValueService clickHouseFactorValueService;
@@ -62,6 +50,7 @@ public class FactorComputeEngine {
     private final SimpMessagingTemplate messagingTemplate;
     private final ObjectMapper objectMapper;
     private final StockFinancialIndicatorMapper financialIndicatorMapper;
+    private final com.quant.platform.factor.service.FactorMetaCacheService factorMetaCache;
     private final Map<String, FactorCalculator> builtinCalculators = new HashMap<>();
     private final Map<String, FinancialFactorCalculator> financialCalculators = new HashMap<>();
     // 跟踪正在计算的因子代码（供前端查询当前运行状态）
@@ -105,9 +94,7 @@ public class FactorComputeEngine {
         // 注册内置技术因子（12个ACTIVE）
         registerBuiltin(new BuiltinFactors.Momentum5Calculator());
         registerBuiltin(new BuiltinFactors.Momentum20Calculator());
-        registerBuiltin(new BuiltinFactors.Mtm6Calculator());
         registerBuiltin(new BuiltinFactors.Volatility20Calculator());
-        registerBuiltin(new BuiltinFactors.Turnover20Calculator());
         registerBuiltin(new BuiltinFactors.VolumeRatioCalculator2());
         registerBuiltin(new BuiltinFactors.TurnoverAnomalyCalculator());
         registerBuiltin(new BuiltinFactors.VolumeSurpriseCalculator());
@@ -136,14 +123,7 @@ public class FactorComputeEngine {
         registerBuiltin(new BuiltinFactors.DividendYieldCalculator());
         registerBuiltin(new BuiltinFactors.FcfYieldCalculator());
 
-        // 注册缠论因子（5个ACTIVE）
-        registerBuiltin(new ChanTheoryFactors.TrendTypeCalculator());
-        registerBuiltin(new ChanTheoryFactors.BuySellSignalCalculator());
-        registerBuiltin(new ChanTheoryFactors.HubPositionCalculator());
-        registerBuiltin(new ChanTheoryFactors.PenCountCalculator());
-        registerBuiltin(new ChanTheoryFactors.PenDirCalculator());
-
-        // 注册财务因子（静态内部类，12个ACTIVE）
+        // 注册财务因子（季频，从 MySQL stock_financial_indicator 计算）
         registerFinancial(new FinancialFactors.RoeCalc());
         registerFinancial(new FinancialFactors.RevenueYoyCalc());
         registerFinancial(new FinancialFactors.NetProfitYoyCalc());
@@ -175,12 +155,12 @@ public class FactorComputeEngine {
         financialCalculators.put(calc.getFactorCode(), calc);
     }
 
+    /** 判断是否为财务因子：从 DB 元数据驱动，季频+FINANCIAL/QUALITY分类即为财务因子 */
     private boolean isFinancialFactor(String code) {
         if (code == null) return false;
-        // 日频估值因子优先排除（它们有 builtin Calculator，走日频路径）
-        if (DAILY_VAL_FACTORS.contains(code)) return false;
-        if (code.startsWith("FIN_")) return true;
-        if (code.startsWith("VAL_") || code.startsWith("QUAL_")) return true;
+        // DB驱动的财务因子判断
+        if (factorMetaCache.isFinancial(code)) return true;
+        // 兜底：已注册的财务计算器映射
         return financialCalculators.containsKey(code);
     }
 

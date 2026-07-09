@@ -45,14 +45,17 @@ public class FactorIcService {
 
     private final FactorIcRecordMapper icRecordMapper;
     private final ClickHouseStockService clickHouseStockService;
+    private final com.quant.platform.factor.service.FactorMetaCacheService factorMetaCache;
 
     /** IC 计算用的未来收益天数（可通过 factor.ic.forward-return-days 配置，默认5） */
     @Value("${quant.factor.ic.forward-return-days:5}")
     private int forwardReturnDays;
 
-    public FactorIcService(FactorIcRecordMapper icRecordMapper, ClickHouseStockService clickHouseStockService) {
+    public FactorIcService(FactorIcRecordMapper icRecordMapper, ClickHouseStockService clickHouseStockService,
+                           com.quant.platform.factor.service.FactorMetaCacheService factorMetaCache) {
         this.icRecordMapper = icRecordMapper;
         this.clickHouseStockService = clickHouseStockService;
+        this.factorMetaCache = factorMetaCache;
     }
 
     /**
@@ -93,8 +96,8 @@ public class FactorIcService {
 
         for (String factorCode : factorCodes) {
             try {
-                // 季频因子（FIN_* / VAL_*季频）只在季末日期有数据，非季末日期跳过
-                if (isQuarterlyFactor(factorCode) && !isQuarterEnd(date)) {
+                // 季频因子只在季末日期有数据，非季末日期跳过（由 DB dataFrequency 驱动）
+                if (factorMetaCache.isQuarterly(factorCode) && !isQuarterEnd(date)) {
                     skippedNonQuarterEnd++;
                     log.debug("[FactorIC] 季频因子跳过: factor={} date={} (非季末日期)", factorCode, date);
                     continue;
@@ -492,22 +495,6 @@ public class FactorIcService {
         if (obj == null) return 0;
         if (obj instanceof Number) return ((Number) obj).intValue();
         return 0;
-    }
-
-    /** 判断因子是否为季频（FIN_* / 部分VAL_*季频因子） */
-    private static boolean isQuarterlyFactor(String factorCode) {
-        // FIN_* 全部为季频因子（财务数据按季度披露）
-        if (factorCode.startsWith("FIN_")) return true;
-        // VAL_* 季频因子白名单（日频白名单之外的VAL_*均为季频）
-        // 日频白名单（MEMORY.md）：VAL_PE_TTM / PB / PE_PERCENTILE / PB_PERCENTILE / DIVIDEND_YIELD / FCF_YIELD
-        // 其他 VAL_* 为季频
-        if (factorCode.startsWith("VAL_")) {
-            return !java.util.Set.of(
-                "VAL_PE_TTM", "VAL_PB", "VAL_PE_PERCENTILE", "VAL_PB_PERCENTILE",
-                "VAL_DIVIDEND_YIELD", "VAL_FCF_YIELD"
-            ).contains(factorCode);
-        }
-        return false;
     }
 
     /** 判断日期是否为季末（03-31 / 06-30 / 09-30 / 12-31） */

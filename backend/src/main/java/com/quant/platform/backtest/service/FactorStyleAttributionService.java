@@ -49,11 +49,11 @@ public class FactorStyleAttributionService {
     private final StrategyDefinitionMapper strategyMapper;
     private final JdbcTemplate jdbcTemplate;
 
-    /** 无配置时的默认因子（向后兼容） */
+    /** 无配置时的兜底因子（3因子：动量/波动率/规模），仅极端兜底用 */
     private static final List<FactorDef> DEFAULT_FACTORS = List.of(
             new FactorDef("MOM20", "动量", "20日动量 — 追涨杀跌收益"),
             new FactorDef("VOL20", "波动率", "20日波动率 — 高波动股短期溢价"),
-            new FactorDef("TURN20", "换手率", "20日换手率 — 流动性溢价")
+            new FactorDef("SIZE", "规模", "市值规模 — 小盘股溢价")
     );
 
     private static final int QUINTILE = 5;          // 分5组，Top 20% vs Bottom 20%
@@ -418,7 +418,7 @@ public class FactorStyleAttributionService {
 
     /**
      * 从策略 factorConfigJson 读取因子列表，解析为 FactorDef。
-     * 无配置时回退到默认4因子。
+     * 无配置时回退到默认3因子（兜底）。
      */
     private List<FactorDef> loadStrategyFactors(Long strategyId) {
         if (strategyId == null) {
@@ -435,7 +435,7 @@ public class FactorStyleAttributionService {
 
         List<String> factorCodes;
         try {
-            // 解析 factorConfigJson: {"factors":[{"code":"TURN20","weight":1.0}]}
+            // 解析 factorConfigJson: {"factors":[{"code":"MOM20","weight":1.0}]}
             List<Map<String, Object>> factorList = objectMapper.readValue(
                     strategy.getFactorConfigJson(),
                     new TypeReference<>() {
