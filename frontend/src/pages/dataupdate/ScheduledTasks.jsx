@@ -73,7 +73,7 @@ const TASK_ITEMS = [
     icon: '⚠️', defaultEnabled: true, color: '#fa8c16',
   },
   {
-    key: 'FINANCIAL_ANOMALY', name: '财务突变检测', desc: '用LAG窗口函数检测营收/净利润环比跳变>100%的异常记录。非数据更新任务，纯监控',
+    key: 'FINANCIAL_ANOMALY', name: '财务突变检测', desc: '基于单季值（累计值拆解）检测营收/净利润环比跳变>500%的异常记录。非数据更新任务，纯监控',
     icon: '📉', defaultEnabled: true, color: '#eb2f96',
   },
 ];

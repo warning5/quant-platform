@@ -55,7 +55,7 @@ public class DataQualityController {
 
     /** 财务突变检测 */
     @GetMapping("/financial-anomalies")
-    @Operation(summary = "财务突变检测", description = "检查营收/净利润环比跳变>100%的记录")
+    @Operation(summary = "财务突变检测", description = "基于单季值（累计值拆解）检查营收/净利润环比跳变>500%的记录")
     public ApiResponse<Map<String, Object>> financialAnomalies() {
         return ApiResponse.success(dataQualityService.checkFinancialAnomalies());
     }

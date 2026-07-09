@@ -85,7 +85,7 @@ public class DataQualityService {
             }
             if (finAnomalies.get("hasAnomaly") instanceof Boolean b && b) {
                 alertMsg.append("### 财务数据突变\n");
-                alertMsg.append("发现 ").append(finAnomalies.get("anomalyCount")).append(" 条营收/利润环比跳变>100%记录\n");
+                alertMsg.append("发现 ").append(finAnomalies.get("anomalyCount")).append(" 条单季营收/利润环比跳变>500%记录\n");
             }
 
             notificationService.sendAlert(alertMsg.toString());
@@ -157,9 +157,11 @@ public class DataQualityService {
         }
 
         // 3. stock_financial_indicator (MySQL)
+        // 财务数据为季频，披露有延迟：Q1报告4月底截止，中报8月底，三季报10月底，年报次年4月底
+        // 阈值用120天覆盖正常披露窗口，避免中报披露期(7-8月)误报
         try {
             Object fiMax = jdbcTemplate.queryForObject(
-                "SELECT max(report_date) FROM stock_financial_indicator WHERE report_type IN (1,2,4)", String.class);
+                "SELECT max(report_date) FROM stock_financial_indicator WHERE report_type IN (1,2,3,4)", String.class);
             LocalDate fiDate = null;
             if (fiMax != null) {
                 String fiStr = fiMax.toString().trim();
@@ -183,10 +185,10 @@ public class DataQualityService {
                 if (fiStale < 0) fiStale = 0;
             }
             Map<String, Object> fiStatus = new LinkedHashMap<>();
-            fiStatus.put("latestReportDate", fiDate != null ? fiDate.toString() : "N/A");
-            fiStatus.put("quartersBehind", fiStale > 90 ? fiStale / 90 : 0);
-            fiStatus.put("stale", fiStale > 90);
-            if (fiStale > 90) {
+            fiStatus.put("latestDate", fiDate != null ? fiDate.toString() : "N/A");
+            fiStatus.put("daysBehind", fiStale > 120 ? fiStale : 0);
+            fiStatus.put("stale", fiStale > 120);
+            if (fiStale > 120) {
                 log.warn("[数据质量] financial_indicator 落后约 {} 天（最新报告期={}）", fiStale, fiDate);
             }
             report.put("financialIndicator", fiStatus);
@@ -333,41 +335,75 @@ public class DataQualityService {
 
     /**
      * 财务数据突变检测
-     * 检查 stock_income 中营收/净利润环比跳变 > 100% 的记录
-     * 跳变 = |本期 - 上期| / |上期| > 100%（且上期 != 0）
+     * 检查 stock_income 中营收/净利润【单季值】环比跳变 > 500% 的记录
+     *
+     * 关键：stock_income 中的 revenue/net_profit 是累计值（一季报=Q1累计，中报=H1累计，三季报=前三季度累计，年报=全年累计）。
+     * 直接对累计值做 LAG 环比会产生伪异常（如 H1 累计 vs Q1 累计天然翻倍）。
+     * 因此先拆成单季值（同年内相邻报告期相减），再对单季值做环比。
+     *
+     * 单季值计算：
+     *   Q1(0331)  → 单季 = 累计（当年第一个报告期）
+     *   H1(0630)  → 单季 = H1累计 - Q1累计
+     *   Q3(0930)  → 单季 = 前三季度累计 - H1累计
+     *   年报(1231) → 单季 = 年报累计 - 前三季度累计
+     *
+     * 过滤条件：
+     *   - 上期单季绝对值 >= 100万元，避免除以极小值产生几十万%的伪异常
+     *   - report_type IN (1,2,3,4)，覆盖全部四种报告类型
+     *   - 时间范围 24 个月（需要至少2个报告期才能算单季环比）
      */
     public Map<String, Object> checkFinancialAnomalies() {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("checkTime", LocalDateTime.now().toString());
 
         try {
-            // 查询最近两个报告期，用 LAG 窗口函数获取上期值
-            // 注意：MySQL 不允许 WHERE 引用 SELECT 别名，需多包一层子查询
-            // report_date 是 VARCHAR(10) 格式 "20250331"，需 STR_TO_DATE 转换后比较
+            // 四层嵌套：
+            // t1: LAG 获取上一行累计值 + 上一行 report_date
+            // t2: 计算单季值（同年相减，跨年用累计本身）
+            // t3: 对单季值再做 LAG 获取上一期单季值
+            // t4: 计算环比百分比，过滤 >100%
             String sql =
-                "SELECT * FROM (" +
-                "  SELECT code, report_date, " +
-                "    revenue, net_profit, " +
-                "    prevRevenue, prevNetProfit, " +
-                "    CASE WHEN prevRevenue IS NOT NULL AND prevRevenue != 0 " +
-                "      THEN ROUND(ABS(revenue - prevRevenue) / ABS(prevRevenue) * 100, 2) " +
-                "      ELSE 0 END AS revenue_chg_pct, " +
-                "    CASE WHEN prevNetProfit IS NOT NULL AND prevNetProfit != 0 " +
-                "      THEN ROUND(ABS(net_profit - prevNetProfit) / ABS(prevNetProfit) * 100, 2) " +
-                "      ELSE 0 END AS profit_chg_pct " +
-                "  FROM (" +
-                "    SELECT code, report_date, revenue, net_profit, " +
-                "      LAG(revenue) OVER (PARTITION BY code ORDER BY report_date) AS prevRevenue, " +
-                "      LAG(net_profit) OVER (PARTITION BY code ORDER BY report_date) AS prevNetProfit " +
-                "    FROM stock_income " +
-                "    WHERE report_type IN (1, 2, 4) " +
-                "      AND STR_TO_DATE(report_date, '%Y%m%d') >= DATE_SUB(CURDATE(), INTERVAL 18 MONTH) " +
-                "  ) t" +
-                ") t2 " +
-                "WHERE (revenue_chg_pct > 100 OR profit_chg_pct > 100) " +
-                "  AND prevRevenue IS NOT NULL " +
-                "  AND prevNetProfit IS NOT NULL " +
-                "ORDER BY GREATEST(revenue_chg_pct, profit_chg_pct) DESC " +
+                "SELECT t4.*, si.name FROM (" +
+                "  SELECT * FROM (" +
+                "    SELECT code, report_date, report_type, " +
+                "      sq_rev AS revenue, sq_np AS net_profit, " +
+                "      prev_sq_rev AS prevRevenue, prev_sq_np AS prevNetProfit, " +
+                "      CASE WHEN prev_sq_rev IS NOT NULL AND ABS(prev_sq_rev) >= 1000000 " +
+                "        THEN ROUND(ABS(sq_rev - prev_sq_rev) / ABS(prev_sq_rev) * 100, 2) " +
+                "        ELSE NULL END AS revenue_chg_pct, " +
+                "      CASE WHEN prev_sq_np IS NOT NULL AND ABS(prev_sq_np) >= 1000000 " +
+                "        THEN ROUND(ABS(sq_np - prev_sq_np) / ABS(prev_sq_np) * 100, 2) " +
+                "        ELSE NULL END AS profit_chg_pct " +
+                "    FROM (" +
+                "      SELECT code, report_date, report_type, sq_rev, sq_np, " +
+                "        LAG(sq_rev) OVER (PARTITION BY code ORDER BY report_date) AS prev_sq_rev, " +
+                "        LAG(sq_np) OVER (PARTITION BY code ORDER BY report_date) AS prev_sq_np " +
+                "      FROM (" +
+                "        SELECT code, report_date, report_type, revenue, net_profit, " +
+                "          CASE WHEN prev_rd IS NOT NULL " +
+                "            AND LEFT(prev_rd, 4) = LEFT(report_date, 4) " +
+                "            AND prev_cum_rev IS NOT NULL " +
+                "            THEN revenue - prev_cum_rev ELSE revenue END AS sq_rev, " +
+                "          CASE WHEN prev_rd IS NOT NULL " +
+                "            AND LEFT(prev_rd, 4) = LEFT(report_date, 4) " +
+                "            AND prev_cum_np IS NOT NULL " +
+                "            THEN net_profit - prev_cum_np ELSE net_profit END AS sq_np " +
+                "        FROM (" +
+                "          SELECT code, report_date, report_type, revenue, net_profit, " +
+                "            LAG(revenue) OVER (PARTITION BY code ORDER BY report_date) AS prev_cum_rev, " +
+                "            LAG(net_profit) OVER (PARTITION BY code ORDER BY report_date) AS prev_cum_np, " +
+                "            LAG(report_date) OVER (PARTITION BY code ORDER BY report_date) AS prev_rd " +
+                "          FROM stock_income " +
+                "          WHERE report_type IN (1, 2, 3, 4) " +
+                "            AND STR_TO_DATE(report_date, '%Y%m%d') >= DATE_SUB(CURDATE(), INTERVAL 24 MONTH) " +
+                "        ) t1 " +
+                "      ) t2 " +
+                "    ) t3 " +
+                "  ) t4_inner " +
+                "  WHERE (revenue_chg_pct > 500 OR profit_chg_pct > 500) " +
+                ") t4 " +
+                "LEFT JOIN stock_info si ON t4.code = si.code " +
+                "ORDER BY GREATEST(COALESCE(revenue_chg_pct, 0), COALESCE(profit_chg_pct, 0)) DESC " +
                 "LIMIT 50";
 
             List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql);
@@ -376,7 +412,9 @@ public class DataQualityService {
             for (Map<String, Object> row : rows) {
                 Map<String, Object> item = new LinkedHashMap<>();
                 item.put("code", row.get("code"));
+                item.put("name", row.get("name"));
                 item.put("reportDate", row.get("report_date") != null ? row.get("report_date").toString() : null);
+                item.put("reportType", row.get("report_type"));
                 item.put("revenue", row.get("revenue"));
                 item.put("prevRevenue", row.get("prevRevenue"));
                 item.put("revenueChgPct", row.get("revenue_chg_pct"));
@@ -391,7 +429,7 @@ public class DataQualityService {
             result.put("hasAnomaly", !anomalies.isEmpty());
 
             if (!anomalies.isEmpty()) {
-                log.warn("[数据质量] 发现 {} 条财务数据环比跳变>100%记录", anomalies.size());
+                log.warn("[数据质量] 发现 {} 条财务数据单季环比跳变>500%记录", anomalies.size());
             }
         } catch (Exception e) {
             log.warn("[数据质量] 财务突变检测失败: {}", e.getMessage());

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import {
   Card, Row, Col, Statistic, Tag, Typography, Button, Spin, Table, Badge,
   Tooltip, Space, Alert, Empty
@@ -262,7 +263,7 @@ function DataQualityDashboard() {
           title={
             <span>
               <WarningOutlined style={{ marginRight: 8 }} />
-              财务数据突变（营收/利润环比跳变 &gt;100%）
+              财务数据突变（单季营收/利润环比跳变 &gt;500%）
             </span>
           }
           extra={
@@ -278,15 +279,18 @@ function DataQualityDashboard() {
             <Table
               dataSource={finAnomalies.anomalies}
               columns={[
-                { title: '代码', dataIndex: 'code', key: 'code', width: 100 },
+                { title: '代码', dataIndex: 'code', key: 'code', width: 100,
+                  render: (v) => <Link to={`/data-detail/financial?code=${v}`}>{v}</Link>,
+                },
+                { title: '名称', dataIndex: 'name', key: 'name', width: 120 },
                 { title: '报告期', dataIndex: 'reportDate', key: 'reportDate', width: 120 },
                 {
-                  title: '营收变化(%)', dataIndex: 'revenueChgPct', key: 'revenueChgPct', width: 120,
-                  render: (v) => v > 0 ? <Text type="danger">+{v}%</Text> : <Text>{v}%</Text>,
+                  title: '单季营收变化(%)', dataIndex: 'revenueChgPct', key: 'revenueChgPct', width: 140,
+                  render: (v) => v == null ? <Text type="secondary">-</Text> : (v > 0 ? <Text type="danger">+{v}%</Text> : <Text>{v}%</Text>),
                 },
                 {
-                  title: '利润变化(%)', dataIndex: 'profitChgPct', key: 'profitChgPct', width: 120,
-                  render: (v) => v > 0 ? <Text type="danger">+{v}%</Text> : <Text>{v}%</Text>,
+                  title: '单季利润变化(%)', dataIndex: 'profitChgPct', key: 'profitChgPct', width: 140,
+                  render: (v) => v == null ? <Text type="secondary">-</Text> : (v > 0 ? <Text type="danger">+{v}%</Text> : <Text>{v}%</Text>),
                 },
               ]}
               rowKey={(r) => `${r.code}_${r.reportDate}`}
@@ -294,7 +298,7 @@ function DataQualityDashboard() {
               pagination={{ pageSize: 10 }}
             />
           ) : (
-            <Empty description="近18个月未发现财务数据突变" />
+            <Empty description="近24个月未发现财务数据突变" />
           )}
         </Card>
 
