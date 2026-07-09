@@ -247,8 +247,10 @@ public class DataUpdateService {
             for (Map<String, Object> row : rows) {
                 String taskKey = (String) row.get("task_key");
                 // 如果内存中已有该类型的运行中任务，说明不是孤儿，跳过
+                // ★ 同时匹配 taskKey（SENTIMENT_MF）和 updateType（SENTIMENT），确保子任务也能匹配
                 boolean hasInMemory = activeTasks.values().stream()
-                    .anyMatch(t -> t.getRequest() != null && taskKey.equals(t.getRequest().getUpdateType()));
+                    .anyMatch(t -> t.getRequest() != null &&
+                        (taskKey.equals(t.getRequest().getTaskKey()) || taskKey.equals(t.getRequest().getUpdateType())));
                 if (hasInMemory) {
                     continue;
                 }
@@ -307,15 +309,16 @@ public class DataUpdateService {
 
         // ★ 直接更新 DB 状态为 CANCELLED（不依赖后台线程 finally 块，
         // 避免 finally 被异常路径覆盖或线程卡住导致 DB 永远停留在 RUNNING）
-        if (ut != null && !ut.isEmpty()) {
+        String dbKey = resolveDbTaskKey(task.getRequest());
+        if (dbKey != null && !dbKey.isEmpty()) {
             try {
                 int rows = jdbcTemplate.update(
                     "UPDATE data_schedule_config SET last_run_status='CANCELLED', updated_at=? WHERE task_key=?",
-                    LocalDateTime.now(), ut
+                    LocalDateTime.now(), dbKey
                 );
-                log.info("[DataUpdate] ★ cancelTask 直接回写 DB: task_key={}, rows={}", ut, rows);
+                log.info("[DataUpdate] ★ cancelTask 直接回写 DB: task_key={}, rows={}", dbKey, rows);
             } catch (Exception dbEx) {
-                log.error("[DataUpdate] ★★ cancelTask 回写 DB 失败!! task_key={}, error: {}", ut, dbEx.getMessage());
+                log.error("[DataUpdate] ★★ cancelTask 回写 DB 失败!! task_key={}, error: {}", dbKey, dbEx.getMessage());
             }
         }
 
@@ -660,6 +663,8 @@ public class DataUpdateService {
             log.info("[DataUpdate] 任务 {} 结束, 状态: {}", taskId, task.getStatus());
 
             // ★ 回写 data_schedule_config 的 last_run_status（让定时任务页面能正确显示最终状态）
+            // 使用 taskKey（如 SENTIMENT_MF）而非 updateType（如 SENTIMENT）匹配 DB 行
+            String dbKey = resolveDbTaskKey(request);
             long durationSec = 0;
             try {
                 String finalStatus = task.getStatus();
@@ -668,25 +673,15 @@ public class DataUpdateService {
                 int rows = jdbcTemplate.update(
                     "UPDATE data_schedule_config SET last_run_status=?, last_run_duration_sec=?, updated_at=? " +
                     "WHERE task_key=?",
-                    finalStatus, durationSec, LocalDateTime.now(), ut
+                    finalStatus, durationSec, LocalDateTime.now(), dbKey
                 );
                 if (rows > 0) {
-                    log.info("[DataUpdate] ★ 回写 DB: task_key={}, status={}, 耗时{}s", ut, finalStatus, durationSec);
+                    log.info("[DataUpdate] ★ 回写 DB: task_key={}, status={}, 耗时{}s", dbKey, finalStatus, durationSec);
                 } else {
-                    log.warn("[DataUpdate] 回写 DB 未匹配任何行: task_key={}", ut);
-                }
-                // SENTIMENT 类型需要额外映射到 MF/OTHER 子表
-                if ("SENTIMENT".equals(ut)) {
-                    String mfSource = request.isFetchMoneyflow() ? "SENTIMENT_MF" : "SENTIMENT_OTHER";
-                    int rows2 = jdbcTemplate.update(
-                        "UPDATE data_schedule_config SET last_run_status=?, last_run_duration_sec=?, updated_at=? " +
-                        "WHERE task_key=?",
-                        finalStatus, durationSec, LocalDateTime.now(), mfSource
-                    );
-                    log.info("[DataUpdate] ★ 回写 DB(SENTIMENT子表): task_key={}, status={}", mfSource, finalStatus);
+                    log.warn("[DataUpdate] 回写 DB 未匹配任何行: task_key={}", dbKey);
                 }
             } catch (Exception dbEx) {
-                log.error("[DataUpdate] ★★ 回写 schedule_config 失败!! task_key={}, error: {}", ut, dbEx.getMessage());
+                log.error("[DataUpdate] ★★ 回写 schedule_config 失败!! task_key={}, error: {}", dbKey, dbEx.getMessage());
             }
 
             // ★ 发布任务完成事件，供依赖调度使用
@@ -698,6 +693,18 @@ public class DataUpdateService {
                 eventPublisher.publishEvent(new DataUpdateCompletedEvent(this, eventKey, taskOk, durationSec));
             }
         }
+    }
+
+    /**
+     * 解析 DB 回写的 task_key：优先使用 request.taskKey（如 SENTIMENT_MF），
+     * 无值时 fallback 到 updateType（如 SENTIMENT）。
+     * 确保 DB data_schedule_config 行的 task_key 正确匹配。
+     */
+    private String resolveDbTaskKey(DataUpdateRequest request) {
+        if (request == null) return null;
+        String taskKey = request.getTaskKey();
+        if (taskKey != null && !taskKey.isEmpty()) return taskKey;
+        return request.getUpdateType();
     }
 
     /**
