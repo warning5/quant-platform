@@ -821,7 +821,7 @@ public class StockScreenService {
             // ⚠️ 特殊处理：均值接近 0 的因子（REVERSAL / MACD 等零轴震荡指标），
             //   CV = std/|mean| 会因 |mean|≈0 而爆炸式偏大（数学伪影，非真不稳定）。
             //   改用绝对标准差阈值：std 过大才认为波动异常。
-            boolean isZeroMean = factorCode.startsWith("REVERSAL") || factorCode.equals("MACD");
+            boolean isZeroMean = factorCode.startsWith("REVERSAL");
             boolean unstable = false;
             if (values.size() >= 10) {
                 if (isZeroMean) {
@@ -853,7 +853,7 @@ public class StockScreenService {
 
         log.info("[Screen] Multi-day (latest+stable) for {}: candidates={} -> stable={} filtered_by_CV={} (threshold={}, mode={})",
                 factorCode, totalSymbols, stableCount, filteredByCV, cvThreshold,
-                factorCode.startsWith("REVERSAL") || factorCode.equals("MACD") ? "std_abs" : "cv_ratio");
+                factorCode.startsWith("REVERSAL") ? "std_abs" : "cv_ratio");
         return result;
     }
 

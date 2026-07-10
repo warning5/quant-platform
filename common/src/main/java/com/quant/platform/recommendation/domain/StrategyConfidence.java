@@ -47,7 +47,7 @@ public class StrategyConfidence {
     /** 最大回撤维度得分 (0~20) */
     private Integer drawdownScore;
 
-    /** 近10期最大单日跌幅% */
+    /** 近10期P5分位回撤%（样本<20时为最大单日跌幅%） */
     private BigDecimal maxDrawdownValue;
 
     /** 波动率/稳定性维度得分 (0~15) */

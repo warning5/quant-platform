@@ -517,12 +517,17 @@ public class RecommendationService {
         if (strategyId != null) {
             Set<String> blacklistCodes = stockBlacklistService.getActiveBlacklistCodes(strategyId);
             if (!blacklistCodes.isEmpty()) {
+                // 构建纯代码集合（去除.SZ/.SH/.BJ后缀），兼容历史数据
+                Set<String> pureBlacklistCodes = new HashSet<>();
+                for (String code : blacklistCodes) {
+                    pureBlacklistCodes.add(stripSuffix(code));
+                }
                 int beforeBl = candidates.size();
                 List<String> filteredStocks = new ArrayList<>();
                 candidates = candidates.stream()
                         .filter(s -> {
                             String pureCode = stripSuffix(s.getSymbol());
-                            if (blacklistCodes.contains(pureCode)) {
+                            if (pureBlacklistCodes.contains(pureCode)) {
                                 filteredStocks.add(s.getName() + "(" + pureCode + ")");
                                 return false;
                             }
@@ -531,7 +536,7 @@ public class RecommendationService {
                         .collect(Collectors.toList());
 
                 log.info("[Recommendation] 黑名单过滤 [strategyId={}]: 黑名单股票数={}, 过滤前={}, 过滤后={}, 被过滤={}",
-                        strategyId, blacklistCodes.size(), beforeBl, candidates.size(), filteredStocks);
+                        strategyId, pureBlacklistCodes.size(), beforeBl, candidates.size(), filteredStocks);
                 if (candidates.isEmpty()) {
                     log.warn("[Recommendation] 黑名单过滤后候选池为空，跳过生成（建议先清理黑名单）");
                 }

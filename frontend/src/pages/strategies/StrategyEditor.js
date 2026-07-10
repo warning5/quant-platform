@@ -173,7 +173,7 @@ export default function StrategyEditor() {
     const available = allFactors.find(f => !usedCodes.has(f.factorCode));
     list.push({
       key: Date.now(),
-      code: available ? available.factorCode : 'RSI14',
+      code: available ? available.factorCode : 'MOM5',
       weight: 0.1,
       direction: 1,
       filterOp: 'NONE',

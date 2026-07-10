@@ -1,6 +1,5 @@
 package com.quant.platform.recommendation.service;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.quant.platform.recommendation.domain.StockRecommendation;
 import com.quant.platform.recommendation.domain.StrategyConfidence;
 import com.quant.platform.recommendation.mapper.RecommendationMapper;
@@ -15,7 +14,6 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.stream.Collectors;
 
 /**
  * 策略置信度服务（方案C）
@@ -128,7 +126,7 @@ public class StrategyConfidenceService {
                 strategyId, sc.getScore(), sc.getLevel(),
                 sc.getHitRateValue() != null ? sc.getHitRateValue().doubleValue() * 100 : 0,
                 sc.getAvgReturnValue() != null ? sc.getAvgReturnValue().doubleValue() : 0,
-                sc.getMaxDrawdownValue() != null ? ", maxDD=" + sc.getMaxDrawdownValue() + "%" : "");
+                sc.getMaxDrawdownValue() != null ? ", p5DD=" + sc.getMaxDrawdownValue() + "%" : "");
 
         return sc;
     }
@@ -198,20 +196,33 @@ public class StrategyConfidenceService {
             calc.returnScore = Math.max(0, Math.min(MAX_RETURN_SCORE, calc.returnScore));
         }
 
-        // ---- 维度3: 最大单日回撤 (0~20分) ----
-        OptionalDouble minReturn = recs.stream()
+        // ---- 维度3: P5分位回撤 (0~20分) ----
+        // 用P5（第5百分位）替代max，避免单只股票极端值清零整策略得分
+        // 样本<20时回退到max（小样本分位数不可靠）
+        double[] sortedReturns = recs.stream()
                 .filter(r -> r.getNextDayReturn() != null)
                 .mapToDouble(StockRecommendation::getNextDayReturn)
-                .min();
-        double maxDrawdown = minReturn.orElse(0);
-        calc.maxDrawdownValue = BigDecimal.valueOf(maxDrawdown).setScale(4, RoundingMode.HALF_UP);
-        // maxDrawdown >= 0% → 20分(无回撤), maxDrawdown <= -10% → 0分
-        if (maxDrawdown >= 0) {
+                .sorted()
+                .toArray();
+
+        double drawdownMetric;
+        if (sortedReturns.length >= 20) {
+            // P5: 第5百分位（允许5%的极端值被忽略）
+            int p5Index = (int) Math.floor(sortedReturns.length * 0.05);
+            drawdownMetric = sortedReturns[p5Index];
+        } else {
+            // 小样本回退到max
+            drawdownMetric = sortedReturns.length > 0 ? sortedReturns[0] : 0;
+        }
+        calc.maxDrawdownValue = BigDecimal.valueOf(drawdownMetric).setScale(4, RoundingMode.HALF_UP);
+        // drawdownMetric >= 0% → 20分(无回撤), drawdownMetric <= -8% → 0分
+        // 阈值从-10%收紧到-8%（因P5已过滤极端值，阈值可以更严）
+        if (drawdownMetric >= 0) {
             calc.drawdownScore = MAX_DRAWDOWN_SCORE;
-        } else if (maxDrawdown <= -10) {
+        } else if (drawdownMetric <= -8) {
             calc.drawdownScore = 0;
         } else {
-            calc.drawdownScore = (int) Math.round(maxDrawdown / -10.0 * MAX_DRAWDOWN_SCORE);
+            calc.drawdownScore = (int) Math.round(drawdownMetric / -8.0 * MAX_DRAWDOWN_SCORE);
         }
 
         // ---- 维度4: 收益波动率/稳定性 (0~15分) ----

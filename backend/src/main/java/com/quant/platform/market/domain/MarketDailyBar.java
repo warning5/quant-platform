@@ -100,7 +100,7 @@ public class MarketDailyBar implements Serializable {
      */
     private BigDecimal circMarketCap;
 
-    // ---- 估值字段（供 VAL_PE_PERCENTILE / VAL_PB_PERCENTILE 计算使用）----
+    // ---- 估值字段（供 VAL_PE_PERCENTILE / VAL_PB 计算使用）----
 
     /**
      * 滚动市盈率 (TTM)，来自 ClickHouse stock_daily.pe_ttm。

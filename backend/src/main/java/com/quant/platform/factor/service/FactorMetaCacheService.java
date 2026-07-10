@@ -14,7 +14,6 @@ import java.util.concurrent.ConcurrentHashMap;
  * 因子元数据缓存服务
  * 启动时从 factor_definition 表加载所有 ACTIVE 因子的 dataFrequency，
  * 提供 isQuarterly / isFinancial 等判断方法，替代前缀+白名单硬编码。
- *
  * 新增因子时只需在 DB 中设置 dataFrequency，无需改 Java 代码。
  */
 @Slf4j
@@ -127,11 +126,10 @@ public class FactorMetaCacheService {
         String code = fd.getFactorCode();
         FactorDefinition.FactorCategory cat = fd.getCategory();
 
-        // 已注册日频估值因子 → DAILY
+        // 已注册日频估值因子 → DAILY（2026-07-10: 移除废弃因子 VAL_PB/VAL_PB_PERCENTILE/VAL_DIVIDEND_YIELD）
         if (code.startsWith("VAL_")) {
             switch (code) {
-                case "VAL_PE_TTM", "VAL_PB", "VAL_PE_PERCENTILE",
-                     "VAL_PB_PERCENTILE", "VAL_DIVIDEND_YIELD", "VAL_FCF_YIELD":
+                case "VAL_PE_TTM", "VAL_PE_PERCENTILE", "VAL_FCF_YIELD":
                     return "DAILY";
                 default:
                     return "QUARTERLY";

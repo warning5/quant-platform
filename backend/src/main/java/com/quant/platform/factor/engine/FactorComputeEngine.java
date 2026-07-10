@@ -51,6 +51,7 @@ public class FactorComputeEngine {
     private final ObjectMapper objectMapper;
     private final StockFinancialIndicatorMapper financialIndicatorMapper;
     private final com.quant.platform.factor.service.FactorMetaCacheService factorMetaCache;
+    private final com.quant.platform.stock.mapper.StockInfoMapper stockInfoMapper;
     private final Map<String, FactorCalculator> builtinCalculators = new HashMap<>();
     private final Map<String, FinancialFactorCalculator> financialCalculators = new HashMap<>();
     // 跟踪正在计算的因子代码（供前端查询当前运行状态）
@@ -91,52 +92,39 @@ public class FactorComputeEngine {
     }
 
     {
-        // 注册内置技术因子（12个ACTIVE）
+        // 注册内置因子（15个ACTIVE：9个原有 + 2个新增 + 4个保留）
+        // 动量
         registerBuiltin(new BuiltinFactors.Momentum5Calculator());
         registerBuiltin(new BuiltinFactors.Momentum20Calculator());
+        registerBuiltin(new BuiltinFactors.Momentum60Calculator());
+        // 波动率
         registerBuiltin(new BuiltinFactors.Volatility20Calculator());
+        // 流动性/换手率
         registerBuiltin(new BuiltinFactors.VolumeRatioCalculator2());
         registerBuiltin(new BuiltinFactors.TurnoverAnomalyCalculator());
-        registerBuiltin(new BuiltinFactors.VolumeSurpriseCalculator());
-        registerBuiltin(new BuiltinFactors.Ma5Calculator());
-        registerBuiltin(new BuiltinFactors.Rsi14Calculator());
-        registerBuiltin(new BuiltinFactors.MacdCalculator());
+        // 新增因子（P4/P5）
+        registerBuiltin(new BuiltinFactors.AmihudIlliquidityCalculator());
+        registerBuiltin(new BuiltinFactors.IndustryRelMomCalculator());
+        // 情绪
         registerBuiltin(new BuiltinFactors.LimitUpCountCalculator());
-
-        // 注册其他技术因子（ATR20/SAR/SIZE，2026-06-20 补充）
+        // 估值
+        registerBuiltin(new BuiltinFactors.PePercentileCalculator());
+        registerBuiltin(new BuiltinFactors.PeTtmCalculator());
+        registerBuiltin(new BuiltinFactors.FcfYieldCalculator());
+        // 技术
         registerBuiltin(new BuiltinFactors.Atr20Calculator());
         registerBuiltin(new BuiltinFactors.SarCalculator());
+        // 市值
         registerBuiltin(new BuiltinFactors.SizeCalculator());
-        registerBuiltin(new BuiltinFactors.Price52wHighPctCalculator());
 
-        // MOM60 / VOL60（2026-06-20 补充：因子清理时遗漏）
-        registerBuiltin(new BuiltinFactors.Momentum60Calculator());
-        registerBuiltin(new BuiltinFactors.Volatility60Calculator());
-
-        // 估值分位因子（2026-06-20 补充：依赖 pe_ttm/pb 字段）
-        registerBuiltin(new BuiltinFactors.PePercentileCalculator());
-        registerBuiltin(new BuiltinFactors.PbPercentileCalculator());
-
-        // 日频估值因子（2026-06-20 补充：依赖 pe_ttm/pb/dividend/fcf/marketCap 字段）
-        registerBuiltin(new BuiltinFactors.PeTtmCalculator());
-        registerBuiltin(new BuiltinFactors.PbCalculator());
-        registerBuiltin(new BuiltinFactors.DividendYieldCalculator());
-        registerBuiltin(new BuiltinFactors.FcfYieldCalculator());
-
-        // 注册财务因子（季频，从 MySQL stock_financial_indicator 计算）
+        // 注册财务因子（8个ACTIVE）
         registerFinancial(new FinancialFactors.RoeCalc());
         registerFinancial(new FinancialFactors.RevenueYoyCalc());
         registerFinancial(new FinancialFactors.NetProfitYoyCalc());
         registerFinancial(new FinancialFactors.EarningsQualitySimpleCalc());
         registerFinancial(new FinancialFactors.RevenueQualityCalc());
-        registerFinancial(new FinancialFactors.RoeTtmCalc());
-        registerFinancial(new FinancialFactors.RevenueTtmYoyCalc());
-        registerFinancial(new FinancialFactors.NetProfitTtmYoyCalc());
-        // Phase 2: 研发费用率
         registerFinancial(new FinancialFactors.RdRevenueRatioCalc());
-        // Phase 3: 营业利润/总资产/净资产增速
         registerFinancial(new FinancialFactors.OperatingProfitYoyCalc());
-        registerFinancial(new FinancialFactors.TotalAssetsYoyCalc());
         registerFinancial(new FinancialFactors.TotalEquityYoyCalc());
         log.info("Registered {} financial factor calculators (static)", financialCalculators.size());
     }
@@ -893,14 +881,22 @@ public class FactorComputeEngine {
         String factorCode = factor.getFactorCode();
 
         if (isFinancialFactor(factorCode)) {
-            // 财务因子仍走DB查询（每个日期取最新财报）
             return computeOneDateFinancial(factorCode, date, symbols);
+        }
+
+        // INDUSTRY_REL_MOM 需要行业平均动量数据：预计算行业→avg_mom20映射
+        Map<String, Object> context = Map.of();
+        if ("INDUSTRY_REL_MOM".equals(factorCode)) {
+            context = buildIndustryMomContext(date, symbols, allBarsData);
+            if (context.isEmpty()) {
+                log.debug("[INDUSTRY_REL_MOM] 无法构建行业context: date={}", date);
+                return List.of();
+            }
         }
 
         LocalDateTime now = LocalDateTime.now();
         List<FactorValue> results = new ArrayList<>(symbols.size());
 
-        // 诊断：记录有多少 symbol 的 bars 非空
         int emptyCount = 0;
         for (String symbol : symbols) {
             try {
@@ -910,7 +906,6 @@ public class FactorComputeEngine {
                     continue;
                 }
 
-                // 二分查找：找到 tradeDate > date 的第一个位置（不创建新列表）
                 int lo = 0, hi = allBars.size();
                 while (lo < hi) {
                     int mid = (lo + hi) >>> 1;
@@ -920,11 +915,20 @@ public class FactorComputeEngine {
                         lo = mid + 1;
                     }
                 }
-                // lo = 第一个 tradeDate > date 的位置，即 endIdx
-                if (lo == 0) continue; // date 之前没有任何数据
+                if (lo == 0) continue;
 
                 List<MarketDailyBar> history = allBars.subList(0, lo);
-                BigDecimal value = computeSingleValue(factor, symbol, date, history);
+                // INDUSTRY_REL_MOM: per-stock context with its industry average
+                Map<String, Object> stockContext = context;
+                if ("INDUSTRY_REL_MOM".equals(factorCode) && !context.isEmpty()) {
+                    String code = parseCode(symbol);
+                    String industry = (String) context.getOrDefault("industry_" + code, "");
+                    Object avgMomObj = context.get("industryAvgMom_" + industry);
+                    stockContext = Map.of("industry", industry,
+                                          "industryAvgMom20", avgMomObj != null ? avgMomObj : 0.0);
+                }
+
+                BigDecimal value = computeSingleValue(factor, symbol, date, history, stockContext);
                 if (value != null) {
                     String code = parseCode(symbol);
                     FactorValue fv = FactorValue.builder()
@@ -953,6 +957,78 @@ public class FactorComputeEngine {
     private String parseCode(String symbol) {
         int dot = symbol.lastIndexOf('.');
         return dot > 0 ? symbol.substring(0, dot) : symbol;
+    }
+
+    /**
+     * 构建 INDUSTRY_REL_MOM 所需的行业平均动量context
+     * 1. 从 stock_info 获取每只股票的行业
+     * 2. 从 allBarsData 计算每只股票的20日动量
+     * 3. 汇总每个行业的平均动量
+     * 返回 Map 包含: "industry_<code>" = 行业名, "industryAvgMom_<industry>" = Double
+     */
+    private Map<String, Object> buildIndustryMomContext(LocalDate date, List<String> symbols,
+                                                        Map<String, List<MarketDailyBar>> allBarsData) {
+        try {
+            // 加载行业映射（code → industry）
+            Map<String, String> industryMap = new HashMap<>();
+            List<com.quant.platform.stock.entity.StockInfo> stockInfos =
+                    stockInfoMapper.selectList(
+                        new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.quant.platform.stock.entity.StockInfo>()
+                            .in(com.quant.platform.stock.entity.StockInfo::getCode,
+                                symbols.stream().map(this::parseCode).collect(Collectors.toList()))
+                            .select(com.quant.platform.stock.entity.StockInfo::getCode,
+                                    com.quant.platform.stock.entity.StockInfo::getIndustry));
+            for (var info : stockInfos) {
+                if (info.getIndustry() != null && !info.getIndustry().isEmpty()) {
+                    industryMap.put(info.getCode(), info.getIndustry());
+                }
+            }
+
+            // 计算每只股票的20日动量，并按行业汇总
+            Map<String, List<Double>> industryMoms = new HashMap<>();
+            Map<String, Object> context = new HashMap<>();
+
+            for (String symbol : symbols) {
+                String code = parseCode(symbol);
+                String industry = industryMap.getOrDefault(code, "未知");
+                context.put("industry_" + code, industry);
+
+                List<MarketDailyBar> allBars = allBarsData.getOrDefault(symbol, List.of());
+                if (allBars.size() < 21) continue;
+
+                // 找到 date 位置
+                int lo = 0, hi = allBars.size();
+                while (lo < hi) {
+                    int mid = (lo + hi) >>> 1;
+                    if (allBars.get(mid).getTradeDate().compareTo(date) > 0) hi = mid;
+                    else lo = mid + 1;
+                }
+                if (lo < 21) continue;
+
+                var latest = allBars.get(lo - 1);
+                var past = allBars.get(lo - 21);
+                if (past.getClose() == null || past.getClose().compareTo(BigDecimal.ZERO) == 0) continue;
+                if (latest.getClose() == null) continue;
+
+                double mom20 = latest.getClose().subtract(past.getClose())
+                        .divide(past.getClose(), 8, RoundingMode.HALF_UP).doubleValue();
+                industryMoms.computeIfAbsent(industry, k -> new ArrayList<>()).add(mom20);
+            }
+
+            // 计算每个行业的平均动量
+            for (var entry : industryMoms.entrySet()) {
+                List<Double> moms = entry.getValue();
+                if (moms.size() >= 3) {
+                    double avg = moms.stream().mapToDouble(Double::doubleValue).average().orElse(0);
+                    context.put("industryAvgMom_" + entry.getKey(), avg);
+                }
+            }
+
+            return context;
+        } catch (Exception e) {
+            log.warn("[INDUSTRY_REL_MOM] 构建行业context失败: date={} error={}", date, e.getMessage());
+            return Map.of();
+        }
     }
 
     /**
@@ -1072,18 +1148,26 @@ public class FactorComputeEngine {
     }
 
     /**
-     * 计算单个因子值
+     * 计算单个因子值（带context参数）
      */
-    private BigDecimal computeSingleValue(FactorDefinition factor, String symbol, LocalDate calcDate, List<MarketDailyBar> history) {
+    private BigDecimal computeSingleValue(FactorDefinition factor, String symbol, LocalDate calcDate,
+                                          List<MarketDailyBar> history, Map<String, Object> context) {
         if (factor.getFactorType() == FactorDefinition.FactorType.BUILTIN) {
             FactorCalculator calc = builtinCalculators.get(factor.getFactorCode());
             if (calc != null) {
-                return calc.calculate(symbol, calcDate, history, Map.of());
+                return calc.calculate(symbol, calcDate, history, context);
             }
         } else if (factor.getFactorType() == FactorDefinition.FactorType.SCRIPTED && factor.getScriptCode() != null) {
-            return scriptedEngine.calculate(factor.getScriptCode(), factor.getFactorCode(), symbol, calcDate, history, Map.of());
+            return scriptedEngine.calculate(factor.getScriptCode(), factor.getFactorCode(), symbol, calcDate, history, context);
         }
         return null;
+    }
+
+    /**
+     * 计算单个因子值（无context，默认空Map）
+     */
+    private BigDecimal computeSingleValue(FactorDefinition factor, String symbol, LocalDate calcDate, List<MarketDailyBar> history) {
+        return computeSingleValue(factor, symbol, calcDate, history, Map.of());
     }
 
     /**

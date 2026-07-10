@@ -3,8 +3,8 @@ package com.quant.platform.recommendation.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.quant.platform.recommendation.domain.StockBlacklist;
 import com.quant.platform.recommendation.domain.StockRecommendation;
-import com.quant.platform.recommendation.mapper.StockBlacklistMapper;
 import com.quant.platform.recommendation.mapper.RecommendationMapper;
+import com.quant.platform.recommendation.mapper.StockBlacklistMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -12,12 +12,13 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.*;
-import java.util.stream.Collectors;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Set;
 
 /**
  * 股票黑名单服务
- *
  * 黑名单规则：
  * 1. 连续3次推荐，追踪收益率均为负 → 自动拉黑30天
  * 2. 近5次推荐，命中率 < 20%（即最多1次上涨） → 自动拉黑14天
@@ -48,6 +49,11 @@ public class StockBlacklistService {
     private static final double SEVERE_LOSS_THRESHOLD = -8.0;
     /** 踩雷自动拉黑天数 */
     private static final int SEVERE_LOSS_DAYS = 60;
+
+    /** 重复踩雷判定：近10次推荐中严重亏损次数≥此值 → 永久拉黑 */
+    private static final int REPEATED_SEVERE_LOSS_COUNT = 2;
+    /** 重复踩雷回溯推荐次数 */
+    private static final int REPEATED_SEVERE_LOSS_LOOKBACK = 10;
 
     /** 手动拉黑默认天数 */
     private static final int MANUAL_BLACKLIST_DAYS = 30;
@@ -115,16 +121,36 @@ public class StockBlacklistService {
      * 评估单只股票是否应加入黑名单
      */
     private void evaluateSingleStock(Long strategyId, StockRecommendation rec) {
-        String code = rec.getStockCode();
+        String rawCode = rec.getStockCode();
+        if (rawCode == null || rec.getNextDayReturn() == null) {
+            return;
+        }
+        // 统一存储纯代码（无后缀），与推荐管线过滤逻辑一致
+        String code = stripSuffix(rawCode);
         Double nextDayReturn = rec.getNextDayReturn();
         LocalDate recommendDate = rec.getRecommendDate();
 
-        if (code == null || nextDayReturn == null) {
-            return; // 无追踪数据，跳过
-        }
-
         // 规则3：踩雷检测（优先级最高）
         if (nextDayReturn <= SEVERE_LOSS_THRESHOLD) {
+            // 先检查是否已是重复踩雷 → 永久拉黑
+            List<StockRecommendation> history = getRecentRecommendationsForStock(strategyId, rawCode);
+            long severeLossCount = history.stream()
+                    .filter(h -> h.getNextDayReturn() != null && h.getNextDayReturn() <= SEVERE_LOSS_THRESHOLD)
+                    .count();
+            if (severeLossCount >= REPEATED_SEVERE_LOSS_COUNT) {
+                // 规则4：重复踩雷 → 永久拉黑
+                addToBlacklist(strategyId, code, rec.getStockName(),
+                        "REPEATED_SEVERE_LOSS",
+                        String.format("近%d次推荐中%d次严重亏损(≤%.0f%%)", 
+                                Math.min(history.size(), REPEATED_SEVERE_LOSS_LOOKBACK),
+                                severeLossCount, SEVERE_LOSS_THRESHOLD),
+                        null, // null = 永久
+                        "AUTO");
+                log.warn("[Blacklist] [重复踩雷-永久] code={} name={} 近{}次中{}次≤{}% 已永久拉黑",
+                        code, rec.getStockName(), history.size(), severeLossCount, (int) SEVERE_LOSS_THRESHOLD);
+                return;
+            }
+
             addToBlacklist(strategyId, code, rec.getStockName(),
                     "SEVERE_LOSS",
                     String.format("次日跌幅%.1f%%(≤%d%%)", nextDayReturn, (int) SEVERE_LOSS_THRESHOLD),
@@ -132,11 +158,11 @@ public class StockBlacklistService {
                     "AUTO");
             log.warn("[Blacklist] [踩雷] code={} name={} return={:.2f}% 已自动拉黑{}天",
                     code, rec.getStockName(), nextDayReturn, SEVERE_LOSS_DAYS);
-            return; // 踩雷后不再检查其他规则
+            return;
         }
 
         // 获取该股票近N期的推荐历史
-        List<StockRecommendation> history = getRecentRecommendationsForStock(strategyId, code);
+        List<StockRecommendation> history = getRecentRecommendationsForStock(strategyId, rawCode);
         if (history.size() < CONSECUTIVE_LOSS_THRESHOLD) {
             return; // 数据不足，不判定连续失利
         }
@@ -209,27 +235,34 @@ public class StockBlacklistService {
     @Transactional
     public StockBlacklist manualAdd(Long strategyId, String stockCode, String stockName,
                                      String reasonDetail, Integer days) {
-        // 先解封已有的（如果存在）
-        removeFromBlacklist(strategyId, stockCode);
+        // 统一存储纯代码（无后缀）
+        String pureCode = stripSuffix(stockCode);
+        // 先解封已有的（如果存在，匹配纯代码和带后缀两种格式）
+        removeFromBlacklist(strategyId, pureCode);
 
         int actualDays = days != null ? days : MANUAL_BLACKLIST_DAYS;
-        return addToBlacklist(strategyId, stockCode, stockName,
+        return addToBlacklist(strategyId, pureCode, stockName,
                 "MANUAL", reasonDetail != null ? reasonDetail : "手动屏蔽",
                 LocalDate.now().plusDays(actualDays), "MANUAL");
     }
 
     /**
      * 从黑名单中移除（解封）
+     * 同时匹配纯代码和带后缀的格式，确保历史数据也能正确解封
      */
     @Transactional
     public boolean removeFromBlacklist(Long strategyId, String stockCode) {
-        // 删除所有匹配的记录（包括已过期的）
+        String pureCode = stripSuffix(stockCode);
+        // 删除纯代码和带后缀的所有变体
         LambdaQueryWrapper<StockBlacklist> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(StockBlacklist::getStrategyId, strategyId)
-               .eq(StockBlacklist::getStockCode, stockCode);
+               .and(w -> w.eq(StockBlacklist::getStockCode, pureCode)
+                          .or().eq(StockBlacklist::getStockCode, pureCode + ".SZ")
+                          .or().eq(StockBlacklist::getStockCode, pureCode + ".SH")
+                          .or().eq(StockBlacklist::getStockCode, pureCode + ".BJ"));
         int deleted = stockBlacklistMapper.delete(wrapper);
         if (deleted > 0) {
-            log.info("[Blacklist] [解封] strategyId={}, code={} 已从黑名单移除", strategyId, stockCode);
+            log.info("[Blacklist] [解封] strategyId={}, code={} 已从黑名单移除", strategyId, pureCode);
         }
         return deleted > 0;
     }
@@ -288,4 +321,11 @@ public class StockBlacklistService {
 
     /** 用于传递近期收益率数据的简单DTO */
     record StockRecentReturn(LocalDate date, Double nextDayReturn) {}
+
+    /** 去除股票代码后缀（.SZ/.SH/.BJ），返回纯代码 */
+    private static String stripSuffix(String code) {
+        if (code == null) return null;
+        int dot = code.indexOf('.');
+        return dot > 0 ? code.substring(0, dot) : code;
+    }
 }

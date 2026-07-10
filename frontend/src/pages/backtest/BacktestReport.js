@@ -1430,9 +1430,9 @@ function BrinsonConclusion({ summary, industrySummary, periods }) {
         selBody += '\n• 当前因子：' + factorNames.slice(0, 5).join('、') + (factorNames.length > 5 ? ' 等' + factorNames.length + '个' : '');
         selBody += '\n• 操作：去 Alpha 分析面板，按行业筛选 — 查看这些行业内各因子的 IC 均值';
         selBody += '\n• 移除 IC 均值为负的因子（在策略编辑页删除），或加大 IC 为正的因子权重';
-        selBody += '\n• 如所有因子 IC 均为负 → 该行业内因子全面失效 → 考虑在策略编辑页添加质量因子（FIN_ROE_TTM、PE_TTM）作为替代驱动';
+        selBody += '\n• 如所有因子 IC 均为负 → 该行业内因子全面失效 → 考虑在策略编辑页添加质量因子（FIN_ROE、PE_TTM）作为替代驱动';
       } else {
-        selBody += '\n• 当前策略未使用因子选股 → 在策略编辑页为这些行业添加质量/价值因子（如 FIN_ROE_TTM、PE_TTM）';
+        selBody += '\n• 当前策略未使用因子选股 → 在策略编辑页为这些行业添加质量/价值因子（如 FIN_ROE、PE_TTM）';
       }
       actionables.push(makeAction('因子调整 — 修复选股拖累', selBody));
       verifications.push(makeVerify('选股修复验证',
@@ -1482,7 +1482,7 @@ function BrinsonConclusion({ summary, industrySummary, periods }) {
   if (allNeg) {
     actionables.push(makeAction('全线亏损 — 从零重建策略',
       '三效应全部负贡献，说明当前因子组合在回测期内全面失效。建议：\n'
-      + '• 在策略编辑页新建一个最小化策略：仅保留1-2个基本面因子（如 FIN_ROE_TTM + PE_TTM）\n'
+      + '• 在策略编辑页新建一个最小化策略：仅保留1-2个基本面因子（如 FIN_ROE + PE_TTM）\n'
       + '• weightMode 设为 EQUAL，调仓频率设为 MONTHLY（最小化成本）\n'
       + '• 跑一遍回测看选股效应是否转正\n'
       + '• 如果转正 → 逐个加回原来的因子，每次加一个并回测验证\n'

@@ -55,17 +55,15 @@ public class LlmAnalysisService {
             代码: %s  名称: %s  行业: %s
 
             【基本面】
-            PE(TTM): %s  PB: %s  股息率: %s%%
-            PE 3年分位: %s%%  PB 3年分位: %s%%
+            PE(TTM): %s  PE 3年分位: %s%%
             自由现金流收益率: %s%%
             ROE: %s%%  净利润增长: %s%%  负债率: %s%%
             毛利率: %s%%  经营现金流/净利润: %s%%
             盈利质量得分: %s  营收质量得分: %s
 
             【技术面】
-            RSI14: %s  20日动量: %s  20日波动率: %s
-            距52周高点回撤: %s%%  20日换手率: %s%%
-            MACD信号: %s
+            20日动量: %s  20日波动率: %s
+            行业相对动量: %s  Amihud非流动性: %s
 
             【综合评分】
             规则引擎综合得分: %s/100
@@ -143,24 +141,22 @@ public class LlmAnalysisService {
 
         String prompt = String.format(USER_PROMPT_TEMPLATE,
                 rec.getStockCode(), rec.getStockName(), industry,
-                fmt(factorValues.get("VAL_PE_TTM")), fmt(factorValues.get("VAL_PB")),
-                fmt(factorValues.get("VAL_DIVIDEND_YIELD")),
-                fmt(factorValues.get("VAL_PE_PERCENTILE")), fmt(factorValues.get("VAL_PB_PERCENTILE")),
+                fmt(factorValues.get("VAL_PE_TTM")),
+                fmt(factorValues.get("VAL_PE_PERCENTILE")),
                 fmt(factorValues.get("VAL_FCF_YIELD")),
                 fmt(financialData.get("roe")), fmt(financialData.get("netProfitYoy")),
                 fmt(financialData.get("debtToAsset")),
                 fmt(financialData.get("grossMargin")), fmt(financialData.get("ocfRatio")),
                 fmt(factorValues.get("FIN_EARNINGS_QUALITY")), fmt(factorValues.get("FIN_REVENUE_QUALITY")),
-                fmt(factorValues.get("RSI14")), fmt(factorValues.get("MOM20")),
-                fmt(factorValues.get("VOL20")), fmt(factorValues.get("PRICE_52W_HIGH_PCT")),
-                fmt(factorValues.get("MACD")),
+                fmt(factorValues.get("MOM20")),
+                fmt(factorValues.get("VOL20")),
+                fmt(factorValues.get("INDUSTRY_REL_MOM")), fmt(factorValues.get("AMIHUD_ILLIQUIDITY")),
                 String.valueOf(rec.getFinalScore() != null ? Math.round(rec.getFinalScore() * 100) : "N/A")
         );
 
         log.info("[LlmAnalysisService] {}({}) Prompt摘要: PE={}, PB={}, ROE={}, 因子数={}",
                 rec.getStockName(), rec.getStockCode(),
                 factorValues.getOrDefault("VAL_PE_TTM", -1.0),
-                factorValues.getOrDefault("VAL_PB", -1.0),
                 financialData.get("roe"),
                 factorValues.size());
         return prompt;
@@ -318,9 +314,8 @@ public class LlmAnalysisService {
             log.warn("[LlmAnalysisService] {} ClickHouse因子查询失败: {}", stockCode, e.getMessage());
         }
 
-        // 2. 查带后缀格式（补充 Python 特殊因子：VAL_PE_PERCENTILE/VAL_PB_PERCENTILE/PRICE_52W_HIGH_PCT）
-        //    StockRecommendation.stockCode 是纯代码（无后缀），findLatestBySymbol("920906") 不会查 "920906.BJ"
-        //    需要显式拼接后缀查询，获取存储在后缀格式中的3个特殊因子
+        // 2. 查带后缀格式（补充 Python 特殊因子：VAL_PE_PERCENTILE/AMIHUD_ILLIQUIDITY/INDUSTRY_REL_MOM）
+        //    需要显式拼接后缀查询，获取存储在后缀格式中的因子
         String pureCode = stripSuffix(stockCode);
         if (!stockCode.contains(".")) {
             String suffixedCode = lookupSuffixedCode(pureCode);
@@ -349,29 +344,14 @@ public class LlmAnalysisService {
             }
         }
 
-        // 3. CH stock_daily 回退：补充缺失的基础估值指标（PE/PB/价格）
-        //    CH stock_daily 有 5490 只股票的完整行情+估值数据，MySQL stock_daily 为空
-        //    特别重要：北交所(BJ)股票的 VAL_*/FIN_* 因子按季度计算（最新仅到2026-03-31），日常缺失严重
+        // 3. CH stock_daily 回退：补充缺失的基础估值指标（PE/价格）
         try {
-            boolean needsDailyFallback = !result.containsKey("VAL_PE_TTM")
-                    || !result.containsKey("VAL_PB")
-                    || !result.containsKey("PRICE_52W_HIGH_PCT");
+            boolean needsDailyFallback = !result.containsKey("VAL_PE_TTM");
             if (needsDailyFallback) {
                 Map<String, Double> dailyData = clickHouseFactorValueService.findStockDailyLatest(pureCode);
                 if (!dailyData.isEmpty()) {
                     if (!result.containsKey("VAL_PE_TTM") && dailyData.containsKey("pe_ttm"))
                         result.put("VAL_PE_TTM", dailyData.get("pe_ttm"));
-                    if (!result.containsKey("VAL_PB") && dailyData.containsKey("pb"))
-                        result.put("VAL_PB", dailyData.get("pb"));
-                    // 52周回撤
-                    if (!result.containsKey("PRICE_52W_HIGH_PCT")
-                            && dailyData.containsKey("high_price") && dailyData.containsKey("close_price")) {
-                        double high = dailyData.get("high_price");
-                        double close = dailyData.get("close_price");
-                        if (high > 0) {
-                            result.put("PRICE_52W_HIGH_PCT", Math.round((close / high - 1) * 10000) / 100.0);
-                        }
-                    }
                     log.info("[LlmAnalysisService] {} CH stock_daily 补齐: {}", stockCode, dailyData.keySet());
                 }
             }

@@ -117,6 +117,7 @@ export default function RecommendationList() {
   const [confidenceData, setConfidenceData] = useState(null); // 当前策略的置信度
   const [allConfidence, setAllConfidence] = useState([]); // 所有策略的置信度列表（用于策略下拉展示）
   const [confidenceWarningVisible, setConfidenceWarningVisible] = useState(false); // 低置信度警告弹窗
+  const [recalculating, setRecalculating] = useState(false); // 置信度重算中
 
   // ── 交易日历状态 ──
   const [calendarData, setCalendarData] = useState(null);
@@ -575,6 +576,7 @@ export default function RecommendationList() {
     CONSECUTIVE_LOSS: { label: '连续失利', color: 'orange', desc: '连续N次推荐次日收益为负' },
     LOW_HIT_RATE: { label: '低命中率', color: 'gold', desc: '近N次推荐命中率过低' },
     SEVERE_LOSS: { label: '踩雷', color: 'red', desc: '单日跌幅过大(≥8%)' },
+    REPEATED_SEVERE_LOSS: { label: '多次踩雷', color: 'volcano', desc: '近10次推荐中≥2次严重亏损，永久拉黑' },
     MANUAL: { label: '手动屏蔽', color: 'blue', desc: '用户手动加入' },
   };
   const isExpired = (until) => until && dayjs(until).isBefore(dayjs(), 'day');
@@ -593,6 +595,27 @@ export default function RecommendationList() {
       const list = await confidenceApi.getAllLatest();
       setAllConfidence(list || []);
     } catch { /* ignore */ }
+  };
+
+  // 手动重算置信度（改了算法/追踪数据后主动刷新）
+  const handleRecalculate = async () => {
+    if (!selectedStrategyId || recalculating) return;
+    setRecalculating(true);
+    try {
+      const result = await confidenceApi.recalculate(selectedStrategyId);
+      if (result && result.score != null) {
+        setConfidenceData(result);
+        // 同步刷新全量列表（策略下拉里的置信度标签也要更新）
+        await loadAllConfidence();
+        message.success(`置信度已重算：${result.score}分 (${result.level})`);
+      } else {
+        message.warning('该策略暂无足够追踪数据，无法重算');
+      }
+    } catch (e) {
+      message.error('重算失败: ' + (e.message || '未知错误'));
+    } finally {
+      setRecalculating(false);
+    }
   };
 
   // 当策略切换时自动加载置信度
@@ -1599,6 +1622,17 @@ export default function RecommendationList() {
                   >
                     查看详情
                   </Button>
+                  <Tooltip title="基于最新追踪数据重新计算置信度（改了算法或追踪数据后使用）">
+                    <Button
+                      type="link"
+                      size="small"
+                      style={{ padding: 0, fontSize: 11 }}
+                      loading={recalculating}
+                      onClick={handleRecalculate}
+                    >
+                      重算置信度
+                    </Button>
+                  </Tooltip>
                 </Space>
                 {isLow && (
                   <Tag color="warning" style={{ fontSize: 11 }}>
@@ -2453,12 +2487,12 @@ export default function RecommendationList() {
                 <Col span={12}>
                   <div style={{ marginBottom: 12 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <Text type="secondary">最大回撤维度</Text>
+                      <Text type="secondary">回撤维度</Text>
                       <Text>{confidenceData.drawdownScore ?? '-'}/20</Text>
                     </div>
                     <Progress percent={confidenceData.drawdownScore != null ? confidenceData.drawdownScore * 5 : 0} size="small" />
                     <div style={{ fontSize: 11, color: '#8c8c8c' }}>
-                      最大单日跌幅: {confidenceData.maxDrawdownValue != null ? confidenceData.maxDrawdownValue.toFixed(2) + '%' : '-'}
+                      P5分位回撤: {confidenceData.maxDrawdownValue != null ? confidenceData.maxDrawdownValue.toFixed(2) + '%' : '-'}
                     </div>
                   </div>
                 </Col>

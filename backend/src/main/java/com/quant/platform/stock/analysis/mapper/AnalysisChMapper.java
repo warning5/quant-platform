@@ -166,25 +166,63 @@ public class AnalysisChMapper {
     }
     
     /**
-     * 查询最新 RSI（从 factor_value 表，CH 列名）
+     * 查询最新 RSI14（从 stock_daily 收盘价实时计算）
+     * RSI14 因子已废弃，不再从 factor_value 表读取，改为从最近15日收盘价计算
      * symbol 格式兼容：旧数据带后缀(600619.SH)，新数据无后缀(600619)
      */
     public BigDecimal selectLatestRsi(String code) {
-        // 数据库中实际 factor_code 为 RSI5 / RSI14，此处用 RSI14（个股分析常用）
+        // 从 stock_daily 取最近15个交易日收盘价，实时计算 RSI14
         String sql = """
-            SELECT factor_val AS rsi FROM stock.factor_value FINAL
-            WHERE (symbol = ? OR symbol = ?) AND factor_code = 'RSI14'
-              AND calc_date = (SELECT MAX(calc_date) FROM stock.factor_value FINAL WHERE (symbol = ? OR symbol = ?) AND factor_code = 'RSI14')
-            LIMIT 1
+            SELECT close FROM stock.stock_daily FINAL
+            WHERE (symbol = ? OR symbol = ?)
+            ORDER BY trade_date DESC LIMIT 15
             """;
         try {
             String withSuffix = normalizeCode(code);
             String noSuffix = normalizeCodeForDaily(code);
-            return clickHouseJdbcTemplate.queryForObject(sql, BigDecimal.class, withSuffix, noSuffix, withSuffix, noSuffix);
+            List<Double> closes = clickHouseJdbcTemplate.queryForList(sql, Double.class, withSuffix, noSuffix);
+            if (closes.size() < 14) {
+                log.warn("RSI14计算数据不足: code={}, 仅有{}日数据", code, closes.size());
+                return null;
+            }
+            // closes 按日期降序（最近在前），需反转
+            double[] arr = new double[closes.size()];
+            for (int i = 0; i < closes.size(); i++) {
+                arr[closes.size() - 1 - i] = closes.get(i);
+            }
+            double rsi = calcRsi(arr, 14);
+            return BigDecimal.valueOf(rsi).setScale(2, java.math.RoundingMode.HALF_UP);
         } catch (Exception e) {
-            log.warn("查询RSI失败: code={}, error={}", code, e.getMessage());
+            log.warn("计算RSI失败: code={}, error={}", code, e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * RSI 计算（Wilder 平滑法）
+     */
+    private double calcRsi(double[] closes, int period) {
+        if (closes.length < period + 1) return 50.0;
+        double avgGain = 0, avgLoss = 0;
+        // 第一个周期：简单平均
+        for (int i = 1; i <= period; i++) {
+            double change = closes[i] - closes[i - 1];
+            if (change > 0) avgGain += change;
+            else avgLoss += Math.abs(change);
+        }
+        avgGain /= period;
+        avgLoss /= period;
+        // Wilder 平滑
+        for (int i = period + 1; i < closes.length; i++) {
+            double change = closes[i] - closes[i - 1];
+            double gain = change > 0 ? change : 0;
+            double loss = change < 0 ? Math.abs(change) : 0;
+            avgGain = (avgGain * (period - 1) + gain) / period;
+            avgLoss = (avgLoss * (period - 1) + loss) / period;
+        }
+        if (avgLoss == 0) return 100.0;
+        double rs = avgGain / avgLoss;
+        return 100.0 - (100.0 / (1.0 + rs));
     }
 
     /**

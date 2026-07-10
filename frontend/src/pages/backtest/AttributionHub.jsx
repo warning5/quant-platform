@@ -1365,9 +1365,9 @@ function BrinsonConclusion({ summary, industrySummary, periods }) {
       if (hasFactors && factorNames.length > 0) {
         selBody += '\n• 当前因子：' + factorNames.slice(0,5).join('、') + (factorNames.length>5?' 等'+factorNames.length+'个':'');
         selBody += '\n• 操作：按行业筛选查看这些行业内各因子 IC 均值，移除 IC 为负的因子';
-        selBody += '\n• 如所有因子 IC 均为负 → 考虑为该行业添加质量因子（FIN_ROE_TTM、PE_TTM）';
+        selBody += '\n• 如所有因子 IC 均为负 → 考虑为该行业添加质量因子（FIN_ROE、PE_TTM）';
       } else {
-        selBody += '\n• 在策略编辑页为这些行业添加质量/价值因子（如 FIN_ROE_TTM、PE_TTM）';
+        selBody += '\n• 在策略编辑页为这些行业添加质量/价值因子（如 FIN_ROE、PE_TTM）';
       }
       actionables.push(makeAction('因子调整 — 修复选股拖累', selBody));
       verifications.push(makeVerify('选股修复验证', '移除负IC因子后重跑回测 → 预期这些行业选股效应回升到 -1% 以内。'));
@@ -1406,7 +1406,7 @@ function BrinsonConclusion({ summary, industrySummary, periods }) {
   if (allNeg) {
     actionables.push(makeAction('全线亏损 — 从零重建策略',
       '三效应全部负贡献，当前因子组合在回测期内全面失效。建议：\n'
-      + '• 新建最小化策略：仅保留1-2个基本面因子（FIN_ROE_TTM + PE_TTM）\n'
+      + '• 新建最小化策略：仅保留1-2个基本面因子（FIN_ROE + PE_TTM）\n'
       + '• weightMode 设为 EQUAL，调仓频率设为 MONTHLY\n'
       + '• 跑一遍回测看选股效应是否转正，然后逐个加回原来的因子'
     ));
@@ -1918,7 +1918,7 @@ function FactorConclusionHeader({ betas, summary, regressionDetail }) {
   if (lowR2 && absExcess > 0.01) {
     let body = `四因子仅解释 ${(rSquared*100).toFixed(1)}% 超额，${(alpha*100).toFixed(2)}% 的 α 说明策略有显著的因子外选股能力。\n`;
     body += '建议扩展因子维度以定位真实收益源：\n';
-    body += '• 质量因子：FIN_ROE_TTM（ROE）、FIN_GROSS_MARGIN（毛利率）\n';
+    body += '• 质量因子：FIN_ROE（ROE）、FIN_GROSS_MARGIN（毛利率）\n';
     body += '• 价值因子：PE_TTM（市盈率）、PB_LF（市净率）\n';
     body += '• 情绪因子：资金流向、机构持仓变化\n';
     body += '• 扩展后重跑因子归因，观察 R² 是否提升到 30%+';
@@ -2203,7 +2203,7 @@ function FactorConclusionBody({ betas, summary, regressionDetail, observationDay
   if (lowR2 && absExcess > 0.01) {
     let body = `四因子仅解释 ${(rSquared*100).toFixed(1)}% 超额，${(alpha*100).toFixed(2)}% 的 α 说明策略有显著的因子外选股能力。\n`;
     body += '建议扩展因子维度以定位真实收益源：\n';
-    body += '• 质量因子：FIN_ROE_TTM（ROE）、FIN_GROSS_MARGIN（毛利率）\n';
+    body += '• 质量因子：FIN_ROE（ROE）、FIN_GROSS_MARGIN（毛利率）\n';
     body += '• 价值因子：PE_TTM（市盈率）、PB_LF（市净率）\n';
     body += '• 情绪因子：资金流向、机构持仓变化\n';
     body += '• 扩展后重跑因子归因，观察 R² 是否提升到 30%+';

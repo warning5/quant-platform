@@ -6,7 +6,6 @@ import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 
-import java.time.LocalDate;
 import java.util.List;
 import java.util.Set;
 
@@ -38,8 +37,16 @@ public interface StockBlacklistMapper extends BaseMapper<StockBlacklist> {
 
     /**
      * 根据策略+股票查询是否在黑名单中
+     * 同时匹配纯代码和带后缀格式（兼容历史数据）
      */
-    @Select("SELECT * FROM stock_blacklist WHERE strategy_id = #{strategyId} AND stock_code = #{stockCode} " +
+    @Select("SELECT * FROM stock_blacklist WHERE strategy_id = #{strategyId} " +
+            "AND (stock_code = #{stockCode} " +
+            "     OR stock_code = CONCAT(#{stockCode}, '.SZ') " +
+            "     OR stock_code = CONCAT(#{stockCode}, '.SH') " +
+            "     OR stock_code = CONCAT(#{stockCode}, '.BJ') " +
+            "     OR stock_code = REPLACE(#{stockCode}, '.SZ', '') " +
+            "     OR stock_code = REPLACE(#{stockCode}, '.SH', '') " +
+            "     OR stock_code = REPLACE(#{stockCode}, '.BJ', '')) " +
             "AND (blacklist_until IS NULL OR blacklist_until >= CURDATE()) LIMIT 1")
     StockBlacklist findActive(@Param("strategyId") Long strategyId, @Param("stockCode") String stockCode);
 

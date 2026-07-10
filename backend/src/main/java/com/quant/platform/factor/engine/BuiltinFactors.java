@@ -12,12 +12,13 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
- * 内置因子实现集合
- * 仅保留 ACTIVE 状态的因子（37个中的Java实现部分）
- * 废弃的110个因子已删除，如需恢复可从Git历史找回
+ * 内置因子实现集合（ACTIVE 状态）
+ * 2026-07-10: 废弃9个冗余因子（VOL60/MA5/RSI14/MACD/VAL_PB/VAL_PB_PERCENTILE/
+ *   VAL_DIVIDEND_YIELD/PRICE_52W_HIGH_PCT/VOLUME_SURPRISE），新增2个因子（AMIHUD_ILLIQUIDITY/INDUSTRY_REL_MOM）
  */
 @Slf4j
 @Component
@@ -36,7 +37,7 @@ public class BuiltinFactors {
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
-                                List<MarketDailyBar> history, java.util.Map<String, Object> context) {
+                                List<MarketDailyBar> history, Map<String, Object> context) {
             if (history.size() < 61) return null;
             var latest = history.getLast();
             var past = history.get(history.size() - 61);
@@ -55,7 +56,7 @@ public class BuiltinFactors {
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
-                                List<MarketDailyBar> history, java.util.Map<String, Object> context) {
+                                List<MarketDailyBar> history, Map<String, Object> context) {
             if (history.size() < 6) return null;
             MarketDailyBar latest = history.getLast();
             MarketDailyBar past = history.get(history.size() - 6);
@@ -74,7 +75,7 @@ public class BuiltinFactors {
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
-                                List<MarketDailyBar> history, java.util.Map<String, Object> context) {
+                                List<MarketDailyBar> history, Map<String, Object> context) {
             if (history.size() < 21) return null;
             var latest = history.getLast();
             var past = history.get(history.size() - 21);
@@ -89,37 +90,7 @@ public class BuiltinFactors {
     // ====================================================================
 
     /**
-     * 60日历史波动率 (VOL60) = 60日对数收益率标准差 × sqrt(252)
-     */
-    public static class Volatility60Calculator implements FactorCalculator {
-        @Override
-        public String getFactorCode() { return "VOL60"; }
-
-        @Override
-        public BigDecimal calculate(String symbol, LocalDate calcDate,
-                                List<MarketDailyBar> history, java.util.Map<String, Object> context) {
-            if (history.size() < 61) return null;
-            var window = history.subList(history.size() - 61, history.size());
-            double[] returns = new double[60];
-            for (int i = 0; i < 60; i++) {
-                double prev = window.get(i).getClose().doubleValue();
-                double curr = window.get(i + 1).getClose().doubleValue();
-                if (prev == 0) return null;
-                returns[i] = Math.log(curr / prev);
-            }
-            double mean = 0;
-            for (double r : returns) mean += r;
-            mean /= returns.length;
-            double variance = 0;
-            for (double r : returns) variance += (r - mean) * (r - mean);
-            variance /= (returns.length - 1);
-            return BigDecimal.valueOf(Math.sqrt(variance) * Math.sqrt(252))
-                    .setScale(8, RoundingMode.HALF_UP);
-        }
-    }
-
-    /**
-     * 20日历史波动率 (VOL20)
+     * 20日历史波动率 (VOL20) = 20日对数收益率标准差 × sqrt(252)
      */
     public static class Volatility20Calculator implements FactorCalculator {
         @Override
@@ -127,7 +98,7 @@ public class BuiltinFactors {
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
-                                List<MarketDailyBar> history, java.util.Map<String, Object> context) {
+                                List<MarketDailyBar> history, Map<String, Object> context) {
             if (history.size() < 21) return null;
             var window = history.subList(history.size() - 21, history.size());
             double[] returns = new double[20];
@@ -154,7 +125,7 @@ public class BuiltinFactors {
 
     /**
      * 量比因子 (VOLUME_RATIO) - 近5日均量/前20日均量
-     * 注：返回因子代码 "VOLUME_RATIO"
+     * 注：计划被 AMIHUD_ILLIQUIDITY 替代，暂时保留
      */
     public static class VolumeRatioCalculator2 implements FactorCalculator {
         @Override
@@ -162,7 +133,7 @@ public class BuiltinFactors {
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
-                                List<MarketDailyBar> history, java.util.Map<String, Object> context) {
+                                List<MarketDailyBar> history, Map<String, Object> context) {
             if (history.size() < 25) return null;
             double recentSum = 0;
             for (int i = history.size() - 5; i < history.size(); i++) {
@@ -190,7 +161,7 @@ public class BuiltinFactors {
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
-                                List<MarketDailyBar> history, java.util.Map<String, Object> context) {
+                                List<MarketDailyBar> history, Map<String, Object> context) {
             if (history.size() < 61) return null;
             double recentSum = 0;
             int recentCount = 0;
@@ -216,135 +187,89 @@ public class BuiltinFactors {
         }
     }
 
+    // ====================================================================
+    // Amihud 非流动性因子 (P4 新增)
+    // ====================================================================
+
     /**
-     * 成交量惊喜 (VOLUME_SURPRISE) - 近5日均量/20日均量的对数
+     * Amihud 非流动性指标 (AMIHUD_ILLIQUIDITY)
+     * = 20日均值(|日收益率| / 日成交额(万元))
+     * 越大表示流动性越差（小成交额下的大波动），方向为负IC（低流动性=超额收益）
+     * 参考文献Amihud (2002): Illiquidity and stock returns
      */
-    public static class VolumeSurpriseCalculator implements FactorCalculator {
+    public static class AmihudIlliquidityCalculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "VOLUME_SURPRISE"; }
+        public String getFactorCode() { return "AMIHUD_ILLIQUIDITY"; }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
-                                List<MarketDailyBar> history, java.util.Map<String, Object> context) {
-            if (history.size() < 26) return null;
-            double recentSum = 0;
-            int recentCount = 0;
-            for (int i = history.size() - 5; i < history.size(); i++) {
-                if (history.get(i).getVol() != null) {
-                    recentSum += history.get(i).getVol().doubleValue();
-                    recentCount++;
-                }
+                                List<MarketDailyBar> history, Map<String, Object> context) {
+            if (history.size() < 21) return null;
+            var window = history.subList(history.size() - 21, history.size());
+            double sumAmihud = 0;
+            int count = 0;
+            for (int i = 1; i < window.size(); i++) {
+                var prev = window.get(i - 1);
+                var curr = window.get(i);
+                if (prev.getClose() == null || prev.getClose().compareTo(BigDecimal.ZERO) == 0) continue;
+                if (curr.getClose() == null) continue;
+                if (curr.getAmount() == null || curr.getAmount().doubleValue() <= 0) continue;
+
+                double dailyReturn = Math.abs(
+                        (curr.getClose().doubleValue() - prev.getClose().doubleValue())
+                        / prev.getClose().doubleValue()
+                );
+                // amount 单位：万元，Amihud = |return| / amount (万元)
+                // 结果量级约 1e-6 ~ 1e-4，乘 1e6 使数值更友好
+                double amihud = dailyReturn / curr.getAmount().doubleValue();
+                sumAmihud += amihud;
+                count++;
             }
-            if (recentCount == 0) return null;
-            double pastSum = 0;
-            int pastCount = 0;
-            for (int i = history.size() - 25; i < history.size() - 5; i++) {
-                if (history.get(i).getVol() != null) {
-                    pastSum += history.get(i).getVol().doubleValue();
-                    pastCount++;
-                }
-            }
-            if (pastCount == 0 || pastSum == 0) return null;
-            double ratio = (recentSum / recentCount) / (pastSum / pastCount);
-            if (ratio <= 0) return null;
-            return BigDecimal.valueOf(Math.log(ratio)).setScale(8, RoundingMode.HALF_UP);
+            if (count < 10) return null;
+            // 乘 1e6 使数值在 0~100 范围（更易比较和排名）
+            return BigDecimal.valueOf(sumAmihud / count * 1e6)
+                    .setScale(8, RoundingMode.HALF_UP);
         }
     }
 
     // ====================================================================
-    // 市值 / 技术因子
+    // 行业相对动量因子 (P5 新增)
     // ====================================================================
 
     /**
-     * 5日均线 (MA5)
+     * 行业相对动量 (INDUSTRY_REL_MOM)
+     * = 个股20日动量 - 所属行业20日平均动量
+     * 通过 context 接收行业信息（FactorComputeEngine 预计算并传入）
+     * context keys: "industry" (String), "industryAvgMom20" (Double)
+     * 正值=跑赢行业，负值=跑输行业，剥离行业beta后提取个股Alpha
      */
-    public static class Ma5Calculator implements FactorCalculator {
+    public static class IndustryRelMomCalculator implements FactorCalculator {
         @Override
-        public String getFactorCode() { return "MA5"; }
+        public String getFactorCode() { return "INDUSTRY_REL_MOM"; }
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
-                                List<MarketDailyBar> history, java.util.Map<String, Object> context) {
-            if (history.size() < 5) return null;
-            var window = history.subList(history.size() - 5, history.size());
-            double sum = window.stream().mapToDouble(b -> b.getClose().doubleValue()).sum();
-            return BigDecimal.valueOf(sum / 5).setScale(8, RoundingMode.HALF_UP);
-        }
-    }
+                                List<MarketDailyBar> history, Map<String, Object> context) {
+            // 计算个股20日动量
+            if (history.size() < 21) return null;
+            var latest = history.getLast();
+            var past = history.get(history.size() - 21);
+            if (past.getClose().compareTo(BigDecimal.ZERO) == 0) return null;
+            double stockMom = latest.getClose().subtract(past.getClose())
+                    .divide(past.getClose(), 8, RoundingMode.HALF_UP).doubleValue();
 
-    /**
-     * 14日RSI (RSI14) —— Wilder EMA 标准实现
-     * 初始 avgGain/avgLoss = 前14日涨跌绝对值的简单平均
-     * 后续迭代：avgGain = (prevAvgGain × 13 + currentGain) / 14
-     */
-    public static class Rsi14Calculator implements FactorCalculator {
-        @Override
-        public String getFactorCode() { return "RSI14"; }
-
-        @Override
-        public BigDecimal calculate(String symbol, LocalDate calcDate,
-                                List<MarketDailyBar> history, java.util.Map<String, Object> context) {
-            if (history.size() < 15) return null;
-
-            // 用足够长的窗口（至少15根K线）计算 Wilder EMA
-            int start = Math.max(0, history.size() - 250); // 最多用250根，避免初始值影响
-            var window = history.subList(start, history.size());
-
-            // 第1步：计算前14日的 SMA 作为初始 avgGain/avgLoss
-            double sumGain = 0, sumLoss = 0;
-            for (int i = 1; i <= 14; i++) {
-                double change = window.get(i).getClose().doubleValue()
-                             - window.get(i - 1).getClose().doubleValue();
-                if (change > 0) sumGain += change;
-                else           sumLoss += Math.abs(change);
-            }
-            double avgGain = sumGain / 14.0;
-            double avgLoss = sumLoss / 14.0;
-
-            // 第2步：Wilder EMA 迭代（第15根K线开始）
-            for (int i = 15; i < window.size(); i++) {
-                double change = window.get(i).getClose().doubleValue()
-                             - window.get(i - 1).getClose().doubleValue();
-                double gain = change > 0 ? change : 0;
-                double loss = change < 0 ? -change : 0;
-                avgGain = (avgGain * 13 + gain) / 14.0;
-                avgLoss = (avgLoss * 13 + loss) / 14.0;
+            // 从 context 获取行业平均动量
+            Object avgObj = context.get("industryAvgMom20");
+            if (avgObj == null) return null;
+            double industryAvgMom;
+            if (avgObj instanceof Number) {
+                industryAvgMom = ((Number) avgObj).doubleValue();
+            } else {
+                return null;
             }
 
-            if (avgLoss == 0) return BigDecimal.valueOf(100);
-            double rs = avgGain / avgLoss;
-            double rsi = 100.0 - (100.0 / (1.0 + rs));
-            return BigDecimal.valueOf(rsi).setScale(8, RoundingMode.HALF_UP);
-        }
-    }
-
-    /**
-     * MACD (DIF值) - 12日EMA - 26日EMA
-     */
-    public static class MacdCalculator implements FactorCalculator {
-        @Override
-        public String getFactorCode() { return "MACD"; }
-
-        @Override
-        public BigDecimal calculate(String symbol, LocalDate calcDate,
-                                List<MarketDailyBar> history, java.util.Map<String, Object> context) {
-            if (history.size() < 27) return null;
-            double[] closes = new double[history.size()];
-            for (int i = 0; i < history.size(); i++) {
-                closes[i] = history.get(i).getClose().doubleValue();
-            }
-            double ema12 = calcEma(closes, 12);
-            double ema26 = calcEma(closes, 26);
-            return BigDecimal.valueOf(ema12 - ema26).setScale(8, RoundingMode.HALF_UP);
-        }
-
-        private double calcEma(double[] data, int period) {
-            double k = 2.0 / (period + 1);
-            double ema = data[0];
-            for (int i = 1; i < data.length; i++) {
-                ema = data[i] * k + ema * (1 - k);
-            }
-            return ema;
+            double relMom = stockMom - industryAvgMom;
+            return BigDecimal.valueOf(relMom).setScale(8, RoundingMode.HALF_UP);
         }
     }
 
@@ -353,21 +278,17 @@ public class BuiltinFactors {
     // ====================================================================
 
     /**
-     * 近20日涨停次数
+     * 近20日涨停次数 (LIMIT_UP_COUNT)
      * 涨停阈值按板块区分：科创板/创业板20%，北交所30%，主板9.8%，ST股5%
-     * 创业板2020-08-24改革前为10%，改革后为20%（使用 LimitUpUtils 统一判断）
-     * ST股直接排除不计入（ST股涨跌5%限制，且不应进入选股池）
+     * ST股直接排除不计入
      */
     public static class LimitUpCountCalculator implements FactorCalculator {
-        /** ST股票代码集合（纯数字代码，如 "000520"），外部初始化时填充 */
         private static volatile Set<String> stStockCodes = Collections.emptySet();
 
-        /** 外部调用：从数据库/CH 加载含"ST"的股票代码后调用此方法初始化 */
         public static void initStStockCodes(Set<String> codes) {
             stStockCodes = Collections.unmodifiableSet(new HashSet<>(codes));
         }
 
-        /** 清空（测试用） */
         public static void clearStStockCodes() { stStockCodes = Collections.emptySet(); }
 
         @Override
@@ -375,10 +296,9 @@ public class BuiltinFactors {
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
-                                List<MarketDailyBar> history, java.util.Map<String, Object> context) {
+                                List<MarketDailyBar> history, Map<String, Object> context) {
             if (history.size() < 21) return null;
 
-            // 排除ST股
             String codeOnly = symbol.replaceAll("\\..*$", "");
             if (!stStockCodes.isEmpty() && stStockCodes.contains(codeOnly)) {
                 return BigDecimal.valueOf(0).setScale(8, RoundingMode.HALF_UP);
@@ -389,7 +309,6 @@ public class BuiltinFactors {
             for (var b : window) {
                 if (b.getPctChg() == null) continue;
                 double pct = b.getPctChg().doubleValue();
-                // 使用 LimitUpUtils 统一判断，传入每根K线的交易日期以处理创业板改革
                 double threshold = LimitUpUtils.getLimitUpThreshold(symbol, b.getTradeDate(), false);
                 if (pct >= threshold) count++;
             }
@@ -398,13 +317,12 @@ public class BuiltinFactors {
     }
 
     // ====================================================================
-    // 估值分位因子（依赖 MarketDailyBar.peTtm / pb 字段）
+    // 估值因子
     // ====================================================================
 
     /**
      * PE历史百分位 (VAL_PE_PERCENTILE)
-     * = 当前 PE_TTM 在近750交易日（约3年）PE序列中的百分位排名（0~100）
-     * 越低表示估值相对历史越便宜，亏损股（PE<=0）返回 null
+     * = 当前 PE_TTM 在近750交易日PE序列中的百分位排名（0~100）
      */
     public static class PePercentileCalculator implements FactorCalculator {
         @Override
@@ -412,7 +330,7 @@ public class BuiltinFactors {
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
-                                List<MarketDailyBar> history, java.util.Map<String, Object> context) {
+                                List<MarketDailyBar> history, Map<String, Object> context) {
             if (history.size() < 60) return null;
             var last = history.getLast();
             if (last.getPeTtm() == null) return null;
@@ -436,45 +354,8 @@ public class BuiltinFactors {
     }
 
     /**
-     * PB历史百分位 (VAL_PB_PERCENTILE)
-     * = 当前 PB 在近750交易日 PB 序列中的百分位排名（0~100）
-     */
-    public static class PbPercentileCalculator implements FactorCalculator {
-        @Override
-        public String getFactorCode() { return "VAL_PB_PERCENTILE"; }
-
-        @Override
-        public BigDecimal calculate(String symbol, LocalDate calcDate,
-                                List<MarketDailyBar> history, java.util.Map<String, Object> context) {
-            if (history.size() < 60) return null;
-            var last = history.getLast();
-            if (last.getPb() == null) return null;
-            double currentPb = last.getPb().doubleValue();
-            if (currentPb <= 0 || currentPb >= 10000) return null;
-
-            int lookback = Math.min(750, history.size());
-            var window = history.subList(history.size() - lookback, history.size());
-            List<Double> pbValues = new ArrayList<>();
-            for (var bar : window) {
-                if (bar.getPb() != null) {
-                    double pb = bar.getPb().doubleValue();
-                    if (pb > 0 && pb < 10000) pbValues.add(pb);
-                }
-            }
-            if (pbValues.size() < 30) return null;
-            long lowerCount = pbValues.stream().filter(v -> v < currentPb).count();
-            return BigDecimal.valueOf((double) lowerCount / pbValues.size() * 100.0)
-                    .setScale(8, RoundingMode.HALF_UP);
-        }
-    }
-
-    // ====================================================================
-    // 日频估值因子（依赖 dividendPerShare12m / fcf / marketCap）
-    // ====================================================================
-
-    /**
      * 市盈率TTM（日频） (VAL_PE_TTM)
-     * 直接取 ClickHouse stock_daily.pe_ttm 字段，每天随股价更新
+     * 直接取 stock_daily.pe_ttm 字段
      */
     public static class PeTtmCalculator implements FactorCalculator {
         @Override
@@ -482,7 +363,7 @@ public class BuiltinFactors {
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
-                                List<MarketDailyBar> history, java.util.Map<String, Object> context) {
+                                List<MarketDailyBar> history, Map<String, Object> context) {
             if (history.isEmpty()) return null;
             var last = history.getLast();
             if (last.getPeTtm() == null || last.getPeTtm().compareTo(BigDecimal.ZERO) <= 0) return null;
@@ -491,27 +372,8 @@ public class BuiltinFactors {
     }
 
     /**
-     * 市净率（日频） (VAL_PB)
-     * 直接取 ClickHouse stock_daily.pb 字段，每天随股价更新
-     */
-    public static class PbCalculator implements FactorCalculator {
-        @Override
-        public String getFactorCode() { return "VAL_PB"; }
-
-        @Override
-        public BigDecimal calculate(String symbol, LocalDate calcDate,
-                                List<MarketDailyBar> history, java.util.Map<String, Object> context) {
-            if (history.isEmpty()) return null;
-            var last = history.getLast();
-            if (last.getPb() == null || last.getPb().compareTo(BigDecimal.ZERO) <= 0) return null;
-            return last.getPb().setScale(8, RoundingMode.HALF_UP);
-        }
-    }
-
-    /**
      * 股息率（日频） (VAL_DIVIDEND_YIELD)
-     * = 近12月每股派息 / 当前收盘价 × 100
-     * 分红相对稳定，股价每天变化，故日频计算更准确
+     * = 近12月每股派息 / 收盘价 × 100
      */
     public static class DividendYieldCalculator implements FactorCalculator {
         @Override
@@ -519,22 +381,23 @@ public class BuiltinFactors {
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
-                                List<MarketDailyBar> history, java.util.Map<String, Object> context) {
+                                List<MarketDailyBar> history, Map<String, Object> context) {
             if (history.isEmpty()) return null;
             var last = history.getLast();
             if (last.getDividendPerShare12m() == null
                     || last.getDividendPerShare12m().compareTo(BigDecimal.ZERO) <= 0) return null;
             if (last.getClose() == null || last.getClose().compareTo(BigDecimal.ZERO) <= 0) return null;
             double dps = last.getDividendPerShare12m().doubleValue();
-            double close = last.getClose().doubleValue();
-            return BigDecimal.valueOf(dps / close * 100.0).setScale(8, RoundingMode.HALF_UP);
+            double price = last.getClose().doubleValue();
+            double result = dps / price * 100.0;
+            if (Double.isNaN(result) || Double.isInfinite(result)) return null;
+            return BigDecimal.valueOf(result).setScale(8, RoundingMode.HALF_UP);
         }
     }
 
     /**
      * 自由现金流收益率（日频） (VAL_FCF_YIELD)
      * = FCF（元）/ 总市值（万元×10000）× 100
-     * FCF季频更新，市值每天变化，故日频计算更准确
      */
     public static class FcfYieldCalculator implements FactorCalculator {
         @Override
@@ -542,19 +405,22 @@ public class BuiltinFactors {
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
-                                List<MarketDailyBar> history, java.util.Map<String, Object> context) {
+                                List<MarketDailyBar> history, Map<String, Object> context) {
             if (history.isEmpty()) return null;
             var last = history.getLast();
             if (last.getFcf() == null) return null;
             if (last.getMarketCap() == null || last.getMarketCap().compareTo(BigDecimal.ZERO) <= 0) return null;
             double fcf = last.getFcf().doubleValue();
-            // marketCap 单位：万元，转元需 ×10000
             double mcapYuan = last.getMarketCap().doubleValue() * 10000.0;
             double result = fcf / mcapYuan * 100.0;
             if (Double.isNaN(result) || Double.isInfinite(result)) return null;
             return BigDecimal.valueOf(result).setScale(8, RoundingMode.HALF_UP);
         }
     }
+
+    // ====================================================================
+    // 技术因子
+    // ====================================================================
 
     /**
      * 20日平均真实波幅 (ATR20)
@@ -567,9 +433,8 @@ public class BuiltinFactors {
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
-                                List<MarketDailyBar> history, java.util.Map<String, Object> context) {
+                                List<MarketDailyBar> history, Map<String, Object> context) {
             if (history.size() < 21) return null;
-            // 只取最近21根K线，计算20个TR值（ATR20标准定义）
             var window = history.subList(history.size() - 21, history.size());
             double sumTr = 0;
             for (int i = 1; i < window.size(); i++) {
@@ -580,7 +445,7 @@ public class BuiltinFactors {
                 double lp = curr.getLow().subtract(prev.getClose() != null ? prev.getClose() : prev.getOpen()).abs().doubleValue();
                 sumTr += Math.max(hl, Math.max(hp, lp));
             }
-            int trCount = window.size() - 1; // 应为20
+            int trCount = window.size() - 1;
             return BigDecimal.valueOf(sumTr / trCount)
                     .setScale(8, RoundingMode.HALF_UP);
         }
@@ -589,7 +454,7 @@ public class BuiltinFactors {
     /**
      * 抛物线转向指标 (SAR)
      * 简化版：用最近5日的极值点判断趋势方向
-     * 正值=上升趋势，负值=下降趋势，绝对值=SAR价格参考
+     * 正值=上升趋势，负值=下降趋势
      */
     public static class SarCalculator implements FactorCalculator {
         @Override
@@ -597,12 +462,11 @@ public class BuiltinFactors {
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
-                                List<MarketDailyBar> history, java.util.Map<String, Object> context) {
+                                List<MarketDailyBar> history, Map<String, Object> context) {
             if (history.size() < 6) return null;
             int n = history.size();
             var last = history.get(n - 1);
 
-            // 用最近5日高低点判断短期趋势
             double recentHigh = Double.MIN_VALUE, recentLow = Double.MAX_VALUE;
             for (int i = Math.max(0, n - 5); i < n; i++) {
                 var bar = history.get(i);
@@ -615,8 +479,6 @@ public class BuiltinFactors {
             if (recentLow >= Double.MAX_VALUE || recentHigh <= Double.MIN_VALUE) return null;
 
             double close = last.getClose() != null ? last.getClose().doubleValue() : 0;
-            // 趋势强度 = (close - 最近低点) / (最近高点 - 最近低点) * 100 - 50
-            // 正值偏多，负值偏空
             double range = recentHigh - recentLow;
             if (range == 0) return BigDecimal.ZERO;
             double sarValue = ((close - recentLow) / range - 0.5) * 100;
@@ -625,35 +487,7 @@ public class BuiltinFactors {
     }
 
     /**
-     * 距52周高点回撤百分比 (PRICE_52W_HIGH_PCT)
-     * = (当前收盘价 - 近252日最高价) / 近252日最高价 × 100
-     * 结果为负数，越低(绝对值越大)说明回撤越深
-     */
-    public static class Price52wHighPctCalculator implements FactorCalculator {
-        @Override
-        public String getFactorCode() { return "PRICE_52W_HIGH_PCT"; }
-
-        @Override
-        public BigDecimal calculate(String symbol, LocalDate calcDate,
-                                List<MarketDailyBar> history, java.util.Map<String, Object> context) {
-            if (history.size() < 60) return null;
-            int lookback = Math.min(252, history.size());
-            var window = history.subList(history.size() - lookback, history.size());
-            double high52w = window.stream()
-                    .filter(b -> b.getHigh() != null)
-                    .mapToDouble(b -> b.getHigh().doubleValue())
-                    .max().orElse(0);
-            if (high52w <= 0) return null;
-            var last = history.getLast();
-            if (last.getClose() == null) return null;
-            double pct = (last.getClose().doubleValue() - high52w) / high52w * 100.0;
-            return BigDecimal.valueOf(pct).setScale(8, RoundingMode.HALF_UP);
-        }
-    }
-
-    /**
      * 市值因子 (SIZE) = log(总市值)
-     * 与 recompute_factors.py 的 calc_size 保持一致
      */
     public static class SizeCalculator implements FactorCalculator {
         @Override
@@ -661,7 +495,7 @@ public class BuiltinFactors {
 
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
-                                List<MarketDailyBar> history, java.util.Map<String, Object> context) {
+                                List<MarketDailyBar> history, Map<String, Object> context) {
             if (history.isEmpty()) return null;
             var last = history.getLast();
             if (last.getMarketCap() == null || last.getMarketCap().compareTo(BigDecimal.ZERO) <= 0)
