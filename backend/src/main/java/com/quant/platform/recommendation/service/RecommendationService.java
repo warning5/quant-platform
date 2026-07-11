@@ -126,13 +126,23 @@ public class RecommendationService {
      */
     private static final int ATR_LOOKBACK_DAYS = 250;
     /**
-     * P1: 默认IC预筛选阈值
+     * P1: 默认IR预筛选阈值
+     * IR = |IC均值| / IC标准差，衡量因子信号的稳定性
+     * 0.1: 剔除IC波动过大（不稳定）的噪声因子，保留信号稳定的因子
+     * 比IC绝对值阈值更合理：IC高但波动大的因子（如VOL20 IC=0.063但IR=0.19）仍保留，
+     * 而IC低且稳定的因子（如VAL_FCF_YIELD IC=0.032但IR=1.16）也不会被误杀
      */
-    private static final double DEFAULT_IC_THRESHOLD = 0.03;
+    private static final double DEFAULT_IR_THRESHOLD = 0.1;
     /**
      * P2: 默认半衰期（交易日）
      */
     private static final int DEFAULT_HALFLIFE_DAYS = 20;
+    /**
+     * P3: ICW模式单因子权重上限（占比）
+     * 防止强IC因子（如SIZE IC=0.052）主导排名导致策略趋同
+     * 超出部分按比例重新分配给其他因子
+     */
+    private static final double MAX_ICW_WEIGHT_PCT = 0.35;
     /**
      * 沪深300指数代码
      */
@@ -2352,7 +2362,7 @@ public class RecommendationService {
      * <p>
      * 规则：
      * - 使用 FactorAnalysisService.quickFactorIcSnapshot() 计算衰减加权IC
-     * - 预筛选：|IC| &lt; icThreshold 的因子被剔除
+     * - 预筛选：IR &lt; irThreshold 的因子被剔除（信号不稳定）
      * - 方向对齐：负IC因子自动反转direction，使用|IC|参与加权
      * - 权重分配（由 weightMode 决定）：
      * EQW  = 等权分配
@@ -2387,7 +2397,7 @@ public class RecommendationService {
         int halflife = computeAdaptiveHalflife(refDate);
         Map<String, com.quant.platform.factor.service.FactorAnalysisService.FactorIcSnapshot> snapshots =
                 factorAnalysisService.quickFactorIcSnapshot(
-                        factorCodes, refDate, 60, DEFAULT_IC_THRESHOLD, halflife);
+                        factorCodes, refDate, 60, DEFAULT_IR_THRESHOLD, halflife);
 
         // P3: 因子拥挤度检测与去重
         Set<String> crowdingDropped = applyCrowdingFilter(factorCodes, refDate, snapshots);
@@ -2396,8 +2406,8 @@ public class RecommendationService {
         // P5: IC季度一致性校验（方向不稳定因子降权或剔除）
         int consistencyDropped = applyIcConsistencyCheck(factorCodes, refDate, snapshots);
 
-        log.info("[DynamicWeight] IC快照完成: mode={}, {}个因子, 阈值={}, 半衰={}天, 保留{}个 (拥挤度剔除{}, 一致性剔除{})",
-                weightMode, factorCodes.size(), DEFAULT_IC_THRESHOLD, halflife,
+        log.info("[DynamicWeight] IC快照完成: mode={}, {}个因子, IR阈值={}, 半衰={}天, 保留{}个 (拥挤度剔除{}, 一致性剔除{})",
+                weightMode, factorCodes.size(), DEFAULT_IR_THRESHOLD, halflife,
                 snapshots.values().stream().filter(s -> "KEPT".equals(s.status)).count(),
                 crowdingDropped.size(), consistencyDropped);
 
@@ -2451,15 +2461,17 @@ public class RecommendationService {
                 log.warn("[DynamicWeight] 因子 {} 无IC历史数据", fc);
                 noDataCount++;
             } else if ("DROPPED".equals(snap.status)) {
-                // |IC| < 阈值，剔除
+                // IR < 阈值，剔除（信号不稳定）
                 adjustedFw.setWeight(0.0);
                 adjustedFw.setDirection(originalDirection);
                 diag.action = "DROPPED";
                 diag.icMean = snap.icMean;
                 diag.adjustedWeight = 0;
-                diag.reason = String.format("|IC|=%.4f < 阈值%.2f，预筛选剔除（衰减加权IC=%.4f，半衰=%d天）",
-                        Math.abs(snap.icMean), DEFAULT_IC_THRESHOLD, snap.icMean, halflife);
-                log.info("[DynamicWeight] 因子 {} |IC|={} < {}, 剔除", fc, Math.abs(snap.icMean), DEFAULT_IC_THRESHOLD);
+                diag.reason = String.format("IR=%.4f < 阈值%.2f，信号不稳定剔除（IC=%.4f, IC_std=%.4f, 半衰=%d天）",
+                        snap.ir, DEFAULT_IR_THRESHOLD, snap.icMean, snap.icStd, halflife);
+                log.info("[DynamicWeight] 因子 {} IR={} < {}, 剔除 (IC={}, std={})",
+                        fc, String.format("%.4f", snap.ir), DEFAULT_IR_THRESHOLD,
+                        String.format("%.4f", snap.icMean), String.format("%.4f", snap.icStd));
                 droppedCount++;
             } else if ("CROWDING_DROPPED".equals(snap.status) || "CONSISTENCY_DROPPED".equals(snap.status)) {
                 // P3: 因子拥挤度剔除 / P5: IC一致性剔除
@@ -2526,10 +2538,87 @@ public class RecommendationService {
             adjusted.add(adjustedFw);
         }
 
+        // P6: ICW权重上限——防止单因子主导排名导致策略趋同
+        if ("ICW".equals(weightMode)) {
+            applyWeightCap(adjusted, MAX_ICW_WEIGHT_PCT);
+        }
+
         log.info("[DynamicWeight] 完成: mode={}, 保留{}/剔除{}/无数据{}, |IC|和={}, 半衰={}天",
                 weightMode, keptCount, droppedCount, noDataCount, sumAbsIc, halflife);
 
         return adjusted;
+    }
+
+    /**
+     * P6: ICW权重上限——迭代式cap & redistribute
+     * 1. 计算各因子权重占比（相对于有效因子权重总和）
+     * 2. 超过maxPct的因子截断为maxPct，溢出部分按比例分配给未截断因子
+     * 3. 重复直到所有因子占比≤maxPct（最多N-1轮）
+     */
+    private void applyWeightCap(List<ScreenRequest.FactorWeight> adjusted, double maxPct) {
+        List<ScreenRequest.FactorWeight> active = new ArrayList<>();
+        for (ScreenRequest.FactorWeight fw : adjusted) {
+            if (fw.getWeight() > 0) active.add(fw);
+        }
+        if (active.size() <= 1) return;
+
+        double totalWeight = active.stream().mapToDouble(ScreenRequest.FactorWeight::getWeight).sum();
+        if (totalWeight <= 0) return;
+
+        Set<String> capped = new HashSet<>();
+        for (int iter = 0; iter < active.size() - 1; iter++) {
+            // 1. 找出超出上限的因子
+            List<ScreenRequest.FactorWeight> overLimit = new ArrayList<>();
+            double uncappedSum = 0;
+            for (ScreenRequest.FactorWeight fw : active) {
+                if (capped.contains(fw.getFactorCode())) continue;
+                double pct = fw.getWeight() / totalWeight;
+                if (pct > maxPct) {
+                    overLimit.add(fw);
+                } else {
+                    uncappedSum += fw.getWeight();
+                }
+            }
+            if (overLimit.isEmpty()) break;
+
+            // 2. 截断超限因子
+            for (ScreenRequest.FactorWeight fw : overLimit) {
+                double oldW = fw.getWeight();
+                double oldPct = oldW / totalWeight;
+                fw.setWeight(totalWeight * maxPct);
+                capped.add(fw.getFactorCode());
+                log.info("[WeightCap] 因子 {} 权重 {}->{} (占比 {}->{})",
+                        fw.getFactorCode(),
+                        String.format("%.4f", oldW),
+                        String.format("%.4f", fw.getWeight()),
+                        String.format("%.0f%%", oldPct * 100),
+                        String.format("%.0f%%", maxPct * 100));
+            }
+
+            // 3. 将溢出权重按比例分配给未截断因子
+            double cappedTotal = 0;
+            for (ScreenRequest.FactorWeight fw : active) {
+                if (capped.contains(fw.getFactorCode())) {
+                    cappedTotal += fw.getWeight();
+                }
+            }
+            double uncappedTarget = totalWeight - cappedTotal;
+            if (uncappedSum > 0 && uncappedTarget > 0) {
+                double scale = uncappedTarget / uncappedSum;
+                for (ScreenRequest.FactorWeight fw : active) {
+                    if (!capped.contains(fw.getFactorCode())) {
+                        double oldW = fw.getWeight();
+                        fw.setWeight(oldW * scale);
+                        if (Math.abs(fw.getWeight() - oldW) > 0.001) {
+                            log.debug("[WeightCap] 因子 {} 重分配 {}->{}",
+                                    fw.getFactorCode(),
+                                    String.format("%.4f", oldW),
+                                    String.format("%.4f", fw.getWeight()));
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /**

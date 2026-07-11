@@ -1400,9 +1400,10 @@ public class FactorAnalysisService {
         public double icMean;         // 衰减加权IC均值
         public double icMeanRaw;      // 原始等权IC均值（用于诊断）
         public double icStd;          // IC标准差
+        public double ir;             // 信息比率 = |IC均值| / IC标准差（衡量信号稳定性）
         public double icSign;         // IC符号：+1正向，-1反向（用于方向对齐）
         public int sampleDays;        // 有效样本日数
-        public String status;         // KEPT: 保留, DROPPED: |IC|不足, NO_DATA: 无数据
+        public String status;         // KEPT: 保留, DROPPED: IR不足, NO_DATA: 无数据
         public String assessment;     // 有效因子/弱有效/无效因子
         public List<Double> icTimeline; // IC时序
         public int halflifeUsed;      // 使用的半衰期
@@ -1417,13 +1418,13 @@ public class FactorAnalysisService {
      * @param factorCodes    因子代码列表
      * @param referenceDate  参考日期（推荐日期）
      * @param lookbackDays   回溯天数（默认60）
-     * @param icThreshold    IC阈值（|IC|低于此值的因子被剔除）
+     * @param irThreshold    IR阈值（IR低于此值的因子被剔除，衡量信号稳定性）
      * @param halflifeDays   半衰期天数（默认20，0表示等权）
      * @return 因子IC快照映射
      */
     public Map<String, FactorIcSnapshot> quickFactorIcSnapshot(
             List<String> factorCodes, LocalDate referenceDate,
-            int lookbackDays, double icThreshold, int halflifeDays) {
+            int lookbackDays, double irThreshold, int halflifeDays) {
 
         // 安全校验：factorCode 白名单
         checkFactorCodes(factorCodes);
@@ -1439,7 +1440,7 @@ public class FactorAnalysisService {
         for (String fc : factorCodes) {
             try {
                 FactorIcSnapshot snapshot = computeSnapshot(fc, startDateStr, endDateStr,
-                        forwardReturnDays, false, "spearman", halflifeDays, icThreshold);
+                        forwardReturnDays, false, "spearman", halflifeDays, irThreshold);
                 snapshots.put(fc, snapshot);
             } catch (Exception e) {
                 log.warn("[IC快照] 因子 {} 计算失败: {}", fc, e.getMessage());
@@ -1460,7 +1461,7 @@ public class FactorAnalysisService {
      */
     private FactorIcSnapshot computeSnapshot(String factorCode, String startDate, String endDate,
                                               int forwardDays, boolean neutralizeByIndustry,
-                                              String correlationType, int halflifeDays, double icThreshold) {
+                                              String correlationType, int halflifeDays, double irThreshold) {
 
         // 1. 获取IC时序
         List<Double> icTimeline = getIcTimeline(factorCode, startDate, endDate, forwardDays,
@@ -1486,17 +1487,32 @@ public class FactorAnalysisService {
         // 3. 计算标准差
         double icStd = calcStd(icTimeline);
 
-        // 4. 阈值判断
+        // 4. 计算IR并阈值判断
+        // IR = |IC均值| / IC标准差，衡量信号稳定性
+        // IC高但波动大（低IR）的因子是噪声而非有效信号
+        // 季频因子样本少导致icStd=NaN时，无法评估稳定性，保留因子（不因数据不足误杀）
+        double ir;
+        if (Double.isNaN(icStd) || icStd <= 1e-9) {
+            ir = Double.NaN;  // 标记为"无法评估稳定性"
+        } else {
+            ir = Math.abs(decayIcMean) / icStd;
+        }
+
         FactorIcSnapshot s = new FactorIcSnapshot();
         s.factorCode = factorCode;
         s.icMean = decayIcMean;
         s.icMeanRaw = rawIcMean;
         s.icStd = icStd;
+        s.ir = ir;
         s.sampleDays = icTimeline.size();
         s.icTimeline = icTimeline;
         s.halflifeUsed = halflifeDays;
 
-        if (Math.abs(decayIcMean) < icThreshold) {
+        if (Double.isNaN(ir)) {
+            // 样本不足无法评估稳定性，保留因子（给予信任，ICW的|IC|加权会自动给低IC因子低权重）
+            s.status = "KEPT";
+            s.icSign = decayIcMean >= 0 ? 1 : -1;
+        } else if (ir < irThreshold) {
             s.status = "DROPPED";
             s.icSign = decayIcMean >= 0 ? 1 : -1;
         } else {
@@ -1506,7 +1522,7 @@ public class FactorAnalysisService {
 
         // 5. 评估
         s.assessment = assessIcIr(Math.abs(decayIcMean),
-                icStd > 1e-9 ? Math.abs(decayIcMean) / icStd : 0);
+                Double.isNaN(ir) ? 0 : ir);
 
         return s;
     }
