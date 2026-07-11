@@ -206,8 +206,8 @@ export default function StockAnalysis() {
       })
       .finally(() => setLoading(false));
 
-    // 同时加载K线数据
-    stockAnalysisApi.getKLine(code, 60)
+    // 同时加载K线数据（拉120日保证MA60有完整曲线，但卡片标题仍写"近60日K线"，展示窗口保留最后60日）
+    stockAnalysisApi.getKLine(code, 120)
       .then(data => setKlineData(data))
       .catch(() => setKlineData(null));
   }, [inputCode, setSearchParams]);
@@ -1545,20 +1545,23 @@ function KLineChart({ data }) {
   const { token } = theme.useToken();
   if (!data || data.length === 0) return null;
 
-  const dates = data.map(d => d.date);
-  const ohlc = data.map(d => [d.open, d.close, d.low, d.high]);
-  const volumes = data.map(d => d.volume || 0);
-  const closes = data.map(d => d.close);
+  // 展示最近60日（但完整传入数据保留前N日用于MA60计算）
+  const displayData = data.slice(-60);
+  const dates = displayData.map(d => d.date);
+  const ohlc = displayData.map(d => [d.open, d.close, d.low, d.high]);
+  const volumes = displayData.map(d => d.volume || 0);
+  // 均线计算用完整 data 的 closes，MA60 在 display 窗口内全部有效
+  const allCloses = data.map(d => d.close);
 
-  // 计算均线
+  // 计算均线（返回与 data 等长的数组，display 窗口内全部有效）
   const calcMA = (period) => {
     const result = [];
-    for (let i = 0; i < closes.length; i++) {
+    for (let i = 0; i < allCloses.length; i++) {
       if (i < period - 1) { result.push('-'); continue; }
-      const sum = closes.slice(i - period + 1, i + 1).reduce((a, b) => a + b, 0);
+      const sum = allCloses.slice(i - period + 1, i + 1).reduce((a, b) => a + b, 0);
       result.push((sum / period).toFixed(2));
     }
-    return result;
+    return result.slice(-60);
   };
 
   const ma5 = calcMA(5);
@@ -1575,7 +1578,7 @@ function KLineChart({ data }) {
         const bar = params.find(p => p.seriesType === 'candlestick');
         if (!bar) return '';
         const idx = bar.dataIndex;
-        const d = data[idx];
+        const d = displayData[idx];
         const vol = params.find(p => p.seriesName === '成交量');
         return `<b>${d.date}</b><br/>
           开：${d.open}<br/>高：${d.high}<br/>低：${d.low}<br/>收：${d.close}
@@ -1593,7 +1596,7 @@ function KLineChart({ data }) {
       { scale: true, gridIndex: 0, axisLine: { lineStyle: { color: token.colorBorderSecondary } }, axisLabel: { fontSize: 10, color: token.colorTextTertiary } },
       { scale: true, gridIndex: 1, axisLine: { lineStyle: { color: token.colorBorderSecondary } }, axisLabel: { fontSize: 10, color: token.colorTextTertiary, formatter: v => (v / 10000).toFixed(0) + '万' } },
     ],
-    dataZoom: [{ type: 'inside', xAxisIndex: [0, 1], start: 50, end: 100 }, { type: 'slider', xAxisIndex: [0, 1], start: 50, end: 100 }],
+    dataZoom: [{ type: 'inside', xAxisIndex: [0, 1], start: 0, end: 100 }, { type: 'slider', xAxisIndex: [0, 1], start: 0, end: 100 }],
     series: [
       {
         type: 'candlestick',
@@ -2953,13 +2956,27 @@ function ValuationTab({ data, code }) {
   const pePct = data.pePercentile ?? 0;
   const pbPct = data.pbPercentile ?? 0;
 
-  // 分位→颜色
+  // 分位→颜色（分位数字用，纯按分位）
   const colorOf = (p) =>
     p >= 80 ? 'var(--sa-error)' : p >= 50 ? '#fa8c16' : p >= 20 ? '#1890ff' : 'var(--sa-success)';
 
-  // 分位→文字标签
-  const labelOf = (p) =>
-    p >= 80 ? '高估' : p >= 50 ? '偏贵' : p >= 20 ? '合理' : '低估';
+  // 综合「分位 + 绝对值」→ { label, color }
+  // PE/PB 绝对值阈值不同：PE>80偏高 / >100高估；PB>5偏高 / >8高估
+  const labelOf = (pct, current, type) => {
+    // 绝对值兜底：即使分位不高，绝对值离谱也要警示
+    if (current != null) {
+      const thresholds = type === 'PE' ? [60, 100] : type === 'PB' ? [4, 8] : null;
+      if (thresholds) {
+        if (current >= thresholds[1]) return { label: '高估(绝对值)', color: 'var(--sa-error)' };
+        if (current >= thresholds[0]) return { label: '绝对值偏高', color: '#fa8c16' };
+      }
+    }
+    // 分位判断
+    if (pct >= 80) return { label: '高估', color: 'var(--sa-error)' };
+    if (pct >= 50) return { label: '偏贵', color: '#fa8c16' };
+    if (pct >= 20) return { label: '合理', color: '#1890ff' };
+    return { label: '低估', color: 'var(--sa-success)' };
+  };
 
   // ── PE 解释 Tooltip ──
   const peTooltip = (
@@ -2975,10 +2992,13 @@ function ValuationTab({ data, code }) {
       </div>
       <div style={{ marginBottom: 4, fontWeight: 500 }}>参考意义</div>
       <div style={{ color: 'var(--sa-text-secondary)' }}>
-        • 分位 &lt; 20%：处于历史底部区域，安全边际较高<br/>
-        • 分位 20%~50%：估值偏低，可考虑布局<br/>
-        • 分位 50%~80%：估值偏高，谨慎追高<br/>
-        • 分位 &gt; 80%：处于历史高位，警惕回调风险
+        • 分位 &lt; 20%：处于历史底部区域，安全边际较高（低估）<br/>
+        • 分位 20%~50%：估值处于历史中低位（合理）<br/>
+        • 分位 50%~80%：估值偏高，谨慎追高（偏贵）<br/>
+        • 分位 &gt; 80%：处于历史高位，警惕回调风险（高估）<br/>
+        <span style={{ color: 'var(--sa-warning)', marginTop: 4, display: 'inline-block' }}>
+          ※ 绝对值兜底：PE&gt;60或PB&gt;4显示"绝对值偏高"，PE&gt;100或PB&gt;8显示"高估(绝对值)"
+        </span>
       </div>
     </div>
   );
@@ -2997,15 +3017,18 @@ function ValuationTab({ data, code }) {
       </div>
       <div style={{ marginBottom: 4, fontWeight: 500 }}>参考意义</div>
       <div style={{ color: 'var(--sa-text-secondary)' }}>
-        • 分位 &lt; 20%：破净或接近破净，安全边际高<br/>
-        • 分位 20%~50%：净资产折价，适合价值投资<br/>
-        • 分位 &gt; 80%：市价远超净资产，警惕泡沫
+        • 分位 &lt; 20%：破净或接近破净，安全边际高（低估）<br/>
+        • 分位 20%~50%：净资产折价，适合价值投资（合理）<br/>
+        • 分位 50%~80%：估值偏高，谨慎追高（偏贵）<br/>
+        • 分位 &gt; 80%：市价远超净资产，警惕泡沫（高估）
       </div>
     </div>
   );
 
   // 单个指标行
-  const Row = ({ label, tooltip, pct, current, precision, tooltipStyle }) => (
+  const Row = ({ label, tooltip, pct, current, precision, type, tooltipStyle }) => {
+    const lv = labelOf(pct, current, type);
+    return (
     <div style={{
       display: 'flex', alignItems: 'center',
       padding: '12px 0', borderBottom: '1px solid var(--sa-border-secondary)', gap: 12,
@@ -3032,17 +3055,18 @@ function ValuationTab({ data, code }) {
         {current != null ? Number(current).toFixed(precision) : '-'}
       </span>
 
-      {/* 估值水平标签 */}
+      {/* 估值水平标签（分位+绝对值综合判断） */}
       <span style={{
-        width: 72, flexShrink: 0, textAlign: 'center',
+        width: 96, flexShrink: 0, textAlign: 'center',
         fontSize: 12, fontWeight: 500,
-        color: colorOf(pct),
-        background: colorOf(pct) + '12',
-        border: `1px solid ${colorOf(pct)}30`,
+        color: lv.color,
+        background: lv.color + '12',
+        border: `1px solid ${lv.color}30`,
         borderRadius: 4, padding: '1px 0',
-      }}>{labelOf(pct)}</span>
+      }}>{lv.label}</span>
     </div>
-  );
+    );
+  };
 
   return (
     <div>
@@ -3057,12 +3081,13 @@ function ValuationTab({ data, code }) {
         <span style={{ width: 72, flexShrink: 0, textAlign: 'center' }}>估值水平</span>
       </div>
 
-      <Row label="PE(TTM)" tooltip={peTooltip} pct={pePct} current={data.peCurrent} precision={1} />
-      <Row label="PB"       tooltip={pbTooltip}  pct={pbPct} current={data.pbCurrent} precision={2} />
+      <Row label="PE(TTM)" tooltip={peTooltip} pct={pePct} current={data.peCurrent} precision={1} type="PE" />
+      <Row label="PB"       tooltip={pbTooltip}  pct={pbPct} current={data.pbCurrent} precision={2} type="PB" />
 
       <div style={{ marginTop: 8, fontSize: 11, color: 'var(--sa-text-quaternary)', lineHeight: '18px' }}>
         {code} · 近{data.years || 3}年历史分位 · PE样本{data.peHistoryCount || 0}日 / PB样本{data.pbHistoryCount || 0}日<br/>
-        分位定义：当前值在历史数据中的相对位置，&lt;20%低估 · 20%~50%合理 · 50%~80%偏贵 · &gt;80%高估
+        分位定义：当前值在历史数据中的相对位置，&lt;20%低估 · 20%~50%合理 · 50%~80%偏贵 · &gt;80%高估<br/>
+        绝对值兜底：PE&gt;60/PB&gt;4标记"绝对值偏高"，PE&gt;100/PB&gt;8标记"高估(绝对值)"
       </div>
     </div>
   );

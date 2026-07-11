@@ -283,7 +283,11 @@ function DataQualityDashboard() {
                   render: (v) => <Link to={`/data-detail/financial?code=${v}`}>{v}</Link>,
                 },
                 { title: '名称', dataIndex: 'name', key: 'name', width: 120 },
-                { title: '报告期', dataIndex: 'reportDate', key: 'reportDate', width: 120 },
+                {
+                  title: '报告期', dataIndex: 'reportDate', key: 'reportDate', width: 120,
+                  sorter: (a, b) => Number(a.reportDate) - Number(b.reportDate),
+                  defaultSortOrder: 'descend',
+                },
                 {
                   title: '单季营收变化(%)', dataIndex: 'revenueChgPct', key: 'revenueChgPct', width: 140,
                   render: (v) => v == null ? <Text type="secondary">-</Text> : (v > 0 ? <Text type="danger">+{v}%</Text> : <Text>{v}%</Text>),
