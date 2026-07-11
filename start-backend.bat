@@ -18,7 +18,7 @@ echo 后端地址：http://localhost:8080/api
 echo Swagger UI：http://localhost:8080/api/swagger-ui.html
 echo.
 
-cd /d "%~dp0backend"
-call mvn spring-boot:run -Dspring-boot.run.jvmArguments="--enable-preview"
+cd /d "%~dp0"
+call mvn -pl common -DskipTests install && cd /d "%~dp0backend" && call mvn spring-boot:run -Dspring-boot.run.jvmArguments="--enable-preview"
 
 pause

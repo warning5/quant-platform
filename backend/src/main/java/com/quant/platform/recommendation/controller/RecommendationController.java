@@ -126,13 +126,25 @@ public class RecommendationController {
     }
 
     /**
+     * 获取指定策略+日期+模式的所有推荐
+     */
+    @GetMapping("/strategy/{strategyId}/date/{date}/modes")
+    public ApiResponse<List<String>> getModesByStrategyAndDate(
+            @PathVariable Long strategyId,
+            @PathVariable @JsonFormat(pattern = "yyyy-MM-dd") LocalDate date) {
+        return ApiResponse.success(recommendationService.getModesByStrategyAndDate(strategyId, date));
+    }
+
+    /**
      * 获取指定策略+日期的推荐列表
+     * @param weightMode 可选，按权重模式过滤（不传则返回所有模式合并的快照）
      */
     @GetMapping("/strategy/{strategyId}/date/{date}")
     public ApiResponse<List<StockRecommendation>> getByStrategyAndDate(
             @PathVariable Long strategyId,
-            @PathVariable @JsonFormat(pattern = "yyyy-MM-dd") LocalDate date) {
-        List<StockRecommendation> list = recommendationService.getRecommendationsByStrategyAndDate(strategyId, date);
+            @PathVariable @JsonFormat(pattern = "yyyy-MM-dd") LocalDate date,
+            @RequestParam(required = false) String weightMode) {
+        List<StockRecommendation> list = recommendationService.getRecommendationsByStrategyAndDate(strategyId, date, weightMode);
         return ApiResponse.success(list);
     }
 

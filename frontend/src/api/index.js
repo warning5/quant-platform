@@ -393,8 +393,13 @@ export const recommendationApi = {
   generate: (date, topN, strategyId, weightMode, enableConfidenceControl, advancedOptions) => api.post('/recommendations/generate', { date, topN, strategyId, weightMode, enableConfidenceControl, ...advancedOptions }),
   /** 获取最新推荐列表 */
   getLatest: () => api.get('/recommendations/latest'),
-  /** 获取指定策略+日期的推荐列表 */
-  getByStrategyAndDate: (strategyId, date) => api.get(`/recommendations/strategy/${strategyId}/date/${date}`),
+  /** 获取指定策略+日期的推荐列表（可按权重模式过滤） */
+  getByStrategyAndDate: (strategyId, date, weightMode) => {
+    const params = weightMode && weightMode !== 'ALL' ? `?weightMode=${encodeURIComponent(weightMode)}` : '';
+    return api.get(`/recommendations/strategy/${strategyId}/date/${date}${params}`);
+  },
+  /** 获取指定策略+日期已存在的所有权重模式列表 */
+  findModesByStrategyAndDate: (strategyId, date) => api.get(`/recommendations/strategy/${strategyId}/date/${date}/modes`),
   /** 获取有推荐记录的策略+日期组合列表 */
   getStrategyDateCombos: (limit = 20) => api.get('/recommendations/strategy-date-combos', { params: { limit } }),
   /** 获取指定策略在最近 N 天内有推荐数据的日期列表（倒序） */

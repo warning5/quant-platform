@@ -293,13 +293,13 @@ public class ScheduleService implements SchedulingConfigurer {
                 LocalDateTime.now(), taskKey
             );
             log.info("[ScheduleService] 定时执行: {}", taskKey);
-        } catch (Exception e) {
+        } catch (Throwable t) {
             jdbcTemplate.update(
                 "UPDATE data_schedule_config SET last_run_time = ?, last_run_status = 'FAILED' " +
                 "WHERE task_key = ?",
                 LocalDateTime.now(), taskKey
             );
-            log.error("[ScheduleService] 定时执行失败: {}", taskKey, e);
+            log.error("[ScheduleService] 定时执行失败: {}", taskKey, t);
 
             // P1-2.2: 失败后5分钟自动重试一次（同一天同一任务只重试一次）
             String retryKey = taskKey + ":" + LocalDate.now();
@@ -321,7 +321,7 @@ public class ScheduleService implements SchedulingConfigurer {
             }
 
             // 10: 失败告警推送通知
-            sendFailureAlert(taskKey, e);
+            sendFailureAlert(taskKey, t);
         }
     }
 
@@ -334,7 +334,7 @@ public class ScheduleService implements SchedulingConfigurer {
     }
 
     /** 10: 失败时推送告警通知 */
-    private void sendFailureAlert(String taskKey, Exception e) {
+    private void sendFailureAlert(String taskKey, Throwable t) {
         try {
             String todayStr = LocalDate.now().toString();
             String alertKey = "FAIL_" + taskKey + "_" + todayStr;
@@ -343,7 +343,7 @@ public class ScheduleService implements SchedulingConfigurer {
 
             String msg = String.format(
                 "## 调度任务失败\n\n- 任务: %s\n- 时间: %s\n- 错误: %s\n\n系统将在5分钟后自动重试一次。",
-                taskKey, LocalDateTime.now(), e.getMessage());
+                taskKey, LocalDateTime.now(), t.getMessage());
             getNotificationService().sendAlert(msg);
             log.info("[ScheduleService] 已发送失败告警: {}", taskKey);
         } catch (Exception ex) {
@@ -550,10 +550,12 @@ public class ScheduleService implements SchedulingConfigurer {
 
         // 读取推荐配置
         Integer topN = 15;                       // 默认推荐15只
-        String weightMode = null;
+        java.util.List<String> weightModes = new java.util.ArrayList<>();  // 多权重模式
         String dateMode = "today";               // 日期模式
         List<Long> strategyIds = new java.util.ArrayList<>();
         boolean enableConfidenceControl = true;
+        String customStartDate = null;           // custom 模式开始日期
+        String customEndDate = null;             // custom 模式结束日期
 
         try {
             Map<String, Object> configRow = null;
@@ -569,9 +571,10 @@ public class ScheduleService implements SchedulingConfigurer {
                     @SuppressWarnings("unchecked")
                     Map<String, Object> ec = mapper.readValue(extraConfigJson, Map.class);
                     if (ec.get("topN") != null) topN = Integer.parseInt(ec.get("topN").toString());
-                    if (ec.get("weightMode") != null) weightMode = ec.get("weightMode").toString();
                     if (ec.get("enableConfidenceControl") != null) enableConfidenceControl = Boolean.parseBoolean(ec.get("enableConfidenceControl").toString());
                     if (ec.get("dateMode") != null) dateMode = ec.get("dateMode").toString();
+                    if (ec.get("startDate") != null) customStartDate = ec.get("startDate").toString();
+                    if (ec.get("endDate") != null) customEndDate = ec.get("endDate").toString();
                     // 支持多策略: strategyIds 数组优先，向后兼容 strategyId
                     if (ec.get("strategyIds") instanceof java.util.List<?> list) {
                         for (Object id : list) {
@@ -580,38 +583,64 @@ public class ScheduleService implements SchedulingConfigurer {
                     } else if (ec.get("strategyId") != null) {
                         strategyIds.add(Long.parseLong(ec.get("strategyId").toString()));
                     }
+                    // 权重模式: weightModes 数组优先，向后兼容 weightMode
+                    if (ec.get("weightModes") instanceof java.util.List<?> wmList) {
+                        for (Object wm : wmList) {
+                            if (wm != null) weightModes.add(wm.toString());
+                        }
+                    } else if (ec.get("weightMode") != null) {
+                        weightModes.add(ec.get("weightMode").toString());
+                    }
+                    if (weightModes.isEmpty()) weightModes.add("ICW");  // 默认 ICW
                 }
             }
         } catch (Exception e) {
             log.warn("[ScheduleService] 解析DAILY_RECOMMENDATION配置失败，使用默认值: {}", e.getMessage());
         }
+        if (weightModes.isEmpty()) weightModes.add("ICW");
 
-        // 根据 dateMode 计算实际日期（不再传 null）
-        LocalDate runDate = null;
+        // 根据 dateMode 构建待执行日期列表
+        List<LocalDate> runDates = new java.util.ArrayList<>();
         try {
             switch (dateMode == null ? "today" : dateMode.toLowerCase()) {
                 case "today":
-                    runDate = LocalDate.now();
+                    runDates.add(LocalDate.now());
                     break;
                 case "recent_1":
-                    runDate = LocalDate.now().minusDays(1);
+                    runDates.add(LocalDate.now().minusDays(1));
                     break;
                 case "recent_3":
-                    runDate = LocalDate.now().minusDays(3);
+                    // 最近3个交易日（日历日倒推，跳过周末）
+                    for (int i = 1; i <= 7 && runDates.size() < 3; i++) {
+                        LocalDate d = LocalDate.now().minusDays(i);
+                        if (!isWeekend(d)) runDates.add(d);
+                    }
+                    break;
+                case "custom":
+                    if (customStartDate != null && customEndDate != null) {
+                        LocalDate sd = LocalDate.parse(customStartDate);
+                        LocalDate ed = LocalDate.parse(customEndDate);
+                        for (LocalDate d = sd; !d.isAfter(ed); d = d.plusDays(1)) {
+                            if (!isWeekend(d)) runDates.add(d);
+                        }
+                    } else {
+                        log.warn("[ScheduleService] dateMode=custom 但 startDate/endDate 为空，回退到 today");
+                        runDates.add(LocalDate.now());
+                    }
                     break;
                 default:
-                    runDate = LocalDate.now();
+                    runDates.add(LocalDate.now());
                     break;
             }
         } catch (Exception e) {
             log.warn("[ScheduleService] 解析日期失败，使用当天: {}", e.getMessage());
-            runDate = LocalDate.now();
+            runDates.add(LocalDate.now());
         }
 
-        log.info("[ScheduleService] 推荐参数: date={}, dateMode={}, topN={}, strategyIds={}, weightMode={}",
-                runDate, dateMode, topN, strategyIds, weightMode);
+        log.info("[ScheduleService] 推荐参数: runDates={}, dateMode={}, topN={}, strategyIds={}, weightModes={}",
+                runDates, dateMode, topN, strategyIds, weightModes);
 
-        // 逐策略生成推荐
+        // 逐日期 × 策略 × 权重模式 三层循环，每种组合分别生成独立快照
         java.util.List<com.quant.platform.recommendation.domain.StockRecommendation> allRecommendations = new java.util.ArrayList<>();
         boolean allSuccess = true;
 
@@ -623,19 +652,25 @@ public class ScheduleService implements SchedulingConfigurer {
             return;
         }
 
-        for (Long strategyId : strategyIds) {
-            try {
-                List<com.quant.platform.recommendation.domain.StockRecommendation> recommendations =
-                    recommendationService.generateRecommendations(
-                        runDate, topN, strategyId, weightMode,
-                        new java.util.ArrayList<>(), enableConfidenceControl);
+        for (LocalDate runDate : runDates) {
+            log.info("[ScheduleService] 开始处理日期: {} (共{}个日期)", runDate, runDates.size());
+            for (Long strategyId : strategyIds) {
+                for (String wm : weightModes) {
+                    try {
+                        List<com.quant.platform.recommendation.domain.StockRecommendation> recommendations =
+                            recommendationService.generateRecommendations(
+                                runDate, topN, strategyId, wm,
+                                new java.util.ArrayList<>(), enableConfidenceControl);
 
-                log.info("[ScheduleService] 策略[{}]推荐完成: 推荐数量={}", strategyId, recommendations.size());
-                allRecommendations.addAll(recommendations);
+                        log.info("[ScheduleService] 日期[{}] 策略[{}] 模式[{}] 推荐完成: 推荐数量={}",
+                                runDate, strategyId, wm, recommendations.size());
+                        allRecommendations.addAll(recommendations);
 
-            } catch (Exception e) {
-                log.error("[ScheduleService] 策略[{}]推荐执行失败", strategyId, e);
-                allSuccess = false;
+                    } catch (Throwable t) {
+                        log.error("[ScheduleService] 日期[{}] 策略[{}] 模式[{}] 推荐执行失败", runDate, strategyId, wm, t);
+                        allSuccess = false;
+                    }
+                }
             }
         }
 
@@ -659,5 +694,10 @@ public class ScheduleService implements SchedulingConfigurer {
             LocalDateTime.now(), allSuccess ? "SUCCESS" : "PARTIAL", durationSec);
         log.info("[ScheduleService] 每日自动推荐完成: 策略数={}, 推荐总数={}, 耗时={}s, 状态={}",
             strategyIds.size(), allRecommendations.size(), durationSec, allSuccess ? "SUCCESS" : "PARTIAL");
+    }
+
+    /** 判断是否周末（周六=6, 周日=7） */
+    private static boolean isWeekend(LocalDate date) {
+        return date.getDayOfWeek().getValue() >= 6;
     }
 }

@@ -249,8 +249,15 @@ public class ScheduleConfigController {
             CompletableFuture.runAsync(() -> {
                 try {
                     scheduleService.executeTaskManual(upper);
-                } catch (Exception e) {
-                    log.error("[ScheduleConfig] 异步执行 {} 失败: {}", upper, e.getMessage(), e);
+                } catch (Throwable t) {
+                    log.error("[ScheduleConfig] 异步执行 {} 失败: {}", upper, t.getMessage(), t);
+                    // Error（如NoSuchMethodError）不会被子调用方的catch(Exception)捕获，
+                    // 必须在这里兜底，否则CompletableFuture会静默吞掉异常
+                    try {
+                        jdbcTemplate.update(
+                            "UPDATE data_schedule_config SET last_run_time = ?, last_run_status = 'FAILED' WHERE task_key = ?",
+                            java.time.LocalDateTime.now(), upper);
+                    } catch (Exception ignored) {}
                 }
             });
 
@@ -356,6 +363,8 @@ public class ScheduleConfigController {
             case "FACTOR_COMPUTE": req.setUpdateType("FACTOR_COMPUTE"); break;
             case "DATA_FRESHNESS": /* 质量检查: 已在 ScheduleService 中特殊处理 */ break;
             case "PRICE_ANOMALY":  /* 质量检查: 已在 ScheduleService 中特殊处理 */ break;
+            case "RECOMMENDATION_TRACK": /* P1-4: 已在 ScheduleService 中特殊处理 */ break;
+            case "DAILY_RECOMMENDATION": /* Phase 2: 已在 ScheduleService 中特殊处理 */ break;
             default: throw new IllegalArgumentException("未知的任务类型: " + taskKey);
         }
 

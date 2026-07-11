@@ -592,18 +592,40 @@ public class RecommendationService {
         // Step 5: 行业分散化(动态限制, Phase A+C)
         recommendations = diversify(recommendations, industryMomentumMap);
 
+        // Step 5.5: 过滤 SELL 推荐并截断到 topN
+        int beforeFilter = recommendations.size();
+        recommendations = recommendations.stream()
+                .filter(r -> !"SELL".equals(r.getActionTag()))
+                .collect(Collectors.toList());
+        int sellFiltered = beforeFilter - recommendations.size();
+        // 截断到 topN（diversify 可能保留了超过 topN 的条目）
+        if (recommendations.size() > topN) {
+            recommendations = recommendations.subList(0, topN);
+        }
+
+        long buyCount = recommendations.stream().filter(r -> "BUY".equals(r.getActionTag())).count();
+        if (buyCount == 0 && !recommendations.isEmpty()) {
+            log.warn("[Recommendation] 策略[{}] 日期[{}] 无BUY推荐, 全部为HOLD, 共{}条 (过滤{}条SELL)",
+                    strategyId, actualDate, recommendations.size(), sellFiltered);
+        }
+        if (sellFiltered > 0) {
+            log.info("[Recommendation] 过滤{}条SELL推荐, 剩余{}条 (BUY={}, HOLD={})",
+                    sellFiltered, recommendations.size(), buyCount, recommendations.size() - buyCount);
+        }
+
         for (int i = 0; i < recommendations.size(); i++) {
             recommendations.get(i).setRankNum(i + 1);
         }
 
-        // Step 6: 写入数据库（按 strategy_id + recommend_date 去重，先删旧写新）
+        // Step 6: 写入数据库（按 (strategy_id, recommend_date, weight_mode) 去重，先删旧写新）
         for (StockRecommendation rec : recommendations) {
             rec.setStrategyId(strategyId);
             rec.setRecommendDate(actualDate);
+            rec.setWeightMode(effectiveWeightMode);
         }
-        // 仅当指定了策略时才做清理（避免误删）
+        // 仅当指定了策略时才做清理（避免误删），按模式精准删除不影响其他模式的快照
         if (strategyId != null) {
-            recommendationMapper.deleteByStrategyAndDate(strategyId, actualDate);
+            recommendationMapper.deleteByStrategyAndDateAndMode(strategyId, actualDate, effectiveWeightMode);
         }
         for (StockRecommendation rec : recommendations) {
             try {
@@ -632,10 +654,21 @@ public class RecommendationService {
     }
 
     /**
-     * 获取指定策略+日期的推荐列表
+     * 获取指定策略+日期的推荐列表（不过滤模式，合并所有模式快照）
      */
     public List<StockRecommendation> getRecommendationsByStrategyAndDate(Long strategyId, LocalDate recommendDate) {
         return enrichFromStockInfo(recommendationMapper.findByStrategyAndDate(strategyId, recommendDate));
+    }
+
+    /**
+     * 获取指定策略+日期的推荐列表（按权重模式过滤）
+     * @param weightMode 权重模式，null/空/ALL=不过滤
+     */
+    public List<StockRecommendation> getRecommendationsByStrategyAndDate(Long strategyId, LocalDate recommendDate, String weightMode) {
+        if (weightMode == null || weightMode.isEmpty() || "ALL".equalsIgnoreCase(weightMode)) {
+            return getRecommendationsByStrategyAndDate(strategyId, recommendDate);
+        }
+        return enrichFromStockInfo(recommendationMapper.findByStrategyAndDateAndMode(strategyId, recommendDate, weightMode));
     }
 
     /**
@@ -706,8 +739,8 @@ public class RecommendationService {
      * @return 更新的记录数
      */
     public int trackRecommendationPerformance() {
-        // 优先拉取还有 nextDayReturn IS NULL 的组合（追踪专用方法，limit 放大到 200 覆盖所有近期未追批次）
-        List<Map<String, Object>> recentCombos = recommendationMapper.findUntrackedStrategyDates(200);
+        // 按 (strategy_id, recommend_date, weight_mode) 三元组去重，确保每种模式的快照都能被追踪
+        List<Map<String, Object>> recentCombos = recommendationMapper.findUntrackedStrategyDateModes(200);
         if (recentCombos.isEmpty()) {
             log.info("[Recommendation] 所有近期组合均已追踪，跳过");
             return 0;
@@ -723,8 +756,12 @@ public class RecommendationService {
             java.sql.Date sqlDate = (java.sql.Date) combo.get("recommend_date");
             if (sqlDate == null) continue;
             LocalDate recDate = sqlDate.toLocalDate();
+            String weightMode = (String) combo.get("weight_mode");
 
-            List<StockRecommendation> recs = recommendationMapper.findByStrategyAndDate(sid, recDate);
+            // 按模式读取该模式下的快照（多模式快照隔离追踪）
+            List<StockRecommendation> recs = weightMode != null
+                ? recommendationMapper.findByStrategyAndDateAndMode(sid, recDate, weightMode)
+                : recommendationMapper.findByStrategyAndDate(sid, recDate);
             if (recs.isEmpty()) continue;
 
             int daysSince = (int) java.time.temporal.ChronoUnit.DAYS.between(recDate, today);
@@ -843,10 +880,17 @@ public class RecommendationService {
     }
 
     /**
-     * 获取最近的策略+日期组合列表
+     * 获取指定策略+日期的所有模式列表
+     */
+    public List<String> getModesByStrategyAndDate(Long strategyId, LocalDate recommendDate) {
+        return recommendationMapper.findModesByStrategyAndDate(strategyId, recommendDate);
+    }
+
+    /**
+     * 获取最近的策略+日期组合列表（含权重模式）
      */
     public List<Map<String, Object>> getStrategyDateCombos(int limit) {
-        return recommendationMapper.findRecentStrategyDates(limit);
+        return recommendationMapper.findRecentStrategyDateModes(limit);
     }
 
     /**
@@ -2915,7 +2959,7 @@ public class RecommendationService {
     private int computeAdaptiveHalflife(LocalDate refDate) {
         try {
             List<com.quant.platform.market.domain.MarketDailyBar> hist =
-                    marketDataService.getBarsBySymbol(SSE300_CODE, refDate.minusDays(60), refDate);
+                    marketDataService.getBarsInRange(SSE300_CODE, refDate.minusDays(60), refDate);
             if (hist == null || hist.size() < 20) {
                 log.warn("[DynamicWeight] P2 沪深300历史数据不足({}), 使用默认半衰期{}天",
                         hist == null ? "null" : hist.size(), DEFAULT_HALFLIFE_DAYS);

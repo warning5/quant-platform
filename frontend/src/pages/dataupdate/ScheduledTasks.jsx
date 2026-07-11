@@ -161,21 +161,30 @@ function extractTimeFromCron(cronExpr) {
 
 /** 解析 DB 中的 extra_config JSON 字符串 */
 function parseExtraConfig(raw) {
-  if (!raw) return { incremental: true, dateMode: 'today', startDate: null, endDate: null, strategyIds: [], weightMode: 'ICW', topN: 15, enableConfidenceControl: true };
+  if (!raw) return { incremental: true, dateMode: 'today', startDate: null, endDate: null, strategyIds: [], weightModes: ['ICW'], weightMode: 'ICW', topN: 15, enableConfidenceControl: true };
   try {
     const obj = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    // 向后兼容：weightMode 单值 -> weightModes 数组
+    let weightModes = obj.weightModes;
+    if (!weightModes && obj.weightMode) {
+      weightModes = [obj.weightMode];
+    }
+    if (!Array.isArray(weightModes) || weightModes.length === 0) {
+      weightModes = ['ICW'];
+    }
     return {
       incremental: obj.incremental !== false,  // 未配置时默认增量模式
       dateMode: obj.dateMode || 'today',
       startDate: obj.startDate || null,
       endDate: obj.endDate || null,
       strategyIds: obj.strategyIds || (obj.strategyId ? [obj.strategyId] : []),
-      weightMode: obj.weightMode || 'ICW',
+      weightModes,
+      weightMode: weightModes[0] || 'ICW',
       topN: obj.topN || 15,
       enableConfidenceControl: obj.enableConfidenceControl !== false,
     };
   } catch {
-    return { incremental: true, dateMode: 'today', startDate: null, endDate: null, strategyIds: [], weightMode: 'ICW', topN: 15, enableConfidenceControl: true };
+    return { incremental: true, dateMode: 'today', startDate: null, endDate: null, strategyIds: [], weightModes: ['ICW'], weightMode: 'ICW', topN: 15, enableConfidenceControl: true };
   }
 }
 
@@ -193,12 +202,13 @@ function stringifyExtraConfig(config) {
     result.topN = config.topN || 15;
     result.enableConfidenceControl = config.enableConfidenceControl !== false;
   }
-  // 权重模式（非默认 ICW 时才写入，保持向后兼容）
-  if (config.weightMode && config.weightMode !== 'ICW') {
-    result.weightMode = config.weightMode;
-  } else if (config.weightMode === 'ICW') {
-    result.weightMode = 'ICW';
-  }
+  // 权重模式（多选数组：weightModes 数组优先，weightMode 单值时兼容写入）
+  const wms = config.weightModes && config.weightModes.length > 0
+    ? config.weightModes
+    : (config.weightMode ? [config.weightMode] : ['ICW']);
+  result.weightModes = wms;
+  // 同步写单值字段（向后兼容旧后端/旧解析逻辑）
+  result.weightMode = wms[0];
   return JSON.stringify(result);
 }
 
@@ -499,7 +509,7 @@ function CronVisualEditor({ open, initialValue, initialExtraConfig, taskKey, onO
   const [customDates, setCustomDates] = useState(null); // [dayjs, dayjs]
   // --- 推荐任务专属 state ---
   const [strategyIds, setStrategyIds] = useState([]);
-  const [weightMode, setWeightMode] = useState('ICW');
+  const [weightModes, setWeightModes] = useState(['ICW']);
   const [topN, setTopN] = useState(15);
   const [enableConfidenceControl, setEnableConfidenceControl] = useState(true);
   const [allStrategies, setAllStrategies] = useState([]);
@@ -522,7 +532,7 @@ function CronVisualEditor({ open, initialValue, initialExtraConfig, taskKey, onO
         setCustomDates(null);
       }
       setStrategyIds(ec.strategyIds || []);
-      setWeightMode(ec.weightMode || 'ICW');
+      setWeightModes(ec.weightModes || (ec.weightMode ? [ec.weightMode] : ['ICW']));
       setTopN(ec.topN || 15);
       setEnableConfidenceControl(ec.enableConfidenceControl !== false);
       // 推荐任务时加载策略列表
@@ -812,13 +822,15 @@ function CronVisualEditor({ open, initialValue, initialExtraConfig, taskKey, onO
               </Text>
             )}
 
-            {/* 权重模式选择 */}
-            <Text strong style={{ fontSize: 13, display: 'block', marginBottom: 8 }}>权重模式</Text>
+            {/* 权重模式选择（多选） */}
+            <Text strong style={{ fontSize: 13, display: 'block', marginBottom: 8 }}>权重模式（可多选，每种模式生成独立快照）</Text>
             <Select
-              value={weightMode}
-              onChange={setWeightMode}
-              placeholder="选择因子权重模式"
+              mode="multiple"
+              value={weightModes}
+              onChange={setWeightModes}
+              placeholder="选择因子权重模式（可多选）"
               style={{ width: '100%', marginBottom: 16 }}
+              maxTagCount="responsive"
               options={[
                 { value: 'ICW', label: 'IC动态加权（默认，根据因子预测能力自动调整）' },
                 { value: 'STATIC', label: '固定等权（策略配置中的固定权重）' },
@@ -1141,11 +1153,11 @@ function CronVisualEditor({ open, initialValue, initialExtraConfig, taskKey, onO
       startDate: sd,
       endDate: ed,
       strategyIds,
-      weightMode,
+      weightModes,
       topN,
       enableConfidenceControl,
     });
-  }, [incremental, dateMode, customDates, strategyIds, weightMode, topN, enableConfidenceControl]);
+  }, [incremental, dateMode, customDates, strategyIds, weightModes, topN, enableConfidenceControl]);
 
   return (
     <Modal

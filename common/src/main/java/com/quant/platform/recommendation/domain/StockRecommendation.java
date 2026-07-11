@@ -150,4 +150,7 @@ public class StockRecommendation {
 
     /** 更新时间 */
     private LocalDateTime updatedAt;
+
+    /** 权重模式: FIXED(固定权重) / ICW(动态IC权重) */
+    private String weightMode;
 }

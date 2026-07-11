@@ -86,6 +86,8 @@ export default function RecommendationList() {
   const [factorDiagnostics, setFactorDiagnostics] = useState(null); // IC加权诊断
   const [diagExpanded, setDiagExpanded] = useState(false); // 已剔除/异常面板默认收起
   const [weightMode, setWeightMode] = useState('STATIC'); // 权重模式: STATIC(固定) / IC(动态IC)
+  const [viewWeightMode, setViewWeightMode] = useState('ALL'); // 查看模式过滤: ALL/ICW/STATIC/EQUAL
+  const [availableModes, setAvailableModes] = useState([]); // 当前(策略,日期)已存在的所有模式
   const [icDataDate, setIcDataDate] = useState(null); // IC数据可用日期
   const [enableConfidenceControl, setEnableConfidenceControl] = useState(() => {
     const saved = localStorage.getItem('confidenceControlEnabled');
@@ -324,9 +326,15 @@ export default function RecommendationList() {
       let data;
       const dateStr = date ? dayjs(date).format('YYYY-MM-DD') : null;
       if (sid && dateStr) {
-        data = await recommendationApi.getByStrategyAndDate(sid, dateStr);
+        data = await recommendationApi.getByStrategyAndDate(sid, dateStr, viewWeightMode);
+        // 加载该(策略,日期)下所有可用模式，供下拉选择
+        try {
+          const modes = await recommendationApi.findModesByStrategyAndDate(sid, dateStr);
+          setAvailableModes(modes || []);
+        } catch { setAvailableModes([]); }
       } else {
         data = await recommendationApi.getLatest();
+        setAvailableModes([]);
       }
       const list = Array.isArray(data) ? data : [];
       list.sort((a, b) => (b.finalScore || 0) - (a.finalScore || 0));
@@ -344,6 +352,7 @@ export default function RecommendationList() {
         setWeightInfo({
           factorWeight: list[0].factorWeight,
           analysisWeight: list[0].analysisWeight,
+          weightMode: list[0].weightMode,
         });
       } else {
         setRegime(null);
@@ -351,7 +360,7 @@ export default function RecommendationList() {
       }
     } catch { /* ignore */ }
     setLoading(false);
-  }, []);
+  }, [viewWeightMode]);
 
   // ── 策略切换：刷新可用日期列表，自动选最近日期，加载推荐 ──
   const handleStrategyChange = async (value) => {
@@ -1092,6 +1101,21 @@ export default function RecommendationList() {
             })}
           />
           <Select
+            value={viewWeightMode}
+            onChange={(v) => { setViewWeightMode(v); loadRecommendations(selectedStrategyId, screenDate); }}
+            style={{ width: 130 }}
+            size="middle"
+            disabled={availableModes.length === 0}
+            placeholder="查看模式"
+          >
+            <Select.Option value="ALL">全部模式</Select.Option>
+            {availableModes.map(m => (
+              <Select.Option key={m} value={m}>
+                {m === 'ICW' ? 'IC动态' : m === 'STATIC' ? '固定权重' : m === 'EQUAL' ? '简单等权' : m}
+              </Select.Option>
+            ))}
+          </Select>
+          <Select
             value={weightMode}
             onChange={setWeightMode}
             style={{ width: 120 }}
@@ -1335,7 +1359,7 @@ export default function RecommendationList() {
                   title={<span>因子权重 <QuestionCircleOutlined style={{ color: '#8c8c8c', fontSize: 12, marginLeft: 2 }} /></span>}
                   value={weightInfo?.factorWeight != null ? `${(weightInfo.factorWeight * 100).toFixed(0)}%` : '未设置'}
                   valueStyle={{ fontSize: 20 }}
-                  suffix={weightInfo?.analysisWeight != null ? `/ ${(weightInfo.analysisWeight * 100).toFixed(0)}%分析` : ''}
+                  suffix={<>{weightInfo?.analysisWeight != null ? `/ ${(weightInfo.analysisWeight * 100).toFixed(0)}%分析` : ''}{weightInfo?.weightMode && <Tag style={{ marginLeft: 6, fontSize: 11 }} color={weightInfo.weightMode === 'ICW' ? 'blue' : weightInfo.weightMode === 'EQW' ? 'green' : 'default'}>{weightInfo.weightMode === 'ICW' ? 'IC加权' : weightInfo.weightMode === 'EQW' ? '等权' : weightInfo.weightMode === 'STATIC' ? '固定' : weightInfo.weightMode}</Tag>}</>}
                   titleStyle={{ fontSize: 12 }}
                 />
               </Tooltip>
