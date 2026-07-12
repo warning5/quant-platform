@@ -126,7 +126,8 @@ public class IntradayMonitorService {
                     t.setDaemon(true);
                     return t;
                 });
-        this.dataDate = LocalDate.now();
+        // 使用交易日历获取最近交易日，避免周末/节假日启动时dataDate卡在非交易日
+        this.dataDate = tradeCalendarService.getLatestTradingDay();
         // 启动时从数据库加载自定义股票
         loadCustomStocksFromDb();
 
@@ -578,9 +579,13 @@ public class IntradayMonitorService {
         if (recDate != null) {
             this.dataDate = recDate;
         } else if (llmDate != null) {
+            // llm_analysis日期可能是节假日，调整到最近交易日
+            while (isNonTradingDay(llmDate)) {
+                llmDate = llmDate.minusDays(1);
+            }
             this.dataDate = llmDate;
         } else {
-            this.dataDate = LocalDate.now().minusDays(1);
+            this.dataDate = tradeCalendarService.getLatestTradingDay(LocalDate.now().minusDays(1));
         }
         log.info("[IntradayMonitor] ===== 加载目标价 START ===== LLM日期={}, 推荐日期={}, 显示日期={}", llmDate, recDate, this.dataDate);
 

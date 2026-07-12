@@ -122,7 +122,7 @@ public class MonitorController {
                 "monitoring", intradayMonitorService.isMonitoring(),
                 "initialized", !intradayMonitorService.getTargetPriceCache().isEmpty(),
                 "watchingCount", intradayMonitorService.getTargetPriceCache().size(),
-                "dataDate", intradayMonitorService.getDataDate().toString(),
+                "dataDate", intradayMonitorService.getLatestDataDate().toString(),
                 "targetPrices", targetPrices,
                 "signalHistory", intradayMonitorService.getSignalHistory()
         ));
