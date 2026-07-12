@@ -78,6 +78,11 @@ public class FactorComputeEngine {
         this.clickHouseJdbcTemplate = jdbcTemplate;
     }
 
+    /** MySQL JdbcTemplate（用于查询融资融券等MySQL数据） */
+    @org.springframework.beans.factory.annotation.Autowired
+    @org.springframework.beans.factory.annotation.Qualifier("jdbcTemplate")
+    private org.springframework.jdbc.core.JdbcTemplate mysqlJdbcTemplate;
+
     /** 启动时加载ST股票名单到 LimitUpCountCalculator */
     @jakarta.annotation.PostConstruct
     private void loadStStockCodes() {
@@ -110,12 +115,19 @@ public class FactorComputeEngine {
         // 估值
         registerBuiltin(new BuiltinFactors.PePercentileCalculator());
         registerBuiltin(new BuiltinFactors.PeTtmCalculator());
+        registerBuiltin(new BuiltinFactors.ValPbCalculator());
         registerBuiltin(new BuiltinFactors.FcfYieldCalculator());
         // 技术
         registerBuiltin(new BuiltinFactors.Atr20Calculator());
         registerBuiltin(new BuiltinFactors.SarCalculator());
         // 市值
         registerBuiltin(new BuiltinFactors.SizeCalculator());
+        // 2026-07-12 新增因子（IC回测验证有效）
+        registerBuiltin(new BuiltinFactors.Reversal5DCalculator());     // IR=0.32
+        registerBuiltin(new BuiltinFactors.Beta60DCalculator());        // IR=0.36
+        registerBuiltin(new BuiltinFactors.MarginBuyRatioCalculator()); // IR=-0.36
+        // 2026-07-12 恢复注册（E策略需要VAL_DIVIDEND_YIELD）
+        registerBuiltin(new BuiltinFactors.DividendYieldCalculator());
 
         // 注册财务因子（8个ACTIVE）
         registerFinancial(new FinancialFactors.RoeCalc());
@@ -223,6 +235,19 @@ public class FactorComputeEngine {
 
             log.info("[全量] 跳过删除，直接覆盖写入: factor={}, {}~{}", factor.getFactorCode(), startDate, endDate);
 
+            // BETA_60D: 预加载上证指数K线（一次性查询，所有日期共享）
+            final Map<String, List<MarketDailyBar>> effectiveBarsData;
+            if ("BETA_60D".equals(factor.getFactorCode())) {
+                LocalDate idxStart = startDate.minusDays(400);
+                List<MarketDailyBar> indexBars = marketDataService.getBarsInRange("000001.SH", idxStart, endDate);
+                Map<String, List<MarketDailyBar>> withIndex = new HashMap<>(allBarsData);
+                withIndex.put("INDEX_000001", indexBars);
+                effectiveBarsData = withIndex;
+                log.info("[BETA_60D] 预加载上证指数K线: {} 条, {} ~ {}", indexBars.size(), idxStart, endDate);
+            } else {
+                effectiveBarsData = allBarsData;
+            }
+
             List<LocalDate> tradingDates = marketDataService.getTradingDates(startDate, endDate);
             int totalDates = tradingDates.size();
             int totalStocks = symbols.size();
@@ -244,7 +269,7 @@ public class FactorComputeEngine {
             java.util.concurrent.ExecutorCompletionService<List<FactorValue>> completionService =
                     new java.util.concurrent.ExecutorCompletionService<>(pool);
             for (LocalDate date : tradingDates) {
-                completionService.submit(() -> computeOneDateFromMemory(factor, date, symbols, allBarsData));
+                completionService.submit(() -> computeOneDateFromMemory(factor, date, symbols, effectiveBarsData));
             }
             pool.shutdown();
 
@@ -476,6 +501,20 @@ public class FactorComputeEngine {
                 log.warn("[{}] allBarsData 为空！symbols前5={}", code, symbols.subList(0, Math.min(5, symbols.size())));
             }
 
+            // BETA_60D: 预加载上证指数K线
+            final Map<String, List<MarketDailyBar>> effectiveBarsData;
+            if ("BETA_60D".equals(code) && newDates != null && !newDates.isEmpty()) {
+                LocalDate idxStart = newDates.get(0).minusDays(400);
+                LocalDate idxEnd = newDates.get(newDates.size() - 1);
+                List<MarketDailyBar> indexBars = marketDataService.getBarsInRange("000001.SH", idxStart, idxEnd);
+                Map<String, List<MarketDailyBar>> withIndex = new HashMap<>(allBarsData);
+                withIndex.put("INDEX_000001", indexBars);
+                effectiveBarsData = withIndex;
+                log.info("[BETA_60D] [增量] 预加载上证指数K线: {} 条", indexBars.size());
+            } else {
+                effectiveBarsData = allBarsData;
+            }
+
             // ── 并行参数 ──
             // 预加载后不再需要DB连接，可以更激进地使用线程
             int maxInternalThreads = Math.max(1, 30 / Math.max(runningFactors.size(), 1) - 2);
@@ -494,7 +533,7 @@ public class FactorComputeEngine {
             java.util.concurrent.ExecutorCompletionService<List<FactorValue>> completionService =
                     new java.util.concurrent.ExecutorCompletionService<>(pool);
             for (LocalDate date : newDates) {
-                completionService.submit(() -> computeOneDateFromMemory(factor, date, symbols, allBarsData));
+                completionService.submit(() -> computeOneDateFromMemory(factor, date, symbols, effectiveBarsData));
             }
             pool.shutdown();
 
@@ -855,11 +894,21 @@ public class FactorComputeEngine {
         // 批量查询：一次 DB 调用替代 N 次单只查询（修复 5490 只股票串行查询卡死问题）
         Map<String, List<MarketDailyBar>> batchData = marketDataService.getBarsBatch(symbols, histStart, date);
 
+        // 特殊因子需要预构建context
+        Map<String, Object> context = new HashMap<>();
+        if ("BETA_60D".equals(factorCode)) {
+            context.putAll(buildIndexReturnsContext(date, null));
+            if (context.isEmpty()) return List.of();
+        } else if ("MARGIN_BUY_RATIO".equals(factorCode)) {
+            context.putAll(buildMarginContext(date));
+            if (context.isEmpty()) return List.of();
+        }
+
         List<FactorValue> results = new ArrayList<>(symbols.size());
         for (String symbol : symbols) {
             try {
                 List<MarketDailyBar> history = batchData.getOrDefault(symbol, List.of());
-                BigDecimal value = computeSingleValue(factor, symbol, date, history);
+                BigDecimal value = computeSingleValue(factor, symbol, date, history, context);
                 if (value != null) {
                     String code = parseCode(symbol);
                     FactorValue fv = FactorValue.builder().factorCode(factor.getFactorCode()).symbol(code).calcDate(date).factorVal(value).createdAt(now).build();
@@ -884,12 +933,24 @@ public class FactorComputeEngine {
             return computeOneDateFinancial(factorCode, date, symbols);
         }
 
-        // INDUSTRY_REL_MOM 需要行业平均动量数据：预计算行业→avg_mom20映射
-        Map<String, Object> context = Map.of();
+        // 特殊因子需要预构建context
+        Map<String, Object> context = new HashMap<>();
         if ("INDUSTRY_REL_MOM".equals(factorCode)) {
-            context = buildIndustryMomContext(date, symbols, allBarsData);
+            context.putAll(buildIndustryMomContext(date, symbols, allBarsData));
             if (context.isEmpty()) {
                 log.debug("[INDUSTRY_REL_MOM] 无法构建行业context: date={}", date);
+                return List.of();
+            }
+        } else if ("BETA_60D".equals(factorCode)) {
+            context.putAll(buildIndexReturnsContext(date, allBarsData));
+            if (context.isEmpty()) {
+                log.debug("[BETA_60D] 无法构建指数收益context: date={}", date);
+                return List.of();
+            }
+        } else if ("MARGIN_BUY_RATIO".equals(factorCode)) {
+            context.putAll(buildMarginContext(date));
+            if (context.isEmpty()) {
+                log.debug("[MARGIN_BUY_RATIO] 无融资融券数据: date={}", date);
                 return List.of();
             }
         }
@@ -1032,9 +1093,83 @@ public class FactorComputeEngine {
     }
 
     /**
-     * 财务因子计算：每个交易日使用该股票最新的年报财务指标
-     * 优化：批量预加载替代逐只N+1查询
+     * BETA_60D: 构建上证指数日收益率序列（从预加载的allBarsData或直接查询）
+     * allBarsData中key "INDEX_000001" 存储预加载的指数K线
      */
+    private Map<String, Object> buildIndexReturnsContext(LocalDate date,
+                                                          Map<String, List<MarketDailyBar>> allBarsData) {
+        try {
+            List<MarketDailyBar> indexBars = null;
+            if (allBarsData != null) {
+                indexBars = allBarsData.get("INDEX_000001");
+            }
+            if (indexBars == null || indexBars.isEmpty()) {
+                // 直接查询上证指数K线
+                indexBars = marketDataService.getBarsInRange("000001.SH", date.minusDays(400), date);
+            }
+            if (indexBars == null || indexBars.isEmpty()) return Map.of();
+
+            // 二分查找date位置
+            int lo = 0, hi = indexBars.size();
+            while (lo < hi) {
+                int mid = (lo + hi) >>> 1;
+                if (indexBars.get(mid).getTradeDate().compareTo(date) > 0) hi = mid;
+                else lo = mid + 1;
+            }
+            if (lo < 2) return Map.of();
+
+            // 计算对数收益率（按日序排列）
+            int maxReturns = Math.min(lo - 1, 250);
+            double[] returns = new double[maxReturns];
+            for (int i = 0; i < maxReturns; i++) {
+                var curr = indexBars.get(lo - 1 - (maxReturns - 1 - i));
+                var prev = indexBars.get(lo - 1 - (maxReturns - 1 - i) - 1);
+                if (prev.getClose() == null || prev.getClose().compareTo(BigDecimal.ZERO) == 0
+                        || curr.getClose() == null) {
+                    returns[i] = 0;
+                } else {
+                    returns[i] = Math.log(curr.getClose().doubleValue() / prev.getClose().doubleValue());
+                }
+            }
+
+            Map<String, Object> context = new HashMap<>();
+            context.put("indexReturns", returns);
+            return context;
+        } catch (Exception e) {
+            log.warn("[BETA_60D] 构建指数收益context失败: date={} error={}", date, e.getMessage());
+            return Map.of();
+        }
+    }
+
+    /**
+     * MARGIN_BUY_RATIO: 从MySQL查询融资融券数据，计算margin_buy/margin_balance
+     */
+    private Map<String, Object> buildMarginContext(LocalDate date) {
+        try {
+            List<Map<String, Object>> rows = mysqlJdbcTemplate.queryForList(
+                    "SELECT code, margin_buy, margin_balance FROM stock_sentiment_margin_detail WHERE trade_date = ?",
+                    date);
+            Map<String, Double> ratioMap = new HashMap<>();
+            for (var row : rows) {
+                String code = (String) row.get("code");
+                Object mb = row.get("margin_buy");
+                Object mbl = row.get("margin_balance");
+                if (code == null || mb == null || mbl == null) continue;
+                double buy = Double.parseDouble(mb.toString());
+                double balance = Double.parseDouble(mbl.toString());
+                if (balance > 0) {
+                    ratioMap.put(code, buy / balance);
+                }
+            }
+            if (ratioMap.isEmpty()) return Map.of();
+            Map<String, Object> context = new HashMap<>();
+            context.put("marginBuyRatioMap", ratioMap);
+            return context;
+        } catch (Exception e) {
+            log.warn("[MARGIN_BUY_RATIO] 构建融资融券context失败: date={} error={}", date, e.getMessage());
+            return Map.of();
+        }
+    }
     private List<FactorValue> computeOneDateFinancial(String factorCode, LocalDate date, List<String> symbols) {
         FinancialFactorCalculator calculator = financialCalculators.get(factorCode);
         List<FactorValue> results = new ArrayList<>(symbols.size());

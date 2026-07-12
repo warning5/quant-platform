@@ -505,4 +505,156 @@ public class BuiltinFactors {
             return BigDecimal.valueOf(Math.log(mc)).setScale(8, RoundingMode.HALF_UP);
         }
     }
+
+    /**
+     * 市净率（日频） (VAL_PB)
+     * 直接取 stock_daily.pb 字段
+     * PB越低=估值越低（value factor），IC=-0.041（反转方向）
+     */
+    public static class ValPbCalculator implements FactorCalculator {
+        @Override
+        public String getFactorCode() { return "VAL_PB"; }
+
+        @Override
+        public BigDecimal calculate(String symbol, LocalDate calcDate,
+                                List<MarketDailyBar> history, Map<String, Object> context) {
+            if (history.isEmpty()) return null;
+            var last = history.getLast();
+            if (last.getPb() == null || last.getPb().compareTo(BigDecimal.ZERO) <= 0) return null;
+            return last.getPb().setScale(8, RoundingMode.HALF_UP);
+        }
+    }
+
+    // ====================================================================
+    // 反转因子 (REVERSAL_5D) — 2026-07-12 新增
+    // IC回测: IR=0.32 (5日前瞻), 覆盖全市场, = -MOM5
+    // ====================================================================
+
+    /**
+     * 5日反转因子 (REVERSAL_5D) = -MOM5 = (过去收盘 - 当前收盘) / 过去收盘
+     * 正值=超跌（适合反弹选股），负值=超涨
+     */
+    public static class Reversal5DCalculator implements FactorCalculator {
+        @Override
+        public String getFactorCode() { return "REVERSAL_5D"; }
+
+        @Override
+        public BigDecimal calculate(String symbol, LocalDate calcDate,
+                                List<MarketDailyBar> history, Map<String, Object> context) {
+            if (history.size() < 6) return null;
+            MarketDailyBar latest = history.getLast();
+            MarketDailyBar past = history.get(history.size() - 6);
+            if (past.getClose() == null || past.getClose().compareTo(BigDecimal.ZERO) == 0) return null;
+            if (latest.getClose() == null) return null;
+            return past.getClose().subtract(latest.getClose())
+                    .divide(past.getClose(), 8, RoundingMode.HALF_UP);
+        }
+    }
+
+    // ====================================================================
+    // Beta因子 (BETA_60D) — 2026-07-12 新增
+    // IC回测: IR=0.36 (20日前瞻), 覆盖全市场, 低Beta溢价效应
+    // 需要context中提供 "indexReturns" (double[], 按日序排列的指数对数收益率)
+    // ====================================================================
+
+    /**
+     * 60日Beta因子 (BETA_60D) = Cov(个股收益, 指数收益) / Var(指数收益)
+     * 使用上证指数(000001)作为市场基准，60个交易日滚动窗口
+     */
+    public static class Beta60DCalculator implements FactorCalculator {
+        @Override
+        public String getFactorCode() { return "BETA_60D"; }
+
+        @Override
+        public BigDecimal calculate(String symbol, LocalDate calcDate,
+                                List<MarketDailyBar> history, Map<String, Object> context) {
+            if (history.size() < 61) return null;
+            // 从context获取指数日收益率序列
+            Object idxObj = context.get("indexReturns");
+            if (idxObj == null) return null;
+            double[] indexReturns;
+            if (idxObj instanceof double[]) {
+                indexReturns = (double[]) idxObj;
+            } else if (idxObj instanceof List) {
+                List<?> list = (List<?>) idxObj;
+                indexReturns = new double[list.size()];
+                for (int i = 0; i < list.size(); i++) {
+                    if (list.get(i) instanceof Number) {
+                        indexReturns[i] = ((Number) list.get(i)).doubleValue();
+                    } else {
+                        return null;
+                    }
+                }
+            } else {
+                return null;
+            }
+            if (indexReturns.length < 60) return null;
+
+            // 计算个股最近60日对数收益率
+            var window = history.subList(history.size() - 61, history.size());
+            double[] stockReturns = new double[60];
+            for (int i = 0; i < 60; i++) {
+                double prev = window.get(i).getClose().doubleValue();
+                double curr = window.get(i + 1).getClose().doubleValue();
+                if (prev <= 0 || curr <= 0) return null;
+                stockReturns[i] = Math.log(curr / prev);
+            }
+
+            // 取最近60日指数收益率（与个股窗口对齐）
+            int idxStart = indexReturns.length - 60;
+            double stockMean = 0, idxMean = 0;
+            for (int i = 0; i < 60; i++) {
+                stockMean += stockReturns[i];
+                idxMean += indexReturns[idxStart + i];
+            }
+            stockMean /= 60;
+            idxMean /= 60;
+
+            double cov = 0, idxVar = 0;
+            for (int i = 0; i < 60; i++) {
+                double sDev = stockReturns[i] - stockMean;
+                double iDev = indexReturns[idxStart + i] - idxMean;
+                cov += sDev * iDev;
+                idxVar += iDev * iDev;
+            }
+            cov /= 59;
+            idxVar /= 59;
+
+            if (idxVar == 0) return null;
+            double beta = cov / idxVar;
+            return BigDecimal.valueOf(beta).setScale(8, RoundingMode.HALF_UP);
+        }
+    }
+
+    // ====================================================================
+    // 融资买入比因子 (MARGIN_BUY_RATIO) — 2026-07-12 新增
+    // IC回测: IR=-0.36 (20日前瞻), 反转信号(高融资买入→后续下跌)
+    // 需要context中提供 "marginBuyRatioMap" (Map<String,Double>, code→ratio)
+    // ratio = margin_buy / margin_balance (融资买入强度)
+    // ====================================================================
+
+    /**
+     * 融资买入比因子 (MARGIN_BUY_RATIO) = margin_buy / margin_balance
+     * 数据来源: MySQL stock_sentiment_margin_detail 表
+     * 高值=融资买入活跃（反转信号，后续倾向下跌）
+     */
+    public static class MarginBuyRatioCalculator implements FactorCalculator {
+        @Override
+        public String getFactorCode() { return "MARGIN_BUY_RATIO"; }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public BigDecimal calculate(String symbol, LocalDate calcDate,
+                                List<MarketDailyBar> history, Map<String, Object> context) {
+            Object mapObj = context.get("marginBuyRatioMap");
+            if (mapObj == null || !(mapObj instanceof Map)) return null;
+
+            Map<String, Double> ratioMap = (Map<String, Double>) mapObj;
+            String code = symbol.replaceAll("\\..*$", "");
+            Double ratio = ratioMap.get(code);
+            if (ratio == null || ratio.isNaN() || ratio.isInfinite()) return null;
+
+            return BigDecimal.valueOf(ratio).setScale(8, RoundingMode.HALF_UP);
+        }
+    }
 }
