@@ -453,10 +453,10 @@ public class IntradayMonitorService {
             futures.add(future);
         }
 
-        // 等待所有分析完成（最多等15秒，比单只股票K线拉取8秒×并发数更宽裕）
+        // 等待所有分析完成（最多等30秒，留足K线重试时间：12s请求×2次重试+缓冲）
         try {
             CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
-                    .get(15, TimeUnit.SECONDS);
+                    .get(30, TimeUnit.SECONDS);
         } catch (TimeoutException e) {
             log.warn("[IntradayMonitor] 部分K线分析超时，已降级处理");
         } catch (InterruptedException e) {

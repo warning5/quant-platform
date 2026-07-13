@@ -294,12 +294,18 @@ public class FactorService {
                     skipped.add(code + "(已计算到" + latestDate + ")");
                     continue;
                 }
-                log.info("[{}] incremental: existing data up to {}, computing from {}", code, latestDate, startDate);
+                // ★ Fix: 增量模式应从 latestDate 的次日开始计算，而非使用传入的 startDate。
+                //   传入的 startDate 可能是 today（周末/非交易日），导致 getTradingDates 返回空列表，
+                //   从而跳过所有待计算日期（如 MARGIN_BUY_RATIO 只到7月2日，但 startDate=7月12日周六，
+                //   getTradingDates(7/12, 7/12) 返回空，7月3-10日全部被跳过）。
+                LocalDate incrementalStart = (latestDate != null) ? latestDate.plusDays(1) : startDate;
+                log.info("[{}] incremental: existing data up to {}, computing from {} (request start: {})",
+                        code, latestDate, incrementalStart, startDate);
                 try {
                     if (sharedBars != null) {
-                        computeEngine.computeFactorIncrementalWithBars(factor, startDate, endDate, symbols, sharedBars);
+                        computeEngine.computeFactorIncrementalWithBars(factor, incrementalStart, endDate, symbols, sharedBars);
                     } else {
-                        computeEngine.computeFactorIncremental(factor, startDate, endDate, symbols);
+                        computeEngine.computeFactorIncremental(factor, incrementalStart, endDate, symbols);
                     }
                 } catch (Exception e) {
                     skipped.add(code + "(提交失败:" + e.getMessage().split("\\n")[0] + ")");

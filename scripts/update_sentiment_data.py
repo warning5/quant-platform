@@ -377,7 +377,9 @@ def fetch_margin(start_date: str, end_date: str) -> list:
     rows = []
     try:
         df = ak.stock_margin_sse(start_date=start_date, end_date=end_date)
-        if df is None or df.empty:
+        # ★ 防御：akshare 在节假日/边界日期可能返回空df但带新列(13列)，
+        #   pandas 会因 Length mismatch 抛异常；外层 try 已捕获，但再补一道校验
+        if df is None or df.empty or len(df.columns) != 7:
             return rows
         for _, r in df.iterrows():
             td = to_date(r.get("信用交易日期"))
@@ -395,6 +397,7 @@ def fetch_margin(start_date: str, end_date: str) -> list:
             ])
         print(f"  融资融券汇总: {len(rows)} 条")
     except Exception as e:
+        # 节假日akshare会触发Length mismatch等pandas内部异常，捕获后跳过
         print(f"  融资融券汇总获取失败: {e}")
     return rows
 

@@ -644,8 +644,20 @@ public class ScheduleService implements SchedulingConfigurer {
         java.util.List<com.quant.platform.recommendation.domain.StockRecommendation> allRecommendations = new java.util.ArrayList<>();
         boolean allSuccess = true;
 
+        // 如果 extra_config 未指定 strategyIds，则自动查询所有 ACTIVE 策略
         if (strategyIds.isEmpty()) {
-            log.warn("[ScheduleService] DAILY_RECOMMENDATION 未配置 strategyId/strategyIds，跳过执行");
+            try {
+                List<Long> activeIds = jdbcTemplate.queryForList(
+                    "SELECT id FROM strategy_definition WHERE status = 'ACTIVE' ORDER BY id", Long.class);
+                strategyIds.addAll(activeIds);
+                log.info("[ScheduleService] extra_config 未配置 strategyIds，自动发现 {} 个 ACTIVE 策略: {}",
+                    strategyIds.size(), strategyIds);
+            } catch (Exception e) {
+                log.error("[ScheduleService] 查询 ACTIVE 策略失败: {}", e.getMessage());
+            }
+        }
+        if (strategyIds.isEmpty()) {
+            log.warn("[ScheduleService] DAILY_RECOMMENDATION 无可用策略（无配置且无ACTIVE策略），跳过执行");
             jdbcTemplate.update(
                 "UPDATE data_schedule_config SET last_run_time = ?, last_run_status = 'SKIPPED' " +
                 "WHERE task_key = 'DAILY_RECOMMENDATION'", LocalDateTime.now());

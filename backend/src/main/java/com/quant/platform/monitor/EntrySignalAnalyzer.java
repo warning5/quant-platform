@@ -39,10 +39,11 @@ public class EntrySignalAnalyzer {
     private static final String KLINE_URL = "https://ifzq.gtimg.cn/appstock/app/kline/mkline?param=%s&_var=m5_today&r=%f";
 
     /** 复用HttpClient避免每次新建（连接池+keep-alive）
-     *  腾讯ifzq.gtimg.cn mkline接口不支持HTTP/2，会发送GOAWAY导致请求失败，强制HTTP/1.1 */
+     *  腾讯ifzq.gtimg.cn mkline接口不支持HTTP/2，会发送GOAWAY导致请求失败，强制HTTP/1.1
+     *  连接超时10秒（HTTPS握手+DNS，并发场景下5秒太短） */
     private final java.net.http.HttpClient httpClient = java.net.http.HttpClient.newBuilder()
             .version(java.net.http.HttpClient.Version.HTTP_1_1)
-            .connectTimeout(java.time.Duration.ofSeconds(5))
+            .connectTimeout(java.time.Duration.ofSeconds(10))
             .build();
 
     /** 信号权重配置 */
@@ -259,36 +260,58 @@ public class EntrySignalAnalyzer {
      * @return 最近N根m5 K线，失败返回null
      */
     private List<KlineBar> fetchM5Kline(String stockCode) {
-        try {
-            String tencentCode = guessTencentCode(stockCode);
-            // mkline接口参数格式: code,period,,count（不需要日期范围）
-            String param = String.format("%s,m5,,320", tencentCode);
-            String url = String.format(KLINE_URL, param, Math.random());
+        String tencentCode = guessTencentCode(stockCode);
+        String param = String.format("%s,m5,,320", tencentCode);
+        String url = String.format(KLINE_URL, param, Math.random());
 
-            java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
-                    .uri(java.net.URI.create(url))
-                    .timeout(java.time.Duration.ofSeconds(8))
-                    .GET()
-                    .build();
+        // 最多重试2次（首次+1次重试），应对间歇性连接超时
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            try {
+                java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                        .uri(java.net.URI.create(url))
+                        .timeout(java.time.Duration.ofSeconds(12))
+                        .header("User-Agent", "Mozilla/5.0")
+                        .GET()
+                        .build();
 
-            java.net.http.HttpResponse<String> response = httpClient.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+                java.net.http.HttpResponse<String> response = httpClient.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
 
-            if (response.statusCode() != 200) return null;
+                if (response.statusCode() != 200) {
+                    log.warn("[EntrySignal] m5 K线HTTP {} (attempt {}/2): code={}", response.statusCode(), attempt, stockCode);
+                    if (attempt < 2) { Thread.sleep(200); continue; }
+                    return null;
+                }
 
-            // mkline响应以_var值开头（如"m5_today="），需要去掉前缀才是JSON
-            String body = response.body();
-            String jsonPrefix = "m5_today=";
-            int jsonStart = body.indexOf(jsonPrefix);
-            if (jsonStart >= 0) {
-                body = body.substring(jsonStart + jsonPrefix.length());
+                // mkline响应以_var值开头（如"m5_today="），需要去掉前缀才是JSON
+                String body = response.body();
+                String jsonPrefix = "m5_today=";
+                int jsonStart = body.indexOf(jsonPrefix);
+                if (jsonStart >= 0) {
+                    body = body.substring(jsonStart + jsonPrefix.length());
+                }
+
+                List<KlineBar> bars = parseM5Kline(body, tencentCode);
+                if (bars != null && bars.size() >= 10) {
+                    return bars;
+                }
+                // 解析结果不足，不重试（数据问题非网络问题）
+                log.warn("[EntrySignal] m5 K线数据不足({}条): code={}", bars == null ? 0 : bars.size(), stockCode);
+                return null;
+
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.warn("[EntrySignal] 获取m5 K线被中断: code={}", stockCode);
+                return null;
+            } catch (Exception e) {
+                if (attempt < 2) {
+                    log.warn("[EntrySignal] m5 K线获取失败(attempt {}/2): code={}, error={}, 100ms后重试", attempt, stockCode, e.getMessage());
+                    try { Thread.sleep(100); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); return null; }
+                } else {
+                    log.warn("[EntrySignal] 获取m5 K线失败(最终): code={}, error={}", stockCode, e.getMessage());
+                }
             }
-
-            return parseM5Kline(body, tencentCode);
-
-        } catch (Exception e) {
-            log.warn("[EntrySignal] 获取m5 K线失败: code={}, error={}", stockCode, e.getMessage());
-            return null;
         }
+        return null;
     }
 
     /**

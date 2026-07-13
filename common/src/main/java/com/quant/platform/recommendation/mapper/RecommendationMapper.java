@@ -106,6 +106,12 @@ public interface RecommendationMapper extends BaseMapper<StockRecommendation> {
     List<String> findModesByStrategyAndDate(@Param("strategyId") Long strategyId, @Param("recommendDate") LocalDate recommendDate);
 
     /**
+     * 获取指定策略的所有权重模式（用于置信度按模式计算）
+     */
+    @Select("SELECT DISTINCT weight_mode FROM stock_recommendation WHERE strategy_id = #{strategyId} AND weight_mode IS NOT NULL")
+    List<String> findModesByStrategyId(@Param("strategyId") Long strategyId);
+
+    /**
      * 查询指定股票最新一条推荐的买入建议价（用于模拟盘信号价对齐）
      */
     @Select("SELECT suggested_buy_price FROM stock_recommendation WHERE stock_code = #{code} ORDER BY recommend_date DESC, id DESC LIMIT 1")

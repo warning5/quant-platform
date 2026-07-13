@@ -330,6 +330,8 @@ public class RecommendationService {
         }
 
         // P1-4: 检查上期推荐命中率，动态调整 topN（仅当指定了 strategyId 时）
+        // P2修复: 记录命中率调整结果，与置信度调整取max而非叠加
+        int hitRateAdjustedTopN = topN; // 命中率调整后的topN
         if (strategyId != null && topN > 10) {
             StockRecommendation latestRec = recommendationMapper.findLatest();
             if (latestRec != null && latestRec.getStrategyId() != null && latestRec.getStrategyId().equals(strategyId)) {
@@ -338,10 +340,9 @@ public class RecommendationService {
                     Map<String, Object> hitStats = getHitRate(latestRec.getStrategyId(), prevDate);
                     Double hitRate = (Double) hitStats.get("hitRate");
                     if (hitRate != null && hitRate < 0.4) {
-                        int originalTopN = topN;
-                        topN = Math.max(10, topN - 5);
-                        log.info("[Recommendation] 上期命中率{}%偏低({}), 缩减topN: {} -> {}",
-                                hitRate * 100, prevDate, originalTopN, topN);
+                        hitRateAdjustedTopN = Math.max(10, topN - 5);
+                        log.info("[Recommendation] 上期命中率{}%偏低({}), 建议缩减topN: {} -> {}",
+                                hitRate * 100, prevDate, topN, hitRateAdjustedTopN);
                     }
                 }
             }
@@ -352,30 +353,51 @@ public class RecommendationService {
         // 仅在启用置信度控制时生效
         if (enableConfidenceControl && strategyId != null) {
             try {
-                var confidenceOpt = strategyConfidenceService.getLatestConfidence(strategyId);
+                // P1修复: 按权重模式查询置信度
+                var confidenceOpt = strategyConfidenceService.getLatestConfidence(strategyId, effectiveWeightMode);
                 if (confidenceOpt.isPresent()) {
                     var conf = confidenceOpt.get();
                     String level = conf.getLevel();
                     Integer score = conf.getScore();
-                    log.info("[Recommendation] 策略置信度: strategyId={}, level={}, score={}, hitRate={}%, avgReturn={}%",
-                            strategyId, level,
+                    log.info("[Recommendation] 策略置信度: strategyId={}, mode={}, level={}, score={}, hitRate={}%, avgReturn={}%",
+                            strategyId, effectiveWeightMode, level,
                             score != null ? score : "N/A",
                             conf.getHitRateValue() != null ? conf.getHitRateValue().doubleValue() * 100 : 0,
                             conf.getAvgReturnValue() != null ? conf.getAvgReturnValue().doubleValue() : 0);
 
                     // 根据置信度调整 topN
-                    int adjustedTopN = strategyConfidenceService.getAdjustedTopN(topN, conf);
-                    if (adjustedTopN == 0) {
-                        log.warn("[Recommendation] 策略置信度过低(SUSPENDED), 跳过该策略: strategyId={}, score={}", strategyId, score);
-                        return List.of();
-                    } else if (adjustedTopN < topN) {
+                    int confidenceAdjustedTopN = strategyConfidenceService.getAdjustedTopN(topN, conf);
+
+                    // P2修复: 命中率调整和置信度调整取max（较温和的那个），而非叠加
+                    // 原来是先执行命中率调整(topN-5)，再在已缩减的topN上执行置信度调整(topN/3)，导致过度缩减
+                    int finalTopN = Math.max(hitRateAdjustedTopN, confidenceAdjustedTopN);
+
+                    if (finalTopN < topN) {
                         int originalTopN = topN;
-                        topN = adjustedTopN;
-                        log.info("[Recommendation] 置信度调整topN: {} -> {} (level={}, score={})", originalTopN, topN, level, score);
+                        topN = finalTopN;
+                        log.info("[Recommendation] topN调整: {} -> {} (命中率建议={}, 置信度建议={}, 取max; level={}, score={})",
+                                originalTopN, topN, hitRateAdjustedTopN, confidenceAdjustedTopN, level, score);
+                    }
+                } else {
+                    // 无置信度记录时，仅应用命中率调整
+                    if (hitRateAdjustedTopN < topN) {
+                        int originalTopN = topN;
+                        topN = hitRateAdjustedTopN;
+                        log.info("[Recommendation] topN调整(仅命中率): {} -> {}", originalTopN, topN);
                     }
                 }
             } catch (Exception e) {
-                log.warn("[Recommendation] 置信度查询异常，跳过调整: error={}", e.getMessage());
+                // P3修复: 异常时降级为保守topN而非放行全量推荐
+                log.error("[Recommendation] 置信度查询异常，降级为保守topN: error={}", e.getMessage());
+                topN = Math.max(5, topN / 2);
+                log.info("[Recommendation] 异常降级topN: {}", topN);
+            }
+        } else {
+            // 未启用置信度控制时，仅应用命中率调整
+            if (hitRateAdjustedTopN < topN) {
+                int originalTopN = topN;
+                topN = hitRateAdjustedTopN;
+                log.info("[Recommendation] topN调整(仅命中率, 置信度未启用): {} -> {}", originalTopN, topN);
             }
         }
 
@@ -837,15 +859,19 @@ public class RecommendationService {
         }
 
         // 追踪完成后，自动更新策略置信度（方案C）
-        Set<Long> strategyIds = recentCombos.stream()
-                .filter(c -> c.get("strategy_id") != null)
-                .map(c -> ((Number) c.get("strategy_id")).longValue())
-                .collect(java.util.stream.Collectors.toSet());
-        for (Long sid : strategyIds) {
+        // P1优化: 按 (strategyId, weightMode) 去重，分别计算每种模式的置信度
+        Set<String> seenStrategyModes = new HashSet<>();
+        for (Map<String, Object> combo : recentCombos) {
+            Object sidObj = combo.get("strategy_id");
+            if (sidObj == null) continue;
+            Long sid = ((Number) sidObj).longValue();
+            String mode = combo.get("weight_mode") != null ? combo.get("weight_mode").toString() : "ICW";
+            String key = sid + ":" + mode;
+            if (!seenStrategyModes.add(key)) continue; // 已处理过该策略+模式
             try {
-                strategyConfidenceService.calculateAndSave(sid);
+                strategyConfidenceService.calculateAndSave(sid, mode);
             } catch (Exception e) {
-                log.warn("[Recommendation] 置信度自动计算异常: strategyId={} error={}", sid, e.getMessage());
+                log.warn("[Recommendation] 置信度自动计算异常: strategyId={}, mode={} error={}", sid, mode, e.getMessage());
             }
         }
 
@@ -2698,7 +2724,9 @@ public class RecommendationService {
                 Object filterOp = cfg.get("filterOp");
                 if (filterOp != null) fw.setFilterOp(filterOp.toString());
                 Object filterValue = cfg.get("filterValue");
-                if (filterValue != null) fw.setFilterValue(((Number) filterValue).doubleValue());
+                if (filterValue instanceof Number) {
+                    fw.setFilterValue(((Number) filterValue).doubleValue());
+                }
                 result.add(fw);
             }
             log.info("[Recommendation] 从策略[{}]加载因子配置: {}个因子", strategy.getStrategyName(), result.size());

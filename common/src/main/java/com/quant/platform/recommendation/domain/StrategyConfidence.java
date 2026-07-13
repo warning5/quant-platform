@@ -24,6 +24,9 @@ public class StrategyConfidence {
     /** 策略ID */
     private Long strategyId;
 
+    /** 权重模式: ICW / STATIC（区分不同模式的置信度） */
+    private String weightMode;
+
     /**
      * 置信度等级: HIGH / NORMAL / LOW / SUSPENDED
      */

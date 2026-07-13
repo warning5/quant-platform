@@ -31,8 +31,8 @@ public class StrategyConfidenceService {
     private final StrategyConfidenceMapper strategyConfidenceMapper;
     private final RecommendationMapper recommendationMapper;
 
-    /** 计算用的回溯期数 */
-    private static final int LOOKBACK_PERIODS = 10;
+    /** 计算用的回溯期数（P3优化: 10→20，增加样本稳定性） */
+    private static final int LOOKBACK_PERIODS = 20;
 
     // ── 维度权重（满分100）──
     private static final int MAX_HIT_RATE_SCORE = 40;    // 命中率维度满分
@@ -43,10 +43,27 @@ public class StrategyConfidenceService {
     // ==================== 核心查询接口 ====================
 
     /**
-     * 获取某策略的最新置信度
+     * 获取某策略的最新置信度（不区分权重模式，向后兼容）
      */
     public Optional<StrategyConfidence> getLatestConfidence(Long strategyId) {
         if (strategyId == null) return Optional.empty();
+        return strategyConfidenceMapper.findLatestByStrategyId(strategyId);
+    }
+
+    /**
+     * 获取某策略指定权重模式的最新置信度（P1优化: 按模式区分）
+     * 如果指定模式没有记录，回退到不区分模式的查询
+     */
+    public Optional<StrategyConfidence> getLatestConfidence(Long strategyId, String weightMode) {
+        if (strategyId == null) return Optional.empty();
+        if (weightMode == null || weightMode.isBlank()) {
+            return getLatestConfidence(strategyId);
+        }
+        Optional<StrategyConfidence> modeSpecific = strategyConfidenceMapper.findLatestByStrategyIdAndMode(strategyId, weightMode);
+        if (modeSpecific.isPresent()) {
+            return modeSpecific;
+        }
+        // 回退: 该模式无置信度记录时，用通用的（向后兼容）
         return strategyConfidenceMapper.findLatestByStrategyId(strategyId);
     }
 
@@ -66,7 +83,7 @@ public class StrategyConfidenceService {
 
     /**
      * 根据置信度获取推荐的 topN 调整建议
-     * @return 调整后的 topN，如果置信度过低返回 -1 表示建议暂停
+     * @return 调整后的 topN
      */
     public int getAdjustedTopN(int originalTopN, StrategyConfidence confidence) {
         if (confidence == null || confidence.getScore() == null) {
@@ -80,7 +97,9 @@ public class StrategyConfidenceService {
             case "HIGH" -> originalTopN;           // 高置信度：正常推荐
             case "NORMAL" -> originalTopN;         // 中等：正常（前端显示提醒）
             case "LOW" -> Math.max(3, originalTopN / 3);  // 低：缩减至1/3
-            case "SUSPENDED" -> 0;                 // 暂停：不生成推荐
+            // P0修复: SUSPENDED 不再返回0（会导致死锁），改为保留最小探底topN
+            // 这样SUSPENDED策略仍能生成少量推荐来积累样本，表现好可自然恢复
+            case "SUSPENDED" -> Math.max(3, originalTopN / 5);  // 暂停：缩减至1/5，最低3
             default -> originalTopN;
         };
     }
@@ -97,7 +116,7 @@ public class StrategyConfidenceService {
     // ==================== 计算与更新 ====================
 
     /**
-     * 为指定策略重新计算并保存置信度
+     * 为指定策略重新计算并保存置信度（计算所有权重模式）
      * 通常在 trackRecommendationPerformance() 之后调用
      */
     @Transactional
@@ -107,41 +126,72 @@ public class StrategyConfidenceService {
             return null;
         }
 
-        log.info("[Confidence] 开始计算策略置信度: strategyId={}", strategyId);
+        // P1优化: 查找该策略的所有权重模式，分别计算
+        List<String> modes = recommendationMapper.findModesByStrategyId(strategyId);
+        if (modes.isEmpty()) {
+            log.info("[Confidence] strategyId={} 无权重模式数据，使用默认ICW", strategyId);
+            modes = List.of("ICW");
+        }
 
-        // 1. 收集近LOOKBACK_PERIODS期的追踪数据
-        List<StockRecommendation> trackedRecs = collectTrackedData(strategyId);
+        StrategyConfidence lastResult = null;
+        for (String mode : modes) {
+            try {
+                lastResult = calculateAndSave(strategyId, mode);
+            } catch (Exception e) {
+                log.warn("[Confidence] 计算策略置信度异常: strategyId={}, mode={}, error={}", strategyId, mode, e.getMessage());
+            }
+        }
+        return lastResult;
+    }
+
+    /**
+     * 为指定策略+权重模式重新计算并保存置信度（P1优化: 按模式区分）
+     */
+    @Transactional
+    public StrategyConfidence calculateAndSave(Long strategyId, String weightMode) {
+        if (strategyId == null) {
+            log.warn("[Confidence] strategyId为空，跳过计算");
+            return null;
+        }
+        if (weightMode == null || weightMode.isBlank()) {
+            weightMode = "ICW";
+        }
+
+        log.info("[Confidence] 开始计算策略置信度: strategyId={}, weightMode={}", strategyId, weightMode);
+
+        // 1. 收集近LOOKBACK_PERIODS期的追踪数据（按权重模式过滤）
+        List<StockRecommendation> trackedRecs = collectTrackedData(strategyId, weightMode);
         if (trackedRecs.isEmpty()) {
-            log.info("[Confidence] strategyId={} 暂无追踪数据，无法计算", strategyId);
-            return createUntrained(strategyId);
+            log.info("[Confidence] strategyId={}, mode={} 暂无追踪数据，无法计算", strategyId, weightMode);
+            return createUntrained(strategyId, weightMode);
         }
 
         // 2. 计算各维度得分
         ConfidenceCalculation calc = calculateDimensions(trackedRecs);
 
         // 3. 构建并保存结果
-        StrategyConfidence sc = buildAndSave(strategyId, calc, trackedRecs);
+        StrategyConfidence sc = buildAndSave(strategyId, weightMode, calc, trackedRecs);
 
-        log.info("[Confidence] 计算完成: strategyId={}, score={}, level={}, hitRate={:.1f}%, avgReturn={:.2f}%{}",
-                strategyId, sc.getScore(), sc.getLevel(),
+        log.info("[Confidence] 计算完成: strategyId={}, mode={}, score={}, level={}, sampleSize={}, hitRate={}%, avgReturn={}%",
+                strategyId, weightMode, sc.getScore(), sc.getLevel(), sc.getSampleSize(),
                 sc.getHitRateValue() != null ? sc.getHitRateValue().doubleValue() * 100 : 0,
-                sc.getAvgReturnValue() != null ? sc.getAvgReturnValue().doubleValue() : 0,
-                sc.getMaxDrawdownValue() != null ? ", p5DD=" + sc.getMaxDrawdownValue() + "%" : "");
+                sc.getAvgReturnValue() != null ? sc.getAvgReturnValue().doubleValue() : 0);
 
         return sc;
     }
 
     /**
-     * 收集近N期的追踪数据
+     * 收集近N期的追踪数据（P1优化: 按权重模式过滤）
      */
-    private List<StockRecommendation> collectTrackedData(Long strategyId) {
+    private List<StockRecommendation> collectTrackedData(Long strategyId, String weightMode) {
         // 找到该策略最近的推荐日期
         List<LocalDate> dates = recommendationMapper.findDatesByStrategyId(strategyId, LOOKBACK_PERIODS);
         if (dates.isEmpty()) return List.of();
 
         List<StockRecommendation> allRecs = new ArrayList<>();
         for (LocalDate date : dates) {
-            List<StockRecommendation> recs = recommendationMapper.findByStrategyAndDate(strategyId, date);
+            // P1修复: 使用 findByStrategyAndDateAndMode 按权重模式过滤
+            List<StockRecommendation> recs = recommendationMapper.findByStrategyAndDateAndMode(strategyId, date, weightMode);
             for (StockRecommendation rec : recs) {
                 // 只保留有次日追踪数据的
                 if (rec.getNextDayReturn() != null) {
@@ -159,14 +209,13 @@ public class StrategyConfidenceService {
         ConfidenceCalculation calc = new ConfidenceCalculation();
         int n = recs.size();
 
-        // ---- 维度1: 近10期命中率 (0~40分) ----
+        // ---- 维度1: 近N期命中率 (0~40分) ----
         long positiveCount = recs.stream()
                 .filter(r -> r.getNextDayReturn() != null && r.getNextDayReturn() > 0)
                 .count();
         double hitRate = (double) positiveCount / n;
         calc.hitRateValue = BigDecimal.valueOf(hitRate).setScale(4, RoundingMode.HALF_UP);
         // 非线性映射: 50%为随机基准，不超过10分
-        // hitRate < 35% → 0分(差于随机), 35-50% → 0-10分, 50-65% → 10-28分, 65%+ → 28-40分
         if (hitRate < 0.35) {
             calc.hitRateScore = 0;
         } else if (hitRate < 0.50) {
@@ -184,21 +233,16 @@ public class StrategyConfidenceService {
                 .mapToDouble(StockRecommendation::getNextDayReturn)
                 .average().orElse(0);
         calc.avgReturnValue = BigDecimal.valueOf(avgReturn).setScale(4, RoundingMode.HALF_UP);
-        // 正收益给高分，负收益递减
-        // avgReturn >= +2% → 25分, avgReturn <= -3% → 0分, 中间线性
         if (avgReturn >= 2.0) {
             calc.returnScore = MAX_RETURN_SCORE;
         } else if (avgReturn <= -3.0) {
             calc.returnScore = 0;
         } else {
-            // 映射 [-3%, +2%] → [0, 25]
             calc.returnScore = (int) Math.round((avgReturn + 3.0) / 5.0 * MAX_RETURN_SCORE);
             calc.returnScore = Math.max(0, Math.min(MAX_RETURN_SCORE, calc.returnScore));
         }
 
         // ---- 维度3: P5分位回撤 (0~20分) ----
-        // 用P5（第5百分位）替代max，避免单只股票极端值清零整策略得分
-        // 样本<20时回退到max（小样本分位数不可靠）
         double[] sortedReturns = recs.stream()
                 .filter(r -> r.getNextDayReturn() != null)
                 .mapToDouble(StockRecommendation::getNextDayReturn)
@@ -207,16 +251,12 @@ public class StrategyConfidenceService {
 
         double drawdownMetric;
         if (sortedReturns.length >= 20) {
-            // P5: 第5百分位（允许5%的极端值被忽略）
             int p5Index = (int) Math.floor(sortedReturns.length * 0.05);
             drawdownMetric = sortedReturns[p5Index];
         } else {
-            // 小样本回退到max
             drawdownMetric = sortedReturns.length > 0 ? sortedReturns[0] : 0;
         }
         calc.maxDrawdownValue = BigDecimal.valueOf(drawdownMetric).setScale(4, RoundingMode.HALF_UP);
-        // drawdownMetric >= 0% → 20分(无回撤), drawdownMetric <= -8% → 0分
-        // 阈值从-10%收紧到-8%（因P5已过滤极端值，阈值可以更严）
         if (drawdownMetric >= 0) {
             calc.drawdownScore = MAX_DRAWDOWN_SCORE;
         } else if (drawdownMetric <= -8) {
@@ -232,7 +272,6 @@ public class StrategyConfidenceService {
                 .toArray();
         double stdDev = calculateStdDev(returns);
         calc.volatilityValue = BigDecimal.valueOf(stdDev).setScale(4, RoundingMode.HALF_UP);
-        // stdDev <= 1.5% → 15分(稳定), stdDev >= 6% → 0分(高波动)
         if (stdDev <= 1.5) {
             calc.volatilityScore = MAX_VOLATILITY_SCORE;
         } else if (stdDev >= 6) {
@@ -247,8 +286,10 @@ public class StrategyConfidenceService {
 
     /**
      * 构建并持久化 StrategyConfidence 对象
+     * P1优化: 改为append模式（不再先删后插），保留历史趋势
      */
-    private StrategyConfidence buildAndSave(Long strategyId, ConfidenceCalculation calc,
+    private StrategyConfidence buildAndSave(Long strategyId, String weightMode,
+                                           ConfidenceCalculation calc,
                                            List<StockRecommendation> recs) {
         int totalScore = calc.hitRateScore + calc.returnScore + calc.drawdownScore + calc.volatilityScore;
         String level = StrategyConfidence.getLevelByScore(totalScore);
@@ -262,6 +303,7 @@ public class StrategyConfidenceService {
 
         StrategyConfidence sc = new StrategyConfidence();
         sc.setStrategyId(strategyId);
+        sc.setWeightMode(weightMode);
         sc.setLevel(level);
         sc.setScore(totalScore);
         sc.setHitRateScore(calc.hitRateScore);
@@ -277,8 +319,8 @@ public class StrategyConfidenceService {
         sc.setCreatedAt(LocalDateTime.now());
         sc.setUpdatedAt(LocalDateTime.now());
 
-        // 先删旧记录，再插入新记录（每个策略只保留一条最新记录）
-        strategyConfidenceMapper.deleteByStrategyId(strategyId);
+        // P1修复: 改为append模式，保留历史趋势（/history API 可返回多条记录）
+        // 不再 deleteByStrategyId，直接insert
         strategyConfidenceMapper.insert(sc);
 
         return sc;
@@ -287,9 +329,10 @@ public class StrategyConfidenceService {
     /**
      * 创建未训练状态（无足够数据）
      */
-    private StrategyConfidence createUntrained(Long strategyId) {
+    private StrategyConfidence createUntrained(Long strategyId, String weightMode) {
         StrategyConfidence sc = new StrategyConfidence();
         sc.setStrategyId(strategyId);
+        sc.setWeightMode(weightMode);
         sc.setLevel("UNTRAINED");
         sc.setScore(null);  // 无分数表示未训练
         sc.setDataAsOfDate(LocalDate.now());
@@ -298,9 +341,14 @@ public class StrategyConfidenceService {
         sc.setUpdatedAt(LocalDateTime.now());
 
         // 不覆盖已有的有效记录
-        Optional<StrategyConfidence> existing = strategyConfidenceMapper.findLatestByStrategyId(strategyId);
+        Optional<StrategyConfidence> existing = strategyConfidenceMapper.findLatestByStrategyIdAndMode(strategyId, weightMode);
         if (existing.isPresent()) {
             return existing.get(); // 返回旧值
+        }
+        // 回退到不区分模式的查询
+        Optional<StrategyConfidence> existingGeneric = strategyConfidenceMapper.findLatestByStrategyId(strategyId);
+        if (existingGeneric.isPresent()) {
+            return existingGeneric.get();
         }
 
         strategyConfidenceMapper.insert(sc);
@@ -309,9 +357,12 @@ public class StrategyConfidenceService {
 
     // ==================== 工具方法 ====================
 
-    /** 计算标准差 */
+    /**
+     * 计算标准差
+     * P2修复: 小样本(length<2)时返回5.0(中间值)而非0，避免波动率维度虚高满分
+     */
     private static double calculateStdDev(double[] values) {
-        if (values.length < 2) return 0;
+        if (values.length < 2) return 5.0; // 中间值，对应约8分而非满分15
         double mean = Arrays.stream(values).average().orElse(0);
         double sumSqDiff = Arrays.stream(values).map(v -> Math.pow(v - mean, 2)).sum();
         return Math.sqrt(sumSqDiff / (values.length - 1)); // 样本标准差
