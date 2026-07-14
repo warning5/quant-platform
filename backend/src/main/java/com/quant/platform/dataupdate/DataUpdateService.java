@@ -25,6 +25,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDate;
@@ -96,44 +97,120 @@ public class DataUpdateService {
     private int defaultStartDays;
 
     /** 脚本目录（绝对路径，启动时从相对路径解析） */
+    @Getter
     private String resolvedScriptDir;
 
+    // ─── 数据库凭据由 db_config.py 从 .env 文件读取，Java 不再传递 ───
+
     /**
-     * 初始化：将相对路径解析为绝对路径并验证
+     * 为 Python 子进程设置运行时环境变量（仅编码和后端选择，凭据由 .env 提供）。
+     */
+    void configurePythonEnv(ProcessBuilder pb) {
+        Map<String, String> env = pb.environment();
+        env.put("PYTHONIOENCODING", "utf-8");
+        env.putIfAbsent("DB_BACKEND", "clickhouse");
+    }
+
+    /**
+     * 初始化：解析脚本目录（优先外部路径，其次从 classpath 提取）
      */
     @PostConstruct
     public void init() {
+        // 1. 尝试外部脚本目录（application.yml 配置的 script-dir）
+        //    仅当目录存在且包含 db_config.py 时才使用，避免空目录命中
         File dir = new File(scriptDir);
         if (!dir.isAbsolute()) {
-            // 相对于项目根目录 (Claw/) 解析
             Path absolute = Paths.get(System.getProperty("user.dir"), scriptDir).toAbsolutePath().normalize();
             dir = absolute.toFile();
         }
-
-        if (dir.exists() && dir.isDirectory()) {
+        if (dir.exists() && dir.isDirectory() && new File(dir, "db_config.py").exists()) {
             resolvedScriptDir = dir.getAbsolutePath();
-            log.info("[DataUpdate] 脚本目录: {}", resolvedScriptDir);
-            // 检查关键脚本是否存在
-            String[] scripts = {"update_stock_data.py", "update_stock_daily_baostock.py",
-                    "update_bj_stock_daily_qq.py", "update_index_daily_baostock.py",
-                    "update_dividend_baostock.py", "update_research_report.py"};
-            for (String s : scripts) {
-                File f = new File(resolvedScriptDir, s);
-                log.info("[DataUpdate]   {} : {}", s, f.exists() ? "OK" : "MISSING");
-            }
-        } else {
-            // 尝试从 Claw 工作目录解析
-            Path fallback = Paths.get(System.getProperty("user.dir"), "..", "..", "update_data").toAbsolutePath().normalize();
-            if (fallback.toFile().exists()) {
-                resolvedScriptDir = fallback.toString();
-                log.warn("[DataUpdate] script-dir '{}' 解析失败，使用回退路径: {}", scriptDir, resolvedScriptDir);
-            } else {
-                log.error("[DataUpdate] 脚本目录不存在: {} (也尝试过 {})", dir.getAbsolutePath(), fallback);
-                log.error("[DataUpdate] 请在 application.yml 中设置 quant.data-update.script-dir 为绝对路径");
-            resolvedScriptDir = null;
+            log.info("[DataUpdate] 脚本目录(外部): {}", resolvedScriptDir);
+            verifyScripts();
+            cleanupStaleTasks();
+            return;
         }
 
-        // ★ 清理上次异常退出（重启/崩溃）遗留的 RUNNING 状态
+        // 2. 从 classpath 提取脚本（jar 部署模式）
+        try {
+            resolvedScriptDir = extractScriptsFromClasspath();
+            log.info("[DataUpdate] 脚本目录(classpath): {}", resolvedScriptDir);
+            verifyScripts();
+        } catch (Exception e) {
+            log.error("[DataUpdate] 无法加载脚本目录: {}", e.getMessage());
+            resolvedScriptDir = null;
+        }
+        cleanupStaleTasks();
+    }
+
+    /**
+     * 从 classpath:scripts/ 加载 Python 脚本。
+     * IDE 模式：classpath 指向 src/main/resources/scripts/，直接使用。
+     * Jar 模式：classpath 指向 jar 内部，提取到 ~/.quant-platform/scripts/。
+     */
+    private String extractScriptsFromClasspath() throws IOException {
+        var resolver = new org.springframework.core.io.support.PathMatchingResourcePatternResolver();
+        var resources = resolver.getResources("classpath:scripts/*");
+
+        // IDE 模式：resource.getFile() 可用，直接返回所在目录
+        if (resources.length > 0) {
+            try {
+                java.io.File file = resources[0].getFile();
+                if (file.isFile()) {
+                    String dir = file.getParent();
+                    log.info("[DataUpdate] classpath scripts 直接使用: {}", dir);
+                    return dir;
+                }
+            } catch (IOException ignored) {
+                // Jar 模式：getFile() 失败，走提取逻辑
+            }
+        }
+
+        // Jar 模式：提取到 ~/.quant-platform/scripts/
+        Path targetDir = Paths.get(System.getProperty("user.home"), ".quant-platform", "scripts");
+        Files.createDirectories(targetDir);
+
+        int count = 0;
+        for (var resource : resources) {
+            String filename = resource.getFilename();
+            if (filename == null || filename.isEmpty() || filename.endsWith("/")) continue;
+            Path target = targetDir.resolve(filename);
+            try (var is = resource.getInputStream()) {
+                Files.copy(is, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                count++;
+            }
+        }
+
+        // 同时提取 .env 到 ~/.quant-platform/.env（db_config.py 第二候选路径）
+        try {
+            var envResource = new org.springframework.core.io.support.PathMatchingResourcePatternResolver()
+                    .getResource("classpath:.env");
+            if (envResource.exists()) {
+                Path envTarget = Paths.get(System.getProperty("user.home"), ".quant-platform", ".env");
+                try (var is = envResource.getInputStream()) {
+                    Files.copy(is, envTarget, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                }
+                log.info("[DataUpdate] 从 classpath 提取 .env 到 {}", envTarget);
+            }
+        } catch (IOException e) {
+            log.warn("[DataUpdate] 提取 .env 失败（Python 将依赖环境变量或磁盘 .env）: {}", e.getMessage());
+        }
+
+        log.info("[DataUpdate] 从 classpath 提取了 {} 个脚本到 {}", count, targetDir);
+        return targetDir.toAbsolutePath().toString();
+    }
+
+    private void verifyScripts() {
+        String[] scripts = {"update_stock_data.py", "update_stock_daily_baostock.py",
+                "update_bj_stock_daily_qq.py", "update_index_daily_baostock.py",
+                "update_dividend_baostock.py", "update_research_report.py"};
+        for (String s : scripts) {
+            File f = new File(resolvedScriptDir, s);
+            log.info("[DataUpdate]   {} : {}", s, f.exists() ? "OK" : "MISSING");
+        }
+    }
+
+    private void cleanupStaleTasks() {
         try {
             int cleaned = jdbcTemplate.update(
                 "UPDATE data_schedule_config SET last_run_status = 'INTERRUPTED', updated_at = ? " +
@@ -146,7 +223,6 @@ public class DataUpdateService {
         } catch (Exception e) {
             log.warn("[DataUpdate] 清理残留 RUNNING 状态失败: {}", e.getMessage());
         }
-    }
     }
 
     /**
@@ -833,10 +909,9 @@ public class DataUpdateService {
             cmd.add("from field_completer import run_optimize_stock_daily; run_optimize_stock_daily()");
             
             ProcessBuilder pb = new ProcessBuilder(cmd);
-            pb.directory(new File(scriptDir));
+            pb.directory(new File(resolvedScriptDir));
             pb.redirectErrorStream(true);
-            pb.environment().put("PYTHONIOENCODING", "utf-8");
-            pb.environment().put("DB_BACKEND", "clickhouse");
+            configurePythonEnv(pb);
             Process proc = pb.start();
             
             try (BufferedReader reader = new BufferedReader(
@@ -881,8 +956,7 @@ public class DataUpdateService {
         }
         pb.directory(workDir);
         pb.redirectErrorStream(true);
-        pb.environment().put("PYTHONIOENCODING", "utf-8");
-        pb.environment().put("DB_BACKEND", "clickhouse");
+        configurePythonEnv(pb);
         Process process = pb.start();
         // 存储到任务对象自身（不再使用共享变量 currentProcess/currentProcessPid，
         // 避免多任务并发时互相覆盖）
@@ -945,7 +1019,7 @@ public class DataUpdateService {
             ProcessBuilder pb = new ProcessBuilder(cmd);
             pb.directory(new java.io.File(resolvedScriptDir));
             pb.redirectErrorStream(false);
-            pb.environment().put("PYTHONIOENCODING", "utf-8");
+            configurePythonEnv(pb);
             Process p = pb.start();
 
             StringBuilder stdout = new StringBuilder();

@@ -1,16 +1,16 @@
 package com.quant.platform.dataupdate;
 
+import com.quant.platform.calendar.service.TradeCalendarService;
 import com.quant.platform.config.ClickHouseConfig;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
+import java.sql.*;
+import java.time.LocalDate;
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * ClickHouse 情绪数据服务
@@ -23,6 +23,7 @@ public class ClickHouseSentimentService {
 
     private final ClickHouseConfig clickHouseConfig;
     private final SentimentService sentimentService;  // MySQL fallback
+    private final TradeCalendarService tradeCalendarService;
     private final JdbcTemplate jdbcTemplate;  // 用于查询MySQL-only的表（基金持仓/股东人数/新闻）
 
     // 情绪数据表列表（与 SentimentService 一致）
@@ -56,11 +57,17 @@ public class ClickHouseSentimentService {
         TABLE_NAMES.put("stock_sentiment_activity", "市场活跃度");
     }
 
-    // 各表的日期字段名（notice/survey 用 notice_date，其余用 trade_date）
+    // 各表的日期字段名（notice 用 notice_date，survey 用 meeting_date；MySQL-only 表补充，避免外部调用 getDateColumn 拿到错误的 trade_date）
     private static final Map<String, String> DATE_COLUMNS = new HashMap<>();
     static {
         DATE_COLUMNS.put("stock_sentiment_notice", "notice_date");
-        DATE_COLUMNS.put("stock_sentiment_survey", "notice_date");
+        DATE_COLUMNS.put("stock_sentiment_survey", "meeting_date");
+        DATE_COLUMNS.put("stock_fund_holder", "report_date");
+        DATE_COLUMNS.put("stock_shareholder", "report_date");
+        DATE_COLUMNS.put("stock_news", "publish_date");
+        DATE_COLUMNS.put("macro_bond_yield", "trade_date");
+        DATE_COLUMNS.put("stock_consensus_estimate", "update_time");
+        DATE_COLUMNS.put("stock_earnings_report", "report_date");
     }
 
     // 允许直接拼接到 SQL 中的表名白名单（sentiment 表 + coverage 中追加的 MySQL-only 表 + CH-only 表）
@@ -80,11 +87,38 @@ public class ClickHouseSentimentService {
 
     // 允许直接拼接到 SQL 中的日期列名白名单
     private static final Set<String> ALLOWED_DATE_COLUMNS = new HashSet<>(Arrays.asList(
-            "trade_date", "notice_date", "report_date", "publish_date", "update_time"
+            "trade_date", "notice_date", "meeting_date", "report_date", "publish_date", "update_time"
     ));
 
     private String getDateColumn(String table) {
         return DATE_COLUMNS.getOrDefault(table, "trade_date");
+    }
+
+    /**
+     * 校验日期字符串格式，仅允许 yyyy-MM-dd
+     */
+    private boolean isValidDateParam(String date) {
+        if (date == null || date.isEmpty()) {
+            return false;
+        }
+        return date.matches("\\d{4}-\\d{2}-\\d{2}");
+    }
+
+    /**
+     * 构建 ClickHouse 日期范围过滤条件（已校验格式，表名/列名调用前已白名单校验）
+     */
+    private String buildDateRangeCondition(String dateCol, String startDate, String endDate) {
+        StringBuilder sb = new StringBuilder();
+        if (isValidDateParam(startDate)) {
+            sb.append(dateCol).append(" >= '").append(startDate).append("'");
+        }
+        if (isValidDateParam(endDate)) {
+            if (sb.length() > 0) {
+                sb.append(" AND ");
+            }
+            sb.append(dateCol).append(" <= '").append(endDate).append("'");
+        }
+        return sb.length() > 0 ? " WHERE " + sb.toString() : "";
     }
 
     /**
@@ -339,7 +373,8 @@ public class ClickHouseSentimentService {
         // 先完成白名单校验，非法表名直接抛异常
         validateTableAndColumn(table, getDateColumn(table));
 
-        if (!clickHouseConfig.isEnabled()) {
+        // MySQL-only 表直接走 MySQL，避免 ClickHouse UNKNOWN_TABLE 警告
+        if (!clickHouseConfig.isEnabled() || !SENTIMENT_TABLES.contains(table)) {
             return sentimentService.getTableStats(table);
         }
 
@@ -414,28 +449,105 @@ public class ClickHouseSentimentService {
      * 数据校验（优先 ClickHouse）
      */
     public Map<String, Object> validate() {
+        return validate(null, null, Collections.emptyList());
+    }
+
+    public Map<String, Object> validate(String startDate, String endDate) {
+        return validate(startDate, endDate, Collections.emptyList());
+    }
+
+    public Map<String, Object> validate(String startDate, String endDate, List<String> tables) {
         if (!clickHouseConfig.isEnabled()) {
-            return sentimentService.validate();
+            return sentimentService.validate(startDate, endDate, tables);
         }
 
-        try {
-            return queryValidateFromClickHouse();
-        } catch (Exception e) {
-            log.warn("[ClickHouse] 数据校验失败，回退到 MySQL: {}", e.getMessage());
+        // 拆分为 ClickHouse 表与 MySQL-only 表，分别校验后合并
+        List<String> chTables;
+        List<String> mysqlOnlyTables;
+        if (tables == null || tables.isEmpty()) {
+            chTables = new ArrayList<>(SENTIMENT_TABLES);
+            mysqlOnlyTables = Collections.emptyList();
+        } else {
+            chTables = tables.stream()
+                    .filter(SENTIMENT_TABLES::contains)
+                    .distinct()
+                    .collect(Collectors.toList());
+            mysqlOnlyTables = tables.stream()
+                    .filter(t -> !SENTIMENT_TABLES.contains(t) && ALLOWED_TABLES.contains(t))
+                    .distinct()
+                    .collect(Collectors.toList());
         }
 
-        return sentimentService.validate();
+        Map<String, Object> chResult = Collections.emptyMap();
+        if (!chTables.isEmpty()) {
+            try {
+                chResult = queryValidateFromClickHouse(startDate, endDate, chTables);
+            } catch (Exception e) {
+                log.warn("[ClickHouse] 数据校验失败，回退到 MySQL: {}", e.getMessage());
+                return sentimentService.validate(startDate, endDate, tables);
+            }
+        }
+
+        Map<String, Object> mysqlResult = Collections.emptyMap();
+        if (!mysqlOnlyTables.isEmpty()) {
+            mysqlResult = sentimentService.validate(startDate, endDate, mysqlOnlyTables);
+        }
+
+        return mergeValidateResults(chResult, mysqlResult);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> mergeValidateResults(Map<String, Object> chResult, Map<String, Object> mysqlResult) {
+        List<Map<String, Object>> chTables = getListMap(chResult, "tables");
+        List<Map<String, Object>> mysqlTables = getListMap(mysqlResult, "tables");
+
+        List<Map<String, Object>> mergedTables = new ArrayList<>(chTables.size() + mysqlTables.size());
+        mergedTables.addAll(chTables);
+        mergedTables.addAll(mysqlTables);
+
+        int chWarnings = 0;
+        Object chWarnObj = chResult != null ? chResult.get("totalWarnings") : null;
+        if (chWarnObj instanceof Number) chWarnings = ((Number) chWarnObj).intValue();
+        int myWarnings = 0;
+        Object myWarnObj = mysqlResult != null ? mysqlResult.get("totalWarnings") : null;
+        if (myWarnObj instanceof Number) myWarnings = ((Number) myWarnObj).intValue();
+        int totalWarnings = chWarnings + myWarnings;
+
+        long chRecords = 0L;
+        Object chRecObj = chResult != null ? chResult.get("totalRecords") : null;
+        if (chRecObj instanceof Number) chRecords = ((Number) chRecObj).longValue();
+        long myRecords = 0L;
+        Object myRecObj = mysqlResult != null ? mysqlResult.get("totalRecords") : null;
+        if (myRecObj instanceof Number) myRecords = ((Number) myRecObj).longValue();
+        long totalRecords = chRecords + myRecords;
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("tables", mergedTables);
+        result.put("tableCount", mergedTables.size());
+        result.put("totalWarnings", totalWarnings);
+        result.put("status", totalWarnings == 0 ? "OK" : "WARNING");
+        result.put("dateRangeStart", chResult.getOrDefault("dateRangeStart", mysqlResult.get("dateRangeStart")));
+        result.put("dateRangeEnd", chResult.getOrDefault("dateRangeEnd", mysqlResult.get("dateRangeEnd")));
+        result.put("totalRecords", totalRecords);
+        return result;
     }
 
     /**
      * 从 ClickHouse 查询校验结果
      */
-    private Map<String, Object> queryValidateFromClickHouse() throws Exception {
+    private Map<String, Object> queryValidateFromClickHouse(String startDate, String endDate, List<String> tables) throws Exception {
         Map<String, Object> result = new LinkedHashMap<>();
         List<Map<String, Object>> tableValidations = new ArrayList<>();
         int totalWarnings = 0;
 
-        for (String table : SENTIMENT_TABLES) {
+        List<String> tablesToValidate = (tables == null || tables.isEmpty())
+                ? SENTIMENT_TABLES
+                : tables.stream()
+                        .filter(SENTIMENT_TABLES::contains) // 安全：只处理 ClickHouse 中存在的情绪表
+                        .distinct()
+                        .collect(Collectors.toList());
+
+        for (String table : tablesToValidate) {
             // 白名单校验
             validateTableAndColumn(table, getDateColumn(table));
 
@@ -443,19 +555,23 @@ public class ClickHouseSentimentService {
             validation.put("table", table);
             validation.put("name", TABLE_NAMES.getOrDefault(table, table));
 
-            // 记录数
-            String countSql = "SELECT COUNT(*) as cnt FROM " + table;
+            String dateCol = getDateColumn(table);
+            String dateRangeCondition = buildDateRangeCondition(dateCol, startDate, endDate);
+
+            // 记录数（按日期范围）
+            String countSql = "SELECT COUNT(*) as cnt FROM " + table + dateRangeCondition;
+            Long count = 0L;
             try (Connection conn = getConnection();
                  PreparedStatement stmt = conn.prepareStatement(countSql);
                  ResultSet rs = stmt.executeQuery()) {
-                Long count = rs.next() ? rs.getLong("cnt") : 0L;
+                count = rs.next() ? rs.getLong("cnt") : 0L;
                 validation.put("recordCount", count);
             }
 
-            // 空值检查
+            // 空值检查（按日期范围）
             List<Map<String, Object>> nullChecks = new ArrayList<>();
             try {
-                String nullCheckSql = "SELECT SUM(CASE WHEN code IS NULL OR code = '' THEN 1 ELSE 0 END) as null_count FROM " + table;
+                String nullCheckSql = "SELECT SUM(CASE WHEN code IS NULL OR code = '' THEN 1 ELSE 0 END) as null_count FROM " + table + dateRangeCondition;
                 try (Connection conn = getConnection();
                      PreparedStatement stmt = conn.prepareStatement(nullCheckSql);
                      ResultSet rs = stmt.executeQuery()) {
@@ -477,32 +593,21 @@ public class ClickHouseSentimentService {
             validation.put("warningCount", nullChecks.size());
             totalWarnings += nullChecks.size();
 
-            // 最近7天是否有数据
-            String dateCol = getDateColumn(table);
-            String recentSql = "SELECT COUNT(*) as cnt FROM " + table +
-                    " WHERE " + dateCol + " >= today() - 7";
-            try (Connection conn = getConnection();
-                 PreparedStatement stmt = conn.prepareStatement(recentSql);
-                 ResultSet rs = stmt.executeQuery()) {
-                if (rs.next()) {
-                    Long recentCount = rs.getLong("cnt");
-                    validation.put("hasRecentData", recentCount > 0);
-                    validation.put("recentRecordCount", recentCount);
-                }
-            } catch (Exception e) {
-                validation.put("hasRecentData", null);
-                validation.put("recentRecordCount", 0);
-            }
+            // 日期范围内是否有数据
+            validation.put("hasRecentData", count > 0);
+            validation.put("recentRecordCount", count);
 
-            // 资金流向专属深度校验
+            // 资金流向专属深度校验（按日期范围）
             if ("stock_sentiment_moneyflow".equals(table)) {
                 List<Map<String, Object>> extraChecks = new ArrayList<>();
+                String mfDateRangeCondition = buildDateRangeCondition("trade_date", startDate, endDate);
 
                 // 校验1: CH vs MySQL 两端记录数对比
                 try {
-                    Long chCount = (Long) validation.get("recordCount");
-                    Long myCount = jdbcTemplate.queryForObject(
-                            "SELECT COUNT(*) FROM stock_sentiment_moneyflow", Long.class);
+                    Long chCount = count;
+                    String myCountSql = "SELECT COUNT(*) FROM stock_sentiment_moneyflow" +
+                            (mfDateRangeCondition.isEmpty() ? "" : " WHERE " + mfDateRangeCondition.substring(7));
+                    Long myCount = jdbcTemplate.queryForObject(myCountSql, Long.class);
                     if (myCount == null) myCount = 0L;
                     long diff = Math.abs(chCount - myCount);
                     Map<String, Object> check = new LinkedHashMap<>();
@@ -531,8 +636,9 @@ public class ClickHouseSentimentService {
                 // 校验2: all_zero — 5个资金流向字段全为0
                 try (Connection conn = getConnection();
                      PreparedStatement stmt = conn.prepareStatement(
-                             "SELECT COUNT(*) FROM stock_sentiment_moneyflow FINAL " +
-                             "WHERE net_main=0 AND net_huge=0 AND net_big=0 AND net_medium=0 AND net_small=0");
+                             "SELECT COUNT(*) FROM stock_sentiment_moneyflow FINAL " + mfDateRangeCondition +
+                             (mfDateRangeCondition.isEmpty() ? "WHERE " : " AND ") +
+                             "net_main=0 AND net_huge=0 AND net_big=0 AND net_medium=0 AND net_small=0");
                      ResultSet rs = stmt.executeQuery()) {
                     if (rs.next()) {
                         Long allZeroCount = rs.getLong(1);
@@ -558,7 +664,8 @@ public class ClickHouseSentimentService {
                 // 校验3: close=0 — 收盘价为0（停牌股）
                 try (Connection conn = getConnection();
                      PreparedStatement stmt = conn.prepareStatement(
-                             "SELECT COUNT(*) FROM stock_sentiment_moneyflow FINAL WHERE close=0");
+                             "SELECT COUNT(*) FROM stock_sentiment_moneyflow FINAL" + mfDateRangeCondition +
+                             (mfDateRangeCondition.isEmpty() ? " WHERE close=0" : " AND close=0"));
                      ResultSet rs = stmt.executeQuery()) {
                     if (rs.next()) {
                         Long closeZeroCount = rs.getLong(1);
@@ -591,7 +698,238 @@ public class ClickHouseSentimentService {
         result.put("tableCount", tableValidations.size());
         result.put("totalWarnings", totalWarnings);
         result.put("status", totalWarnings == 0 ? "OK" : "WARNING");
+        result.put("dateRangeStart", isValidDateParam(startDate) ? startDate : null);
+        result.put("dateRangeEnd", isValidDateParam(endDate) ? endDate : null);
+        result.put("totalRecords", tableValidations.stream()
+                .mapToLong(t -> ((Number) t.get("recordCount")).longValue())
+                .sum());
 
         return result;
+    }
+
+    public Map<String, Object> validateDaily(String startDate, String endDate, List<String> tables) {
+        if (!clickHouseConfig.isEnabled()) {
+            return sentimentService.validateDaily(startDate, endDate, tables);
+        }
+
+        // 拆分为 ClickHouse 表与 MySQL-only 表，分别查询后合并
+        List<String> chTables;
+        List<String> mysqlOnlyTables;
+        if (tables == null || tables.isEmpty()) {
+            chTables = new ArrayList<>(SENTIMENT_TABLES);
+            mysqlOnlyTables = Collections.emptyList();
+        } else {
+            chTables = tables.stream()
+                    .filter(SENTIMENT_TABLES::contains)
+                    .distinct()
+                    .collect(Collectors.toList());
+            mysqlOnlyTables = tables.stream()
+                    .filter(t -> !SENTIMENT_TABLES.contains(t) && ALLOWED_TABLES.contains(t))
+                    .distinct()
+                    .collect(Collectors.toList());
+        }
+
+        Map<String, Object> chResult = Collections.emptyMap();
+        if (!chTables.isEmpty()) {
+            try {
+                chResult = queryValidateDailyFromClickHouse(startDate, endDate, chTables);
+            } catch (Exception e) {
+                log.warn("[ClickHouse] 按日数据校验失败，回退到 MySQL: {}", e.getMessage());
+                // 混合模式下也整体回退到 MySQL，保证结果一致
+                return sentimentService.validateDaily(startDate, endDate, tables);
+            }
+        }
+
+        Map<String, Object> mysqlResult = Collections.emptyMap();
+        if (!mysqlOnlyTables.isEmpty()) {
+            mysqlResult = sentimentService.validateDaily(startDate, endDate, mysqlOnlyTables);
+        }
+
+        return mergeValidateDailyResults(chResult, mysqlResult, chTables, mysqlOnlyTables);
+    }
+
+    private Map<String, Object> mergeValidateDailyResults(Map<String, Object> chResult, Map<String, Object> mysqlResult,
+                                                         List<String> chTables, List<String> mysqlOnlyTables) {
+        // 合并表名
+        Map<String, String> mergedTableNames = new LinkedHashMap<>();
+        mergedTableNames.putAll(getMapString(chResult, "tableNames"));
+        mergedTableNames.putAll(getMapString(mysqlResult, "tableNames"));
+
+        // 按日期合并 dailyStats：每行都包含所有表列，缺省为 0/null
+        List<Map<String, Object>> chDaily = getListMap(chResult, "dailyStats");
+        List<Map<String, Object>> mysqlDaily = getListMap(mysqlResult, "dailyStats");
+        Set<String> allDates = new TreeSet<>(Collections.reverseOrder());
+        for (Map<String, Object> row : chDaily) allDates.add(String.valueOf(row.get("date")));
+        for (Map<String, Object> row : mysqlDaily) allDates.add(String.valueOf(row.get("date")));
+
+        List<Map<String, Object>> mergedDailyStats = new ArrayList<>();
+        for (String date : allDates) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("date", date);
+            long totalCount = 0L;
+            long totalNullCount = 0L;
+
+            for (String t : chTables) {
+                Object v = findValue(chDaily, date, t, 0L);
+                Object nv = findValue(chDaily, date, t + "_null", 0L);
+                row.put(t, v);
+                row.put(t + "_null", nv);
+                if (v instanceof Number) totalCount += ((Number) v).longValue();
+                if (nv instanceof Number) totalNullCount += ((Number) nv).longValue();
+            }
+            for (String t : mysqlOnlyTables) {
+                Object v = findValue(mysqlDaily, date, t, 0L);
+                Object nv = findValue(mysqlDaily, date, t + "_null", 0L);
+                row.put(t, v);
+                row.put(t + "_null", nv);
+                if (v instanceof Number) totalCount += ((Number) v).longValue();
+                if (nv instanceof Number) totalNullCount += ((Number) nv).longValue();
+            }
+            row.put("totalCount", totalCount);
+            row.put("totalNullCount", totalNullCount);
+            mergedDailyStats.add(row);
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("dailyStats", mergedDailyStats);
+        result.put("tableNames", mergedTableNames);
+        result.put("dateRangeStart", chResult.getOrDefault("dateRangeStart", mysqlResult.get("dateRangeStart")));
+        result.put("dateRangeEnd", chResult.getOrDefault("dateRangeEnd", mysqlResult.get("dateRangeEnd")));
+        return result;
+    }
+
+    private Object findValue(List<Map<String, Object>> rows, String date, String key, Object defaultValue) {
+        for (Map<String, Object> row : rows) {
+            if (date.equals(String.valueOf(row.get("date")))) {
+                return row.containsKey(key) ? row.get(key) : defaultValue;
+            }
+        }
+        return defaultValue;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, String> getMapString(Map<String, Object> source, String key) {
+        if (source == null || !source.containsKey(key)) return Collections.emptyMap();
+        Object v = source.get(key);
+        return (v instanceof Map) ? (Map<String, String>) v : Collections.emptyMap();
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> getListMap(Map<String, Object> source, String key) {
+        if (source == null || !source.containsKey(key)) return Collections.emptyList();
+        Object v = source.get(key);
+        return (v instanceof List) ? (List<Map<String, Object>>) v : Collections.emptyList();
+    }
+
+    private int getInt(Map<String, Object> source, String key) {
+        if (source == null || !source.containsKey(key)) return 0;
+        Object v = source.get(key);
+        return (v instanceof Number) ? ((Number) v).intValue() : 0;
+    }
+
+    private long getLong(Map<String, Object> source, String key) {
+        if (source == null || !source.containsKey(key)) return 0L;
+        Object v = source.get(key);
+        return (v instanceof Number) ? ((Number) v).longValue() : 0L;
+    }
+
+    private Map<String, Object> queryValidateDailyFromClickHouse(String startDate, String endDate, List<String> tables) throws Exception {
+        List<String> tablesToValidate = (tables == null || tables.isEmpty())
+                ? SENTIMENT_TABLES
+                : tables.stream()
+                        .filter(SENTIMENT_TABLES::contains) // 安全：只处理 ClickHouse 中存在的情绪表
+                        .distinct()
+                        .collect(Collectors.toList());
+
+        Map<String, String> tableNames = new LinkedHashMap<>();
+        Map<String, Map<String, DailyRow>> tableDateMap = new LinkedHashMap<>();
+        Set<String> allDates = new TreeSet<>(Collections.reverseOrder());
+
+        for (String table : tablesToValidate) {
+            String dateCol = getDateColumn(table);
+            validateTableAndColumn(table, dateCol);
+            String dateRangeCondition = buildDateRangeCondition(dateCol, startDate, endDate);
+
+            Map<String, DailyRow> rows = new LinkedHashMap<>();
+            String countSql = "SELECT toString(toDate(" + dateCol + ")) as d, COUNT(*) as cnt FROM " + table +
+                    dateRangeCondition + " GROUP BY toDate(" + dateCol + ") ORDER BY d";
+            try (Connection conn = getConnection();
+                 PreparedStatement stmt = conn.prepareStatement(countSql);
+                 ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    String d = rs.getString("d");
+                    long cnt = rs.getLong("cnt");
+                    rows.put(d, new DailyRow(cnt, 0L));
+                    allDates.add(d);
+                }
+            }
+
+            try {
+                String nullSql = "SELECT toString(toDate(" + dateCol + ")) as d, " +
+                        "SUM(CASE WHEN code IS NULL OR code = '' THEN 1 ELSE 0 END) as null_count FROM " + table +
+                        dateRangeCondition + " GROUP BY toDate(" + dateCol + ") ORDER BY d";
+                try (Connection conn = getConnection();
+                     PreparedStatement stmt = conn.prepareStatement(nullSql);
+                     ResultSet rs = stmt.executeQuery()) {
+                    while (rs.next()) {
+                        String d = rs.getString("d");
+                        DailyRow row = rows.get(d);
+                        if (row != null) {
+                            row.nullCount = rs.getLong("null_count");
+                        } else {
+                            rows.put(d, new DailyRow(0L, rs.getLong("null_count")));
+                            allDates.add(d);
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                log.debug("表 {} 无 code 空值统计: {}", table, e.getMessage());
+            }
+
+            tableDateMap.put(table, rows);
+            tableNames.put(table, TABLE_NAMES.getOrDefault(table, table));
+        }
+
+        List<Map<String, Object>> dailyStats = new ArrayList<>();
+        Set<String> tradingDates = isValidDateParam(startDate) && isValidDateParam(endDate)
+                ? tradeCalendarService.getTradingDaysBetween(LocalDate.parse(startDate), LocalDate.parse(endDate))
+                        .stream().map(LocalDate::toString).collect(Collectors.toSet())
+                : null;
+        for (String date : allDates) {
+            if (tradingDates != null && !tradingDates.contains(date)) {
+                continue;
+            }
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("date", date);
+            long totalCount = 0L;
+            long totalNullCount = 0L;
+            for (String table : tablesToValidate) {
+                DailyRow dr = tableDateMap.getOrDefault(table, Collections.emptyMap()).getOrDefault(date, DailyRow.ZERO);
+                row.put(table, dr.count);
+                row.put(table + "_null", dr.nullCount);
+                totalCount += dr.count;
+                totalNullCount += dr.nullCount;
+            }
+            row.put("totalCount", totalCount);
+            row.put("totalNullCount", totalNullCount);
+            dailyStats.add(row);
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("dailyStats", dailyStats);
+        result.put("tableNames", tableNames);
+        result.put("dateRangeStart", isValidDateParam(startDate) ? startDate : null);
+        result.put("dateRangeEnd", isValidDateParam(endDate) ? endDate : null);
+        return result;
+    }
+
+    private static class DailyRow {
+        static final DailyRow ZERO = new DailyRow(0L, 0L);
+        long count;
+        long nullCount;
+        DailyRow(long count, long nullCount) {
+            this.count = count;
+            this.nullCount = nullCount;
+        }
     }
 }

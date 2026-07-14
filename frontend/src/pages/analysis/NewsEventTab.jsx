@@ -395,7 +395,6 @@ export function NewsEventTab({ data, code, catalysts }) {
       {/* 数据说明 */}
       <div style={{ fontSize: 11, color: '#999', marginTop: 12, paddingLeft: 4 }}>
         数据来源：东方财富个股新闻（akshare）；情感评分基于关键词匹配；事件标签包括：业绩/扩产/政策/原材料/并购/解禁等10类。
-        如需补充其他新闻源，请运行：python update_news_data.py --batch --days 90
       </div>
     </div>
   );

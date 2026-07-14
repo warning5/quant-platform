@@ -1,4 +1,4 @@
-package com.quant.platform.common.config;
+package com.quant.platform.mp.config;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,11 +22,10 @@ import java.util.Map;
 
 /**
  * Spring Boot EnvironmentPostProcessor：在属性占位符解析前加载 .env 文件。
- * 解析 key=value 并注入到 Environment，无需任何外部依赖。
  *
  * 查找顺序：
- * 1. classpath:.env（jar 内置，打包时从 src/main/resources/.env 加载）
- * 2. 当前目录 .env → ../.env → ../../.env（外部覆盖，如部署时放在 jar 同级目录）
+ * 1. classpath:.env（jar 内置）
+ * 2. 当前目录 .env → ../.env → ../../.env（外部覆盖）
  */
 public class DotenvLoader implements EnvironmentPostProcessor {
 
@@ -36,46 +35,36 @@ public class DotenvLoader implements EnvironmentPostProcessor {
     public void postProcessEnvironment(ConfigurableEnvironment environment, SpringApplication application) {
         Map<String, Object> envVars = new LinkedHashMap<>();
 
-        // 1. 从 classpath 加载（jar 内置 .env）
+        // 1. classpath .env
         try {
             ClassPathResource cpr = new ClassPathResource(".env");
             if (cpr.exists()) {
-                Map<String, Object> classpathVars = parseEnvStream(cpr.getInputStream());
-                envVars.putAll(classpathVars);
-                log.debug("Found .env on classpath with {} entries", classpathVars.size());
+                envVars.putAll(parseEnvStream(cpr.getInputStream()));
             }
         } catch (IOException e) {
-            log.debug("No .env on classpath: {}", e.getMessage());
+            log.debug("No .env on classpath");
         }
 
-        // 2. 从文件系统加载（外部 .env，优先级高于 classpath）
+        // 2. 文件系统 .env（覆盖 classpath）
         Path fsFile = findEnvFileOnDisk();
         if (fsFile != null) {
             try {
-                Map<String, Object> fsVars = parseEnvStream(Files.newInputStream(fsFile));
-                envVars.putAll(fsVars); // 覆盖 classpath 的同名 key
-                log.debug("Found external .env at {} with {} entries", fsFile, fsVars.size());
+                envVars.putAll(parseEnvStream(Files.newInputStream(fsFile)));
             } catch (IOException e) {
-                log.warn("Failed to read .env file: {}", fsFile, e);
+                log.warn("Failed to read .env: {}", fsFile, e);
             }
         }
 
-        if (envVars.isEmpty()) {
-            log.debug(".env not found (classpath or filesystem), skipping dotenv loading");
-            return;
-        }
+        if (envVars.isEmpty()) return;
 
-        // 只设置 Spring Environment 中不存在的 key（避免覆盖已有环境变量/命令行参数）
         Map<String, Object> filtered = new LinkedHashMap<>();
         for (Map.Entry<String, Object> entry : envVars.entrySet()) {
             if (!environment.containsProperty(entry.getKey())) {
                 filtered.put(entry.getKey(), entry.getValue());
             }
         }
-
         if (!filtered.isEmpty()) {
-            environment.getPropertySources()
-                    .addFirst(new MapPropertySource("dotenv", filtered));
+            environment.getPropertySources().addFirst(new MapPropertySource("dotenv", filtered));
             log.info("Loaded {} variables from .env", filtered.size());
         }
     }
@@ -84,9 +73,7 @@ public class DotenvLoader implements EnvironmentPostProcessor {
         Path workDir = Paths.get("").toAbsolutePath();
         for (String candidate : List.of(".env", "../.env", "../../.env")) {
             Path resolved = workDir.resolve(candidate).normalize();
-            if (Files.isRegularFile(resolved)) {
-                return resolved;
-            }
+            if (Files.isRegularFile(resolved)) return resolved;
         }
         return null;
     }
@@ -102,15 +89,12 @@ public class DotenvLoader implements EnvironmentPostProcessor {
                 if (eqIdx < 0) continue;
                 String key = line.substring(0, eqIdx).strip();
                 String value = line.substring(eqIdx + 1).strip();
-                if (value.startsWith("\"") && value.endsWith("\"") && value.length() >= 2) {
+                if (value.startsWith("\"") && value.endsWith("\"") && value.length() >= 2)
                     value = value.substring(1, value.length() - 1);
-                } else if (value.startsWith("'") && value.endsWith("'") && value.length() >= 2) {
+                else if (value.startsWith("'") && value.endsWith("'") && value.length() >= 2)
                     value = value.substring(1, value.length() - 1);
-                }
                 int commentIdx = value.indexOf(" #");
-                if (commentIdx > 0) {
-                    value = value.substring(0, commentIdx);
-                }
+                if (commentIdx > 0) value = value.substring(0, commentIdx);
                 result.put(key, value);
             }
         }

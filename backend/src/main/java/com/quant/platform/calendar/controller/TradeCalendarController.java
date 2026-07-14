@@ -22,6 +22,32 @@ public class TradeCalendarController {
     private TradeCalendarService tradeCalendarService;
     
     /**
+     * 获取指定日期范围内的所有交易日
+     * GET /api/calendar/trading-dates?startDate=2026-07-01&endDate=2026-07-14
+     */
+    @GetMapping("/trading-dates")
+    public ApiResponse<Map<String, Object>> getTradingDatesBetween(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+        Map<String, Object> result = Map.of(
+            "dates", tradeCalendarService.getTradingDaysBetween(startDate, endDate)
+        );
+        return ApiResponse.success(result);
+    }
+
+    /**
+     * 获取最近 N 个交易日
+     * GET /api/calendar/last-trading-dates?count=7
+     */
+    @GetMapping("/last-trading-dates")
+    public ApiResponse<Map<String, Object>> getLastTradingDates(@RequestParam(defaultValue = "7") int count) {
+        Map<String, Object> result = Map.of(
+            "dates", tradeCalendarService.getLastTradingDays(count)
+        );
+        return ApiResponse.success(result);
+    }
+
+    /**
      * 判断某天是否为交易日
      * GET /api/calendar/is-trading?date=2026-06-19
      */

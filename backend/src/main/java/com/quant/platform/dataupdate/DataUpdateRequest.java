@@ -172,7 +172,7 @@ public class DataUpdateRequest {
 
     /**
      * 情绪数据：采集 QVIX 中国恐慌指数（默认 true）
-     * 数据来源: scripts/collect_qvix.py → ClickHouse market_sentiment
+     * 数据来源: backend/scripts/collect_qvix.py → ClickHouse market_sentiment
      */
     private boolean fetchQvix = true;
 

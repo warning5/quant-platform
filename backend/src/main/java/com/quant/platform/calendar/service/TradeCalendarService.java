@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.DayOfWeek;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -76,6 +77,39 @@ public class TradeCalendarService {
         return tradeCalendarMapper.selectByYear(year);
     }
 
+    /**
+     * 获取指定日期范围内（含起止）的所有交易日
+     */
+    public List<LocalDate> getTradingDaysBetween(LocalDate startDate, LocalDate endDate) {
+        if (startDate == null || endDate == null || startDate.isAfter(endDate)) {
+            return List.of();
+        }
+        List<LocalDate> result = new ArrayList<>();
+        LocalDate d = startDate;
+        while (!d.isAfter(endDate)) {
+            if (isTradingDay(d)) {
+                result.add(d);
+            }
+            d = d.plusDays(1);
+        }
+        return result;
+    }
+
+    /**
+     * 获取最近 N 个交易日（含今天，若今天是交易日）
+     */
+    public List<LocalDate> getLastTradingDays(int count) {
+        if (count <= 0) return List.of();
+        List<LocalDate> result = new ArrayList<>();
+        LocalDate d = LocalDate.now();
+        while (result.size() < count && d.isAfter(LocalDate.now().minusYears(1))) {
+            if (isTradingDay(d)) {
+                result.add(0, d); // 保持升序
+            }
+            d = d.minusDays(1);
+        }
+        return result;
+    }
     /**
      * 计算两个日期之间（不含起始日，含结束日）的交易日个数
      * 例如：from=周五, to=周一 → 周末2天非交易，周一1天交易 → 返回1

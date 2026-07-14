@@ -2,7 +2,6 @@
  * BidAskPanel.jsx - 内外盘比分析面板
  *
  * 数据来源: /api/analysis/bid-ask
- * 采集脚本: update_bid_ask.py (akshare.stock_bid_ask_em)
  *
  * 解读:
  *   外盘(红): 以卖出价成交 = 主动买盘 → 推动上涨
@@ -48,7 +47,7 @@ export function BidAskPanel({ data }) {
     return (
       <Card size="small" title="内外盘比分析">
         <div style={{ color: '#999', textAlign: 'center', padding: 20 }}>
-          暂无数据（请先运行 update_bid_ask.py 采集）
+          暂无数据
         </div>
       </Card>
     );
@@ -77,7 +76,7 @@ export function BidAskPanel({ data }) {
       title={
         <span>
           内外盘比分析
-          <Tooltip title="外盘=主动买盘（以卖出价成交），内盘=主动卖盘（以买入价成交）。外盘/内盘>1表明买方主导，防庄家对倒造假。数据由 update_bid_ask.py 每日收盘后采集。">
+          <Tooltip title="外盘=主动买盘（以卖出价成交），内盘=主动卖盘（以买入价成交）。外盘/内盘>1表明买方主导，防庄家对倒造假。">
             <QuestionCircleOutlined style={{ marginLeft: 6, color: '#999' }} />
           </Tooltip>
         </span>

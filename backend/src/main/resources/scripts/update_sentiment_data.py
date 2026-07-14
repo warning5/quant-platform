@@ -8,8 +8,8 @@ update_sentiment_data.py v4
   ClickHouse 表（同名 MySQL 表同步）:
     1. stock_sentiment_lhb          龙虎榜详情
     2. stock_sentiment_lhb_inst     龙虎榜机构统计
-    3. stock_sentiment_margin       融资融券汇总（沪市）
-    4. stock_sentiment_margin_detail 融资融券个股（沪市）
+    3. stock_sentiment_margin       融资融券汇总（沪深合并）
+    4. stock_sentiment_margin_detail 融资融券个股（沪深合并）
     5. stock_sentiment_survey      机构调研
     6. stock_sentiment_block_trade 大宗交易
     7. stock_sentiment_activity    市场活跃度
@@ -231,7 +231,18 @@ def _mysql_batch_upsert(table: str, rows: list, column_names: list,
         cur = conn.cursor()
         placeholders = ", ".join(["%s"] * len(column_names))
         sql = f"REPLACE INTO {table} ({', '.join(column_names)}) VALUES ({placeholders})"
-        cur.executemany(sql, rows)
+        # 将 numpy 类型转为 Python 原生类型，避免 pymysql executemany 内部 AttributeError
+        import numpy as np
+        clean_rows = []
+        for row in rows:
+            clean = []
+            for v in row:
+                if isinstance(v, np.generic):
+                    clean.append(v.item())
+                else:
+                    clean.append(v)
+            clean_rows.append(clean)
+        cur.executemany(sql, clean_rows)
         conn.commit()
         affected = cur.rowcount
         cur.close()
@@ -372,33 +383,58 @@ def fetch_lhb_inst(start_date: str, end_date: str) -> list:
 # ║            融券余量金额/融券卖出量/融资融券余额
 # ╙══════════════════════════════════════════════════════════════
 
+def _parse_margin_row(r):
+    """解析融资融券汇总单行，返回 list 或 None"""
+    td = to_date(r.get("信用交易日期"))
+    if td is None:
+        return None
+    return [
+        td,
+        to_float(r.get("融资余额")),
+        to_float(r.get("融资买入额")),
+        to_float(r.get("融券余量")),
+        to_float(r.get("融券余量金额")),
+        to_float(r.get("融券卖出量")),
+        to_float(r.get("融资融券余额")),
+        datetime.datetime.now(),
+    ]
+
+
 def fetch_margin(start_date: str, end_date: str) -> list:
     import akshare as ak
     rows = []
     try:
         df = ak.stock_margin_sse(start_date=start_date, end_date=end_date)
-        # ★ 防御：akshare 在节假日/边界日期可能返回空df但带新列(13列)，
-        #   pandas 会因 Length mismatch 抛异常；外层 try 已捕获，但再补一道校验
         if df is None or df.empty or len(df.columns) != 7:
             return rows
         for _, r in df.iterrows():
-            td = to_date(r.get("信用交易日期"))
-            if td is None:
-                continue
-            rows.append([
-                td,
-                to_float(r.get("融资余额")),
-                to_float(r.get("融资买入额")),
-                to_float(r.get("融券余量")),
-                to_float(r.get("融券余量金额")),
-                to_float(r.get("融券卖出量")),
-                to_float(r.get("融资融券余额")),
-                datetime.datetime.now(),
-            ])
+            row = _parse_margin_row(r)
+            if row:
+                rows.append(row)
         print(f"  融资融券汇总: {len(rows)} 条")
     except Exception as e:
-        # 节假日akshare会触发Length mismatch等pandas内部异常，捕获后跳过
-        print(f"  融资融券汇总获取失败: {e}")
+        # akshare 无数据时抛 "Length mismatch" pandas 异常（SSE 返回空响应但带13列名）
+        # 尝试用更宽日期范围查询，SSE 会只返回有数据的日期
+        if "Length mismatch" in str(e):
+            try:
+                wider_start = (datetime.datetime.strptime(start_date, "%Y%m%d")
+                               - datetime.timedelta(days=7)).strftime("%Y%m%d")
+                df2 = ak.stock_margin_sse(start_date=wider_start, end_date=end_date)
+                if df2 is not None and not df2.empty and len(df2.columns) == 7:
+                    for _, r in df2.iterrows():
+                        row = _parse_margin_row(r)
+                        if row:
+                            td_str = str(row[0]).replace("-", "")
+                            if start_date <= td_str <= end_date:
+                                rows.append(row)
+                    if rows:
+                        print(f"  融资融券汇总: {len(rows)} 条 (宽范围回退)")
+                        return rows
+            except Exception:
+                pass
+            print(f"  融资融券汇总: 无数据（非交易日或数据尚未发布）")
+        else:
+            print(f"  融资融券汇总获取失败: {e}")
     return rows
 
 
@@ -437,8 +473,114 @@ def fetch_margin_detail(trade_date: str) -> list:
             ])
         print(f"  融资融券个股: {len(rows)} 条")
     except Exception as e:
-        print(f"  融资融券个股获取失败: {e}（该日期可能非交易日或接口暂无数据）")
+        if "Length mismatch" in str(e):
+            print(f"  融资融券个股(沪市): 无数据（非交易日或数据尚未发布）")
+        else:
+            print(f"  融资融券个股(沪市)获取失败: {e}（该日期可能非交易日或接口暂无数据）")
     return rows
+
+
+# ═══════════════════════════════════════════════════════════════
+# 3b. 融资融券汇总（深市） stock_margin_szse
+# ║  akshare 接口只接受单个 date，返回 6 列（无日期列）
+# ║  返回字段: 融资买入额/融资余额/融券卖出量/融券余量/融券余额/融资融券余额
+# ║  需要与沪市汇总按日期合并求和
+# ╙══════════════════════════════════════════════════════════════
+
+def fetch_margin_szse(date_str: str) -> list:
+    """深市融资融券汇总，返回与 _parse_margin_row 相同格式的 list
+    注意: SZSE 汇总接口返回值单位是亿元，需 ×10^8 转为元以匹配 SSE"""
+    import akshare as ak
+    rows = []
+    try:
+        df = ak.stock_margin_szse(date=date_str)
+        if df is None or df.empty:
+            return rows
+        td = to_date(date_str)
+        if td is None:
+            return rows
+        E8 = 100_000_000  # 亿元 → 元
+        # SZSE 汇总可能有多行（分页），全部求和后转单位
+        mb  = df["融资余额"].apply(to_float).sum() * E8       if "融资余额" in df.columns else 0.0
+        mby = df["融资买入额"].apply(to_float).sum() * E8     if "融资买入额" in df.columns else 0.0
+        sbv = df["融券余量"].apply(to_float).sum() * E8       if "融券余量" in df.columns else 0.0
+        sba = df["融券余额"].apply(to_float).sum() * E8       if "融券余额" in df.columns else 0.0
+        ssv = df["融券卖出量"].apply(to_float).sum() * E8     if "融券卖出量" in df.columns else 0.0
+        msb = df["融资融券余额"].apply(to_float).sum() * E8   if "融资融券余额" in df.columns else 0.0
+        rows.append([td, mb, mby, sbv, sba, ssv, msb, datetime.datetime.now()])
+        print(f"  融资融券汇总(深市): {len(rows)} 条 (亿元→元转换后)")
+    except Exception as e:
+        if "Length mismatch" in str(e):
+            print(f"  融资融券汇总(深市): 无数据（非交易日或数据尚未发布）")
+        else:
+            print(f"  融资融券汇总(深市)获取失败: {e}")
+    return rows
+
+
+# ═══════════════════════════════════════════════════════════════
+# 4b. 融资融券个股（深市） stock_margin_detail_szse
+# ║  akshare 接口返回 8 列: 证券代码/证券简称/融资买入额/融资余额/
+# ║                         融券卖出量/融券余量/融券余额/融资融券余额
+# ║  缺少 融资偿还额/融券偿还量，用 None 填充
+# ╙══════════════════════════════════════════════════════════════
+
+def fetch_margin_detail_szse(trade_date: str) -> list:
+    """深市融资融券个股，返回与 fetch_margin_detail 相同格式的 list"""
+    import akshare as ak
+    rows = []
+    try:
+        df = ak.stock_margin_detail_szse(date=trade_date)
+        if df is None or df.empty:
+            print("  融资融券个股(深市): 无数据（可能非交易日或接口无数据）")
+            return rows
+        td = to_date(trade_date)
+        if td is None:
+            return rows
+        for _, r in df.iterrows():
+            code = str(r.get("证券代码", "")).strip().zfill(6)
+            if not code:
+                continue
+            rows.append([
+                td,
+                code,
+                str(r.get("证券简称", ""))[:50],
+                to_float(r.get("融资余额")),
+                to_float(r.get("融资买入额")),
+                0.0,  # 融资偿还额 — SZSE 不提供
+                to_float(r.get("融券余量")),
+                to_float(r.get("融券卖出量")),
+                0.0,  # 融券偿还量 — SZSE 不提供
+                datetime.datetime.now(),
+            ])
+        print(f"  融资融券个股(深市): {len(rows)} 条")
+    except Exception as e:
+        if "Length mismatch" in str(e):
+            print(f"  融资融券个股(深市): 无数据（非交易日或数据尚未发布）")
+        else:
+            print(f"  融资融券个股(深市)获取失败: {e}")
+    return rows
+
+
+def _merge_margin_rows(sse_rows: list, szse_rows: list) -> list:
+    """按 trade_date 合并沪市 + 深市融资融券汇总，同日期字段求和"""
+    if not szse_rows:
+        return sse_rows
+    if not sse_rows:
+        return szse_rows
+    # 构建 date -> row 的 dict
+    merged = {}
+    for row in sse_rows + szse_rows:
+        td = row[0]
+        if td not in merged:
+            merged[td] = list(row)  # copy
+        else:
+            existing = merged[td]
+            # 字段 1-6 是数值字段，求和；字段 7 是 update_time，保留较早的
+            for i in range(1, 7):
+                a = existing[i] if existing[i] is not None else 0.0
+                b = row[i] if row[i] is not None else 0.0
+                existing[i] = a + b
+    return list(merged.values())
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -2019,10 +2161,13 @@ def process_single_date(args, date_str: str):
     else:
         print("[SKIP] 龙虎榜机构已跳过")
 
-    # ── 3. 融资融券汇总 ──────────────────────────────────────
+    # ── 3. 融资融券汇总（沪市 + 深市合并） ─────────────────────
     if not args.skip_margin:
         print("[INFO] 融资融券汇总（沪市）...")
-        rows = fetch_margin(start_str, end_str)
+        sse_rows = fetch_margin(start_str, end_str)
+        print("[INFO] 融资融券汇总（深市）...")
+        szse_rows = fetch_margin_szse(date_str)
+        rows = _merge_margin_rows(sse_rows, szse_rows)
         rows = _filter(rows)
         if rows:
             _dual_write(
@@ -2035,16 +2180,20 @@ def process_single_date(args, date_str: str):
                  "margin_short_bal","update_time"],
                 ["trade_date"],
                 dry_run=args.dry_run,
+                force=True,  # 沪深合并后强制覆盖旧的单市场数据
             )
         else:
             print("  无融资融券汇总数据")
     else:
         print("[SKIP] 融资融券汇总已跳过")
 
-    # ── 4. 融资融券个股 ──────────────────────────────────────
+    # ── 4. 融资融券个股（沪市 + 深市合并） ─────────────────────
     if not args.skip_margin_detail:
         print("[INFO] 融资融券个股（沪市）...")
-        rows = fetch_margin_detail(date_str)
+        sse_rows = fetch_margin_detail(date_str)
+        print("[INFO] 融资融券个股（深市）...")
+        szse_rows = fetch_margin_detail_szse(date_str)
+        rows = sse_rows + szse_rows
         rows = _filter(rows)
         if rows:
             _dual_write(
@@ -2057,6 +2206,7 @@ def process_single_date(args, date_str: str):
                  "short_repay_vol","update_time"],
                 ["code", "trade_date"],
                 dry_run=args.dry_run,
+                force=True,  # 深市数据追加，强制覆盖以更新已有记录
             )
         else:
             print("  无融资融券个股数据")

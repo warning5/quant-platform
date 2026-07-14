@@ -7,11 +7,11 @@ const { Title, Paragraph, Text } = Typography;
 export default function ManualFinancial() {
   // 数据更新流程步骤
   const updateSteps = [
-    { no: 1, label: '东方财富业绩报表',    cmd: 'python scripts/update_financial_data.py --step yjbb',             desc: '批量拉取，写入 gross_margin/net_profit_yoy/roe 等',          color: 'blue' },
-    { no: 2, label: '同花顺财务摘要',      cmd: 'python scripts/update_financial_data.py --step ths',              desc: '逐只补充 net_profit_margin/存货周转率/流动比率 等',   color: 'green' },
-    { no: 3, label: '新浪三大表',          cmd: 'python scripts/update_financial_sina_fast.py --workers 15',  desc: '利润表+资产负债表+现金流量表（并发优化版）',        color: 'purple' },
-    { no: 4, label: '计算派生指标',        cmd: 'python scripts/calc_financial_indicators.py',            desc: '计算 ROA/ROIC/同比增长率/周转率 等22个指标',   color: 'orange' },
-    { no: 5, label: '重算因子值',          cmd: 'python scripts/recompute_factors.py',                   desc: '用最新财务数据重新计算所有因子',                 color: 'red' },
+    { no: 1, label: '东方财富业绩报表',    desc: '批量拉取，写入 gross_margin/net_profit_yoy/roe 等',          color: 'blue' },
+    { no: 2, label: '同花顺财务摘要',      desc: '逐只补充 net_profit_margin/存货周转率/流动比率 等',   color: 'green' },
+    { no: 3, label: '新浪三大表',          desc: '利润表+资产负债表+现金流量表（并发优化版）',        color: 'purple' },
+    { no: 4, label: '计算派生指标',        desc: '计算 ROA/ROIC/同比增长率/周转率 等22个指标',   color: 'orange' },
+    { no: 5, label: '重算因子值',          desc: '用最新财务数据重新计算所有因子',                 color: 'red' },
   ];
 
   // 四张财务表
@@ -67,12 +67,9 @@ export default function ManualFinancial() {
                 <Text strong style={{ fontSize: 13, display: 'block', marginBottom: 6 }}>
                   {s.label}
                 </Text>
-                <Paragraph style={{ fontSize: 11, margin: '0 0 8px', color: '#888' }}>
+                <Paragraph style={{ fontSize: 11, margin: 0, color: '#888' }}>
                   {s.desc}
                 </Paragraph>
-                <Card size="small" style={{ background: '#fafafa', fontSize: 11 }}>
-                  <Text code style={{ fontSize: 11 }}>{s.cmd}</Text>
-                </Card>
               </Card>
             </Badge.Ribbon>
           </Col>
@@ -144,7 +141,6 @@ export default function ManualFinancial() {
               <li>每周运行一次完整财务更新（Step 1~5），保持数据新鲜</li>
               <li>财报季（4月/8月/10月）后优先跑 Step 1（东方财富批量更新最快）</li>
               <li>Step 3 超时失败时，用 <Text code>--start-code</Text> 断点续传</li>
-              <li>因子回测前确保 <Text code>recompute_factors.py</Text> 已运行</li>
             </ul>
           </Card>
         </Col>
@@ -154,8 +150,6 @@ export default function ManualFinancial() {
             <ul style={{ margin: 0, paddingLeft: 20, fontSize: 12, lineHeight: 1.8 }}>
               <li>新浪接口有频率限制，并发数建议 ≤20，否则会触发限流</li>
               <li>北交所股票（4开头）财务数据覆盖率较低，属正常情况</li>
-              <li><Text code>calc_financial_indicators.py</Text> 只更新非空值，可重复运行</li>
-              <li>分红除权数据用独立脚本 <Text code>update_dividend_baostock.py</Text></li>
             </ul>
           </Card>
         </Col>

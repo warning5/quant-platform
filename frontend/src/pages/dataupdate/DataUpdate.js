@@ -15,11 +15,39 @@ import {
   LockOutlined, CheckSquareOutlined, CloseSquareOutlined, FlagOutlined
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import { dataUpdateApi, financialApi, silentConfig } from '../../api/index';
+import { dataUpdateApi, financialApi, calendarApi, silentConfig } from '../../api/index';
 import { useStompWebSocket } from '../../hooks/useStompWebSocket';
 
 const { Text, Title } = Typography;
 const { RangePicker } = DatePicker;
+
+// 情绪数据校验表选项
+const SENTIMENT_TABLE_OPTIONS = [
+  { value: 'stock_sentiment_zt', label: '涨跌停池' },
+  { value: 'stock_sentiment_moneyflow', label: '资金流向' },
+  { value: 'stock_sentiment_notice', label: '公告' },
+  { value: 'stock_sentiment_lhb', label: '龙虎榜' },
+  { value: 'stock_sentiment_lhb_inst', label: '龙虎榜机构明细' },
+  { value: 'stock_sentiment_margin', label: '融资融券' },
+  { value: 'stock_sentiment_margin_detail', label: '融资融券明细' },
+  { value: 'stock_sentiment_survey', label: '机构调研' },
+  { value: 'stock_sentiment_block_trade', label: '大宗交易' },
+  { value: 'stock_sentiment_activity', label: '市场活跃度' },
+  { value: 'stock_fund_holder', label: '基金持仓' },
+  { value: 'stock_shareholder', label: '股东人数' },
+  { value: 'stock_news', label: '新闻' },
+  { value: 'macro_bond_yield', label: '国债收益率' },
+  { value: 'stock_consensus_estimate', label: '一致预期' },
+  { value: 'stock_earnings_report', label: '业绩快报' },
+];
+
+const SENTIMENT_QUICK_DATE_OPTIONS = [
+  { value: '7', label: '近7天' },
+  { value: '30', label: '近30天' },
+  { value: '90', label: '近90天' },
+  { value: 'all', label: '全部' },
+  { value: 'custom', label: '自定义' },
+];
 
 const SOURCE_OPTIONS = [
   { value: 'ALL', label: '全部数据源' },
@@ -238,6 +266,16 @@ function DataUpdate() {
   const sentimentCoverageFetchedRef = useRef(false);
   const [sentimentValidateResult, setSentimentValidateResult] = useState(null);
   const [sentimentValidateLoading, setSentimentValidateLoading] = useState(false);
+  const [sentimentValidateQuickDate, setSentimentValidateQuickDate] = useState('7');
+  const [sentimentValidateDateRange, setSentimentValidateDateRange] = useState([
+    dayjs().subtract(7, 'day'),
+    dayjs(),
+  ]);
+  const [sentimentValidateTables, setSentimentValidateTables] = useState(SENTIMENT_TABLE_OPTIONS.map(o => o.value));
+  const [sentimentTradingDates, setSentimentTradingDates] = useState([]);
+  const [sentimentTradingDatesLoading, setSentimentTradingDatesLoading] = useState(false);
+  const sentimentAutoValidatedRef = useRef(false);
+  const handleSentimentValidateRef = useRef(null);
   const [sentimentMoneyflowSource, setSentimentMoneyflowSource] = useState('AKSHARE');
 
   // 内外盘数据
@@ -1148,11 +1186,41 @@ function DataUpdate() {
   };
 
   // ========== 情绪数据校验 ==========
+  const handleSentimentQuickDateChange = (value) => {
+    setSentimentValidateQuickDate(value);
+    if (value === 'custom') {
+      return;
+    }
+    if (value === 'all') {
+      if (sentimentTradingDates.length > 0) {
+        setSentimentValidateDateRange([dayjs(sentimentTradingDates[0]), dayjs(sentimentTradingDates[sentimentTradingDates.length - 1])]);
+      }
+      return;
+    }
+    const count = parseInt(value, 10);
+    if (sentimentTradingDates.length >= count) {
+      const slice = sentimentTradingDates.slice(-count);
+      setSentimentValidateDateRange([dayjs(slice[0]), dayjs(slice[slice.length - 1])]);
+    }
+  };
+
+  const isTradingDay = (date) => {
+    if (!date || !date.isValid()) return true;
+    return sentimentTradingDates.includes(date.format('YYYY-MM-DD'));
+  };
+
   const handleSentimentValidate = async () => {
     setSentimentValidateLoading(true);
     setSentimentValidateResult(null);
     try {
-      const res = await dataUpdateApi.validateSentiment();
+      const [start, end] = sentimentValidateDateRange || [];
+      const params = {};
+      if (start && start.isValid()) params.startDate = start.format('YYYY-MM-DD');
+      if (end && end.isValid()) params.endDate = end.format('YYYY-MM-DD');
+      if (sentimentValidateTables && sentimentValidateTables.length > 0) {
+        params.tables = sentimentValidateTables.join(',');
+      }
+      const res = await dataUpdateApi.validateSentimentDaily(params);
       if (res && Object.keys(res).length > 0) {
         setSentimentValidateResult(res);
       } else {
@@ -1164,6 +1232,7 @@ function DataUpdate() {
       setSentimentValidateLoading(false);
     }
   };
+  handleSentimentValidateRef.current = handleSentimentValidate;
 
   const overview = coverage?.overview || {};
   const markets = coverage?.markets || [];
@@ -1174,6 +1243,42 @@ function DataUpdate() {
     if (activeTab === 'DELISTED') fetchDelistedStocks();
     if (activeTab === 'BIDASK') fetchBidaskCoverage();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 加载交易日历，并默认最近7个交易日
+  useEffect(() => {
+    if (activeTab !== 'SENTIMENT') return;
+    const loadTradingDates = async () => {
+      setSentimentTradingDatesLoading(true);
+      try {
+        const end = dayjs().add(1, 'year');
+        const start = dayjs().subtract(3, 'year');
+        const res = await calendarApi.getTradingDatesBetween(start.format('YYYY-MM-DD'), end.format('YYYY-MM-DD'));
+        const dates = (res?.dates || []).map(d => d.toString());
+        setSentimentTradingDates(dates);
+        if (dates.length > 0 && !sentimentValidateDateRange?.[0]) {
+          const last7 = dates.slice(-7);
+          if (last7.length >= 2) {
+            setSentimentValidateDateRange([dayjs(last7[0]), dayjs(last7[last7.length - 1])]);
+          } else if (last7.length === 1) {
+            setSentimentValidateDateRange([dayjs(last7[0]), dayjs(last7[0])]);
+          }
+        }
+      } catch (e) {
+        console.warn('加载交易日历失败', e);
+      } finally {
+        setSentimentTradingDatesLoading(false);
+      }
+    };
+    loadTradingDates();
+  }, [activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 情绪数据校验面板默认自动加载一次
+  useEffect(() => {
+    if (activeTab === 'SENTIMENT' && sentimentTradingDates.length > 0 && !sentimentAutoValidatedRef.current && handleSentimentValidateRef.current) {
+      sentimentAutoValidatedRef.current = true;
+      handleSentimentValidateRef.current();
+    }
+  }, [activeTab, sentimentTradingDates]);
 
   const onTabChange = (key) => {
     setActiveTab(key);
@@ -2126,10 +2231,6 @@ function DataUpdate() {
                   <Form.Item name="force" valuePropName="checked" style={{ marginBottom: 0 }}>
                     <Checkbox>全量重刷（覆盖已有数据）</Checkbox>
                   </Form.Item>
-                  <Button icon={<SearchOutlined />}
-                    onClick={handleSentimentValidate} loading={sentimentValidateLoading}>
-                    数据校验
-                  </Button>
                   {isRunning && <Tag color="processing">采集中...</Tag>}
                   {sentimentTask && sentimentTask.status === 'SUCCESS' && <Tag color="success">采集完成</Tag>}
                   {sentimentTask && sentimentTask.status === 'FAILED' && <Tag color="error">采集失败</Tag>}
@@ -2142,129 +2243,159 @@ function DataUpdate() {
         {/* 进度条 */}
         {renderProgressBar(sentimentTask)}
 
-        {/* 任务配置摘要 */}
-        {sentimentTask && (sentimentTask.configStartDate || sentimentTask.configMoneyflowSource) && (
-          <Card size="small" style={{ marginBottom: 8, background: '#f6ffed', borderColor: '#b7eb8f' }}>
-            <Space wrap size={16}>
-              <Text style={{ fontSize: 12 }}>
-                <CalendarOutlined /> 日期：
-                <Tag size="small" color="blue">{sentimentTask.configStartDate || '默认'}</Tag>
-                {' ~ '}
-                <Tag size="small" color="blue">{sentimentTask.configEndDate || '默认'}</Tag>
-              </Text>
-              <Text style={{ fontSize: 12 }}>
-                <ThunderboltOutlined /> 模式：
-                {sentimentTask.configMoneyflowSource === 'WESTOCK' ? (
-                  <Tag size="small" color="purple">westock（仅资金流向）</Tag>
-                ) : (
-                  <Tag size="small">akshare</Tag>
-                )}
-              </Text>
-              {(sentimentTask.configMoneyflowSource !== 'WESTOCK') && (
-                <Text style={{ fontSize: 12 }}>
-                  模块：
-                  {sentimentTask.configFetchLhb && <Tag size="small">龙虎榜</Tag>}
-                  {sentimentTask.configFetchMargin && <Tag size="small">融资融券</Tag>}
-                  {sentimentTask.configFetchSurvey && <Tag size="small">机构调研</Tag>}
-                  {sentimentTask.configFetchBlockTrade && <Tag size="small">大宗交易</Tag>}
-                  {sentimentTask.configFetchActivity && <Tag size="small">市场活跃度</Tag>}
-                  {sentimentTask.configFetchZtPool && <Tag size="small">涨跌停池</Tag>}
-                  {sentimentTask.configFetchMoneyflow && <Tag size="small">资金流向</Tag>}
-                  {sentimentTask.configFetchNotice && <Tag size="small">公告</Tag>}
-                  {sentimentTask.configFetchFundHolder && <Tag size="small">基金持仓</Tag>}
-                  {sentimentTask.configFetchShareholder && <Tag size="small">股东人数</Tag>}
-                  {sentimentTask.configFetchNews && <Tag size="small">新闻</Tag>}
-                  {sentimentTask.configFetchBondYield !== false && <Tag size="small">国债收益率</Tag>}
-                  {sentimentTask.configFetchShenwanIndex !== false && <Tag size="small">申万行业指数</Tag>}
-                  {sentimentTask.configFetchConsensusEstimate !== false && <Tag size="small">一致预期</Tag>}
-                  {sentimentTask.configFetchEarningsReport !== false && <Tag size="small">业绩快报</Tag>}
-                  {sentimentTask.configFetchQvix !== false && <Tag size="small" color="purple">QVIX恐慌指数</Tag>}
-                </Text>
-              )}
-            </Space>
-          </Card>
-        )}
-
         {/* 日志 */}
-        <Card title={<span>采集日志 <Text type="secondary" style={{ fontSize: 12 }}>({sentimentLogs.length} 条)</Text></span>}
-          size="small" extra={<Button size="small" onClick={() => setSentimentLogs([])}>清空</Button>}>
+        <Card
+          title={(
+            <span>
+              采集日志 <Text type="secondary" style={{ fontSize: 12 }}>({sentimentLogs.length} 条)</Text>
+            </span>
+          )}
+          size="small" style={{ marginBottom: 16 }}
+          extra={<Button size="small" onClick={() => setSentimentLogs([])}>清空</Button>}>
+          {sentimentTask && (sentimentTask.configStartDate || sentimentTask.configMoneyflowSource) && (
+            <div style={{ padding: '8px 0 12px', borderBottom: '1px solid #f0f0f0', marginBottom: 12 }}>
+              <Space size={8} wrap>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  <CalendarOutlined /> 日期：
+                  <Text style={{ fontSize: 12 }}>
+                    {sentimentTask.configStartDate || '默认'} ~ {sentimentTask.configEndDate || '默认'}
+                  </Text>
+                </Text>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  渠道：
+                  <Text style={{ fontSize: 12 }}>
+                    {sentimentTask.configMoneyflowSource === 'WESTOCK' ? 'westock（仅资金流向）' : 'akshare'}
+                  </Text>
+                </Text>
+                {(sentimentTask.configMoneyflowSource !== 'WESTOCK') && (
+                  <>
+                    {sentimentTask.configFetchLhb && <Tag size="small">龙虎榜</Tag>}
+                    {sentimentTask.configFetchMargin && <Tag size="small">融资融券</Tag>}
+                    {sentimentTask.configFetchSurvey && <Tag size="small">机构调研</Tag>}
+                    {sentimentTask.configFetchBlockTrade && <Tag size="small">大宗交易</Tag>}
+                    {sentimentTask.configFetchActivity && <Tag size="small">市场活跃度</Tag>}
+                    {sentimentTask.configFetchZtPool && <Tag size="small">涨跌停池</Tag>}
+                    {sentimentTask.configFetchMoneyflow && <Tag size="small">资金流向</Tag>}
+                    {sentimentTask.configFetchNotice && <Tag size="small">公告</Tag>}
+                    {sentimentTask.configFetchFundHolder && <Tag size="small">基金持仓</Tag>}
+                    {sentimentTask.configFetchShareholder && <Tag size="small">股东人数</Tag>}
+                    {sentimentTask.configFetchNews && <Tag size="small">新闻</Tag>}
+                    {sentimentTask.configFetchBondYield !== false && <Tag size="small">国债收益率</Tag>}
+                    {sentimentTask.configFetchShenwanIndex !== false && <Tag size="small">申万行业指数</Tag>}
+                    {sentimentTask.configFetchConsensusEstimate !== false && <Tag size="small">一致预期</Tag>}
+                    {sentimentTask.configFetchEarningsReport !== false && <Tag size="small">业绩快报</Tag>}
+                    {sentimentTask.configFetchQvix !== false && <Tag size="small" color="purple">QVIX恐慌指数</Tag>}
+                  </>
+                )}
+              </Space>
+            </div>
+          )}
           {renderLogs(sentimentLogs, sentimentLogRef)}
         </Card>
 
-        {/* 情绪数据校验报告 */}
-        {sentimentValidateResult && renderSentimentValidateCard()}
+        {/* 情绪数据校验 */}
+        {renderSentimentValidateCard()}
       </>
     );
   };
 
-  // ========== 情绪数据校验报告 ==========
+  // ========== 情绪数据校验 ==========
   const renderSentimentValidateCard = () => {
-    const { tables, tableCount, totalWarnings, status } = sentimentValidateResult;
+    const { dailyStats, tableNames, dateRangeStart, dateRangeEnd } = sentimentValidateResult || {};
+    const rangeText = dateRangeStart && dateRangeEnd ? `${dateRangeStart} ~ ${dateRangeEnd}` : '全部日期';
+
+    const tableColumns = (sentimentValidateTables || []).map(value => {
+      const label = (tableNames && tableNames[value])
+        || SENTIMENT_TABLE_OPTIONS.find(o => o.value === value)?.label
+        || value;
+      const labelWidthMap = {
+        stock_sentiment_lhb_inst: 150,
+        stock_sentiment_margin_detail: 140,
+        stock_consensus_estimate: 120,
+      };
+      return {
+        title: label,
+        dataIndex: value,
+        key: value,
+        width: labelWidthMap[value] || 110,
+        align: 'right',
+        render: v => v > 0 ? (v).toLocaleString() : <Button size="small" disabled style={{ padding: '0 7px', fontSize: 12 }}>无</Button>,
+      };
+    });
+
+    const columns = [
+      { title: '日期', dataIndex: 'date', key: 'date', width: 110, fixed: 'left' },
+      ...tableColumns,
+      {
+        title: (
+          <span>
+            空值检查
+            <Tooltip title="空值检查：检查选中日期范围内，各表 code 字段是否存在 NULL 或空字符串。">
+              <QuestionCircleOutlined style={{ marginLeft: 4, color: '#8c8c8c' }} />
+            </Tooltip>
+          </span>
+        ),
+        dataIndex: 'totalNullCount',
+        key: 'totalNullCount',
+        width: 110,
+        align: 'center',
+        render: v => v > 0 ? <Tag color="warning">{v} 条</Tag> : <Tag color="success">正常</Tag>,
+      },
+    ];
+
     return (
-      <Card title={<span><SearchOutlined /> 数据校验报告</span>} size="small" style={{ marginTop: 16 }}
-        extra={<Button size="small" type="text" onClick={() => setSentimentValidateResult(null)}>关闭</Button>}>
-        {/* 概览 */}
-        <Row gutter={16} style={{ marginBottom: 16 }}>
-          <Col span={4}>
-            <Statistic title="校验表数" value={tableCount || 0}
-              valueStyle={{ fontSize: 14, color: '#1677ff' }} />
-          </Col>
-          <Col span={4}>
-            <Statistic title="警告数" value={totalWarnings || 0}
-              valueStyle={{ fontSize: 14, color: totalWarnings > 0 ? '#fa8c16' : '#52c41a' }} />
-          </Col>
-          <Col span={4}>
-            <Statistic title="状态" value={status === 'OK' ? '正常' : '有警告'}
-              valueStyle={{ fontSize: 14, color: status === 'OK' ? '#52c41a' : '#fa8c16' }} />
-          </Col>
-        </Row>
-
-        {/* 各表校验结果 */}
+      <Card title={<span><SearchOutlined /> 数据校验</span>} size="small" style={{ marginBottom: 16 }}
+        extra={
+          <Button size="small" type="text" onClick={() => setSentimentValidateResult(null)}>
+            关闭
+          </Button>
+        }>
+        <Space wrap style={{ marginBottom: 16 }}>
+          <Select
+            value={sentimentValidateQuickDate}
+            onChange={handleSentimentQuickDateChange}
+            options={SENTIMENT_QUICK_DATE_OPTIONS}
+            style={{ width: 110 }}
+            placeholder="日期范围"
+          />
+          <RangePicker
+            value={sentimentValidateDateRange}
+            onChange={(dates) => {
+              setSentimentValidateDateRange(dates);
+              setSentimentValidateQuickDate('custom');
+            }}
+            disabledDate={(date) => !isTradingDay(date)}
+            placeholder={['开始日期', '结束日期']}
+            style={{ width: 240 }}
+          />
+          <Select
+            mode="multiple"
+            allowClear
+            showSearch={false}
+            value={sentimentValidateTables}
+            onChange={setSentimentValidateTables}
+            options={SENTIMENT_TABLE_OPTIONS}
+            style={{ minWidth: 180, maxWidth: 360 }}
+            placeholder="选择校验表"
+            maxTagCount={2}
+            maxTagPlaceholder={(omittedValues) => `+${omittedValues.length} 项`}
+          />
+          <Button icon={<SearchOutlined />}
+            onClick={handleSentimentValidate} loading={sentimentValidateLoading}>
+            数据校验
+          </Button>
+          <Text type="secondary" style={{ fontSize: 13 }}>
+            当前范围：{rangeText}
+          </Text>
+        </Space>
         <Table
-          dataSource={(tables || []).map((t, i) => ({ ...t, key: i }))}
-          columns={[
-            { title: '表名', dataIndex: 'name', width: 120 },
-            { title: '记录数', dataIndex: 'recordCount', render: v => (v || 0).toLocaleString(), align: 'right' },
-            { title: '最近7天数据', dataIndex: 'recentRecordCount',
-              render: v => v > 0 ? <Tag color="success">{v}条</Tag> : <Tag color="default">无</Tag> },
-            { title: '空值检查', dataIndex: 'warningCount',
-              render: v => v > 0 ? <Tag color="warning">{v}项</Tag> : <Tag color="success">正常</Tag> },
-            {
-              title: '详情', dataIndex: 'nullChecks', width: 200,
-              render: checks => checks && checks.length > 0 ? (
-                <ul style={{ margin: 0, paddingLeft: 16, fontSize: 11 }}>
-                  {checks.map((c, i) => <li key={i}>{c.message}</li>)}
-                </ul>
-              ) : '-'
-            },
-          ]}
-          size="small" pagination={false} scroll={{ x: 'max-content' }}
+          dataSource={(dailyStats || []).map((d, i) => ({ ...d, key: i }))}
+          columns={columns}
+          size="small"
+          pagination={false}
+          scroll={{ x: 'max-content' }}
+          locale={{ emptyText: '暂无校验数据，请选择日期范围并点击“数据校验”' }}
         />
-
-        {/* 资金流向深度校验 */}
-        {(tables || []).filter(t => t.table === 'stock_sentiment_moneyflow' && t.extraChecks && t.extraChecks.length > 0).map(mfTable => (
-          <Card key="mf-deep-check" size="small" style={{ marginTop: 12, backgroundColor: '#fafafa' }}
-            title={<span style={{ fontSize: 13 }}>资金流向表深度校验</span>}>
-            <Table
-              dataSource={mfTable.extraChecks.map((c, i) => ({ ...c, key: i }))}
-              columns={[
-                { title: '检测项', dataIndex: 'type', width: 120,
-                  render: v => {
-                    const labels = { CH_MYSQL_DIFF: 'CH/MySQL一致性', ALL_ZERO: '全零资金流向', CLOSE_ZERO: '收盘价=0' };
-                    return labels[v] || v;
-                  }
-                },
-                { title: '状态', dataIndex: 'status', width: 72,
-                  render: v => v === 'OK' ? <Tag color="success">正常</Tag> : <Tag color="warning">异常</Tag>
-                },
-                { title: '详情', dataIndex: 'message',
-                  render: v => <span style={{ fontSize: 12 }}>{v}</span>
-                },
-              ]}
-              size="small" pagination={false} scroll={{ x: 'max-content' }} showHeader={true}
-            />
-          </Card>
-        ))}
       </Card>
     );
   };
@@ -2707,15 +2838,18 @@ function DataUpdate() {
   );
 
   return (
-    <div style={{ padding: '0 0 16px' }}>
-      <Title level={4} style={{ marginBottom: 8 }}>
-        <CloudSyncOutlined /> 数据更新管理
-        <Badge status={wsConnected ? 'success' : 'error'}
-          text={<Text type="secondary" style={{ fontSize: 13 }}>
-            {wsConnected ? 'WebSocket 已连接' : 'WebSocket 未连接'}
-          </Text>}
-          style={{ marginLeft: 12 }} />
-      </Title>
+    <div style={{ padding: '0 0 24px' }}>
+      {/* 头部 */}
+      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Title level={4} style={{ margin: 0 }}>
+          <CloudSyncOutlined /> 数据更新管理
+          <Badge status={wsConnected ? 'success' : 'error'}
+            text={<Text type="secondary" style={{ fontSize: 13 }}>
+              {wsConnected ? 'WebSocket 已连接' : 'WebSocket 未连接'}
+            </Text>}
+            style={{ marginLeft: 12 }} />
+        </Title>
+      </div>
 
       {/* ==================== 更新配置 Tabs ==================== */}
       <Card size="small" style={{ marginBottom: 16 }} styles={{ body: { padding: '12px 0 0' } }}>

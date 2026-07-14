@@ -311,10 +311,10 @@ quant-platform/
 │   ├── strategy/               # 策略管理
 │   ├── backtest/               # 回测引擎
 │   ├── market/                 # 行情数据
-│   └── common/                 # 通用组件
+│   ├── common/                 # 通用组件
+│   └── scripts/                # Python 数据脚本
 ├── frontend/                   # React 前端
 │   └── src/pages/              # 页面组件
-├── scripts/                    # Python 数据脚本
 ├── docs/                       # 项目文档
 ├── start-backend.bat           # 后端启动脚本
 ├── start-frontend.bat          # 前端启动脚本

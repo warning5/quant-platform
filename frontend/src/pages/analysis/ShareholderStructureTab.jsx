@@ -142,7 +142,7 @@ export function ShareholderStructureTab({ data, code }) {
           <ReactECharts option={holderChartOption} style={{ height: 320 }} notMerge lazyUpdate />
         </Card>
       ) : (
-        <Alert type="info" message="暂无股东人数数据，请运行 python update_shareholder_batch.py 采集" showIcon style={{ marginBottom: 16 }} />
+        <Alert type="info" message="暂无股东人数数据" showIcon style={{ marginBottom: 16 }} />
       )}
 
       {/* ── 基金持仓明细 ─────────────────────────────────── */}

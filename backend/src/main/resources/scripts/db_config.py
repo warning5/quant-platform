@@ -16,8 +16,19 @@ import warnings
 from pathlib import Path
 
 # ─── 自动加载 .env 文件（纯 Python，零外部依赖）────────────────
-_env_file = Path(__file__).resolve().parent.parent / ".env"
-if _env_file.exists():
+# 查找顺序：
+#   1. 当前工作目录/.env（从项目根运行时）
+#   2. ~/.quant-platform/.env（jar 提取模式，.env 也被提取到此）
+#   3. 脚本同级目录/.env（scripts/ 下直接放 .env）
+#   4. 脚本上级目录/.env（resources/.env — IDE/源码模式，.env 与 scripts 同在 resources 下）
+_env_candidates = [
+    Path.cwd() / ".env",
+    Path.home() / ".quant-platform" / ".env",
+    Path(__file__).resolve().parent / ".env",
+    Path(__file__).resolve().parent.parent / ".env",
+]
+_env_file = next((p for p in _env_candidates if p.exists()), None)
+if _env_file is not None:
     _loaded = 0
     for _line in _env_file.read_text(encoding="utf-8").splitlines():
         _line = _line.strip()

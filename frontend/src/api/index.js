@@ -297,7 +297,8 @@ export const dataUpdateApi = {
   // 情绪数据
   getSentimentCoverage: () => api.get('/data-update/sentiment/coverage'),
   getSentimentTableStats: (table) => api.get(`/data-update/sentiment/table-stats/${table}`),
-  validateSentiment: () => api.get('/data-update/sentiment/validate'),
+  validateSentiment: (params) => api.get('/data-update/sentiment/validate', { params }),
+  validateSentimentDaily: (params) => api.get('/data-update/sentiment/validate-daily', { params }),
   // 研报数据
   getResearchCoverage: () => api.get('/data-update/research/coverage'),
   validateResearch: () => api.get('/data-update/research/validate'),
@@ -482,6 +483,10 @@ export const calendarApi = {
   getByDate: (date) => api.get('/calendar/date', { params: { date } }),
   /** 查询某年的所有记录 */
   getByYear: (year) => api.get('/calendar/year', { params: { year } }),
+  /** 获取指定日期范围内的所有交易日 */
+  getTradingDatesBetween: (startDate, endDate) => api.get('/calendar/trading-dates', { params: { startDate, endDate } }),
+  /** 获取最近 N 个交易日 */
+  getLastTradingDates: (count) => api.get('/calendar/last-trading-dates', { params: { count } }),
   /** 手动标记某天 */
   markDay: (date, isTrading, reason) => api.post('/calendar/mark', { date, isTrading, reason }),
 };

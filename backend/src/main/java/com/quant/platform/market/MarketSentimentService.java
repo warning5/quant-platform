@@ -17,7 +17,7 @@ import java.util.Map;
  * 市场情绪指标服务
  * 读取 QVIX(中国恐慌指数) 等市场级指标，供策略使用
  *
- * 数据来源: scripts/collect_qvix.py → ClickHouse market_sentiment
+ * 数据来源: backend/scripts/collect_qvix.py → ClickHouse market_sentiment
  * QVIX 含义: 数值越高代表市场恐慌越重
  *   - QVIX < 15: 市场平静，可能过度乐观
  *   - QVIX 15~25: 正常波动

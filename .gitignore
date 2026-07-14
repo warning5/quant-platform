@@ -3,10 +3,9 @@
 /backend/target/
 /.idea/
 /backend/logs/
-/scripts/.codebuddy/
-/scripts/.workbuddy/
-/logs/
+/backend/scripts/
 /.workbuddy/
+/logs/
 .env
 .env.*
 

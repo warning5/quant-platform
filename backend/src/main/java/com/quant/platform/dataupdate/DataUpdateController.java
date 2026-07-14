@@ -37,23 +37,16 @@ public class DataUpdateController {
     @Value("${quant.data-update.python-path:python}")
     private String pythonPath;
 
-    @Value("${quant.data-update.script-dir:scripts}")
-    private String scriptDir;
-
     private String resolvedScriptDir;
 
     @PostConstruct
     public void init() {
-        java.io.File dir = new java.io.File(scriptDir);
-        if (!dir.isAbsolute()) {
-            dir = java.nio.file.Paths.get(System.getProperty("user.dir"), scriptDir).toFile();
-        }
-        if (dir.exists() && dir.isDirectory()) {
-            resolvedScriptDir = dir.getAbsolutePath();
-            log.info("[DataUpdate] 脚本目录: {}", resolvedScriptDir);
+        // 复用 DataUpdateService 的脚本目录解析逻辑
+        resolvedScriptDir = dataUpdateService.getResolvedScriptDir();
+        if (resolvedScriptDir != null) {
+            log.info("[DataUpdateController] 脚本目录: {}", resolvedScriptDir);
         } else {
-            log.error("[DataUpdate] 脚本目录不存在: {}", dir.getAbsolutePath());
-            resolvedScriptDir = null;
+            log.error("[DataUpdateController] 脚本目录未解析");
         }
     }
 
@@ -482,8 +475,7 @@ public class DataUpdateController {
         ProcessBuilder pb = new ProcessBuilder(pythonPath, script.getAbsolutePath(), String.valueOf(inactiveDays));
         pb.directory(new java.io.File(resolvedScriptDir));
         pb.redirectErrorStream(false);
-        // 强制 Python 使用 UTF-8 输出，避免 Windows 默认 GBK 导致中文乱码
-        pb.environment().put("PYTHONIOENCODING", "utf-8");
+        dataUpdateService.configurePythonEnv(pb);
         Process p = pb.start();
 
         // 读取 stdout（JSON 输出）

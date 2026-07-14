@@ -1,11 +1,14 @@
 package com.quant.platform.dataupdate;
 
+import com.quant.platform.calendar.service.TradeCalendarService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * 情绪数据服务
@@ -16,6 +19,7 @@ import java.util.*;
 public class SentimentService {
 
     private final JdbcTemplate jdbcTemplate;
+    private final TradeCalendarService tradeCalendarService;
 
     // 情绪数据表列表
     // 保留：zt(涨跌停池) + moneyflow(资金情绪代理) + notice(公告)
@@ -46,13 +50,24 @@ public class SentimentService {
         TABLE_NAMES.put("stock_sentiment_survey", "机构调研");
         TABLE_NAMES.put("stock_sentiment_block_trade", "大宗交易");
         TABLE_NAMES.put("stock_sentiment_activity", "市场活跃度");
+        TABLE_NAMES.put("stock_fund_holder", "基金持仓");
+        TABLE_NAMES.put("stock_shareholder", "股东人数");
+        TABLE_NAMES.put("stock_news", "新闻");
+        TABLE_NAMES.put("macro_bond_yield", "国债收益率");
+        TABLE_NAMES.put("stock_consensus_estimate", "一致预期");
+        TABLE_NAMES.put("stock_earnings_report", "业绩快报");
     }
 
-    // 各表的日期字段名（notice 用 notice_date，survey 用 notice_date，其余用 trade_date）
+    // 各表的日期字段名（notice 用 notice_date，survey 用 meeting_date，其余用 trade_date）
     private static final Map<String, String> DATE_COLUMNS = new HashMap<>();
     static {
         DATE_COLUMNS.put("stock_sentiment_notice", "notice_date");
-        DATE_COLUMNS.put("stock_sentiment_survey", "notice_date");
+        DATE_COLUMNS.put("stock_sentiment_survey", "meeting_date");
+        DATE_COLUMNS.put("stock_fund_holder", "report_date");
+        DATE_COLUMNS.put("stock_shareholder", "report_date");
+        DATE_COLUMNS.put("stock_news", "publish_date");
+        DATE_COLUMNS.put("stock_consensus_estimate", "update_time");
+        DATE_COLUMNS.put("stock_earnings_report", "report_date");
     }
 
     // 允许直接拼接到 SQL 中的表名白名单（sentiment 表 + coverage 中追加的 MySQL-only 表）
@@ -70,7 +85,7 @@ public class SentimentService {
 
     // 允许直接拼接到 SQL 中的日期列名白名单
     private static final Set<String> ALLOWED_DATE_COLUMNS = new HashSet<>(Arrays.asList(
-            "trade_date", "notice_date", "report_date", "publish_date", "update_time"
+            "trade_date", "notice_date", "meeting_date", "report_date", "publish_date", "update_time"
     ));
 
     private String getDateColumn(String table) {
@@ -238,29 +253,48 @@ public class SentimentService {
      * 数据校验
      */
     public Map<String, Object> validate() {
+        return validate(null, null, Collections.emptyList());
+    }
+
+    public Map<String, Object> validate(String startDate, String endDate) {
+        return validate(startDate, endDate, Collections.emptyList());
+    }
+
+    public Map<String, Object> validate(String startDate, String endDate, List<String> tables) {
         Map<String, Object> result = new LinkedHashMap<>();
         List<Map<String, Object>> tableValidations = new ArrayList<>();
         int totalWarnings = 0;
 
-        for (String table : SENTIMENT_TABLES) {
+        List<String> tablesToValidate = (tables == null || tables.isEmpty())
+                ? SENTIMENT_TABLES
+                : tables.stream()
+                        .filter(ALLOWED_TABLES::contains)
+                        .distinct()
+                        .collect(Collectors.toList());
+
+        for (String table : tablesToValidate) {
             try {
                 // 白名单校验
-                validateTableAndColumn(table, getDateColumn(table));
+                String dateCol = getDateColumn(table);
+                validateTableAndColumn(table, dateCol);
 
                 Map<String, Object> validation = new LinkedHashMap<>();
                 validation.put("table", table);
                 validation.put("name", TABLE_NAMES.getOrDefault(table, table));
 
-                // 记录数
-                Integer count = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM " + table, Integer.class);
+                String dateRangeCondition = buildDateRangeCondition(dateCol, startDate, endDate);
+
+                // 记录数（按日期范围）
+                Integer count = jdbcTemplate.queryForObject(
+                        "SELECT COUNT(*) FROM " + table + dateRangeCondition, Integer.class);
                 validation.put("recordCount", count != null ? count : 0);
 
-                // 空值检查
+                // 空值检查（按日期范围）
                 List<Map<String, Object>> nullChecks = new ArrayList<>();
                 try {
-                    String nullCheckSql = "SELECT 'code' as field, SUM(CASE WHEN code IS NULL OR code = '' THEN 1 ELSE 0 END) as null_count FROM " + table +
+                    String nullCheckSql = "SELECT 'code' as field, SUM(CASE WHEN code IS NULL OR code = '' THEN 1 ELSE 0 END) as null_count FROM " + table + dateRangeCondition +
                             " UNION ALL " +
-                            "SELECT 'trade_date' as field, SUM(CASE WHEN trade_date IS NULL THEN 1 ELSE 0 END) FROM " + table;
+                            "SELECT 'trade_date' as field, SUM(CASE WHEN trade_date IS NULL THEN 1 ELSE 0 END) FROM " + table + dateRangeCondition;
                     List<Map<String, Object>> nullResults = jdbcTemplate.queryForList(nullCheckSql);
                     for (Map<String, Object> r : nullResults) {
                         Long nullCount = ((Number) r.get("null_count")).longValue();
@@ -279,18 +313,9 @@ public class SentimentService {
                 validation.put("warningCount", nullChecks.size());
                 totalWarnings += nullChecks.size();
 
-                // 最近7天是否有数据
-                String dateCol = getDateColumn(table);
-                String recentSql = "SELECT COUNT(*) FROM " + table +
-                        " WHERE " + dateCol + " >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)";
-                try {
-                    Integer recentCount = jdbcTemplate.queryForObject(recentSql, Integer.class);
-                    validation.put("hasRecentData", recentCount != null && recentCount > 0);
-                    validation.put("recentRecordCount", recentCount != null ? recentCount : 0);
-                } catch (Exception e) {
-                    validation.put("hasRecentData", null);
-                    validation.put("recentRecordCount", 0);
-                }
+                // 日期范围内是否有数据
+                validation.put("hasRecentData", count != null && count > 0);
+                validation.put("recentRecordCount", count != null ? count : 0);
 
                 tableValidations.add(validation);
             } catch (Exception e) {
@@ -302,7 +327,134 @@ public class SentimentService {
         result.put("tableCount", tableValidations.size());
         result.put("totalWarnings", totalWarnings);
         result.put("status", totalWarnings == 0 ? "OK" : "WARNING");
+        result.put("dateRangeStart", isValidDateParam(startDate) ? startDate : null);
+        result.put("dateRangeEnd", isValidDateParam(endDate) ? endDate : null);
+        result.put("totalRecords", tableValidations.stream()
+                .mapToLong(t -> ((Number) t.get("recordCount")).longValue())
+                .sum());
 
         return result;
+    }
+
+    public Map<String, Object> validateDaily(String startDate, String endDate, List<String> tables) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        List<String> tablesToValidate = (tables == null || tables.isEmpty())
+                ? SENTIMENT_TABLES
+                : tables.stream()
+                        .filter(ALLOWED_TABLES::contains)
+                        .distinct()
+                        .collect(Collectors.toList());
+
+        Map<String, String> tableNames = new LinkedHashMap<>();
+        Map<String, Map<String, DailyRow>> tableDateMap = new LinkedHashMap<>();
+        Set<String> allDates = new TreeSet<>(Collections.reverseOrder());
+
+        for (String table : tablesToValidate) {
+            try {
+                String dateCol = getDateColumn(table);
+                validateTableAndColumn(table, dateCol);
+                String dateRangeCondition = buildDateRangeCondition(dateCol, startDate, endDate);
+
+                Map<String, DailyRow> rows = new LinkedHashMap<>();
+                String countSql = "SELECT DATE(" + dateCol + ") as d, COUNT(*) as cnt FROM " + table +
+                        dateRangeCondition + " GROUP BY DATE(" + dateCol + ") ORDER BY d";
+                List<Map<String, Object>> countList = jdbcTemplate.queryForList(countSql);
+                for (Map<String, Object> r : countList) {
+                    String d = r.get("d") != null ? r.get("d").toString() : null;
+                    if (d == null || d.isEmpty()) continue;
+                    long cnt = ((Number) r.get("cnt")).longValue();
+                    rows.put(d, new DailyRow(cnt, 0L));
+                    allDates.add(d);
+                }
+
+                try {
+                    String nullSql = "SELECT DATE(" + dateCol + ") as d, " +
+                            "SUM(CASE WHEN code IS NULL OR code = '' THEN 1 ELSE 0 END) as null_count FROM " + table +
+                            dateRangeCondition + " GROUP BY DATE(" + dateCol + ") ORDER BY d";
+                    List<Map<String, Object>> nullList = jdbcTemplate.queryForList(nullSql);
+                    for (Map<String, Object> r : nullList) {
+                        String d = r.get("d") != null ? r.get("d").toString() : null;
+                        if (d == null || d.isEmpty()) continue;
+                        long nullCount = ((Number) r.get("null_count")).longValue();
+                        DailyRow row = rows.get(d);
+                        if (row != null) {
+                            row.nullCount = nullCount;
+                        } else {
+                            rows.put(d, new DailyRow(0L, nullCount));
+                            allDates.add(d);
+                        }
+                    }
+                } catch (Exception e) {
+                    log.debug("表 {} 无 code 空值统计: {}", table, e.getMessage());
+                }
+
+                tableDateMap.put(table, rows);
+                tableNames.put(table, TABLE_NAMES.getOrDefault(table, table));
+            } catch (Exception e) {
+                log.warn("按日校验表 {} 失败: {}", table, e.getMessage());
+            }
+        }
+
+        List<Map<String, Object>> dailyStats = new ArrayList<>();
+        Set<String> tradingDates = isValidDateParam(startDate) && isValidDateParam(endDate)
+                ? tradeCalendarService.getTradingDaysBetween(LocalDate.parse(startDate), LocalDate.parse(endDate))
+                        .stream().map(LocalDate::toString).collect(Collectors.toSet())
+                : null;
+        for (String date : allDates) {
+            if (tradingDates != null && !tradingDates.contains(date)) {
+                continue;
+            }
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("date", date);
+            long totalCount = 0L;
+            long totalNullCount = 0L;
+            for (String table : tablesToValidate) {
+                DailyRow dr = tableDateMap.getOrDefault(table, Collections.emptyMap()).getOrDefault(date, DailyRow.ZERO);
+                row.put(table, dr.count);
+                row.put(table + "_null", dr.nullCount);
+                totalCount += dr.count;
+                totalNullCount += dr.nullCount;
+            }
+            row.put("totalCount", totalCount);
+            row.put("totalNullCount", totalNullCount);
+            dailyStats.add(row);
+        }
+
+        result.put("dailyStats", dailyStats);
+        result.put("tableNames", tableNames);
+        result.put("dateRangeStart", isValidDateParam(startDate) ? startDate : null);
+        result.put("dateRangeEnd", isValidDateParam(endDate) ? endDate : null);
+        return result;
+    }
+
+    private static class DailyRow {
+        static final DailyRow ZERO = new DailyRow(0L, 0L);
+        long count;
+        long nullCount;
+        DailyRow(long count, long nullCount) {
+            this.count = count;
+            this.nullCount = nullCount;
+        }
+    }
+
+    private boolean isValidDateParam(String date) {
+        if (date == null || date.isEmpty()) {
+            return false;
+        }
+        return date.matches("\\d{4}-\\d{2}-\\d{2}");
+    }
+
+    private String buildDateRangeCondition(String dateCol, String startDate, String endDate) {
+        StringBuilder sb = new StringBuilder();
+        if (isValidDateParam(startDate)) {
+            sb.append(dateCol).append(" >= '").append(startDate).append("'");
+        }
+        if (isValidDateParam(endDate)) {
+            if (sb.length() > 0) {
+                sb.append(" AND ");
+            }
+            sb.append(dateCol).append(" <= '").append(endDate).append("'");
+        }
+        return sb.length() > 0 ? " WHERE " + sb.toString() : "";
     }
 }

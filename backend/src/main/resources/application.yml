@@ -103,8 +103,8 @@ quant:
     domain: http://127.0.0.1:9090
     base-url: http://127.0.0.1:9090/api/public/
   data-update:
-    python-path: python  # Python 可执行文件路径
-    script-dir: C:/Users/warning5/WorkBuddy/quant-platform/scripts  # Python 脚本绝对路径
+    # python-path: 默认 python（@Value 注解兜底，无需配置）
+    # script-dir: 默认 scripts，优先从外部目录加载；不存在时从 classpath:scripts/ 提取到 ~/.quant-platform/scripts/
     default-start-days: 3       # 默认从几天前开始更新
   # 通知推送配置
   notification:
