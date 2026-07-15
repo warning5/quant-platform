@@ -49,6 +49,14 @@ const SENTIMENT_QUICK_DATE_OPTIONS = [
   { value: 'custom', label: '自定义' },
 ];
 
+const SENTIMENT_CHANNEL_FIELDS = [
+  'fetchLhb', 'fetchMargin', 'fetchSurvey', 'fetchBlockTrade',
+  'fetchActivity', 'fetchZtPool', 'fetchMoneyflow', 'fetchNotice',
+  'fetchFundHolder', 'fetchShareholder', 'fetchNews',
+  'fetchBondYield', 'fetchShenwanIndex',
+  'fetchConsensusEstimate', 'fetchEarningsReport', 'fetchQvix',
+];
+
 const SOURCE_OPTIONS = [
   { value: 'ALL', label: '全部数据源' },
   { value: 'BAOSTOCK', label: 'Baostock (沪深 SH/SZ)' },
@@ -148,20 +156,22 @@ const renderTaskConfig = (task, updateType) => {
     if (task.configSingleCode) tags.push(<Tag key="single" color="geekblue">单只: {task.configSingleCode}</Tag>);
     if (task.configForce) tags.push(<Tag key="force" color="red">强制重新采集</Tag>);
   } else if (updateType === 'SENTIMENT') {
-    if (task.configFetchLhb !== false) tags.push(<Tag key="lhb" color="blue">龙虎榜</Tag>);
-    if (task.configFetchMargin !== false) tags.push(<Tag key="margin" color="green">融资融券</Tag>);
-    if (task.configFetchSurvey !== false) tags.push(<Tag key="survey" color="cyan">机构调研</Tag>);
-    if (task.configFetchBlockTrade !== false) tags.push(<Tag key="block" color="orange">大宗交易</Tag>);
-    if (task.configFetchActivity !== false) tags.push(<Tag key="activity" color="purple">市场活跃度</Tag>);
-    if (task.configFetchZtPool !== false) tags.push(<Tag key="ztpool" color="red">涨跌停池</Tag>);
-    if (task.configFetchMoneyflow !== false) tags.push(<Tag key="moneyflow" color="magenta">资金流向</Tag>);
-    if (task.configFetchNotice !== false) tags.push(<Tag key="notice" color="volcano">公告</Tag>);
-    if (task.configFetchFundHolder !== false) tags.push(<Tag key="fund" color="gold">基金持仓</Tag>);
-    if (task.configFetchShareholder !== false) tags.push(<Tag key="shareholder" color="lime">股东人数</Tag>);
-    if (task.configFetchNews !== false) tags.push(<Tag key="news" color="cyan">新闻</Tag>);
-    if (task.configFetchBondYield !== false) tags.push(<Tag key="bond" color="gold">国债收益率</Tag>);
-    if (task.configFetchShenwanIndex !== false) tags.push(<Tag key="shenwan" color="geekblue">申万行业指数</Tag>);
-    if (task.configFetchQvix !== false) tags.push(<Tag key="qvix" color="purple">QVIX恐慌指数</Tag>);
+    if (task.configFetchLhb === true) tags.push(<Tag key="lhb" color="blue">龙虎榜</Tag>);
+    if (task.configFetchMargin === true) tags.push(<Tag key="margin" color="green">融资融券</Tag>);
+    if (task.configFetchSurvey === true) tags.push(<Tag key="survey" color="cyan">机构调研</Tag>);
+    if (task.configFetchBlockTrade === true) tags.push(<Tag key="block" color="orange">大宗交易</Tag>);
+    if (task.configFetchActivity === true) tags.push(<Tag key="activity" color="purple">市场活跃度</Tag>);
+    if (task.configFetchZtPool === true) tags.push(<Tag key="ztpool" color="red">涨跌停池</Tag>);
+    if (task.configFetchMoneyflow === true) tags.push(<Tag key="moneyflow" color="magenta">资金流向</Tag>);
+    if (task.configFetchNotice === true) tags.push(<Tag key="notice" color="volcano">公告</Tag>);
+    if (task.configFetchFundHolder === true) tags.push(<Tag key="fund" color="gold">基金持仓</Tag>);
+    if (task.configFetchShareholder === true) tags.push(<Tag key="shareholder" color="lime">股东人数</Tag>);
+    if (task.configFetchNews === true) tags.push(<Tag key="news" color="cyan">新闻</Tag>);
+    if (task.configFetchBondYield === true) tags.push(<Tag key="bond" color="gold">国债收益率</Tag>);
+    if (task.configFetchShenwanIndex === true) tags.push(<Tag key="shenwan" color="geekblue">申万行业指数</Tag>);
+    if (task.configFetchConsensusEstimate === true) tags.push(<Tag key="consensus" color="purple">一致预期</Tag>);
+    if (task.configFetchEarningsReport === true) tags.push(<Tag key="earnings" color="geekblue">业绩快报</Tag>);
+    if (task.configFetchQvix === true) tags.push(<Tag key="qvix" color="purple">QVIX恐慌指数</Tag>);
     if (task.configForce) tags.push(<Tag key="force" color="red">全量重刷</Tag>);
   } else if (updateType === 'RESEARCH') {
     if (task.configForce) tags.push(<Tag key="force" color="red">强制重新采集</Tag>);
@@ -277,6 +287,11 @@ function DataUpdate() {
   const sentimentAutoValidatedRef = useRef(false);
   const handleSentimentValidateRef = useRef(null);
   const [sentimentMoneyflowSource, setSentimentMoneyflowSource] = useState('AKSHARE');
+  const watchedValues = Form.useWatch([], sentimentForm);
+  const sentimentCanStart = useMemo(() => {
+    if (!watchedValues) return false;
+    return SENTIMENT_CHANNEL_FIELDS.some(k => watchedValues[k] === true);
+  }, [watchedValues]);
 
   // 内外盘数据
   const [bidaskTask, setBidaskTask] = useState(null);
@@ -1047,22 +1062,22 @@ function DataUpdate() {
         // 情绪数据专属字段
         ...(updateType === 'SENTIMENT' ? {
           ...(sentimentMoneyflowSource !== 'WESTOCK' ? {
-            fetchLhb: values.fetchLhb !== false,
-            fetchMargin: values.fetchMargin !== false,
-            fetchSurvey: values.fetchSurvey !== false,
-            fetchBlockTrade: values.fetchBlockTrade !== false,
-            fetchActivity: values.fetchActivity !== false,
-            fetchZtPool: values.fetchZtPool !== false,
-            fetchMoneyflow: values.fetchMoneyflow !== false,
-            fetchNotice: values.fetchNotice !== false,
-            fetchFundHolder: values.fetchFundHolder !== false,
-            fetchShareholder: values.fetchShareholder !== false,
-            fetchNews: values.fetchNews !== false,
-            fetchBondYield: values.fetchBondYield !== false,
-            fetchShenwanIndex: values.fetchShenwanIndex !== false,
-            fetchConsensusEstimate: values.fetchConsensusEstimate !== false,
-            fetchEarningsReport: values.fetchEarningsReport !== false,
-            fetchQvix: values.fetchQvix !== false,
+            fetchLhb: values.fetchLhb === true,
+            fetchMargin: values.fetchMargin === true,
+            fetchSurvey: values.fetchSurvey === true,
+            fetchBlockTrade: values.fetchBlockTrade === true,
+            fetchActivity: values.fetchActivity === true,
+            fetchZtPool: values.fetchZtPool === true,
+            fetchMoneyflow: values.fetchMoneyflow === true,
+            fetchNotice: values.fetchNotice === true,
+            fetchFundHolder: values.fetchFundHolder === true,
+            fetchShareholder: values.fetchShareholder === true,
+            fetchNews: values.fetchNews === true,
+            fetchBondYield: values.fetchBondYield === true,
+            fetchShenwanIndex: values.fetchShenwanIndex === true,
+            fetchConsensusEstimate: values.fetchConsensusEstimate === true,
+            fetchEarningsReport: values.fetchEarningsReport === true,
+            fetchQvix: values.fetchQvix === true,
           } : {
             // westock 模式：显式关闭其他模块，防止 Java 默认值 true 导致误执行
             fetchLhb: false,
@@ -2221,7 +2236,7 @@ function DataUpdate() {
               <Col>
                 <Space size={12} wrap>
                   <Button type="primary" icon={isRunning ? <LockOutlined /> : <PlayCircleOutlined />}
-                    onClick={() => handleSubmit('SENTIMENT')} disabled={isRunning}>
+                    onClick={() => handleSubmit('SENTIMENT')} disabled={isRunning || !sentimentCanStart}>
                     开始采集
                   </Button>
                   <Button danger icon={<StopOutlined />}
@@ -2282,9 +2297,9 @@ function DataUpdate() {
                     {sentimentTask.configFetchNews && <Tag size="small">新闻</Tag>}
                     {sentimentTask.configFetchBondYield !== false && <Tag size="small">国债收益率</Tag>}
                     {sentimentTask.configFetchShenwanIndex !== false && <Tag size="small">申万行业指数</Tag>}
-                    {sentimentTask.configFetchConsensusEstimate !== false && <Tag size="small">一致预期</Tag>}
-                    {sentimentTask.configFetchEarningsReport !== false && <Tag size="small">业绩快报</Tag>}
-                    {sentimentTask.configFetchQvix !== false && <Tag size="small" color="purple">QVIX恐慌指数</Tag>}
+                    {sentimentTask.configFetchConsensusEstimate === true && <Tag size="small">一致预期</Tag>}
+                    {sentimentTask.configFetchEarningsReport === true && <Tag size="small">业绩快报</Tag>}
+                    {sentimentTask.configFetchQvix === true && <Tag size="small" color="purple">QVIX恐慌指数</Tag>}
                   </>
                 )}
               </Space>

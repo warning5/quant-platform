@@ -161,20 +161,20 @@ public class DataUpdateRequest {
     private boolean fetchShenwanIndex = true;
 
     /**
-     * 情绪数据：采集一致预期（同花顺，默认 true）
+     * 情绪数据：采集一致预期（同花顺，默认 false，避免定时任务无意义跑全量）
      */
-    private boolean fetchConsensusEstimate = true;
+    private boolean fetchConsensusEstimate = false;
 
     /**
-     * 情绪数据：采集业绩快报（东方财富，默认 true）
+     * 情绪数据：采集业绩快报（东方财富，默认 false）
      */
-    private boolean fetchEarningsReport = true;
+    private boolean fetchEarningsReport = false;
 
     /**
-     * 情绪数据：采集 QVIX 中国恐慌指数（默认 true）
+     * 情绪数据：采集 QVIX 中国恐慌指数（默认 false）
      * 数据来源: backend/scripts/collect_qvix.py → ClickHouse market_sentiment
      */
-    private boolean fetchQvix = true;
+    private boolean fetchQvix = false;
 
     /**
      * 情绪数据：资金流向数据源

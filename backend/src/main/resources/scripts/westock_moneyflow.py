@@ -4,6 +4,7 @@ westock_moneyflow.py - 用 westock-data asfund 替代 NeoData 获取资金流向
 
 import subprocess
 import datetime
+import os
 import re
 import sys
 from pathlib import Path
@@ -16,7 +17,7 @@ _westock_looked_up = False
 
 def _find_westock():
     """
-    搜索 westock-data skill 的根目录（含 package.json 的目录）
+    搜索 westock-data skill 的根目录（含 scripts/index.js 的目录）
     返回 (node_exe, script_path, cwd_dir) 或 (None, None, None)
     结果缓存到模块级变量，后续调用直接返回，不再重复搜索/打印
     """
@@ -27,32 +28,43 @@ def _find_westock():
     _westock_looked_up = True
     wb_dir = Path.home() / ".workbuddy"
 
-    # 找 westock-data 根目录（包含 package.json）
-    skill_root = None
+    # 收集所有可能的 westock-data 根目录候选
+    candidates = []
+
+    # 1. ~/.workbuddy/plugins/marketplaces/ 下的 westock-data（有 package.json）
     for mp_name in ["marketplaces", "marketplaces/experts"]:
         mp_dir = wb_dir / "plugins" / mp_name
         if not mp_dir.exists():
             continue
-        # 遍历所有含 package.json 的目录，找到 westock-data 的那个
         for pkg in mp_dir.rglob("package.json"):
             if pkg.parent.name == "westock-data":
-                skill_root = pkg.parent
-                break
-        if skill_root:
+                candidates.append(pkg.parent)
+
+    # 2. builtin-skills 目录（WorkBuddy 应用内置，有 scripts/index.js）
+    local_app = os.environ.get("LOCALAPPDATA", "")
+    if local_app:
+        builtin = Path(local_app) / "Programs" / "WorkBuddy" / "resources" / "app.asar.unpacked" / "resources" / "builtin-skills" / "westock-data"
+        if builtin.exists():
+            candidates.append(builtin)
+
+    # 找到第一个有 scripts/index.js 的候选
+    skill_root = None
+    for c in candidates:
+        if (c / "scripts" / "index.js").exists():
+            skill_root = c
             break
 
     if not skill_root:
-        print("  [westock ERROR] 找不到 westock-data skill（无 package.json），请先安装 westock-data skill")
+        print("  [westock ERROR] 找不到 westock-data skill 的 scripts/index.js")
+        if candidates:
+            print(f"  [westock] 找到 westock-data 目录但缺少 scripts/index.js: {[str(c) for c in candidates]}")
+        else:
+            print("  [westock ERROR] 未找到任何 westock-data skill 目录")
         _westock_cache = None
         return None, None, None
 
     script_path = skill_root / "scripts" / "index.js"
-    if not script_path.exists():
-        print(f"  [westock ERROR] 找不到 index.js: {script_path}")
-        _westock_cache = None
-        return None, None, None
-
-    cwd_dir = str(skill_root)   # cwd = skill 根目录（有 package.json）
+    cwd_dir = str(skill_root)
     script_str = str(script_path)
 
     # 找 node.exe（managed 版本优先）
@@ -92,7 +104,7 @@ def to_float(v) -> float:
 
 def query_westock(codes: list, start_date: str, end_date: str) -> str | None:
     """
-    通过 westock-data asfund 查询资金流向，返回原始 stdout 文本
+    通过 westock-data fund flow 查询资金流向，返回原始 stdout 文本
     codes: list of "sh600619" 风格代码（最多10只）
     start_date, end_date: "YYYY-MM-DD"
     返回: stdout 原始文本（含 markdown 表格），失败返回 None
@@ -105,7 +117,7 @@ def query_westock(codes: list, start_date: str, end_date: str) -> str | None:
     code_arg = ",".join(codes)
     try:
         r = subprocess.run(
-            [node_exe, script_path, "asfund", code_arg,
+            [node_exe, script_path, "fund", "flow", code_arg,
              "--start", start_date, "--end", end_date],
             capture_output=True, timeout=60,
             cwd=cwd_dir,
