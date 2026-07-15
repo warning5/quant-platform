@@ -1571,6 +1571,7 @@ public class DataUpdateService {
                 msg.put("fetchShenwanIndex", req.isFetchShenwanIndex());
                 msg.put("fetchConsensusEstimate", req.isFetchConsensusEstimate());
                 msg.put("fetchEarningsReport", req.isFetchEarningsReport());
+                msg.put("fetchQvix", req.isFetchQvix());
                 msg.put("moneyflowSource", req.getMoneyflowSource());
                 msg.put("emMoneyflowMode", req.getEmMoneyflowMode());
             }

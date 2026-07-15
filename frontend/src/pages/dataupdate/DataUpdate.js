@@ -599,6 +599,41 @@ function DataUpdate() {
     }
   }, []);
 
+  const applyTaskFields = useCallback((source, target) => {
+    if (!source) return;
+    if (source.market !== undefined) target.configMarket = source.market;
+    if (source.source !== undefined) target.configSource = source.source;
+    if (source.startDate !== undefined) target.configStartDate = source.startDate;
+    if (source.endDate !== undefined) target.configEndDate = source.endDate;
+    if (source.resume !== undefined) target.configResume = source.resume;
+    if (source.excludeSt !== undefined) target.configExcludeSt = source.excludeSt;
+    if (source.dailyOnly !== undefined) target.configDailyOnly = source.dailyOnly;
+    if (source.infoOnly !== undefined) target.configInfoOnly = source.infoOnly;
+    if (source.force !== undefined) target.configForce = source.force;
+    if (source.yearStart !== undefined) target.configYearStart = source.yearStart;
+    if (source.yearEnd !== undefined) target.configYearEnd = source.yearEnd;
+    if (source.stockPool !== undefined) target.configStockPool = source.stockPool;
+    if (source.fetchLhb !== undefined) target.configFetchLhb = source.fetchLhb;
+    if (source.fetchMargin !== undefined) target.configFetchMargin = source.fetchMargin;
+    if (source.fetchSurvey !== undefined) target.configFetchSurvey = source.fetchSurvey;
+    if (source.fetchBlockTrade !== undefined) target.configFetchBlockTrade = source.fetchBlockTrade;
+    if (source.fetchActivity !== undefined) target.configFetchActivity = source.fetchActivity;
+    if (source.fetchZtPool !== undefined) target.configFetchZtPool = source.fetchZtPool;
+    if (source.fetchMoneyflow !== undefined) target.configFetchMoneyflow = source.fetchMoneyflow;
+    if (source.fetchNotice !== undefined) target.configFetchNotice = source.fetchNotice;
+    if (source.fetchFundHolder !== undefined) target.configFetchFundHolder = source.fetchFundHolder;
+    if (source.fetchShareholder !== undefined) target.configFetchShareholder = source.fetchShareholder;
+    if (source.fetchNews !== undefined) target.configFetchNews = source.fetchNews;
+    if (source.fetchBondYield !== undefined) target.configFetchBondYield = source.fetchBondYield;
+    if (source.fetchShenwanIndex !== undefined) target.configFetchShenwanIndex = source.fetchShenwanIndex;
+    if (source.fetchConsensusEstimate !== undefined) target.configFetchConsensusEstimate = source.fetchConsensusEstimate;
+    if (source.fetchEarningsReport !== undefined) target.configFetchEarningsReport = source.fetchEarningsReport;
+    if (source.fetchQvix !== undefined) target.configFetchQvix = source.fetchQvix;
+    if (source.moneyflowSource !== undefined) target.configMoneyflowSource = source.moneyflowSource;
+    if (source.emMoneyflowMode !== undefined) target.configEmMoneyflowMode = source.emMoneyflowMode;
+    if (source.singleCode !== undefined) target.configSingleCode = source.singleCode;
+  }, []);
+
   // ── 统一 WebSocket（useStompWebSocket Hook）──
   // 状态回调：根据 updateType 更新对应任务状态
   const handleUpdateStatus = useCallback((msg) => {
@@ -619,39 +654,10 @@ function DataUpdate() {
       if (msg.error !== undefined) t.error = msg.error;
       if (msg.bidAskStats !== undefined) t.bidAskStats = msg.bidAskStats;
       t.updateType = ut;
-      if (msg.market !== undefined) t.configMarket = msg.market;
-      if (msg.source !== undefined) t.configSource = msg.source;
-      if (msg.startDate !== undefined) t.configStartDate = msg.startDate;
-      if (msg.endDate !== undefined) t.configEndDate = msg.endDate;
-      if (msg.resume !== undefined) t.configResume = msg.resume;
-      if (msg.excludeSt !== undefined) t.configExcludeSt = msg.excludeSt;
-      if (msg.dailyOnly !== undefined) t.configDailyOnly = msg.dailyOnly;
-      if (msg.infoOnly !== undefined) t.configInfoOnly = msg.infoOnly;
-      if (msg.force !== undefined) t.configForce = msg.force;
-      if (msg.yearStart !== undefined) t.configYearStart = msg.yearStart;
-      if (msg.yearEnd !== undefined) t.configYearEnd = msg.yearEnd;
-      if (msg.stockPool !== undefined) t.configStockPool = msg.stockPool;
-      if (msg.fetchLhb !== undefined) t.configFetchLhb = msg.fetchLhb;
-      if (msg.fetchMargin !== undefined) t.configFetchMargin = msg.fetchMargin;
-      if (msg.fetchSurvey !== undefined) t.configFetchSurvey = msg.fetchSurvey;
-      if (msg.fetchBlockTrade !== undefined) t.configFetchBlockTrade = msg.fetchBlockTrade;
-      if (msg.fetchActivity !== undefined) t.configFetchActivity = msg.fetchActivity;
-      if (msg.fetchZtPool !== undefined) t.configFetchZtPool = msg.fetchZtPool;
-      if (msg.fetchMoneyflow !== undefined) t.configFetchMoneyflow = msg.fetchMoneyflow;
-      if (msg.fetchNotice !== undefined) t.configFetchNotice = msg.fetchNotice;
-      if (msg.fetchFundHolder !== undefined) t.configFetchFundHolder = msg.fetchFundHolder;
-      if (msg.fetchShareholder !== undefined) t.configFetchShareholder = msg.fetchShareholder;
-      if (msg.fetchNews !== undefined) t.configFetchNews = msg.fetchNews;
-      if (msg.fetchBondYield !== undefined) t.configFetchBondYield = msg.fetchBondYield;
-      if (msg.fetchShenwanIndex !== undefined) t.configFetchShenwanIndex = msg.fetchShenwanIndex;
-      if (msg.fetchQvix !== undefined) t.configFetchQvix = msg.fetchQvix;
-      if (msg.moneyflowSource !== undefined) t.configMoneyflowSource = msg.moneyflowSource;
-      if (msg.emMoneyflowMode !== undefined) t.configEmMoneyflowMode = msg.emMoneyflowMode;
-      if (msg.singleCode !== undefined) t.configSingleCode = msg.singleCode;
-      if (msg.force !== undefined) t.configForce = msg.force;
+      applyTaskFields(msg, t);
       return t;
     });
-  }, [getTaskUpdater]);
+  }, [getTaskUpdater, applyTaskFields]);
 
   // 日志回调：根据 updateType 推送到对应日志数组
   const handleUpdateLog = useCallback((msg) => {
@@ -923,7 +929,11 @@ function DataUpdate() {
           const ut = t.request?.updateType || 'DAILY';
           // 只恢复非 IDLE 状态且非 CANCELLED 状态的任务
           if (t.status && t.status !== 'IDLE' && t.status !== 'CANCELLED') {
-            getTaskUpdater(ut)(prev => ({ ...prev, ...t, updateType: ut }));
+            getTaskUpdater(ut)(prev => {
+              const merged = { ...prev, ...t, updateType: ut };
+              applyTaskFields(t.request, merged);
+              return merged;
+            });
             // 同时补拉历史日志（刷新页面后日志丢失的根本原因）
             if (t.taskId) {
               dataUpdateApi.getTaskLogs(t.taskId).then(logs => {
@@ -1138,7 +1148,9 @@ function DataUpdate() {
               if (found && found.taskId === t.taskId) {
                 getTaskUpdater(updateType)(prev => {
                   if (prev && prev.status === 'RUNNING') {
-                    return { ...prev, ...found, updateType };
+                    const merged = { ...prev, ...found, updateType };
+                    applyTaskFields(found.request, merged);
+                    return merged;
                   }
                   return prev;
                 });
