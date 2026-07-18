@@ -461,7 +461,7 @@ public class AnalysisService {
         overview.setCatalysts(buildCatalysts(code, fundamentalSignal, sentimentSignal, researchSignal));
 
         // 7.9 多空辩论：生成论据列表 + 结论文本（供前端"核心结论"和"多空交锋"区域）
-        buildBullBearDebate(overview, signal);
+        buildBullBearDebate(overview);
 
         log.info("个股分析完成: code={}, totalScore={}, action={}, isBlueChip={}, tailRisks={}, catalysts={}, bullArgs={}, bearArgs={}",
                 code, overview.getTotalScore(), overview.getAction(), isBlueChip,
@@ -3225,7 +3225,7 @@ public class AnalysisService {
      * 逻辑与 WorkflowReportService.evaluateBullBear 一致，但内联在 AnalysisService 中
      * 避免循环依赖（WorkflowReportService 依赖 AnalysisService）
      */
-    private void buildBullBearDebate(AnalysisOverview overview, TradingSignal signal) {
+    private void buildBullBearDebate(AnalysisOverview overview) {
         List<BullBearArgument> bullArgs = new ArrayList<>();
         List<BullBearArgument> bearArgs = new ArrayList<>();
 
@@ -3495,7 +3495,7 @@ public class AnalysisService {
         BigDecimal anchor = resistancePrice != null ? resistancePrice : currentPrice;
         BigDecimal low = anchor.multiply(BigDecimal.valueOf(0.99)).setScale(2, RoundingMode.HALF_UP);
         BigDecimal high = anchor.multiply(BigDecimal.valueOf(1.02)).setScale(2, RoundingMode.HALF_UP);
-        return low.toString() + "-" + high.toString();
+        return low + "-" + high;
     }
 
     /**

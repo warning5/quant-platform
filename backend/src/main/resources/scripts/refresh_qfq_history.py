@@ -16,10 +16,12 @@ refresh_qfq_history.py
   3. 写入 CH 时使用 refresh_version=True，update_time=now() 确保覆盖旧快照
 
 触发时机：DIVIDEND 任务完成后自动触发（通过 data_task_dependency 配置）
-也可手动执行：python refresh_qfq_history.py --days 1 --timeout 15
+也可手动执行：python refresh_qfq_history.py --days 1 --timeout 30
 
 注意：仅处理沪深股票（Baostock 覆盖范围），北交所由腾讯 API 处理。
-      串行执行（Baostock 不支持多进程并行），timeout=15s/股，delay=0.05s。
+      串行执行（Baostock 不支持多进程并行），timeout=30s/股/块，delay=0.1s。
+      分块拉取：长历史股票按3年/块分块查询，避免单次长查询超时。
+      单块超时后自动 re-login + retry 1次，失败则跳过该块继续后续块。
       任何错误后自动 re-login + retry 1次。
 """
 
@@ -112,10 +114,9 @@ def get_baostock_code(code, market):
     return None
 
 
-def fetch_stock_history(code, market, start_date, end_date, timeout=15):
+def _fetch_single_query(code, market, start_date, end_date, timeout=30):
     """
-    使用 Baostock 获取单只股票的历史行情（前复权）。
-    包含超时控制和错误自动重登录。
+    单次 Baostock 查询（带超时控制和重登录重试）。
     返回: DataFrame 或 None
     """
     import pandas as pd
@@ -160,11 +161,12 @@ def fetch_stock_history(code, market, start_date, end_date, timeout=15):
             if t.is_alive():
                 # 超时：线程仍在后台运行（无法杀掉），必须 re-login
                 if attempt < max_attempts - 1:
-                    print(f"    [TIMEOUT] {code} 超时({timeout}s)，重新登录Baostock...")
+                    print(f"      [TIMEOUT] {code} {start_str}~{end_str} 超时({timeout}s)，重新登录...")
                     bs_relogin()
                     continue
                 else:
-                    raise TimeoutError(f"{code} 请求超时({timeout}s)")
+                    print(f"      [SKIP] {code} {start_str}~{end_str} 超时，跳过此段")
+                    return None
 
             if error_holder[0]:
                 raise error_holder[0]
@@ -178,12 +180,8 @@ def fetch_stock_history(code, market, start_date, end_date, timeout=15):
             df = df[df['tradestatus'] == '1']
             return df
 
-        except TimeoutError:
-            raise
         except Exception as e:
             err_msg = str(e)
-            # Baostock 常见错误：解压失败、编码错误、连接断开
-            # 这些都说明 Baostock 会话已损坏，需要 re-login
             should_relogin = (
                 "codec can't decode" in err_msg or
                 "decompressing data" in err_msg or
@@ -197,14 +195,56 @@ def fetch_stock_history(code, market, start_date, end_date, timeout=15):
             )
 
             if should_relogin and attempt < max_attempts - 1:
-                print(f"    [RETRY] {code} Baostock错误({err_msg[:50]})，重新登录...")
+                print(f"      [RETRY] {code} {start_str}~{end_str} Baostock错误({err_msg[:40]})，重新登录...")
                 bs_relogin()
                 continue
             else:
-                # 最后一次尝试仍失败，或不可恢复错误
+                print(f"      [SKIP] {code} {start_str}~{end_str} 失败: {err_msg[:40]}")
                 return None
 
     return None
+
+
+def fetch_stock_history(code, market, start_date, end_date, timeout=30, chunk_years=3):
+    """
+    使用 Baostock 获取单只股票的历史行情（前复权）。
+    采用分块拉取策略：将日期范围按 chunk_years 年分块，每块独立超时控制。
+    单块失败不影响其他块，最终合并所有成功的数据。
+    返回: DataFrame 或 None
+    """
+    import pandas as pd
+
+    # 计算分块
+    chunk_days = 365 * chunk_years
+    chunks = []
+    current_start = start_date
+    while current_start < end_date:
+        current_end = min(current_start + timedelta(days=chunk_days), end_date)
+        chunks.append((current_start, current_end))
+        current_start = current_end + timedelta(days=1)
+
+    if len(chunks) <= 1:
+        # 只有一块，直接查询
+        return _fetch_single_query(code, market, start_date, end_date, timeout)
+
+    print(f"    [CHUNK] {code} 分 {len(chunks)} 块拉取 ({start_date} ~ {end_date})")
+
+    all_dfs = []
+    for i, (chunk_start, chunk_end) in enumerate(chunks):
+        df = _fetch_single_query(code, market, chunk_start, chunk_end, timeout)
+        if df is not None and len(df) > 0:
+            all_dfs.append(df)
+        if i < len(chunks) - 1:
+            time.sleep(0.1)  # 块间延迟
+
+    if not all_dfs:
+        return None
+
+    result = pd.concat(all_dfs, ignore_index=True)
+    failed_chunks = len(chunks) - len(all_dfs)
+    if failed_chunks > 0:
+        print(f"    [CHUNK] {code} {len(chunks)}块中成功{len(all_dfs)}块失败{failed_chunks}块，共{len(result)}条")
+    return result
 
 
 def build_daily_rows(db, code, name, market, df):
@@ -324,10 +364,12 @@ def main():
                        help="历史数据结束日期 (默认: 今天)")
     parser.add_argument("--max-stocks", type=int, default=None,
                        help="单次最多处理股票数 (默认: 无限制)")
-    parser.add_argument("--delay", type=float, default=0.05,
-                       help="股票间延迟秒数 (默认: 0.05)")
-    parser.add_argument("--timeout", type=int, default=15,
-                       help="单只股票请求超时秒数 (默认: 15)")
+    parser.add_argument("--delay", type=float, default=0.1,
+                       help="股票间延迟秒数 (默认: 0.1)")
+    parser.add_argument("--timeout", type=int, default=30,
+                       help="单只股票单次请求超时秒数 (默认: 30)")
+    parser.add_argument("--chunk-years", type=int, default=3,
+                       help="分块拉取的年数 (默认: 3年/块, 0=不分块)")
     parser.add_argument("--workers", type=int, default=3,
                        help="已弃用: Baostock不支持多进程并行, 保持串行模式")
     args = parser.parse_args()
@@ -410,7 +452,8 @@ def main():
                     fetch_start = date(1990, 1, 1)
 
             try:
-                df = fetch_stock_history(code, market, fetch_start, end_date, timeout=args.timeout)
+                df = fetch_stock_history(code, market, fetch_start, end_date,
+                                         timeout=args.timeout, chunk_years=args.chunk_years)
                 if df is None or len(df) == 0:
                     print(f"    [WARN] 未获取到数据，跳过")
                     total_failed += 1
