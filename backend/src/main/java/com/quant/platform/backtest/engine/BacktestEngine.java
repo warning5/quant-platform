@@ -2306,8 +2306,8 @@ public class BacktestEngine {
             try {
                 List<Double> icValues = factorIcService.getIcHistory(fc, rebalanceDate, 60);
                 if (icValues == null || icValues.isEmpty()) {
-                    log.debug("[BacktestEngine DynamicWeight] 因子 {} 在 {} 无IC历史数据，使用静态权重", fc, rebalanceDate);
-                    icScores.put(fc, 1.0);
+                    log.debug("[BacktestEngine DynamicWeight] 因子 {} 在 {} 无IC历史数据，使用保守默认权重0.05", fc, rebalanceDate);
+                    icScores.put(fc, 0.05);
                     continue;
                 }
 

@@ -470,6 +470,17 @@ public class DataUpdateService {
                     task.setProgress(100);
                     task.setCurrentStep(divOk ? "更新完成" : "更新失败");
                 }
+            } else if ("QFQ_REFRESH".equals(updateType)) {
+                // 前复权因子刷新：单次执行 refresh_qfq_history.py
+                task.setTotalStocks(1);
+                task.setCurrentStep("前复权因子刷新");
+                broadcastStatus(task);
+                boolean qfqOk = runSingleScript(taskId, task, cmd, "前复权刷新");
+                if (!"CANCELLED".equals(task.getStatus())) {
+                    task.setStatus(qfqOk ? "SUCCESS" : "FAILED");
+                    task.setProgress(100);
+                    task.setCurrentStep(qfqOk ? "更新完成" : "更新失败");
+                }
             } else if ("FINANCIAL".equals(updateType)) {
                 // 财务数据：执行 update_financial_data.py
                 task.setTotalStocks(1);
@@ -1160,6 +1171,38 @@ public class DataUpdateService {
             return cmd;
         }
 
+        // 前复权因子刷新（除权除息后重刷历史qfq价格）
+        if ("QFQ_REFRESH".equals(updateType)) {
+            cmd.add("refresh_qfq_history.py");
+            // days参数：查最近N天除权股票（调度默认1天，手动默认7天）
+            int days = 7; // 默认7天（手动触发）
+            if (request.getLimit() != null && request.getLimit() > 0) {
+                days = request.getLimit();
+            }
+            cmd.add("--days");
+            cmd.add(String.valueOf(days));
+            // 不限制历史范围：除权除息后 qfq 因子会 retroactive 更新全部历史，必须从上市日拉到今天
+            String startDate = request.getStartDate();
+            if (startDate != null && !startDate.isEmpty()) {
+                cmd.add("--start-date");
+                cmd.add(startDate);
+            }
+            String endDate = request.getEndDate();
+            if (endDate != null && !endDate.isEmpty()) {
+                cmd.add("--end-date");
+                cmd.add(endDate);
+            }
+            String singleCode = request.getSingleCode();
+            if (singleCode != null && !singleCode.isEmpty()) {
+                cmd.add("--code");
+                cmd.add(singleCode);
+            }
+            // 超时15s（Baostock正常响应<5s，15s足够）
+            cmd.add("--timeout");
+            cmd.add("15");
+            return cmd;
+        }
+
         // 内外盘数据（调用 update_stock_data.py --bidask-only）
         if ("BIDASK".equals(updateType)) {
             cmd.add("update_stock_data.py");
@@ -1345,8 +1388,9 @@ public class DataUpdateService {
     private int estimateTotalStocks(DataUpdateRequest request) {
         LambdaQueryWrapper<StockInfo> wrapper = new LambdaQueryWrapper<>();
 
-        // 分红除权只覆盖 SH+SZ
-        if ("DIVIDEND".equals(request.getUpdateType())) {
+        // 分红除权 + 前复权刷新 只覆盖 SH+SZ
+        if ("DIVIDEND".equals(request.getUpdateType())
+                || "QFQ_REFRESH".equals(request.getUpdateType())) {
             wrapper.in(StockInfo::getMarket, "SH", "SZ");
         } else if ("BAOSTOCK".equals(request.getSource())) {
             wrapper.in(StockInfo::getMarket, "SH", "SZ");

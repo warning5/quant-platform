@@ -360,11 +360,13 @@ public class ScheduleConfigController {
                 req.setFetchEarningsReport(true); req.setFetchQvix(true);
                 break;
             case "RESEARCH":       req.setUpdateType("RESEARCH"); break;
+            case "QFQ_REFRESH":    req.setUpdateType("QFQ_REFRESH"); break;
             case "FACTOR_COMPUTE": req.setUpdateType("FACTOR_COMPUTE"); break;
             case "DATA_FRESHNESS": /* 质量检查: 已在 ScheduleService 中特殊处理 */ break;
             case "PRICE_ANOMALY":  /* 质量检查: 已在 ScheduleService 中特殊处理 */ break;
             case "RECOMMENDATION_TRACK": /* P1-4: 已在 ScheduleService 中特殊处理 */ break;
             case "DAILY_RECOMMENDATION": /* Phase 2: 已在 ScheduleService 中特殊处理 */ break;
+            case "FACTOR_HEALTH_CHECK": /* P3-11: 已在 ScheduleService 中特殊处理 */ break;
             default: throw new IllegalArgumentException("未知的任务类型: " + taskKey);
         }
 
@@ -405,9 +407,9 @@ public class ScheduleConfigController {
      */
     @DeleteMapping("/{taskKey}")
     public ApiResponse<Boolean> deleteConfig(@PathVariable String taskKey) {
-        String[] systemKeys = {"GLOBAL", "DAILY", "INDEX", "DIVIDEND", "FINANCIAL", "BIDASK",
+        String[] systemKeys = {"GLOBAL", "DAILY", "INDEX", "DIVIDEND", "QFQ_REFRESH", "FINANCIAL", "BIDASK",
             "SENTIMENT_MF", "SENTIMENT_OTHER", "RESEARCH", "DATA_FRESHNESS", "PRICE_ANOMALY",
-            "FACTOR_NULL_CHECK", "FINANCIAL_ANOMALY", "RECOMMENDATION_TRACK", "DAILY_RECOMMENDATION"};
+            "FACTOR_NULL_CHECK", "FINANCIAL_ANOMALY", "RECOMMENDATION_TRACK", "DAILY_RECOMMENDATION", "FACTOR_HEALTH_CHECK"};
         for (String sk : systemKeys) {
             if (sk.equalsIgnoreCase(taskKey)) {
                 return ApiResponse.error("不允许删除系统预定义任务: " + taskKey);
@@ -432,7 +434,7 @@ public class ScheduleConfigController {
     @GetMapping("/dependencies")
     public ApiResponse<List<Map<String, Object>>> getDependencies() {
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-            "SELECT d.id, d.upstream_key, d.downstream_key, d.delay_seconds, " +
+            "SELECT d.id, d.upstream_key, d.downstream_key, d.delay_seconds, d.require_all_upstreams, " +
             "u.task_name AS upstream_name, v.task_name AS downstream_name, " +
             "d.created_at, d.updated_at " +
             "FROM data_task_dependency d " +
@@ -464,6 +466,8 @@ public class ScheduleConfigController {
         String downstream = (String) body.get("downstreamKey");
         Integer delaySeconds = body.get("delaySeconds") != null
             ? ((Number) body.get("delaySeconds")).intValue() : 300;
+        Integer requireAll = body.get("requireAllUpstreams") != null
+            ? (((Number) body.get("requireAllUpstreams")).intValue() != 0 ? 1 : 0) : 0;
 
         if (upstream == null || downstream == null || upstream.isBlank() || downstream.isBlank()) {
             return ApiResponse.error("上游和下游任务不能为空");
@@ -486,9 +490,9 @@ public class ScheduleConfigController {
         }
 
         jdbcTemplate.update(
-            "INSERT INTO data_task_dependency (upstream_key, downstream_key, delay_seconds) VALUES (?, ?, ?)",
-            upstream, downstream, delaySeconds);
-        log.info("[ScheduleConfig] 新增依赖: {} → {} (延迟{}秒)", upstream, downstream, delaySeconds);
+            "INSERT INTO data_task_dependency (upstream_key, downstream_key, delay_seconds, require_all_upstreams) VALUES (?, ?, ?, ?)",
+            upstream, downstream, delaySeconds, requireAll);
+        log.info("[ScheduleConfig] 新增依赖: {} → {} (延迟{}秒, requireAll={})", upstream, downstream, delaySeconds, requireAll);
         scheduleService.refreshDependencyChain();
         return ApiResponse.success(true);
     }

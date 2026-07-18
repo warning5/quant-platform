@@ -129,6 +129,14 @@ public class FactorComputeEngine {
         // 2026-07-12 恢复注册（E策略需要VAL_DIVIDEND_YIELD）
         registerBuiltin(new BuiltinFactors.DividendYieldCalculator());
 
+        // P1-5: 形态伪因子注册（6个：综合强度 + 5个形态类型）
+        registerBuiltin(new BuiltinFactors.PatternStrengthCalculator());
+        registerBuiltin(new BuiltinFactors.PatternBottomReversalCalculator());
+        registerBuiltin(new BuiltinFactors.PatternMainTrendCalculator());
+        registerBuiltin(new BuiltinFactors.PatternBreakoutCalculator());
+        registerBuiltin(new BuiltinFactors.PatternSmallSwingCalculator());
+        registerBuiltin(new BuiltinFactors.PatternBottomConfirmedCalculator());
+
         // 注册财务因子（8个ACTIVE）
         registerFinancial(new FinancialFactors.RoeCalc());
         registerFinancial(new FinancialFactors.RevenueYoyCalc());
@@ -1287,7 +1295,8 @@ public class FactorComputeEngine {
      */
     private BigDecimal computeSingleValue(FactorDefinition factor, String symbol, LocalDate calcDate,
                                           List<MarketDailyBar> history, Map<String, Object> context) {
-        if (factor.getFactorType() == FactorDefinition.FactorType.BUILTIN) {
+        if (factor.getFactorType() == FactorDefinition.FactorType.BUILTIN
+                || factor.getFactorType() == FactorDefinition.FactorType.PATTERN) {
             FactorCalculator calc = builtinCalculators.get(factor.getFactorCode());
             if (calc != null) {
                 return calc.calculate(symbol, calcDate, history, context);

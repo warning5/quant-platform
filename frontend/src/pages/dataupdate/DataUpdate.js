@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
-  Card, Row, Col, Statistic, Button, Input, Select, DatePicker, Form,
+  Card, Row, Col, Statistic, Button, Input, InputNumber, Select, DatePicker, Form,
   Checkbox, Tag, Typography, Space, Alert, Table, Tooltip, Progress, Badge, Divider, Tabs, Spin, Modal, Popconfirm, Radio, Collapse
 } from 'antd';
 import { QuestionCircleOutlined } from '@ant-design/icons';
@@ -12,7 +12,8 @@ import {
   DatabaseOutlined, RiseOutlined, FallOutlined,
   CalendarOutlined, BarChartOutlined, PieChartOutlined, DollarOutlined,
   LineChartOutlined, GiftOutlined, FileTextOutlined, DeleteOutlined, ExclamationCircleOutlined,
-  LockOutlined, CheckSquareOutlined, CloseSquareOutlined, FlagOutlined
+  LockOutlined, CheckSquareOutlined, CloseSquareOutlined, FlagOutlined,
+  SyncOutlined
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { dataUpdateApi, financialApi, calendarApi, silentConfig } from '../../api/index';
@@ -313,6 +314,12 @@ function DataUpdate() {
   const [researchValidateResult, setResearchValidateResult] = useState(null);
   const [researchValidateLoading, setResearchValidateLoading] = useState(false);
 
+  // 前复权因子刷新
+  const [qfqTask, setQfqTask] = useState(null);
+  const [qfqLogs, setQfqLogs] = useState([]);
+  const qfqLogRef = useRef(null);
+  const [qfqForm] = Form.useForm();
+
   // ========== 退市股票管理 ==========
   const [delistedStocks, setDelistedStocks] = useState([]);
   const [delistedLoading, setDelistedLoading] = useState(false);
@@ -583,6 +590,7 @@ function DataUpdate() {
       case 'SENTIMENT': return setSentimentTask;
       case 'BIDASK': return setBidaskTask;
       case 'RESEARCH': return setResearchTask;
+      case 'QFQ_REFRESH': return setQfqTask;
       default: return setDailyTask;
     }
   }, []);
@@ -595,6 +603,7 @@ function DataUpdate() {
       case 'SENTIMENT': return setSentimentLogs;
       case 'BIDASK': return setBidaskLogs;
       case 'RESEARCH': return setResearchLogs;
+      case 'QFQ_REFRESH': return setQfqLogs;
       default: return setDailyLogs;
     }
   }, []);
@@ -729,6 +738,31 @@ function DataUpdate() {
   useEffect(() => {
     if (researchLogRef.current) researchLogRef.current.scrollTop = researchLogRef.current.scrollHeight;
   }, [researchLogs]);
+
+  useEffect(() => {
+    if (qfqLogRef.current) qfqLogRef.current.scrollTop = qfqLogRef.current.scrollHeight;
+  }, [qfqLogs]);
+
+  // 前复权任务运行中但日志为空时，自动定期补拉（解决定时任务触发后无日志的问题）
+  useEffect(() => {
+    if (qfqTask?.status !== 'RUNNING' || qfqLogs.length > 0) return;
+    const timer = setInterval(async () => {
+      if (!qfqTask?.taskId) return;
+      try {
+        const logs = await dataUpdateApi.getTaskLogs(qfqTask.taskId);
+        if (logs && logs.length > 0) {
+          setQfqLogs(prev => {
+            const existingTexts = new Set(prev.map(l => l.text));
+            const newEntries = logs
+              .filter(l => !existingTexts.has(l.line))
+              .map(l => ({ id: Date.now() + Math.random(), time: l.time || '', text: l.line || '' }));
+            return newEntries.length > 0 ? [...prev, ...newEntries] : prev;
+          });
+        }
+      } catch (_) {}
+    }, 10000);
+    return () => clearInterval(timer);
+  }, [qfqTask?.status, qfqTask?.taskId, qfqLogs.length]);
 
   const fetchCoverage = useCallback(async () => {
     const isFirst = !coverageFetchedRef.current;
@@ -1035,7 +1069,7 @@ function DataUpdate() {
   // ========== 提交任务 ==========
   const handleSubmit = async (updateType) => {
     // 检查是否已有其它任务在运行
-    const runningTask = [dailyTask, indexTask, dividendTask, financialTask, sentimentTask, bidaskTask, researchTask]
+    const runningTask = [dailyTask, indexTask, dividendTask, financialTask, sentimentTask, bidaskTask, researchTask, qfqTask]
       .find(t => t?.status === 'RUNNING');
     if (runningTask) {
       message.warning('已有数据更新任务正在运行，请等待完成后再启动新任务');
@@ -1048,7 +1082,9 @@ function DataUpdate() {
         : updateType === 'FINANCIAL' ? financialForm
         : updateType === 'SENTIMENT' ? sentimentForm
         : updateType === 'RESEARCH' ? researchForm
-        : updateType === 'BIDASK' ? bidaskForm : form;
+        : updateType === 'BIDASK' ? bidaskForm
+        : updateType === 'QFQ_REFRESH' ? qfqForm
+        : form;
       const values = await currentForm.validateFields();
       const dates = values.dateRange;
       const request = {
@@ -1174,6 +1210,7 @@ function DataUpdate() {
       : updateType === 'SENTIMENT' ? sentimentTask
       : updateType === 'RESEARCH' ? researchTask
       : updateType === 'BIDASK' ? bidaskTask
+      : updateType === 'QFQ_REFRESH' ? qfqTask
       : dailyTask;
     if (!task || !task.taskId) return;
     try {
@@ -2226,19 +2263,54 @@ function DataUpdate() {
                       <Checkbox>新闻</Checkbox>
                     </Form.Item>
                     <Form.Item name="fetchBondYield" valuePropName="checked" style={{ marginBottom: 0 }}>
-                      <Checkbox>国债收益率</Checkbox>
+                      <Checkbox>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                          国债收益率
+                          <Tooltip title="国债收益率曲线数据（中债/交易所），用于宏观择时、风险溢价模型和无风险利率基准">
+                            <QuestionCircleOutlined style={{ color: '#999', fontSize: 12 }} />
+                          </Tooltip>
+                        </span>
+                      </Checkbox>
                     </Form.Item>
                     <Form.Item name="fetchShenwanIndex" valuePropName="checked" style={{ marginBottom: 0 }}>
-                      <Checkbox>申万行业指数</Checkbox>
+                      <Checkbox>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                          申万行业指数
+                          <Tooltip title="申万一级/二级行业指数行情，用于行业轮动、行业相对强弱和因子风格归因">
+                            <QuestionCircleOutlined style={{ color: '#999', fontSize: 12 }} />
+                          </Tooltip>
+                        </span>
+                      </Checkbox>
                     </Form.Item>
                     <Form.Item name="fetchConsensusEstimate" valuePropName="checked" style={{ marginBottom: 0 }}>
-                      <Checkbox>一致预期</Checkbox>
+                      <Checkbox>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                          一致预期
+                          <Tooltip title="同花顺/东方财富一致预期数据（预测净利润、EPS），用于事件驱动策略对比实际业绩 vs 预期">
+                            <QuestionCircleOutlined style={{ color: '#999', fontSize: 12 }} />
+                          </Tooltip>
+                        </span>
+                      </Checkbox>
                     </Form.Item>
                     <Form.Item name="fetchEarningsReport" valuePropName="checked" style={{ marginBottom: 0 }}>
-                      <Checkbox>业绩快报</Checkbox>
+                      <Checkbox>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                          业绩快报
+                          <Tooltip title="东方财富业绩快报数据（EPS/营收/净利/ROE等），用于事件驱动策略判断业绩超预期或不及预期">
+                            <QuestionCircleOutlined style={{ color: '#999', fontSize: 12 }} />
+                          </Tooltip>
+                        </span>
+                      </Checkbox>
                     </Form.Item>
                     <Form.Item name="fetchQvix" valuePropName="checked" style={{ marginBottom: 0 }}>
-                      <Checkbox>QVIX恐慌指数</Checkbox>
+                      <Checkbox>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                          QVIX恐慌指数
+                          <Tooltip title="中国VIX指数（50ETF/300ETF/500ETF/创业板指），用于市场情绪策略判断市场恐慌程度">
+                            <QuestionCircleOutlined style={{ color: '#999', fontSize: 12 }} />
+                          </Tooltip>
+                        </span>
+                      </Checkbox>
                     </Form.Item>
                   </div>
                 </div>
@@ -2747,6 +2819,81 @@ function DataUpdate() {
     );
   };
 
+  // ========== 前复权因子刷新 Tab ==========
+  const renderQfqRefreshTab = () => {
+    const isRunning = qfqTask?.status === 'RUNNING';
+    return (
+      <>
+        {/* 说明卡片 */}
+        <Card size="small" style={{ marginBottom: 16 }}>
+          <Alert
+            message="前复权因子刷新"
+            description={
+              <div style={{ fontSize: 13 }}>
+                <p style={{ margin: '4px 0' }}>
+                  除权除息后，Baostock 会 retroactive 更新所有历史前复权因子。本任务查询近 N 天除权股票，重新拉取完整历史 qfq 数据并写入 ClickHouse（以 update_time=now() 确保覆盖旧快照）。
+                </p>
+                <p style={{ margin: '4px 0', color: '#8c8c8c' }}>
+                  <SyncOutlined style={{ marginRight: 4 }} />
+                  依赖链：分红除权(DIVIDEND) → 前复权刷新(QFQ_REFRESH) → 因子计算(FACTOR_COMPUTE)
+                </p>
+              </div>
+            }
+            type="info" showIcon
+          />
+        </Card>
+
+        {/* 配置 */}
+        <Card title="刷新配置" size="small" style={{ marginBottom: 16 }}>
+          <Form form={qfqForm} layout="inline" initialValues={{ limit: 7 }}>
+            <Row gutter={[16, 12]} style={{ width: '100%' }}>
+              <Col>
+                <span style={{ lineHeight: '32px', color: '#8c8c8c', fontSize: 13 }}>
+                  <SyncOutlined style={{ marginRight: 4 }} />
+                  查询近 N 天除权股票并重刷历史 qfq 数据（Baostock adjustflag=2）
+                </span>
+              </Col>
+            </Row>
+            <Row gutter={[16, 12]} style={{ width: '100%', marginBottom: 12 }}>
+              <Col>
+                <Form.Item name="limit" label="查询天数" style={{ marginBottom: 0 }}>
+                  <InputNumber min={1} max={365} style={{ width: 100 }} />
+                </Form.Item>
+              </Col>
+            </Row>
+            <Row style={{ width: '100%' }}>
+              <Col>
+                <Space size={12}>
+                  <Button type="primary" icon={isRunning ? <LockOutlined /> : <PlayCircleOutlined />}
+                    onClick={() => handleSubmit('QFQ_REFRESH')} disabled={isRunning}>
+                    开始刷新
+                  </Button>
+                  <Button danger icon={<StopOutlined />}
+                    onClick={() => handleCancel('QFQ_REFRESH')} disabled={!isRunning}>
+                    取消任务
+                  </Button>
+                  {isRunning && <Tag color="processing">任务运行中...</Tag>}
+                  {qfqTask && qfqTask.status === 'SUCCESS' && <Tag color="success">刷新完成</Tag>}
+                  {qfqTask && qfqTask.status === 'FAILED' && <Tag color="error">刷新失败</Tag>}
+                  {qfqTask && qfqTask.status === 'INTERRUPTED' && <Tag color="warning">已中断</Tag>}
+                </Space>
+              </Col>
+            </Row>
+          </Form>
+        </Card>
+
+        {/* 进度条 */}
+        {renderProgressBar(qfqTask)}
+
+        {/* 日志 */}
+        <Card title={<span>刷新日志 <Text type="secondary" style={{ fontSize: 12 }}>({qfqLogs.length} 条)</Text>{renderTaskConfig(qfqTask, 'QFQ_REFRESH')}</span>}
+          size="small" extra={<Button size="small" onClick={() => setQfqLogs([])}>清空</Button>}>
+          {renderLogs(qfqLogs, qfqLogRef, qfqTask?.status)}
+        </Card>
+      </>
+    );
+  };
+
 
   // ========== 指数完整性检查 ==========
   const renderIndexIntegrity = () => (
@@ -3001,6 +3148,12 @@ function DataUpdate() {
               forceRender: true,
               label: <span><FileTextOutlined /> 研报数据</span>,
               children: <div style={{ padding: '16px 0' }}>{renderResearchTab()}</div>,
+            },
+            {
+              key: 'QFQ_REFRESH',
+              forceRender: true,
+              label: <span><SyncOutlined /> 前复权刷新</span>,
+              children: <div style={{ padding: '16px 0' }}>{renderQfqRefreshTab()}</div>,
             },
             {
               key: 'DELISTED',

@@ -115,11 +115,20 @@ public class StockRecommendation {
     /** 次日收益率% */
     private Double nextDayReturn;
 
+    /** 次日超额收益率%（vs 沪深300） */
+    private Double nextDayExcessReturn;
+
     /** 一周收益率% */
     private Double nextWeekReturn;
 
+    /** 一周超额收益率%（vs 沪深300） */
+    private Double nextWeekExcessReturn;
+
     /** 一月收益率% */
     private Double nextMonthReturn;
+
+    /** 一月超额收益率%（vs 沪深300） */
+    private Double nextMonthExcessReturn;
 
     /** 追踪更新时间 */
     private LocalDateTime trackingUpdatedAt;

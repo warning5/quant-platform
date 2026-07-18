@@ -657,4 +657,166 @@ public class BuiltinFactors {
             return BigDecimal.valueOf(ratio).setScale(8, RoundingMode.HALF_UP);
         }
     }
+
+    // ====================================================================
+    // 形态伪因子（P1-5）— PATTERN策略信号强度作为因子参与ICW
+    // 每个形态类型对应一个因子，值=score/100.0（0~1范围）
+    // PATTERN_STRENGTH = 最强形态得分（综合信号强度）
+    // ====================================================================
+
+    /**
+     * 形态综合强度因子 (PATTERN_STRENGTH) = 最强检测形态得分 / 100.0
+     * 范围 [0, 1]，0=无形态检测到，1=最强形态满分
+     */
+    public static class PatternStrengthCalculator implements FactorCalculator {
+        @Override
+        public String getFactorCode() { return "PATTERN_STRENGTH"; }
+
+        @Override
+        public BigDecimal calculate(String symbol, LocalDate calcDate,
+                                List<MarketDailyBar> history, Map<String, Object> context) {
+            if (history.size() < 60) return null;
+            double[] high = history.stream().mapToDouble(b -> b.getHigh().doubleValue()).toArray();
+            double[] low = history.stream().mapToDouble(b -> b.getLow().doubleValue()).toArray();
+            double[] open = history.stream().mapToDouble(b -> b.getOpen().doubleValue()).toArray();
+            double[] close = history.stream().mapToDouble(b -> b.getClose().doubleValue()).toArray();
+            double[] volume = history.stream().mapToDouble(b -> b.getVol().doubleValue()).toArray();
+
+            PatternDetector.PatternResult strongest = PatternDetector.getStrongestPattern(high, low, open, close, volume);
+            if (strongest == null) return BigDecimal.ZERO;
+            double val = strongest.getScore() / 100.0;
+            if (Double.isNaN(val) || Double.isInfinite(val)) return null;
+            return BigDecimal.valueOf(val).setScale(8, RoundingMode.HALF_UP);
+        }
+    }
+
+    /**
+     * 底部反转形态因子 (PATTERN_BOTTOM_REVERSAL)
+     */
+    public static class PatternBottomReversalCalculator implements FactorCalculator {
+        @Override
+        public String getFactorCode() { return "PATTERN_BOTTOM_REVERSAL"; }
+
+        @Override
+        public BigDecimal calculate(String symbol, LocalDate calcDate,
+                                List<MarketDailyBar> history, Map<String, Object> context) {
+            if (history.size() < 60) return null;
+            double[] high = history.stream().mapToDouble(b -> b.getHigh().doubleValue()).toArray();
+            double[] low = history.stream().mapToDouble(b -> b.getLow().doubleValue()).toArray();
+            double[] open = history.stream().mapToDouble(b -> b.getOpen().doubleValue()).toArray();
+            double[] close = history.stream().mapToDouble(b -> b.getClose().doubleValue()).toArray();
+            double[] volume = history.stream().mapToDouble(b -> b.getVol().doubleValue()).toArray();
+
+            PatternDetector.PatternResult r = PatternDetector.detect(
+                    PatternDetector.PatternType.BOTTOM_REVERSAL, high, low, open, close, volume);
+            if (r == null) return BigDecimal.ZERO;
+            double val = r.getScore() / 100.0;
+            if (Double.isNaN(val) || Double.isInfinite(val)) return null;
+            return BigDecimal.valueOf(val).setScale(8, RoundingMode.HALF_UP);
+        }
+    }
+
+    /**
+     * 主升浪形态因子 (PATTERN_MAIN_TREND)
+     */
+    public static class PatternMainTrendCalculator implements FactorCalculator {
+        @Override
+        public String getFactorCode() { return "PATTERN_MAIN_TREND"; }
+
+        @Override
+        public BigDecimal calculate(String symbol, LocalDate calcDate,
+                                List<MarketDailyBar> history, Map<String, Object> context) {
+            if (history.size() < 60) return null;
+            double[] high = history.stream().mapToDouble(b -> b.getHigh().doubleValue()).toArray();
+            double[] low = history.stream().mapToDouble(b -> b.getLow().doubleValue()).toArray();
+            double[] open = history.stream().mapToDouble(b -> b.getOpen().doubleValue()).toArray();
+            double[] close = history.stream().mapToDouble(b -> b.getClose().doubleValue()).toArray();
+            double[] volume = history.stream().mapToDouble(b -> b.getVol().doubleValue()).toArray();
+
+            PatternDetector.PatternResult r = PatternDetector.detect(
+                    PatternDetector.PatternType.MAIN_TREND, high, low, open, close, volume);
+            if (r == null) return BigDecimal.ZERO;
+            double val = r.getScore() / 100.0;
+            if (Double.isNaN(val) || Double.isInfinite(val)) return null;
+            return BigDecimal.valueOf(val).setScale(8, RoundingMode.HALF_UP);
+        }
+    }
+
+    /**
+     * 变盘突破形态因子 (PATTERN_BREAKOUT)
+     */
+    public static class PatternBreakoutCalculator implements FactorCalculator {
+        @Override
+        public String getFactorCode() { return "PATTERN_BREAKOUT"; }
+
+        @Override
+        public BigDecimal calculate(String symbol, LocalDate calcDate,
+                                List<MarketDailyBar> history, Map<String, Object> context) {
+            if (history.size() < 30) return null;
+            double[] high = history.stream().mapToDouble(b -> b.getHigh().doubleValue()).toArray();
+            double[] low = history.stream().mapToDouble(b -> b.getLow().doubleValue()).toArray();
+            double[] open = history.stream().mapToDouble(b -> b.getOpen().doubleValue()).toArray();
+            double[] close = history.stream().mapToDouble(b -> b.getClose().doubleValue()).toArray();
+            double[] volume = history.stream().mapToDouble(b -> b.getVol().doubleValue()).toArray();
+
+            PatternDetector.PatternResult r = PatternDetector.detect(
+                    PatternDetector.PatternType.BREAKOUT, high, low, open, close, volume);
+            if (r == null) return BigDecimal.ZERO;
+            double val = r.getScore() / 100.0;
+            if (Double.isNaN(val) || Double.isInfinite(val)) return null;
+            return BigDecimal.valueOf(val).setScale(8, RoundingMode.HALF_UP);
+        }
+    }
+
+    /**
+     * 小波段形态因子 (PATTERN_SMALL_SWING)
+     */
+    public static class PatternSmallSwingCalculator implements FactorCalculator {
+        @Override
+        public String getFactorCode() { return "PATTERN_SMALL_SWING"; }
+
+        @Override
+        public BigDecimal calculate(String symbol, LocalDate calcDate,
+                                List<MarketDailyBar> history, Map<String, Object> context) {
+            if (history.size() < 30) return null;
+            double[] high = history.stream().mapToDouble(b -> b.getHigh().doubleValue()).toArray();
+            double[] low = history.stream().mapToDouble(b -> b.getLow().doubleValue()).toArray();
+            double[] open = history.stream().mapToDouble(b -> b.getOpen().doubleValue()).toArray();
+            double[] close = history.stream().mapToDouble(b -> b.getClose().doubleValue()).toArray();
+            double[] volume = history.stream().mapToDouble(b -> b.getVol().doubleValue()).toArray();
+
+            PatternDetector.PatternResult r = PatternDetector.detect(
+                    PatternDetector.PatternType.SMALL_SWING, high, low, open, close, volume);
+            if (r == null) return BigDecimal.ZERO;
+            double val = r.getScore() / 100.0;
+            if (Double.isNaN(val) || Double.isInfinite(val)) return null;
+            return BigDecimal.valueOf(val).setScale(8, RoundingMode.HALF_UP);
+        }
+    }
+
+    /**
+     * 底部探明形态因子 (PATTERN_BOTTOM_CONFIRMED)
+     */
+    public static class PatternBottomConfirmedCalculator implements FactorCalculator {
+        @Override
+        public String getFactorCode() { return "PATTERN_BOTTOM_CONFIRMED"; }
+
+        @Override
+        public BigDecimal calculate(String symbol, LocalDate calcDate,
+                                List<MarketDailyBar> history, Map<String, Object> context) {
+            if (history.size() < 30) return null;
+            double[] high = history.stream().mapToDouble(b -> b.getHigh().doubleValue()).toArray();
+            double[] low = history.stream().mapToDouble(b -> b.getLow().doubleValue()).toArray();
+            double[] open = history.stream().mapToDouble(b -> b.getOpen().doubleValue()).toArray();
+            double[] close = history.stream().mapToDouble(b -> b.getClose().doubleValue()).toArray();
+            double[] volume = history.stream().mapToDouble(b -> b.getVol().doubleValue()).toArray();
+
+            PatternDetector.PatternResult r = PatternDetector.detect(
+                    PatternDetector.PatternType.BOTTOM_CONFIRMED, high, low, open, close, volume);
+            if (r == null) return BigDecimal.ZERO;
+            double val = r.getScore() / 100.0;
+            if (Double.isNaN(val) || Double.isInfinite(val)) return null;
+            return BigDecimal.valueOf(val).setScale(8, RoundingMode.HALF_UP);
+        }
+    }
 }

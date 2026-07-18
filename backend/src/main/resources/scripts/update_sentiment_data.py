@@ -1540,8 +1540,13 @@ def run_westock_moneyflow(args):
         conn.close()
         bex = {s for s in all_name_map if s.startswith(("8", "4", "9", "2"))}
         target = []
+        skipped_delisted = 0
         for code in all_name_map:
             if code in bex or len(code) != 6:
+                continue
+            name = all_name_map[code]
+            if "退" in name:
+                skipped_delisted += 1
                 continue
             ts = code + (".SH" if code.startswith(("6", "5")) else ".SZ")
             cnt = existing.get(ts, 0)
@@ -1549,8 +1554,10 @@ def run_westock_moneyflow(args):
 
             if not args.force and cnt >= expected_days * 0.8:
                 continue
-            target.append((ts, code, all_name_map[code]))
+            target.append((ts, code, name))
         target.sort()
+        if skipped_delisted:
+            print(f"  （跳过 {skipped_delisted} 只退市股票）")
 
     print(f"=== Westock 资金流向补全: {len(target)} 只 ===")
 
@@ -1595,7 +1602,7 @@ def run_westock_moneyflow(args):
     ch_client = clickhouse_connect.get_client(**CLICKHOUSE_CONFIG)
 
     BATCH_SIZE = 10  # 每批 10 只（westock 单次最多 10 只）
-    PARALLEL = 5     # 并行 API 调用数
+    PARALLEL = 2     # 降并发：westock 底层 API 并发限流，5 路同时请求会返回空结果
     batches = [target[i:i + BATCH_SIZE] for i in range(0, len(target), BATCH_SIZE)]
     total_batches = len(batches)
     grand_start = datetime.datetime.now()
@@ -1667,6 +1674,29 @@ def run_westock_moneyflow(args):
     query_elapsed = (datetime.datetime.now() - query_start).total_seconds()
     failed_batch_count = len(failed_batch_indices)
     print(f"  并行查询完成，耗时 {query_elapsed:.1f}s（失败批次: {failed_batch_count}, 重试救回: {retry_rescued}）")
+
+    # ── 阶段 1b：失败批次串行重试（逐个查询，避免并发限流）──
+    if failed_batch_indices:
+        import time as _retry_time
+        print(f"  开始串行重试 {len(failed_batch_indices)} 个失败批次（逐个，间隔 3s）...")
+        still_failed = []
+        for fb_idx in failed_batch_indices:
+            _retry_time.sleep(3)  # 每次重试前等 3 秒，让 API 冷却
+            try:
+                result = _fetch_batch_moneyflow(batches[fb_idx], date_label)
+                if result and any(rows for rows in result.values()):
+                    all_results[fb_idx] = result
+                    print(f"  [串行重试 OK] 第 {fb_idx+1} 批成功")
+                    retry_rescued += 1
+                else:
+                    print(f"  [串行重试 FAIL] 第 {fb_idx+1} 批仍无数据")
+                    still_failed.append(fb_idx)
+            except Exception as e:
+                print(f"  [串行重试 FAIL] 第 {fb_idx+1} 批异常: {e}")
+                still_failed.append(fb_idx)
+        failed_batch_indices = still_failed
+        if failed_batch_indices:
+            print(f"  串行重试后仍失败 {len(failed_batch_indices)} 批: {[i+1 for i in failed_batch_indices]}")
 
     # ── 阶段 2：顺序回填 close/pct_change + 双写（确保写入安全）──
     write_start = datetime.datetime.now()
@@ -1825,6 +1855,7 @@ def run_westock_refresh(args):
               AND code NOT LIKE '8%'
               AND name NOT LIKE 'ST%'
               AND name NOT LIKE '*ST%'
+              AND name NOT LIKE '%退%'
               AND LENGTH(code) = 6
             ORDER BY code
         """)
@@ -1853,7 +1884,7 @@ def run_westock_refresh(args):
 
     # ── 多线程并行查询 westock-data ──────────────────────────
     # 每只股票内部按月串行（同一 API 并发无意义），不同股票间并行
-    WORKERS = 5   # westock 限流约 7-8 次/秒，5 并发留余量（每只股票内部按月串行）
+    WORKERS = 2   # 降并发：westock 底层 API 并发限流，5 路同时请求会返回空结果
 
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
         futures = {

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Card, Table, Tag, Space, Typography, Row, Col, Statistic, Input, Button, Popconfirm, Spin, Tooltip, DatePicker } from 'antd';
+import { Card, Table, Tag, Space, Typography, Row, Col, Statistic, Input, Button, Popconfirm, Spin, Tooltip, DatePicker, Select } from 'antd';
 import { message } from '../../utils/messageUtil';
 import { SearchOutlined, ReloadOutlined, FileTextOutlined, BankOutlined, CalendarOutlined, QuestionCircleOutlined, DeleteOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
@@ -18,6 +18,9 @@ const RATING_COLORS = {
   '减持': 'green',
   '卖出': 'purple',
 };
+const RATING_OPTIONS = ['全部', ...Object.keys(RATING_COLORS)];
+
+const { Option } = Select;
 
 // 评级文案
 const epsTip = `EPS（Earnings Per Share，每股收益）= 净利润 ÷ 总股本，反映每股盈利水平，越高越好。\n数值对应各年度的券商预测值，负值表示预期亏损。`;
@@ -41,6 +44,7 @@ function ResearchData() {
   const [pageSize, setPageSize] = useState(10);
   const [keyword, setKeyword] = useState('');
   const [dateRange, setDateRange] = useState(null);
+  const [rating, setRating] = useState('');
   const [selectedRowKeys, setSelectedRowKeys] = useState([]);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
@@ -78,6 +82,9 @@ function ResearchData() {
     if (dateRange && dateRange[0] && dateRange[1]) {
       params.startDate = dateRange[0].format('YYYY-MM-DD');
       params.endDate = dateRange[1].format('YYYY-MM-DD');
+    }
+    if (rating) {
+      params.rating = rating;
     }
     researchApi.getList(params, silentConfig)
       .then(data => {
@@ -224,8 +231,12 @@ function ResearchData() {
               style={{ width: 200 }} prefix={<SearchOutlined />} allowClear />
             <DatePicker.RangePicker value={dateRange} onChange={setDateRange}
               allowClear style={{ width: 240 }} />
+            <Select placeholder="按评级" value={rating || '全部'} onChange={val => setRating(val === '全部' ? '' : val)}
+              style={{ width: 120 }}>
+              {RATING_OPTIONS.map(r => <Option key={r} value={r}>{r}</Option>)}
+            </Select>
             <Button type="primary" icon={<SearchOutlined />} onClick={() => fetchReports(1)}>搜索</Button>
-            <Button icon={<ReloadOutlined />} onClick={() => { setKeyword(''); setDateRange(null); fetchReports(1); }}>重置</Button>
+            <Button icon={<ReloadOutlined />} onClick={() => { setKeyword(''); setDateRange(null); setRating(''); fetchReports(1); }}>重置</Button>
             {selectedRowKeys.length > 0 && (
               <Popconfirm title={`确定删除 ${selectedRowKeys.length} 条记录？`} onConfirm={handleBatchDelete}
                 okText="确定" cancelText="取消" okButtonProps={{ danger: true }}>

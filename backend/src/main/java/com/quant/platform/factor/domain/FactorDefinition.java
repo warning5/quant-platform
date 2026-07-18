@@ -161,7 +161,8 @@ public class FactorDefinition implements Serializable {
     public enum FactorType {
         BUILTIN,    // 内置因子
         SCRIPTED,   // 脚本因子
-        COMPOSITE   // 合成因子
+        COMPOSITE,  // 合成因子
+        PATTERN     // 形态伪因子（P1-5：PATTERN策略信号强度作为因子参与ICW）
     }
 
     /**
@@ -171,6 +172,7 @@ public class FactorDefinition implements Serializable {
         DRAFT,      // 草稿
         TESTING,    // 测试中
         ACTIVE,     // 已激活
-        DEPRECATED  // 已废弃
+        DEPRECATED, // 已废弃
+        DEGRADED    // 性能衰减（P3-11：因子IC衰减后自动降级，ICW权重置0）
     }
 }

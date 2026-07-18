@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Card, Table, Switch, Button, Tag, Typography, Space, Select, TimePicker, Input, InputNumber, Row, Col, Popconfirm, Badge, Spin, Modal, Tabs, Checkbox, Tooltip, DatePicker, Form } from 'antd';
 import { message } from '../../utils/messageUtil';
 import {
@@ -35,6 +35,10 @@ const TASK_ITEMS = [
   {
     key: 'BIDASK', name: '内外盘数据', desc: '内外盘比、成交量等盘口数据',
     icon: '⚖️', defaultEnabled: true, color: '#13c2c2',
+  },
+  {
+    key: 'QFQ_REFRESH', name: '前复权因子刷新', desc: '除权除息后重刷历史 qfq 价格（依赖分红除权）',
+    icon: '🔄', defaultEnabled: true, color: '#1677ff',
   },
   {
     key: 'SENTIMENT_MF', name: '情绪数据-资金流向', desc: '东财资金流向数据（实时全市场 / 历史120天）',
@@ -1802,212 +1806,359 @@ export default function ScheduledTasks() {
   );
 }
 
-// ========== 任务关系图组件 ==========
+// ========== 任务关系图组件（可拖拽节点 + 画布平移缩放 + localStorage 持久化） ==========
+const GRAPH_LAYOUT_KEY = 'task-dep-graph-layout';
+
+function loadSavedLayout() {
+  try {
+    const raw = localStorage.getItem(GRAPH_LAYOUT_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw);
+  } catch { return {}; }
+}
+
+function saveLayout(positions) {
+  try {
+    localStorage.setItem(GRAPH_LAYOUT_KEY, JSON.stringify(positions));
+  } catch { /* ignore */ }
+}
+
 function TaskDependencyGraph({ deps, loading, taskItems }) {
-  // 构建节点和边
-  const { nodes, edges, layers } = useMemo(() => {
+  // ── 1. 计算初始拓扑布局（仅用于首次渲染 / 新节点） ──
+  const initialLayout = useMemo(() => {
     const taskMap = new Map();
     taskItems.forEach(t => taskMap.set(t.key, t));
 
-    // 收集所有涉及的 task key
     const allKeys = new Set();
+    const nameMap = new Map();
     deps.forEach(d => {
       allKeys.add(d.upstream_key);
       allKeys.add(d.downstream_key);
+      if (d.upstream_name) nameMap.set(d.upstream_key, d.upstream_name);
+      if (d.downstream_name) nameMap.set(d.downstream_key, d.downstream_name);
+    });
+    allKeys.forEach(k => {
+      if (!nameMap.has(k)) nameMap.set(k, taskMap.get(k)?.name || k);
     });
 
-    // 拓扑排序分层
+    // 拓扑分层
     const inDegree = new Map();
-    const adj = new Map(); // upstream -> [downstreams]
-    allKeys.forEach(k => {
-      inDegree.set(k, 0);
-      adj.set(k, []);
-    });
+    const adj = new Map();
+    allKeys.forEach(k => { inDegree.set(k, 0); adj.set(k, []); });
     deps.forEach(d => {
       adj.get(d.upstream_key)?.push(d.downstream_key);
       inDegree.set(d.downstream_key, (inDegree.get(d.downstream_key) || 0) + 1);
     });
 
-    // BFS 分层
-    const layerMap = new Map(); // key -> layer
+    const layerMap = new Map();
     let queue = [];
-    allKeys.forEach(k => {
-      if ((inDegree.get(k) || 0) === 0) {
-        queue.push(k);
-        layerMap.set(k, 0);
-      }
-    });
+    allKeys.forEach(k => { if ((inDegree.get(k) || 0) === 0) { queue.push(k); layerMap.set(k, 0); } });
     let layer = 1;
     while (queue.length > 0) {
       const next = [];
       for (const k of queue) {
         for (const child of (adj.get(k) || [])) {
-          const newLayer = Math.max(layerMap.get(k) + 1, layer);
-          layerMap.set(child, newLayer);
+          layerMap.set(child, Math.max(layerMap.get(k) + 1, layer));
           next.push(child);
         }
       }
-      // 去重
       queue = [...new Set(next)];
       layer++;
-      if (layer > 20) break; // 安全上限
+      if (layer > 20) break;
     }
+    allKeys.forEach(k => { if (!layerMap.has(k)) layerMap.set(k, 0); });
 
-    // 没有入度的节点也兜底设为 0
-    allKeys.forEach(k => {
-      if (!layerMap.has(k)) layerMap.set(k, 0);
-    });
-
-    // 按 layer 分组
     const maxLayer = Math.max(...layerMap.values(), 0);
     const layerGroups = [];
     for (let i = 0; i <= maxLayer; i++) {
-      layerGroups.push([...allKeys].filter(k => layerMap.get(k) === i));
+      layerGroups.push([...allKeys].filter(k => layerMap.get(k) === i).sort((a, b) => a.localeCompare(b)));
     }
 
-    // 计算节点坐标
-    const colWidth = 200;
-    const rowHeight = 80;
-    const nodeWidth = 150;
-    const nodeHeight = 50;
-    const startX = 40;
-    const startY = 40;
+    const colWidth = 240;
+    const rowHeight = 70;
+    const nodeWidth = 170;
+    const nodeHeight = 40;
+    const startX = 32;
+    const startY = 28;
 
-    const nodePos = new Map();
+    const pos = new Map();
     layerGroups.forEach((group, colIdx) => {
       group.forEach((key, rowIdx) => {
-        nodePos.set(key, {
-          x: startX + colIdx * colWidth,
-          y: startY + rowIdx * rowHeight,
-        });
+        pos.set(key, { x: startX + colIdx * colWidth, y: startY + rowIdx * rowHeight });
       });
     });
 
-    const nodeList = allKeys.size > 0
-      ? [...allKeys].map(k => {
-          const pos = nodePos.get(k);
-          const item = taskMap.get(k);
-          return {
-            key: k,
-            name: item?.name || k,
-            x: pos.x,
-            y: pos.y,
-            width: nodeWidth,
-            height: nodeHeight,
-          };
-        })
-      : [];
-
-    const edgeList = deps.map((d, i) => {
-      const from = nodePos.get(d.upstream_key);
-      const to = nodePos.get(d.downstream_key);
-      if (!from || !to) return null;
+    const nodeList = [...allKeys].map(k => {
+      const p = pos.get(k);
+      const item = taskMap.get(k);
       return {
-        id: i,
-        from: d.upstream_key,
-        to: d.downstream_key,
-        x1: from.x + nodeWidth,
-        y1: from.y + nodeHeight / 2,
-        x2: to.x,
-        y2: to.y + nodeHeight / 2,
+        key: k,
+        name: nameMap.get(k) || k,
+        x: p.x,
+        y: p.y,
+        width: nodeWidth,
+        height: nodeHeight,
+        color: item?.color || '#1677ff',
+      };
+    });
+
+    return { nodeList, nodeWidth, nodeHeight, colWidth, rowHeight };
+  }, [deps, taskItems]);
+
+  // ── 2. 节点位置 state（合并 localStorage 保存的布局） ──
+  const [nodePositions, setNodePositions] = useState(() => {
+    const saved = loadSavedLayout();
+    const positions = {};
+    initialLayout.nodeList.forEach(n => {
+      positions[n.key] = saved[n.key] || { x: n.x, y: n.y };
+    });
+    return positions;
+  });
+
+  // 当 deps/taskItems 变化时，补充新节点（用初始布局），移除已不存在的节点
+  useEffect(() => {
+    setNodePositions(prev => {
+      const next = {};
+      initialLayout.nodeList.forEach(n => {
+        next[n.key] = prev[n.key] || { x: n.x, y: n.y };
+      });
+      return next;
+    });
+  }, [initialLayout]);
+
+  // ── 3. 防抖保存到 localStorage ──
+  const saveTimer = useRef(null);
+  useEffect(() => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => saveLayout(nodePositions), 600);
+    return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
+  }, [nodePositions]);
+
+  // ── 4. 构建带位置的 nodes 和实时计算的 edges ──
+  const { nodes, edges, svgSize } = useMemo(() => {
+    const nodeList = initialLayout.nodeList.map(n => ({
+      ...n,
+      x: nodePositions[n.key]?.x ?? n.x,
+      y: nodePositions[n.key]?.y ?? n.y,
+    }));
+    const nodeByKey = new Map(nodeList.map(n => [n.key, n]));
+
+    // 出入度统计
+    const outEdges = new Map();
+    const inEdges = new Map();
+    const edgeList = deps.map((d, i) => ({ id: i, from: d.upstream_key, to: d.downstream_key }));
+    edgeList.forEach((e, idx) => {
+      if (!outEdges.has(e.from)) outEdges.set(e.from, []);
+      if (!inEdges.has(e.to)) inEdges.set(e.to, []);
+      outEdges.get(e.from).push(idx);
+      inEdges.get(e.to).push(idx);
+    });
+
+    outEdges.forEach((indices, src) => {
+      indices.sort((a, b) => (nodeByKey.get(edgeList[a].to)?.y || 0) - (nodeByKey.get(edgeList[b].to)?.y || 0));
+    });
+    inEdges.forEach((indices, tgt) => {
+      indices.sort((a, b) => (nodeByKey.get(edgeList[a].from)?.y || 0) - (nodeByKey.get(edgeList[b].from)?.y || 0));
+    });
+
+    const edgePorts = edgeList.map((e, idx) => {
+      const fromNode = nodeByKey.get(e.from);
+      const toNode = nodeByKey.get(e.to);
+      if (!fromNode || !toNode) return null;
+
+      const outIdx = outEdges.get(e.from).indexOf(idx);
+      const inIdx = inEdges.get(e.to).indexOf(idx);
+      const outCount = outEdges.get(e.from).length;
+      const inCount = inEdges.get(e.to).length;
+
+      const sourceY = fromNode.y + (outIdx + 1) * (fromNode.height / (outCount + 1));
+      const targetY = toNode.y + (inIdx + 1) * (toNode.height / (inCount + 1));
+
+      const x1 = fromNode.x + fromNode.width;
+      const x2 = toNode.x;
+      const laneGap = 18;
+      const baseLane = 22;
+      const laneX = Math.min(x1 + baseLane + outIdx * laneGap, x2 - 12);
+
+      return {
+        ...e,
+        path: `M ${x1} ${sourceY} L ${laneX} ${sourceY} L ${laneX} ${targetY} L ${x2} ${targetY}`,
       };
     }).filter(Boolean);
 
-    const svgWidth = Math.max(...nodeList.map(n => n.x + n.width), 200) + 60;
-    const svgHeight = Math.max(...nodeList.map(n => n.y + n.height), 100) + 40;
+    const svgWidth = Math.max(...nodeList.map(n => n.x + n.width), 200) + 80;
+    const svgHeight = Math.max(...nodeList.map(n => n.y + n.height), 100) + 60;
 
-    return { nodes: nodeList, edges: edgeList, layers: { width: svgWidth, height: svgHeight } };
-  }, [deps, taskItems]);
+    return { nodes: nodeList, edges: edgePorts, svgSize: { width: svgWidth, height: svgHeight } };
+  }, [initialLayout, nodePositions, deps]);
 
+  // ── 5. 画布平移缩放 ──
+  const containerRef = useRef(null);
+  const [view, setView] = useState({ tx: 0, ty: 0, scale: 1 });
+  const panState = useRef({ panning: false, startX: 0, startY: 0, baseTx: 0, baseTy: 0 });
+
+  // ── 6. 节点拖拽 ──
+  const nodeDrag = useRef({ dragging: false, key: null, startClientX: 0, startClientY: 0, baseNodeX: 0, baseNodeY: 0, moved: false });
+
+  const onCanvasMouseDown = (e) => {
+    if (e.button !== 0) return;
+    // 如果点在节点上，不触发画布平移
+    if (e.target.closest('[data-node-key]')) return;
+    panState.current = { panning: true, startX: e.clientX, startY: e.clientY, baseTx: view.tx, baseTy: view.ty };
+  };
+
+  const onCanvasMouseMove = (e) => {
+    if (nodeDrag.current.dragging) {
+      const dx = (e.clientX - nodeDrag.current.startClientX) / view.scale;
+      const dy = (e.clientY - nodeDrag.current.startClientY) / view.scale;
+      if (Math.abs(dx) > 2 || Math.abs(dy) > 2) nodeDrag.current.moved = true;
+      setNodePositions(prev => ({
+        ...prev,
+        [nodeDrag.current.key]: {
+          x: nodeDrag.current.baseNodeX + dx,
+          y: nodeDrag.current.baseNodeY + dy,
+        },
+      }));
+      return;
+    }
+    if (!panState.current.panning) return;
+    const dx = e.clientX - panState.current.startX;
+    const dy = e.clientY - panState.current.startY;
+    setView(prev => ({ ...prev, tx: panState.current.baseTx + dx, ty: panState.current.baseTy + dy }));
+  };
+
+  const onCanvasMouseUp = () => {
+    panState.current.panning = false;
+    nodeDrag.current.dragging = false;
+  };
+
+  const onNodeMouseDown = (e, node) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    nodeDrag.current = {
+      dragging: true,
+      key: node.key,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      baseNodeX: node.x,
+      baseNodeY: node.y,
+      moved: false,
+    };
+  };
+
+  const onWheel = (e) => {
+    e.preventDefault();
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const delta = e.deltaY > 0 ? 0.9 : 1.1;
+    setView(prev => {
+      const newScale = Math.min(Math.max(prev.scale * delta, 0.3), 3);
+      const ratio = newScale / prev.scale;
+      return { tx: mx - (mx - prev.tx) * ratio, ty: my - (my - prev.ty) * ratio, scale: newScale };
+    });
+  };
+
+  const resetView = () => setView({ tx: 0, ty: 0, scale: 1 });
+  const resetLayout = () => {
+    const fresh = {};
+    initialLayout.nodeList.forEach(n => { fresh[n.key] = { x: n.x, y: n.y }; });
+    setNodePositions(fresh);
+    setView({ tx: 0, ty: 0, scale: 1 });
+  };
+
+  // ── 渲染 ──
   if (loading) {
-    return (
-      <div style={{ textAlign: 'center', padding: 60 }}>
-        <Spin tip="加载中..." />
-      </div>
-    );
+    return <div style={{ textAlign: 'center', padding: 60 }}><Spin tip="加载中..." /></div>;
   }
-
   if (deps.length === 0) {
-    return (
-      <div style={{ textAlign: 'center', padding: 60 }}>
-        <Text type="secondary">暂无任务依赖关系</Text>
-      </div>
-    );
+    return <div style={{ textAlign: 'center', padding: 60 }}><Text type="secondary">暂无任务依赖关系</Text></div>;
   }
 
-  const colorMap = {};
-  taskItems.forEach(t => { colorMap[t.key] = t.color; });
+  const isDraggingNode = nodeDrag.current.dragging;
+  const isPanning = panState.current.panning;
 
   return (
-    <div style={{ overflow: 'auto', maxHeight: 500 }}>
-      <svg width={layers.width} height={layers.height} style={{ minWidth: '100%' }}>
-        <defs>
-          <marker
-            id="arrowhead"
-            markerWidth="10"
-            markerHeight="7"
-            refX="9"
-            refY="3.5"
-            orient="auto"
-          >
-            <polygon points="0 0, 10 3.5, 0 7" fill="#8c8c8c" />
-          </marker>
-        </defs>
+    <div style={{ position: 'relative' }}>
+      <div style={{ position: 'absolute', top: 8, right: 8, zIndex: 10, display: 'flex', gap: 6 }}>
+        <Button size="small" icon={<ReloadOutlined />} onClick={resetView}>重置视图</Button>
+        <Popconfirm title="恢复自动布局？拖拽的位置将丢失。" onConfirm={resetLayout} okText="确定" cancelText="取消">
+          <Button size="small" icon={<ClearOutlined />}>自动布局</Button>
+        </Popconfirm>
+      </div>
+      <div
+        ref={containerRef}
+        style={{
+          overflow: 'hidden',
+          height: 520,
+          cursor: isDraggingNode ? 'grabbing' : isPanning ? 'grabbing' : 'grab',
+          background: '#fafafa',
+          borderRadius: 6,
+          userSelect: 'none',
+        }}
+        onMouseDown={onCanvasMouseDown}
+        onMouseMove={onCanvasMouseMove}
+        onMouseUp={onCanvasMouseUp}
+        onMouseLeave={onCanvasMouseUp}
+        onWheel={onWheel}
+      >
+        <svg width={svgSize.width} height={svgSize.height} style={{ minWidth: '100%', minHeight: '100%' }}>
+          <defs>
+            <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+              <polygon points="0 0, 10 3.5, 0 7" fill="#8c8c8c" />
+            </marker>
+          </defs>
 
-        {/* 边 */}
-        {edges.map(e => (
-          <g key={`edge-${e.id}`}>
-            <path
-              d={`M ${e.x1} ${e.y1} C ${e.x1 + 40} ${e.y1}, ${e.x2 - 40} ${e.y2}, ${e.x2} ${e.y2}`}
-              fill="none"
-              stroke="#8c8c8c"
-              strokeWidth={1.5}
-              markerEnd="url(#arrowhead)"
-            />
+          <g transform={`translate(${view.tx},${view.ty}) scale(${view.scale})`}>
+            {/* 边 */}
+            {edges.map(e => (
+              <path key={`edge-${e.id}`} d={e.path} fill="none" stroke="#8c8c8c" strokeWidth={1.2} markerEnd="url(#arrowhead)" />
+            ))}
+
+            {/* 节点 */}
+            {nodes.map(n => (
+              <g
+                key={`node-${n.key}`}
+                data-node-key={n.key}
+                onMouseDown={(e) => onNodeMouseDown(e, n)}
+                style={{ cursor: 'grab' }}
+              >
+                <rect
+                  x={n.x} y={n.y} width={n.width} height={n.height}
+                  rx={8} ry={8}
+                  fill={n.color} fillOpacity={0.08} stroke={n.color} strokeWidth={1.5}
+                />
+                <foreignObject x={n.x} y={n.y} width={n.width} height={n.height}>
+                  <div
+                    xmlns="http://www.w3.org/1999/xhtml"
+                    style={{
+                      width: '100%', height: '100%',
+                      display: 'flex', flexDirection: 'column',
+                      justifyContent: 'center', alignItems: 'center',
+                      padding: '2px 6px', boxSizing: 'border-box',
+                      textAlign: 'center', overflow: 'hidden', pointerEvents: 'none',
+                    }}
+                  >
+                    <div
+                      style={{ fontSize: 11, fontWeight: 600, color: n.color, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%', lineHeight: 1.1 }}
+                      title={n.key}
+                    >{n.key}</div>
+                    <div
+                      style={{ fontSize: 11, color: '#595959', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%', lineHeight: 1.1 }}
+                      title={n.name}
+                    >{n.name}</div>
+                  </div>
+                </foreignObject>
+              </g>
+            ))}
           </g>
-        ))}
+        </svg>
+      </div>
 
-        {/* 节点 */}
-        {nodes.map(n => (
-          <g key={`node-${n.key}`}>
-            <rect
-              x={n.x}
-              y={n.y}
-              width={n.width}
-              height={n.height}
-              rx={6}
-              ry={6}
-              fill={colorMap[n.key] || '#1677ff'}
-              fillOpacity={0.1}
-              stroke={colorMap[n.key] || '#1677ff'}
-              strokeWidth={1.5}
-            />
-            <text
-              x={n.x + n.width / 2}
-              y={n.y + 18}
-              textAnchor="middle"
-              fontSize={12}
-              fontWeight={600}
-              fill={colorMap[n.key] || '#1677ff'}
-            >
-              {n.key}
-            </text>
-            <text
-              x={n.x + n.width / 2}
-              y={n.y + 36}
-              textAnchor="middle"
-              fontSize={11}
-              fill="#595959"
-            >
-              {n.name.length > 8 ? n.name.slice(0, 7) + '…' : n.name}
-            </text>
-          </g>
-        ))}
-      </svg>
-
-      <div style={{ marginTop: 12, padding: '8px 12px', background: '#f5f5f5', borderRadius: 6 }}>
+      <div style={{ marginTop: 8, padding: '6px 12px', background: '#f5f5f5', borderRadius: 6 }}>
         <Text type="secondary" style={{ fontSize: 12 }}>
-          箭头方向：上游任务 → 下游任务（上游完成后自动触发下游）
+          拖拽节点移动 · 空白处拖拽平移 · 滚轮缩放 · 布局自动保存 · 箭头方向：上游 → 下游
         </Text>
       </div>
     </div>

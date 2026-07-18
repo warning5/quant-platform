@@ -31,7 +31,9 @@ from db_config import MYSQL_CONFIG
 
 BATCH_DELAY = 0.2  # 每只股票间隔（秒），避免限流
 MAX_RETRIES = 2
-WORKERS = 4  # 并发线程数
+WORKERS = 2  # 并发线程数（降低以避免MySQL deadlock）
+DEADLOCK_RETRIES = 3  # 死锁重试次数
+DEADLOCK_WAIT = 0.5  # 死锁重试等待(秒)
 
 
 def ensure_table(conn):
@@ -85,36 +87,48 @@ def _clean_decimal(val):
 
 
 def upsert_rows(conn, code, df):
-    """将一致预期数据写入MySQL"""
+    """将一致预期数据写入MySQL（含死锁重试）"""
     now = datetime.now()
     rows = 0
-    with conn.cursor() as cur:
-        for _, row in df.iterrows():
-            year = int(row.get("年度", 0))
-            if year < 2024:
-                continue
-            agency_count = row.get("预测机构数", 0)
-            est_min = _clean_decimal(row.get("最小值"))
-            est_avg = _clean_decimal(row.get("均值"))
-            est_max = _clean_decimal(row.get("最大值"))
-            ind_avg = _clean_decimal(row.get("行业平均数"))
+    for attempt in range(DEADLOCK_RETRIES):
+        try:
+            with conn.cursor() as cur:
+                for _, row in df.iterrows():
+                    year = int(row.get("年度", 0))
+                    if year < 2024:
+                        continue
+                    agency_count = row.get("预测机构数", 0)
+                    est_min = _clean_decimal(row.get("最小值"))
+                    est_avg = _clean_decimal(row.get("均值"))
+                    est_max = _clean_decimal(row.get("最大值"))
+                    ind_avg = _clean_decimal(row.get("行业平均数"))
 
-            cur.execute("""
-                INSERT INTO stock_consensus_estimate
-                    (code, forecast_year, agency_count, estimate_min, estimate_avg, estimate_max, industry_avg, update_time)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                ON DUPLICATE KEY UPDATE
-                    agency_count=VALUES(agency_count),
-                    estimate_min=VALUES(estimate_min),
-                    estimate_avg=VALUES(estimate_avg),
-                    estimate_max=VALUES(estimate_max),
-                    industry_avg=VALUES(industry_avg),
-                    update_time=VALUES(update_time)
-            """, (code, year, int(agency_count) if agency_count else 0,
-                  est_min, est_avg, est_max, ind_avg, now))
-            rows += 1
-    conn.commit()
-    return rows
+                    cur.execute("""
+                        INSERT INTO stock_consensus_estimate
+                            (code, forecast_year, agency_count, estimate_min, estimate_avg, estimate_max, industry_avg, update_time)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        ON DUPLICATE KEY UPDATE
+                            agency_count=VALUES(agency_count),
+                            estimate_min=VALUES(estimate_min),
+                            estimate_avg=VALUES(estimate_avg),
+                            estimate_max=VALUES(estimate_max),
+                            industry_avg=VALUES(industry_avg),
+                            update_time=VALUES(update_time)
+                    """, (code, year, int(agency_count) if agency_count else 0,
+                          est_min, est_avg, est_max, ind_avg, now))
+                    rows += 1
+            conn.commit()
+            return rows
+        except pymysql.err.OperationalError as e:
+            if e.args[0] == 1213 and attempt < DEADLOCK_RETRIES - 1:
+                # Deadlock: rollback, wait, retry
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                time.sleep(DEADLOCK_WAIT * (attempt + 1))
+                continue
+            raise
 
 
 def get_stock_list(conn, top_n=None, code=None):

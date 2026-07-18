@@ -586,7 +586,7 @@ class StockDailyDB:
 
     # ─── stock_daily 写入 ─────────────────────────────────────
 
-    def upsert_daily(self, rows, table="stock", force=False):
+    def upsert_daily(self, rows, table="stock", force=False, refresh_version=False):
         """
         批量 upsert 日线数据（统一入口，自动路由到 CH 或 MySQL）。
 
@@ -599,6 +599,9 @@ class StockDailyDB:
               - "stock" (默认): stock_daily 表 — 股票日线（沪深+北交所个股）
               - "index":       index_daily 表 — 指数日线（上证指数/沪深300等）
             force: 是否强制写入（跳过预过滤，直接INSERT覆盖）
+            refresh_version: 是否使用当前时间戳作为 update_time 版本号。
+              正常写入时 update_time=trade_date+12:00 保证幂等；
+              前复权因子刷新时必须设为 True，用 now() 作为版本号确保新数据覆盖旧快照。
 
         返回: 插入的行数
 
@@ -610,7 +613,7 @@ class StockDailyDB:
             return 0
 
         if self.backend == "clickhouse":
-            return self._ch_insert_rows(rows, table=table, force=force)
+            return self._ch_insert_rows(rows, table=table, force=force, refresh_version=refresh_version)
         else:
             return self._mysql_upsert_rows(rows, table=table)
 
@@ -620,7 +623,7 @@ class StockDailyDB:
         """
         pass  # no-op: 不产生任何 mutation
 
-    def _ch_insert_rows(self, rows, table="stock", force=False):
+    def _ch_insert_rows(self, rows, table="stock", force=False, refresh_version=False):
         """
         ClickHouse: 批量幂等写入。返回实际写入主表的行数。
 
@@ -628,6 +631,8 @@ class StockDailyDB:
             rows:  待写入的行列表（list of dict）
             table: "stock" 写入 stock_daily (默认), "index" 写入 index_daily
             force: 是否强制写入（跳过预过滤，直接INSERT覆盖）
+            refresh_version: 使用当前时间戳作为 update_time，确保覆盖旧版本。
+              用于前复权因子刷新场景：除权后历史 qfq 价格变化，需用更大版本号覆盖旧快照。
 
         直接 INSERT（ch_client.insert），写入前先查 FINAL 表过滤已存在的 (code, trade_date)。
         原因：ReplacingMergeTree 的自动去重只在后台合并时生效，查询不加 FINAL 会看到重复行。
@@ -639,6 +644,7 @@ class StockDailyDB:
         对于已存在但需要更新的行，仍然直接 INSERT（update_time 版本列保证覆盖）。
 
         当 force=True 时，跳过预过滤，直接写入所有行（依赖 ReplacingMergeTree 去重）。
+        当 refresh_version=True 时，update_time 使用 datetime.now()，保证新数据版本号 > 旧数据。
         """
         if not rows:
             return 0
@@ -767,7 +773,10 @@ class StockDailyDB:
                     vals.append(ct)
 
                 ut = row.get("update_time")
-                if ut is None:
+                if refresh_version:
+                    # 前复权刷新模式：用当前时间戳作为版本号，确保 > 旧数据的 trade_date+12:00
+                    vals.append(datetime.now())
+                elif ut is None:
                     # 用 trade_date + 12:00:00 作为统一版本号，保证同一天多次运行幂等
                     # ReplacingMergeTree 按 update_time 去重：相同 (code, trade_date, update_time)
                     # 的记录会合并，避免 now_dt 秒级差异导致重复

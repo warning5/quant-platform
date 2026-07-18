@@ -1618,8 +1618,8 @@ public class StockScreenService {
                 // 从 factor_ic_record 表获取最近60天的IC序列
                 List<Double> icValues = factorIcService.getIcHistory(fc, screenDate, 60);
                 if (icValues == null || icValues.isEmpty()) {
-                    log.warn("[DynamicWeight] 因子 {} 无IC历史数据，使用默认权重1.0", fc);
-                    icScores.put(fc, 1.0);
+                    log.warn("[DynamicWeight] 因子 {} 无IC历史数据，使用保守默认权重0.05", fc);
+                    icScores.put(fc, 0.05);
                     continue;
                 }
 
@@ -1635,8 +1635,8 @@ public class StockScreenService {
                 }
                 icScores.put(fc, score);
             } catch (Exception e) {
-                log.warn("[DynamicWeight] 获取因子 {} IC数据失败: {}", fc, e.getMessage());
-                icScores.put(fc, 1.0);
+                log.warn("[DynamicWeight] 获取因子 {} IC数据失败: {}, 使用保守默认权重0.05", fc, e.getMessage());
+                icScores.put(fc, 0.05);
             }
         }
 

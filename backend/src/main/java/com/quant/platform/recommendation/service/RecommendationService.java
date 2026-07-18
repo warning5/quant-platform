@@ -62,6 +62,12 @@ public class RecommendationService {
      * 个股深度分析取 Top N（精筛）
      */
     private static final int ANALYSIS_TOP_N = 20;
+
+    /**
+     * P1-6: 个股深度分析并行线程数
+     * 限制并发以避免 ClickHouse 连接池耗尽
+     */
+    private static final int ANALYSIS_PARALLELISM = 5;
     /**
      * 同行业最多推荐 N 只
      */
@@ -143,6 +149,13 @@ public class RecommendationService {
      * 超出部分按比例重新分配给其他因子
      */
     private static final double MAX_ICW_WEIGHT_PCT = 0.35;
+
+    /**
+     * P1-4: 噪声因子|IC|阈值
+     * |IC| < 此值的因子直接剔除而非反转——噪声因子的反转≠有效信号
+     * 典型噪声因子: MOM5(IC=-0.03), VOLUME_RATIO(IC=-0.033) 等
+     */
+    private static final double NOISE_FACTOR_IC_THRESHOLD = 0.015;
     /**
      * 沪深300指数代码
      */
@@ -183,6 +196,8 @@ public class RecommendationService {
     private final StockAnalysisMapper stockAnalysisMapper;
     private final com.quant.platform.factor.ic.mapper.FactorIcRecordMapper factorIcRecordMapper;
     private final com.quant.platform.factor.service.FactorMetaCacheService factorMetaCache;
+    private final com.quant.platform.factor.mapper.FactorDefinitionMapper factorDefinitionMapper;
+    private final com.quant.platform.factor.dynamic.DynamicIndustryCorrelationService dynamicIndustryCorrService;
 
     public RecommendationService(StockScreenService stockScreenService,
                                  AnalysisService analysisService,
@@ -205,7 +220,9 @@ public class RecommendationService {
                                  javax.sql.DataSource dataSource,
                                  StockAnalysisMapper stockAnalysisMapper,
                                  com.quant.platform.factor.ic.mapper.FactorIcRecordMapper factorIcRecordMapper,
-                                 com.quant.platform.factor.service.FactorMetaCacheService factorMetaCache) {
+                                 com.quant.platform.factor.service.FactorMetaCacheService factorMetaCache,
+                                 com.quant.platform.factor.mapper.FactorDefinitionMapper factorDefinitionMapper,
+                                 com.quant.platform.factor.dynamic.DynamicIndustryCorrelationService dynamicIndustryCorrService) {
         this.stockScreenService = stockScreenService;
         this.analysisService = analysisService;
         this.marketDataService = marketDataService;
@@ -228,6 +245,8 @@ public class RecommendationService {
         this.stockAnalysisMapper = stockAnalysisMapper;
         this.factorIcRecordMapper = factorIcRecordMapper;
         this.factorMetaCache = factorMetaCache;
+        this.factorDefinitionMapper = factorDefinitionMapper;
+        this.dynamicIndustryCorrService = dynamicIndustryCorrService;
     }
 
     /**
@@ -525,15 +544,6 @@ public class RecommendationService {
                     })
                     .collect(Collectors.toList());
 
-            // 调试用：输出问题股票的实际 industry 值
-            for (String debugCode : List.of("002033", "601000", "600258", "601008")) {
-                StockInfo dinfo = codeInfoMap.get(debugCode);
-                if (dinfo != null) {
-                    log.info("[Recommendation] 调试-行业值: code={}, name={}, industry='{}'",
-                            debugCode, dinfo.getName(), dinfo.getIndustry());
-                }
-            }
-
             log.info("[Recommendation] 行业排除过滤 [strategyId={}]: 排除关键词数={}, 过滤前={}, 过滤后={}",
                     strategyId, excludeSet.size(), before, candidates.size());
             log.info("[Recommendation] 被排除股票: {}", excludedStocks);
@@ -591,29 +601,54 @@ public class RecommendationService {
         Map<String, String> codeToIndustry = buildCodeToIndustryMap(candidates);
         log.info("[Recommendation] 行业映射: {}只候选股", codeToIndustry.size());
 
-        // Step 3: 对 Top N 做个股深度分析
+        // Step 3: 对 Top N 做个股深度分析（P1-6: 并行化）
         int analysisCount = Math.min(topN, candidates.size());
         List<StockRecommendation> recommendations = new ArrayList<>();
 
+        // P1-6: 并行执行个股深度分析，限制并发线程数避免CH连接池耗尽
+        java.util.concurrent.ExecutorService analysisExecutor =
+                java.util.concurrent.Executors.newFixedThreadPool(
+                        Math.min(ANALYSIS_PARALLELISM, analysisCount));
+
+        List<java.util.concurrent.CompletableFuture<StockRecommendation>> futures = new ArrayList<>();
         for (int i = 0; i < analysisCount; i++) {
             ScreenResult.StockScore stock = candidates.get(i);
-            String pureCode = stripSuffix(stock.getSymbol());
-            String industry = codeToIndustry.getOrDefault(pureCode, "UNKNOWN");
+            String industry = codeToIndustry.getOrDefault(stripSuffix(stock.getSymbol()), "UNKNOWN");
             IndustryMomentum im = industryMomentumMap.get(industry);
+            final int idx = i;
+
+            java.util.concurrent.CompletableFuture<StockRecommendation> future =
+                    java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                        try {
+                            StockRecommendation rec = analyzeAndFuse(stock, regime, actualDate, im, strategyId);
+                            log.info("[Recommendation] 分析进度: {}/{} code={} name={} factorScore={} analysisScore={} finalScore={} tech={} money={} senti={} fund={} risk={} liq={}",
+                                    idx + 1, analysisCount, rec.getStockCode(), rec.getStockName(),
+                                    String.format("%.4f", rec.getFactorScore()),
+                                    rec.getAnalysisScore(),
+                                    String.format("%.4f", rec.getFinalScore()),
+                                    rec.getTechnicalScore(), rec.getCapitalScore(), rec.getEventScore(), rec.getFundamentalScore(),
+                                    rec.getRiskScore(), rec.getLiquidityScore());
+                            return rec;
+                        } catch (Exception e) {
+                            log.warn("[Recommendation] 个股分析失败: code={} error={}", stock.getSymbol(), e.getMessage());
+                            return null;
+                        }
+                    }, analysisExecutor);
+            futures.add(future);
+        }
+
+        // 等待所有分析完成并收集结果
+        for (java.util.concurrent.CompletableFuture<StockRecommendation> future : futures) {
             try {
-                StockRecommendation rec = analyzeAndFuse(stock, regime, actualDate, im, strategyId);
-                recommendations.add(rec);
-                log.info("[Recommendation] 分析进度: {}/{} code={} name={} factorScore={} analysisScore={} finalScore={} tech={} money={} senti={} fund={} risk={} liq={}",
-                        i + 1, analysisCount, rec.getStockCode(), rec.getStockName(),
-                        String.format("%.4f", rec.getFactorScore()),
-                        rec.getAnalysisScore(),
-                        String.format("%.4f", rec.getFinalScore()),
-                        rec.getTechnicalScore(), rec.getCapitalScore(), rec.getEventScore(), rec.getFundamentalScore(),
-                        rec.getRiskScore(), rec.getLiquidityScore());
+                StockRecommendation rec = future.get(60, java.util.concurrent.TimeUnit.SECONDS);
+                if (rec != null) {
+                    recommendations.add(rec);
+                }
             } catch (Exception e) {
-                log.warn("[Recommendation] 个股分析失败: code={} error={}", stock.getSymbol(), e.getMessage());
+                log.warn("[Recommendation] 并行分析获取结果失败: {}", e.getMessage());
             }
         }
+        analysisExecutor.shutdown();
 
         // Step 3.5: 批量填充 industry 和 marketCap（从 stock_info）
         fillIndustryAndMarketCap(recommendations);
@@ -808,6 +843,11 @@ public class RecommendationService {
                         Double val = calcForwardReturn(rec.getStockCode(), recDate, 1);
                         if (val != null) {
                             rec.setNextDayReturn(val);
+                            // P0-2: 计算超额收益 = 个股收益 - 沪深300收益
+                            Double benchReturn = calcForwardReturn(SSE300_CODE, recDate, 1);
+                            if (benchReturn != null) {
+                                rec.setNextDayExcessReturn(Math.round((val - benchReturn) * 100.0) / 100.0);
+                            }
                             updated = true;
                         }
                     }
@@ -817,6 +857,10 @@ public class RecommendationService {
                         Double val = calcForwardReturn(rec.getStockCode(), recDate, 5);
                         if (val != null) {
                             rec.setNextWeekReturn(val);
+                            Double benchReturn = calcForwardReturn(SSE300_CODE, recDate, 5);
+                            if (benchReturn != null) {
+                                rec.setNextWeekExcessReturn(Math.round((val - benchReturn) * 100.0) / 100.0);
+                            }
                             updated = true;
                         }
                     }
@@ -826,6 +870,10 @@ public class RecommendationService {
                         Double val = calcForwardReturn(rec.getStockCode(), recDate, 22);
                         if (val != null) {
                             rec.setNextMonthReturn(val);
+                            Double benchReturn = calcForwardReturn(SSE300_CODE, recDate, 22);
+                            if (benchReturn != null) {
+                                rec.setNextMonthExcessReturn(Math.round((val - benchReturn) * 100.0) / 100.0);
+                            }
                             updated = true;
                         }
                     }
@@ -1614,10 +1662,21 @@ public class RecommendationService {
 
     /**
      * 根据行业名查找所属相关组
+     * P2-8: 优先使用动态行业相关分组，回退到静态INDUSTRY_CORR_GROUPS
      */
     private String getCorrGroup(String industry) {
+        // P2-8: 优先使用动态分组
+        try {
+            List<List<String>> dynamicGroups = dynamicIndustryCorrService.getDynamicCorrGroups();
+            for (List<String> group : dynamicGroups) {
+                if (group.contains(industry)) return group.getFirst();
+            }
+        } catch (Exception e) {
+            log.debug("[Recommendation] P2-8 动态行业分组获取失败, 回退到静态: {}", e.getMessage());
+        }
+        // 回退到静态分组
         for (List<String> group : INDUSTRY_CORR_GROUPS) {
-            if (group.contains(industry)) return group.getFirst(); // 用组内第一个行业作为组key
+            if (group.contains(industry)) return group.getFirst();
         }
         return industry; // 不在任何组中，独立计算
     }
@@ -1684,7 +1743,11 @@ public class RecommendationService {
             finalCnt.forEach((grp, cnt) -> {
                 // 找到该组的代表行业
                 String repIndustry = grp;
-                for (List<String> g : INDUSTRY_CORR_GROUPS) {
+                // P2-8: 优先查动态分组，回退到静态
+                List<List<String>> allGroups = null;
+                try { allGroups = dynamicIndustryCorrService.getDynamicCorrGroups(); } catch (Exception ignored) {}
+                if (allGroups == null) allGroups = INDUSTRY_CORR_GROUPS;
+                for (List<String> g : allGroups) {
                     if (g.getFirst().equals(grp)) {
                         repIndustry = String.join(",", g);
                         break;
@@ -2511,12 +2574,32 @@ public class RecommendationService {
                 droppedCount++;
             } else {
                 // KEPT: 方向对齐 + |IC|加权
+                double absIc = snap.absIc();
+
+                // P1-4: 噪声因子剔除 —— |IC| < 阈值直接丢弃，不反转
+                if (absIc < NOISE_FACTOR_IC_THRESHOLD) {
+                    adjustedFw.setWeight(0.0);
+                    adjustedFw.setDirection(originalDirection);
+                    diag.action = "NOISE_DROPPED";
+                    diag.icMean = snap.icMean;
+                    diag.adjustedWeight = 0;
+                    diag.reason = String.format(
+                            "|IC|=%.4f < 噪声阈值%.3f，信号过弱剔除（IC=%.4f, IR=%.4f, 半衰=%d天）",
+                            absIc, NOISE_FACTOR_IC_THRESHOLD, snap.icMean, snap.ir, halflife);
+                    log.info("[DynamicWeight] 因子 {} |IC|={} < {}, 噪声剔除 (IC={}, IR={})",
+                            fc, String.format("%.4f", absIc), NOISE_FACTOR_IC_THRESHOLD,
+                            String.format("%.4f", snap.icMean), String.format("%.4f", snap.ir));
+                    droppedCount++;
+                    diagnostics.add(diag);
+                    adjusted.add(adjustedFw);
+                    continue;
+                }
+
                 // 方向对齐：负IC → 反转direction
                 int alignedDirection = snap.icSign < 0 ? -originalDirection : originalDirection;
                 adjustedFw.setDirection(alignedDirection);
 
                 // 权重按 weightMode 分配
-                double absIc = snap.absIc();
                 double newWeight;
                 String action = switch (weightMode) {
                     case "EQW" -> {
@@ -2729,7 +2812,24 @@ public class RecommendationService {
                 }
                 result.add(fw);
             }
-            log.info("[Recommendation] 从策略[{}]加载因子配置: {}个因子", strategy.getStrategyName(), result.size());
+
+            // P3-11: 过滤 DEGRADED 因子（降级因子不参与选股/推荐）
+            Set<String> degradedCodes = new HashSet<>();
+            List<com.quant.platform.factor.domain.FactorDefinition> degradedFactors = factorDefinitionMapper.selectList(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.quant.platform.factor.domain.FactorDefinition>()
+                    .eq(com.quant.platform.factor.domain.FactorDefinition::getStatus,
+                        com.quant.platform.factor.domain.FactorDefinition.FactorStatus.DEGRADED));
+            for (com.quant.platform.factor.domain.FactorDefinition df : degradedFactors) {
+                degradedCodes.add(df.getFactorCode());
+            }
+            if (!degradedCodes.isEmpty()) {
+                int before = result.size();
+                result.removeIf(fw -> fw.getFactorCode() != null && degradedCodes.contains(fw.getFactorCode()));
+                log.warn("[Recommendation] P3-11 过滤DEGRADED因子: {} → {} (排除: {})",
+                    before, result.size(), degradedCodes);
+            }
+
+            log.info("[Recommendation] 从策略[{}]加载因子配置: {}个因子(已排除DEGRADED)", strategy.getStrategyName(), result.size());
             return result;
         } catch (IllegalArgumentException e) {
             throw e; // 直接抛出业务异常

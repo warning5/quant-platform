@@ -51,8 +51,13 @@ public class ScheduleService implements SchedulingConfigurer {
     /** 手动触发的任务集合（key = taskKey + ":" + date），用于绕过下游 todayCompleted 去重 */
     private final Map<String, Boolean> manualTriggeredToday = new ConcurrentHashMap<>();
 
-    /** 内存缓存：从 DB 加载的依赖链（upstream → List<{downstream, delayMs}>），定时刷新 */
+    /** 内存缓存：从 DB 加载的依赖链（upstream → List<{downstream, delayMs, requireAll}>），定时刷新 */
     private volatile Map<String, List<Map<String, Object>>> dependencyChainCache = Map.of();
+    /** 内存缓存：反向依赖链（downstream → List<upstream>），用于多上游检查 */
+    private volatile Map<String, List<String>> reverseDependencyCache = Map.of();
+
+    /** 标记是否已执行过启动恢复（避免每次 refreshFromDb 都跑） */
+    private boolean startupRecoveryDone = false;
 
     private NotificationService getNotificationService() {
         if (notificationService == null) {
@@ -132,6 +137,12 @@ public class ScheduleService implements SchedulingConfigurer {
 
         // 刷新依赖链缓存
         loadDependencyChain();
+
+        // 启动恢复：检查因后端重启丢失的依赖触发（仅首次执行）
+        if (!startupRecoveryDone) {
+            startupRecoveryDone = true;
+            recoverPendingDependencyTriggers();
+        }
     }
 
     /**
@@ -140,24 +151,140 @@ public class ScheduleService implements SchedulingConfigurer {
     private void loadDependencyChain() {
         try {
             List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-                "SELECT upstream_key, downstream_key, delay_seconds FROM data_task_dependency"
+                "SELECT upstream_key, downstream_key, delay_seconds, require_all_upstreams FROM data_task_dependency"
             );
             Map<String, List<Map<String, Object>>> chain = new java.util.HashMap<>();
+            Map<String, List<String>> reverse = new java.util.HashMap<>();
             for (Map<String, Object> row : rows) {
                 String upstream = (String) row.get("upstream_key");
+                String downstream = (String) row.get("downstream_key");
                 chain.computeIfAbsent(upstream, k -> new java.util.ArrayList<>()).add(row);
+                reverse.computeIfAbsent(downstream, k -> new java.util.ArrayList<>()).add(upstream);
             }
             dependencyChainCache = chain;
+            reverseDependencyCache = reverse;
             log.info("[ScheduleService] 依赖链已刷新，共 {} 条依赖关系", rows.size());
         } catch (Exception e) {
             log.warn("[ScheduleService] 加载依赖链失败，将使用空依赖: {}", e.getMessage());
             dependencyChainCache = Map.of();
+            reverseDependencyCache = Map.of();
         }
     }
 
     /** 供 Controller 调用，新增/删除依赖后刷新缓存（不重新注册 cron） */
     public void refreshDependencyChain() {
         loadDependencyChain();
+    }
+
+    /**
+     * 启动恢复：检查因后端重启丢失的依赖触发。
+     * 场景：DIVIDEND 完成后调度了 60s 后触发 QFQ_REFRESH，但后端在 60s 内重启，
+     * 导致 taskScheduler 内存中的待执行任务被取消，QFQ_REFRESH 永远不会被触发。
+     *
+     * 恢复逻辑：
+     * 1. 查询今天 SUCCESS 的任务，标记到 todayCompleted（防止 cron 重复触发）
+     * 2. 对每个已完成的上游，检查其下游今天是否也 SUCCESS
+     * 3. 如果下游没完成且已启用，补触发（延迟15s让应用完全启动）
+     */
+    private void recoverPendingDependencyTriggers() {
+        try {
+            LocalDate today = LocalDate.now();
+            LocalDateTime todayStart = today.atStartOfDay();
+
+            // 查询今天完成的任务（SUCCESS + updated_at >= today 00:00）
+            List<Map<String, Object>> completedToday = jdbcTemplate.queryForList(
+                "SELECT task_key FROM data_schedule_config " +
+                "WHERE last_run_status = 'SUCCESS' AND updated_at >= ?",
+                todayStart
+            );
+
+            if (completedToday.isEmpty()) {
+                log.info("[ScheduleService] 启动恢复：今天无已完成任务，跳过");
+                return;
+            }
+
+            // 标记今天完成的任务到 todayCompleted（防止 cron 重复触发）
+            for (Map<String, Object> row : completedToday) {
+                String tk = (String) row.get("task_key");
+                todayCompleted.put("DONE_" + tk + "_" + today, true);
+            }
+            log.info("[ScheduleService] 启动恢复：标记 {} 个今日已完成任务到内存缓存", completedToday.size());
+
+            // 检查每个已完成上游的下游任务是否也完成了
+            Map<String, List<Map<String, Object>>> chain = dependencyChainCache;
+            int recoveredCount = 0;
+
+            for (Map<String, Object> row : completedToday) {
+                String upstreamKey = (String) row.get("task_key");
+                List<Map<String, Object>> dependents = chain.get(upstreamKey);
+                if (dependents == null || dependents.isEmpty()) continue;
+
+                for (Map<String, Object> dep : dependents) {
+                    String depKey = (String) dep.get("downstream_key");
+                    int requireAll = dep.get("require_all_upstreams") != null
+                        ? ((Number) dep.get("require_all_upstreams")).intValue() : 0;
+
+                    // 下游今天已完成 → 跳过
+                    String depDoneKey = "DONE_" + depKey + "_" + today;
+                    if (todayCompleted.containsKey(depDoneKey)) continue;
+
+                    // 下游未启用 → 跳过
+                    try {
+                        Integer enabled = jdbcTemplate.queryForObject(
+                            "SELECT enabled FROM data_schedule_config WHERE task_key = ?", Integer.class, depKey);
+                        if (enabled == null || enabled == 0) continue;
+                    } catch (Exception ignored) { continue; }
+
+                    // 多上游依赖：require_all_upstreams=1 时，检查所有上游是否都已完成
+                    if (requireAll == 1) {
+                        List<String> upstreams = reverseDependencyCache.get(depKey);
+                        boolean allDone = true;
+                        if (upstreams != null) {
+                            for (String up : upstreams) {
+                                boolean required = chain.getOrDefault(up, List.of()).stream()
+                                    .anyMatch(r -> depKey.equals(r.get("downstream_key"))
+                                        && Integer.valueOf(1).equals(r.get("require_all_upstreams")));
+                                if (!required) continue;
+                                if (!todayCompleted.containsKey("DONE_" + up + "_" + today)) {
+                                    allDone = false;
+                                    break;
+                                }
+                            }
+                        }
+                        if (!allDone) {
+                            log.info("[ScheduleService] 启动恢复：{} 多上游依赖未满足，跳过", depKey);
+                            continue;
+                        }
+                    }
+
+                    // 补触发下游任务（延迟15s，让应用完全启动）
+                    final String fDepKey = depKey;
+                    final String fUpstreamKey = upstreamKey;
+                    log.info("[ScheduleService] 启动恢复：{} 已完成但下游 {} 今日未完成，15s 后补触发",
+                        fUpstreamKey, fDepKey);
+                    taskScheduler.schedule(
+                        () -> {
+                            try {
+                                log.info("[ScheduleService] 启动恢复触发: {} (from {})", fDepKey, fUpstreamKey);
+                                executeTask(fDepKey);
+                            } catch (Exception ex) {
+                                log.error("[ScheduleService] 启动恢复触发失败: {} (from {})", fDepKey, fUpstreamKey, ex);
+                            }
+                        },
+                        new java.util.Date(System.currentTimeMillis() + 15_000)
+                    );
+                    recoveredCount++;
+                }
+            }
+
+            if (recoveredCount > 0) {
+                log.info("[ScheduleService] 启动恢复：共补触发 {} 个下游任务", recoveredCount);
+            } else {
+                log.info("[ScheduleService] 启动恢复：无需补触发");
+            }
+        } catch (Exception e) {
+            log.warn("[ScheduleService] 启动恢复失败: {}", e.getMessage());
+        }
     }
 
     /**
@@ -259,6 +386,18 @@ public class ScheduleService implements SchedulingConfigurer {
                 return;
             }
 
+            // P3-11: 因子健康检查（衰减检测 + 降级 + 复活）
+            if ("FACTOR_HEALTH_CHECK".equals(taskKey)) {
+                com.quant.platform.factor.health.service.FactorHealthMonitor healthMonitor =
+                    applicationContext.getBean(com.quant.platform.factor.health.service.FactorHealthMonitor.class);
+                Map<String, Object> result = healthMonitor.checkAllFactorsHealth();
+                log.info("[ScheduleService] 因子健康检查完成: warnings={} degraded={} resurrected={}",
+                    result.get("warnings"), result.get("degraded"), result.get("resurrected"));
+                updateTaskStatus(taskKey, "SUCCESS");
+                triggerDependents(taskKey);
+                return;
+            }
+
             // P1-4: 推荐追踪任务
             if ("RECOMMENDATION_TRACK".equals(taskKey)) {
                 int updated = recommendationService.trackRecommendationPerformance();
@@ -353,7 +492,7 @@ public class ScheduleService implements SchedulingConfigurer {
 
     /** 9: 依赖编排 — 触发下游任务 */
     private void triggerDependents(String taskKey) {
-        // 清除当前任务的今日完成标记（允许下次重新触发）
+        // 标记当前任务今日已完成
         String doneKey = "DONE_" + taskKey + "_" + LocalDate.now();
         todayCompleted.put(doneKey, true);
 
@@ -371,6 +510,8 @@ public class ScheduleService implements SchedulingConfigurer {
             int delaySeconds = dep.get("delay_seconds") != null
                 ? ((Number) dep.get("delay_seconds")).intValue() : 300;
             long delayMs = delaySeconds * 1000L;
+            int requireAll = dep.get("require_all_upstreams") != null
+                ? ((Number) dep.get("require_all_upstreams")).intValue() : 0;
 
             String depDoneKey = "DONE_" + depKey + "_" + LocalDate.now();
             if (todayCompleted.containsKey(depDoneKey)) {
@@ -393,6 +534,29 @@ public class ScheduleService implements SchedulingConfigurer {
                     continue;
                 }
             } catch (Exception ignored) {}
+
+            // 多上游依赖：require_all_upstreams=1 时，检查所有上游是否都已完成
+            if (requireAll == 1) {
+                List<String> upstreams = reverseDependencyCache.get(depKey);
+                boolean allDone = true;
+                if (upstreams != null && !upstreams.isEmpty()) {
+                    for (String up : upstreams) {
+                        // 只检查 require_all_upstreams=1 的上游（即参与多上游条件锁定的上游）
+                        boolean required = chain.getOrDefault(up, List.of()).stream()
+                            .anyMatch(r -> depKey.equals(r.get("downstream_key"))
+                                && Integer.valueOf(1).equals(r.get("require_all_upstreams")));
+                        if (!required) continue;
+
+                        String upDoneKey = "DONE_" + up + "_" + LocalDate.now();
+                        if (!todayCompleted.containsKey(upDoneKey)) {
+                            log.info("[ScheduleService] 多上游依赖 {} 未满足，等待上游完成: {}", depKey, up);
+                            allDone = false;
+                            break;
+                        }
+                    }
+                }
+                if (!allDone) continue;
+            }
 
             final String fDepKey = depKey;
             log.info("[ScheduleService] {} 完成，{}ms 后触发下游: {}", taskKey, delayMs, depKey);
@@ -450,6 +614,11 @@ public class ScheduleService implements SchedulingConfigurer {
                     customEndDate = ec.get("endDate") != null ? ec.get("endDate").toString() : null;
                     moneyflowSource = ec.get("moneyflowSource") != null
                         ? ec.get("moneyflowSource").toString() : null;
+                    // QFQ_REFRESH: limit 用作 --days 参数（查最近N天除权股票）
+                    if (ec.get("limit") != null) {
+                        try { req.setLimit(Integer.parseInt(ec.get("limit").toString())); }
+                        catch (NumberFormatException ignored) {}
+                    }
                 }
             } catch (Exception e) {
                 log.warn("[ScheduleService] 解析 extra_config 失败: {}", e.getMessage());
@@ -529,11 +698,20 @@ public class ScheduleService implements SchedulingConfigurer {
                 yield req;
             }
             case "FACTOR_COMPUTE" -> { req.setUpdateType("FACTOR_COMPUTE"); yield req; }
+            case "QFQ_REFRESH"   -> {
+                req.setUpdateType("QFQ_REFRESH");
+                // 调度任务默认 days=1（只刷当天除权股票），手动触发可覆盖
+                if (req.getLimit() == null || req.getLimit() <= 0) {
+                    req.setLimit(1);
+                }
+                yield req;
+            }
             case "RESEARCH"      -> { req.setUpdateType("RESEARCH");      yield req; }
             case "DATA_FRESHNESS"   -> { /* 质量检查: 已在executeTask中特殊处理 */ yield null; }
             case "PRICE_ANOMALY"    -> { /* 质量检查: 已在executeTask中特殊处理 */ yield null; }
             case "RECOMMENDATION_TRACK" -> { /* P1-4: 已在executeTask中特殊处理 */ yield null; }
             case "DAILY_RECOMMENDATION" -> { /* Phase 2: 已在executeTask中特殊处理 */ yield null; }
+            case "FACTOR_HEALTH_CHECK"  -> { /* P3-11: 已在executeTask中特殊处理 */ yield null; }
             default -> throw new IllegalArgumentException("未知任务类型: " + taskKey);
         };
     }
@@ -695,6 +873,19 @@ public class ScheduleService implements SchedulingConfigurer {
                     strategyIds.size() > 1 ? "multi_strategy" : "strategy#" + strategyIds.getFirst());
             } catch (Exception e) {
                 log.warn("[ScheduleService] 推送通知失败（NotificationService可能未配置）: {}", e.getMessage());
+            }
+        }
+
+        // P2-9: 组合风控检查（跨策略个股去重 + 行业集中度 + 回撤监控）
+        if (!allRecommendations.isEmpty() && strategyIds.size() > 1) {
+            try {
+                com.quant.platform.strategy.portfolio.PortfolioRiskService portfolioRiskService =
+                    applicationContext.getBean(com.quant.platform.strategy.portfolio.PortfolioRiskService.class);
+                Map<String, Object> riskReport = portfolioRiskService.runFullPortfolioRiskCheck(runDates.get(runDates.size() - 1));
+                log.info("[ScheduleService] P2-9 组合风控检查完成: riskLevel={}, warnings={}",
+                    riskReport.get("riskLevel"), riskReport.get("totalWarnings"));
+            } catch (Exception e) {
+                log.warn("[ScheduleService] 组合风控检查失败: {}", e.getMessage());
             }
         }
 

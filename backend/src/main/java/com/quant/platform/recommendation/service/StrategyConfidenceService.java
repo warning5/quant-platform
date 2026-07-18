@@ -34,6 +34,12 @@ public class StrategyConfidenceService {
     /** 计算用的回溯期数（P3优化: 10→20，增加样本稳定性） */
     private static final int LOOKBACK_PERIODS = 20;
 
+    /** P0-3: 冷启动最小样本量 —— 低于此值用先验中性分而非直接计算 */
+    private static final int MIN_SAMPLES_FOR_SCORING = 5;
+
+    /** P0-3: 冷启动先验分数（NORMAL下限，不缩减topN但进入评分系统） */
+    private static final int COLD_START_PRIOR_SCORE = 55;
+
     // ── 维度权重（满分100）──
     private static final int MAX_HIT_RATE_SCORE = 40;    // 命中率维度满分
     private static final int MAX_RETURN_SCORE = 25;       // 平均收益维度满分
@@ -166,6 +172,13 @@ public class StrategyConfidenceService {
             return createUntrained(strategyId, weightMode);
         }
 
+        // P0-3: 冷启动加速 —— 样本不足时用先验中性分，而非UNTRAINED或噪声计算
+        if (trackedRecs.size() < MIN_SAMPLES_FOR_SCORING) {
+            log.info("[Confidence] strategyId={}, mode={} 冷启动: sampleSize={} < {}, 使用先验中性分",
+                    strategyId, weightMode, trackedRecs.size(), MIN_SAMPLES_FOR_SCORING);
+            return createColdStart(strategyId, weightMode, trackedRecs);
+        }
+
         // 2. 计算各维度得分
         ConfidenceCalculation calc = calculateDimensions(trackedRecs);
 
@@ -204,14 +217,37 @@ public class StrategyConfidenceService {
 
     /**
      * 计算各维度得分（核心算法）
+     * P0-2: 优先使用超额收益(excess return)，避免牛市命中率虚高
+     * 若超额收益字段为null（旧数据），回退到绝对收益
      */
     private ConfidenceCalculation calculateDimensions(List<StockRecommendation> recs) {
         ConfidenceCalculation calc = new ConfidenceCalculation();
         int n = recs.size();
 
+        // P0-2: 优先使用超额收益
+        // 提取收益率序列：优先 excessReturn，回退到绝对 return
+        double[] dayReturns = recs.stream()
+                .map(r -> r.getNextDayExcessReturn() != null
+                        ? r.getNextDayExcessReturn()
+                        : r.getNextDayReturn())
+                .filter(Objects::nonNull)
+                .mapToDouble(Double::doubleValue)
+                .toArray();
+
+        // 如果超额收益数据全部为null（旧数据未刷新），用绝对收益
+        boolean useExcess = recs.stream().anyMatch(r -> r.getNextDayExcessReturn() != null);
+        String metricLabel = useExcess ? "超额收益" : "绝对收益(回退)";
+        log.info("[Confidence] 计算维度: n={}, 收益指标={}", n, metricLabel);
+
         // ---- 维度1: 近N期命中率 (0~40分) ----
+        // P0-2: 超额收益>0才算"命中"（跑赢基准），而非绝对收益>0
         long positiveCount = recs.stream()
-                .filter(r -> r.getNextDayReturn() != null && r.getNextDayReturn() > 0)
+                .filter(r -> {
+                    Double val = r.getNextDayExcessReturn() != null
+                            ? r.getNextDayExcessReturn()
+                            : r.getNextDayReturn();
+                    return val != null && val > 0;
+                })
                 .count();
         double hitRate = (double) positiveCount / n;
         calc.hitRateValue = BigDecimal.valueOf(hitRate).setScale(4, RoundingMode.HALF_UP);
@@ -228,10 +264,7 @@ public class StrategyConfidenceService {
         }
 
         // ---- 维度2: 平均收益率正负 (0~25分) ----
-        double avgReturn = recs.stream()
-                .filter(r -> r.getNextDayReturn() != null)
-                .mapToDouble(StockRecommendation::getNextDayReturn)
-                .average().orElse(0);
+        double avgReturn = java.util.Arrays.stream(dayReturns).average().orElse(0);
         calc.avgReturnValue = BigDecimal.valueOf(avgReturn).setScale(4, RoundingMode.HALF_UP);
         if (avgReturn >= 2.0) {
             calc.returnScore = MAX_RETURN_SCORE;
@@ -243,11 +276,7 @@ public class StrategyConfidenceService {
         }
 
         // ---- 维度3: P5分位回撤 (0~20分) ----
-        double[] sortedReturns = recs.stream()
-                .filter(r -> r.getNextDayReturn() != null)
-                .mapToDouble(StockRecommendation::getNextDayReturn)
-                .sorted()
-                .toArray();
+        double[] sortedReturns = java.util.Arrays.stream(dayReturns).sorted().toArray();
 
         double drawdownMetric;
         if (sortedReturns.length >= 20) {
@@ -266,11 +295,7 @@ public class StrategyConfidenceService {
         }
 
         // ---- 维度4: 收益波动率/稳定性 (0~15分) ----
-        double[] returns = recs.stream()
-                .filter(r -> r.getNextDayReturn() != null)
-                .mapToDouble(StockRecommendation::getNextDayReturn)
-                .toArray();
-        double stdDev = calculateStdDev(returns);
+        double stdDev = calculateStdDev(dayReturns);
         calc.volatilityValue = BigDecimal.valueOf(stdDev).setScale(4, RoundingMode.HALF_UP);
         if (stdDev <= 1.5) {
             calc.volatilityScore = MAX_VOLATILITY_SCORE;
@@ -352,6 +377,60 @@ public class StrategyConfidenceService {
         }
 
         strategyConfidenceMapper.insert(sc);
+        return sc;
+    }
+
+    /**
+     * P0-3: 冷启动状态（样本 < MIN_SAMPLES_FOR_SCORING）
+     *
+     * 使用先验中性分(COLD_START_PRIOR_SCORE=55, NORMAL下限)而非UNTRAINED，
+     * 让策略级风控更快进入评分系统：
+     * - NORMAL 不缩减 topN（与 UNTRAINED 效果相同）
+     * - 但 score 非空，UI 可以展示置信度数据
+     * - 样本积累到 MIN_SAMPLES_FOR_SCORING 后自动切换到真实计算
+     * - 如果早期表现极差，下一次计算时仍可能降级到 LOW/SUSPENDED
+     */
+    private StrategyConfidence createColdStart(Long strategyId, String weightMode,
+                                                List<StockRecommendation> trackedRecs) {
+        // 尝试用已有数据做初步计算，但用先验做贝叶斯收缩
+        ConfidenceCalculation calc = calculateDimensions(trackedRecs);
+        int actualScore = calc.hitRateScore + calc.returnScore + calc.drawdownScore + calc.volatilityScore;
+
+        // 贝叶斯收缩: priorWeight=0.6, actualWeight=0.4（样本少时先验主导）
+        int blendedScore = (int) Math.round(COLD_START_PRIOR_SCORE * 0.6 + actualScore * 0.4);
+        blendedScore = Math.max(35, Math.min(75, blendedScore)); // 限制在 LOW~HIGH 之间
+
+        String level = StrategyConfidence.getLevelByScore(blendedScore);
+
+        LocalDate dataAsOf = trackedRecs.stream()
+                .map(StockRecommendation::getRecommendDate)
+                .filter(Objects::nonNull)
+                .max(LocalDate::compareTo)
+                .orElse(LocalDate.now());
+
+        StrategyConfidence sc = new StrategyConfidence();
+        sc.setStrategyId(strategyId);
+        sc.setWeightMode(weightMode);
+        sc.setLevel(level);
+        sc.setScore(blendedScore);
+        sc.setHitRateScore(calc.hitRateScore);
+        sc.setHitRateValue(calc.hitRateValue);
+        sc.setReturnScore(calc.returnScore);
+        sc.setAvgReturnValue(calc.avgReturnValue);
+        sc.setDrawdownScore(calc.drawdownScore);
+        sc.setMaxDrawdownValue(calc.maxDrawdownValue);
+        sc.setVolatilityScore(calc.volatilityScore);
+        sc.setVolatilityValue(calc.volatilityValue);
+        sc.setSampleSize(trackedRecs.size());
+        sc.setDataAsOfDate(dataAsOf);
+        sc.setCreatedAt(LocalDateTime.now());
+        sc.setUpdatedAt(LocalDateTime.now());
+
+        strategyConfidenceMapper.insert(sc);
+
+        log.info("[Confidence] 冷启动评估: strategyId={}, mode={}, sampleSize={}, priorScore={}, actualScore={}, blendedScore={}, level={}",
+                strategyId, weightMode, trackedRecs.size(), COLD_START_PRIOR_SCORE, actualScore, blendedScore, level);
+
         return sc;
     }
 
