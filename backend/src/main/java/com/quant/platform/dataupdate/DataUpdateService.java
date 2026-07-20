@@ -707,6 +707,7 @@ public class DataUpdateService {
                 else if ("SZ".equals(m)) marketLabel = "深市";
                 else if ("BJ".equals(m)) marketLabel = "北交所";
                 else if ("BAOSTOCK".equals(request.getSource())) marketLabel = "沪深";
+                else if ("TENCENT_ALL".equals(request.getSource())) marketLabel = "全市场(腾讯)";
                 else if ("TENCENT".equals(request.getSource())) marketLabel = "北交所";
                 task.setCurrentStep(marketLabel != null ? marketLabel : "启动中...");
                 broadcastStatus(task);
@@ -833,8 +834,12 @@ public class DataUpdateService {
         }
 
         // 所有市场顺序执行
+        boolean baostockDegraded = false; // 是否已降级到腾讯
         for (String[] ms : marketScripts) {
             if ("CANCELLED".equals(task.getStatus())) break;
+            // 已降级到腾讯全市场时跳过北交所（已包含在腾讯全量中）
+            if (baostockDegraded) break;
+
             task.setCurrentStep(ms[0]);
             task.setProcessedStocks(0);
             task.setTotalStocks(0);
@@ -853,8 +858,39 @@ public class DataUpdateService {
             addCommonArgs(scriptCmd, request);
             boolean ok = runSingleScript(taskId, task, scriptCmd, ms[0]);
 
-            // 不再使用 akshare 作为备用数据源
-            if (!ok) allSuccess = false;
+            if (!ok) {
+                allSuccess = false;
+                // Baostock 不可用时自动降级到腾讯全市场
+                if ("沪深".equals(ms[0]) && isBaostockBlocked(task)) {
+                    baostockDegraded = true;
+                    String err = task.getLastScriptError();
+                    broadcastLog(taskId, "[WARN] Baostock 不可用 (" + err + ")");
+                    broadcastLog(taskId, "[WARN] 自动降级到腾讯接口（覆盖沪深+北交所全市场）...");
+
+                    List<String> tencentCmd = new ArrayList<>();
+                    tencentCmd.add(pythonPath);
+                    tencentCmd.add("-u");
+                    tencentCmd.add("update_stock_daily.py");
+                    tencentCmd.add("--source");
+                    tencentCmd.add("tencent");
+                    addCommonArgs(tencentCmd, request);
+
+                    task.setCurrentStep("全市场(腾讯降级)");
+                    task.setProcessedStocks(0);
+                    task.setTotalStocks(0);
+                    task.setProgress(0);
+                    broadcastStatus(task);
+                    broadcastLog(taskId, "\n========== 全市场(腾讯降级) ==========");
+
+                    boolean tencentOk = runSingleScript(taskId, task, tencentCmd, "全市场(腾讯降级)");
+                    if (tencentOk) {
+                        allSuccess = true;
+                        broadcastLog(taskId, "[OK] 腾讯降级成功，全市场数据已更新");
+                    } else {
+                        broadcastLog(taskId, "[FAIL] 腾讯降级也失败，请检查网络");
+                    }
+                }
+            }
         }
 
         // ─── Part 1.5: 更新指数日线（仅非 dailyOnly 时）────────────
@@ -981,8 +1017,15 @@ public class DataUpdateService {
             String line;
             while ((line = reader.readLine()) != null) {
                 if ("CANCELLED".equals(task.getStatus())) break;
-                broadcastLog(taskId, line.trim());
+                String trimmed = line.trim();
+                broadcastLog(taskId, trimmed);
                 parseProgress(line, task);
+                // 捕获 Baostock 不可用的错误模式（用于自动降级判断）
+                if (trimmed.contains("黑名单") || trimmed.contains("登录失败")
+                        || trimmed.contains("login fail") || trimmed.contains("blacklist")
+                        || trimmed.contains("ERROR") && trimmed.contains("Baostock")) {
+                    task.setLastScriptError(trimmed);
+                }
             }
         }
 
@@ -992,12 +1035,23 @@ public class DataUpdateService {
         if ("CANCELLED".equals(task.getStatus())) return false;
         if (exitCode == 0) {
             broadcastLog(taskId, "[OK] 脚本执行成功");
+            task.setLastScriptError(null); // 成功则清除错误
             return true;
         } else {
             broadcastLog(taskId, "[FAIL] 脚本退出码: " + exitCode);
             task.setError("脚本退出码: " + exitCode);
             return false;
         }
+    }
+
+    /**
+     * 判断脚本失败是否因 Baostock 不可用（黑名单/登录失败）
+     */
+    private boolean isBaostockBlocked(DataUpdateTask task) {
+        String err = task.getLastScriptError();
+        if (err == null || err.isEmpty()) return false;
+        return err.contains("黑名单") || err.contains("登录失败")
+                || err.contains("login fail") || err.contains("blacklist");
     }
 
     /**
@@ -1360,8 +1414,13 @@ public class DataUpdateService {
             return cmd;
         }
 
-        // 股票日线（原有逻辑）
-        if ("TENCENT".equals(request.getSource()) || "BJ".equals(request.getMarket())) {
+        // 股票日线
+        if ("TENCENT_ALL".equals(request.getSource())) {
+            // 腾讯全市场（沪深+北交所），使用统一 data_provider 模块
+            cmd.add("update_stock_daily.py");
+            cmd.add("--source");
+            cmd.add("tencent");
+        } else if ("TENCENT".equals(request.getSource()) || "BJ".equals(request.getMarket())) {
             cmd.add("update_bj_stock_daily_qq.py");
         } else if ("BAOSTOCK".equals(request.getSource())) {
             // BAOSTOCK 数据源覆盖 SH + SZ，返回 null 走 executeAllMarkets 分别调用
@@ -1375,7 +1434,7 @@ public class DataUpdateService {
             cmd.add("--market");
             cmd.add("SZ");
         } else {
-            return null; // ALL → executeAllMarkets
+            return null; // ALL → executeAllMarkets（含自动降级）
         }
 
         addCommonArgs(cmd, request);
@@ -1394,8 +1453,9 @@ public class DataUpdateService {
             wrapper.in(StockInfo::getMarket, "SH", "SZ");
         } else if ("BAOSTOCK".equals(request.getSource())) {
             wrapper.in(StockInfo::getMarket, "SH", "SZ");
+        } else if ("TENCENT_ALL".equals(request.getSource())) {
+            wrapper.in(StockInfo::getMarket, "SH", "SZ", "BJ");
         } else if ("TENCENT".equals(request.getSource()) || "BJ".equals(request.getMarket())) {
-            wrapper.eq(StockInfo::getMarket, "BJ");
         } else if (!"ALL".equals(request.getMarket())) {
             wrapper.eq(StockInfo::getMarket, request.getMarket());
         }

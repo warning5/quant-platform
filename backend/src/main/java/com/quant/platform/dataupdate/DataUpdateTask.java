@@ -66,6 +66,12 @@ public class DataUpdateTask {
     private String error;
 
     /**
+     * 最近一次脚本输出的错误日志（用于自动降级判断，如 Baostock 黑名单）
+     */
+    @JsonIgnore
+    private transient String lastScriptError;
+
+    /**
      * 失败的股票列表（格式: "code|name|date"，用于前端悬浮展示）
      */
     private List<String> failedStocks = new ArrayList<>();

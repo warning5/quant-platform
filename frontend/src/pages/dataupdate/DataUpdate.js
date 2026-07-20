@@ -59,9 +59,10 @@ const SENTIMENT_CHANNEL_FIELDS = [
 ];
 
 const SOURCE_OPTIONS = [
-  { value: 'ALL', label: '全部数据源' },
+  { value: 'ALL', label: '自动 (Baostock优先, 失败降级腾讯)' },
   { value: 'BAOSTOCK', label: 'Baostock (沪深 SH/SZ)' },
   { value: 'TENCENT', label: '腾讯证券 (北交所 BJ)' },
+  { value: 'TENCENT_ALL', label: '腾讯证券 (全市场 SH/SZ/BJ)' },
 ];
 
 const MARKET_OPTIONS = [
@@ -137,7 +138,7 @@ const renderTaskConfig = (task, updateType) => {
   // 市场/数据源
   if (updateType === 'DAILY') {
     const marketMap = { ALL: '全市场', SH: '沪市', SZ: '深市', BJ: '北交所' };
-    const sourceMap = { ALL: '全部', BAOSTOCK: 'Baostock', TENCENT: '腾讯' };
+    const sourceMap = { ALL: '自动', BAOSTOCK: 'Baostock', TENCENT: '腾讯(BJ)', TENCENT_ALL: '腾讯(全市场)' };
     if (task.configMarket) tags.push(<Tag key="mkt" color="blue">{marketMap[task.configMarket] || task.configMarket}</Tag>);
     if (task.configSource && task.configSource !== 'ALL') tags.push(<Tag key="src" color="cyan">{sourceMap[task.configSource] || task.configSource}</Tag>);
     if (task.configStockPool && task.configStockPool !== 'ALL') {
