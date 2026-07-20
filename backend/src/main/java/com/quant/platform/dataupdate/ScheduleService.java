@@ -3,6 +3,7 @@ package com.quant.platform.dataupdate;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationContext;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.event.EventListener;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.TaskScheduler;
@@ -36,6 +37,7 @@ public class ScheduleService implements SchedulingConfigurer {
     private final TaskScheduler taskScheduler;
     private final RecommendationService recommendationService;
     private final ApplicationContext applicationContext;
+    private final ApplicationEventPublisher eventPublisher;
     // 懒加载注入，避免循环依赖
     private NotificationService notificationService;
     private DataQualityService dataQualityService;
@@ -897,6 +899,19 @@ public class ScheduleService implements SchedulingConfigurer {
             LocalDateTime.now(), allSuccess ? "SUCCESS" : "PARTIAL", durationSec);
         log.info("[ScheduleService] 每日自动推荐完成: 策略数={}, 推荐总数={}, 耗时={}s, 状态={}",
             strategyIds.size(), allRecommendations.size(), durationSec, allSuccess ? "SUCCESS" : "PARTIAL");
+
+        // P3-12: 发布推荐生成完成事件
+        if (eventPublisher != null) {
+            for (Long strategyId : strategyIds) {
+                for (String wm : weightModes) {
+                    eventPublisher.publishEvent(new com.quant.platform.common.event.RecommendationGeneratedEvent(
+                        this, runDates.isEmpty() ? LocalDate.now() : runDates.get(runDates.size() - 1),
+                        strategyId, wm, allRecommendations.size(), allSuccess));
+                }
+            }
+            log.info("[ScheduleService] ★ 发布 RecommendationGeneratedEvent: 策略数={}, 推荐数={}, success={}",
+                strategyIds.size(), allRecommendations.size(), allSuccess);
+        }
     }
 
     /** 判断是否周末（周六=6, 周日=7） */

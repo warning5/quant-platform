@@ -1215,7 +1215,100 @@ public class FactorStyleAttributionService {
 
         log.info("FF3 因子计算完成: {} 个交易日 ({} ~ {})",
                 result.size(), startDate, endDate);
+
+        // 持久化到 ClickHouse factor_premium 表
+        saveFactorPremiumToCH(result);
+
         return result;
+    }
+
+    /**
+     * 将 FF3 因子日收益写入 ClickHouse factor_premium 表。
+     * 使用 ReplacingMergeTree，按 (factor_code, calc_date) 去重。
+     */
+    private void saveFactorPremiumToCH(Map<LocalDate, Map<String, Double>> factorReturns) {
+        if (!clickHouseConfig.isEnabled()) return;
+
+        String sql = """
+            INSERT INTO stock.factor_premium
+            (factor_code, calc_date, factor_return, stock_count, top_return, bottom_return, created_at, update_time)
+            VALUES (?, ?, ?, ?, ?, ?, now(), now())
+            """;
+
+        Properties props = new Properties();
+        props.setProperty("user", clickHouseConfig.getUsername());
+        if (clickHouseConfig.getPassword() != null && !clickHouseConfig.getPassword().isEmpty()) {
+            props.setProperty("password", clickHouseConfig.getPassword());
+        }
+
+        try (Connection conn = DriverManager.getConnection(clickHouseConfig.getJdbcUrl(), props);
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+
+            for (Map.Entry<LocalDate, Map<String, Double>> entry : factorReturns.entrySet()) {
+                LocalDate date = entry.getKey();
+                Map<String, Double> dayMap = entry.getValue();
+                int idx = 0;
+                for (String factorCode : List.of("MKT", "SMB", "HML")) {
+                    Double ret = dayMap.get(factorCode);
+                    if (ret == null) continue;
+                    idx++;
+                    ps.setString(1, factorCode);
+                    ps.setObject(2, date);
+                    ps.setDouble(3, ret);
+                    // stock_count: MKT用全市场，SMB/HML用分组(无精确值，用0占位)
+                    ps.setInt(4, "MKT".equals(factorCode) ? dayMap.size() : 0);
+                    // top/bottom return: SMB=S(小市值)-B(大市值); HML=V(价值)-G(成长)
+                    // 这里直接存 factor_return，精确的top/bottom已含在因子定义中
+                    ps.setDouble(5, 0);  // top_return 占位
+                    ps.setDouble(6, 0);  // bottom_return 占位
+                    ps.addBatch();
+                }
+            }
+            int[] counts = ps.executeBatch();
+            log.info("[FactorStyle] factor_premium 写入 CH: {} 条记录", counts.length);
+        } catch (Exception e) {
+            log.warn("[FactorStyle] factor_premium 写入 CH 失败: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 每日 FF3 因子收益计算（增量：只计算最近N天缺失数据）
+     * 由 FactorComputeCompletedEvent 事件触发。
+     */
+    public void computeDailyFF3Premium() {
+        if (!clickHouseConfig.isEnabled()) {
+            log.info("[FactorStyle] CH 不可用，跳过每日 FF3 计算");
+            return;
+        }
+
+        // 查 factor_premium 最新日期
+        LocalDate lastDate = null;
+        Properties props = new Properties();
+        props.setProperty("user", clickHouseConfig.getUsername());
+        if (clickHouseConfig.getPassword() != null && !clickHouseConfig.getPassword().isEmpty()) {
+            props.setProperty("password", clickHouseConfig.getPassword());
+        }
+        try (Connection conn = DriverManager.getConnection(clickHouseConfig.getJdbcUrl(), props);
+             Statement stmt = conn.createStatement()) {
+            ResultSet rs = stmt.executeQuery("SELECT max(calc_date) FROM stock.factor_premium");
+            if (rs.next()) {
+                java.sql.Date d = rs.getDate(1);
+                if (d != null) lastDate = d.toLocalDate();
+            }
+        } catch (Exception e) {
+            log.warn("[FactorStyle] 查询 factor_premium max date 失败: {}", e.getMessage());
+        }
+
+        LocalDate startDate = lastDate != null ? lastDate.plusDays(1) : LocalDate.now().minusDays(120);
+        LocalDate endDate = LocalDate.now();
+
+        if (startDate.isAfter(endDate)) {
+            log.info("[FactorStyle] factor_premium 数据已最新，无需补算");
+            return;
+        }
+
+        log.info("[FactorStyle] 开始补算 FF3 因子收益: {} ~ {}", startDate, endDate);
+        computeFF3FactorReturns(startDate, endDate);
     }
 
     /** 股票日数据辅助类 */

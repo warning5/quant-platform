@@ -1,6 +1,7 @@
 package com.quant.platform.factor.health.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.quant.platform.config.ClickHouseConfig;
 import com.quant.platform.factor.domain.FactorDefinition;
 import com.quant.platform.factor.ic.domain.FactorIcRecord;
 import com.quant.platform.factor.ic.mapper.FactorIcRecordMapper;
@@ -12,8 +13,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
-import java.math.RoundingMode;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
@@ -36,6 +39,7 @@ public class FactorHealthMonitor {
     private final FactorDefinitionMapper factorDefinitionMapper;
     private final FactorIcRecordMapper factorIcRecordMapper;
     private final FactorHealthLogMapper factorHealthLogMapper;
+    private final ClickHouseConfig clickHouseConfig;
     private final org.springframework.context.ApplicationEventPublisher eventPublisher;
 
     /** 衰减预警阈值：90日IC < 启用时IC × 此比例 → 预警 */
@@ -73,6 +77,10 @@ public class FactorHealthMonitor {
             String code = factor.getFactorCode();
             try {
                 FactorHealthStatus status = evaluateHealth(code);
+                if (status.hasIcData) {
+                    String healthStatus = status.shouldDegrade ? "DEGRADED" : "ACTIVE";
+                    saveHealthMetric(code, status.latestTradeDate, status, healthStatus);
+                }
                 if (status.isWarning) {
                     warningCount++;
                     logEvent(code, FactorHealthLog.EventType.DEGRADE_WARNING, status, "IC衰减预警");
@@ -95,6 +103,10 @@ public class FactorHealthMonitor {
             String code = factor.getFactorCode();
             try {
                 FactorHealthStatus status = evaluateHealth(code);
+                if (status.hasIcData) {
+                    String healthStatus = status.shouldResurrect ? "ACTIVE" : "DEGRADED";
+                    saveHealthMetric(code, status.latestTradeDate, status, healthStatus);
+                }
                 if (status.shouldResurrect) {
                     resurrectCount++;
                     resurrectFactor(code, status);
@@ -136,6 +148,7 @@ public class FactorHealthMonitor {
             return status;
         }
         status.hasIcData = true;
+        status.latestTradeDate = recentRecords.get(0).getTradeDate();
 
         // 计算30/60/90日IC均值
         int total = recentRecords.size();
@@ -319,6 +332,47 @@ public class FactorHealthMonitor {
     }
 
     /**
+     * 写入 ClickHouse factor_health_metric 时序表
+     */
+    private void saveHealthMetric(String factorCode, LocalDate metricDate,
+                                  FactorHealthStatus status, String healthStatus) {
+        if (clickHouseConfig == null || !clickHouseConfig.isEnabled()) {
+            return;
+        }
+        if (metricDate == null) {
+            metricDate = LocalDate.now();
+        }
+        String sql = """
+            INSERT INTO stock.factor_health_metric
+            (factor_code, metric_date, ic_30d, ic_60d, ic_90d, ir_30d, ir_60d,
+             ic_at_activation, decay_ratio, health_status, consecutive_decay_days,
+             consecutive_recovery_days, created_at, update_time)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), now())
+            """;
+        try (Connection conn = DriverManager.getConnection(
+                clickHouseConfig.getJdbcUrl(), clickHouseConfig.getUsername(),
+                clickHouseConfig.getPassword() != null ? clickHouseConfig.getPassword() : "");
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, factorCode);
+            ps.setObject(2, metricDate);
+            ps.setDouble(3, status.ic30d);
+            ps.setDouble(4, status.ic60d);
+            ps.setDouble(5, status.ic90d);
+            ps.setObject(6, status.ir30d);
+            ps.setObject(7, status.ir60d);
+            ps.setDouble(8, status.icAtActivation);
+            ps.setDouble(9, status.decayRatio);
+            ps.setString(10, healthStatus);
+            ps.setInt(11, status.consecutiveDecayDays);
+            ps.setInt(12, status.consecutiveRecoveryDays);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            log.warn("[FactorHealth] 写入 CH factor_health_metric 失败, factor={}, date={}: {}",
+                    factorCode, metricDate, e.getMessage());
+        }
+    }
+
+    /**
      * 记录健康事件日志
      */
     private void logEvent(String factorCode, FactorHealthLog.EventType eventType,
@@ -376,6 +430,7 @@ public class FactorHealthMonitor {
     private static class FactorHealthStatus {
         String factorCode;
         boolean hasIcData;
+        LocalDate latestTradeDate;
         double ic30d;
         double ic60d;
         double ic90d;

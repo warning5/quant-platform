@@ -684,6 +684,17 @@ public class DataUpdateService {
                 }
                 task.setProgress(100);
                 task.setCurrentStep("计算完成");
+                // P3-12: 发布因子计算完成事件
+                if (eventPublisher != null) {
+                    boolean computeOk = "SUCCESS".equals(task.getStatus());
+                    LocalDate computeDate = (request.getEndDate() != null && !request.getEndDate().isEmpty())
+                        ? LocalDate.parse(request.getEndDate()) : LocalDate.now();
+                    int factorCnt = computeOk ? task.getTotalStocks() : 0;
+                    eventPublisher.publishEvent(new com.quant.platform.common.event.FactorComputeCompletedEvent(
+                        this, computeDate, factorCnt, computeOk));
+                    log.info("[DataUpdate] ★ 发布 FactorComputeCompletedEvent: date={}, count={}, success={}",
+                        computeDate, factorCnt, computeOk);
+                }
             } else if (cmd == null) {
                 // ALL → 依次执行 SH、SZ、BJ
                 executeAllMarkets(taskId, request);
