@@ -142,7 +142,7 @@ function ResearchData() {
       render: (rating) => rating ? <Tag color={RATING_COLORS[rating] || 'default'}>{rating}</Tag> : '-' },
     { title: '机构', dataIndex: 'institution', width: 150, ellipsis: true },
     { title: '行业', dataIndex: 'industry', width: 120, ellipsis: true },
-    { title: <Tooltip title={epsTip} overlayClassName="tip-light" styles={{ root: { maxWidth: 420 } }}><span style={{ cursor: 'pointer' }}>EPS预测<QuestionCircleOutlined style={{ fontSize: 12, marginLeft: 4 }} /></span></Tooltip>, key: 'eps', width: 220, align: 'right',
+    { title: <Tooltip title={epsTip} classNames={{ root: 'tip-light' }} styles={{ root: { maxWidth: 420 } }}><span style={{ cursor: 'pointer' }}>EPS预测<QuestionCircleOutlined style={{ fontSize: 12, marginLeft: 4 }} /></span></Tooltip>, key: 'eps', width: 220, align: 'right',
       render: (_, record) => {
         const f = record.epsForecast;
         if (!f || Object.keys(f).length === 0) return '-';
@@ -159,7 +159,7 @@ function ResearchData() {
           </span>
         );
       }},
-    { title: <Tooltip title={peTip} overlayClassName="tip-light" styles={{ root: { maxWidth: 420 } }}><span style={{ cursor: 'pointer' }}>PE预测<QuestionCircleOutlined style={{ fontSize: 12, marginLeft: 4 }} /></span></Tooltip>, key: 'pe', width: 220, align: 'right',
+    { title: <Tooltip title={peTip} classNames={{ root: 'tip-light' }} styles={{ root: { maxWidth: 420 } }}><span style={{ cursor: 'pointer' }}>PE预测<QuestionCircleOutlined style={{ fontSize: 12, marginLeft: 4 }} /></span></Tooltip>, key: 'pe', width: 220, align: 'right',
       render: (_, record) => {
         const f = record.epsForecast;
         if (!f || Object.keys(f).length === 0) return '-';

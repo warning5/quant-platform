@@ -63,6 +63,7 @@ export default function FactorDetail() {
   const testPollRef = useRef(null);
   const testWsDataFlag = useRef(false);  // WebSocket 是否收到过真实数据
   const testPollStartRef = useRef(null); // 轮询开始时间
+  const logIdCounter = useRef(0);        // 日志唯一ID计数器
 
   // ── WebSocket（on-demand 模式：检测开始时启用，完成/失败时关闭）
   const [wsEnabled, setWsEnabled] = useState(false);
@@ -157,7 +158,7 @@ export default function FactorDetail() {
   // ── 推送计算日志条目
   const pushLog = (text, type = 'info') => {
     setComputeLogs(prev => [
-      { id: Date.now() + Math.random(), time: dayjs().format('HH:mm:ss'), text, type },
+      { id: ++logIdCounter.current, time: dayjs().format('HH:mm:ss'), text, type },
       ...prev.slice(0, 49),   // 保留最近50条
     ]);
   };
@@ -165,7 +166,7 @@ export default function FactorDetail() {
   // ── 推送检测日志条目
   const pushTestLog = (text, type = 'info') => {
     setTestLogs(prev => [
-      { id: Date.now() + Math.random(), time: dayjs().format('HH:mm:ss'), text, type },
+      { id: ++logIdCounter.current, time: dayjs().format('HH:mm:ss'), text, type },
       ...prev.slice(0, 49),   // 保留最近50条
     ]);
   };
@@ -339,7 +340,7 @@ export default function FactorDetail() {
           const last = prev[0]?.text || '';
           if (last.includes(`${data.progress}%`)) return prev;
           return [
-            { id: Date.now() + Math.random(), time: dayjs().format('HH:mm:ss'), text: msgText, type: 'info' },
+            { id: ++logIdCounter.current, time: dayjs().format('HH:mm:ss'), text: msgText, type: 'info' },
             ...prev.slice(0, 49),
           ];
         });

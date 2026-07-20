@@ -669,11 +669,14 @@ function DataUpdate() {
     });
   }, [getTaskUpdater, applyTaskFields]);
 
+  // 日志唯一ID计数器（避免 Date.now()+Math.random() 在同毫秒内重复）
+  const logIdCounter = useRef(0);
+
   // 日志回调：根据 updateType 推送到对应日志数组
   const handleUpdateLog = useCallback((msg) => {
     const ut = msg.updateType || 'DAILY';
     const logEntry = {
-      id: Date.now() + Math.random(),
+      id: ++logIdCounter.current,
       time: msg.time || dayjs().format('HH:mm:ss'),
       text: msg.line || '',
       taskId: msg.taskId,
@@ -719,7 +722,7 @@ function DataUpdate() {
             const existingTexts = new Set(prev.map(l => l.text));
             const newEntries = logs
               .filter(l => !existingTexts.has(l.line))
-              .map(l => ({ id: Date.now() + Math.random(), time: l.time || '', text: l.line || '' }));
+              .map(l => ({ id: ++logIdCounter.current, time: l.time || '', text: l.line || '' }));
             return newEntries.length > 0 ? [...prev, ...newEntries] : prev;
           });
         }
@@ -756,7 +759,7 @@ function DataUpdate() {
             const existingTexts = new Set(prev.map(l => l.text));
             const newEntries = logs
               .filter(l => !existingTexts.has(l.line))
-              .map(l => ({ id: Date.now() + Math.random(), time: l.time || '', text: l.line || '' }));
+              .map(l => ({ id: ++logIdCounter.current, time: l.time || '', text: l.line || '' }));
             return newEntries.length > 0 ? [...prev, ...newEntries] : prev;
           });
         }
@@ -979,7 +982,7 @@ function DataUpdate() {
                     const existingTexts = new Set(prev.map(l => l.text));
                     const newEntries = logs
                       .filter(l => !existingTexts.has(l.line))
-                      .map(l => ({ id: Date.now() + Math.random(), time: l.time || '', text: l.line || '' }));
+                      .map(l => ({ id: ++logIdCounter.current, time: l.time || '', text: l.line || '' }));
                     return newEntries.length > 0 ? [...prev, ...newEntries] : prev;
                   });
                 } else if (t.status === 'RUNNING') {
@@ -1174,7 +1177,7 @@ function DataUpdate() {
                 const existingIds = new Set(prev.map(l => l.text));
                 const newLogs = logs
                   .filter(l => !existingIds.has(l.line))
-                  .map(l => ({ id: Date.now() + Math.random(), time: l.time || '', text: l.line || '' }));
+                  .map(l => ({ id: ++logIdCounter.current, time: l.time || '', text: l.line || '' }));
                 return newLogs.length > 0 ? [...prev, ...newLogs] : prev;
               });
             }
