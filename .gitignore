@@ -36,3 +36,4 @@ nul*
 /miniprogram/.swc/
 /backend-mp/target/
 /common/target/
+/opc-doc/

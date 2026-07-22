@@ -2,7 +2,7 @@
   "miniprogramRoot": "dist/",
   "projectname": "quant-mp",
   "description": "量化平台股票推荐小程序",
-  "appid": "",
+  "appid": "wxd5f4ca3ae962f049",
   "setting": {
     "urlCheck": false,
     "es6": false,
