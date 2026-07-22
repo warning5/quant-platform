@@ -37,15 +37,6 @@ const RecommendationList = lazy(() => import('./pages/recommendation/Recommendat
 const LlmAnalysisPage = lazy(() => import('./pages/llm/LlmAnalysisPage'));
 const MonitorPage = lazy(() => import('./pages/monitor/MonitorPage'));
 const StockScreen = lazy(() => import('./pages/screen/StockScreen'));
-const ManualOverviewPage = lazy(() => import('./pages/manual/ManualOverviewPage'));
-const ManualDataInfoPage = lazy(() => import('./pages/manual/ManualDataInfoPage'));
-const ManualStockAnalysisPage = lazy(() => import('./pages/manual/ManualStockAnalysisPage'));
-const ManualMarketThermometerPage = lazy(() => import('./pages/manual/ManualMarketThermometerPage'));
-const ManualPaperTradingFullPage = lazy(() => import('./pages/manual/ManualPaperTradingFullPage'));
-const ManualFactorPage = lazy(() => import('./pages/manual/ManualFactorPage'));
-const ManualFactorTestPage = lazy(() => import('./pages/manual/ManualFactorTestPage'));
-const ManualStrategyPage = lazy(() => import('./pages/manual/ManualStrategyPage'));
-const ManualBacktestPage = lazy(() => import('./pages/manual/ManualBacktestPage'));
 const ManualFullPage = lazy(() => import('./pages/manual/ManualFullPage'));
 const FinancialData = lazy(() => import('./pages/financial/FinancialData'));
 const ResearchData = lazy(() => import('./pages/datadetail/ResearchData'));
@@ -137,18 +128,9 @@ function AppLayout({ isDark, setIsDark }) {
       ],
     },
     {
-      key: 'manual',
+      key: '/manual/full',
       icon: <BookOutlined />,
-      label: '使用手册',
-      children: [
-        { key: '/manual/full', label: <Link to="/manual/full">完整手册 v3.0</Link> },
-        { key: '/manual/overview', label: <Link to="/manual/overview">平台概述</Link> },
-        { key: '/manual/data-info', label: <Link to="/manual/data-info">数据信息</Link> },
-        { key: '/manual/stock-analysis', label: <Link to="/manual/stock-analysis">个股分析</Link> },
-        { key: '/manual/market-thermometer', label: <Link to="/manual/market-thermometer">大盘温度计</Link> },
-        { key: '/manual/factors', label: <Link to="/manual/factors">因子管理</Link> },
-        { key: '/manual/strategy', label: <Link to="/manual/strategy">策略管理</Link> },
-      ],
+      label: <Link to="/manual/full">使用手册 v3.0</Link>,
     },
   ];
 
@@ -160,7 +142,6 @@ function AppLayout({ isDark, setIsDark }) {
     if (path.startsWith('/screen') || path.startsWith('/recommendation') || path.startsWith('/llm') || path.startsWith('/monitor') || path.startsWith('/calendar')) return ['screen'];
     if (path.startsWith('/data-detail')) return ['data-info'];
     if (path === '/data-update' || path === '/scheduled-tasks' || path === '/sector-ranking' || path === '/data-quality') return ['data-info'];
-    if (path.startsWith('/manual/')) return ['manual'];
     return [];
   });
 
@@ -170,7 +151,6 @@ function AppLayout({ isDark, setIsDark }) {
     else if (path.startsWith('/strateg') || path.startsWith('/backtest') || path === '/paper-trading') setOpenKeys(['strategies']);
     else if (path.startsWith('/screen') || path.startsWith('/recommendation') || path.startsWith('/llm') || path.startsWith('/monitor') || path.startsWith('/calendar')) setOpenKeys(['screen']);
     else if (path.startsWith('/data-detail') || path === '/data-update' || path === '/scheduled-tasks' || path === '/sector-ranking' || path === '/data-quality') setOpenKeys(['data-info']);
-    else if (path.startsWith('/manual/')) setOpenKeys(['manual']);
     else setOpenKeys([]);
   }, [location.pathname]);
 
@@ -341,14 +321,6 @@ function AppLayout({ isDark, setIsDark }) {
               <Route path="/monitor" element={<MonitorPage />} />
               <Route path="/screen/backtest/:id" element={<OldRollingRedirect />} />
               <Route path="/screen/backtest" element={<OldRollingRedirect />} />
-              <Route path="/manual/overview" element={<ManualOverviewPage />} />
-              <Route path="/manual/data-info" element={<ManualDataInfoPage />} />
-              <Route path="/manual/stock-analysis" element={<ManualStockAnalysisPage />} />
-              <Route path="/manual/market-thermometer" element={<ManualMarketThermometerPage />} />
-              <Route path="/manual/paper-trading" element={<ManualPaperTradingFullPage />} />
-              <Route path="/manual/factors" element={<ManualFactorPage />} />
-              <Route path="/manual/strategy" element={<ManualStrategyPage />} />
-              <Route path="/manual/backtest" element={<ManualBacktestPage />} />
               <Route path="/manual/full" element={<ManualFullPage />} />
               <Route path="/stock-analysis" element={<StockAnalysis />} />
               <Route path="/market-thermometer" element={<MarketThermometer />} />
