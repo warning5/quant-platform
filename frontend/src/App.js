@@ -46,6 +46,7 @@ const ManualFactorPage = lazy(() => import('./pages/manual/ManualFactorPage'));
 const ManualFactorTestPage = lazy(() => import('./pages/manual/ManualFactorTestPage'));
 const ManualStrategyPage = lazy(() => import('./pages/manual/ManualStrategyPage'));
 const ManualBacktestPage = lazy(() => import('./pages/manual/ManualBacktestPage'));
+const ManualFullPage = lazy(() => import('./pages/manual/ManualFullPage'));
 const FinancialData = lazy(() => import('./pages/financial/FinancialData'));
 const ResearchData = lazy(() => import('./pages/datadetail/ResearchData'));
 const DataUpdate = lazy(() => import('./pages/dataupdate/DataUpdate'));
@@ -140,6 +141,7 @@ function AppLayout({ isDark, setIsDark }) {
       icon: <BookOutlined />,
       label: '使用手册',
       children: [
+        { key: '/manual/full', label: <Link to="/manual/full">完整手册 v3.0</Link> },
         { key: '/manual/overview', label: <Link to="/manual/overview">平台概述</Link> },
         { key: '/manual/data-info', label: <Link to="/manual/data-info">数据信息</Link> },
         { key: '/manual/stock-analysis', label: <Link to="/manual/stock-analysis">个股分析</Link> },
@@ -347,6 +349,7 @@ function AppLayout({ isDark, setIsDark }) {
               <Route path="/manual/factors" element={<ManualFactorPage />} />
               <Route path="/manual/strategy" element={<ManualStrategyPage />} />
               <Route path="/manual/backtest" element={<ManualBacktestPage />} />
+              <Route path="/manual/full" element={<ManualFullPage />} />
               <Route path="/stock-analysis" element={<StockAnalysis />} />
               <Route path="/market-thermometer" element={<MarketThermometer />} />
               <Route path="/sector-ranking" element={<SectorRanking />} />
