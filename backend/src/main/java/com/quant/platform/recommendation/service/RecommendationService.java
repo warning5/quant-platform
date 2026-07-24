@@ -602,6 +602,32 @@ public class RecommendationService {
         log.info("[Recommendation] 行业映射: {}只候选股", codeToIndustry.size());
 
         // Step 3: 对 Top N 做个股深度分析（P1-6: 并行化）
+
+        // 【因子分位排名归一化】对最终候选集的 compositeScore 做批次内 percentile-rank，
+        // 强制拉开因子分区分度。原 compositeScore 为全通过池 rank 加权后的绝对分，
+        // TopN 内仍挤在 0.86+，导致 rank_num 排序近似随机、与次日收益无单调关系。
+        // 改为候选批次内的分位排名后，factor_score 均匀分布于 (0,1)，与 rank_num 严格单调对应，
+        // 排序区分度复活，并经由 fuseScore 传导到 final_score。
+        if (candidates.size() > 1) {
+            List<Double> compSorted = candidates.stream()
+                    .map(ScreenResult.StockScore::getCompositeScore)
+                    .sorted().toList();
+            Map<Double, Double> compToRank = new HashMap<>();
+            int cn = compSorted.size();
+            for (int i = 0; i < cn; i++) {
+                // 重复值取首次出现分位，保证映射稳定
+                compToRank.putIfAbsent(compSorted.get(i), (i + 0.5) / cn);
+            }
+            for (ScreenResult.StockScore s : candidates) {
+                Double r = compToRank.get(s.getCompositeScore());
+                s.setCompositeScore(r != null ? r : 0.5);
+            }
+            log.info("[Recommendation] 因子分位归一化完成: 候选{}只, factor_score区间[{},{}]",
+                    cn,
+                    String.format("%.4f", candidates.get(0).getCompositeScore()),
+                    String.format("%.4f", candidates.get(candidates.size() - 1).getCompositeScore()));
+        }
+
         int analysisCount = Math.min(topN, candidates.size());
         List<StockRecommendation> recommendations = new ArrayList<>();
 
@@ -807,7 +833,9 @@ public class RecommendationService {
      */
     public int trackRecommendationPerformance() {
         // 按 (strategy_id, recommend_date, weight_mode) 三元组去重，确保每种模式的快照都能被追踪
-        List<Map<String, Object>> recentCombos = recommendationMapper.findUntrackedStrategyDateModes(200);
+        // P1-4 修复：放宽 LIMIT，避免老 combo（周/月可补全的）被截断丢失。
+        // 配合 RecommendationMapper 中完成标志改为 next_month_return，确保历史周/月收益持续补算。
+        List<Map<String, Object>> recentCombos = recommendationMapper.findUntrackedStrategyDateModes(1000);
         if (recentCombos.isEmpty()) {
             log.info("[Recommendation] 所有近期组合均已追踪，跳过");
             return 0;

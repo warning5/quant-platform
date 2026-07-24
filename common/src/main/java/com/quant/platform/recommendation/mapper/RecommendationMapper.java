@@ -45,15 +45,18 @@ public interface RecommendationMapper extends BaseMapper<StockRecommendation> {
     @Select("SELECT DISTINCT strategy_id, recommend_date, weight_mode FROM stock_recommendation WHERE strategy_id IS NOT NULL ORDER BY recommend_date DESC, strategy_id DESC, weight_mode LIMIT #{limit}")
     List<Map<String, Object>> findRecentStrategyDateModes(@Param("limit") int limit);
 
-    /** 拉取还有 nextDayReturn IS NULL 记录的策略+日期组合（追踪专用） */
+    /** 拉取月收益尚未补全的策略+日期组合（追踪专用）。
+     *  追踪完成标志从 next_day_return 改为 next_month_return：
+     *  原逻辑次日一填就认为"已追踪"而停止，导致周/月收益永远算不出（一次性追踪缺陷）。
+     *  改为以月收益补全为完成标志，combo 会持续被选中按当前 daysSince 补算次/周/月，直到满 22 个交易日。 */
     @Select("SELECT DISTINCT strategy_id, recommend_date FROM stock_recommendation " +
-            "WHERE strategy_id IS NOT NULL AND next_day_return IS NULL " +
+            "WHERE strategy_id IS NOT NULL AND next_month_return IS NULL " +
             "ORDER BY recommend_date DESC, strategy_id DESC LIMIT #{limit}")
     List<Map<String, Object>> findUntrackedStrategyDates(@Param("limit") int limit);
 
-    /** 拉取还有 nextDayReturn IS NULL 记录的策略+日期+模式组合（追踪专用，按模式去重） */
+    /** 拉取月收益尚未补全的策略+日期+模式组合（追踪专用，按模式去重）。同理改用 next_month_return 作为完成标志。 */
     @Select("SELECT DISTINCT strategy_id, recommend_date, weight_mode FROM stock_recommendation " +
-            "WHERE strategy_id IS NOT NULL AND next_day_return IS NULL " +
+            "WHERE strategy_id IS NOT NULL AND next_month_return IS NULL " +
             "ORDER BY recommend_date DESC, strategy_id DESC, weight_mode LIMIT #{limit}")
     List<Map<String, Object>> findUntrackedStrategyDateModes(@Param("limit") int limit);
 
