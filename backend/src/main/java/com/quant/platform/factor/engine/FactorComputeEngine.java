@@ -128,6 +128,10 @@ public class FactorComputeEngine {
         registerBuiltin(new BuiltinFactors.MarginBuyRatioCalculator()); // IR=-0.36
         // 2026-07-12 恢复注册（E策略需要VAL_DIVIDEND_YIELD）
         registerBuiltin(new BuiltinFactors.DividendYieldCalculator());
+        // 2026-07-25 新增 alpha 因子（基于 MySQL 现有表，补全 ICW 信号源）
+        registerBuiltin(new BuiltinFactors.EarningsSurpriseCalculator());    // 业绩超预期
+        registerBuiltin(new BuiltinFactors.LhbInstNetCalculator());          // 龙虎榜机构净买
+        registerBuiltin(new BuiltinFactors.InstitutionResearchCalculator()); // 机构调研热度
 
         // P1-5: 形态伪因子注册（6个：综合强度 + 5个形态类型）
         registerBuiltin(new BuiltinFactors.PatternStrengthCalculator());
@@ -910,6 +914,15 @@ public class FactorComputeEngine {
         } else if ("MARGIN_BUY_RATIO".equals(factorCode)) {
             context.putAll(buildMarginContext(date));
             if (context.isEmpty()) return List.of();
+        } else if ("EARNINGS_SURPRISE".equals(factorCode)) {
+            context.putAll(buildEarningsContext(date));
+            if (context.isEmpty()) return List.of();
+        } else if ("LHB_INST_NET".equals(factorCode)) {
+            context.putAll(buildLhbContext(date));
+            if (context.isEmpty()) return List.of();
+        } else if ("INST_RESEARCH".equals(factorCode)) {
+            context.putAll(buildResearchContext(date));
+            if (context.isEmpty()) return List.of();
         }
 
         List<FactorValue> results = new ArrayList<>(symbols.size());
@@ -961,6 +974,15 @@ public class FactorComputeEngine {
                 log.debug("[MARGIN_BUY_RATIO] 无融资融券数据: date={}", date);
                 return List.of();
             }
+        } else if ("EARNINGS_SURPRISE".equals(factorCode)) {
+            context.putAll(buildEarningsContext(date));
+            if (context.isEmpty()) return List.of();
+        } else if ("LHB_INST_NET".equals(factorCode)) {
+            context.putAll(buildLhbContext(date));
+            if (context.isEmpty()) return List.of();
+        } else if ("INST_RESEARCH".equals(factorCode)) {
+            context.putAll(buildResearchContext(date));
+            if (context.isEmpty()) return List.of();
         }
 
         LocalDateTime now = LocalDateTime.now();
@@ -1178,6 +1200,87 @@ public class FactorComputeEngine {
             return Map.of();
         }
     }
+
+    // ===== 2026-07-25 新增 alpha 因子 context 构建 =====
+
+    private Map<String, Object> buildEarningsContext(LocalDate date) {
+        try {
+            List<Map<String, Object>> rows = mysqlJdbcTemplate.queryForList(
+                    "SELECT code, net_profit_yoy, announce_date FROM stock_earnings_report " +
+                    "WHERE announce_date IS NOT NULL AND announce_date <= ? AND net_profit_yoy IS NOT NULL",
+                    date.toString());
+            Map<String, Double> map = new HashMap<>();
+            Map<String, String> latestDate = new HashMap<>();
+            for (var row : rows) {
+                String code = (String) row.get("code");
+                Object np = row.get("net_profit_yoy");
+                Object ad = row.get("announce_date");
+                if (code == null || np == null || ad == null) continue;
+                String adStr = ad.toString();
+                Double val;
+                try { val = Double.parseDouble(np.toString()); } catch (Exception e) { continue; }
+                String prev = latestDate.get(code);
+                if (prev == null || adStr.compareTo(prev) > 0) {
+                    latestDate.put(code, adStr);
+                    map.put(code, val);
+                }
+            }
+            if (map.isEmpty()) return Map.of();
+            Map<String, Object> ctx = new HashMap<>();
+            ctx.put("earningsSurpriseMap", map);
+            return ctx;
+        } catch (Exception e) {
+            log.warn("[EARNINGS_SURPRISE] 构建context失败: date={} error={}", date, e.getMessage());
+            return Map.of();
+        }
+    }
+
+    private Map<String, Object> buildLhbContext(LocalDate date) {
+        try {
+            LocalDate start = date.minusDays(20);
+            List<Map<String, Object>> rows = mysqlJdbcTemplate.queryForList(
+                    "SELECT code, SUM(net_inst_amt) AS s FROM stock_sentiment_lhb_inst " +
+                    "WHERE trade_date BETWEEN ? AND ? GROUP BY code",
+                    start, date);
+            Map<String, Double> map = new HashMap<>();
+            for (var row : rows) {
+                String code = (String) row.get("code");
+                Object s = row.get("s");
+                if (code == null || s == null) continue;
+                try { map.put(code, Double.parseDouble(s.toString())); } catch (Exception e) { /* skip */ }
+            }
+            Map<String, Object> ctx = new HashMap<>();
+            ctx.put("lhbInstNetMap", map);
+            return ctx;
+        } catch (Exception e) {
+            log.warn("[LHB_INST_NET] 构建context失败: date={} error={}", date, e.getMessage());
+            return Map.of();
+        }
+    }
+
+    private Map<String, Object> buildResearchContext(LocalDate date) {
+        try {
+            LocalDate start = date.minusDays(90);
+            List<Map<String, Object>> rows = mysqlJdbcTemplate.queryForList(
+                    "SELECT code, COUNT(*) AS c FROM stock_institution_research " +
+                    "WHERE report_date BETWEEN ? AND ? GROUP BY code",
+                    start, date);
+            Map<String, Double> map = new HashMap<>();
+            for (var row : rows) {
+                String code = (String) row.get("code");
+                Object c = row.get("c");
+                if (code == null || c == null) continue;
+                try { map.put(code, Double.parseDouble(c.toString())); } catch (Exception e) { /* skip */ }
+            }
+            Map<String, Object> ctx = new HashMap<>();
+            ctx.put("instResearchMap", map);
+            return ctx;
+        } catch (Exception e) {
+            log.warn("[INST_RESEARCH] 构建context失败: date={} error={}", date, e.getMessage());
+            return Map.of();
+        }
+    }
+
     private List<FactorValue> computeOneDateFinancial(String factorCode, LocalDate date, List<String> symbols) {
         FinancialFactorCalculator calculator = financialCalculators.get(factorCode);
         List<FactorValue> results = new ArrayList<>(symbols.size());

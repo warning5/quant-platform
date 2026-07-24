@@ -157,6 +157,13 @@ public class RecommendationService {
      */
     private static final double NOISE_FACTOR_IC_THRESHOLD = 0.015;
     /**
+     * 高置信门槛：回测验证(7633条历史) final_score∈[0.7,0.9] 档次日超额 +0.71%/胜率57.5%，
+     * 而 0.5~0.7 档为噪声/负收益区(占推荐61%)。仅发出达门槛的推荐，砍掉拖后腿的平庸票。
+     */
+    private static final double HIGH_CONVICTION_FINAL_SCORE = 0.70;
+    /** 高置信档不足时保底保留的 topN（避免低信号期策略无票） */
+    private static final int MIN_HIGH_CONVICTION_PICKS = 5;
+    /**
      * 沪深300指数代码
      */
     private static final String SSE300_CODE = "000300";
@@ -691,6 +698,24 @@ public class RecommendationService {
                 .filter(r -> !"SELL".equals(r.getActionTag()))
                 .collect(Collectors.toList());
         int sellFiltered = beforeFilter - recommendations.size();
+
+        // Step 5.6: 高置信过滤（回测验证：仅 final_score>=门槛的档位次日真能跑赢，
+        // 0.5~0.7 噪声/负收益区占推荐61%应剔除）
+        List<StockRecommendation> highConv = recommendations.stream()
+                .filter(r -> r.getFinalScore() != null && r.getFinalScore() >= HIGH_CONVICTION_FINAL_SCORE)
+                .collect(Collectors.toList());
+        if (highConv.size() >= MIN_HIGH_CONVICTION_PICKS) {
+            recommendations = highConv;
+            log.info("[Recommendation] 高置信过滤生效: 保留{}条 (final_score>={})", recommendations.size(), HIGH_CONVICTION_FINAL_SCORE);
+        } else {
+            log.warn("[Recommendation] 高置信档不足({}/{}), 保底保留按final_score排序的top{}", highConv.size(), MIN_HIGH_CONVICTION_PICKS, MIN_HIGH_CONVICTION_PICKS);
+            recommendations = recommendations.stream()
+                    .sorted((a, b) -> Double.compare(b.getFinalScore() == null ? 0 : b.getFinalScore(),
+                            a.getFinalScore() == null ? 0 : a.getFinalScore()))
+                    .limit(MIN_HIGH_CONVICTION_PICKS)
+                    .collect(Collectors.toList());
+        }
+
         // 截断到 topN（diversify 可能保留了超过 topN 的条目）
         if (recommendations.size() > topN) {
             recommendations = recommendations.subList(0, topN);
@@ -2041,15 +2066,26 @@ public class RecommendationService {
                 }
             }
 
-            // P2-1后：使用momentumScore重新校准fusionBonus（解决尺度不匹配，基于20日综合动量而非单日相对强度）
+            // P2-1后：使用momentumScore重新校准fusionBonus
+            // 牛市：高动量行业给奖励（动量延续）；熊市/回调：反转——高动量行业惩罚(追高易补跌)，低动量奖励(均值回归)
+            boolean bearMarket = regime != null && "BEAR".equals(regime.regime);
             for (IndustryMomentum im : result.values()) {
-                if (im.momentumScore > 0.7) im.fusionBonus = 0.06;
-                else if (im.momentumScore > 0.55) im.fusionBonus = 0.03;
-                else if (im.momentumScore > 0.45) im.fusionBonus = 0.0;
-                else if (im.momentumScore > 0.3) im.fusionBonus = -0.03;
-                else im.fusionBonus = -0.06;
+                if (bearMarket) {
+                    // 熊市反转逻辑：低动量奖励、高动量惩罚
+                    if (im.momentumScore > 0.7) im.fusionBonus = -0.06;
+                    else if (im.momentumScore > 0.55) im.fusionBonus = -0.03;
+                    else if (im.momentumScore > 0.45) im.fusionBonus = 0.0;
+                    else if (im.momentumScore > 0.3) im.fusionBonus = 0.03;
+                    else im.fusionBonus = 0.06;
+                } else {
+                    if (im.momentumScore > 0.7) im.fusionBonus = 0.06;
+                    else if (im.momentumScore > 0.55) im.fusionBonus = 0.03;
+                    else if (im.momentumScore > 0.45) im.fusionBonus = 0.0;
+                    else if (im.momentumScore > 0.3) im.fusionBonus = -0.03;
+                    else im.fusionBonus = -0.06;
+                }
             }
-            log.info("[Recommendation] P2-1 行业动量增强完成，fusionBonus已按momentumScore校准");
+            log.info("[Recommendation] P2-1 行业动量增强完成，fusionBonus已按momentumScore校准 (bear={})", bearMarket);
 
         } catch (Exception e) {
             log.error("[Recommendation] 行业动量计算异常: {}", e.getMessage(), e);

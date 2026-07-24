@@ -659,6 +659,82 @@ public class BuiltinFactors {
     }
 
     // ====================================================================
+    // 业绩超预期因子 (EARNINGS_SURPRISE) — 2026-07-25 新增
+    // 数据源: MySQL stock_earnings_report（公告日更新到 2026-07-21，覆盖 2347 条）
+    // 值 = 截至 calcDate 最新一期财报的 net_profit_yoy（最新季报净利润同比增速）
+    // 越高=盈利加速/超预期，越低/负=盈利恶化
+    // 需要 context 提供 "earningsSurpriseMap" (Map<String,Double>, code->net_profit_yoy)
+    // ====================================================================
+    public static class EarningsSurpriseCalculator implements FactorCalculator {
+        @Override
+        public String getFactorCode() { return "EARNINGS_SURPRISE"; }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public BigDecimal calculate(String symbol, LocalDate calcDate,
+                                List<MarketDailyBar> history, Map<String, Object> context) {
+            Object mapObj = context.get("earningsSurpriseMap");
+            if (mapObj == null || !(mapObj instanceof Map)) return null;
+            Map<String, Double> map = (Map<String, Double>) mapObj;
+            String code = symbol.replaceAll("\\..*$", "");
+            Double v = map.get(code);
+            if (v == null || v.isNaN() || v.isInfinite()) return null;
+            return BigDecimal.valueOf(v).setScale(4, RoundingMode.HALF_UP);
+        }
+    }
+
+    // ====================================================================
+    // 龙虎榜机构净买因子 (LHB_INST_NET) — 2026-07-25 新增
+    // 数据源: MySQL stock_sentiment_lhb_inst（更新到 2026-07-24，覆盖 3919 条）
+    // 值 = 截至 calcDate 前 20 日累计机构净买入额(net_inst_amt，单位元)
+    // 越高=机构主动净买入(看多)，越低/负=机构净卖出(看空)
+    // 无龙虎榜记录的股票返回 0（中性），使因子覆盖全市场横截面
+    // 需要 context 提供 "lhbInstNetMap" (Map<String,Double>, code->sum_net_inst_amt)
+    // ====================================================================
+    public static class LhbInstNetCalculator implements FactorCalculator {
+        @Override
+        public String getFactorCode() { return "LHB_INST_NET"; }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public BigDecimal calculate(String symbol, LocalDate calcDate,
+                                List<MarketDailyBar> history, Map<String, Object> context) {
+            Object mapObj = context.get("lhbInstNetMap");
+            if (mapObj == null || !(mapObj instanceof Map)) return BigDecimal.ZERO;
+            Map<String, Double> map = (Map<String, Double>) mapObj;
+            String code = symbol.replaceAll("\\..*$", "");
+            Double v = map.get(code);
+            if (v == null || v.isNaN() || v.isInfinite()) return BigDecimal.ZERO;
+            return BigDecimal.valueOf(v).setScale(2, RoundingMode.HALF_UP);
+        }
+    }
+
+    // ====================================================================
+    // 机构调研热度因子 (INST_RESEARCH) — 2026-07-25 新增
+    // 数据源: MySQL stock_institution_research（覆盖较稀疏，仅 21 条，作弱信号）
+    // 值 = 截至 calcDate 前 90 日机构调研次数
+    // 无调研记录的股票返回 0（中性）
+    // 需要 context 提供 "instResearchMap" (Map<String,Double>, code->count)
+    // ====================================================================
+    public static class InstitutionResearchCalculator implements FactorCalculator {
+        @Override
+        public String getFactorCode() { return "INST_RESEARCH"; }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public BigDecimal calculate(String symbol, LocalDate calcDate,
+                                List<MarketDailyBar> history, Map<String, Object> context) {
+            Object mapObj = context.get("instResearchMap");
+            if (mapObj == null || !(mapObj instanceof Map)) return BigDecimal.ZERO;
+            Map<String, Double> map = (Map<String, Double>) mapObj;
+            String code = symbol.replaceAll("\\..*$", "");
+            Double v = map.get(code);
+            if (v == null || v.isNaN() || v.isInfinite()) return BigDecimal.ZERO;
+            return BigDecimal.valueOf(v).setScale(4, RoundingMode.HALF_UP);
+        }
+    }
+
+    // ====================================================================
     // 形态伪因子（P1-5）— PATTERN策略信号强度作为因子参与ICW
     // 每个形态类型对应一个因子，值=score/100.0（0~1范围）
     // PATTERN_STRENGTH = 最强形态得分（综合信号强度）
