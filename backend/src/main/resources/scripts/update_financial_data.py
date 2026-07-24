@@ -773,9 +773,56 @@ def fetch_and_update_announce_dates(conn, years):
     print(f"\n  公告日期合计更新: {total_updated:,} 条")
 
 
+def prefilter_stocks_needing_update(conn, codes, table='stock_financial_indicator', quarters_behind=1):
+    """
+    预筛选：只保留最近 N 个季度期末缺数据的股票。
+    默认 quarters_behind=1：只检查缺少最新季度数据的股票，跳过已覆盖的。
+
+    返回 (need_update_list, skipped_count) 并在控制台打印筛选统计。
+    """
+    now = datetime.now()
+
+    # 最新完成的季度期末
+    month = now.month
+    if month <= 3:
+        y, m = now.year - 1, 12
+    elif month <= 6:
+        y, m = now.year, 3
+    elif month <= 9:
+        y, m = now.year, 6
+    else:
+        y, m = now.year, 9
+
+    # 往前推 quarters_behind 个季度
+    for _ in range(quarters_behind):
+        m -= 3
+        if m <= 0:
+            m += 12
+            y -= 1
+
+    days = {3: 31, 6: 30, 9: 30, 12: 31}
+    threshold = f"{y}{m:02d}{days[m]:02d}"
+
+    cursor = conn.cursor()
+    cursor.execute(f"SELECT code, MAX(report_date) as latest_report FROM {table} GROUP BY code")
+    stock_latest = {r[0]: str(r[1]).replace('-', '') if r[1] else '' for r in cursor.fetchall()}
+
+    need_update = []
+    for code in codes:
+        latest = stock_latest.get(code, '')
+        if not latest or latest < threshold:
+            need_update.append(code)
+
+    skipped = len(codes) - len(need_update)
+    print(f"  预筛选({table}): {len(codes)} → {len(need_update)} 只需检查 "
+          f"（跳过 {skipped} 只已有数据，阈值 report_date >= {threshold[:4]}-{threshold[4:6]}-{threshold[6:]}）",
+          flush=True)
+    return need_update
+
+
 def main():
     parser = argparse.ArgumentParser(description='财务数据采集')
-    parser.add_argument('--year', type=int, default=None, help='指定年份（已被 year-start/year-end 取代）')
+    parser.add_argument('--year', type=int, default=None, help='指定年份（已被 year-start/year-end 取���）')
     parser.add_argument('--year-start', type=int, default=None, help='采集起始年份')
     parser.add_argument('--year-end', type=int, default=None, help='采集结束年份')
     parser.add_argument('--force', action='store_true', help='强制重新采集')
@@ -783,6 +830,8 @@ def main():
                         help='只执行指定步骤')
     parser.add_argument('--code', type=str, default=None, help='指定股票代码（仅 ths/sina 步骤有效）')
     parser.add_argument('--start-code', type=str, default=None, help='从指定代码开始（仅 sina 步骤有效，跳过此代码之前的股票）')
+    parser.add_argument('--all', action='store_true',
+                        help='全量检查所有股票（默认启用预筛选，跳过已有最新季度数据的股票）')
     parser.add_argument('--validate', action='store_true', help='强制执行数据校验')
     parser.add_argument('--no-validate', action='store_true', help='跳过数据校验')
     parser.add_argument('--ths-workers', type=int, default=8,
@@ -834,6 +883,16 @@ def main():
             cursor.execute("SELECT code FROM stock_info ORDER BY code")
             codes = [r[0] for r in cursor.fetchall()]
         print(f"共 {len(codes)} 只股票")
+
+        # 预筛选：只处理缺少最近季度数据的股票
+        if not args.all and not args.code:
+            codes = prefilter_stocks_needing_update(conn, codes,
+                                                    table='stock_financial_indicator',
+                                                    quarters_behind=1)
+            if not codes:
+                print("  所有股票均已覆盖最新季度，跳过 THS 步骤")
+                conn.close()
+                return
 
         ths_workers = getattr(args, 'ths_workers', 8)
 
@@ -913,6 +972,16 @@ def main():
                 codes = codes[idx:]
                 print(f"从 {args.start_code} 开始，剩余 {len(codes)} 只")
         print(f"共 {len(codes)} 只股票")
+
+        # 预筛选：只处理缺少最近季度数据的股票（--start-code 已指定范围则跳过预筛）
+        if not args.all and not args.code and not args.start_code:
+            codes = prefilter_stocks_needing_update(conn, codes,
+                                                    table='stock_income',
+                                                    quarters_behind=1)
+            if not codes:
+                print("  所有股票均已覆盖最新季度，跳过新浪三大表步骤")
+                conn.close()
+                return
 
         total_inserted = 0
         for i, code in enumerate(codes):
