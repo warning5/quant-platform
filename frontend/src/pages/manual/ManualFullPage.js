@@ -33,7 +33,7 @@ export default function ManualFullPage() {
         background: '#fafafa',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Text strong style={{ fontSize: 14 }}>📖 使用手册 v3.0 · 完整版</Text>
+          <Text strong style={{ fontSize: 14 }}>📖 使用手册 v3.1 · 完整版</Text>
           <Button
             type="text"
             size="small"
@@ -49,7 +49,7 @@ export default function ManualFullPage() {
       <iframe
         ref={iframeRef}
         src="/manual-full.html"
-        title="使用手册 v3.0"
+        title="使用手册 v3.1"
         style={{ flex: 1, width: '100%', border: 'none' }}
       />
     </div>

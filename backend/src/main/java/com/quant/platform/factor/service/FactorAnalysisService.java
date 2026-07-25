@@ -1,5 +1,6 @@
 package com.quant.platform.factor.service;
 
+import com.quant.platform.factor.regime.MarketRegimeCalendarService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.math3.distribution.TDistribution;
@@ -52,6 +53,10 @@ public class FactorAnalysisService {
 
     @Autowired(required = false)
     private ClickHouseFactorValueService clickHouseFactorValueService;
+
+    /** regime 日历服务（可选）：ICW 权重按 regime 分别取 IC 历史，避免跨体制 IC 互相污染 */
+    @Autowired(required = false)
+    private MarketRegimeCalendarService regimeCalendarService;
 
     /** IC 计算用的未来收益天数（与 FactorIcService 共用配置，默认5） */
     @Value("${quant.factor.ic.forward-return-days:5}")
@@ -1463,9 +1468,19 @@ public class FactorAnalysisService {
                                               int forwardDays, boolean neutralizeByIndustry,
                                               String correlationType, int halflifeDays, double irThreshold) {
 
+        // 0. 计算目标 regime：ICW 按当前 regime 分别取 IC 历史，避免跨体制 IC 互相污染
+        String targetRegime = null;
+        if (regimeCalendarService != null && endDate != null) {
+            try {
+                targetRegime = regimeCalendarService.getRegime(LocalDate.parse(endDate));
+            } catch (Exception ignore) {
+                // 解析失败则不做 regime 过滤
+            }
+        }
+
         // 1. 获取IC时序
         List<Double> icTimeline = getIcTimeline(factorCode, startDate, endDate, forwardDays,
-                neutralizeByIndustry, correlationType);
+                neutralizeByIndustry, correlationType, targetRegime);
         if (icTimeline.isEmpty()) {
             FactorIcSnapshot s = new FactorIcSnapshot();
             s.factorCode = factorCode;
@@ -1533,7 +1548,7 @@ public class FactorAnalysisService {
      */
     private List<Double> getIcTimeline(String factorCode, String startDate, String endDate,
                                         int forwardDays, boolean neutralizeByIndustry,
-                                        String correlationType) {
+                                        String correlationType, String targetRegime) {
         // 复用 calcSingleFactorIcIr，提取 icTimeline
         try {
             Map<String, Object> result = calcSingleFactorIcIr(factorCode, startDate, endDate,
@@ -1542,14 +1557,39 @@ public class FactorAnalysisService {
             List<Map<String, Object>> timeline = (List<Map<String, Object>>) result.get("icTimeline");
             if (timeline == null) return Collections.emptyList();
 
-            List<Double> ics = new ArrayList<>();
+            boolean filterByRegime = targetRegime != null && regimeCalendarService != null;
+            List<Double> filtered = new ArrayList<>();
+            List<Double> all = new ArrayList<>();
             for (Map<String, Object> pt : timeline) {
                 Object icVal = pt.get("ic");
-                if (icVal instanceof Number) {
-                    ics.add(((Number) icVal).doubleValue());
+                if (!(icVal instanceof Number)) continue;
+                double v = ((Number) icVal).doubleValue();
+                all.add(v);
+                if (!filterByRegime) {
+                    filtered.add(v);
+                    continue;
+                }
+                // 仅保留与 targetRegime 相同交易日的 IC，剔除跨体制样本
+                Object dObj = pt.get("date");
+                if (dObj == null) continue; // 无法判定 regime，保守剔除
+                try {
+                    LocalDate d = LocalDate.parse(dObj.toString());
+                    if (targetRegime.equals(regimeCalendarService.getRegime(d))) {
+                        filtered.add(v);
+                    }
+                } catch (Exception ignore) {
+                    // 日期解析失败，保守剔除
                 }
             }
-            return ics;
+            if (!filterByRegime) return all;
+            // 同体制样本不足则退化为全体制（避免 regime 切换初期样本过少导致权重失真）
+            final int MIN_REGIME_SAMPLES = 20;
+            if (filtered.size() >= MIN_REGIME_SAMPLES) {
+                return filtered;
+            }
+            log.debug("[IC时序] 因子{} regime={} 同体制样本不足({}/{}), 退化为全体制",
+                    factorCode, targetRegime, filtered.size(), MIN_REGIME_SAMPLES);
+            return all;
         } catch (Exception e) {
             log.debug("[IC时序] 因子{}获取失败: {}", factorCode, e.getMessage());
             return Collections.emptyList();

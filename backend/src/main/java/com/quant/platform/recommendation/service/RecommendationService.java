@@ -2,6 +2,7 @@ package com.quant.platform.recommendation.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quant.platform.factor.ic.service.FactorIcService;
+import com.quant.platform.factor.regime.MarketRegimeCalendarService;
 import com.quant.platform.factor.service.FactorAnalysisService;
 import com.quant.platform.factor.service.FactorCorrelationService;
 import com.quant.platform.factor.service.QuarterlyFactorAnalysisService;
@@ -29,6 +30,8 @@ import com.quant.platform.strategy.mapper.StrategyDefinitionMapper;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+
+import jakarta.annotation.PostConstruct;
 
 import java.math.BigDecimal;
 import java.sql.Connection;
@@ -164,6 +167,31 @@ public class RecommendationService {
     /** 高置信档不足时保底保留的 topN（避免低信号期策略无票） */
     private static final int MIN_HIGH_CONVICTION_PICKS = 5;
     /**
+     * 优化②：熊市降仓系数。BEAR regime 下建议仓位 ×0.6，降低下行暴露
+     * （评估发现 BEAR 即使高置信仍日亏、胜率偏低，老策略无有效防御；×0.4 过度减仓被回测证伪）
+     */
+    private static final double BEAR_POSITION_FACTOR = 0.6;
+    /**
+     * 优化③：高 beta 限仓。688(科创板)/300(创业板) 为 20% 涨跌停、高波动个股，
+     * 仓位 ×0.7 且硬上限 5%（评估发现 final≥0.9 顶端档集中这些高波动成长股次日大幅回撤）
+     */
+    private static final double HIGH_BETA_POSITION_FACTOR = 0.7;
+    private static final double HIGH_BETA_POSITION_CAP = 0.05;
+    /**
+     * 优化④：连续 BEAR 暂停生成（离散开关）。
+     * 回测发现 BEAR 是小样本噪声区（胜率<50%、日亏），激进降仓/提门槛均被证伪。
+     * 改用更干净的离散防御：最近 N 个交易日(含当日) detectRegime 全部判为 BEAR 时，
+     * 直接暂停当日生成（return 空列表），规避下行，而非在噪声中调参。
+     */
+    private static final int CONSECUTIVE_BEAR_STOP_DAYS = 3;
+    /**
+     * 优化X：强制保留因子白名单。这些因子即使与簇内其他因子高相关（触发拥挤度剔除），
+     * 也不被剔除，确保其权重（尤其是高IC真alpha如EARNINGS_SURPRISE）在组合中生效。
+     * 背景：EARNINGS_SURPRISE 与 SIZE 相关性高(corr≥0.84)被拥挤度剔除，且无IC历史时
+     * 不在 icMap 中永不当代表，导致在ICW管线被CROWDING_DROPPED，权重完全失效。
+     */
+    private static final Set<String> FORCE_KEEP_FACTORS = Set.of("EARNINGS_SURPRISE");
+    /**
      * 沪深300指数代码
      */
     private static final String SSE300_CODE = "000300";
@@ -205,6 +233,18 @@ public class RecommendationService {
     private final com.quant.platform.factor.service.FactorMetaCacheService factorMetaCache;
     private final com.quant.platform.factor.mapper.FactorDefinitionMapper factorDefinitionMapper;
     private final com.quant.platform.factor.dynamic.DynamicIndustryCorrelationService dynamicIndustryCorrService;
+
+    /** regime 日历服务（可选；用于 ICW 按 regime 分别取 IC 历史）。字段注入，避免改动构造函数。 */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private MarketRegimeCalendarService regimeCalendarService;
+
+    @PostConstruct
+    public void initRegimeCalendar() {
+        if (regimeCalendarService != null) {
+            regimeCalendarService.setDetector(this::detectRegimeName);
+            log.info("[Recommendation] regime日历 detector 已注入（detectRegime 落库生效）");
+        }
+    }
 
     public RecommendationService(StockScreenService stockScreenService,
                                  AnalysisService analysisService,
@@ -601,6 +641,15 @@ public class RecommendationService {
         log.info("[Recommendation] 市场环境: regime={}, indexClose={}, MA20={}, MA60={}",
                 regime.regime, regime.indexClose, regime.indexMa20, regime.indexMa60);
 
+        // 优化④：连续 BEAR 暂停生成（离散防御）
+        // 回测证明 BEAR 是小样本噪声区（胜率<50%、日亏），激进降仓/提门槛均被证伪。
+        // 改为最近 N(含当日) 个交易日全部 BEAR 时直接暂停，规避下行。
+        if (isConsecutiveBear(actualDate, CONSECUTIVE_BEAR_STOP_DAYS)) {
+            log.warn("[Recommendation] 优化④触发: 连续{}日BEAR, 暂停策略[{}] {} 生成, 规避下行",
+                    CONSECUTIVE_BEAR_STOP_DAYS, strategyId, actualDate);
+            return List.of();
+        }
+
         // Step 2.5: 行业动量计算 (Phase A+C)
         Map<String, IndustryMomentum> industryMomentumMap = computeIndustryMomentum(regime, actualDate);
 
@@ -706,9 +755,11 @@ public class RecommendationService {
                 .collect(Collectors.toList());
         if (highConv.size() >= MIN_HIGH_CONVICTION_PICKS) {
             recommendations = highConv;
-            log.info("[Recommendation] 高置信过滤生效: 保留{}条 (final_score>={})", recommendations.size(), HIGH_CONVICTION_FINAL_SCORE);
+            log.info("[Recommendation] 高置信过滤生效: 保留{}条 (final_score>={})",
+                    recommendations.size(), HIGH_CONVICTION_FINAL_SCORE);
         } else {
-            log.warn("[Recommendation] 高置信档不足({}/{}), 保底保留按final_score排序的top{}", highConv.size(), MIN_HIGH_CONVICTION_PICKS, MIN_HIGH_CONVICTION_PICKS);
+            log.warn("[Recommendation] 高置信档不足({}/{}), 保底保留按final_score排序的top{}",
+                    highConv.size(), MIN_HIGH_CONVICTION_PICKS, MIN_HIGH_CONVICTION_PICKS);
             recommendations = recommendations.stream()
                     .sorted((a, b) -> Double.compare(b.getFinalScore() == null ? 0 : b.getFinalScore(),
                             a.getFinalScore() == null ? 0 : a.getFinalScore()))
@@ -1487,7 +1538,47 @@ public class RecommendationService {
                 info.atrValue,
                 info.styleRegime, info.sizeRegime, info.rateRegime);
 
+        // 落库 regime 到日历，供 ICW 按 regime 取 IC 历史（避免跨体制 IC 互相污染）
+        if (regimeCalendarService != null) {
+            try {
+                regimeCalendarService.upsert(date, info.regime);
+            } catch (Exception ignore) {
+                // 落库失败不影响主流程
+            }
+        }
+
         return info;
+    }
+
+    /** 公开暴露 regime 名称，供 MarketRegimeCalendarService 的 detector 回调使用（无副作用） */
+    public String detectRegimeName(LocalDate date) {
+        return detectRegime(date).regime;
+    }
+
+    /**
+     * 优化④：判断最近 consecutiveDays 个交易日(含 date 当日)是否全部为 BEAR regime。
+     * 复用 detectRegime 逐日回看，全部 BEAR 才返回 true，用于触发暂停生成开关。
+     * 注意：回看依赖沪深300历史K线，若某日数据缺失 detectRegime 会返回 SIDEWAYS（保守不触发）。
+     *
+     * @param date            当前选股日期
+     * @param consecutiveDays 连续天数阈值（含当日）
+     * @return 连续全部 BEAR 则为 true
+     */
+    private boolean isConsecutiveBear(LocalDate date, int consecutiveDays) {
+        for (int k = 0; k < consecutiveDays; k++) {
+            LocalDate d = date.minusDays(k);
+            try {
+                RegimeInfo r = detectRegime(d);
+                if (!"BEAR".equals(r.regime)) {
+                    return false;
+                }
+            } catch (Exception e) {
+                // 单日 regime 计算异常，保守视为非 BEAR，不触发暂停
+                log.debug("[Recommendation] 连续BEAR回看 {} 失败: {}", d, e.getMessage());
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
@@ -2339,6 +2430,19 @@ public class RecommendationService {
         double basePct = 0.03 + (rs / 15.0) * 0.07;          // 3%~10%
         double liquidityFactor = 0.7 + 0.3 * (ls / 10.0);    // 0.7~1.0
         double positionPct = Math.min(0.10, basePct * liquidityFactor);
+
+        // 优化②：熊市降仓（BEAR regime 下仓位 ×0.6，降低下行暴露）
+        if ("BEAR".equals(rec.getRegime())) {
+            positionPct *= BEAR_POSITION_FACTOR;
+        }
+
+        // 优化③：高 beta 限仓（688 科创板 / 300 创业板 高波动 → 仓位 ×0.7 且硬上限 5%）
+        String code = rec.getStockCode();
+        if (code != null && (code.startsWith("688") || code.startsWith("300"))) {
+            positionPct *= HIGH_BETA_POSITION_FACTOR;
+            positionPct = Math.min(positionPct, HIGH_BETA_POSITION_CAP);
+        }
+
         rec.setSuggestedPositionPct(Math.round(positionPct * 10000.0) / 10000.0);
 
         log.debug("[PricePlan] code={} buy={} stop={} takeProfit={} target={} pos={}%",
@@ -2538,6 +2642,11 @@ public class RecommendationService {
                 .map(ScreenRequest.FactorWeight::getFactorCode)
                 .collect(Collectors.toList());
 
+        // 当前 regime：用于白名单 regime 守卫（SIDEWAYS 下不再强制保留 EARNINGS_SURPRISE），
+        // 与 ICW 过滤使用同一 regime 来源，保持一致
+        String currentRegime = (regimeCalendarService != null && date != null)
+                ? regimeCalendarService.getRegime(date) : "SIDEWAYS";
+
         // Resolve reference date
         LocalDate refDate = date != null ? date : LocalDate.now();
         LocalDate effectiveIcDate = factorIcService.getLatestCommonIcDate(factorCodes);
@@ -2602,6 +2711,23 @@ public class RecommendationService {
             FactorDiagnostic diag = new FactorDiagnostic();
             diag.factorCode = fc;
             diag.originalWeight = originalWeight;
+
+            // 优化X：白名单因子强制保留，权重=配置权重，不受拥挤度/噪声/无IC等任何剔除影响
+            // 白名单 regime 守卫：SIDEWAYS 体制下不再强制保留，交由 regime-aware ICW 决定权重。
+            // 否则 EARNINGS_SURPRISE 在震荡市 ~0/反向 IC 被强制 35% 权重，正是 SIDEWAYS 退步根因。
+            if (FORCE_KEEP_FACTORS.contains(fc) && !"SIDEWAYS".equals(currentRegime)) {
+                adjustedFw.setWeight(originalWeight);
+                adjustedFw.setDirection(originalDirection);
+                diag.action = "FORCE_KEEP";
+                diag.adjustedWeight = originalWeight;
+                diag.icMean = snap != null ? snap.icMean : 0;
+                diag.reason = "白名单强制保留（权重=配置权重" + originalWeight + "）";
+                log.info("[DynamicWeight] 因子 {} 白名单强制保留, 权重={}", fc, originalWeight);
+                adjusted.add(adjustedFw);
+                diagnostics.add(diag);
+                keptCount++;
+                continue;
+            }
 
             if (snap == null || "NO_DATA".equals(snap.status)) {
                 // 无IC数据，保持原样
@@ -3287,6 +3413,11 @@ public class RecommendationService {
                     factorCorrelationService.detectCrowding(factorCodes, startDate, refDate, 0.70, icMap);
             for (com.quant.platform.factor.service.FactorCorrelationService.FactorCluster cluster : clusters) {
                 for (String redundant : cluster.redundantFactors) {
+                    // 优化X：白名单因子强制保留，跳过拥挤度剔除
+                    if (FORCE_KEEP_FACTORS.contains(redundant)) {
+                        log.info("[DynamicWeight] 因子 {} 在强制保留白名单，跳过拥挤度剔除 (簇代表={})", redundant, cluster.representative);
+                        continue;
+                    }
                     com.quant.platform.factor.service.FactorAnalysisService.FactorIcSnapshot snap = snapshots.get(redundant);
                     if (snap != null && "KEPT".equals(snap.status)) {
                         snap.status = "CROWDING_DROPPED";

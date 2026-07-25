@@ -1614,12 +1614,15 @@ public class StockScreenService {
         // 1. 获取每个因子的IC/IR值
         for (ScreenRequest.FactorWeight fw : factors) {
             String fc = fw.getFactorCode();
+            // 优化X：无IC历史因子回退基准——用配置权重(factor_config_json.factors[].weight)代替统一0.05，
+            // 使"配置权重有话语权"（新alpha因子如EARNINGS_SURPRISE IC历史短，历史回测中也能生效）
+            double cfgWeight = (fw.getWeight() != null && fw.getWeight() > 0) ? fw.getWeight() : 0.05;
             try {
                 // 从 factor_ic_record 表获取最近60天的IC序列
                 List<Double> icValues = factorIcService.getIcHistory(fc, screenDate, 60);
                 if (icValues == null || icValues.isEmpty()) {
-                    log.warn("[DynamicWeight] 因子 {} 无IC历史数据，使用保守默认权重0.05", fc);
-                    icScores.put(fc, 0.05);
+                    log.warn("[DynamicWeight] 因子 {} 无IC历史数据，回退到配置权重{}（替代统一0.05）", fc, cfgWeight);
+                    icScores.put(fc, cfgWeight);
                     continue;
                 }
 
@@ -1635,8 +1638,8 @@ public class StockScreenService {
                 }
                 icScores.put(fc, score);
             } catch (Exception e) {
-                log.warn("[DynamicWeight] 获取因子 {} IC数据失败: {}, 使用保守默认权重0.05", fc, e.getMessage());
-                icScores.put(fc, 0.05);
+                log.warn("[DynamicWeight] 获取因子 {} IC数据失败: {}, 回退到配置权重{}", fc, e.getMessage(), cfgWeight);
+                icScores.put(fc, cfgWeight);
             }
         }
 

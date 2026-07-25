@@ -2306,8 +2306,10 @@ public class BacktestEngine {
             try {
                 List<Double> icValues = factorIcService.getIcHistory(fc, rebalanceDate, 60);
                 if (icValues == null || icValues.isEmpty()) {
-                    log.debug("[BacktestEngine DynamicWeight] 因子 {} 在 {} 无IC历史数据，使用保守默认权重0.05", fc, rebalanceDate);
-                    icScores.put(fc, 0.05);
+                    // 优化X：无IC历史时回退到配置权重(fw.weight)，使配置权重有话语权
+                    double cfgW = (fw.weight > 0) ? fw.weight : 0.05;
+                    log.debug("[BacktestEngine DynamicWeight] 因子 {} 在 {} 无IC历史数据，回退到配置权重{}", fc, rebalanceDate, cfgW);
+                    icScores.put(fc, cfgW);
                     continue;
                 }
 

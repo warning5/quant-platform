@@ -222,14 +222,17 @@
 <div class="card-grid">
 <div class="card"><h4>🚀 动量因子 MOM</h4><p><strong>公式</strong>：<code>MOM_N = (Close_t - Close_t-N) / Close_t-N</code><br>捕捉趋势延续——近期涨得多的股票短期倾向于继续涨。背后逻辑是信息扩散不对称：利好消息需要时间被所有投资者消化。</p></div>
 <div class="card green"><h4>📊 波动率因子 VOL</h4><p><strong>公式</strong>：<code>VOL_N = StdDev(Return_1..N)</code><br>衡量价格波动程度。低波动异象的核心：市场对高波动股票过度偏好，导致低波动股票被低估。</p></div>
-<div class="card orange"><h4>💰 市值因子 SIZE</h4><p><strong>公式</strong>：<code>SIZE = log(MarketCap)</code><br>从 stock_info 表获取总股本×收盘价。取对数消除量纲差异（千亿和十亿不能直接比较）。</p></div></div>
+<div class="card orange"><h4>💰 市值因子 SIZE</h4><p><strong>公式</strong>：<code>SIZE = log(MarketCap)</code><br>从 stock_info 表获取总股本×收盘价。取对数消除量纲差异（千亿和十亿不能直接比较）。</p></div>
+<div class="card green"><h4>📈 业绩超预期 EARNINGS_SURPRISE</h4><p><strong>源</strong>：stock_earnings_report（业绩预告/财报）。<strong>逻辑</strong>：实际业绩相对市场一致预期的偏离度。IC≈+0.09、IR≈1.16，是当前预测力最强的新因子之一，自适应权重 1.2（正向加权）。</p></div>
+<div class="card red"><h4>🐉 龙虎榜机构净买 LHB_INST_NET</h4><p><strong>源</strong>：stock_sentiment_lhb_inst（龙虎榜机构买卖）。<strong>逻辑</strong>：近 20 日机构龙虎榜净买入累计。机构流入代表聪明钱认可，但 IR 偏弱（≈-0.66），系统自适应降权至 0.5。</p></div>
+<div class="card purple"><h4>🔍 机构调研 INST_RESEARCH</h4><p><strong>源</strong>：stock_institution_research（调研纪要）。<strong>逻辑</strong>：近 90 日机构调研次数。关注度上升常先于基本面变化，但数据稀疏、IR≈-0.15，自适应权重 0.8。</p></div></div>
 <h4>因子分类标签</h4>
 <p>平台因子按投资逻辑分为以下类别，每类有独立的 IC 分析和推荐管线处理方式：</p>
 <table><tr><th>类别标签</th><th>代表因子</th><th>特点</th></tr>
 <tr><td><span class="tag blue">TECHNICAL</span> 技术</td><td>MOM5/20/60, VOL20, VOLUME_RATIO, TURNOVER_ANOMALY</td><td>短期有效性强，含动量/波动/量价/趋势 4 个子类</td></tr>
-<tr><td><span class="tag green">FINANCIAL</span> 财务</td><td>FIN_ROE, FIN_NET_PROFIT_YOY, FIN_EARNINGS_QUALITY, FIN_RD</td><td>长期有效，稳定性好，季频更新</td></tr>
+<tr><td><span class="tag green">FINANCIAL</span> 财务</td><td>FIN_ROE, FIN_NET_PROFIT_YOY, FIN_EARNINGS_QUALITY, FIN_RD, <strong>EARNINGS_SURPRISE</strong></td><td>长期有效，稳定性好，季频更新</td></tr>
 <tr><td><span class="tag orange">VALUATION</span> 估值</td><td>VAL_PE_PERCENTILE, VAL_PB, VAL_DIVIDEND_YIELD, VAL_FCF_YIELD</td><td>均值回归特性，需配合历史分位</td></tr>
-<tr><td><span class="tag purple">SENTIMENT</span> 情绪</td><td>MARGIN_BUY_RATIO, 龙虎榜信号, 研报热度</td><td>反映市场情绪，短期波动大</td></tr>
+<tr><td><span class="tag purple">SENTIMENT</span> 情绪</td><td>MARGIN_BUY_RATIO, <strong>LHB_INST_NET</strong>, <strong>INST_RESEARCH</strong>, 龙虎榜信号, 研报热度</td><td>反映市场情绪，短期波动大</td></tr>
 <tr><td><span class="tag cyan">PATTERN</span> 形态</td><td>W底, 头肩底, 双底, 三角突破</td><td>模式识别类伪因子，走 builtinCalculators</td></tr>
 <tr><td><span class="tag red">SIZE</span> 规模</td><td>SIZE (log市值)</td><td>独立分类，IC+0.052 全市场最有效因子之一</td></tr></table>
 </div></div>
@@ -682,6 +685,17 @@
 <li><strong>极值处理</strong>：NONE / MAD / SIGMA3 / PERCENTILE</li>
 <li><strong>标准化</strong>：NONE / ZSCORE / MINMAX / RANK</li>
 <li><strong>均线位置过滤</strong>：MA30/60/100 多选，只选站上指定均线的股票</li></ul>
+
+<h4>输出优化与 Regime 感知（2026-07 增强）</h4>
+<div class="why-box"><h4>为什么推荐不能"算完分数就直接发 Top N"？</h4>
+<p>实测 7600+ 条历史推荐发现：综合分数（final_score）若直接取 Top N，61% 的推荐会落在 0.5–0.7 的"噪声区"——该区间次日超额收益接近 0 甚至为负。真正能跑赢的是 0.7–0.9 高分档（次日超额 +0.71%、胜率 57.5%）。因此管线在输出前做了四件事：</p>
+<ul>
+<li><strong>分位排名归一化</strong>：候选批次内对综合分做分位排名（(i+0.5)/n 映射到 0–1），强制拉开分数分布。修复前 96% 的股票分数挤在 ≥0.70，无法区分；修复后标准差 0.113→0.263，高分档和低分档清晰分离</li>
+<li><strong>高置信门槛</strong>：仅推送 final_score ≥ 0.70 的标的；若不足 5 只则保底取分数最高的 5 只。把"选出不涨的股"收敛为"只推验证过能跑赢的股"</li>
+<li><strong>熊市动量反转</strong>：行业动量融合改为 Regime 感知——<span class="tag red">BEAR</span> 市况下不再追高动量行业，改为低动量均值回归（高动量行业融合加成 -0.06、低动量 +0.06）。动量因子 IC 在熊市转负，追高反而踩雷</li>
+<li><strong>噪声因子清理</strong>：VOLUME_RATIO、MA5 等 IC 为负或接近噪声的因子已置 <span class="tag red">DEPRECATED</span>，自动从推荐管线过滤，不再稀释有效信号</li>
+</ul>
+<p>实测效果：某主策略（strategy 73）推荐数从 32 只收敛到 5 只，且全部落在盈利档（电池、贵金属、工业金属、消费电子），不再包含噪声区标的。</p></div>
 </div></div>
 
 <div class="section" id="s4-2"><h3>4.2 权重模式</h3><div class="module-box">
@@ -693,6 +707,15 @@
 <li><strong>EQW（等权基准）</strong>：所有因子权重相等。<strong>用途</strong>：作为基准——用 IC 模式的推荐结果和 EQW 比较，如果 IC 模式没有明显跑赢 EQW，说明 IC 加权没有带来增量价值，不如用简单的等权</li></ul></div>
 </div></div>
 
+<div class="why-box"><h4>实际采用的权重：ICW 自适应</h4>
+<p>系统默认采用 <strong>ICW（IC 加权）自适应权重</strong>：因子权重 = 其近期 IC 衰减均值（decayWeightedMean）归一化后的结果，并内置三道自管理规则：</p>
+<ul>
+<li><strong>噪声自动剔除</strong>：|IC| &lt; 0.015 的因子直接剔除（NOISE_DROPPED），不进入加权</li>
+<li><strong>负 IC 自动反转</strong>：IC&lt;0 的因子取绝对值加权（方向取反），无需手动配置</li>
+<li><strong>新因子保守起步</strong>：无 IC 历史时权重 0.05，而非 1.0，避免"没证据=有效"</li>
+</ul>
+<p>新上线的三个 alpha 因子自适应权重示例：<strong>EARNINGS_SURPRISE → 1.2</strong>（IC≈+0.09 被加权）、<strong>LHB_INST_NET → 0.5</strong>（IR≈-0.66 被降权）、<strong>INST_RESEARCH → 0.8</strong>（稀疏信号略降）。权重每日随因子 IC 刷新自动调整。</p></div>
+
 <div class="section" id="s4-3"><h3>4.3 推荐表现追踪与命中率</h3><div class="module-box">
 <h4>作用</h4><p>追踪每次推荐的实际表现，计算命中率和收益统计，形成闭环反馈。</p>
 <div class="why-box"><h4>为什么推荐不是"发完就完"？</h4>
@@ -701,6 +724,9 @@
 <p>更重要的是<strong>闭环反馈</strong>：命中率数据反馈给置信度系统（2.4 节），命中率低的策略推荐数量自动缩减；因子推荐表现反馈给因子健康监控（1.9 节），持续失效的因子被自动降级。整个系统是自我纠错的——不是"设好了就不管"，而是持续追踪、持续优化。</p></div>
 <h4>关键算法</h4>
 <div class="formula">nextDayExcessReturn = (个股次日收益率) - (沪深300次日收益率)<br>存储单位：百分比数值（如 -7.03 表示 -7.03%）</div>
+<div class="why-box"><h4>跟踪闭环：为什么周/月收益有时会暂时为空？</h4>
+<p>推荐表现分三档追踪：<strong>次日</strong>（约 1 个交易日）、<strong>周</strong>（约 5 个交易日）、<strong>月</strong>（约 20 个交易日）。系统在每日收盘后的定时任务里自动回填——判定一条推荐"已跟踪完成"的标志是<strong>月收益（next_month_return）已填</strong>，而非次日收益。</p>
+<p>因此，<strong>推荐日期距今不足约 5 个交易日时，周收益客观上还不存在</strong>（收益数据尚未发生），会显示为 NULL，这是正常时间窗口限制，不是缺陷。等对应推荐各自满 5 个交易日，定时任务会自动补齐，无需人工干预。若想更早看到周收益，唯一的办法是缩短窗口，但会牺牲收益样本的完整性，不建议。</p></div>
 </div></div>
 
 <div class="section" id="s4-4"><h3>4.4 因子选股</h3><div class="module-box">
