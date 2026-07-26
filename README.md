@@ -287,7 +287,20 @@ npm start
 CREATE DATABASE stock CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ```
 
-系统启动后自动建表，无需手动执行 DDL。
+导入表结构脚本（`backend/sql/stock.sql`，61 张表，仅结构不含数据）：
+
+```bash
+mysql -u root -p stock < backend/sql/stock.sql
+```
+
+ClickHouse 建表脚本（`backend/sql/ch.sql`，仅结构）：
+
+```bash
+clickhouse-client --host <CH_HOST> --port 9000 --user default --password <CH_PASSWORD> \
+  --multiquery < backend/sql/ch.sql
+```
+
+> ⚠️ 应用启动时不执行任何 DDL，必须手动导入上述脚本。表结构创建后，启动应用通过「数据更新」页面采集行情数据。
 
 ---
 

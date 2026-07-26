@@ -31,33 +31,26 @@ cd quant-platform
 ## 第 2 步：初始化数据库（2 分钟）
 
 > ⚠️ **重要：表结构不会自动创建。** 项目使用 MyBatis-Plus，**应用启动时不执行任何 DDL**。数据库脚本位于 `backend/sql/`，分 MySQL 和 ClickHouse 两份：
-> - `mysql-stock-YYYYMMDD.7z` — MySQL `stock` 库完整备份（含表结构 + 14 套策略种子数据 + 历史行情），约 260MB 压缩包
+> - `stock.sql` — MySQL `stock` 库表结构脚本（61 张表，含表结构 + 索引 + 注释，不含数据）
 > - `ch.sql` — ClickHouse 表结构脚本（仅建表，数据由应用运行时写入）
 
 ### 2a. 导入 MySQL（必需）
 
-**1. 解压备份文件**
+**1. 导入表结构**
 
 ```bash
-# 用 7-Zip / WinRAR / Bandizip 解压 backend/sql/mysql-stock-*.7z
-# 解压后得到一个 .sql 文件（如 mysql-stock-20260719.sql）
-```
-
-**2. 导入到 MySQL**
-
-```bash
-# 方式 A：命令行导入（推荐，大文件稳定）
+# 方式 A：命令行导入（推荐）
 mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS stock CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-mysql -u root -p stock < backend/sql/mysql-stock-20260719.sql
+mysql -u root -p stock < backend/sql/stock.sql
 
 # 方式 B：进入 mysql 客户端后用 source
 mysql -u root -p
 mysql> CREATE DATABASE IF NOT EXISTS stock CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 mysql> USE stock;
-mysql> SOURCE backend/sql/mysql-stock-20260719.sql;
+mysql> SOURCE backend/sql/stock.sql;
 ```
 
-> 备份文件已含 `stock_info`（5000+ 股票）、`strategy_definition`（14 套策略）、`factor_definition`（35 个因子）等种子数据，导入后即可直接启动体验，无需再采集基础数据。
+> `stock.sql` 仅创建表结构，不含种子数据。启动应用后需通过「数据更新」页面采集基础数据（股票信息、交易日历等），策略和因子定义可在前端手动配置。
 
 ### 2b. 导入 ClickHouse（必需）
 
@@ -249,7 +242,7 @@ Table 'stock.xxx' doesn't exist
 **原因**：未执行 `backend/sql/` 下的初始化脚本，或脚本执行不完整。
 
 **解决**：
-- MySQL：确认 `mysql-stock-*.7z` 已解压并导入 `stock` 库
+- MySQL：确认 `stock.sql` 已导入 `stock` 库
 - ClickHouse：确认 `ch.sql` 已执行，`SHOW TABLES FROM stock` 能列出 `stock_daily`、`factor_value` 等表
 - 重新执行对应脚本（脚本均用 `IF NOT EXISTS` 写法，可重复执行）
 
