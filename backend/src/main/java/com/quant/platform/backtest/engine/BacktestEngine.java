@@ -20,10 +20,10 @@ import com.quant.platform.market.service.MarketDataService;
 import com.quant.platform.screen.dto.ScreenRequest;
 import com.quant.platform.screen.dto.ScreenResult;
 import com.quant.platform.screen.service.StockScreenService;
+import com.quant.platform.stock.analysis.engine.SellSignalEngine;
 import com.quant.platform.stock.entity.StockInfo;
 import com.quant.platform.stock.mapper.StockInfoMapper;
 import com.quant.platform.stock.service.DividendService;
-import com.quant.platform.stock.analysis.engine.SellSignalEngine;
 import com.quant.platform.strategy.domain.StrategyDefinition;
 import com.quant.platform.strategy.service.StrategyService;
 import groovy.lang.Binding;
@@ -44,7 +44,6 @@ import java.sql.ResultSet;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
 /**
@@ -55,6 +54,11 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class BacktestEngine {
+
+    /** VOLUME 滑点冲击系数（可调） */
+    private static final double VOLUME_IMPACT_COEFF = 10.0;
+    /** 单笔成交金额占日成交额上限（复刻模拟盘 8% 规则） */
+    private static final double MAX_PARTICIPATION = 0.08;
 
     private final BacktestTaskMapper taskMapper;
     private final BacktestReportMapper reportMapper;
@@ -213,7 +217,7 @@ public class BacktestEngine {
         double stampTaxRate = task.getStampTaxRate() != null ? task.getStampTaxRate().doubleValue() : 0.0005;
         double minCommission = task.getMinCommission() != null ? task.getMinCommission().doubleValue() : 5.0;
         double transferFeeRate = task.getTransferFeeRate() != null ? task.getTransferFeeRate().doubleValue() : 0.00002;
-        String slippageModel = task.getSlippageModel() != null ? task.getSlippageModel() : "FIXED";
+        String slippageModel = task.getSlippageModel() != null ? task.getSlippageModel() : "VOLUME";
         String orderType = task.getOrderType() != null ? task.getOrderType() : "CLOSE";
         boolean limitFilter = task.getLimitFilter() != null && task.getLimitFilter();
         boolean suspendFilter = task.getSuspendFilter() != null && task.getSuspendFilter();
@@ -784,7 +788,7 @@ public class BacktestEngine {
         double stampTaxRate = task.getStampTaxRate() != null ? task.getStampTaxRate().doubleValue() : 0.0005;
         double minCommission = task.getMinCommission() != null ? task.getMinCommission().doubleValue() : 5.0;
         double transferFeeRate = task.getTransferFeeRate() != null ? task.getTransferFeeRate().doubleValue() : 0.00002;
-        String slippageModel = task.getSlippageModel() != null ? task.getSlippageModel() : "FIXED";
+        String slippageModel = task.getSlippageModel() != null ? task.getSlippageModel() : "VOLUME";
         String orderType = task.getOrderType() != null ? task.getOrderType() : "CLOSE";
         boolean limitFilter = task.getLimitFilter() != null && task.getLimitFilter();
         boolean suspendFilter = task.getSuspendFilter() != null && task.getSuspendFilter();
@@ -1565,9 +1569,21 @@ public class BacktestEngine {
         if ("VOLUME".equalsIgnoreCase(model) && dayAmount > 0) {
             // 成交量比例滑点：成交额占日成交额比例越高，滑点越大
             double ratio = Math.min(tradeAmount / dayAmount, 1.0);
-            slip = baseSlippage * (1 + Math.sqrt(ratio) * 10);
+            slip = baseSlippage * (1 + Math.sqrt(ratio) * VOLUME_IMPACT_COEFF);
         }
         return isBuy ? price * (1 + slip) : price * (1 - slip);
+    }
+
+    /**
+     * 容量约束：买入金额不得超过日成交额 MAX_PARTICIPATION，否则缩金额
+     * 仅用于买入侧（卖出侧缩股会导致持仓丢失，VOLUME 滑点已覆盖大额卖出惩罚）
+     */
+    private double scaleAmountToCapacity(double amount, MarketDailyBar bar) {
+        if (bar == null || bar.getAmount() == null) return amount;
+        double dayAmount = bar.getAmount().doubleValue() * 1000; // 千元→元
+        if (dayAmount <= 0) return amount;
+        double maxAmount = dayAmount * MAX_PARTICIPATION;
+        return Math.min(amount, maxAmount);
     }
 
     /**
@@ -1835,6 +1851,7 @@ public class BacktestEngine {
                 double closePrice = bar.getClose().doubleValue();
                 double amount = portfolioValue * entry.getValue() * buyScale;
                 double dayAmount = bar.getAmount() != null ? bar.getAmount().doubleValue() * 1000 : 0;
+                amount = scaleAmountToCapacity(amount, bar); // 容量约束：买入不超日成交额8%
                 double price = applySlippage(execPrice, true, slippage, amount, dayAmount, slippageModel);
                 double fee = calcFee(amount, false, commission, stampTaxRate, minCommission, entry.getKey(), transferFeeRate);
 

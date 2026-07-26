@@ -1,19 +1,19 @@
 package com.quant.platform.strategy.portfolio;
 
 import com.quant.platform.recommendation.domain.StockRecommendation;
+import com.quant.platform.stock.entity.StockDaily;
+import com.quant.platform.stock.service.ClickHouseStockService;
 import lombok.Data;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
-import lombok.RequiredArgsConstructor;
 
 import java.time.LocalDate;
 import java.util.*;
-import java.util.stream.Collectors;
 
 /**
  * 策略组合风控服务（P2-9）
- *
  * 跨策略组合层面的风险管理，补充现有单策略风控（PositionAlertService）的缺口：
  * 1. 跨策略个股去重 — 同一股票在多个策略推荐中出现时，保留得分最高的，降权其余
  * 2. 组合级行业暴露 — 聚合多策略推荐后的全局行业集中度检查
@@ -26,6 +26,7 @@ import java.util.stream.Collectors;
 public class PortfolioRiskService {
 
     private final JdbcTemplate jdbcTemplate;
+    private final ClickHouseStockService clickHouseStockService;
 
     /** 跨策略单股最大仓位占比（所有策略合计） */
     private static final double MAX_CROSS_STRATEGY_POSITION_PCT = 0.15;
@@ -35,6 +36,18 @@ public class PortfolioRiskService {
     private static final double MAX_PORTFOLIO_DRAWDOWN_PCT = 0.20;
     /** 同股跨策略去重模式：BEST_ONLY（保留最佳） / MERGE（合并仓位） */
     private static final String DEDUP_MODE = "BEST_ONLY";
+
+    // ===== 流动性风控（P2-9 扩展） =====
+    /** 20日平均换手<1% 视为低流动性 */
+    private static final double ILLIQUID_AVG_TURNOVER_PCT = 1.0;
+    /** 20日日均成交额<5000万 视为低流动性 */
+    private static final double ILLIQUID_MIN_AVG_AMOUNT_WAN = 5000;
+    /** 低流动性单票仓位硬上限 3% */
+    private static final double ILLIQUID_MAX_POSITION_PCT = 0.03;
+    /** 日均成交<1000万 直接剔除 */
+    private static final double EXCLUDE_AVG_AMOUNT_WAN = 1000;
+    /** 观察模式：true=只记warning不改仓位，false=生效 */
+    private static final boolean LIQUIDITY_OBSERVE_MODE = true;
 
     /**
      * 跨策略个股去重
@@ -174,6 +187,75 @@ public class PortfolioRiskService {
     }
 
     /**
+     * 流动性检查：查 CH stock_daily 最近20日 avg(amount)/avg(turnover_rate)
+     * - 日均成交额 <1000万：直接剔除（仓位归零）
+     * - 日均成交额 <5000万 或 平均换手 <1%：仓位砍至 3%
+     * 观察模式（LIQUIDITY_OBSERVE_MODE=true）下只记 warning 不改仓位
+     */
+    public List<String> checkLiquidityCap(List<StockRecommendation> recs) {
+        List<String> warnings = new ArrayList<>();
+        if (recs == null || recs.isEmpty()) return warnings;
+
+        LocalDate end = LocalDate.now();
+        LocalDate start = end.minusDays(40); // 多取日历日确保有20个交易日
+
+        for (StockRecommendation rec : recs) {
+            String stockCode = rec.getStockCode();
+            if (stockCode == null) continue;
+            // CH stock_daily.code 存纯代码（无后缀）
+            String pureCode = stockCode.contains(".") ? stockCode.split("\\.")[0] : stockCode;
+
+            try {
+                List<StockDaily> dailies = clickHouseStockService.getStockDaily(pureCode, start, end);
+                if (dailies == null || dailies.size() < 5) {
+                    warnings.add(stockCode + " 流动性数据不足(" + (dailies == null ? 0 : dailies.size()) + "日)，跳过");
+                    continue;
+                }
+
+                // 取最近20个交易日
+                int n = Math.min(dailies.size(), 20);
+                double sumAmountWan = 0, sumTurnover = 0;
+                int validAmount = 0, validTurnover = 0;
+                for (int i = dailies.size() - n; i < dailies.size(); i++) {
+                    StockDaily d = dailies.get(i);
+                    if (d.getAmount() != null && d.getAmount().doubleValue() > 0) {
+                        sumAmountWan += d.getAmount().doubleValue() / 10.0; // 千元→万元
+                        validAmount++;
+                    }
+                    if (d.getTurnoverRate() != null && d.getTurnoverRate().doubleValue() > 0) {
+                        sumTurnover += d.getTurnoverRate().doubleValue();
+                        validTurnover++;
+                    }
+                }
+
+                double avgAmountWan = validAmount > 0 ? sumAmountWan / validAmount : 0;
+                double avgTurnover = validTurnover > 0 ? sumTurnover / validTurnover : 0;
+                double pos = rec.getSuggestedPositionPct() != null ? rec.getSuggestedPositionPct() : 0.05;
+
+                if (avgAmountWan < EXCLUDE_AVG_AMOUNT_WAN) {
+                    String msg = String.format("%s 流动性极低(日均%.0f万)应剔除", stockCode, avgAmountWan);
+                    if (!LIQUIDITY_OBSERVE_MODE) rec.setSuggestedPositionPct(0.0);
+                    warnings.add(msg + (LIQUIDITY_OBSERVE_MODE ? " [观察模式未执行]" : " [已剔除]"));
+                } else if (avgAmountWan < ILLIQUID_MIN_AVG_AMOUNT_WAN || avgTurnover < ILLIQUID_AVG_TURNOVER_PCT) {
+                    double capped = Math.min(pos, ILLIQUID_MAX_POSITION_PCT);
+                    String msg = String.format("%s 低流动性(日均%.0f万/换手%.2f%%)仓位%.0f%%→%.0f%%",
+                            stockCode, avgAmountWan, avgTurnover, pos * 100, capped * 100);
+                    if (!LIQUIDITY_OBSERVE_MODE) rec.setSuggestedPositionPct(capped);
+                    warnings.add(msg + (LIQUIDITY_OBSERVE_MODE ? " [观察模式未执行]" : " [已执行]"));
+                }
+            } catch (Exception e) {
+                log.warn("[PortfolioRisk] 流动性检查失败: {} {}", stockCode, e.getMessage());
+            }
+        }
+
+        if (!warnings.isEmpty()) {
+            log.info("[PortfolioRisk] 流动性检查: {}条预警 (观察模式={})",
+                    warnings.size(), LIQUIDITY_OBSERVE_MODE);
+        }
+        return warnings;
+    }
+
+    /**
      * 检查组合级回撤
      * 聚合所有运行中模拟盘的总回撤
      *
@@ -296,9 +378,13 @@ public class PortfolioRiskService {
         PortfolioDrawdownReport drawdownReport = checkPortfolioDrawdown();
         report.put("drawdownReport", drawdownReport);
 
-        // 5. 汇总
+        // 5. 流动性检查（观察模式）
+        List<String> liquidityWarnings = checkLiquidityCap(allRecommendations);
+        report.put("liquidityWarnings", liquidityWarnings);
+
+        // 6. 汇总
         int totalWarnings = positionWarnings.size() + industryReport.getWarnings().size()
-            + (drawdownReport.isAlert() ? 1 : 0);
+            + (drawdownReport.isAlert() ? 1 : 0) + liquidityWarnings.size();
         report.put("totalWarnings", totalWarnings);
         report.put("riskLevel", totalWarnings == 0 ? "OK" : totalWarnings <= 2 ? "WARNING" : "CRITICAL");
 

@@ -124,10 +124,19 @@ Quant Platform v1.0.0 是项目的首个正式 Release。它标志着平台的�
 
 **前置诊断修复**（本轮起点）：跟踪闭环修复 → 因子分位排名归一化 → 弃用噪声因子 → 分档单调性验证 → 高置信门槛+熊市动量反转。
 
+**流动性/滑点改造（2026-07-26）**：
+
+| 项 | 改动 | 状态 |
+|---|---|---|
+| ① BacktestEngine | 默认滑点 FIXED→VOLUME；提取 `VOLUME_IMPACT_COEFF` 常量；新增 `MAX_PARTICIPATION=0.08` 容量约束（买入侧） | 已落地 |
+| ② PortfolioRiskService | 新增 `checkLiquidityCap`（查 CH 20日均成交额/换手率，低流动性砍仓3%/剔除）；当前 `LIQUIDITY_OBSERVE_MODE=true` 观察模式 | 已落地（观察模式） |
+| ③ eval 滑点层 | 原 eval_backtest.py 加滑点估算 | 脚本已删除，滑点能力由 ① 统一承载 |
+
 **详细文档**：
 - 技术架构与数据流：`架构-ICW与regime日历.md`
 - 根因分析：`SIDEWAYS退步归因分析_2026-07-25.md`
 - 上线观察与评估计划：`策略73上线观察计划_2026-07-25.md`
+- 流动性与滑点改造方案：`流动性与滑点改造方案_2026-07-26.md`
 
 ---
 
