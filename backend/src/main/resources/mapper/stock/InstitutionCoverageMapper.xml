@@ -40,16 +40,25 @@
           AND report_date >= DATE_SUB(CURDATE(), INTERVAL 120 DAY)
     </select>
 
-    <!-- 近N天机构调研记录 -->
+    <!-- 近N天机构调研记录（数据源：stock_sentiment_survey，替代旧表 stock_institution_research） -->
     <select id="selectRecentInstitutionResearch" resultType="java.util.Map">
+        <![CDATA[
         SELECT
-            DATE_FORMAT(report_date, '%Y-%m-%d') as report_date,
-            org_name,
-            content_summary
-        FROM stock_institution_research
-        WHERE code = #{code}
-          AND report_date >= DATE_SUB(CURDATE(), INTERVAL #{days} DAY)
-        ORDER BY report_date DESC
+            DATE_FORMAT(meeting_date, '%Y-%m-%d') as report_date,
+            CASE
+                WHEN inst_count > 0 THEN CONCAT(inst_count, '家机构')
+                ELSE IFNULL(meeting_type, '机构调研')
+            END as org_name,
+            CONCAT_WS(' | ',
+                NULLIF(meeting_type, ''),
+                IF(location IS NOT NULL AND location <> '', CONCAT('地点:', location), NULL),
+                IF(staff IS NOT NULL AND staff <> '', CONCAT('接待:', staff), NULL)
+            ) as content_summary
+        FROM stock_sentiment_survey
+        WHERE RIGHT(code, 6) = RIGHT(#{code}, 6)
+          AND meeting_date >= DATE_SUB(CURDATE(), INTERVAL #{days} DAY)
+        ORDER BY meeting_date DESC
+        ]]>
     </select>
 
 </mapper>

@@ -389,7 +389,7 @@
         LIMIT 1
     </select>
 
-    <!-- 事件面：机构调研热度（近90天研报数量，替代 stock_institution_research） -->
+    <!-- 事件面：机构调研热度（近90天研报数量，数据源 stock_research_report） -->
     <select id="selectResearchReportCount90d" resultType="java.lang.Integer">
         SELECT COUNT(*) as cnt
         FROM stock_research_report

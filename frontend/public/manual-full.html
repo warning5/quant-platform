@@ -225,7 +225,7 @@
 <div class="card orange"><h4>💰 市值因子 SIZE</h4><p><strong>公式</strong>：<code>SIZE = log(MarketCap)</code><br>从 stock_info 表获取总股本×收盘价。取对数消除量纲差异（千亿和十亿不能直接比较）。</p></div>
 <div class="card green"><h4>📈 业绩超预期 EARNINGS_SURPRISE</h4><p><strong>源</strong>：stock_earnings_report（业绩预告/财报）。<strong>逻辑</strong>：实际业绩相对市场一致预期的偏离度。IC≈+0.09、IR≈1.16，是当前预测力最强的新因子之一，自适应权重 1.2（正向加权）。</p></div>
 <div class="card red"><h4>🐉 龙虎榜机构净买 LHB_INST_NET</h4><p><strong>源</strong>：stock_sentiment_lhb_inst（龙虎榜机构买卖）。<strong>逻辑</strong>：近 20 日机构龙虎榜净买入累计。机构流入代表聪明钱认可，但 IR 偏弱（≈-0.66），系统自适应降权至 0.5。</p></div>
-<div class="card purple"><h4>🔍 机构调研 INST_RESEARCH</h4><p><strong>源</strong>：stock_institution_research（调研纪要）。<strong>逻辑</strong>：近 90 日机构调研次数。关注度上升常先于基本面变化，但数据稀疏、IR≈-0.15，自适应权重 0.8。</p></div></div>
+<div class="card purple"><h4>🔍 机构调研 INST_RESEARCH</h4><p><strong>源</strong>：stock_sentiment_survey（机构调研事件）。<strong>逻辑</strong>：近 90 日机构调研次数（inst_count 累计）。关注度上升常先于基本面变化，数据源由旧表 stock_institution_research 迁移而来，已切换为 5 万+条的高覆盖表。</p></div></div>
 <h4>因子分类标签</h4>
 <p>平台因子按投资逻辑分为以下类别，每类有独立的 IC 分析和推荐管线处理方式：</p>
 <table><tr><th>类别标签</th><th>代表因子</th><th>特点</th></tr>

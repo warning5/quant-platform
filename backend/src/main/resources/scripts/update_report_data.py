@@ -695,20 +695,6 @@ def ensure_tables(conn):
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
     """)
 
-    # 机构调研
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS stock_institution_research (
-        id BIGINT AUTO_INCREMENT PRIMARY KEY,
-        code VARCHAR(6) NOT NULL,
-        report_date DATE,
-        org_name VARCHAR(200),
-        content_summary VARCHAR(500),
-        fetched_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        INDEX idx_code (code),
-        INDEX idx_report_date (report_date)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-    """)
-
     # 股东人数
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS stock_shareholder (
@@ -792,19 +778,7 @@ def store_all_data(conn, data):
             data.get('hsgt_hold_ratio'),
         ))
 
-    # 3. 机构调研（研报覆盖 + 机构调研）
-    # 研报覆盖或机构调研任一有数据就写入
-    if data.get('research_research_count', 0) > 0 or data.get('research_jgdy_count', 0) > 0:
-        # 先删旧数据再插入新数据
-        cursor.execute("DELETE FROM stock_institution_research WHERE code=%s", (code,))
-        for rep in data.get('research_research_reports', []):
-            if rep.get('report_name'):
-                cursor.execute("""
-                    INSERT INTO stock_institution_research
-                        (code, report_date, org_name, content_summary)
-                    VALUES (%s, %s, %s, %s)
-                """, (code, rep.get('date') or None,
-                      rep.get('org', ''), f"评级:{rep.get('rating','')} {rep.get('report_name','')}"))
+    # 3. 机构调研明细已迁移至 stock_sentiment_survey（由 SentimentService 统一维护），此处不再写入旧表
 
     # 4. 股东人数
     if data.get('holder_holder_fetched') and data.get('holder_report_date'):

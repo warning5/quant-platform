@@ -711,8 +711,8 @@ public class BuiltinFactors {
 
     // ====================================================================
     // 机构调研热度因子 (INST_RESEARCH) — 2026-07-25 新增
-    // 数据源: MySQL stock_institution_research（覆盖较稀疏，仅 21 条，作弱信号）
-    // 值 = 截至 calcDate 前 90 日机构调研次数
+    // 数据源: MySQL stock_sentiment_survey（机构调研事件情绪表，5万+条，每日由 SentimentService 刷新）
+    // 值 = 截至 calcDate 前 90 日机构调研次数（按 meeting_date 统计）
     // 无调研记录的股票返回 0（中性）
     // 需要 context 提供 "instResearchMap" (Map<String,Double>, code->count)
     // ====================================================================

@@ -10,8 +10,8 @@ import dayjs from 'dayjs';
 
 const { Title } = Typography;
 const { Option } = Select;
-const STATUS_COLORS = { DRAFT:'default', TESTING:'processing', ACTIVE:'success', DEPRECATED:'default' };
-const STATUS_LABELS = { DRAFT:'草稿', TESTING:'测试中', ACTIVE:'已激活', DEPRECATED:'已废弃' };
+const STATUS_COLORS = { DRAFT:'default', TESTING:'processing', ACTIVE:'success', DEPRECATED:'default', DEGRADED:'error' };
+const STATUS_LABELS = { DRAFT:'草稿', TESTING:'测试中', ACTIVE:'已激活', DEPRECATED:'已废弃', DEGRADED:'已降级' };
 const TYPE_LABELS = { BUILTIN:'内置', SCRIPTED:'脚本', COMPOSITE:'合成' };
 
 /**

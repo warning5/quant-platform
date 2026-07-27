@@ -1116,22 +1116,6 @@ CREATE TABLE `stock_info`  (
 ) ENGINE = InnoDB AUTO_INCREMENT = 5491 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '股票基本信息表（名称/行业/总市值/流通市值等）' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
--- Table structure for stock_institution_research
--- ----------------------------
-DROP TABLE IF EXISTS `stock_institution_research`;
-CREATE TABLE `stock_institution_research`  (
-  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
-  `code` varchar(6) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '股票代码（6位）',
-  `report_date` date NULL DEFAULT NULL COMMENT '调研日期',
-  `org_name` varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '调研机构名称',
-  `content_summary` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '调研内容摘要',
-  `fetched_at` datetime NULL DEFAULT CURRENT_TIMESTAMP COMMENT '数据获取时间',
-  PRIMARY KEY (`id`) USING BTREE,
-  INDEX `idx_code`(`code` ASC) USING BTREE,
-  INDEX `idx_report_date`(`report_date` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 22 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '机构调研记录表（接待日期/调研机构/调研方式）' ROW_FORMAT = Dynamic;
-
--- ----------------------------
 -- Table structure for stock_news
 -- ----------------------------
 DROP TABLE IF EXISTS `stock_news`;

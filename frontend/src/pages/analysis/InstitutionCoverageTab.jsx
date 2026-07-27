@@ -4,7 +4,7 @@
  * 数据来源：
  *   - stock_research_report：研报覆盖（最权威，2738只股票）
  *   - stock_fund_holder：基金持仓（5188只股票）
- *   - stock_institution_research：机构调研（补充数据）
+ *   - stock_sentiment_survey：机构调研（每日刷新）
  *
  * 评分维度：
  *   - 研报覆盖（0-5分）：近1年研报数量

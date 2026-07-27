@@ -8,7 +8,7 @@ import java.util.Map;
 
 /**
  * 机构覆盖度数据Mapper（分析包）
- * 整合: stock_research_report(研报) + stock_fund_holder(基金持仓) + stock_institution_research(机构调研)
+ * 整合: stock_research_report(研报) + stock_fund_holder(基金持仓) + stock_sentiment_survey(机构调研)
  */
 @Mapper
 public interface InstitutionCoverageMapper {

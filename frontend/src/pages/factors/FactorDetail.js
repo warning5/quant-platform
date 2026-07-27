@@ -823,7 +823,7 @@ export default function FactorDetail() {
   if (loading) return <div style={{ textAlign: 'center', padding: 80 }}><Spin size="large" /></div>;
   if (!factor) return <Text type="danger">因子不存在</Text>;
 
-  const statusColors = { DRAFT: 'default', TESTING: 'processing', ACTIVE: 'success', DEPRECATED: 'default' };
+  const statusColors = { DRAFT: 'default', TESTING: 'processing', ACTIVE: 'success', DEPRECATED: 'default', DEGRADED: 'error' };
   const isCompleted  = selectedReport?.status === 'COMPLETED';
   const isRunning    = selectedReport?.status === 'RUNNING';
   // 是否已有因子值（可运行测试）

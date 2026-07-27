@@ -1262,8 +1262,8 @@ public class FactorComputeEngine {
         try {
             LocalDate start = date.minusDays(90);
             List<Map<String, Object>> rows = mysqlJdbcTemplate.queryForList(
-                    "SELECT code, COUNT(*) AS c FROM stock_institution_research " +
-                    "WHERE report_date BETWEEN ? AND ? GROUP BY code",
+                    "SELECT code, COUNT(*) AS c FROM stock_sentiment_survey " +
+                    "WHERE meeting_date BETWEEN ? AND ? GROUP BY code",
                     start, date);
             Map<String, Double> map = new HashMap<>();
             for (var row : rows) {
