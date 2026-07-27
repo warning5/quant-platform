@@ -10,14 +10,18 @@ import com.quant.platform.recommendation.service.RecommendationService;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 
 /**
  * 智能推荐 Controller
@@ -30,11 +34,14 @@ public class RecommendationController {
     private final RecommendationService recommendationService;
     private final FactorIcService factorIcService;
     private final IntradayMonitorService intradayMonitorService;
+    private final ExecutorService backtestExecutor;
 
-    public RecommendationController(RecommendationService recommendationService, FactorIcService factorIcService, IntradayMonitorService intradayMonitorService) {
+    public RecommendationController(RecommendationService recommendationService, FactorIcService factorIcService, IntradayMonitorService intradayMonitorService,
+                                    @Qualifier("backtestTaskExecutorService") ExecutorService backtestExecutor) {
         this.recommendationService = recommendationService;
         this.factorIcService = factorIcService;
         this.intradayMonitorService = intradayMonitorService;
+        this.backtestExecutor = backtestExecutor;
     }
 
     /**
@@ -254,18 +261,31 @@ public class RecommendationController {
     }
 
     /**
-     * 触发推荐表现追踪
+     * 触发推荐表现追踪（异步提交，立即返回）
+     * trackRecommendationPerformance 内部循环遍历最多 1000 个 (strategy, date, mode) 组合
+     * 并对每条推荐查 ClickHouse 算 1/5/22 日收益，可能耗时数十秒到数分钟，
+     * 同步执行会触发前端 axios 超时。改为异步：提交到 backtestTaskExecutor 线程池立即返回。
      */
     @PostMapping("/track")
     public ApiResponse<Map<String, Object>> trackPerformance() {
         try {
-            int updated = recommendationService.trackRecommendationPerformance();
+            LocalDateTime submittedAt = LocalDateTime.now();
+            CompletableFuture.runAsync(() -> {
+                try {
+                    int updated = recommendationService.trackRecommendationPerformance();
+                    log.info("[Recommendation] 异步追踪任务完成: updated={} submittedAt={}", updated, submittedAt);
+                } catch (Exception e) {
+                    log.error("[Recommendation] 异步追踪任务异常: submittedAt={}", submittedAt, e);
+                }
+            }, backtestExecutor);
             Map<String, Object> result = new HashMap<>();
-            result.put("updated", updated);
-            return ApiResponse.success("表现追踪完成", result);
+            result.put("submitted", true);
+            result.put("submittedAt", submittedAt.toString());
+            result.put("message", "追踪任务已提交到后台执行");
+            return ApiResponse.success("表现追踪已提交", result);
         } catch (Exception e) {
-            log.error("[Recommendation] 表现追踪失败", e);
-            return ApiResponse.error("表现追踪失败: " + e.getMessage());
+            log.error("[Recommendation] 表现追踪提交失败", e);
+            return ApiResponse.error("表现追踪提交失败: " + e.getMessage());
         }
     }
 

@@ -497,8 +497,11 @@ export default function RecommendationList() {
   const handleTrack = async () => {
     setTrackingLoading(true);
     try {
-      const res = await recommendationApi.trackPerformance();
-      message.success(`表现追踪完成，更新 ${res.updated} 条记录`);
+      // 异步提交：后端立即返回 submitted=true，真正追踪在后台线程池执行
+      // 不再等 updated 数字；延迟 2s 刷新让后端有时间跑几个批次
+      await recommendationApi.trackPerformance();
+      message.success('追踪任务已提交，正在后台执行，2秒后自动刷新');
+      await new Promise(r => setTimeout(r, 2000));
       // 刷新推荐列表（用当前策略+日期刷新）
       loadRecommendations(selectedStrategyId, screenDate);
       // 刷新历史命中率趋势图、质量标签、复盘数据
