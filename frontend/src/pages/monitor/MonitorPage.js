@@ -704,8 +704,8 @@ export default function MonitorPage() {
         </Space>
       </div>
 
-      {/* 非交易日提示 */}
-      {status?.dataDate && (() => {
+      {/* 数据日期提示：熊市暂停时只展示黄色警告 */}
+      {status?.dataDate && !status?.pauseReason && (() => {
         const d = new Date(status.dataDate);
         const today = new Date();
         return d.toDateString() !== today.toDateString()
@@ -713,6 +713,12 @@ export default function MonitorPage() {
               message={`当前监控基于 ${d.toLocaleDateString('zh-CN')} 的数据，非交易日自动取最近一个交易日`} />
           : null;
       })()}
+
+      {/* 连续熊市暂停提示 */}
+      {status?.pauseReason &&
+        <Alert type="warning" showIcon banner style={{ marginBottom: 10, padding: '6px 12px', fontSize: 13 }}
+          message={status.pauseReason} />
+      }
 
       {/* 大盘指数实时面板（每5秒自动刷新） */}
       {indexQuotes.length > 0 && (

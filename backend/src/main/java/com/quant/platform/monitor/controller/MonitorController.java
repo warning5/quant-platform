@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.*;
 
 /**
@@ -117,15 +118,32 @@ public class MonitorController {
 
             targetPrices.add(m);
         });
+        // 检查是否因连续熊市暂停推荐生成
+        String pauseReason = null;
+        LocalDate dataDate = intradayMonitorService.getLatestDataDate();
+        try {
+            List<String> recentRegimes = jdbcTemplate.queryForList(
+                "SELECT regime FROM market_regime_calendar WHERE trade_date <= CURDATE() ORDER BY trade_date DESC LIMIT 3",
+                String.class);
+            if (recentRegimes.size() >= 3 && recentRegimes.stream().allMatch("BEAR"::equals)) {
+                pauseReason = String.format("最近一个交易日为熊市，推荐生成已自动暂停（当前监控基于 %s 数据）", dataDate);
+            }
+        } catch (Exception e) {
+            log.debug("[Monitor] 查询market_regime_calendar失败: {}", e.getMessage());
+        }
+
+        Map<String, Object> data = new HashMap<>();
+        data.put("monitoring", intradayMonitorService.isMonitoring());
+        data.put("initialized", !intradayMonitorService.getTargetPriceCache().isEmpty());
+        data.put("watchingCount", intradayMonitorService.getTargetPriceCache().size());
+        data.put("dataDate", dataDate.toString());
+        data.put("targetPrices", targetPrices);
+        data.put("signalHistory", intradayMonitorService.getSignalHistory());
+        if (pauseReason != null) {
+            data.put("pauseReason", pauseReason);
+        }
         result.put("code", 200);
-        result.put("data", Map.of(
-                "monitoring", intradayMonitorService.isMonitoring(),
-                "initialized", !intradayMonitorService.getTargetPriceCache().isEmpty(),
-                "watchingCount", intradayMonitorService.getTargetPriceCache().size(),
-                "dataDate", intradayMonitorService.getLatestDataDate().toString(),
-                "targetPrices", targetPrices,
-                "signalHistory", intradayMonitorService.getSignalHistory()
-        ));
+        result.put("data", data);
         return ResponseEntity.ok(result);
     }
 
