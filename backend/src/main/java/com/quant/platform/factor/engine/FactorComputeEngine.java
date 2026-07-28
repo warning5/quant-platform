@@ -16,6 +16,7 @@ import com.quant.platform.market.service.MarketDataService;
 import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.scheduling.annotation.Async;
@@ -57,44 +58,21 @@ public class FactorComputeEngine {
     // 跟踪正在计算的因子代码（供前端查询当前运行状态）
     private final java.util.Set<String> runningFactors =
             java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
+    org.springframework.jdbc.core.JdbcTemplate clickHouseJdbcTemplate;
     /**
      * 写入阶段起始时间（用于计算速度）
      */
-    private final java.util.concurrent.atomic.AtomicLong writeStartGlobal = new java.util.concurrent.atomic.AtomicLong();
-    @org.springframework.beans.factory.annotation.Autowired
-    private FinancialFactors financialFactorsBean;
     @Resource
     private ClickHouseConfig clickHouseConfig;
     // 自注入，用于内部调用时走代理（解决 @Transactional 自调用失效）
     @Lazy
     @Resource
     private FactorComputeEngine self;
-    org.springframework.jdbc.core.JdbcTemplate clickHouseJdbcTemplate;
-
-    @org.springframework.beans.factory.annotation.Autowired
-    public void setClickHouseJdbcTemplate(
-            @org.springframework.beans.factory.annotation.Qualifier("clickHouseJdbcTemplate")
-            org.springframework.jdbc.core.JdbcTemplate jdbcTemplate) {
-        this.clickHouseJdbcTemplate = jdbcTemplate;
-    }
-
-    /** MySQL JdbcTemplate（用于查询融资融券等MySQL数据） */
-    @org.springframework.beans.factory.annotation.Autowired
-    @org.springframework.beans.factory.annotation.Qualifier("jdbcTemplate")
+    /**
+     * MySQL JdbcTemplate（用于查询融资融券等MySQL数据）
+     */
+    @Qualifier("jdbcTemplate")
     private org.springframework.jdbc.core.JdbcTemplate mysqlJdbcTemplate;
-
-    /** 启动时加载ST股票名单到 LimitUpCountCalculator */
-    @jakarta.annotation.PostConstruct
-    private void loadStStockCodes() {
-        try {
-            Set<String> stCodes = new HashSet<>(clickHouseJdbcTemplate.queryForList(
-                    "SELECT DISTINCT code FROM stock.stock_info WHERE stock_name LIKE '%ST%'", String.class));
-            BuiltinFactors.LimitUpCountCalculator.initStStockCodes(stCodes);
-            log.info("Loaded {} ST stock codes into LimitUpCountCalculator filter", stCodes.size());
-        } catch (Exception e) {
-            log.warn("Failed to load ST stock codes, ST filter disabled: {}", e.getMessage());
-        }
-    }
 
     {
         // 注册内置因子（15个ACTIVE：9个原有 + 2个新增 + 4个保留）
@@ -153,6 +131,28 @@ public class FactorComputeEngine {
         log.info("Registered {} financial factor calculators (static)", financialCalculators.size());
     }
 
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setClickHouseJdbcTemplate(
+            @org.springframework.beans.factory.annotation.Qualifier("clickHouseJdbcTemplate")
+            org.springframework.jdbc.core.JdbcTemplate jdbcTemplate) {
+        this.clickHouseJdbcTemplate = jdbcTemplate;
+    }
+
+    /**
+     * 启动时加载ST股票名单到 LimitUpCountCalculator
+     */
+    @jakarta.annotation.PostConstruct
+    private void loadStStockCodes() {
+        try {
+            Set<String> stCodes = new HashSet<>(mysqlJdbcTemplate.queryForList(
+                    "SELECT DISTINCT code FROM stock_info WHERE name LIKE '%ST%'", String.class));
+            BuiltinFactors.LimitUpCountCalculator.initStStockCodes(stCodes);
+            log.info("Loaded {} ST stock codes into LimitUpCountCalculator filter", stCodes.size());
+        } catch (Exception e) {
+            log.warn("Failed to load ST stock codes, ST filter disabled: {}", e.getMessage());
+        }
+    }
+
     @jakarta.annotation.PostConstruct
     private void registerDeferred() {
         // VAL_PE_TTM / VAL_PB / VAL_DIVIDEND_YIELD / VAL_FCF_YIELD 已全部改为日频 builtin
@@ -167,7 +167,9 @@ public class FactorComputeEngine {
         financialCalculators.put(calc.getFactorCode(), calc);
     }
 
-    /** 判断是否为财务因子：从 DB 元数据驱动，季频+FINANCIAL/QUALITY分类即为财务因子 */
+    /**
+     * 判断是否为财务因子：从 DB 元数据驱动，季频+FINANCIAL/QUALITY分类即为财务因子
+     */
     private boolean isFinancialFactor(String code) {
         if (code == null) return false;
         // DB驱动的财务因子判断
@@ -274,7 +276,6 @@ public class FactorComputeEngine {
             log.info("[{}] [sync] Using {} threads (runningFactors={})", factor.getFactorCode(), threads, runningFactors.size());
 
             AtomicInteger datesCompleted = new AtomicInteger(0);
-            AtomicLong rowsInserted = new AtomicLong(0);
             AtomicLong startTimeMs = new AtomicLong(System.currentTimeMillis());
             int lastPushedPct = -1;
 
@@ -790,8 +791,6 @@ public class FactorComputeEngine {
         final int BATCH = 500;
         for (int i = 0; i < codes.size(); i += BATCH) {
             List<String> batch = codes.subList(i, Math.min(i + BATCH, codes.size()));
-            String inClause = batch.stream().map(c -> "'" + c + "'").collect(Collectors.joining(","));
-
             // 批量查出所有符合条件的数据，Java 端 groupBy 取最新一条
             // （避免 GROUP BY + SELECT 非聚合字段触发 only_full_group_by 报错）
             List<StockFinancialIndicator> allIndicators = financialIndicatorMapper.selectList(
@@ -801,15 +800,12 @@ public class FactorComputeEngine {
                             .orderByDesc(StockFinancialIndicator::getEndDate));
 
             // 按 code 分组取最新一条
-            allIndicators.stream()
+            result.putAll(allIndicators.stream()
                     .collect(Collectors.groupingBy(
                             StockFinancialIndicator::getCode,
                             Collectors.collectingAndThen(
                                     Collectors.maxBy(Comparator.comparing(StockFinancialIndicator::getEndDate)),
-                                    opt -> opt.orElse(null))))
-                    .forEach((code, ind) -> {
-                        if (ind != null) result.put(code, ind);
-                    });
+                                    opt -> opt.orElse(null)))));
         }
         return result;
     }
@@ -935,7 +931,7 @@ public class FactorComputeEngine {
                     FactorValue fv = FactorValue.builder().factorCode(factor.getFactorCode()).symbol(code).calcDate(date).factorVal(value).createdAt(now).build();
                     results.add(fv);
                 }
-            } catch (Exception e) {
+            } catch (Exception ignored) {
             }
         }
         return results;
@@ -1000,7 +996,7 @@ public class FactorComputeEngine {
                 int lo = 0, hi = allBars.size();
                 while (lo < hi) {
                     int mid = (lo + hi) >>> 1;
-                    if (allBars.get(mid).getTradeDate().compareTo(date) > 0) {
+                    if (allBars.get(mid).getTradeDate().isAfter(date)) {
                         hi = mid;
                     } else {
                         lo = mid + 1;
@@ -1016,7 +1012,7 @@ public class FactorComputeEngine {
                     String industry = (String) context.getOrDefault("industry_" + code, "");
                     Object avgMomObj = context.get("industryAvgMom_" + industry);
                     stockContext = Map.of("industry", industry,
-                                          "industryAvgMom20", avgMomObj != null ? avgMomObj : 0.0);
+                            "industryAvgMom20", avgMomObj != null ? avgMomObj : 0.0);
                 }
 
                 BigDecimal value = computeSingleValue(factor, symbol, date, history, stockContext);
@@ -1031,7 +1027,7 @@ public class FactorComputeEngine {
                             .build();
                     results.add(fv);
                 }
-            } catch (Exception e) {
+            } catch (Exception ignored) {
             }
         }
         if (results.isEmpty() && emptyCount == symbols.size()) {
@@ -1064,11 +1060,11 @@ public class FactorComputeEngine {
             Map<String, String> industryMap = new HashMap<>();
             List<com.quant.platform.stock.entity.StockInfo> stockInfos =
                     stockInfoMapper.selectList(
-                        new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.quant.platform.stock.entity.StockInfo>()
-                            .in(com.quant.platform.stock.entity.StockInfo::getCode,
-                                symbols.stream().map(this::parseCode).collect(Collectors.toList()))
-                            .select(com.quant.platform.stock.entity.StockInfo::getCode,
-                                    com.quant.platform.stock.entity.StockInfo::getIndustry));
+                            new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.quant.platform.stock.entity.StockInfo>()
+                                    .in(com.quant.platform.stock.entity.StockInfo::getCode,
+                                            symbols.stream().map(this::parseCode).collect(Collectors.toList()))
+                                    .select(com.quant.platform.stock.entity.StockInfo::getCode,
+                                            com.quant.platform.stock.entity.StockInfo::getIndustry));
             for (var info : stockInfos) {
                 if (info.getIndustry() != null && !info.getIndustry().isEmpty()) {
                     industryMap.put(info.getCode(), info.getIndustry());
@@ -1091,7 +1087,7 @@ public class FactorComputeEngine {
                 int lo = 0, hi = allBars.size();
                 while (lo < hi) {
                     int mid = (lo + hi) >>> 1;
-                    if (allBars.get(mid).getTradeDate().compareTo(date) > 0) hi = mid;
+                    if (allBars.get(mid).getTradeDate().isAfter(date)) hi = mid;
                     else lo = mid + 1;
                 }
                 if (lo < 21) continue;
@@ -1127,7 +1123,7 @@ public class FactorComputeEngine {
      * allBarsData中key "INDEX_000001" 存储预加载的指数K线
      */
     private Map<String, Object> buildIndexReturnsContext(LocalDate date,
-                                                          Map<String, List<MarketDailyBar>> allBarsData) {
+                                                         Map<String, List<MarketDailyBar>> allBarsData) {
         try {
             List<MarketDailyBar> indexBars = null;
             if (allBarsData != null) {
@@ -1143,7 +1139,7 @@ public class FactorComputeEngine {
             int lo = 0, hi = indexBars.size();
             while (lo < hi) {
                 int mid = (lo + hi) >>> 1;
-                if (indexBars.get(mid).getTradeDate().compareTo(date) > 0) hi = mid;
+                if (indexBars.get(mid).getTradeDate().isAfter(date)) hi = mid;
                 else lo = mid + 1;
             }
             if (lo < 2) return Map.of();
@@ -1207,7 +1203,7 @@ public class FactorComputeEngine {
         try {
             List<Map<String, Object>> rows = mysqlJdbcTemplate.queryForList(
                     "SELECT code, net_profit_yoy, announce_date FROM stock_earnings_report " +
-                    "WHERE announce_date IS NOT NULL AND announce_date <= ? AND net_profit_yoy IS NOT NULL",
+                            "WHERE announce_date IS NOT NULL AND announce_date <= ? AND net_profit_yoy IS NOT NULL",
                     date.toString());
             Map<String, Double> map = new HashMap<>();
             Map<String, String> latestDate = new HashMap<>();
@@ -1218,7 +1214,11 @@ public class FactorComputeEngine {
                 if (code == null || np == null || ad == null) continue;
                 String adStr = ad.toString();
                 Double val;
-                try { val = Double.parseDouble(np.toString()); } catch (Exception e) { continue; }
+                try {
+                    val = Double.parseDouble(np.toString());
+                } catch (Exception e) {
+                    continue;
+                }
                 String prev = latestDate.get(code);
                 if (prev == null || adStr.compareTo(prev) > 0) {
                     latestDate.put(code, adStr);
@@ -1240,14 +1240,16 @@ public class FactorComputeEngine {
             LocalDate start = date.minusDays(20);
             List<Map<String, Object>> rows = mysqlJdbcTemplate.queryForList(
                     "SELECT code, SUM(net_inst_amt) AS s FROM stock_sentiment_lhb_inst " +
-                    "WHERE trade_date BETWEEN ? AND ? GROUP BY code",
+                            "WHERE trade_date BETWEEN ? AND ? GROUP BY code",
                     start, date);
             Map<String, Double> map = new HashMap<>();
             for (var row : rows) {
                 String code = (String) row.get("code");
                 Object s = row.get("s");
                 if (code == null || s == null) continue;
-                try { map.put(code, Double.parseDouble(s.toString())); } catch (Exception e) { /* skip */ }
+                try {
+                    map.put(code, Double.parseDouble(s.toString()));
+                } catch (Exception e) { /* skip */ }
             }
             Map<String, Object> ctx = new HashMap<>();
             ctx.put("lhbInstNetMap", map);
@@ -1263,14 +1265,16 @@ public class FactorComputeEngine {
             LocalDate start = date.minusDays(90);
             List<Map<String, Object>> rows = mysqlJdbcTemplate.queryForList(
                     "SELECT code, COUNT(*) AS c FROM stock_sentiment_survey " +
-                    "WHERE meeting_date BETWEEN ? AND ? GROUP BY code",
+                            "WHERE meeting_date BETWEEN ? AND ? GROUP BY code",
                     start, date);
             Map<String, Double> map = new HashMap<>();
             for (var row : rows) {
                 String code = (String) row.get("code");
                 Object c = row.get("c");
                 if (code == null || c == null) continue;
-                try { map.put(code, Double.parseDouble(c.toString())); } catch (Exception e) { /* skip */ }
+                try {
+                    map.put(code, Double.parseDouble(c.toString()));
+                } catch (Exception e) { /* skip */ }
             }
             Map<String, Object> ctx = new HashMap<>();
             ctx.put("instResearchMap", map);
@@ -1307,7 +1311,7 @@ public class FactorComputeEngine {
                             .build();
                     results.add(fv);
                 }
-            } catch (Exception e) {
+            } catch (Exception ignored) {
             }
         }
         return results;
@@ -1411,13 +1415,6 @@ public class FactorComputeEngine {
     }
 
     /**
-     * 计算单个因子值（无context，默认空Map）
-     */
-    private BigDecimal computeSingleValue(FactorDefinition factor, String symbol, LocalDate calcDate, List<MarketDailyBar> history) {
-        return computeSingleValue(factor, symbol, calcDate, history, Map.of());
-    }
-
-    /**
      * 对因子值做横截面归一化（Z-Score + 百分位排名）
      * 优化：ClickHouse 窗口函数一次性算完所有日期，INSERT 覆盖（ReplacingMergeTree 去重）
      * 性能：从 ~178万次 UPDATE 优化为 2次SQL，提速 10x+
@@ -1446,7 +1443,7 @@ public class FactorComputeEngine {
 
                 sendProgress(factorCode, "COMPUTING", 99, String.format(
                         "归一化完成 | %d 日期 × 均值 %d 只/日 ≈ %,d 行 | 耗时 %.1f 秒",
-                        dates.size(), rowCount > 0 && dates.size() > 0 ? rowCount / dates.size() : 0,
+                        dates.size(), rowCount > 0 && !dates.isEmpty() ? rowCount / dates.size() : 0,
                         rowCount, elapsed / 1000.0));
                 return;
             } catch (Exception e) {
@@ -1695,8 +1692,6 @@ public class FactorComputeEngine {
 
             for (int di = 0; di < dates.size() - 1; di++) {
                 LocalDate calcDate = dates.get(di);
-                LocalDate nextDate = dates.get(di + 1);
-
                 // ── 快速跳过：预查已确定无因子值的日期 ──
                 if (!validDates.contains(calcDate)) {
                     skippedNoData++;
@@ -1772,7 +1767,7 @@ public class FactorComputeEngine {
                         List<MarketDailyBar> fwd = fwdBars.get(sym);
                         if (curr != null && !curr.isEmpty() && fwd != null && !fwd.isEmpty()) {
                             double r = fwd.getFirst().getClose().doubleValue()
-                                     / curr.getFirst().getClose().doubleValue() - 1;
+                                    / curr.getFirst().getClose().doubleValue() - 1;
                             retMap.put(sym, r);
                         }
                     }
@@ -1955,12 +1950,15 @@ public class FactorComputeEngine {
                     double c = pearsonCorr(
                             Arrays.copyOf(curr, minN),
                             Arrays.copyOf(prev, minN));
-                    if (!Double.isNaN(c)) { sumCorr += c; corrCount++; }
+                    if (!Double.isNaN(c)) {
+                        sumCorr += c;
+                        corrCount++;
+                    }
                 }
                 autoCorr1 = corrCount > 0 ? sumCorr / corrCount : 0;
             }
 
-            log.info("[换手率] factor={} | Top组截面换手率={:.4f} | 自相关={} | 计算期数={}",
+            log.info("[换手率] factor={} | Top组截面换手率={} | 自相关={} | 计算期数={}",
                     factor.getFactorCode(), avgTurnover, autoCorr1, turnoverCount);
 
             // ── 汇总：IC 统计 ────────────────────────────────────
@@ -1994,9 +1992,6 @@ public class FactorComputeEngine {
             // ── 汇总：分组收益 ───────────────────────────────────
             report.setGroupCount(GROUP_COUNT);
             int tradingDays = Math.max(processed, 1);
-            // 年化因子（每年有多少个调仓期）
-            double annualFactor = getAnnualFactor(report.getRebalanceFreq(), tradingDays);
-
             // 用复利净值计算年化收益：annualReturn = NAV^(periodsPerYear/tradingDays) - 1
             // 这比简单累加×年化因子更准确，且对 tradingDays 的微小差异不敏感
             double periodsPerYear = getPeriodsPerYear(report.getRebalanceFreq());
@@ -2019,8 +2014,6 @@ public class FactorComputeEngine {
 
             // ── 汇总：主动指标 ────────────────────────────────────
             if (!topActiveReturnList.isEmpty()) {
-                // 主动年化收益（多头组超额日均收益 × 每年调仓期数）
-                double activeAnnual = avg(topActiveReturnList) * periodsPerYear;
                 // 主动年化波动率
                 double activeVol = std(topActiveReturnList) * Math.sqrt(periodsPerYear);
                 // 相对基准胜率：多头日收益 > 基准日收益的比例
@@ -2056,8 +2049,7 @@ public class FactorComputeEngine {
                     // Calmar比率：年化收益 / 最大回撤
                     double calmar = maxDd == 0 ? 0 : annualReturns[g] / maxDd;
                     // 超额收益：该组年化 - 基准年化
-                    double benchmarkNavFinal = benchmarkNav;
-                    double benchmarkAnnual = years <= 0 ? 0 : Math.pow(benchmarkNavFinal, 1.0 / years) - 1;
+                    double benchmarkAnnual = years <= 0 ? 0 : Math.pow(benchmarkNav, 1.0 / years) - 1;
                     double excessReturn = annualReturns[g] - benchmarkAnnual;
                     gr.put("volatility", round4(vol));
                     gr.put("sharpe", round4(sharpe));
@@ -2417,7 +2409,7 @@ public class FactorComputeEngine {
 
             if (periods.size() >= 3) {
                 // ln(|IC|) = ln(|IC(0)|) - λt
-                List<Double> logICs = absICs.stream().map(Math::log).collect(Collectors.toList());
+                List<Double> logICs = absICs.stream().map(Math::log).toList();
                 double sumT = 0, sumLogIC = 0, sumTLogIC = 0, sumT2 = 0;
                 int n = periods.size();
                 for (int i = 0; i < n; i++) {

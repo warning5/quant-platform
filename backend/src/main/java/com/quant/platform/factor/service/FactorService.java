@@ -21,9 +21,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.util.*;
+import java.util.AbstractMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * 因子管理服务
@@ -59,6 +61,7 @@ public class FactorService {
     private final StockInfoMapper stockInfoMapper;
     private final org.springframework.messaging.simp.SimpMessagingTemplate messagingTemplate;
     private final FactorMetaCacheService factorMetaCache;
+    private final org.springframework.context.ApplicationEventPublisher eventPublisher;
 
     /**
      * 查询因子列表（分页+搜索）
@@ -230,6 +233,9 @@ public class FactorService {
         FactorDefinition factor = getById(factorId);
         List<String> symbols = marketDataService.getAllSymbols();
         computeEngine.computeFactor(factor, startDate, endDate, symbols);
+        // 因子值算完，发布事件触发下游（IC增量刷新等），使手动重算也能自动接上 IC 计算
+        eventPublisher.publishEvent(
+                new com.quant.platform.common.event.FactorComputeCompletedEvent(this, endDate, 1, true));
         return factor.getFactorCode();
     }
 
@@ -335,6 +341,14 @@ public class FactorService {
                 "skipped", skipped,
                 "timestamp", java.time.LocalDateTime.now().toString()
         ));
+
+        // 若有因子实际提交计算，发布 FactorComputeCompletedEvent，
+        // 触发下游（IC增量刷新 / FF3补算等），使手动重算也能自动接上 IC 计算
+        if (!submitted.isEmpty()) {
+            eventPublisher.publishEvent(
+                    new com.quant.platform.common.event.FactorComputeCompletedEvent(this, endDate, submitted.size(), true));
+            log.info("[批量计算] 已发布 FactorComputeCompletedEvent，触发 IC 增量刷新: submitted={}", submitted.size());
+        }
 
         return Map.of("submitted", submitted, "skipped", skipped,
                 "totalFactors", factorCodes.size(), "symbolCount", symbols.size());

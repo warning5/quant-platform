@@ -1508,10 +1508,9 @@ CREATE TABLE `strategy_confidence`  (
   `created_at` datetime NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`) USING BTREE,
-  UNIQUE INDEX `uk_strategy_date`(`strategy_id` ASC, `data_as_of_date` ASC) USING BTREE,
+  UNIQUE INDEX `uk_confidence_strategy_mode`(`strategy_id` ASC, `weight_mode` ASC, `data_as_of_date` DESC) USING BTREE,
   INDEX `idx_strategy_id`(`strategy_id` ASC) USING BTREE,
-  INDEX `idx_level`(`level` ASC) USING BTREE,
-  INDEX `idx_confidence_strategy_mode`(`strategy_id` ASC, `weight_mode` ASC, `data_as_of_date` DESC) USING BTREE
+  INDEX `idx_level`(`level` ASC) USING BTREE
 ) ENGINE = InnoDB AUTO_INCREMENT = 926 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '策略置信度 - 基于历史追踪表现的风控评分' ROW_FORMAT = Dynamic;
 
 -- ----------------------------

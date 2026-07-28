@@ -17,7 +17,6 @@ import java.util.*;
 
 /**
  * 策略置信度服务（方案C）
- *
  * 基于历史追踪表现计算策略置信度，用于策略级风控。
  * 与方案B（个股黑名单）形成两层风控体系：
  *   Layer 1 (C): 策略级 → 检查置信度，低则降topN/暂停
@@ -344,8 +343,8 @@ public class StrategyConfidenceService {
         sc.setCreatedAt(LocalDateTime.now());
         sc.setUpdatedAt(LocalDateTime.now());
 
-        // P1修复: 改为append模式，保留历史趋势（/history API 可返回多条记录）
-        // 不再 deleteByStrategyId，直接insert
+        // 先删同策略+模式+日期的旧记录（处理重跑），再insert
+        strategyConfidenceMapper.deleteByStrategyIdAndModeAndDate(strategyId, weightMode, dataAsOf);
         strategyConfidenceMapper.insert(sc);
 
         return sc;
@@ -382,7 +381,6 @@ public class StrategyConfidenceService {
 
     /**
      * P0-3: 冷启动状态（样本 < MIN_SAMPLES_FOR_SCORING）
-     *
      * 使用先验中性分(COLD_START_PRIOR_SCORE=55, NORMAL下限)而非UNTRAINED，
      * 让策略级风控更快进入评分系统：
      * - NORMAL 不缩减 topN（与 UNTRAINED 效果相同）
@@ -426,6 +424,7 @@ public class StrategyConfidenceService {
         sc.setCreatedAt(LocalDateTime.now());
         sc.setUpdatedAt(LocalDateTime.now());
 
+        strategyConfidenceMapper.deleteByStrategyIdAndModeAndDate(strategyId, weightMode, sc.getDataAsOfDate());
         strategyConfidenceMapper.insert(sc);
 
         log.info("[Confidence] 冷启动评估: strategyId={}, mode={}, sampleSize={}, priorScore={}, actualScore={}, blendedScore={}, level={}",

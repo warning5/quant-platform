@@ -26,6 +26,11 @@ public interface StrategyConfidenceMapper extends BaseMapper<StrategyConfidence>
     @Delete("DELETE FROM strategy_confidence WHERE strategy_id = #{strategyId}")
     int deleteByStrategyId(@Param("strategyId") Long strategyId);
 
+    @Delete("DELETE FROM strategy_confidence WHERE strategy_id = #{strategyId} AND weight_mode = #{weightMode} AND data_as_of_date = #{dataAsOfDate}")
+    int deleteByStrategyIdAndModeAndDate(@Param("strategyId") Long strategyId,
+                                          @Param("weightMode") String weightMode,
+                                          @Param("dataAsOfDate") java.time.LocalDate dataAsOfDate);
+
     @Select("SELECT * FROM strategy_confidence WHERE strategy_id = #{strategyId} ORDER BY data_as_of_date ASC")
     List<StrategyConfidence> findByStrategyId(@Param("strategyId") Long strategyId);
 }

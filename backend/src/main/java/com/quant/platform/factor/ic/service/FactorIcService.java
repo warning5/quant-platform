@@ -1,11 +1,15 @@
 package com.quant.platform.factor.ic.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.quant.platform.factor.domain.FactorDefinition;
 import com.quant.platform.factor.ic.domain.FactorIcRecord;
 import com.quant.platform.factor.ic.mapper.FactorIcRecordMapper;
+import com.quant.platform.factor.mapper.FactorDefinitionMapper;
 import com.quant.platform.stock.service.ClickHouseStockService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -19,7 +23,6 @@ import java.util.*;
  * 1. 评估因子有效性（IC绝对值越大越好）
  * 2. 评估因子稳定性（IR越大越好）
  * 3. 为推荐管线提供自适应因子权重（IC衰减的因子自动降权）
- *
  * 安全：所有接受 factorCode/factorCodes 的方法均通过白名单校验（字母/数字/下划线/横线）
  */
 @Slf4j
@@ -46,16 +49,19 @@ public class FactorIcService {
     private final FactorIcRecordMapper icRecordMapper;
     private final ClickHouseStockService clickHouseStockService;
     private final com.quant.platform.factor.service.FactorMetaCacheService factorMetaCache;
+    private final FactorDefinitionMapper factorDefinitionMapper;
 
     /** IC 计算用的未来收益天数（可通过 factor.ic.forward-return-days 配置，默认5） */
     @Value("${quant.factor.ic.forward-return-days:5}")
     private int forwardReturnDays;
 
     public FactorIcService(FactorIcRecordMapper icRecordMapper, ClickHouseStockService clickHouseStockService,
-                           com.quant.platform.factor.service.FactorMetaCacheService factorMetaCache) {
+                           com.quant.platform.factor.service.FactorMetaCacheService factorMetaCache,
+                           FactorDefinitionMapper factorDefinitionMapper) {
         this.icRecordMapper = icRecordMapper;
         this.clickHouseStockService = clickHouseStockService;
         this.factorMetaCache = factorMetaCache;
+        this.factorDefinitionMapper = factorDefinitionMapper;
     }
 
     /**
@@ -192,6 +198,47 @@ public class FactorIcService {
                 latestAvailable != null ? String.format(" (最近可计算日期=%s, 需往前%d交易日才有前瞻数据)", latestAvailable, forwardReturnDays)
                         : " (数据不足，无法计算任何日期的IC)");
         return allResults;
+    }
+
+    /**
+     * 因子计算完成后异步增量刷新 IC 历史（factor_ic_record）。
+     * 由 FactorComputeCompletedEvent 触发，保证因子值就绪后再算 IC。
+     * 增量窗口覆盖最近若干交易日（含前瞻收益延迟），upsert 幂等，可每日重算。
+     */
+    @Async("backtestTaskExecutor")
+    public void refreshIcIncrementallyAsync() {
+        try {
+            LocalDate end = clickHouseStockService.getLatestTradeDate();
+            if (end == null) {
+                log.warn("[FactorIC] 增量刷新跳过：无法获取最新交易日");
+                return;
+            }
+            // 增量窗口：覆盖前瞻收益延迟（forwardReturnDays）+ 冗余，每日幂等重算
+            LocalDate start = end.minusDays(20);
+            List<String> codes = getActiveFactorCodes();
+            if (codes.isEmpty()) {
+                log.warn("[FactorIC] 增量刷新跳过：无 ACTIVE 因子");
+                return;
+            }
+            Map<LocalDate, Map<String, FactorIcRecord>> res = computeAndSaveIcBatch(start, end, codes);
+            log.info("[FactorIC] 增量刷新完成: range=[{}, {}] factors={} days={}",
+                    start, end, codes.size(), res.size());
+        } catch (Throwable t) {
+            log.warn("[FactorIC] 增量刷新异常: {}", t.getMessage(), t);
+        }
+    }
+
+    /**
+     * 获取所有 ACTIVE 因子的 code 列表（用于 IC 增量刷新）
+     */
+    private List<String> getActiveFactorCodes() {
+        List<FactorDefinition> active = factorDefinitionMapper.selectList(
+                new LambdaQueryWrapper<FactorDefinition>()
+                        .eq(FactorDefinition::getStatus, FactorDefinition.FactorStatus.ACTIVE));
+        return active.stream()
+                .map(FactorDefinition::getFactorCode)
+                .filter(Objects::nonNull)
+                .toList();
     }
 
     /**
