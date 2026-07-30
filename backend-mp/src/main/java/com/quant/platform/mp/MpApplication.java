@@ -7,6 +7,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.web.client.RestTemplate;
 
 @SpringBootApplication
 @MapperScan({"com.quant.platform.**.mapper", "com.quant.platform.mp.mapper"})
@@ -20,6 +21,11 @@ public class MpApplication {
     @Bean
     public MpAuthFilter mpAuthFilter() {
         return new MpAuthFilter();
+    }
+
+    @Bean
+    public RestTemplate restTemplate() {
+        return new RestTemplate();
     }
 
     @Bean
