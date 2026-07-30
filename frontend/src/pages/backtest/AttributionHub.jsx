@@ -1,8 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import {
-  Card, Row, Col, Typography, Tag, Table, Alert, Spin, Divider, Statistic,
-  Badge, Tooltip, Modal, Button, Space, Empty, Result,
-} from 'antd';
+import { Card, Row, Col, Typography, Tag, Table, Alert, Spin, Divider, Statistic, Badge, Tooltip, Modal, Button, Space, Empty, Result } from 'antd';
 import {
   InfoCircleOutlined, RiseOutlined, FallOutlined, BarChartOutlined,
   PieChartOutlined, QuestionCircleOutlined, UpOutlined, DownOutlined,
@@ -245,7 +242,7 @@ export default function AttributionHub({ taskId }) {
         </Tooltip>
       </>}
         open={brinsonOpen} onCancel={() => setBrinsonOpen(false)}
-        width={1100} footer={null} destroyOnClose
+        width={1100} footer={null} destroyOnHidden
         style={{top:20}}
         styles={{ body: { maxHeight: 'calc(90vh - 120px)', overflowY: 'auto', overflowX: 'hidden', paddingRight: 4 } }}
       >
@@ -273,7 +270,7 @@ export default function AttributionHub({ taskId }) {
         </Tooltip>
       </>}
         open={factorOpen} onCancel={() => setFactorOpen(false)}
-        width={1100} footer={null} destroyOnClose
+        width={1100} footer={null} destroyOnHidden
         style={{top:20}}
         styles={{ body: { maxHeight: 'calc(90vh - 120px)', overflowY: 'auto', overflowX: 'hidden', paddingRight: 4 } }}
       >
@@ -334,7 +331,7 @@ export default function AttributionHub({ taskId }) {
         </Tooltip>
       </>}
         open={ff3Open} onCancel={() => setFF3Open(false)}
-        width={1100} footer={null} destroyOnClose
+        width={1100} footer={null} destroyOnHidden
         style={{top:20}}
         styles={{ body: { maxHeight: 'calc(90vh - 120px)', overflowY: 'auto', overflowX: 'hidden', paddingRight: 4 } }}
       >
@@ -384,7 +381,7 @@ export default function AttributionHub({ taskId }) {
         </Tooltip>
       </>}
         open={alphaMonitorOpen} onCancel={() => setAlphaMonitorOpen(false)}
-        width={1100} footer={null} destroyOnClose
+        width={1100} footer={null} destroyOnHidden
         style={{top:20}}
         styles={{ body: { maxHeight: 'calc(90vh - 120px)', overflowY: 'auto', overflowX: 'hidden', paddingRight: 4 } }}
       >
@@ -396,7 +393,7 @@ export default function AttributionHub({ taskId }) {
         <AlertOutlined style={{marginRight:8}}/>风格β 漂移监控
       </>}
         open={styleMonitorOpen} onCancel={() => setStyleMonitorOpen(false)}
-        width={1100} footer={null} destroyOnClose
+        width={1100} footer={null} destroyOnHidden
         style={{top:20}}
         styles={{ body: { maxHeight: 'calc(90vh - 120px)', overflowY: 'auto', overflowX: 'hidden', paddingRight: 4 } }}
       >

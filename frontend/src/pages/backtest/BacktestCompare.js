@@ -1,8 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import {
-  Card, Row, Col, Table, Button, Space, Typography, Spin, Alert,
-  Tag, Tooltip, Select, Empty, Statistic, Badge,
-} from 'antd';
+import { Card, Row, Col, Table, Button, Space, Typography, Spin, Alert, Tag, Tooltip, Select, Empty, Statistic, Badge } from 'antd';
 import {
   ArrowLeftOutlined, ReloadOutlined, LineChartOutlined,
   TrophyOutlined, RiseOutlined, FallOutlined,

@@ -1,9 +1,5 @@
 ﻿import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import {
-  Card, Button, Space, Typography, Table, Tag, InputNumber, Select,
-  DatePicker, Row, Col, Statistic, Divider, Tooltip, Badge,
-  Empty, Spin, Progress, Alert, Form, Popover, Modal, Input, Slider, Tabs, Checkbox, App,
-} from 'antd';
+import { Card, Button, Space, Typography, Table, Tag, InputNumber, Select, DatePicker, Row, Col, Statistic, Divider, Tooltip, Badge, Empty, Spin, Progress, Alert, Form, Popover, Modal, Input, Slider, Tabs, Checkbox, App } from 'antd';
 import {
   PlusOutlined, DeleteOutlined, PlayCircleOutlined, FilterOutlined,
   InfoCircleOutlined, ReloadOutlined, SwapOutlined, QuestionCircleOutlined,

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Card, Calendar, Tag, Button, Select, Modal, Form, Input, Switch, message, Spin, Space, Divider, Tooltip } from 'antd';
+import { Card, Calendar, Tag, Button, Select, Modal, Form, Input, Switch, Spin, Space, Divider, Tooltip } from 'antd'
+import { message } from '../../utils/messageUtil';
 import { LeftOutlined, RightOutlined, CalendarOutlined, EditOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { calendarApi } from '../../api';

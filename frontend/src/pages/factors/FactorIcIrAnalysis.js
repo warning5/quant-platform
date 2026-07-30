@@ -1,10 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
-import {
-  Card, Row, Col, Select, Button, Tag, Spin, Alert, Space, Switch,
-  Typography, Table, Tooltip, Popover, Divider, Statistic, DatePicker, InputNumber, App, Radio,
-} from 'antd';
+import { Card, Row, Col, Select, Button, Tag, Spin, Alert, Space, Switch, Typography, Table, Tooltip, Popover, Divider, Statistic, DatePicker, InputNumber, App, Radio } from 'antd';
 import {
   BarChartOutlined, LineChartOutlined, ReloadOutlined, InfoCircleOutlined,
   CheckCircleOutlined, WarningOutlined, CloseCircleOutlined, QuestionCircleOutlined,

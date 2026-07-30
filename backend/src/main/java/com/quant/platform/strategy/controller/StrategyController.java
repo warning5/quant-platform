@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/strategies")
 @RequiredArgsConstructor
 @Tag(name = "策略管理", description = "量化策略定义与管理接口")
+@cn.dev33.satoken.annotation.SaCheckPermission("strategy:view")
 public class StrategyController {
 
     private final StrategyService strategyService;

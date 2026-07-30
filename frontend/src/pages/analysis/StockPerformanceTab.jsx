@@ -10,9 +10,7 @@
  * 数据来源：stock_daily（CH）+ index_daily（CH，沪深300）
  */
 import React from 'react';
-import {
-  Card, Row, Col, Statistic, Progress, Tag, Divider, Tooltip, Alert,
-} from 'antd';
+import { Card, Row, Col, Statistic, Progress, Tag, Divider, Tooltip, Alert } from 'antd';
 import { QuestionCircleOutlined } from '@ant-design/icons';
 
 // RS Rating 颜色

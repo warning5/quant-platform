@@ -16,6 +16,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/calendar")
+@cn.dev33.satoken.annotation.SaCheckPermission("calendar:view")
 public class TradeCalendarController {
     
     @Autowired

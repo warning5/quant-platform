@@ -1,9 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import {
-  Card, Form, Input, Select, InputNumber, Button, Space, Typography, Spin, App, Tabs, Row, Col,
-  Table, Tag, Tooltip, Modal, InputNumber as AntInputNumber
-} from 'antd';
+import { Card, Form, Input, Select, InputNumber, Button, Space, Typography, Spin, App, Tabs, Row, Col, Table, Tag, Tooltip, Modal, InputNumber as AntInputNumber } from 'antd';
 import {
   ArrowLeftOutlined, SaveOutlined, PlusOutlined, DeleteOutlined,
   CopyOutlined, SwapOutlined, CodeOutlined, EditOutlined

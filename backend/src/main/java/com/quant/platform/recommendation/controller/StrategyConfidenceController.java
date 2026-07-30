@@ -17,6 +17,7 @@ import java.util.Optional;
 @RestController
 @RequestMapping("/strategy-confidence")
 @RequiredArgsConstructor
+@cn.dev33.satoken.annotation.SaCheckPermission("recommendation:view")
 public class StrategyConfidenceController {
 
     private final StrategyConfidenceService strategyConfidenceService;

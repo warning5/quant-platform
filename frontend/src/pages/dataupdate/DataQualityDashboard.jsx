@@ -1,9 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import {
-  Card, Row, Col, Statistic, Tag, Typography, Button, Spin, Table, Badge,
-  Tooltip, Space, Alert, Empty
-} from 'antd';
+import { Card, Row, Col, Statistic, Tag, Typography, Button, Spin, Table, Badge, Tooltip, Space, Alert, Empty } from 'antd';
 import {
   CheckCircleOutlined, WarningOutlined, CloseCircleOutlined,
   SyncOutlined, ReloadOutlined, ClockCircleOutlined, ThunderboltOutlined

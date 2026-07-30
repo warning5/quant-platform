@@ -20,6 +20,7 @@ import java.util.Map;
 @RequestMapping("/market")
 @RequiredArgsConstructor
 @Tag(name = "行情数据", description = "股票行情数据查询接口")
+@cn.dev33.satoken.annotation.SaCheckPermission("market:view")
 public class MarketDataController {
 
     private final MarketDataService marketDataService;

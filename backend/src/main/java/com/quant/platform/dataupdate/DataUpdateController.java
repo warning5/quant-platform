@@ -26,6 +26,7 @@ import java.util.*;
 @RequestMapping("/data-update")
 @RequiredArgsConstructor
 @Tag(name = "数据更新", description = "股票数据更新管理接口（调用 Python 脚本采集数据）")
+@cn.dev33.satoken.annotation.SaCheckPermission("data:view")
 public class DataUpdateController {
 
     private final DataUpdateService dataUpdateService;

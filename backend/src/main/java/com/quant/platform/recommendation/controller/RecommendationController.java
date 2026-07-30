@@ -29,6 +29,7 @@ import java.util.concurrent.ExecutorService;
 @Slf4j
 @RestController
 @RequestMapping("/recommendations")
+@cn.dev33.satoken.annotation.SaCheckPermission("recommendation:view")
 public class RecommendationController {
 
     private final RecommendationService recommendationService;

@@ -20,6 +20,7 @@ import java.util.Map;
 @RequestMapping("/data-quality")
 @RequiredArgsConstructor
 @Tag(name = "数据质量", description = "数据新鲜度、异常检测等质量监控接口")
+@cn.dev33.satoken.annotation.SaCheckPermission("data:view")
 public class DataQualityController {
 
     private final DataQualityService dataQualityService;

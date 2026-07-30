@@ -56,6 +56,7 @@ class ApiResponse<T> {
 @RestController
 @RequestMapping("/analysis")
 @RequiredArgsConstructor
+@cn.dev33.satoken.annotation.SaCheckPermission("stock:view")
 public class StockAnalysisController {
     
     @Autowired(required = false)

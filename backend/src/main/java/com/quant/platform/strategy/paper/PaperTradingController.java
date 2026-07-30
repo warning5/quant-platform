@@ -18,6 +18,7 @@ import java.util.Map;
 @RequestMapping("/paper-trading")
 @RequiredArgsConstructor
 @Tag(name = "模拟盘交易", description = "策略模拟盘：信号生成、持仓管理、净值追踪")
+@cn.dev33.satoken.annotation.SaCheckPermission("strategy:view")
 public class PaperTradingController {
 
     private final PaperTradingService paperTradingService;

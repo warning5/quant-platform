@@ -1,9 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import {
-  Card, Progress, Typography, Space, Button, Tag, Statistic, Row, Col,
-  Alert, Spin,
-} from 'antd';
+import { Card, Progress, Typography, Space, Button, Tag, Statistic, Row, Col, Alert, Spin } from 'antd';
 import {
   LineChartOutlined, CheckCircleOutlined, CloseCircleOutlined,
   ArrowLeftOutlined, FileTextOutlined,

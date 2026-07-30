@@ -28,6 +28,13 @@
             <artifactId>common</artifactId>
         </dependency>
 
+        <!-- Sa-Token 权限认证（Spring Boot 3，与主后端同版本） -->
+        <dependency>
+            <groupId>cn.dev33</groupId>
+            <artifactId>sa-token-spring-boot3-starter</artifactId>
+            <version>1.38.0</version>
+        </dependency>
+
         <!-- MyBatis-Plus (for DB access, shared mappers in common) -->
         <dependency>
             <groupId>com.baomidou</groupId>

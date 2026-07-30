@@ -1,10 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import {
-  Card, Descriptions, Tag, Button, Space, Tabs, Table,
-  Row, Col, Typography, Spin, Modal, DatePicker,
-  Input, App, Progress, Divider, Select, Popconfirm, Alert, Timeline, Badge
-} from 'antd';
+import { Card, Descriptions, Tag, Button, Space, Tabs, Table, Row, Col, Typography, Spin, Modal, DatePicker, Input, App, Progress, Divider, Select, Popconfirm, Alert, Timeline, Badge } from 'antd';
 import {
   ArrowLeftOutlined, EditOutlined,
   BarChartOutlined, ExperimentOutlined, RiseOutlined,

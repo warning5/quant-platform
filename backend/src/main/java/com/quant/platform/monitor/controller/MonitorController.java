@@ -20,6 +20,7 @@ import java.util.*;
 @RestController
 @RequestMapping("/monitor")
 @RequiredArgsConstructor
+@cn.dev33.satoken.annotation.SaCheckPermission("monitor:view")
 public class MonitorController {
 
     private final IntradayMonitorService intradayMonitorService;

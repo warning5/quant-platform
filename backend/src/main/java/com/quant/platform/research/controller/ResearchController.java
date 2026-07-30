@@ -21,6 +21,7 @@ import java.util.Map;
 @RequestMapping("/research")
 @RequiredArgsConstructor
 @Tag(name = "研报数据", description = "东方财富个股研报数据查询接口")
+@cn.dev33.satoken.annotation.SaCheckPermission("research:view")
 public class ResearchController {
 
     private final JdbcTemplate jdbcTemplate;

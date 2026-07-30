@@ -19,6 +19,7 @@ import java.util.Map;
 @RequestMapping("/portfolio-risk")
 @RequiredArgsConstructor
 @Tag(name = "策略组合风控", description = "跨策略组合层面风险管理")
+@cn.dev33.satoken.annotation.SaCheckPermission("strategy:view")
 public class PortfolioRiskController {
 
     private final PortfolioRiskService portfolioRiskService;

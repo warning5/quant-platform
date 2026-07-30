@@ -34,6 +34,7 @@ import java.util.*;
 @RequiredArgsConstructor
 @Slf4j
 @Tag(name = "回测管理", description = "策略回测任务和报告管理接口")
+@cn.dev33.satoken.annotation.SaCheckPermission("strategy:view")
 public class BacktestController {
 
     private final BacktestService backtestService;

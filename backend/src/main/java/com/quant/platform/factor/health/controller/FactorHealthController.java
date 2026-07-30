@@ -19,6 +19,7 @@ import java.util.Map;
 @RequestMapping("/factor-health")
 @RequiredArgsConstructor
 @Tag(name = "因子健康检查", description = "因子时效性管理：衰减检测、降级、复活")
+@cn.dev33.satoken.annotation.SaCheckPermission("factor:view")
 public class FactorHealthController {
 
     private final FactorHealthMonitor factorHealthMonitor;

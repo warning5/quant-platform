@@ -1,8 +1,5 @@
 import React from 'react';
-import {
-  Card, Row, Col, Table, Tag, Empty, Alert,
-  Statistic, Divider, Tooltip, Typography,
-} from 'antd';
+import { Card, Row, Col, Table, Tag, Empty, Alert, Statistic, Divider, Tooltip, Typography } from 'antd';
 import { StarFilled, StarOutlined } from '@ant-design/icons';
 
 const { Text } = Typography;

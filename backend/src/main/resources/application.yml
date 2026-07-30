@@ -63,6 +63,35 @@ clickhouse:
   password: ${CLICKHOUSE_PASSWORD:123456}  # 本地开发默认值，生产通过环境变量覆盖
   enabled: true  # 是否启用 ClickHouse 优先查询
 
+# ============================================================
+# Sa-Token 配置（登录态 / 权限 / 角色）
+# 保护范围：/system/** 全部要求登录，方法级用 @SaCheckPermission 细粒度鉴权
+# 其余业务接口仍保持公开，避免影响现有量化功能（后续可按需收紧）
+# ============================================================
+sa-token:
+  token-name: satoken
+  timeout: 2592000          # token 有效期：30 天（秒）
+  active-timeout: -1        # 不限制活动超时
+  is-concurrent: true       # 允许同端多端同时登录
+  is-share: true            # 同端共享 token
+  token-style: uuid
+  is-log: false
+
+# 微信联合登录配置（敏感凭据通过环境变量注入，见 .env）
+wechat:
+  frontend-base-url: ${WECHAT_FRONTEND_BASE_URL:http://localhost:3000}
+  web:
+    app-id: ${WECHAT_WEB_APPID:}
+    app-secret: ${WECHAT_WEB_SECRET:}
+    redirect-uri: ${WECHAT_WEB_REDIRECT_URI:http://localhost:8080/api/auth/wechat/website/callback}
+  mp:
+    app-id: ${WECHAT_MP_APPID:}
+    app-secret: ${WECHAT_MP_SECRET:}
+    redirect-uri: ${WECHAT_MP_REDIRECT_URI:http://localhost:8080/api/auth/wechat/mp/callback}
+  mini:
+    app-id: ${WECHAT_MINI_APPID:}
+    app-secret: ${WECHAT_MINI_SECRET:}
+
 logging:
   charset:
     console: UTF-8

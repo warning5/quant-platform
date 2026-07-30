@@ -1,9 +1,24 @@
 import axios from 'axios';
 import { message } from '../utils/messageUtil';
+import { getToken, clearAuth } from '../utils/auth';
 
 const api = axios.create({
   baseURL: '/api',
   timeout: 120000,
+});
+
+// 请求拦截器：注入登录态 token（sa-token 默认 token 头名 satoken）
+api.interceptors.request.use((config) => {
+  const token = getToken();
+  if (token) {
+    if (config.headers && typeof config.headers.set === 'function') {
+      config.headers.set('satoken', token);
+    } else {
+      config.headers = config.headers || {};
+      config.headers.satoken = token;
+    }
+  }
+  return config;
 });
 
 // 友好错误提示映射：对服务器内部错误统一显示友好文案
@@ -39,7 +54,12 @@ api.interceptors.response.use(
       // HTTP 5xx / 429 等错误：统一友好提示（silent 模式不弹）
       if (!silent) message.error(FRIENDLY_ERRORS[status]);
     } else if (status === 401) {
-      if (!silent) message.error('登录已过期，请重新登录');
+      // 登录态失效：清理本地 token 并跳回登录页
+      clearAuth();
+      if (window.location.pathname !== '/login') {
+        if (!silent) message.error('登录已过期，请重新登录');
+        window.location.href = '/login';
+      }
     } else if (status === 403) {
       if (!silent) message.error('无权限访问');
     } else if (status === 404) {

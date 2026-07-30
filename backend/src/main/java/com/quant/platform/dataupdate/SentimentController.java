@@ -23,6 +23,7 @@ import java.util.stream.Collectors;
 @RequestMapping("/data-update/sentiment")
 @RequiredArgsConstructor
 @Tag(name = "情绪数据", description = "情绪数据概览与校验接口")
+@cn.dev33.satoken.annotation.SaCheckPermission("data:view")
 public class SentimentController {
 
     private final ClickHouseSentimentService clickHouseSentimentService;

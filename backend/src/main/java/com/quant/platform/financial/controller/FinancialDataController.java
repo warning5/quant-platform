@@ -29,6 +29,7 @@ import java.util.*;
 @RequestMapping("/financial")
 @RequiredArgsConstructor
 @Tag(name = "财务数据", description = "上市公司财务数据查询接口")
+@cn.dev33.satoken.annotation.SaCheckPermission("financial:view")
 public class FinancialDataController {
 
     private final FinancialDataService financialDataService;

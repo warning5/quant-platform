@@ -3,6 +3,7 @@ package com.quant.platform.common.ratelimit;
 import io.github.bucket4j.Bandwidth;
 import io.github.bucket4j.Bucket;
 import io.github.bucket4j.ConsumptionProbe;
+import cn.dev33.satoken.stp.StpUtil;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
@@ -70,7 +71,14 @@ public class RateLimitInterceptor implements HandlerInterceptor {
                 return "ip:" + ip;
             }
             case USER -> {
-                // 当前系统无登录态，fallback 到 IP
+                // 已登录则按登录主体限流，否则 fallback 到 IP
+                try {
+                    if (StpUtil.isLogin()) {
+                        return "user:" + StpUtil.getLoginIdAsString();
+                    }
+                } catch (Exception ignored) {
+                    // Sa-Token 未初始化或异常时忽略，回退 IP
+                }
                 return "user:" + ip;
             }
             case IP_AND_USER -> {

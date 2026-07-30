@@ -13,9 +13,7 @@
  *   - 综合得分：0-10分
  */
 import React from 'react';
-import {
-  Card, Row, Col, Statistic, Progress, Tag, Table, Divider, Tooltip, Alert,
-} from 'antd';
+import { Card, Row, Col, Statistic, Progress, Tag, Table, Divider, Tooltip, Alert } from 'antd';
 import { QuestionCircleOutlined } from '@ant-design/icons';
 
 const scoreColor = (score, max) => {

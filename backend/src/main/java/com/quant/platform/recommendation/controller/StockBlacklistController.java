@@ -18,6 +18,7 @@ import java.util.Set;
 @RestController
 @RequestMapping("/blacklist")
 @RequiredArgsConstructor
+@cn.dev33.satoken.annotation.SaCheckPermission("recommendation:view")
 public class StockBlacklistController {
 
     private final StockBlacklistService stockBlacklistService;

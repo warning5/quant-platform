@@ -1035,7 +1035,7 @@ function CronVisualEditor({ open, initialValue, initialExtraConfig, taskKey, onO
         okText="确认添加"
         cancelText="取消"
         confirmLoading={depSubmitLoading}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={depForm} layout="vertical" style={{ marginTop: 16 }}>
           <Form.Item
@@ -1798,7 +1798,7 @@ export default function ScheduledTasks() {
         onCancel={() => setGraphOpen(false)}
         footer={null}
         width={900}
-        destroyOnClose
+        destroyOnHidden
       >
         <TaskDependencyGraph deps={graphDeps} loading={graphLoading} taskItems={TASK_ITEMS} />
       </Modal>

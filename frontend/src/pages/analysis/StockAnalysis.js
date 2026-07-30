@@ -1,8 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import {
-  Card, Row, Col, Tabs, Input, AutoComplete, Button, Spin, Empty, Tooltip, Tag, Progress,
-  Typography, Alert, Statistic, Table, Descriptions, Dropdown, Space, theme,
-} from 'antd';
+import { Card, Row, Col, Tabs, Input, AutoComplete, Button, Spin, Empty, Tooltip, Tag, Progress, Typography, Alert, Statistic, Table, Descriptions, Dropdown, Space, theme } from 'antd';
 import {
   QuestionCircleOutlined, SearchOutlined,
   ArrowUpOutlined, ArrowDownOutlined,

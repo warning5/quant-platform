@@ -1,15 +1,16 @@
 import React, { useState, useEffect, Suspense, lazy } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Link, useLocation, useParams } from 'react-router-dom';
-import { App as AntApp, Layout, Menu, Typography, Space, Badge, Button, Tooltip, Spin, Drawer, Switch, ConfigProvider, theme } from 'antd';
+import { BrowserRouter, Routes, Route, Navigate, Link, useLocation, useParams, useNavigate } from 'react-router-dom';
+import { App as AntApp, Layout, Menu, Typography, Space, Badge, Button, Tooltip, Spin, Drawer, Switch, ConfigProvider, theme, Dropdown, Avatar } from 'antd';
 import {
-  FundOutlined, FundViewOutlined, ThunderboltOutlined,
-  DashboardOutlined, BarChartOutlined, StockOutlined,
-  MenuFoldOutlined, MenuUnfoldOutlined, FilterOutlined, BookOutlined,
-  PartitionOutlined, AccountBookOutlined,
-  SearchOutlined,
-  AppstoreOutlined, ControlOutlined,
+  BarChartOutlined,
+  MenuFoldOutlined, MenuUnfoldOutlined,
   MoonOutlined, SunOutlined,
+  LogoutOutlined, AppstoreOutlined,
+  DashboardOutlined, UserOutlined,
 } from '@ant-design/icons';
+import { useAuthStore } from './stores/authStore';
+import { ICON_MAP } from './utils/iconMap';
+import RequireAuth from './components/RequireAuth';
 
 // ── 页面懒加载（React.lazy + Suspense）──
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -46,6 +47,41 @@ const DataQuality = lazy(() => import('./pages/dataupdate/DataQualityDashboard')
 const StockAnalysis = lazy(() => import('./pages/analysis/StockAnalysis'));
 const TradeCalendar = lazy(() => import('./pages/calendar/TradeCalendar'));
 const MarketThermometer = lazy(() => import('./pages/analysis/MarketThermometer'));
+const Login = lazy(() => import('./pages/login/Login'));
+const SystemUserManage = lazy(() => import('./pages/system/UserManage'));
+const SystemRoleManage = lazy(() => import('./pages/system/RoleManage'));
+const SystemMenuManage = lazy(() => import('./pages/system/MenuManage'));
+
+// 在菜单树中查找当前路由对应的所有祖先目录 key（用于自动展开）
+function findOpenKeys(nodes, pathname, trail = []) {
+  for (const n of nodes || []) {
+    const cur = [...trail, 'sys-' + n.id];
+    if (n.path && pathname === n.path) {
+      return trail; // 命中叶子，返回其上层目录 key
+    }
+    if (n.children && n.children.length) {
+      const res = findOpenKeys(n.children, pathname, cur);
+      if (res) return res;
+    }
+  }
+  return null;
+}
+
+// 把后端菜单树转换为 antd Menu items（仅目录/菜单参与，按权限过滤已在后端完成）
+function buildSystemMenuItems(nodes) {
+  return (nodes || []).map((node) => {
+    const icon = ICON_MAP[node.icon] || <AppstoreOutlined />;
+    if (node.children && node.children.length > 0) {
+      return { key: 'sys-' + node.id, icon, label: node.menuName, children: buildSystemMenuItems(node.children) };
+    }
+    const key = node.path || 'sys-' + node.id;
+    return {
+      key,
+      icon,
+      label: node.path ? <Link to={node.path}>{node.menuName}</Link> : node.menuName,
+    };
+  });
+}
 
 /** 滚动回测旧路由重定向到统一回测 */
 function OldRollingRedirect() {
@@ -71,87 +107,25 @@ function AppLayout({ isDark, setIsDark }) {
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const location = useLocation();
   const isMobile = window.innerWidth < 768;
+  const navigate = useNavigate();
+  const menus = useAuthStore((s) => s.menus);
+  const user = useAuthStore((s) => s.user);
+  const logout = useAuthStore((s) => s.logout);
 
-  const menuItems = [
-    { key: '/', icon: <DashboardOutlined />, label: <Link to="/">总览</Link> },
-    { key: '/market', icon: <FundViewOutlined />, label: <Link to="/market">行情数据</Link> },
-    { key: '/market-thermometer', icon: <ControlOutlined />, label: <Link to="/market-thermometer">大盘温度计</Link> },
-    { key: '/stock-analysis', icon: <SearchOutlined />, label: <Link to="/stock-analysis">个股分析</Link> },
-    {
-      key: 'factors',
-      icon: <FundOutlined />,
-      label: '因子管理',
-      children: [
-        { key: '/factors', label: <Link to="/factors">因子列表</Link> },
-        { key: '/factor-monitor', label: <Link to="/factor-monitor">因子计算</Link> },
-        { key: '/factor-correlation', label: <Link to="/factor-correlation">因子相关性</Link> },
-        { key: '/factor-weight-optimize', label: <Link to="/factor-weight-optimize">权重优化</Link> },
-        { key: '/factor-ic-ir', label: <Link to="/factor-ic-ir">IC管理</Link> },
-      ],
-    },
-    {
-      key: 'strategies',
-      icon: <ThunderboltOutlined />,
-      label: '策略管理',
-      children: [
-        { key: '/strategies', label: <Link to="/strategies">策略列表</Link> },
-        { key: '/backtests', label: <Link to="/backtests">回测列表</Link> },
-        { key: '/backtests/compare', label: <Link to="/backtests/compare">策略对比</Link> },
-        { key: '/backtests/param-optimize', label: <Link to="/backtests/param-optimize">参数优化</Link> },
-        { key: '/backtests/walk-forward', label: <Link to="/backtests/walk-forward">Walk-Forward验证</Link> },
-        { key: '/paper-trading', label: <Link to="/paper-trading">模拟盘</Link> },
-      ],
-    },
-    {
-      key: 'screen',
-      icon: <AppstoreOutlined />,
-      label: '选股工具',
-      children: [
-        { key: '/screen', label: <Link to="/screen">因子选股</Link> },
-        { key: '/recommendation', label: <Link to="/recommendation">智能推荐</Link> },
-        { key: '/llm', label: <Link to="/llm">AI推理分析</Link> },
-        { key: '/monitor', label: <Link to="/monitor">盘中监控</Link> },
-        { key: '/calendar', label: <Link to="/calendar">交易日历</Link> },
-      ],
-    },
-    {
-      key: 'data-info',
-      icon: <AccountBookOutlined />,
-      label: '数据信息',
-      children: [
-        { key: '/data-update', label: <Link to="/data-update">数据更新</Link> },
-        { key: '/data-detail/financial', label: <Link to="/data-detail/financial">财务数据</Link> },
-        { key: '/data-detail/research', label: <Link to="/data-detail/research">研报数据</Link> },
-        { key: '/sector-ranking', label: <Link to="/sector-ranking">行业排行</Link> },
-        { key: '/scheduled-tasks', label: <Link to="/scheduled-tasks">定时任务</Link> },
-        { key: '/data-quality', label: <Link to="/data-quality">质量监控</Link> },
-      ],
-    },
-    {
-      key: '/manual/full',
-      icon: <BookOutlined />,
-      label: <Link to="/manual/full">使用手册 v3.0</Link>,
-    },
-  ];
+  // 侧边栏菜单完全由后端 menus 渲染（已按当前用户角色权限过滤）
+  const systemMenuItems = buildSystemMenuItems(menus);
+  // 兜底：若后端未返回菜单（如角色尚未分配），至少保留「总览」可访问
+  const fallbackItems = [{ key: '/', icon: <DashboardOutlined />, label: <Link to="/">总览</Link> }];
+  const fullMenuItems = menus && menus.length ? systemMenuItems : fallbackItems;
 
   const selectedKeys = [location.pathname];
-  const [openKeys, setOpenKeys] = useState(() => {
-    const path = window.location.pathname;
-    if (path.startsWith('/factor') || path === '/factor-weight-optimize') return ['factors'];
-    if (path.startsWith('/strateg') || path.startsWith('/backtest') || path === '/paper-trading') return ['strategies'];
-    if (path.startsWith('/screen') || path.startsWith('/recommendation') || path.startsWith('/llm') || path.startsWith('/monitor') || path.startsWith('/calendar')) return ['screen'];
-    if (path.startsWith('/data-detail')) return ['data-info'];
-    if (path === '/data-update' || path === '/scheduled-tasks' || path === '/sector-ranking' || path === '/data-quality') return ['data-info'];
-    return [];
-  });
+  const [openKeys, setOpenKeys] = useState(() =>
+    findOpenKeys(menus, window.location.pathname) || []
+  );
 
   useEffect(() => {
-    const path = location.pathname;
-    if (path.startsWith('/factor') || path === '/factor-weight-optimize') setOpenKeys(['factors']);
-    else if (path.startsWith('/strateg') || path.startsWith('/backtest') || path === '/paper-trading') setOpenKeys(['strategies']);
-    else if (path.startsWith('/screen') || path.startsWith('/recommendation') || path.startsWith('/llm') || path.startsWith('/monitor') || path.startsWith('/calendar')) setOpenKeys(['screen']);
-    else if (path.startsWith('/data-detail') || path === '/data-update' || path === '/scheduled-tasks' || path === '/sector-ranking' || path === '/data-quality') setOpenKeys(['data-info']);
-    else setOpenKeys([]);
+    const keys = findOpenKeys(menus, location.pathname);
+    if (keys) setOpenKeys(keys);
   }, [location.pathname]);
 
   return (
@@ -204,7 +178,7 @@ function AppLayout({ isDark, setIsDark }) {
             // 始终只保留最后一个打开的父菜单（手风琴）
             setOpenKeys(keys.length > openKeys.length ? [keys[keys.length - 1]] : []);
           }}
-          items={menuItems}
+          items={fullMenuItems}
           style={{ marginTop: 4, borderRight: 0 }}
           inlineCollapsed={collapsed}
         />
@@ -226,7 +200,7 @@ function AppLayout({ isDark, setIsDark }) {
             selectedKeys={selectedKeys}
             openKeys={openKeys}
             onOpenChange={(keys) => setOpenKeys(keys.length > openKeys.length ? [keys[keys.length - 1]] : [])}
-            items={menuItems}
+            items={fullMenuItems}
             onClick={() => setMobileDrawerOpen(false)}
           />
         </Drawer>
@@ -282,6 +256,31 @@ function AppLayout({ isDark, setIsDark }) {
               unCheckedChildren={<SunOutlined />}
               style={{ marginLeft: 12 }}
             />
+            {/* ── 用户区 ── */}
+            {user && (
+              <Dropdown
+                menu={{
+                  items: [
+                    { key: 'user', label: user.nickname || user.username, disabled: true },
+                    { type: 'divider' },
+                    {
+                      key: 'logout',
+                      icon: <LogoutOutlined />,
+                      label: '退出登录',
+                      onClick: async () => {
+                        await logout();
+                        navigate('/login');
+                      },
+                    },
+                  ],
+                }}
+              >
+                <Space style={{ cursor: 'pointer', marginLeft: 12 }}>
+                  <Avatar size="small" src={user.avatar} icon={<UserOutlined />} />
+                  <span>{user.nickname || user.username}</span>
+                </Space>
+              </Dropdown>
+            )}
           </Space>
         </Header>
 
@@ -326,6 +325,9 @@ function AppLayout({ isDark, setIsDark }) {
               <Route path="/market-thermometer" element={<MarketThermometer />} />
               <Route path="/sector-ranking" element={<SectorRanking />} />
               <Route path="/calendar" element={<TradeCalendar />} />
+              <Route path="/system/users" element={<SystemUserManage />} />
+              <Route path="/system/roles" element={<SystemRoleManage />} />
+              <Route path="/system/menus" element={<SystemMenuManage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </Suspense>
@@ -343,6 +345,13 @@ export default function App() {
     document.body.setAttribute('data-theme', isDark ? 'dark' : 'light');
   }, [isDark]);
 
+  // 启动恢复登录态：本地存在 token 时拉取用户信息（失败由拦截器清理并跳登录）
+  useEffect(() => {
+    if (useAuthStore.getState().token) {
+      useAuthStore.getState().fetchMe().catch(() => {});
+    }
+  }, []);
+
   return (
     <BrowserRouter
       future={{
@@ -359,7 +368,19 @@ export default function App() {
         }}
       >
         <AntApp>
-          <AppLayout isDark={isDark} setIsDark={setIsDark} />
+          <Suspense fallback={<PageLoading />}>
+            <Routes>
+              <Route path="/login" element={<Login />} />
+              <Route
+                path="/*"
+                element={
+                  <RequireAuth>
+                    <AppLayout isDark={isDark} setIsDark={setIsDark} />
+                  </RequireAuth>
+                }
+              />
+            </Routes>
+          </Suspense>
         </AntApp>
       </ConfigProvider>
     </BrowserRouter>

@@ -17,6 +17,7 @@ import java.util.Map;
 @RequestMapping("/regime-backtest")
 @RequiredArgsConstructor
 @Tag(name = "Regime权重回验", description = "市场环境Regime权重最优性验证")
+@cn.dev33.satoken.annotation.SaCheckPermission("strategy:view")
 public class RegimeBacktestController {
 
     private final RegimeBacktestService regimeBacktestService;

@@ -1,11 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import dayjs from 'dayjs';
-import {
-  Card, Row, Col, Table, Button, Space, Typography, Spin, Alert,
-  Form, InputNumber, Select, Slider, Tag, Tooltip, Divider, Badge,
-  Steps, Statistic, Empty, Input, Switch, DatePicker, Modal,
-  Collapse, Popconfirm,
-} from 'antd';
+import { Card, Row, Col, Table, Button, Space, Typography, Spin, Alert, Form, InputNumber, Select, Slider, Tag, Tooltip, Divider, Badge, Steps, Statistic, Empty, Input, Switch, DatePicker, Modal, Collapse, Popconfirm } from 'antd';
 import { message } from '../../utils/messageUtil';
 const { Panel } = Collapse;
 const { RangePicker } = DatePicker;

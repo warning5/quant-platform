@@ -33,6 +33,7 @@ import java.util.stream.Collectors;
 @RequestMapping("/factors")
 @RequiredArgsConstructor
 @Tag(name = "因子管理", description = "因子定义、计算、测试管理接口")
+@cn.dev33.satoken.annotation.SaCheckPermission("factor:view")
 public class FactorController {
 
     /**

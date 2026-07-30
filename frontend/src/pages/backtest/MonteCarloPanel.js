@@ -1,8 +1,5 @@
 import React, { useState } from 'react';
-import {
-  Card, Row, Col, Spin, Button, Alert, Statistic, Tag, Progress,
-  Tooltip, Divider, Typography, Space, Table,
-} from 'antd';
+import { Card, Row, Col, Spin, Button, Alert, Statistic, Tag, Progress, Tooltip, Divider, Typography, Space, Table } from 'antd';
 import {
   ExperimentOutlined, ReloadOutlined, InfoCircleOutlined,
 } from '@ant-design/icons';

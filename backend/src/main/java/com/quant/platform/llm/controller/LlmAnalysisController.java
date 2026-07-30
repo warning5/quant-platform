@@ -23,6 +23,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/llm")
 @RequiredArgsConstructor
+@cn.dev33.satoken.annotation.SaCheckPermission("llm:view")
 public class LlmAnalysisController {
 
     private final LlmAnalysisService llmAnalysisService;

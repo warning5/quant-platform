@@ -19,6 +19,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/screen")
 @RequiredArgsConstructor
+@cn.dev33.satoken.annotation.SaCheckPermission("screen:view")
 public class StockScreenController {
 
     private final StockScreenService screenService;

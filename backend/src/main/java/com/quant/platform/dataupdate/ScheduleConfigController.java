@@ -22,6 +22,7 @@ import java.util.concurrent.CompletableFuture;
 @RestController
 @RequestMapping("/schedule-config")
 @RequiredArgsConstructor
+@cn.dev33.satoken.annotation.SaCheckPermission("data:view")
 public class ScheduleConfigController {
 
     private final JdbcTemplate jdbcTemplate;
