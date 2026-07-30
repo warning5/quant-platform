@@ -16,6 +16,7 @@ import com.quant.platform.market.service.MarketDataService;
 import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -71,6 +72,7 @@ public class FactorComputeEngine {
     /**
      * MySQL JdbcTemplate（用于查询融资融券等MySQL数据）
      */
+    @Autowired
     @Qualifier("jdbcTemplate")
     private org.springframework.jdbc.core.JdbcTemplate mysqlJdbcTemplate;
 

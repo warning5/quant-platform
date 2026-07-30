@@ -122,11 +122,19 @@ public class MonitorController {
         String pauseReason = null;
         LocalDate dataDate = intradayMonitorService.getLatestDataDate();
         try {
+            // 统计从今天往前连续的 BEAR 天数（最多回看 20 个交易日）
             List<String> recentRegimes = jdbcTemplate.queryForList(
-                "SELECT regime FROM market_regime_calendar WHERE trade_date <= CURDATE() ORDER BY trade_date DESC LIMIT 3",
+                "SELECT regime FROM market_regime_calendar WHERE trade_date <= CURDATE() ORDER BY trade_date DESC LIMIT 20",
                 String.class);
-            if (recentRegimes.size() >= 3 && recentRegimes.stream().allMatch("BEAR"::equals)) {
-                pauseReason = String.format("最近一个交易日为熊市，推荐生成已自动暂停（当前监控基于 %s 数据）", dataDate);
+            int bearDays = 0;
+            for (String r : recentRegimes) {
+                if ("BEAR".equals(r)) bearDays++;
+                else break;
+            }
+            if (bearDays >= 3) {
+                pauseReason = String.format(
+                    "市场已连续 %d 个交易日处于熊市，系统自动暂停推荐生成（风险防御）。最近有效推荐停留在 %s，%s 至今无新推荐。",
+                    bearDays, dataDate, dataDate.plusDays(1));
             }
         } catch (Exception e) {
             log.debug("[Monitor] 查询market_regime_calendar失败: {}", e.getMessage());

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { Card, Table, Button, Tag, Select, Space, Statistic, Row, Col, Typography, Tooltip, Spin, Progress, DatePicker, Divider, Modal, Popconfirm, Switch, Dropdown, Collapse, Checkbox } from 'antd';
+import { Card, Table, Button, Tag, Select, Space, Statistic, Row, Col, Typography, Tooltip, Spin, Progress, DatePicker, Divider, Modal, Popconfirm, Switch, Dropdown, Collapse, Checkbox, Alert } from 'antd';
 import { message } from '../../utils/messageUtil';
 import dayjs from 'dayjs';
 import { ThunderboltOutlined, ReloadOutlined, LineChartOutlined, StockOutlined, RiseOutlined, FallOutlined, MinusOutlined, QuestionCircleOutlined, RadarChartOutlined, StopOutlined, UnlockOutlined, DownloadOutlined, SettingOutlined } from '@ant-design/icons';
@@ -103,6 +103,7 @@ export default function RecommendationList() {
   const [topBottom, setTopBottom] = useState(null); // 当前策略+日期的最佳/最差
   const [trackingLoading, setTrackingLoading] = useState(false); // 追踪触发中
   const [qualityTag, setQualityTag] = useState(null); // 当前策略+日期质量标签
+  const [pauseReason, setPauseReason] = useState(null); // 连续熊市暂停提示（来自 /monitor/status）
   // 复盘筛选状态（按策略隔离）
   const [reviewStrategyId, setReviewStrategyId] = useState(null);
   const [reviewDate, setReviewDate] = useState(null);
@@ -132,6 +133,11 @@ export default function RecommendationList() {
 
   // 加载交易日历 + 校正 screenDate 到最近交易日
   useEffect(() => {
+    // 查询连续熊市暂停状态
+    api.get('/monitor/status').then(d => {
+      if (d?.pauseReason) setPauseReason(d.pauseReason);
+    }).catch(() => { /* 接口挂了不阻塞页面 */ });
+
     const year = dayjs().year();
     calendarApi.getByYear(year).then(data => {
       const map = {};
@@ -1527,6 +1533,17 @@ export default function RecommendationList() {
           </Card>
         );
       })()}
+
+      {/* 连续熊市暂停推荐生成（来自 /monitor/status.pauseReason） */}
+      {pauseReason && (
+        <Alert
+          type="warning"
+          showIcon
+          banner
+          style={{ marginBottom: 10, padding: '6px 12px', fontSize: 13 }}
+          message={pauseReason}
+        />
+      )}
 
       {/* 推荐列表 */}
       <Card 
