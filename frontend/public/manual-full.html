@@ -103,6 +103,8 @@
 <a class="nav-item" href="#s5-1">5.1 Brinson归因</a><a class="nav-item" href="#s5-2">5.2 因子风格归因</a><a class="nav-item" href="#s5-3">5.3 FF3归因</a><a class="nav-item" href="#s5-4">5.4 Alpha滚动监控</a><a class="nav-item" href="#s5-5">5.5 蒙特卡洛</a><a class="nav-item" href="#s5-6">5.6 Walk-Forward</a><a class="nav-item" href="#s5-7">5.7 Regime回验</a><a class="nav-item" href="#s5-8">5.8 模拟盘</a><a class="nav-item" href="#s5-9">5.9 组合风控</a></div>
 <div class="nav-group"><a class="nav-main" href="#part6">六、数据管理</a>
 <a class="nav-item" href="#s6-1">6.1 数据更新</a><a class="nav-item" href="#s6-2">6.2 财务数据</a><a class="nav-item" href="#s6-3">6.3 研报数据</a><a class="nav-item" href="#s6-4">6.4 行业排行</a><a class="nav-item" href="#s6-5">6.5 定时任务</a><a class="nav-item" href="#s6-6">6.6 质量监控</a><a class="nav-item" href="#s6-7">6.7 缠论筛选</a><a class="nav-item" href="#s6-8">6.8 黑名单</a></div>
+<div class="nav-group"><a class="nav-main" href="#part7">七、系统管理</a>
+<a class="nav-item" href="#s7-1">7.1 系统管理总览</a><a class="nav-item" href="#s7-2">7.2 用户管理</a><a class="nav-item" href="#s7-3">7.3 角色管理</a><a class="nav-item" href="#s7-4">7.4 菜单与权限管理</a><a class="nav-item" href="#s7-5">7.5 权限模型与排错</a></div>
 </nav>
 <div class="main">
 <h1>量化因子平台 · 使用手册</h1>
@@ -1321,10 +1323,113 @@ R_portfolio = Σ (β_i × F_i) + ε
 </ul>
 </div></div>
 
+<h2 id="part7">七、系统管理</h2>
+<p>系统管理是平台的<strong>治理层</strong>——它不参与因子计算、策略回测，却控制着"谁能访问哪些功能"。平台所有业务模块（因子、策略、回测、推荐、评估、数据）的访问入口都由它管控。三个核心页面：<strong>用户管理</strong>、<strong>角色管理</strong>、<strong>菜单管理</strong>，配合 Sa-Token 权限框架实现菜单级 + 按钮级两级鉴权。</p>
+
+<div class="section" id="s7-1"><h3>7.1 系统管理总览</h3><div class="module-box">
+<h4>作用与价值</h4><p>把"平台账号"和"功能权限"解耦成三层结构，让权限分配可复用、可审计：<strong>用户</strong>被赋予<strong>角色</strong>，<strong>角色</strong>被赋予<strong>菜单/权限</strong>，最终用户的可访问范围 = 其所有角色权限的并集。</p>
+<h4>三层模型</h4><ul>
+<li><strong>用户（User）</strong>：平台账号，可绑定多个角色。支持启用/禁用、重置密码。</li>
+<li><strong>角色（Role）</strong>：权限的集合抽象。典型如 <code>ADMIN</code>（全权限）、<code>TestRole</code>（只读部分菜单）。一个角色可绑定多个菜单节点。</li>
+<li><strong>菜单/权限（Menu）</strong>：左侧导航的载体，同时承载按钮级权限标识。分目录、菜单、按钮三类（详见 7.4）。</li>
+</ul>
+<h4>权限的两级</h4><ul>
+<li><strong>菜单级</strong>：能否看到某个页面（左侧导航是否出现该菜单）。</li>
+<li><strong>按钮级</strong>：页面内某个操作按钮是否可见/可用（如"新增用户""删除"），由按钮节点上的 <code>permission</code> 标识控制。</li>
+</ul>
+<div class="why-box"><h4>为什么用"角色"做中间层，而不是给用户直接配权限？</h4>
+<p>直接给用户配权限，100 个用户就要配 100 遍，且无法保证一致性。引入角色后，权限只配一次（配给角色），再给用户指派角色即可。新增一类岗位（如"只读研究员"），只需新建一个角色并分配对应菜单，再把人加进去，运维成本从 O(用户数) 降到 O(角色数)。</p></div>
+</div></div>
+
+<div class="section" id="s7-2"><h3>7.2 用户管理</h3><div class="module-box">
+<h4>作用与价值</h4><p>维护平台账号：创建运营/研究员账号、分配角色、重置密码、启用或禁用账号。这是权限落地的"最后一公里"——角色配得再好，最终也要赋给具体用户。</p>
+<h4>页面字段</h4><table>
+<tr><th>字段</th><th>说明</th></tr>
+<tr><td>账号（username）</td><td>登录名，唯一，新增后不可修改</td></tr>
+<tr><td>昵称 / 邮箱 / 手机</td><td>展示与联系方式，可选</td></tr>
+<tr><td>状态</td><td>启用（1）/ 禁用（0）。禁用后该账号无法登录</td></tr>
+<tr><td>角色</td><td>多选，决定该用户能访问哪些功能</td></tr>
+</table>
+<h4>操作（均受权限控制）</h4><ul>
+<li><strong>新增用户</strong>（<code>system:user:add</code>）</li>
+<li><strong>编辑</strong>（<code>system:user:edit</code>）：修改资料与角色</li>
+<li><strong>改密</strong>（<code>system:user:reset</code>）：单独的重置密码入口，无需知道原密码</li>
+<li><strong>删除</strong>（<code>system:user:delete</code>）：谨慎操作</li>
+</ul>
+<h4>实现思路</h4><ul>
+<li>用户与角色是多对多关系，新增/编辑时在弹框用多选下拉一次性分配角色</li>
+<li>密码以 <strong>BCrypt</strong> 加密存储（强度 10），数据库中不保存明文</li>
+<li>重置密码走独立接口 <code>POST /system/user/{id}/reset-password</code>，管理员可强制改密</li>
+</ul>
+</div></div>
+
+<div class="section" id="s7-3"><h3>7.3 角色管理</h3><div class="module-box">
+<h4>作用与价值</h4><p>把权限集合抽象成角色。核心操作是给角色<strong>分配菜单权限</strong>——通过一个树形勾选弹框完成。</p>
+<h4>核心功能：分配菜单权限（权限树）</h4><ul>
+<li>打开某角色的"分配菜单"弹框，展示完整菜单树（目录 → 菜单 → 按钮 三层）。</li>
+<li><strong>所见即所得</strong>：勾了什么就存什么。UI 勾选状态 = 数据库存储 = 实际授权，三者严格一致。</li>
+<li><strong>级联规则</strong>：
+  <ul>
+    <li>勾选一个父节点（如"系统管理"目录，或"用户管理"菜单），其下<strong>所有子节点一并勾上</strong>；</li>
+    <li>取消一个父节点，其下<strong>所有勾选一并清除</strong>，绝不残留。</li>
+  </ul>
+</li>
+<li><strong>保存严格 1:1</strong>：不会自动"勾父=包含子"地展开存储。你看到勾了 3 个，数据库就只存 3 个，不会偷偷变成 16 个。</li>
+</ul>
+<div class="alert warn"><strong>常见误区</strong>：不要误以为"勾了父目录就自动拥有所有子权限"。本平台采用严格 1:1 存储，只有真正勾选（含级联自动勾上的）节点才会落库授权。若某按钮没勾，即使父目录勾了，该按钮仍无权限（页面按钮不显示、调用接口返回 403）。</div>
+<h4>典型配置流程</h4><ol>
+<li>角色管理页 → 新增角色，填<strong>角色编码</strong>（如 test_role）和<strong>角色名称</strong></li>
+<li>点该角色的"分配菜单" → 在权限树中勾选需要开放的菜单与按钮</li>
+<li>保存 → 到<strong>用户管理</strong>把该角色赋给目标用户</li>
+<li>用户<strong>重新登录</strong>后新权限生效（见 7.5）</li>
+</ol>
+</div></div>
+
+<div class="section" id="s7-4"><h3>7.4 菜单与权限管理</h3><div class="module-box">
+<h4>作用与价值</h4><p>菜单树是权限的<strong>载体</strong>：它不仅决定左侧导航长什么样，还承载了所有按钮级权限标识。调整菜单结构，等于调整权限结构。</p>
+<h4>三类节点</h4><table>
+<tr><th>类型</th><th>说明</th><th>必填项</th></tr>
+<tr><td>目录（type=0）</td><td>分组容器，无路由、无组件。如"系统管理"</td><td>菜单名称</td></tr>
+<tr><td>菜单（type=1）</td><td>对应一个前端页面，左侧导航可点击进入</td><td>路由 path、前端组件 component</td></tr>
+<tr><td>按钮（type=2）</td><td>页面内的操作权限，不绑定组件</td><td>权限标识 permission（如 system:user:add）</td></tr>
+</table>
+<h4>关键字段</h4><ul>
+<li><strong>路由（path）</strong>：菜单类型填写，如 <code>/system/users</code></li>
+<li><strong>组件（component）</strong>：菜单类型填写，对应 <code>src/pages</code> 下的相对路径</li>
+<li><strong>权限标识（permission）</strong>：按钮类型必填，是后端 <code>@SaCheckPermission</code> 注解校验的字符串，也是前端 <code>hasPermission</code> 判断的依据</li>
+</ul>
+<h4>实现思路</h4><ul>
+<li>菜单以树形表格展示，支持<strong>按名称过滤</strong>（命中节点保留完整子树，方便查看结构）</li>
+<li>新增菜单时可选择<strong>上级菜单</strong>、<strong>类型</strong>；目录/按钮无需填写组件</li>
+<li>删除菜单会<strong>级联删除其下所有子项</strong>，操作前请确认</li>
+</ul>
+<div class="why-box"><h4>为什么按钮也要登记成"菜单"节点？</h4>
+<p>为了让权限可视化、可配置。把"新增用户"这种操作登记为一个 type=2 的按钮节点并挂在其父菜单下，管理员在角色权限树里就能直观勾选"要不要给这个角色开放新增用户按钮"，而不用在代码里硬编码。权限标识（如 <code>system:user:add</code>）则是前后端统一的契约。</p></div>
+</div></div>
+
+<div class="section" id="s7-5"><h3>7.5 权限模型与常见问题</h3><div class="module-box">
+<h4>权限框架：Sa-Token</h4><p>登录时签发 token，后续请求携带；后端用 <code>@SaCheckPermission</code> 做方法级鉴权，前端用 <code>hasPermission</code> 控制按钮显隐，<strong>按钮级鉴权是双保险</strong>：无权限既看不到按钮（前端），调接口也会返回 403（后端）。</p>
+<div class="alert warn"><strong>⚠ 关键坑：改完权限必须重新登录</strong><br>
+后端权限是从 <strong>Sa-Token 的 session 缓存</strong> 读取的，<strong>不是每次请求实时查库</strong>。因此：
+<ul>
+<li>你给某用户/角色调整了菜单权限后，该用户<strong>必须退出登录再重新登录</strong>，新权限才会生效。</li>
+<li>否则会出现"<strong>数据库已更新，但页面仍看不到菜单 / 调接口仍 403</strong>"的假象——这不是 bug，是缓存未刷新。</li>
+</ul>
+</div>
+<h4>常见排查清单</h4><table>
+<tr><th>现象</th><th>排查方向</th></tr>
+<tr><td>访问某页面/接口报 <code>403</code></td><td>确认该用户所属角色是否勾选了对应<strong>菜单</strong>（菜单级）和按钮 <code>permission</code>（按钮级）</td></tr>
+<tr><td>页面上看不到某操作按钮</td><td>确认当前账号 <code>hasPermission</code> 是否包含该按钮标识（如 <code>system:user:add</code>）</td></tr>
+<tr><td>配置了权限但不生效</td><td>让用户<strong>重新登录</strong>（见上方说明），刷新 session 缓存</td></tr>
+<tr><td>角色分配菜单弹框显示异常</td><td>确认菜单树数据完整（目录/菜单/按钮节点齐全），必要时到菜单管理检查节点</td></tr>
+</table>
+<h4>默认账号</h4><p>系统初始化时内置 <code>admin</code> 账号（角色 ADMIN，拥有全部权限）。其他账号需由 admin 在用户管理页创建并赋角色。</p>
+</div></div>
+
 <div class="alert info">
 <strong>手册到此结束</strong>。总结本手册的核心逻辑链：<br><br>
-<strong>因子</strong>（选股能力的量化表达）→ <strong>策略</strong>（因子组合+风控规则）→ <strong>回测</strong>（策略在历史中的验证）→ <strong>选股/推荐</strong>（策略在当下生成具体股票）→ <strong>评估</strong>（验证收益的真实来源和持续性）→ <strong>数据管理</strong>（支撑以上所有模块的底层数据质量）<br><br>
-每一步都不是孤立的——因子质量决定策略上限，回测质量决定策略可信度，推荐管线质量决定策略执行效果，评估质量决定策略迭代方向，数据质量决定以上一切的根基。<strong>量化投资不是"找到一个好因子"那么简单，而是一个需要全链路质量保障的系统工程。</strong>
+<strong>因子</strong>（选股能力的量化表达）→ <strong>策略</strong>（因子组合+风控规则）→ <strong>回测</strong>（策略在历史中的验证）→ <strong>选股/推荐</strong>（策略在当下生成具体股票）→ <strong>评估</strong>（验证收益的真实来源和持续性）→ <strong>数据管理</strong>（支撑以上所有模块的底层数据质量）→ <strong>系统管理</strong>（用户 / 角色 / 权限，贯穿所有模块的访问治理层）<br><br>
+每一步都不是孤立的——因子质量决定策略上限，回测质量决定策略可信度，推荐管线质量决定策略执行效果，评估质量决定策略迭代方向，数据质量决定以上一切的根基，而系统管理决定了"谁能使用这一切"。<strong>量化投资不是"找到一个好因子"那么简单，而是一个需要全链路质量保障的系统工程。</strong>
 </div>
 </div>
 
