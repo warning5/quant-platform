@@ -7,6 +7,7 @@ import { message as msg } from '../../utils/messageUtil';
 
 export default function UserManage() {
   const [form] = Form.useForm();
+  const [modalForm] = Form.useForm();
   const [pwForm] = Form.useForm();
   const [data, setData] = useState([]);
   const [total, setTotal] = useState(0);
@@ -46,19 +47,19 @@ export default function UserManage() {
 
   const openAdd = () => {
     setEditing(null);
-    form.resetFields();
-    form.setFieldsValue({ status: 1 });
+    modalForm.resetFields();
+    modalForm.setFieldsValue({ status: 1 });
     setModalOpen(true);
   };
   const openEdit = async (row) => {
     setEditing(row);
     const roleIds = await userApi.getRoles(row.id).catch(() => []);
-    form.resetFields();
-    form.setFieldsValue({ ...row, roleIds });
+    modalForm.resetFields();
+    modalForm.setFieldsValue({ ...row, roleIds });
     setModalOpen(true);
   };
   const onSubmit = async () => {
-    const values = await form.validateFields();
+    const values = await modalForm.validateFields();
     if (editing) {
       await userApi.update({ id: editing.id, ...values });
     } else {
@@ -185,7 +186,7 @@ export default function UserManage() {
         destroyOnHidden
         width={640}
       >
-        <Form form={form} layout="vertical">
+        <Form form={modalForm} layout="vertical">
           <Row gutter={16}>
             <Col span={12}>
               <Form.Item name="username" label="账号" rules={[{ required: true, message: '请输入账号' }]}>
