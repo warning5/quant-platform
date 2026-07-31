@@ -24,6 +24,7 @@ public class RegimeBacktestController {
 
     @Operation(summary = "执行Regime权重回验", description = "回验历史Regime分布、各Regime下推荐表现、权重最优性")
     @GetMapping("/run")
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"strategy:view", "strategy:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     public ApiResponse<Map<String, Object>> runBacktest(
             @RequestParam(defaultValue = "120") int days) {
         Map<String, Object> report = regimeBacktestService.runRegimeBacktest(days);

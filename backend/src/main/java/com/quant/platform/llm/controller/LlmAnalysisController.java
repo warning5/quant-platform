@@ -73,6 +73,7 @@ public class LlmAnalysisController {
     }
 
     /** 对单只股票执行LLM深度分析（个股分析页"LLM深度解读"按钮调用） */
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"llm:view", "llm:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/analyze/{stockCode}")
     public ResponseEntity<Map<String, Object>> analyzeSingleStock(@PathVariable String stockCode) {
         log.info("[LlmController] 单股LLM分析: code={}", stockCode);
@@ -92,6 +93,7 @@ public class LlmAnalysisController {
     }
 
     /** 手动触发LLM推理（对当前推荐候选股执行） */
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"llm:view", "llm:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/analyze")
     public ResponseEntity<Map<String, Object>> triggerAnalysis(
             @RequestParam(defaultValue = "15") Integer topN,

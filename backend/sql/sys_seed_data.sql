@@ -91,3 +91,26 @@ ALTER TABLE sys_user      AUTO_INCREMENT = 100;
 ALTER TABLE sys_menu      AUTO_INCREMENT = 1000;
 ALTER TABLE sys_user_role AUTO_INCREMENT = 100;
 ALTER TABLE sys_role_menu AUTO_INCREMENT = 1000;
+
+-- ---------- 7. 按钮级权限节点（2026-07-31 补充，配合后端方法级 @SaCheckPermission） ----------
+-- 前端写按钮按 module:edit / module:delete 显隐；后端写方法要求对应权限（AND view）。
+-- 固定 id 60-73（避开 1-47 与 AUTO_INCREMENT 1000）；INSERT IGNORE 可重复执行。
+INSERT IGNORE INTO sys_menu (id, parent_id, menu_name, menu_type, path, component, icon, permission, sort, status, create_time, update_time, deleted)
+VALUES
+(60, 21, '因子-新增/计算/编辑',    2, '', '', '', 'factor:edit',        1, 1, NOW(), NOW(), 0),
+(61, 21, '因子-删除',              2, '', '', '', 'factor:delete',      2, 1, NOW(), NOW(), 0),
+(62, 38, '盘中监控-操作',          2, '', '', '', 'monitor:edit',        1, 1, NOW(), NOW(), 0),
+(63, 36, '推荐-生成/计算/跟踪',    2, '', '', '', 'recommendation:edit', 1, 1, NOW(), NOW(), 0),
+(64, 36, '推荐-黑名单删除',        2, '', '', '', 'recommendation:delete',2, 1, NOW(), NOW(), 0),
+(65, 35, '选股-执行',              2, '', '', '', 'screen:edit',         1, 1, NOW(), NOW(), 0),
+(66, 37, 'AI推理-分析',            2, '', '', '', 'llm:edit',            1, 1, NOW(), NOW(), 0),
+(67, 27, '策略-新增/回测/模拟盘',  2, '', '', '', 'strategy:edit',       1, 1, NOW(), NOW(), 0),
+(68, 27, '策略-删除',              2, '', '', '', 'strategy:delete',     2, 1, NOW(), NOW(), 0),
+(69, 39, '日历-标记',              2, '', '', '', 'calendar:edit',       1, 1, NOW(), NOW(), 0),
+(70, 40, '数据-更新/任务',         2, '', '', '', 'data:edit',           1, 1, NOW(), NOW(), 0),
+(71, 40, '数据-删除',              2, '', '', '', 'data:delete',         2, 1, NOW(), NOW(), 0),
+(72, 43, '研报-批量删除',          2, '', '', '', 'research:delete',      1, 1, NOW(), NOW(), 0),
+(73, 20, '个股分析-解析',          2, '', '', '', 'stock:edit',          1, 1, NOW(), NOW(), 0);
+
+INSERT IGNORE INTO sys_role_menu (role_id, menu_id) VALUES
+(1,60),(1,61),(1,62),(1,63),(1,64),(1,65),(1,66),(1,67),(1,68),(1,69),(1,70),(1,71),(1,72),(1,73);

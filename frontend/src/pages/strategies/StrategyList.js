@@ -4,6 +4,7 @@ import { message } from '../../utils/messageUtil';
 import { PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined, ExperimentOutlined, DownloadOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { strategyApi } from '../../api';
+import { useAuthStore } from '../../stores/authStore';
 import { exportCsv } from '../../utils/exportUtil';
 
 const { Title } = Typography;
@@ -20,6 +21,8 @@ const FREQ_LABELS = { DAILY:'日频', WEEKLY:'周频', MONTHLY:'月频', QUARTER
 
 export default function StrategyList() {
   const navigate = useNavigate();
+  const canEdit = useAuthStore((s) => s.hasPermission('strategy:edit'));
+  const canDelete = useAuthStore((s) => s.hasPermission('strategy:delete'));
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState({ records: [], total: 0 });
   const [params, setParams] = useState({ page: 0, size: 15, keyword: '', type: undefined, status: undefined });
@@ -36,6 +39,7 @@ export default function StrategyList() {
   useEffect(() => { fetchData(); }, []);
 
   const handleDelete = (id) => {
+    if (!canDelete) { message.warning('无权限删除策略'); return; }
     strategyApi.delete(id).then(() => { message.success('删除成功'); fetchData(); });
   };
 
@@ -59,15 +63,15 @@ export default function StrategyList() {
             <Button size="small" icon={<EyeOutlined />} onClick={() => navigate(`/strategies/${record.id}`)} />
           </Tooltip>
           <Tooltip title="编辑">
-            <Button size="small" icon={<EditOutlined />} onClick={() => navigate(`/strategies/${record.id}/edit`)} />
+            <Button size="small" icon={<EditOutlined />} onClick={() => navigate(`/strategies/${record.id}/edit`)} disabled={!canEdit} />
           </Tooltip>
           <Tooltip title="创建回测">
             <Button size="small" type="primary" icon={<ExperimentOutlined />}
-                    onClick={() => navigate(`/backtests/new?strategyId=${record.id}`)} />
+                    onClick={() => navigate(`/backtests/new?strategyId=${record.id}`)} disabled={!canEdit} />
           </Tooltip>
           <Popconfirm title="确认删除？" onConfirm={() => handleDelete(record.id)}>
             <Tooltip title="删除">
-              <Button size="small" danger icon={<DeleteOutlined />} />
+              <Button size="small" danger icon={<DeleteOutlined />} disabled={!canDelete} />
             </Tooltip>
           </Popconfirm>
         </Space>
@@ -79,7 +83,7 @@ export default function StrategyList() {
     <div>
       <div className="page-header">
         <Title level={4} style={{ margin: 0 }}>策略管理</Title>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/strategies/new')}>
+        <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/strategies/new')} disabled={!canEdit}>
           新建策略
         </Button>
       </div>

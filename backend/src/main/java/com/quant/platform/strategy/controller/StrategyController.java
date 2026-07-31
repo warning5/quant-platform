@@ -38,12 +38,14 @@ public class StrategyController {
         return ApiResponse.success(strategyService.getById(id));
     }
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"strategy:view", "strategy:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping
     @Operation(summary = "创建策略")
     public ApiResponse<StrategyDefinition> create(@RequestBody StrategyDefinition strategy) {
         return ApiResponse.success("策略创建成功", strategyService.createStrategy(strategy));
     }
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"strategy:view", "strategy:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PutMapping("/{id}")
     @Operation(summary = "更新策略")
     public ApiResponse<StrategyDefinition> update(@PathVariable Long id,
@@ -51,6 +53,7 @@ public class StrategyController {
         return ApiResponse.success("策略更新成功", strategyService.updateStrategy(id, strategy));
     }
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"strategy:view", "strategy:delete"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @DeleteMapping("/{id}")
     @Operation(summary = "删除策略")
     public ApiResponse<Void> delete(@PathVariable Long id) {
@@ -58,6 +61,7 @@ public class StrategyController {
         return ApiResponse.ok();
     }
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"strategy:view", "strategy:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PatchMapping("/{id}/status")
     @Operation(summary = "更改策略状态")
     public ApiResponse<StrategyDefinition> changeStatus(@PathVariable Long id,

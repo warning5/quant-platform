@@ -8,6 +8,7 @@ import {
 import ReactECharts from '../../components/LazyECharts';
 import { backtestApi } from '../../api';
 import useFactorStore from '../../stores/factorStore';
+import { useAuthStore } from '../../stores/authStore';
 import dayjs from 'dayjs';
 
 const { Title, Text } = Typography;
@@ -34,6 +35,8 @@ export default function WalkForward() {
   const factorList = useFactorStore(state => state.factorList);
   const loadFactorList = useFactorStore(state => state.load);
   useEffect(() => { loadFactorList(); }, [loadFactorList]);
+  const hasPermission = useAuthStore((s) => s.hasPermission);
+  const canEdit = hasPermission('strategy:edit');
   const [running, setRunning] = useState(false);
   const [results, setResults] = useState(null);
   const [summary, setSummary] = useState(null);
@@ -56,6 +59,10 @@ export default function WalkForward() {
     .map(f => ({ label: `${f.factorCode}（${f.factorName || f.factorCode}）`, value: f.factorCode }));
 
   const handleRun = useCallback(() => {
+    if (!canEdit) {
+      message.warning('无权限执行回测（需 strategy:edit 权限）');
+      return;
+    }
     if (!factors || factors.length === 0) {
       message.warning('请至少选择一个因子');
       return;
@@ -266,6 +273,7 @@ export default function WalkForward() {
               size="large"
               icon={<PlayCircleOutlined />}
               loading={running}
+              disabled={!canEdit}
               onClick={handleRun}
               style={{ minWidth: 200 }}
             >

@@ -29,6 +29,7 @@ public class StockScreenController {
      * POST /api/screen/run
      */
     @Operation(summary = "执行多因子选股")
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"screen:view", "screen:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/run")
     public ApiResponse<ScreenResult> run(@RequestBody ScreenRequest req) {
         ScreenResult result = screenService.screen(req);

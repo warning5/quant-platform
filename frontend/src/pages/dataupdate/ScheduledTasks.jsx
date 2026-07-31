@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Card, Table, Switch, Button, Tag, Typography, Space, Select, TimePicker, Input, InputNumber, Row, Col, Popconfirm, Badge, Spin, Modal, Tabs, Checkbox, Tooltip, DatePicker, Form } from 'antd';
 import { message } from '../../utils/messageUtil';
+import { useAuthStore } from '../../stores/authStore';
 import {
   PlayCircleOutlined, ClockCircleOutlined,
   CheckCircleOutlined, CloseCircleOutlined, SyncOutlined,
@@ -1291,6 +1292,7 @@ function CronPicker({ value, onChange }) {
 
 // ========== 主组件 ==========
 export default function ScheduledTasks() {
+  const canEdit = useAuthStore((s) => s.hasPermission('data:edit'));
   const [loading, setLoading] = useState(false);
   const [globalConfig, setGlobalConfig] = useState(null);
   const [taskConfigs, setTaskConfigs] = useState([]);
@@ -1379,6 +1381,7 @@ export default function ScheduledTasks() {
   }, [triggeringKeys.size]); // 只依赖 size 变化触发/停止轮询
 
   const saveSingle = async (taskKey, field, val) => {
+    if (!canEdit) { message.warning('无权限操作定时任务'); return; }
     try {
       await scheduleApi.update(taskKey, { [field]: val });
     } catch (e) {
@@ -1388,6 +1391,7 @@ export default function ScheduledTasks() {
   };
 
   const saveGlobal = async (field, val) => {
+    if (!canEdit) { message.warning('无权限操作定时任务'); return; }
     try {
       await scheduleApi.update('GLOBAL', { [field]: val });
     } catch (e) {
@@ -1405,6 +1409,7 @@ export default function ScheduledTasks() {
 
   // 手动触发 — 支持并发
   const handleTrigger = async (taskKey) => {
+    if (!canEdit) { message.warning('无权限操作定时任务'); return; }
     setTriggeringKeys(prev => new Set(prev).add(taskKey));
     try {
       const res = await scheduleApi.trigger(taskKey);
@@ -1431,6 +1436,7 @@ export default function ScheduledTasks() {
 
   // 取消单个任务
   const handleCancel = async (taskKey) => {
+    if (!canEdit) { message.warning('无权限操作定时任务'); return; }
     try {
       const res = await scheduleApi.cancel(taskKey);
       if (res === true) {
@@ -1458,6 +1464,7 @@ export default function ScheduledTasks() {
   // 编辑器确认 → 保存 cron + extra_config + 可选触发
   const handleEditorOk = async (cronExpr, extraConfigStr, triggerNow = false) => {
     if (!editorTarget) return;
+    if (!canEdit) { message.warning('无权限操作定时任务'); return; }
     try {
       if (editorTarget.type === 'global') {
         await scheduleApi.update('GLOBAL', { cron_expression: cronExpr });

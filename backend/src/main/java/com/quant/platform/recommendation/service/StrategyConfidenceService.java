@@ -95,7 +95,6 @@ public class StrategyConfidenceService {
             return originalTopN; // 无数据，不调整
         }
 
-        int score = confidence.getScore();
         String level = confidence.getLevel();
 
         return switch (level) {

@@ -6,6 +6,8 @@ import {
   ClockCircleOutlined, DollarOutlined, StockOutlined
 } from '@ant-design/icons';
 import api, { llmApi } from '../../api';
+import { useAuthStore } from '../../stores/authStore';
+import { message } from '../../utils/messageUtil';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -22,6 +24,7 @@ const LlmAnalysisPage = () => {
   const [error, setError] = useState(null);
   const [strategies, setStrategies] = useState([]);
   const [selectedStrategyId, setSelectedStrategyId] = useState(74);
+  const canEdit = useAuthStore((s) => s.hasPermission('llm:edit'));
 
   useEffect(() => {
     fetchAnalyses();
@@ -57,6 +60,10 @@ const LlmAnalysisPage = () => {
   };
 
   const triggerAnalysis = async () => {
+    if (!canEdit) {
+      message.warning('无权限执行AI推理');
+      return;
+    }
     setAnalyzing(true);
     setError(null);
     try {
@@ -104,6 +111,7 @@ const LlmAnalysisPage = () => {
                 icon={<ThunderboltOutlined />}
                 onClick={triggerAnalysis}
                 loading={analyzing}
+                disabled={!canEdit}
               >
                 {analyzing ? '推理中...' : '执行AI推理'}
               </Button>

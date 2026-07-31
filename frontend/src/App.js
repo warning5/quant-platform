@@ -51,6 +51,8 @@ const Login = lazy(() => import('./pages/login/Login'));
 const SystemUserManage = lazy(() => import('./pages/system/UserManage'));
 const SystemRoleManage = lazy(() => import('./pages/system/RoleManage'));
 const SystemMenuManage = lazy(() => import('./pages/system/MenuManage'));
+const AuditLog = lazy(() => import('./pages/system/AuditLog'));
+const CredentialManage = lazy(() => import('./pages/system/CredentialManage'));
 
 // 在菜单树中查找当前路由对应的所有祖先目录 key（用于自动展开）
 function findOpenKeys(nodes, pathname, trail = []) {
@@ -328,6 +330,8 @@ function AppLayout({ isDark, setIsDark }) {
               <Route path="/system/users" element={<SystemUserManage />} />
               <Route path="/system/roles" element={<SystemRoleManage />} />
               <Route path="/system/menus" element={<SystemMenuManage />} />
+              <Route path="/audit-logs" element={<AuditLog />} />
+              <Route path="/credentials" element={<CredentialManage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </Suspense>

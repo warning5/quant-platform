@@ -3,6 +3,7 @@ import { Card, Table, Button, Tag, Space, Alert, Typography, Tooltip, Modal, Inp
 import { message, notification } from '../../utils/messageUtil';
 import { ReloadOutlined, PlayCircleOutlined, EyeOutlined, ThunderboltOutlined, QuestionCircleOutlined, PlusOutlined, DeleteOutlined, EditOutlined, BellOutlined, MoreOutlined, FundOutlined } from '@ant-design/icons';
 import api, { silentConfig } from '../../api';
+import { useAuthStore } from '../../stores/authStore';
 
 const { Text } = Typography;
 
@@ -61,6 +62,8 @@ export default function MonitorPage() {
   const [notificationsPaused, setNotificationsPaused] = useState(false);
   const notificationsPausedRef = useRef(false);  // ref 避免 SSE 闭包问题
   const { token } = theme.useToken();
+  const canEdit = useAuthStore((s) => s.hasPermission('monitor:edit'));
+  const canDelete = useAuthStore((s) => s.hasPermission('monitor:delete'));
 
   const fetchStatus = useCallback(async () => {
     setLoading(true);
@@ -249,6 +252,7 @@ export default function MonitorPage() {
 
   // 手动触发扫描
   const handleTriggerScan = async () => {
+    if (!canEdit) { message.warning('无权限触发扫描'); return; }
     setScanLoading(true);
     setScanResult(null);
     try {
@@ -270,6 +274,7 @@ export default function MonitorPage() {
 
   // 模拟交易周期（非交易日/非交易时段测试推送）
   const handleSimulateCycle = async () => {
+    if (!canEdit) { message.warning('无权限模拟交易周期'); return; }
     setSimulateLoading(true);
     try {
       const data = await api.post('/monitor/simulate-cycle?force=true');
@@ -285,6 +290,7 @@ export default function MonitorPage() {
 
   // 清除信号历史
   const handleClearSignals = async () => {
+    if (!canEdit) { message.warning('无权限清除信号'); return; }
     try {
       await api.post('/monitor/clear-signals');
       setSseSignals([]);
@@ -320,6 +326,7 @@ export default function MonitorPage() {
 
   // 添加或编辑自定义股票
   const handleAddCustomStock = async (values) => {
+    if (!canEdit) { message.warning('无权限编辑自选股'); return; }
     setCustomLoading(true);
     try {
       await api.post('/monitor/add-custom-stock', {
@@ -383,6 +390,7 @@ export default function MonitorPage() {
 
   // 删除自定义股票
   const handleRemoveCustomStock = async (stockCode) => {
+    if (!canDelete) { message.warning('无权限移除自选股'); return; }
     try {
       await api.delete(`/monitor/custom-stock?stockCode=${encodeURIComponent(stockCode)}`);
       message.success('已移除');
@@ -394,6 +402,7 @@ export default function MonitorPage() {
 
   // 编辑自定义股票
   const handleEditCustomStock = (record) => {
+    if (!canEdit) { message.warning('无权限编辑自选股'); return; }
     setEditingStock(record);
     customForm.setFieldsValue({
       stockCode: record.stockCode,
@@ -464,8 +473,8 @@ export default function MonitorPage() {
             placement="rightTop"
             content={
               <Space>
-                <Button type="link" size="small" icon={<EditOutlined />} onClick={(e) => { e.stopPropagation(); handleEditCustomStock(r); }} style={{ padding: 0, fontSize: 12, color: 'var(--mp-primary)' }}>编辑</Button>
-                <Button type="link" danger size="small" icon={<DeleteOutlined />} onClick={(e) => { e.stopPropagation(); handleRemoveCustomStock(r.stockCode); }} style={{ padding: 0, fontSize: 12 }}>删除</Button>
+                <Button type="link" size="small" icon={<EditOutlined />} onClick={(e) => { e.stopPropagation(); handleEditCustomStock(r); }} style={{ padding: 0, fontSize: 12, color: 'var(--mp-primary)' }} disabled={!canEdit}>编辑</Button>
+                <Button type="link" danger size="small" icon={<DeleteOutlined />} onClick={(e) => { e.stopPropagation(); handleRemoveCustomStock(r.stockCode); }} style={{ padding: 0, fontSize: 12 }} disabled={!canDelete}>删除</Button>
               </Space>
             }
           >
@@ -483,8 +492,8 @@ export default function MonitorPage() {
             placement="rightTop"
             content={
               <Space>
-                <Button type="link" size="small" icon={<EditOutlined />} onClick={(e) => { e.stopPropagation(); handleEditCustomStock(r); }} style={{ padding: 0, fontSize: 12, color: 'var(--mp-primary)' }}>编辑</Button>
-                <Button type="link" danger size="small" icon={<DeleteOutlined />} onClick={(e) => { e.stopPropagation(); handleRemoveCustomStock(r.stockCode); }} style={{ padding: 0, fontSize: 12 }}>删除</Button>
+                <Button type="link" size="small" icon={<EditOutlined />} onClick={(e) => { e.stopPropagation(); handleEditCustomStock(r); }} style={{ padding: 0, fontSize: 12, color: 'var(--mp-primary)' }} disabled={!canEdit}>编辑</Button>
+                <Button type="link" danger size="small" icon={<DeleteOutlined />} onClick={(e) => { e.stopPropagation(); handleRemoveCustomStock(r.stockCode); }} style={{ padding: 0, fontSize: 12 }} disabled={!canDelete}>删除</Button>
               </Space>
             }
           >
@@ -687,17 +696,17 @@ export default function MonitorPage() {
         </Space>
         <Space>
           <Button icon={<ReloadOutlined />} onClick={handleRefresh} loading={loading}>刷新</Button>
-          <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleTriggerScan} loading={scanLoading}>
+          <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleTriggerScan} loading={scanLoading} disabled={!canEdit}>
             手动触发扫描
           </Button>
-          <Button type="dashed" icon={<PlusOutlined />} onClick={() => { setEditingStock(null); setCustomModalOpen(true); }}>
+          <Button type="dashed" icon={<PlusOutlined />} onClick={() => { setEditingStock(null); setCustomModalOpen(true); }} disabled={!canEdit}>
             添加自定义
           </Button>
           <Dropdown menu={{ items: [
             { key: 'realtime', icon: <EyeOutlined />, label: '手动查价', onClick: handleShowRealtime },
-            { key: 'simulate', icon: <ThunderboltOutlined />, label: '模拟交易周期', onClick: handleSimulateCycle },
+            { key: 'simulate', icon: <ThunderboltOutlined />, label: '模拟交易周期', onClick: handleSimulateCycle, disabled: !canEdit },
             { type: 'divider' },
-            { key: 'clear', icon: <DeleteOutlined />, label: '清除信号历史', onClick: handleClearSignals },
+            { key: 'clear', icon: <DeleteOutlined />, label: '清除信号历史', onClick: handleClearSignals, disabled: !canEdit },
           ]}} trigger={['click']}>
             <Button icon={<MoreOutlined />}>更多</Button>
           </Dropdown>
@@ -792,7 +801,7 @@ export default function MonitorPage() {
           size="small"
           style={{ marginTop: 12 }}
           extra={
-            <Button type="text" size="small" danger onClick={handleClearSignals}>
+            <Button type="text" size="small" danger onClick={handleClearSignals} disabled={!canEdit}>
               清除
             </Button>
           }
@@ -881,7 +890,7 @@ export default function MonitorPage() {
           <div style={{ textAlign: 'right', marginTop: 8 }}>
             <Space>
               <Button onClick={() => { setCustomModalOpen(false); setEditingStock(null); }}>取消</Button>
-              <Button type="primary" htmlType="submit" loading={customLoading} icon={editingStock ? <EditOutlined /> : <PlusOutlined />}>
+              <Button type="primary" htmlType="submit" loading={customLoading} icon={editingStock ? <EditOutlined /> : <PlusOutlined />} disabled={!canEdit}>
                 {editingStock ? '保存修改' : '添加到监控'}
               </Button>
             </Space>

@@ -44,6 +44,7 @@ public class AuthService {
      */
     public LoginResult issueToken(SysUser user) {
         StpUtil.login(user.getId());
+        StpUtil.getSession().set("username", user.getUsername());
         user.setLastLoginTime(LocalDateTime.now());
         userMapper.updateById(user);
         return buildResult(user, StpUtil.getTokenValue());

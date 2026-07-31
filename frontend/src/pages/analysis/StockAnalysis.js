@@ -18,6 +18,7 @@ import { StockPerformanceTab } from './StockPerformanceTab';
 import { ShareholderStructureTab } from './ShareholderStructureTab';
 import { TriggerDashboard } from './TriggerDashboard';
 import { message } from '../../utils/messageUtil';
+import { useAuthStore } from '../../stores/authStore';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -64,6 +65,9 @@ const saveRecent = (list) => {
 // ── 主页面 ──────────────────────────────────────────────────────────────────
 export default function StockAnalysis() {
   const { token } = theme.useToken();
+  const canQuickBuy = useAuthStore((s) => s.hasPermission('strategy:edit'));
+  const canAddMonitor = useAuthStore((s) => s.hasPermission('monitor:edit'));
+  const canLlm = useAuthStore((s) => s.hasPermission('llm:edit'));
   const [searchParams, setSearchParams] = useSearchParams();
   const [inputCode, setInputCode] = useState('');
   const [loading, setLoading] = useState(false);
@@ -110,6 +114,7 @@ export default function StockAnalysis() {
 
   // 加入模拟盘（一键买入）
   const handleQuickBuy = async (paperId) => {
+    if (!canQuickBuy) return;
     if (!overview?.code) return;
     setQuickBuyLoading(true);
     try {
@@ -124,6 +129,7 @@ export default function StockAnalysis() {
 
   // 加入监控
   const handleAddToMonitor = async () => {
+    if (!canAddMonitor) return;
     if (!overview?.code) return;
     setMonitorLoading(true);
     try {
@@ -402,6 +408,7 @@ export default function StockAnalysis() {
 
   // 触发单股LLM深度分析
   const handleLlmAnalyze = useCallback(async () => {
+    if (!canLlm) return;
     if (!overview?.code) return;
     if (llmEnabled === false) {
       const hint = llmStatusMsg?.includes('连接')
@@ -784,6 +791,7 @@ export default function StockAnalysis() {
                       ghost
                       icon={<ThunderboltOutlined />}
                       loading={quickBuyLoading}
+                      disabled={!canQuickBuy}
                     >
                       加入模拟盘 <DownOutlined />
                     </Button>
@@ -795,6 +803,7 @@ export default function StockAnalysis() {
                   icon={<EyeOutlined />}
                   onClick={handleAddToMonitor}
                   loading={monitorLoading}
+                  disabled={!canAddMonitor}
                 >
                   加入监控
                 </Button>
@@ -1142,7 +1151,7 @@ export default function StockAnalysis() {
                           loading={llmLoading}
                           onClick={handleLlmAnalyze}
                           icon={<ThunderboltOutlined />}
-                          disabled={llmEnabled === false}
+                          disabled={llmEnabled === false || !canLlm}
                         >
                           {llmData ? '重新分析' : (llmEnabled === false ? 'LLM未启用' : 'AI分析')}
                         </Button>

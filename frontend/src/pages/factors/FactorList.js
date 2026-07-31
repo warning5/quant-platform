@@ -7,6 +7,7 @@ import { factorApi } from '../../api';
 import { CATEGORY_OPTIONS, CATEGORY_LABELS } from './constants';
 import { exportCsv } from '../../utils/exportUtil';
 import dayjs from 'dayjs';
+import { useAuthStore } from '../../stores/authStore';
 
 const { Title } = Typography;
 const { Option } = Select;
@@ -26,6 +27,8 @@ function formatCount(count) {
 
 export default function FactorList() {
   const navigate = useNavigate();
+  const canEdit = useAuthStore((s) => s.hasPermission('factor:edit'));
+  const canDelete = useAuthStore((s) => s.hasPermission('factor:delete'));
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState({ records: [], total: 0 });
   const [params, setParams] = useState({ page: 0, size: 15, keyword: '', category: undefined, status: undefined });
@@ -146,10 +149,12 @@ export default function FactorList() {
   }, [computeDateRange, computeMode, selectedFactors, navigate]);
 
   const handleDelete = (id) => {
+    if (!canDelete) { message.warning('无权限删除因子'); return; }
     factorApi.delete(id).then(() => { message.success('删除成功'); fetchData(params); });
   };
 
   const handleDeleteValues = (record) => {
+    if (!canDelete) { message.warning('无权限清理因子值'); return; }
     factorApi.deleteValues(record.id).then(res => {
       message.success(`已删除 ${res?.deleted ?? 0} 条因子值`);
       fetchData(params);
@@ -157,6 +162,7 @@ export default function FactorList() {
   };
 
   const handleActivate = (record) => {
+    if (!canEdit) { message.warning('无权限修改因子状态'); return; }
     const newStatus = record.status === 'ACTIVE' ? 'DRAFT' : 'ACTIVE';
     factorApi.changeStatus(record.id, newStatus).then(() => {
       message.success(`状态已更新为 ${STATUS_LABELS[newStatus]}`);
@@ -263,17 +269,17 @@ export default function FactorList() {
           </Tooltip>
           {record.factorType !== 'BUILTIN' && (
             <Tooltip title="编辑">
-              <Button size="small" icon={<EditOutlined />} onClick={() => navigate(`/factors/${record.id}/edit`)} />
+              <Button size="small" icon={<EditOutlined />} disabled={!canEdit} onClick={() => navigate(`/factors/${record.id}/edit`)} />
             </Tooltip>
           )}
           <Tooltip title={record.status === 'ACTIVE' ? '停用' : '激活'}>
             <Button size="small" type={record.status === 'ACTIVE' ? 'default' : 'primary'}
-                    icon={<PlayCircleOutlined />} onClick={() => handleActivate(record)} />
+                    icon={<PlayCircleOutlined />} disabled={!canEdit} onClick={() => handleActivate(record)} />
           </Tooltip>
           {record.factorType !== 'BUILTIN' && (
             <Popconfirm title="确认删除？" onConfirm={() => handleDelete(record.id)}>
               <Tooltip title="删除">
-                <Button size="small" danger icon={<DeleteOutlined />} />
+                <Button size="small" danger icon={<DeleteOutlined />} disabled={!canDelete} />
               </Tooltip>
             </Popconfirm>
           )}
@@ -286,7 +292,7 @@ export default function FactorList() {
     <div>
       <div className="page-header">
         <Title level={4} style={{ margin: 0 }}>因子列表</Title>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/factors/new')}>
+        <Button type="primary" icon={<PlusOutlined />} disabled={!canEdit} onClick={() => navigate('/factors/new')}>
           新建因子
         </Button>
       </div>
@@ -341,6 +347,7 @@ export default function FactorList() {
                         size="small"
                         icon={<CalculatorOutlined />}
                         loading={computing}
+                        disabled={!canEdit}
                         onClick={handleComputeMissing}
                       >
                         一键补算
@@ -388,6 +395,7 @@ export default function FactorList() {
                   type="primary"
                   size="small"
                   icon={<ThunderboltOutlined />}
+                  disabled={!canEdit}
                   onClick={handleOpenBatchCompute}
                 >
                   批量计算

@@ -25,6 +25,7 @@ public class PaperTradingController {
     private final PositionAlertService positionAlertService;
     private final ExecutionQualityService executionQualityService;
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"strategy:view", "strategy:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/create")
     @Operation(summary = "创建模拟盘（支持单策略或多策略组合，可选从回测导入参数）")
     public ApiResponse<PaperTrading> create(
@@ -49,6 +50,7 @@ public class PaperTradingController {
         return ApiResponse.success(paperTradingService.getDetail(paperId));
     }
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"strategy:view", "strategy:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/{paperId}/generate-signals")
     @Operation(summary = "生成交易信号")
     public ApiResponse<List<PaperSignal>> generateSignals(@PathVariable Long paperId) {
@@ -56,6 +58,7 @@ public class PaperTradingController {
     }
 
     /** Fix #2：一键买入（从推荐页快速建仓） */
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"strategy:view", "strategy:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/{paperId}/quick-buy")
     @Operation(summary = "一键买入（推荐页→模拟盘）")
     public ApiResponse<PaperPosition> quickBuy(
@@ -68,6 +71,7 @@ public class PaperTradingController {
                         name, price != null ? price : null));
     }
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"strategy:view", "strategy:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/signals/{signalId}/execute")
     @Operation(summary = "执行信号（买入/卖出）")
     public ApiResponse<PaperPosition> executeSignal(@PathVariable Long signalId) {
@@ -75,6 +79,7 @@ public class PaperTradingController {
     }
 
     /** 【缺陷1修复】创建条件单（限价单/止损单/追踪止损单） */
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"strategy:view", "strategy:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/{paperId}/conditional-order")
     @Operation(summary = "创建条件单（限价/止损/追踪止损）")
     public ApiResponse<PaperSignal> createConditionalOrder(
@@ -94,6 +99,7 @@ public class PaperTradingController {
     }
 
     /** 【缺陷1修复】检查并执行所有待触发的条件单 */
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"strategy:view", "strategy:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/{paperId}/check-conditional-orders")
     @Operation(summary = "检查条件单触发状态并执行")
     public ApiResponse<Integer> checkConditionalOrders(@PathVariable Long paperId) {
@@ -107,6 +113,7 @@ public class PaperTradingController {
         return ApiResponse.success(paperTradingService.getSignals(paperId));
     }
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"strategy:view", "strategy:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PatchMapping("/{paperId}/status")
     @Operation(summary = "更新模拟盘状态（RUNNING/PAUSED/STOPPED）")
     public ApiResponse<PaperTrading> updateStatus(
@@ -115,6 +122,7 @@ public class PaperTradingController {
         return ApiResponse.success(paperTradingService.updateStatus(paperId, status));
     }
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"strategy:view", "strategy:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/{paperId}/execute-all-signals")
     @Operation(summary = "批量执行所有待处理信号")
     public ApiResponse<List<PaperPosition>> executeAllSignals(@PathVariable Long paperId) {
@@ -122,6 +130,7 @@ public class PaperTradingController {
             paperTradingService.executeAllSignals(paperId));
     }
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"strategy:view", "strategy:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/{paperId}/process-dividends")
     @Operation(summary = "处理分红送股（按除权除息日结算）")
     public ApiResponse<Void> processDividends(@PathVariable Long paperId) {
@@ -129,6 +138,7 @@ public class PaperTradingController {
         return ApiResponse.success("分红处理完成", null);
     }
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"strategy:view", "strategy:delete"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @DeleteMapping("/{paperId}")
     @Operation(summary = "删除模拟盘（及关联的持仓、信号、净值）")
     public ApiResponse<Void> delete(@PathVariable Long paperId) {
@@ -152,12 +162,14 @@ public class PaperTradingController {
         return ApiResponse.success(positionAlertService.getUnreadCount(paperId));
     }
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"strategy:view", "strategy:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/{paperId}/alerts/read-all")
     @Operation(summary = "标记所有预警为已读")
     public ApiResponse<Integer> markAllRead(@PathVariable Long paperId) {
         return ApiResponse.success("已标记全部已读", positionAlertService.markAllRead(paperId));
     }
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"strategy:view", "strategy:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/alerts/{alertId}/read")
     @Operation(summary = "标记单条预警为已读")
     public ApiResponse<Void> markRead(@PathVariable Long alertId) {
@@ -165,6 +177,7 @@ public class PaperTradingController {
         return ApiResponse.success("已标记已读", null);
     }
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"strategy:view", "strategy:delete"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @DeleteMapping("/alerts/{alertId}")
     @Operation(summary = "删除单条预警")
     public ApiResponse<Void> deleteAlert(@PathVariable Long alertId) {
@@ -172,6 +185,7 @@ public class PaperTradingController {
         return ApiResponse.success("预警已删除", null);
     }
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"strategy:view", "strategy:delete"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @DeleteMapping("/{paperId}/alerts")
     @Operation(summary = "清空模拟盘所有预警")
     public ApiResponse<Integer> clearAlerts(@PathVariable Long paperId) {
@@ -179,6 +193,7 @@ public class PaperTradingController {
         return ApiResponse.success("已清空 " + count + " 条预警", count);
     }
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"strategy:view", "strategy:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/{paperId}/scan-alerts")
     @Operation(summary = "手动触发持仓预警扫描")
     public ApiResponse<Integer> scanAlerts(@PathVariable Long paperId) {
@@ -194,6 +209,7 @@ public class PaperTradingController {
         return ApiResponse.success(paperTradingService.getRiskConfig(paperId));
     }
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"strategy:view", "strategy:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PutMapping("/{paperId}/risk-config")
     @Operation(summary = "更新风控配置")
     public ApiResponse<PaperRiskConfig> updateRiskConfig(
@@ -222,6 +238,7 @@ public class PaperTradingController {
                 autoBlockEnabled, twapThreshold));
     }
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"strategy:view", "strategy:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/{paperId}/cash-flow/deposit")
     @Operation(summary = "追加入金")
     public ApiResponse<PaperCashFlow> deposit(
@@ -231,6 +248,7 @@ public class PaperTradingController {
         return ApiResponse.success("入金成功", paperTradingService.deposit(paperId, amount, note));
     }
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"strategy:view", "strategy:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/{paperId}/cash-flow/withdraw")
     @Operation(summary = "提取出金")
     public ApiResponse<PaperCashFlow> withdraw(

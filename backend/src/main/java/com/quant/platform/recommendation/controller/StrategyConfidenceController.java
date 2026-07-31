@@ -61,6 +61,7 @@ public class StrategyConfidenceController {
      * 手动触发置信度计算（通常在追踪后自动执行，此接口用于调试/手动刷新）
      * POST /strategy-confidence/recalculate?strategyId=35
      */
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"recommendation:view", "recommendation:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/recalculate")
     public ApiResponse<StrategyConfidence> recalculate(@RequestParam Long strategyId) {
         try {

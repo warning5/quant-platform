@@ -51,6 +51,7 @@ public class StockBlacklistController {
      * POST /blacklist
      * Body: { "strategyId": 35, "stockCode": "600519", "stockName": "贵州茅台", "reasonDetail": "...", "days": 30 }
      */
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"recommendation:view", "recommendation:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping
     public ApiResponse<StockBlacklist> addBlacklist(@RequestBody Map<String, Object> request) {
         Long strategyId = Long.valueOf(request.get("strategyId").toString());
@@ -68,6 +69,7 @@ public class StockBlacklistController {
      * 从黑名单中移除（按策略+代码）
      * DELETE /blacklist?strategyId=35&stockCode=600519
      */
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"recommendation:view", "recommendation:delete"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @DeleteMapping
     public ApiResponse<Void> removeBlacklist(
             @RequestParam Long strategyId,
@@ -84,6 +86,7 @@ public class StockBlacklistController {
      * 按ID从黑名单中移除（解封）
      * DELETE /blacklist/{id}
      */
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"recommendation:view", "recommendation:delete"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @DeleteMapping("/{id}")
     public ApiResponse<Void> removeById(@PathVariable Long id) {
         boolean removed = stockBlacklistService.removeById(id);
@@ -98,6 +101,7 @@ public class StockBlacklistController {
      * 清空某策略全部黑名单
      * DELETE /blacklist/all?strategyId=35
      */
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"recommendation:view", "recommendation:delete"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @DeleteMapping("/all")
     public ApiResponse<Void> clearAll(@RequestParam Long strategyId) {
         stockBlacklistService.clearAll(strategyId);

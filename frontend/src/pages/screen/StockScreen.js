@@ -11,6 +11,7 @@ import {
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import api, { factorApi } from '../../api';
+import { useAuthStore } from '../../stores/authStore';
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { useMarketThermometer } from '../../hooks/useMarketThermometer';
 import { CATEGORY_LABELS as CATEGORY_LABEL } from '../factors/constants';
@@ -212,6 +213,8 @@ function ExpandedRow({ record }) {
 /* ══════════════════════════════════════════════════════════════════ */
 export default function StockScreen() {
   const { message } = App.useApp();
+  const canEdit = useAuthStore((s) => s.hasPermission('screen:edit'));
+  const canBacktest = useAuthStore((s) => s.hasPermission('strategy:edit'));
   /* ── 可用因子 ──────────────────────────────────────────────────── */
   const [availableFactors, setAvailableFactors] = useState([]);
   const [loadingFactors, setLoadingFactors] = useState(false);
@@ -465,6 +468,7 @@ export default function StockScreen() {
 
   /* ── 执行选股 ─────────────────────────────────────────────────── */
   const handleRun = useCallback(() => {
+    if (!canEdit) { message.warning('无权限执行选股'); return; }
     if (factors.length === 0) { message.warning('请至少添加一个因子'); return; }
     if (totalWeight === 0)    { message.warning('因子权重合计不能为0'); return; }
 
@@ -780,7 +784,7 @@ export default function StockScreen() {
                   size="small"
                   loading={running}
                   onClick={handleRun}
-                  disabled={factors.length === 0}
+                  disabled={!canEdit || factors.length === 0}
                 >
                   {running ? '选股中' : '执行选股'}
                 </Button>
@@ -1404,10 +1408,10 @@ export default function StockScreen() {
                 extra={
                   <Space size="small">
                     {result && (
-                      <Button type="primary" size="small" icon={<PlayCircleOutlined />}
-                        onClick={() => setBacktestModalVisible(true)}>
-                        滚动回测
-                      </Button>
+                    <Button type="primary" size="small" icon={<PlayCircleOutlined />}
+                      onClick={() => setBacktestModalVisible(true)} disabled={!canBacktest}>
+                      滚动回测
+                    </Button>
                     )}
                     <Button
                       size="small"
@@ -1416,7 +1420,7 @@ export default function StockScreen() {
                     >
                       {collapsed ? '展开参数' : '折叠参数'}
                     </Button>
-                    <Button size="small" icon={<ReloadOutlined />} onClick={handleRun} loading={running}>
+                    <Button size="small" icon={<ReloadOutlined />} onClick={handleRun} loading={running} disabled={!canEdit}>
                       刷新
                     </Button>
                   </Space>

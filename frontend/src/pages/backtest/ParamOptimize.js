@@ -13,6 +13,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import ReactECharts from '../../components/LazyECharts';
 import { backtestApi, strategyApi } from '../../api';
+import { useAuthStore } from '../../stores/authStore';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -739,6 +740,8 @@ function TaskDetail({ job: initialJob, onToggle, onComplete, navigate, strategie
 export default function ParamOptimize() {
   const navigate = useNavigate();
   const [strategies, setStrategies] = useState([]);
+  const canEdit = useAuthStore((s) => s.hasPermission('strategy:edit'));
+  const canDelete = useAuthStore((s) => s.hasPermission('strategy:delete'));
   const [form, setForm] = useState({
     strategyId: null,
     startDate: '2025-01-01',
@@ -850,6 +853,7 @@ export default function ParamOptimize() {
   }, 1);
 
   const handleSubmit = () => {
+    if (!canEdit) return;
     console.log('[ParamOptimize] handleSubmit called');
     if (!form.strategyId) { message.warning('请选择策略'); return; }
     if (paramRows.length === 0) { message.warning('请至少添加一个参数'); return; }
@@ -958,6 +962,7 @@ export default function ParamOptimize() {
 
   // 删除优化任务
   const handleDelete = (jobId) => {
+    if (!canDelete) return;
     backtestApi.deleteParamOptimize(jobId)
       .then(() => {
         setTaskList(prev => prev.filter(t => t.jobId !== jobId));
@@ -983,7 +988,7 @@ export default function ParamOptimize() {
       width: 50,
       render: (_, r) => (
         <Popconfirm title="确定删除？" onConfirm={() => handleDelete(r.jobId)} okText="确定" cancelText="取消">
-          <Button type="text" danger size="small" icon={<DeleteOutlined />} />
+          <Button type="text" danger size="small" icon={<DeleteOutlined />} disabled={!canDelete} />
         </Popconfirm>
       ),
     },
@@ -1087,6 +1092,7 @@ export default function ParamOptimize() {
               icon={<PlayCircleOutlined />}
               onClick={handleSubmit}
               size="large"
+              disabled={!canEdit}
             >
               开始优化
             </Button>

@@ -8,6 +8,7 @@ import {
 } from '@ant-design/icons';
 import { factorApi } from '../../api';
 import { CATEGORY_DISPLAY, CATEGORY_LABELS } from './constants';
+import { useAuthStore } from '../../stores/authStore';
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
@@ -31,6 +32,7 @@ export default function FactorEditor() {
   const [validateResult, setValidateResult] = useState(null);
   const [helpVisible, setHelpVisible] = useState(false);
   const isEdit = !!id;
+  const canEdit = useAuthStore((s) => s.hasPermission('factor:edit'));
 
   useEffect(() => {
     if (id) {
@@ -65,6 +67,7 @@ export default function FactorEditor() {
   };
 
   const handleSave = () => {
+    if (!canEdit) { message.warning('无权限保存因子'); return; }
     form.validateFields().then(values => {
       setSaving(true);
       const payload = {
@@ -99,10 +102,10 @@ export default function FactorEditor() {
           </Tooltip>
         </Space>
         <Space>
-          <Button icon={<CheckCircleOutlined />} onClick={handleValidate} loading={validating}>
+          <Button icon={<CheckCircleOutlined />} onClick={handleValidate} loading={validating} disabled={!canEdit}>
             验证脚本
           </Button>
-          <Button type="primary" icon={<SaveOutlined />} onClick={handleSave} loading={saving}>
+          <Button type="primary" icon={<SaveOutlined />} onClick={handleSave} loading={saving} disabled={!canEdit}>
             保存因子
           </Button>
         </Space>

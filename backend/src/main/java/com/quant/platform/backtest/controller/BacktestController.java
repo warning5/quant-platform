@@ -50,6 +50,7 @@ public class BacktestController {
     private final ObjectMapper objectMapper;
     private final WalkForwardService walkForwardService;
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"strategy:view", "strategy:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping
     @RateLimit(capacity = 5, duration = 1)
     @Operation(summary = "创建并启动回测任务")
@@ -92,12 +93,14 @@ public class BacktestController {
         return ApiResponse.success(backtestService.getReportById(reportId));
     }
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"strategy:view", "strategy:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/{taskId}/cancel")
     @Operation(summary = "取消回测任务")
     public ApiResponse<BacktestTask> cancel(@PathVariable Long taskId) {
         return ApiResponse.success("任务已取消", backtestService.cancelTask(taskId));
     }
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"strategy:view", "strategy:delete"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @DeleteMapping("/{taskId}")
     @Operation(summary = "删除回测任务")
     public ApiResponse<Void> delete(@PathVariable Long taskId) {
@@ -105,6 +108,7 @@ public class BacktestController {
         return ApiResponse.ok();
     }
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"strategy:view", "strategy:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/{taskId}/rerun")
     @RateLimit(capacity = 5, duration = 1)
     @Operation(summary = "重跑回测任务（清空旧结果并重新执行）")
@@ -632,6 +636,7 @@ public class BacktestController {
      * POST /backtests/compare
      * Body: { "taskIds": [1, 2, 3] }
      */
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"strategy:view", "strategy:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/compare")
     @RateLimit(capacity = 10, duration = 1)
     @Operation(summary = "多策略对比（P1）")
@@ -663,6 +668,7 @@ public class BacktestController {
      * 提交参数优化任务（异步网格搜索）
      * POST /backtests/param-optimize/submit
      */
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"strategy:view", "strategy:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/param-optimize/submit")
     @RateLimit(capacity = 3, duration = 1)
     @Operation(summary = "提交参数优化任务（P1）")
@@ -789,6 +795,7 @@ public class BacktestController {
      * 删除优化任务
      * DELETE /backtests/param-optimize/{jobId}
      */
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"strategy:view", "strategy:delete"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @DeleteMapping("/param-optimize/{jobId}")
     @Operation(summary = "删除优化任务")
     public ApiResponse<Void> deleteParamOptimizeJob(@PathVariable String jobId) {
@@ -813,6 +820,7 @@ public class BacktestController {
      *   "rebalanceInterval": 20
      * }
      */
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"strategy:view", "strategy:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/walk-forward")
     @RateLimit(capacity = 3, duration = 1)
     @Operation(summary = "Walk-Forward 滚动窗口验证")

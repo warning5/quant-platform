@@ -99,6 +99,7 @@ public class TradeCalendarController {
      * POST /api/calendar/mark
      * Body: {"date":"2026-06-19","isTrading":false,"reason":"临时标记"}
      */
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"calendar:view", "calendar:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/mark")
     public ApiResponse<Void> markDay(@RequestBody Map<String, Object> params) {
         String dateStr = (String) params.get("date");

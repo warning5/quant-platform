@@ -32,4 +32,19 @@ export const menuApi = {
   remove: (id) => api.delete(`/system/menu/${id}`),
 };
 
-export default { userApi, roleApi, menuApi };
+// 审计日志
+export const auditApi = {
+  page: (params) => api.get('/system/audit/page', { params }),
+  remove: (id) => api.delete(`/system/audit/${id}`),
+};
+
+// 凭证管理
+export const credentialApi = {
+  page: (params) => api.get('/system/credential/page', { params }),
+  add: (data) => api.post('/system/credential', data),
+  update: (data) => api.put('/system/credential', data),
+  remove: (id) => api.delete(`/system/credential/${id}`),
+  detail: (id) => api.get(`/system/credential/${id}`),
+};
+
+export default { userApi, roleApi, menuApi, auditApi, credentialApi };

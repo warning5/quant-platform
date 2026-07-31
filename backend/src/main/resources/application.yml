@@ -77,6 +77,12 @@ sa-token:
   token-style: uuid
   is-log: false
 
+# 凭证加密主密钥（P0：凭证管理模块用 AES-256 加密存储 API Key）
+# 生产必须设置强密钥：环境变量 CREDENTIAL_AES_KEY（建议 32 字节随机串）
+# 未设置则使用内置开发密钥（仅本地开发，不安全）
+credential:
+  aes-key: ${CREDENTIAL_AES_KEY:}
+
 # 微信联合登录配置（敏感凭据通过环境变量注入，见 .env）
 wechat:
   frontend-base-url: ${WECHAT_FRONTEND_BASE_URL:http://localhost:3000}
@@ -107,7 +113,7 @@ logging:
 llm:
   enabled: true                                   # 开发环境禁用LLM（需要环境变量LLM_API_KEY）
   base-url: ${LLM_BASE_URL:https://api.deepseek.com/v1}             # API 地址（Ollama: http://localhost:11434/v1）
-  api-key: ${LLM_API_KEY:sk-3bedb909271f49d59edbb2c1e5ab989d}  # 本地开发可留空（LLM 默认禁用），生产通过环境变量配置
+  api-key: ${LLM_API_KEY:}  # 建议改由凭证管理维护(DEEPSEEK_API_KEY)，此处仅作向后兼容回退；默认留空
   model: ${LLM_MODEL:deepseek-v4-flash}                          # 模型名（deepseek-v4-flash / deepseek-v4-pro）
   max-tokens: ${LLM_MAX_TOKENS:4096}                                  # 最大输出 token 数（2048不够会导致JSON截断）
   temperature: ${LLM_TEMPERATURE:0.3}                                  # 温度（低温更准确）

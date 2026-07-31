@@ -775,6 +775,7 @@ public class StockAnalysisController {
      * POST /api/analysis/news-event/parse
      */
     @GetMapping("/news-event/parse")
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"stock:view", "stock:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     public ResponseEntity<?> parseNewsEvents() {
         if (newsEventParser == null) {
             return ResponseEntity.status(503).body(errorBody("新闻事件解析服务不可用"));

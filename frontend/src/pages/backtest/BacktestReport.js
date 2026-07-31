@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom';
 import { Card, Row, Col, Statistic, Typography, Button, Space, Spin, Tabs, Skeleton, Tag, Table, Alert, Badge, Tooltip as AntTooltip, Popconfirm, Progress } from 'antd';
 import { message } from '../../utils/messageUtil';
+import { useAuthStore } from '../../stores/authStore';
 import {
   ArrowLeftOutlined, ReloadOutlined,
   RiseOutlined, FallOutlined, BarChartOutlined,
@@ -2582,6 +2583,7 @@ export default function BacktestReport() {
   const [task, setTask] = useState(null);
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(true);
+  const canEdit = useAuthStore((s) => s.hasPermission('strategy:edit'));
   const [polling, setPolling] = useState(false);
 
   const load = useCallback(() => {
@@ -2594,6 +2596,7 @@ export default function BacktestReport() {
   }, [taskId]);
 
   const handleRerun = () => {
+    if (!canEdit) return;
     backtestApi.rerun(taskId).then(() => {
       message.success('已重新提交，回测正在执行...');
       setReport(null);
@@ -2783,7 +2786,7 @@ export default function BacktestReport() {
         <Space>
           <Button icon={<ReloadOutlined />} onClick={load} loading={polling}>刷新</Button>
           <Popconfirm title="将清空旧结果并重新执行，确认重跑？" onConfirm={handleRerun}>
-            <Button icon={<RedoOutlined />}>重跑</Button>
+            <Button icon={<RedoOutlined />} disabled={!canEdit}>重跑</Button>
           </Popconfirm>
         </Space>
       </div>

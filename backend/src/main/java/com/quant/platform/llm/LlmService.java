@@ -9,6 +9,8 @@ import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
+import com.quant.platform.credential.service.CredentialService;
+
 import java.util.*;
 
 /**
@@ -28,7 +30,7 @@ public class LlmService {
     private String baseUrl;
 
     @Value("${llm.api-key:}")
-    private String apiKey;
+    private String apiKeyFallback;
 
     @Value("${llm.model:deepseek-v4-flash}")
     private String defaultModel;
@@ -45,7 +47,10 @@ public class LlmService {
     @Value("${llm.enabled:false}")
     private boolean enabled;
 
-    public LlmService() {
+    private final CredentialService credentialService;
+
+    public LlmService(CredentialService credentialService) {
+        this.credentialService = credentialService;
         this.objectMapper = new ObjectMapper();
     }
 
@@ -84,6 +89,7 @@ public class LlmService {
      * @param enableThinking 是否开启思考模式（DeepSeek V4 支持）
      */
     public String chat(String systemPrompt, String userPrompt, String model, boolean enableThinking) {
+        String apiKey = resolveApiKey();
         if (!enabled || apiKey == null || apiKey.isEmpty()) {
             log.warn("[LlmService] LLM未启用或API Key未配置");
             return null;
@@ -382,12 +388,14 @@ public class LlmService {
     }
 
     public boolean isEnabled() {
-        return enabled && apiKey != null && !apiKey.trim().isEmpty();
+        String key = resolveApiKey();
+        return enabled && key != null && !key.trim().isEmpty();
     }
 
     /** API Key 是否已配置（不暴露 key 内容，仅用于状态诊断） */
     public boolean isApiKeyConfigured() {
-        return apiKey != null && !apiKey.trim().isEmpty();
+        String key = resolveApiKey();
+        return key != null && !key.trim().isEmpty();
     }
 
     public String getDefaultModel() {
@@ -396,5 +404,21 @@ public class LlmService {
 
     public String getBaseUrl() {
         return baseUrl;
+    }
+
+    /**
+     * 解析 API Key：优先从加密凭证(sys_credential, key=DEEPSEEK_API_KEY)读取，
+     * 未配置则回退到 yml 的 llm.api-key（向后兼容）。
+     */
+    private String resolveApiKey() {
+        try {
+            String k = credentialService.getDecrypted(CredentialService.LLM_DEEPSEEK_KEY);
+            if (k != null && !k.trim().isEmpty()) {
+                return k;
+            }
+        } catch (Exception e) {
+            log.warn("[LlmService] 从凭证读取 API Key 失败，回退 yml: {}", e.getMessage());
+        }
+        return apiKeyFallback;
     }
 }

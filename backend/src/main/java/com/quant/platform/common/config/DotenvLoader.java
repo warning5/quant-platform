@@ -65,10 +65,18 @@ public class DotenvLoader implements EnvironmentPostProcessor {
             return;
         }
 
-        // 只设置 Spring Environment 中不存在的 key（避免覆盖已有环境变量/命令行参数）
+        // 注入 .env 变量，优先级低于命令行参数(-D)和系统环境变量，但高于 yml 占位符默认值。
+        // 判断是否需要注入：
+        //  - Environment 中不存在该 key，或
+        //  - 已存在但值为空，或
+        //  - 已存在但是未解析的占位符字面量（如 yml 里的 ${CREDENTIAL_AES_KEY:}）
+        // 这样 yml 中以 `${KEY:}` 形式声明的占位符（默认空值）可被 .env 的真实值覆盖，
+        // 而命令行/系统环境显式设置的非空值仍保持最高优先级（不被覆盖）。
         Map<String, Object> filtered = new LinkedHashMap<>();
         for (Map.Entry<String, Object> entry : envVars.entrySet()) {
-            if (!environment.containsProperty(entry.getKey())) {
+            String existing = environment.getProperty(entry.getKey());
+            boolean unresolved = existing != null && existing.contains("${");
+            if (existing == null || existing.isEmpty() || unresolved) {
                 filtered.put(entry.getKey(), entry.getValue());
             }
         }

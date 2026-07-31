@@ -90,6 +90,7 @@ public class ScheduleConfigController {
     }
 
     @GetMapping
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"data:view", "data:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     public ApiResponse<List<Map<String, Object>>> getAllConfigs() {
         migrateSentimentIfNeeded();
         List<Map<String, Object>> list = jdbcTemplate.queryForList(
@@ -129,6 +130,7 @@ public class ScheduleConfigController {
     /**
      * 更新全局或单项配置
      */
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"data:view", "data:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PutMapping("/{taskKey}")
     public ApiResponse<Map<String, Object>> updateConfig(
             @PathVariable String taskKey,
@@ -205,6 +207,7 @@ public class ScheduleConfigController {
     /**
      * 批量更新配置（用于前端一次性保存多个任务的开关/cron等）
      */
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"data:view", "data:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PutMapping("/batch")
     public ApiResponse<Boolean> batchUpdate(@RequestBody List<Map<String, Object>> items) {
         for (Map<String, Object> item : items) {
@@ -241,6 +244,7 @@ public class ScheduleConfigController {
     /**
      * 手动触发单个数据更新任务（支持并发）
      */
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"data:view", "data:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/trigger/{taskKey}")
     public ApiResponse<Map<String, Object>> triggerTask(@PathVariable String taskKey) {
         try {
@@ -377,6 +381,7 @@ public class ScheduleConfigController {
     /**
      * 取消正在执行的任务（按任务类型）
      */
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"data:view", "data:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/cancel/{taskKey}")
     public ApiResponse<Boolean> cancelTask(@PathVariable String taskKey) {
         DataUpdateRequest req = buildRequestFromKey(taskKey, null);
@@ -406,6 +411,7 @@ public class ScheduleConfigController {
     /**
      * 删除自定义定时配置（不允许删除预定义的 GLOBAL/DAILY/INDEX 等系统任务）
      */
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"data:view", "data:delete"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @DeleteMapping("/{taskKey}")
     public ApiResponse<Boolean> deleteConfig(@PathVariable String taskKey) {
         String[] systemKeys = {"GLOBAL", "DAILY", "INDEX", "DIVIDEND", "QFQ_REFRESH", "FINANCIAL", "BIDASK",
@@ -461,6 +467,7 @@ public class ScheduleConfigController {
      * 新增任务依赖关系
      * 包含循环依赖校验
      */
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"data:view", "data:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/dependencies")
     public ApiResponse<?> addDependency(@RequestBody Map<String, Object> body) {
         String upstream = (String) body.get("upstreamKey");
@@ -501,6 +508,7 @@ public class ScheduleConfigController {
     /**
      * 删除任务依赖关系
      */
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"data:view", "data:delete"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @DeleteMapping("/dependencies/{id}")
     public ApiResponse<?> deleteDependency(@PathVariable("id") Long id) {
         int rows = jdbcTemplate.update("DELETE FROM data_task_dependency WHERE id = ?", id);

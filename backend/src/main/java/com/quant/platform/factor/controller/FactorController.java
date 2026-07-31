@@ -81,6 +81,7 @@ public class FactorController {
         return ApiResponse.success(factorService.batchGetFactorStatus(codeList));
     }
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"factor:view", "factor:delete"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @DeleteMapping("/{id:\\d+}/values")
     @Operation(summary = "删除指定因子的所有因子值")
     public ApiResponse<Map<String, Object>> deleteValues(@PathVariable Long id) {
@@ -100,12 +101,14 @@ public class FactorController {
         return ApiResponse.success(factorService.getFactorInit(id));
     }
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"factor:view", "factor:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping
     @Operation(summary = "创建自定义因子")
     public ApiResponse<FactorDefinition> create(@Valid @RequestBody FactorDefinition factor) {
         return ApiResponse.success("因子创建成功", factorService.createFactor(factor));
     }
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"factor:view", "factor:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PutMapping("/{id}")
     @Operation(summary = "更新因子")
     public ApiResponse<FactorDefinition> update(@PathVariable Long id,
@@ -113,6 +116,7 @@ public class FactorController {
         return ApiResponse.success("因子更新成功", factorService.updateFactor(id, factor));
     }
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"factor:view", "factor:delete"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @DeleteMapping("/{id}")
     @Operation(summary = "删除因子")
     public ApiResponse<Void> delete(@PathVariable Long id) {
@@ -120,6 +124,7 @@ public class FactorController {
         return ApiResponse.ok();
     }
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"factor:view", "factor:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PatchMapping("/{id}/status")
     @Operation(summary = "更改因子状态")
     public ApiResponse<FactorDefinition> changeStatus(@PathVariable Long id,
@@ -127,6 +132,7 @@ public class FactorController {
         return ApiResponse.success(factorService.changeStatus(id, FactorDefinition.FactorStatus.valueOf(status)));
     }
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"factor:view", "factor:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/{id}/compute")
     @Operation(summary = "触发因子计算，返回 factorCode 供前端订阅进度")
     public ApiResponse<Map<String, Object>> compute(
@@ -137,6 +143,7 @@ public class FactorController {
         return ApiResponse.success("因子计算任务已提交", Map.of("factorCode", factorCode));
     }
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"factor:view", "factor:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/batch-compute")
     @Operation(summary = "批量并行计算多个因子（日期范围≤7天时无因子数量限制，否则最多8个）")
     public ApiResponse<Map<String, Object>> batchCompute(
@@ -160,6 +167,7 @@ public class FactorController {
         return ApiResponse.success(factorService.getFactorValueCount(id));
     }
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"factor:view", "factor:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/{id}/test")
     @Operation(summary = "触发因子测试（IC分析+分层回测）")
     public ApiResponse<FactorTestReport> test(
@@ -186,6 +194,7 @@ public class FactorController {
         return ApiResponse.success(factorService.getTestReport(reportId));
     }
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"factor:view", "factor:delete"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @DeleteMapping("/tests/{reportId}")
     @Operation(summary = "删除测试报告")
     public ApiResponse<Void> deleteTestReport(@PathVariable Long reportId) {
@@ -230,6 +239,7 @@ public class FactorController {
         return ApiResponse.success(factorService.getScriptTemplate(type));
     }
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"factor:view", "factor:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/script/validate")
     @Operation(summary = "验证脚本语法")
     public ApiResponse<Map<String, Object>> validateScript(@RequestBody Map<String, String> body) {
@@ -253,6 +263,7 @@ public class FactorController {
 
     @GetMapping("/monitor")
     @Operation(summary = "因子计算监控数据（各因子统计+全局总数）")
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"factor:view", "factor:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     public ApiResponse<Map<String, Object>> monitor(
             @RequestParam(defaultValue = "false") boolean force) {
         if (force) {
@@ -294,6 +305,7 @@ public class FactorController {
      * 因子组合权重优化
      * POST /factors/weight-optimize?factorCodes=MOM20,VOL20,SIZE&startDate=2024-01-01&endDate=2025-01-01&method=MARKOWITZ
      */
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"factor:view", "factor:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/weight-optimize")
     @Operation(summary = "因子组合权重优化（P1）：EQUAL / MARKOWITZ / RISK_PARITY")
     public ApiResponse<Map<String, Object>> weightOptimize(
@@ -312,6 +324,7 @@ public class FactorController {
      * 批量计算因子 IC/IR
      * POST /factors/ic-ir-analysis?factorCodes=MOM20,VOL20,SIZE&startDate=2024-01-01&endDate=2025-01-01&forwardDays=5
      */
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"factor:view", "factor:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/ic-ir-analysis")
     @Operation(summary = "批量计算因子IC/IR：支持Spearman秩相关 / Pearson线性相关")
     public ApiResponse<List<Map<String, Object>>> batchIcIrAnalysis(
@@ -338,6 +351,7 @@ public class FactorController {
      * 分段 IC/IR 对比分析
      * POST /factors/ic-ir-analysis/segmented?factorCodes=MOM20,...&startDate=...&endDate=...&splitDate=...&forwardDays=5
      */
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"factor:view", "factor:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/ic-ir-analysis/segmented")
     @Operation(summary = "分段IC/IR对比：按splitDate拆分前后两段+全量，对比因子时效性")
     public ApiResponse<Map<String, Object>> segmentedIcIrAnalysis(
@@ -387,6 +401,7 @@ public class FactorController {
     //  P3: 因子拥挤度检测
     // ================================================================
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"factor:view", "factor:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/crowding-detection")
     @Operation(summary = "P3: 因子拥挤度检测 — 相关性聚类+去重建议")
     public ApiResponse<Map<String, Object>> crowdingDetection(
@@ -410,6 +425,7 @@ public class FactorController {
         return ApiResponse.success(report);
     }
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"factor:view", "factor:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/crowding-dedup")
     @Operation(summary = "P3: 因子拥挤度去重 — 返回去重后的因子列表")
     public ApiResponse<Map<String, Object>> crowdingDedup(
@@ -447,6 +463,7 @@ public class FactorController {
     //  P4: 财务因子季频评估
     // ================================================================
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"factor:view", "factor:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/quarterly-ic")
     @Operation(summary = "P4: 财务因子季频IC分析 — 只在季末日期评估，避免日频虚高")
     public ApiResponse<List<QuarterlyFactorAnalysisService.QuarterlyIcResult>> quarterlyIc(

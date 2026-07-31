@@ -4,6 +4,7 @@ import { message } from '../../utils/messageUtil';
 import { LeftOutlined, RightOutlined, CalendarOutlined, EditOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { calendarApi } from '../../api';
+import { useAuthStore } from '../../stores/authStore';
 
 /**
  * 交易日历管理页面 v5
@@ -17,6 +18,7 @@ import { calendarApi } from '../../api';
  */
 
 const TradeCalendar = () => {
+  const canEdit = useAuthStore((s) => s.hasPermission('calendar:edit'));
   const [currentDate, setCurrentDate] = useState(dayjs());
   const [loading, setLoading] = useState(false);
   const [calendarData, setCalendarData] = useState([]);
@@ -180,6 +182,10 @@ const TradeCalendar = () => {
 
   // 打开标记弹窗
   const openMarkModal = (date) => {
+    if (!canEdit) {
+      message.warning('无权限标记交易日历');
+      return;
+    }
     const dateStr = date.format('YYYY-MM-DD');
     setSelectedDate(dateStr);
 

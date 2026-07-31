@@ -7,6 +7,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import ReactECharts from '../../components/LazyECharts';
 import { backtestApi } from '../../api';
+import { useAuthStore } from '../../stores/authStore';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -131,6 +132,7 @@ function RadarChart({ metrics }) {
 export default function BacktestCompare() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
+  const canEdit = useAuthStore((s) => s.hasPermission('strategy:edit'));
   const [loadingTasks, setLoadingTasks] = useState(false);
   const [tasks, setTasks] = useState([]);
   const [selectedIds, setSelectedIds] = useState([]);
@@ -147,6 +149,7 @@ export default function BacktestCompare() {
   }, []);
 
   const handleCompare = () => {
+    if (!canEdit) return;
     if (selectedIds.length < 2) return;
     setLoading(true);
     setError(null);
@@ -229,7 +232,7 @@ export default function BacktestCompare() {
           <Button
             type="primary"
             icon={<LineChartOutlined />}
-            disabled={selectedIds.length < 2}
+            disabled={selectedIds.length < 2 || !canEdit}
             onClick={handleCompare}
             loading={loading}
           >

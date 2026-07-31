@@ -25,6 +25,7 @@ public class FactorHealthController {
     private final FactorHealthMonitor factorHealthMonitor;
 
     @Operation(summary = "执行因子健康检查", description = "检查所有因子健康状态，执行衰减预警/降级/复活")
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"factor:view", "factor:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/check")
     public ApiResponse<Map<String, Object>> checkAllFactorsHealth() {
         Map<String, Object> result = factorHealthMonitor.checkAllFactorsHealth();
@@ -39,6 +40,7 @@ public class FactorHealthController {
     }
 
     @Operation(summary = "手动降级因子", description = "将指定因子从ACTIVE降级为DEGRADED")
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"factor:view", "factor:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/degrade/{factorCode}")
     public ApiResponse<String> degradeFactor(
             @PathVariable String factorCode,
@@ -48,6 +50,7 @@ public class FactorHealthController {
     }
 
     @Operation(summary = "手动复活因子", description = "将指定因子从DEGRADED复活为ACTIVE")
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"factor:view", "factor:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/resurrect/{factorCode}")
     public ApiResponse<String> resurrectFactor(@PathVariable String factorCode) {
         factorHealthMonitor.resurrectFactorManual(factorCode);

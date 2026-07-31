@@ -163,6 +163,7 @@ public class MonitorController {
     }
 
     /** 手动启动/恢复盘中监控 */
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"monitor:view", "monitor:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/start")
     public ResponseEntity<Map<String, Object>> startMonitoring() {
         intradayMonitorService.startMonitoring();
@@ -177,6 +178,7 @@ public class MonitorController {
     }
 
     /** 手动停止盘中监控 */
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"monitor:view", "monitor:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/stop")
     public ResponseEntity<Map<String, Object>> stopMonitoring() {
         intradayMonitorService.stopMonitoring();
@@ -188,6 +190,7 @@ public class MonitorController {
     }
 
     /** 清除信号历史 */
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"monitor:view", "monitor:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/clear-signals")
     public ResponseEntity<Map<String, Object>> clearSignals() {
         intradayMonitorService.clearSignalHistory();
@@ -198,6 +201,7 @@ public class MonitorController {
     }
 
     /** 手动刷新监控目标价 */
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"monitor:view", "monitor:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/refresh-targets")
     public ResponseEntity<Map<String, Object>> refreshTargets() {
         intradayMonitorService.loadTargetPrices();
@@ -247,6 +251,7 @@ public class MonitorController {
      * POST /api/monitor/trigger-scan
      * POST /api/monitor/trigger-scan?stockCodes=sh600519,sz000858
      */
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"monitor:view", "monitor:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/trigger-scan")
     public ResponseEntity<Map<String, Object>> triggerScan(
             @RequestParam(required = false) String stockCodes) {
@@ -269,6 +274,7 @@ public class MonitorController {
      * POST /api/monitor/simulate-cycle
      * POST /api/monitor/simulate-cycle?force=true
      */
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"monitor:view", "monitor:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/simulate-cycle")
     public ResponseEntity<Map<String, Object>> simulateCycle(
             @RequestParam(defaultValue = "false") boolean force) {
@@ -286,6 +292,7 @@ public class MonitorController {
      * 添加自定义监控股票
      * POST /api/monitor/add-custom-stock
      */
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"monitor:view", "monitor:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/add-custom-stock")
     public ResponseEntity<Map<String, Object>> addCustomStock(@RequestBody Map<String, Object> body) {
         String stockCode = (String) body.get("stockCode");
@@ -368,6 +375,7 @@ public class MonitorController {
      * 移除自定义监控股票
      * DELETE /api/monitor/custom-stock?stockCode=xxx
      */
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"monitor:view", "monitor:delete"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @DeleteMapping("/custom-stock")
     public ResponseEntity<Map<String, Object>> removeCustomStock(@RequestParam String stockCode) {
         boolean removed = intradayMonitorService.removeCustomStock(stockCode.trim());

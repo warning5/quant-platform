@@ -6,6 +6,7 @@ import dayjs from 'dayjs';
 import { ThunderboltOutlined, ReloadOutlined, LineChartOutlined, StockOutlined, RiseOutlined, FallOutlined, MinusOutlined, QuestionCircleOutlined, RadarChartOutlined, StopOutlined, UnlockOutlined, DownloadOutlined, SettingOutlined } from '@ant-design/icons';
 import api, { recommendationApi, blacklistApi, confidenceApi, calendarApi } from '../../api';
 import useFactorStore from '../../stores/factorStore';
+import { useAuthStore } from '../../stores/authStore';
 import ReactECharts from '../../components/LazyECharts';
 import { exportCsv } from '../../utils/exportUtil';
 
@@ -73,6 +74,10 @@ const DIAG_CONFIG = {
 export default function RecommendationList() {
   const factorMeta = useFactorStore(state => state.factorMeta);
   const loadFactorMeta = useFactorStore(state => state.load);
+  const hasPermission = useAuthStore((s) => s.hasPermission);
+  const canEditRec = hasPermission('recommendation:edit');
+  const canDeleteBlack = hasPermission('recommendation:delete');
+  const canPaperBuy = hasPermission('strategy:edit');
   useEffect(() => { loadFactorMeta(); }, [loadFactorMeta]);
   const [recommendations, setRecommendations] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -171,6 +176,10 @@ export default function RecommendationList() {
 
   // 快速买入处理函数
   const handleQuickBuy = async (rec, paperId) => {
+    if (!canPaperBuy) {
+      message.warning('无权限模拟盘买入（需 strategy:edit 权限）');
+      return;
+    }
     setQuickBuyLoading(true);
     try {
       const payload = { code: rec.stockCode, name: rec.stockName };
@@ -186,6 +195,10 @@ export default function RecommendationList() {
 
   // ── 批量操作处理函数 ─────────────────────────────────────
   const handleBatchQuickBuy = async (paperId) => {
+    if (!canPaperBuy) {
+      message.warning('无权限模拟盘买入（需 strategy:edit 权限）');
+      return;
+    }
     if (selectedRowKeys.length === 0) return;
     setBatchLoading(true);
     const selectedRecs = recommendations.filter(r => selectedRowKeys.includes(r.id));
@@ -401,6 +414,10 @@ export default function RecommendationList() {
 
   // 生成推荐
   const handleGenerate = async () => {
+    if (!canEditRec) {
+      message.warning('无权限生成推荐（需 recommendation:edit 权限）');
+      return;
+    }
     if (!selectedStrategyId) {
       message.warning('请先选择策略');
       return;
@@ -501,6 +518,10 @@ export default function RecommendationList() {
 
   // 手动触发表现追踪
   const handleTrack = async () => {
+    if (!canEditRec) {
+      message.warning('无权限跟踪绩效（需 recommendation:edit 权限）');
+      return;
+    }
     setTrackingLoading(true);
     try {
       // 异步提交：后端立即返回 submitted=true，真正追踪在后台线程池执行
@@ -559,6 +580,10 @@ export default function RecommendationList() {
   };
 
   const handleRemoveFromBlacklist = async (id) => {
+    if (!canDeleteBlack) {
+      message.warning('无权限操作黑名单（需 recommendation:delete 权限）');
+      return;
+    }
     try {
       await blacklistApi.removeById(id);
       message.success('已从黑名单移除');
@@ -569,6 +594,10 @@ export default function RecommendationList() {
   };
 
   const handleClearBlacklist = async () => {
+    if (!canDeleteBlack) {
+      message.warning('无权限操作黑名单（需 recommendation:delete 权限）');
+      return;
+    }
     if (!selectedStrategyId) return;
     try {
       await blacklistApi.clearAll(selectedStrategyId);
@@ -1132,6 +1161,7 @@ export default function RecommendationList() {
             type="primary"
             icon={<ReloadOutlined spin={generating} />}
             loading={generating}
+            disabled={!canEditRec}
             onClick={handleGenerate}
           >
             生成推荐
@@ -1559,6 +1589,7 @@ export default function RecommendationList() {
                       items: paperAccounts.length > 0 ? paperAccounts.map(acc => ({
                         key: acc.id,
                         label: acc.name || `模拟盘#${acc.id}`,
+                        disabled: !canPaperBuy,
                         onClick: () => handleBatchQuickBuy(acc.id),
                       })) : [{
                         key: '_none',
@@ -2049,6 +2080,7 @@ export default function RecommendationList() {
                   <Button
                     icon={<ReloadOutlined spin={trackingLoading} />}
                     loading={trackingLoading}
+                    disabled={!canEditRec}
                     onClick={handleTrack}
                     size="small"
                   >
@@ -2336,7 +2368,7 @@ export default function RecommendationList() {
         onCancel={() => setBlacklistModalVisible(false)}
         width={720}
         footer={[
-          <Button key="clear" danger onClick={handleClearBlacklist} disabled={!selectedStrategyId}>
+          <Button key="clear" danger onClick={handleClearBlacklist} disabled={!selectedStrategyId || !canDeleteBlack}>
             全部解封
           </Button>,
           <Button key="refresh" icon={<ReloadOutlined />} onClick={loadBlacklist}>
@@ -2418,7 +2450,7 @@ export default function RecommendationList() {
                       okText="确认"
                       cancelText="取消"
                     >
-                      <Button type="link" size="small" icon={<UnlockOutlined />} style={{ padding: 0 }}>
+                      <Button type="link" size="small" icon={<UnlockOutlined />} style={{ padding: 0 }} disabled={!canDeleteBlack}>
                         解封
                       </Button>
                     </Popconfirm>

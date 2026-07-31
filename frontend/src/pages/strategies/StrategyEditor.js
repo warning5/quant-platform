@@ -6,6 +6,7 @@ import {
   CopyOutlined, SwapOutlined, CodeOutlined, EditOutlined
 } from '@ant-design/icons';
 import { strategyApi, factorApi } from '../../api';
+import { useAuthStore } from '../../stores/authStore';
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
@@ -13,6 +14,7 @@ const { Option } = Select;
 
 export default function StrategyEditor() {
   const { message } = App.useApp();
+  const canEdit = useAuthStore((s) => s.hasPermission('strategy:edit'));
   const { id } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
@@ -141,6 +143,7 @@ export default function StrategyEditor() {
   }, [id]);
 
   const handleSave = () => {
+    if (!canEdit) { message.warning('无权限保存策略'); return; }
     form.validateFields().then(values => {
       setSaving(true);
       const payload = {
@@ -358,7 +361,7 @@ export default function StrategyEditor() {
           <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/strategies')}>返回</Button>
           <Title level={4} style={{ margin: 0 }}>{isEdit ? '编辑策略' : '新建策略'}</Title>
         </Space>
-        <Button type="primary" icon={<SaveOutlined />} onClick={handleSave} loading={saving}>
+        <Button type="primary" icon={<SaveOutlined />} onClick={handleSave} loading={saving} disabled={!canEdit}>
           保存策略
         </Button>
       </div>

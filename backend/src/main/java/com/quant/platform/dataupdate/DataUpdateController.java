@@ -64,6 +64,7 @@ public class DataUpdateController {
         ));
     }
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"data:view", "data:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/start")
     @Operation(summary = "启动数据更新任务")
     public ApiResponse<Map<String, Object>> startTask(@RequestBody DataUpdateRequest request) {
@@ -114,6 +115,7 @@ public class DataUpdateController {
         return ApiResponse.success(dataUpdateService.getScheduledRunningTasks());
     }
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"data:view", "data:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/cancel-orphan/{taskKey}")
     @Operation(summary = "清理孤儿 RUNNING 任务的 DB 状态")
     public ApiResponse<Map<String, Object>> cancelOrphanTask(@PathVariable String taskKey) {
@@ -121,6 +123,7 @@ public class DataUpdateController {
         return ApiResponse.success(ok ? "已清理孤儿任务状态" : "清理失败", Map.of("cleaned", ok));
     }
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"data:view", "data:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/cancel/{taskId}")
     @Operation(summary = "取消任务")
     public ApiResponse<Map<String, Object>> cancelTask(@PathVariable String taskId) {
@@ -526,6 +529,7 @@ public class DataUpdateController {
         }
     }
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"data:view", "data:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/delisted/mark")
     @Operation(summary = "标记退市股票（更新 delist_date 而非删除）")
     public ApiResponse<Map<String, Object>> markDelistedStocks() {
@@ -577,6 +581,7 @@ public class DataUpdateController {
         }
     }
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"data:view", "data:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/delisted/clean")
     @Operation(summary = "清理退市股票数据（物理删除，慎用）")
     public ApiResponse<Map<String, Object>> cleanDelistedStocks(@RequestBody List<String> codes) {

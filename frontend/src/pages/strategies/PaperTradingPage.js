@@ -12,6 +12,7 @@ import {
 import ReactECharts from '../../components/LazyECharts';
 import { paperTradingApi, strategyApi, backtestApi } from '../../api';
 import { useMarketThermometer } from '../../hooks/useMarketThermometer';
+import { useAuthStore } from '../../stores/authStore';
 
 const { Text, Title } = Typography;
 const fmt = v => v != null ? (+v).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '-';
@@ -33,6 +34,8 @@ function PaperList({ onSelect }) {
   const [list, setList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
+  const canEdit = useAuthStore((s) => s.hasPermission('strategy:edit'));
+  const canDelete = useAuthStore((s) => s.hasPermission('strategy:delete'));
 
   const load = () => {
     setLoading(true);
@@ -40,6 +43,7 @@ function PaperList({ onSelect }) {
   };
 
   const handleDelete = async (id) => {
+    if (!canDelete) return;
     try {
       await paperTradingApi.delete(id);
       message.success('模拟盘已删除');
@@ -78,17 +82,17 @@ function PaperList({ onSelect }) {
         <Space size={4}>
           <Button size="small" type="link" onClick={() => onSelect(r.id)}>详情</Button>
           {r.status === 'RUNNING' && (
-            <Button size="small" type="link" onClick={() => paperTradingApi.updateStatus(r.id, 'PAUSED').then(load)}>
+            <Button size="small" type="link" onClick={() => paperTradingApi.updateStatus(r.id, 'PAUSED').then(load)} disabled={!canEdit}>
               暂停
             </Button>
           )}
           {r.status === 'PAUSED' && (
-            <Button size="small" type="link" onClick={() => paperTradingApi.updateStatus(r.id, 'RUNNING').then(load)}>
+            <Button size="small" type="link" onClick={() => paperTradingApi.updateStatus(r.id, 'RUNNING').then(load)} disabled={!canEdit}>
               恢复
             </Button>
           )}
           <Popconfirm title="确认删除此模拟盘？所有持仓、信号、净值数据将一并删除。" onConfirm={() => handleDelete(r.id)} okText="删除" cancelText="取消" okButtonProps={{ danger: true }}>
-            <Button size="small" type="link" danger>删除</Button>
+            <Button size="small" type="link" danger disabled={!canDelete}>删除</Button>
           </Popconfirm>
         </Space>
       ),
@@ -123,7 +127,7 @@ function PaperList({ onSelect }) {
             <InfoCircleOutlined style={{ marginLeft: 8, color: '#bbb', fontSize: 16, cursor: 'pointer' }} />
           </Tooltip>
         </div>
-        <Button type="primary" onClick={() => setShowCreate(true)}>新建模拟盘</Button>
+        <Button type="primary" onClick={() => setShowCreate(true)} disabled={!canEdit}>新建模拟盘</Button>
       </div>
 
       <Table dataSource={list} columns={columns} rowKey="id" size="small" loading={loading} pagination={false} scroll={{ x: 'max-content' }} />
@@ -145,6 +149,7 @@ function CreateModal({ visible, onClose, onCreated }) {
   const [selectedBacktestId, setSelectedBacktestId] = useState(null);
   const [recommendedConfig, setRecommendedConfig] = useState(null);
   const [configLoading, setConfigLoading] = useState(false);
+  const canEdit = useAuthStore((s) => s.hasPermission('strategy:edit'));
 
   useEffect(() => {
     strategyApi.list({ page: 0, size: 100 }).then(res => {
@@ -180,6 +185,7 @@ function CreateModal({ visible, onClose, onCreated }) {
   };
 
   const handleCreate = async () => {
+    if (!canEdit) return;
     if (!selectedStrategy) { message.warning('请选择策略'); return; }
     setCreating(true);
     try {
@@ -299,6 +305,8 @@ function PaperDetail({ paperId, onBack }) {
   const [activeTab, setActiveTab] = useState('overview');
   const [executionQuality, setExecutionQuality] = useState(null);
   const [qualityLoading, setQualityLoading] = useState(false);
+  const canEdit = useAuthStore((s) => s.hasPermission('strategy:edit'));
+  const canDelete = useAuthStore((s) => s.hasPermission('strategy:delete'));
 
   /* ── 大盘温度计 ─────────────────────── */
   const { data: thData2, status: thStatus2 } = useMarketThermometer();
@@ -337,6 +345,7 @@ function PaperDetail({ paperId, onBack }) {
   };
 
   const handleSaveRiskConfig = async () => {
+    if (!canEdit) return;
     const vals = riskForm.getFieldsValue();
     setRiskSaving(true);
     try {
@@ -380,6 +389,7 @@ function PaperDetail({ paperId, onBack }) {
   useEffect(() => { load(); }, [paperId]);
 
   const handleGenerate = async () => {
+    if (!canEdit) return;
     setGenLoading(true);
     try {
       const newSignals = await paperTradingApi.generateSignals(paperId);
@@ -394,6 +404,7 @@ function PaperDetail({ paperId, onBack }) {
   };
 
   const handleExecute = async (signalId) => {
+    if (!canEdit) return;
     setExecLoading(signalId);
     try {
       await paperTradingApi.executeSignal(signalId);
@@ -408,6 +419,7 @@ function PaperDetail({ paperId, onBack }) {
 
   // 批量执行所有待处理信号
   const handleBatchExecute = async () => {
+    if (!canEdit) return;
     setBatchExecLoading(true);
     try {
       const results = await paperTradingApi.executeAllSignals(paperId);
@@ -422,6 +434,7 @@ function PaperDetail({ paperId, onBack }) {
 
   // 处理分红送股
   const handleProcessDividends = async () => {
+    if (!canEdit) return;
     setDividendLoading(true);
     try {
       await paperTradingApi.processDividends(paperId);
@@ -436,6 +449,7 @@ function PaperDetail({ paperId, onBack }) {
 
   // 【缺陷1】条件单创建
   const handleCreateConditionalOrder = async () => {
+    if (!canEdit) return;
     setCondOrderLoading(true);
     try {
       const vals = condOrderForm.getFieldsValue();
@@ -463,6 +477,7 @@ function PaperDetail({ paperId, onBack }) {
 
   // 【缺陷1】检查条件单触发
   const handleCheckConditionalOrders = async () => {
+    if (!canEdit) return;
     try {
       const count = await paperTradingApi.checkConditionalOrders(paperId);
       message.success(`条件单检查完成，触发了 ${count || 0} 笔`);
@@ -474,6 +489,7 @@ function PaperDetail({ paperId, onBack }) {
 
   // 手动扫描预警
   const handleScanAlerts = async () => {
+    if (!canEdit) return;
     setScanLoading(true);
     try {
       const count = await paperTradingApi.scanAlerts(paperId);
@@ -488,6 +504,7 @@ function PaperDetail({ paperId, onBack }) {
 
   // 全部标记已读
   const handleMarkAllRead = async () => {
+    if (!canEdit) return;
     try {
       const count = await paperTradingApi.markAllRead(paperId);
       message.success(`已标记 ${count} 条预警为已读`);
@@ -497,6 +514,7 @@ function PaperDetail({ paperId, onBack }) {
 
   // 单条标记已读
   const handleMarkRead = async (alertId) => {
+    if (!canEdit) return;
     try {
       await paperTradingApi.markRead(alertId);
       loadAlerts();
@@ -505,6 +523,7 @@ function PaperDetail({ paperId, onBack }) {
 
   // 删除单条预警
   const handleDeleteAlert = async (alertId) => {
+    if (!canDelete) return;
     try {
       await paperTradingApi.deleteAlert(alertId);
       message.success('已删除');
@@ -514,6 +533,7 @@ function PaperDetail({ paperId, onBack }) {
 
   // 清空所有预警
   const handleClearAlerts = async () => {
+    if (!canDelete) return;
     try {
       const count = await paperTradingApi.clearAlerts(paperId);
       message.success(`已清空 ${count} 条预警`);
@@ -629,9 +649,9 @@ function PaperDetail({ paperId, onBack }) {
     {
       title: '操作', width: 80,
       render: (_, r) => r.status === 'PENDING' ? (
-        <Button size="small" type="primary" loading={execLoading === r.id} onClick={() => handleExecute(r.id)}>
-          执行
-        </Button>
+<Button size="small" type="primary" loading={execLoading === r.id} onClick={() => handleExecute(r.id)} disabled={!canEdit}>
+        执行
+      </Button>
       ) : '-',
     },
   ];
@@ -670,9 +690,9 @@ function PaperDetail({ paperId, onBack }) {
               <>
                 <Row gutter={12} style={{ marginBottom: 16 }}>
                   <Col span={24} style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                    <Button type="primary" icon={<SendOutlined />} onClick={handleGenerate} loading={genLoading}>生成信号</Button>
-                    <Button onClick={handleBatchExecute} loading={batchExecLoading}>一键执行</Button>
-                    <Button onClick={handleProcessDividends} loading={dividendLoading}>处理分红</Button>
+                    <Button type="primary" icon={<SendOutlined />} onClick={handleGenerate} loading={genLoading} disabled={!canEdit}>生成信号</Button>
+                    <Button onClick={handleBatchExecute} loading={batchExecLoading} disabled={!canEdit}>一键执行</Button>
+                    <Button onClick={handleProcessDividends} loading={dividendLoading} disabled={!canEdit}>处理分红</Button>
                   </Col>
                 </Row>
                 {navOption && (
@@ -756,9 +776,9 @@ function PaperDetail({ paperId, onBack }) {
               <>
                 <Row gutter={12} style={{ marginBottom: 16 }}>
                   <Col span={24} style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                    <Button type="primary" icon={<SendOutlined />} onClick={handleGenerate} loading={genLoading}>生成信号</Button>
-                    <Button icon={<SafetyCertificateOutlined />} onClick={() => setCondOrderVisible(true)}>创建条件单</Button>
-                    <Button icon={<CheckCircleOutlined />} onClick={handleCheckConditionalOrders}>检查条件单</Button>
+                    <Button type="primary" icon={<SendOutlined />} onClick={handleGenerate} loading={genLoading} disabled={!canEdit}>生成信号</Button>
+                    <Button icon={<SafetyCertificateOutlined />} onClick={() => setCondOrderVisible(true)} disabled={!canEdit}>创建条件单</Button>
+                    <Button icon={<CheckCircleOutlined />} onClick={handleCheckConditionalOrders} disabled={!canEdit}>检查条件单</Button>
                     <Button icon={<DownloadOutlined />} onClick={() => exportCsv({ data: signals, columns: sigColumns, filename: `信号_${paperId}` })}>导出CSV</Button>
                   </Col>
                 </Row>
@@ -795,11 +815,11 @@ function PaperDetail({ paperId, onBack }) {
               <>
                 <Row gutter={12} style={{ marginBottom: 16 }}>
                   <Col span={24} style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                    <Button icon={<BellOutlined />} onClick={handleScanAlerts} loading={scanLoading}>手动扫描预警</Button>
-                    {unreadCount > 0 && <Button icon={<EyeOutlined />} onClick={handleMarkAllRead}>全部已读</Button>}
+                    <Button icon={<BellOutlined />} onClick={handleScanAlerts} loading={scanLoading} disabled={!canEdit}>手动扫描预警</Button>
+                    {unreadCount > 0 && <Button icon={<EyeOutlined />} onClick={handleMarkAllRead} disabled={!canEdit}>全部已读</Button>}
                     {alerts.length > 0 && (
                       <Popconfirm title="确认清空所有预警？" onConfirm={handleClearAlerts} okText="清空" cancelText="取消">
-                        <Button danger icon={<DeleteOutlined />}>清空</Button>
+                        <Button danger icon={<DeleteOutlined />} disabled={!canDelete}>清空</Button>
                       </Popconfirm>
                     )}
                   </Col>
@@ -872,9 +892,9 @@ function PaperDetail({ paperId, onBack }) {
                           title: '操作', width: 90,
                           render: (_, r) => (
                             <Space size={0}>
-                              {!r.isRead && <Button size="small" type="link" onClick={() => handleMarkRead(r.id)}>已读</Button>}
+                              {!r.isRead && <Button size="small" type="link" onClick={() => handleMarkRead(r.id)} disabled={!canEdit}>已读</Button>}
                               <Popconfirm title="确认删除此预警？" onConfirm={() => handleDeleteAlert(r.id)} okText="删除" cancelText="取消">
-                                <Button size="small" type="link" danger>删除</Button>
+                                <Button size="small" type="link" danger disabled={!canDelete}>删除</Button>
                               </Popconfirm>
                             </Space>
                           ),
@@ -894,7 +914,7 @@ function PaperDetail({ paperId, onBack }) {
               <>
                 <Row gutter={12} style={{ marginBottom: 16 }}>
                   <Col span={24} style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                    <Button type="primary" icon={<CheckCircleOutlined />} onClick={handleSaveRiskConfig} loading={riskSaving}>保存配置</Button>
+                    <Button type="primary" icon={<CheckCircleOutlined />} onClick={handleSaveRiskConfig} loading={riskSaving} disabled={!canEdit}>保存配置</Button>
                   </Col>
                 </Row>
                 <Alert

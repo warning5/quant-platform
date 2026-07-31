@@ -4,6 +4,7 @@ import { message } from '../../utils/messageUtil';
 import { PlusOutlined, EyeOutlined, DeleteOutlined, ReloadOutlined, StopOutlined, LoadingOutlined, RedoOutlined, ThunderboltOutlined, DownloadOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { backtestApi, strategyApi } from '../../api';
+import { useAuthStore } from '../../stores/authStore';
 import { exportCsv } from '../../utils/exportUtil';
 import dayjs from 'dayjs';
 
@@ -26,6 +27,8 @@ const SIGNAL_LABELS = {
 export default function BacktestList() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
+  const canEdit = useAuthStore((s) => s.hasPermission('strategy:edit'));
+  const canDelete = useAuthStore((s) => s.hasPermission('strategy:delete'));
   const [data, setData] = useState({ records: [], total: 0 });
   const [params, setParams] = useState({ page: 0, size: 15 });
   const [selectedRowKeys, setSelectedRowKeys] = useState([]);
@@ -57,6 +60,7 @@ export default function BacktestList() {
 
   // 批量删除
   const handleBatchDelete = () => {
+    if (!canDelete) return;
     if (selectedRowKeys.length === 0) return;
     Promise.all(selectedRowKeys.map(id => backtestApi.delete(id)))
       .then(() => {
@@ -68,14 +72,17 @@ export default function BacktestList() {
   };
 
   const handleDelete = (id) => {
+    if (!canDelete) return;
     backtestApi.delete(id).then(() => { message.success('删除成功'); fetchData(); });
   };
 
   const handleCancel = (id) => {
+    if (!canEdit) return;
     backtestApi.cancel(id).then(() => { message.success('已发送取消请求'); fetchData(); });
   };
 
   const handleRerun = (id) => {
+    if (!canEdit) return;
     backtestApi.rerun(id).then(() => {
       message.success('已重新提交，回测正在执行...');
       fetchData();
@@ -94,6 +101,7 @@ export default function BacktestList() {
 
   // 批量回测提交
   const handleBatchBacktest = async () => {
+    if (!canEdit) return;
     if (batchStrategyIds.length === 0) {
       message.warning('请选择至少1个策略');
       return;
@@ -194,7 +202,7 @@ export default function BacktestList() {
           {(record.status === 'COMPLETED' || record.status === 'FAILED' || record.status === 'CANCELLED') && (
             <Popconfirm title="将清空旧结果并重新执行，确认重跑？" onConfirm={() => handleRerun(record.id)}>
               <Tooltip title="重跑">
-                <Button size="small" icon={<RedoOutlined />} />
+                <Button size="small" icon={<RedoOutlined />} disabled={!canEdit} />
               </Tooltip>
             </Popconfirm>
           )}
@@ -207,13 +215,13 @@ export default function BacktestList() {
           {(record.status === 'RUNNING' || record.status === 'PENDING') && (
             <Popconfirm title="确认取消该回测任务？" onConfirm={() => handleCancel(record.id)}>
               <Tooltip title="取消任务">
-                <Button size="small" danger icon={<StopOutlined />} />
+                <Button size="small" danger icon={<StopOutlined />} disabled={!canEdit} />
               </Tooltip>
             </Popconfirm>
           )}
           <Popconfirm title="确认删除？" onConfirm={() => handleDelete(record.id)}>
             <Tooltip title="删除">
-              <Button size="small" danger icon={<DeleteOutlined />} />
+              <Button size="small" danger icon={<DeleteOutlined />} disabled={!canDelete} />
             </Tooltip>
           </Popconfirm>
         </Space>
@@ -238,13 +246,13 @@ export default function BacktestList() {
             ]}
           />
           {selectedRowKeys.length > 0 && (
-            <Button danger icon={<DeleteOutlined />} onClick={handleBatchDelete}>
+            <Button danger icon={<DeleteOutlined />} onClick={handleBatchDelete} disabled={!canDelete}>
               批量删除 ({selectedRowKeys.length})
             </Button>
           )}
           <Button icon={<ReloadOutlined />} onClick={() => fetchData()}>刷新</Button>
-          <Button icon={<ThunderboltOutlined />} onClick={openBatchModal}>批量回测</Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/backtests/new')}>
+          <Button icon={<ThunderboltOutlined />} onClick={openBatchModal} disabled={!canEdit}>批量回测</Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/backtests/new')} disabled={!canEdit}>
             新建回测
           </Button>
         </Space>
@@ -297,6 +305,7 @@ export default function BacktestList() {
         onCancel={() => setBatchModalOpen(false)}
         onOk={handleBatchBacktest}
         confirmLoading={batchLoading}
+        okButtonProps={{ disabled: !canEdit }}
         width={520}
         okText={`开始回测 (${batchStrategyIds.length}个策略)`}
         cancelText="取消"

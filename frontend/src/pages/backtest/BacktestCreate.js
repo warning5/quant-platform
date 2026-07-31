@@ -5,6 +5,7 @@ import { message } from '../../utils/messageUtil';
 import { ArrowLeftOutlined, PlayCircleOutlined, QuestionCircleOutlined, RocketOutlined, ThunderboltFilled } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { backtestApi, strategyApi } from '../../api';
+import { useAuthStore } from '../../stores/authStore';
 
 // 高亮字段 label：带「最优」徽标 + Tooltip
 function OptLabel({ label, tip }) {
@@ -43,6 +44,7 @@ export default function BacktestCreate() {
   const [form] = Form.useForm();
   const [strategies, setStrategies] = useState([]);
   const [submitting, setSubmitting] = useState(false);
+  const canEdit = useAuthStore((s) => s.hasPermission('strategy:edit'));
   const [fromOptimize, setFromOptimize] = useState(false);
   // 记录从参数优化自动填充的字段名集合，用于高亮标识
   const [highlightedFields, setHighlightedFields] = useState(new Set());
@@ -100,6 +102,7 @@ export default function BacktestCreate() {
   }, [presetStrategyId]);
 
   const handleSubmit = () => {
+    if (!canEdit) { message.warning('无权限创建回测'); return; }
     form.validateFields().then(values => {
       const isScreen = values.signalSource === 'SCREEN';
       const [start, end] = values.dateRange;
@@ -624,6 +627,7 @@ export default function BacktestCreate() {
               onClick={handleSubmit}
               loading={submitting}
               size="large"
+              disabled={!canEdit}
             >
               开始回测
             </Button>

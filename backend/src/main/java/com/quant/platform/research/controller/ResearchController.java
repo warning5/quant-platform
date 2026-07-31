@@ -112,6 +112,7 @@ public class ResearchController {
         }
     }
 
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"research:view", "research:delete"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @DeleteMapping("/batch-delete")
     @Operation(summary = "批量删除研报", description = "从 MySQL 删除研报数据")
     public ApiResponse<Map<String, Object>> batchDelete(@RequestBody Map<String, Object> body) {

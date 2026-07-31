@@ -48,6 +48,7 @@ public class RecommendationController {
     /**
      * 手动触发生成推荐列表
      */
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"recommendation:view", "recommendation:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/generate")
     @RateLimit(capacity = 10, duration = 1)
     public ApiResponse<Map<String, Object>> generate(@RequestBody(required = false) GenerateRequest req) {
@@ -185,6 +186,7 @@ public class RecommendationController {
     /**
      * 触发因子 IC/IR 计算
      */
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"recommendation:view", "recommendation:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/ic/compute")
     public ApiResponse<Map<String, FactorIcRecord>> computeIc(@RequestBody(required = false) Map<String, Object> params) {
         try {
@@ -206,6 +208,7 @@ public class RecommendationController {
     /**
      * 批量计算因子 IC/IR（按日期范围）
      */
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"recommendation:view", "recommendation:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/ic/compute-batch")
     @RateLimit(capacity = 3, duration = 1)
     public ApiResponse<Map<String, Object>> computeIcBatch(@RequestBody Map<String, Object> params) {
@@ -267,6 +270,7 @@ public class RecommendationController {
      * 并对每条推荐查 ClickHouse 算 1/5/22 日收益，可能耗时数十秒到数分钟，
      * 同步执行会触发前端 axios 超时。改为异步：提交到 backtestTaskExecutor 线程池立即返回。
      */
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"recommendation:view", "recommendation:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/track")
     public ApiResponse<Map<String, Object>> trackPerformance() {
         try {

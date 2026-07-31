@@ -5,6 +5,7 @@ import { PlayCircleOutlined, QuestionCircleOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { backtestApi } from '../../api';
 import { useNavigate } from 'react-router-dom';
+import { useAuthStore } from '../../stores/authStore';
 
 const { Text } = Typography;
 const { Option } = Select;
@@ -25,6 +26,7 @@ const { RangePicker } = DatePicker;
 export default function RollingBacktestModal({ visible, onClose, screenConfig, onCreated }) {
   const [form] = Form.useForm();
   const navigate = useNavigate();
+  const canEdit = useAuthStore((s) => s.hasPermission('strategy:edit'));
   const [submitting, setSubmitting] = React.useState(false);
   const isEmptyConfig = !screenConfig || !screenConfig.factors || screenConfig.factors.length === 0;
 
@@ -52,6 +54,10 @@ export default function RollingBacktestModal({ visible, onClose, screenConfig, o
   }, [visible, form]);
 
   const handleSubmit = () => {
+    if (!canEdit) {
+      message.warning('无权限提交回测任务');
+      return;
+    }
     form.validateFields().then(values => {
       const [start, end] = values.dateRange;
 
@@ -103,7 +109,7 @@ export default function RollingBacktestModal({ visible, onClose, screenConfig, o
         <Button key="cancel" onClick={onClose}>取消</Button>,
         <Button key="submit" type="primary" icon={<PlayCircleOutlined />}
           onClick={handleSubmit} loading={submitting}
-          disabled={isEmptyConfig}>
+          disabled={!canEdit || isEmptyConfig}>
           {isEmptyConfig ? '请先配置选股条件' : '提交回测'}
         </Button>
       ]}
