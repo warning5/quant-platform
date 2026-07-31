@@ -20,6 +20,11 @@ public interface SysUserMapper extends BaseMapper<SysUser> {
             "WHERE ur.user_id = #{userId} AND r.deleted = 0")
     List<String> selectRoleCodeByUserId(@Param("userId") Long userId);
 
+    @Select("SELECT DISTINCT r.id FROM sys_role r " +
+            "JOIN sys_user_role ur ON ur.role_id = r.id " +
+            "WHERE ur.user_id = #{userId} AND r.deleted = 0")
+    List<Long> selectRoleIdByUserId(@Param("userId") Long userId);
+
     @Select("SELECT * FROM sys_user WHERE username = #{username} AND deleted = 0 LIMIT 1")
     SysUser selectByUsername(@Param("username") String username);
 

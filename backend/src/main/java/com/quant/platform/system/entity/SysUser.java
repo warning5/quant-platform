@@ -45,6 +45,9 @@ public class SysUser {
     /** 0=无 1=网站应用 2=公众号 3=小程序 */
     private Integer wechatType;
 
+    /** 所属部门id，0=未分配（数据权限部门维度） */
+    private Long deptId;
+
     private LocalDateTime lastLoginTime;
 
     @TableField(fill = FieldFill.INSERT)

@@ -12,11 +12,15 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
+import com.quant.platform.common.annotation.ResourceMeta;
+import com.quant.platform.common.enums.ResourceType;
+
 /**
  * 回测任务实体
  */
 @Data
 @TableName("backtest_task")
+@ResourceMeta(ResourceType.BACKTEST)
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor

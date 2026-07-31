@@ -7,6 +7,7 @@ import com.baomidou.mybatisplus.extension.plugins.inner.PaginationInnerIntercept
 import org.apache.ibatis.reflection.MetaObject;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import com.quant.platform.dataperm.interceptor.ResourcePermissionInnerInterceptor;
 
 import java.time.LocalDateTime;
 
@@ -20,8 +21,10 @@ public class MyBatisPlusConfig {
      * 分页插件配置
      */
     @Bean
-    public MybatisPlusInterceptor mybatisPlusInterceptor() {
+    public MybatisPlusInterceptor mybatisPlusInterceptor(
+            ResourcePermissionInnerInterceptor resourcePermissionInnerInterceptor) {
         MybatisPlusInterceptor interceptor = new MybatisPlusInterceptor();
+        interceptor.addInnerInterceptor(resourcePermissionInnerInterceptor);
         interceptor.addInnerInterceptor(new PaginationInnerInterceptor(DbType.MYSQL));
         return interceptor;
     }

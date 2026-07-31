@@ -36,21 +36,23 @@ public class SaTokenConfigure implements WebMvcConfigurer {
     public void addInterceptors(InterceptorRegistry registry) {
         List<String> excludes = new ArrayList<>();
         // 登录与微信联合登录（匿名可访问）
-        excludes.add("/api/auth/login");
-        excludes.add("/api/auth/wechat/**");
+        excludes.add("/auth/login");
+        excludes.add("/auth/wechat/**");
         // 健康检查（匿名）
-        excludes.add("/api/test/**");
+        excludes.add("/test/**");
         // API 文档仅在 dev / local 环境放开，生产环境需登录后访问
         boolean devProfile = Arrays.stream(environment.getActiveProfiles())
                 .anyMatch(p -> "dev".equals(p) || "local".equals(p));
         if (devProfile) {
-            excludes.add("/api/v3/api-docs/**");
-            excludes.add("/api/swagger-ui/**");
-            excludes.add("/api/swagger-resources/**");
-            excludes.add("/api/webjars/**");
+            excludes.add("/v3/api-docs/**");
+            excludes.add("/swagger-ui/**");
+            excludes.add("/swagger-resources/**");
+            excludes.add("/webjars/**");
         }
+        // 注意：context-path 为 /api 时，Spring 对拦截器匹配的是「去掉 context-path 后」的路径
+        // （如 /strategies、/auth/login），因此必须用 /** 而非 /api/**，否则拦截器对所有业务接口都不生效。
         registry.addInterceptor(new SaInterceptor())
-                .addPathPatterns("/api/**")
+                .addPathPatterns("/**")
                 .excludePathPatterns(excludes);
     }
 

@@ -685,7 +685,7 @@ public class ScheduleService implements SchedulingConfigurer {
             }
             case "SENTIMENT_OTHER" -> {
                 req.setUpdateType("SENTIMENT");
-                // 其它情绪数据：关掉资金流向，开启其余
+                // 其它情绪数据：关掉资金流向，开启其余（含一致预期/业绩快报/QVIX）
                 req.setFetchMoneyflow(false);
                 req.setFetchLhb(true);
                 req.setFetchMargin(true);
@@ -697,6 +697,9 @@ public class ScheduleService implements SchedulingConfigurer {
                 req.setFetchFundHolder(true);
                 req.setFetchShareholder(true);
                 req.setFetchNews(true);
+                req.setFetchConsensusEstimate(true);
+                req.setFetchEarningsReport(true);
+                req.setFetchQvix(true);
                 yield req;
             }
             case "FACTOR_COMPUTE" -> { req.setUpdateType("FACTOR_COMPUTE"); yield req; }

@@ -53,6 +53,8 @@ const SystemRoleManage = lazy(() => import('./pages/system/RoleManage'));
 const SystemMenuManage = lazy(() => import('./pages/system/MenuManage'));
 const AuditLog = lazy(() => import('./pages/system/AuditLog'));
 const CredentialManage = lazy(() => import('./pages/system/CredentialManage'));
+const DataPermissionManage = lazy(() => import('./pages/system/DataPermissionManage'));
+const DepartmentManage = lazy(() => import('./pages/system/DepartmentManage'));
 
 // 在菜单树中查找当前路由对应的所有祖先目录 key（用于自动展开）
 function findOpenKeys(nodes, pathname, trail = []) {
@@ -125,10 +127,12 @@ function AppLayout({ isDark, setIsDark }) {
     findOpenKeys(menus, window.location.pathname) || []
   );
 
+  // 菜单树是登录后异步加载的：menus 到达前 findOpenKeys 会算成 []，
+  // 必须把 menus 纳入依赖，菜单一到位就重算父目录展开，避免当前页菜单项被藏进折叠态。
   useEffect(() => {
     const keys = findOpenKeys(menus, location.pathname);
     if (keys) setOpenKeys(keys);
-  }, [location.pathname]);
+  }, [location.pathname, menus]);
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -332,6 +336,8 @@ function AppLayout({ isDark, setIsDark }) {
               <Route path="/system/menus" element={<SystemMenuManage />} />
               <Route path="/audit-logs" element={<AuditLog />} />
               <Route path="/credentials" element={<CredentialManage />} />
+              <Route path="/data-permissions" element={<DataPermissionManage />} />
+              <Route path="/system/departments" element={<DepartmentManage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </Suspense>

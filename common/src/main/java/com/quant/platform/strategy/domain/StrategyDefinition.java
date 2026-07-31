@@ -3,20 +3,26 @@ package com.quant.platform.strategy.domain;
 import com.baomidou.mybatisplus.annotation.*;
 import lombok.*;
 
+import java.io.Serial;
 import java.io.Serializable;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+
+import com.quant.platform.common.annotation.ResourceMeta;
+import com.quant.platform.common.enums.ResourceType;
 
 /**
  * 策略定义实体（共享，backend 和 backend-mp 共用）
  */
 @Data
 @TableName("strategy_definition")
+@ResourceMeta(ResourceType.STRATEGY)
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
 public class StrategyDefinition implements Serializable {
 
+    @Serial
     private static final long serialVersionUID = 1L;
 
     @TableId(type = IdType.AUTO)

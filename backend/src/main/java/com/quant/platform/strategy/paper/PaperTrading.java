@@ -9,8 +9,12 @@ import lombok.NoArgsConstructor;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
+import com.quant.platform.common.annotation.ResourceMeta;
+import com.quant.platform.common.enums.ResourceType;
+
 @Data
 @TableName("paper_trading")
+@ResourceMeta(ResourceType.PAPER_TRADING)
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor

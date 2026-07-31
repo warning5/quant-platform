@@ -10,11 +10,15 @@ import java.io.Serial;
 import java.io.Serializable;
 import java.time.LocalDateTime;
 
+import com.quant.platform.common.annotation.ResourceMeta;
+import com.quant.platform.common.enums.ResourceType;
+
 /**
  * 因子定义实体
  */
 @Data
 @TableName("factor_definition")
+@ResourceMeta(ResourceType.FACTOR)
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
