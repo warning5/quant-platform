@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/system/audit")
 @RequiredArgsConstructor
+@SaCheckPermission("system:audit:list")
 public class AuditController {
 
     private final OperationLogService operationLogService;

@@ -15,6 +15,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/system/menu")
 @RequiredArgsConstructor
+@SaCheckPermission("system:menu:list")
 public class MenuController {
 
     private final MenuService menuService;

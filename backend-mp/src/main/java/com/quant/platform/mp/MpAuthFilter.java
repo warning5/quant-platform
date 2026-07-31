@@ -22,7 +22,7 @@ public class MpAuthFilter implements Filter {
         HttpServletResponse httpResp = (HttpServletResponse) response;
 
         String uri = httpReq.getRequestURI();
-        if (uri.contains("/health") || uri.contains("/login")) {
+        if (uri.endsWith("/mp/health") || uri.endsWith("/mp/login")) {
             chain.doFilter(request, response);
             return;
         }

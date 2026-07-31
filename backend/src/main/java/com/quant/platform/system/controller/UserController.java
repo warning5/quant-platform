@@ -20,6 +20,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/system/user")
 @RequiredArgsConstructor
+@SaCheckPermission("system:user:list")
 public class UserController {
 
     private final UserService userService;

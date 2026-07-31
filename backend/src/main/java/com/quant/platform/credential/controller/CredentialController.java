@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/system/credential")
 @RequiredArgsConstructor
+@SaCheckPermission("system:credential:list")
 public class CredentialController {
 
     private final CredentialService credentialService;

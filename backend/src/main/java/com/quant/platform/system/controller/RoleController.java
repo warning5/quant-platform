@@ -18,6 +18,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/system/role")
 @RequiredArgsConstructor
+@SaCheckPermission("system:role:list")
 public class RoleController {
 
     private final RoleService roleService;
