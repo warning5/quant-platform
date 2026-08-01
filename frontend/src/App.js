@@ -44,6 +44,7 @@ const ResearchData = lazy(() => import('./pages/datadetail/ResearchData'));
 const DataUpdate = lazy(() => import('./pages/dataupdate/DataUpdate'));
 const ScheduledTasks = lazy(() => import('./pages/dataupdate/ScheduledTasks'));
 const DataQuality = lazy(() => import('./pages/dataupdate/DataQualityDashboard'));
+const TaskRunHistory = lazy(() => import('./pages/dataupdate/TaskRunHistory'));
 const StockAnalysis = lazy(() => import('./pages/analysis/StockAnalysis'));
 const TradeCalendar = lazy(() => import('./pages/calendar/TradeCalendar'));
 const MarketThermometer = lazy(() => import('./pages/analysis/MarketThermometer'));
@@ -300,6 +301,7 @@ function AppLayout({ isDark, setIsDark }) {
               <Route path="/data-update" element={<DataUpdate />} />
               <Route path="/scheduled-tasks" element={<ScheduledTasks />} />
               <Route path="/data-quality" element={<DataQuality />} />
+              <Route path="/task-monitor" element={<TaskRunHistory />} />
               <Route path="/factors" element={<FactorList />} />
               <Route path="/factors/new" element={<FactorEditor />} />
               <Route path="/factors/:id" element={<FactorDetail />} />

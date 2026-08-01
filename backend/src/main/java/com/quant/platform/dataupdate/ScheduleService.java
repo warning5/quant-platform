@@ -41,6 +41,7 @@ public class ScheduleService implements SchedulingConfigurer {
     // 懒加载注入，避免循环依赖
     private NotificationService notificationService;
     private DataQualityService dataQualityService;
+    private TaskRunHistoryService taskRunHistoryService;
 
     // taskKey → ScheduledFuture（用于动态取消）
     private final Map<String, ScheduledFuture<?>> scheduledTasks = new ConcurrentHashMap<>();
@@ -75,6 +76,13 @@ public class ScheduleService implements SchedulingConfigurer {
         return dataQualityService;
     }
 
+    private TaskRunHistoryService getTaskRunHistoryService() {
+        if (taskRunHistoryService == null) {
+            taskRunHistoryService = applicationContext.getBean(TaskRunHistoryService.class);
+        }
+        return taskRunHistoryService;
+    }
+
     /**
      * Spring 启动后回调：注册所有 enabled 的任务
      */
@@ -82,6 +90,55 @@ public class ScheduleService implements SchedulingConfigurer {
     public void configureTasks(ScheduledTaskRegistrar taskRegistrar) {
         // 在 Spring 的调度器初始化后刷新
         refreshFromDb();
+        // 注册孤儿任务扫描（独立于 DB 任务，不随 refreshFromDb 取消）
+        try {
+            taskScheduler.scheduleAtFixedRate(this::scanOrphanTasks, java.time.Duration.ofMinutes(10));
+            log.info("[ScheduleService] 孤儿任务扫描已注册（每10分钟）");
+        } catch (Exception e) {
+            log.warn("[ScheduleService] 注册孤儿任务扫描失败: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * P1-1: 孤儿任务扫描
+     * 将 task_run_history 中长时间处于 RUNNING（进程已死/后端重启未清理）的记录标记为 TIMEOUT，
+     * 并发送一次告警；同时清理 data_schedule_config 中对应的 RUNNING 孤儿状态。
+     */
+    private void scanOrphanTasks() {
+        try {
+            TaskRunHistoryService svc = getTaskRunHistoryService();
+            int orphanCount = svc != null ? svc.markTimeoutOrphans(180) : 0;
+            if (orphanCount > 0) {
+                log.warn("[ScheduleService] 孤儿任务扫描: 标记 {} 条超时记录", orphanCount);
+                // 同一天仅告警一次，避免每10分钟刷屏
+                String orphanAlertKey = "ORPHAN_" + LocalDate.now();
+                if (retryTracker.putIfAbsent(orphanAlertKey, true) == null) {
+                    try {
+                        getNotificationService().sendAlert(String.format(
+                            "## 定时任务孤儿告警\n\n检测到 %d 个执行记录超过3小时仍处于 RUNNING（疑似进程中断/后端重启未清理），已自动标记为 TIMEOUT。\n请检查相关任务是否需手动重跑。",
+                            orphanCount));
+                    } catch (Exception ignored) {}
+                }
+            }
+            // 清理 data_schedule_config 中长时间 RUNNING 的孤儿（>180分钟仍 RUNNING 视为中断）
+            try {
+                List<Map<String, Object>> orphans = jdbcTemplate.queryForList(
+                    "SELECT task_key FROM data_schedule_config " +
+                    "WHERE last_run_status = 'RUNNING' AND last_run_time < DATE_SUB(NOW(), INTERVAL 180 MINUTE)");
+                for (Map<String, Object> row : orphans) {
+                    String tk = (String) row.get("task_key");
+                    jdbcTemplate.update(
+                        "UPDATE data_schedule_config SET last_run_status='TIMEOUT', last_run_time=? " +
+                        "WHERE task_key=? AND last_run_status='RUNNING'",
+                        LocalDateTime.now(), tk);
+                    log.info("[ScheduleService] 清理 data_schedule_config 孤儿: {}", tk);
+                }
+            } catch (Exception e) {
+                log.warn("[ScheduleService] 清理 data_schedule_config 孤儿失败: {}", e.getMessage());
+            }
+        } catch (Exception e) {
+            log.warn("[ScheduleService] 孤儿任务扫描异常: {}", e.getMessage());
+        }
     }
 
     /**
@@ -268,7 +325,7 @@ public class ScheduleService implements SchedulingConfigurer {
                         () -> {
                             try {
                                 log.info("[ScheduleService] 启动恢复触发: {} (from {})", fDepKey, fUpstreamKey);
-                                executeTask(fDepKey);
+                                executeTask(fDepKey, "DEPENDENCY");
                             } catch (Exception ex) {
                                 log.error("[ScheduleService] 启动恢复触发失败: {} (from {})", fDepKey, fUpstreamKey, ex);
                             }
@@ -342,82 +399,95 @@ public class ScheduleService implements SchedulingConfigurer {
         String manualKey = taskKey + ":" + LocalDate.now();
         manualTriggeredToday.put(manualKey, true);
         log.info("[ScheduleService] 手动触发任务: {} (将绕过下游去重)", taskKey);
-        executeTask(taskKey);
+        executeTask(taskKey, "MANUAL");
     }
 
     /**
      * 执行任务：构建 DataUpdateRequest → 提交给 DataUpdateService（支持并发）
      * 完成后自动触发依赖链下游任务
+     *
+     * @param triggerType 触发来源: CRON / MANUAL / DEPENDENCY
      */
-    public void executeTask(String taskKey) {
+    public void executeTask(String taskKey, String triggerType) {
         try {
             // 质量检查任务：数据新鲜度
             if ("DATA_FRESHNESS".equals(taskKey)) {
-                Map<String, Object> result = getDataQualityService().checkDataFreshness();
-                log.info("[ScheduleService] 数据新鲜度检查完成: hasWarning={}", result.get("hasWarning"));
-                updateTaskStatus(taskKey, "SUCCESS");
-                // 质量检查结果通过 DataQualityService 内部推送
-                triggerDependents(taskKey);
+                runJavaTask(taskKey, triggerType, k -> {
+                    Map<String, Object> result = getDataQualityService().checkDataFreshness();
+                    log.info("[ScheduleService] 数据新鲜度检查完成: hasWarning={}", result.get("hasWarning"));
+                });
                 return;
             }
 
             // 质量检查任务：价格异常检测
             if ("PRICE_ANOMALY".equals(taskKey)) {
-                Map<String, Object> result = getDataQualityService().checkPriceAnomalies(7);
-                log.info("[ScheduleService] 价格异常检测完成: count={}", result.get("anomalyCount"));
-                updateTaskStatus(taskKey, "SUCCESS");
-                triggerDependents(taskKey);
+                runJavaTask(taskKey, triggerType, k -> {
+                    Map<String, Object> result = getDataQualityService().checkPriceAnomalies(7);
+                    log.info("[ScheduleService] 价格异常检测完成: count={}", result.get("anomalyCount"));
+                });
                 return;
             }
 
             // 质量检查任务：因子NULL检测
             if ("FACTOR_NULL_CHECK".equals(taskKey)) {
-                Map<String, Object> result = getDataQualityService().checkFactorNullRatio();
-                log.info("[ScheduleService] 因子NULL检测完成: nullFactorCount={}", result.get("nullFactorCount"));
-                updateTaskStatus(taskKey, "SUCCESS");
-                triggerDependents(taskKey);
+                runJavaTask(taskKey, triggerType, k -> {
+                    Map<String, Object> result = getDataQualityService().checkFactorNullRatio();
+                    log.info("[ScheduleService] 因子NULL检测完成: nullFactorCount={}", result.get("nullFactorCount"));
+                });
                 return;
             }
 
             // 质量检查任务：财务突变检测
             if ("FINANCIAL_ANOMALY".equals(taskKey)) {
-                Map<String, Object> result = getDataQualityService().checkFinancialAnomalies();
-                log.info("[ScheduleService] 财务突变检测完成: count={}", result.get("anomalyCount"));
-                updateTaskStatus(taskKey, "SUCCESS");
-                triggerDependents(taskKey);
+                runJavaTask(taskKey, triggerType, k -> {
+                    Map<String, Object> result = getDataQualityService().checkFinancialAnomalies();
+                    log.info("[ScheduleService] 财务突变检测完成: count={}", result.get("anomalyCount"));
+                });
                 return;
             }
 
             // P3-11: 因子健康检查（衰减检测 + 降级 + 复活）
             if ("FACTOR_HEALTH_CHECK".equals(taskKey)) {
-                com.quant.platform.factor.health.service.FactorHealthMonitor healthMonitor =
-                    applicationContext.getBean(com.quant.platform.factor.health.service.FactorHealthMonitor.class);
-                Map<String, Object> result = healthMonitor.checkAllFactorsHealth();
-                log.info("[ScheduleService] 因子健康检查完成: warnings={} degraded={} resurrected={}",
-                    result.get("warnings"), result.get("degraded"), result.get("resurrected"));
-                updateTaskStatus(taskKey, "SUCCESS");
-                triggerDependents(taskKey);
+                runJavaTask(taskKey, triggerType, k -> {
+                    com.quant.platform.factor.health.service.FactorHealthMonitor healthMonitor =
+                        applicationContext.getBean(com.quant.platform.factor.health.service.FactorHealthMonitor.class);
+                    Map<String, Object> result = healthMonitor.checkAllFactorsHealth();
+                    log.info("[ScheduleService] 因子健康检查完成: warnings={} degraded={} resurrected={}",
+                        result.get("warnings"), result.get("degraded"), result.get("resurrected"));
+                });
                 return;
             }
 
             // P1-4: 推荐追踪任务
             if ("RECOMMENDATION_TRACK".equals(taskKey)) {
-                int updated = recommendationService.trackRecommendationPerformance();
-                log.info("[ScheduleService] 推荐追踪完成: 更新{}条", updated);
-                updateTaskStatus(taskKey, "SUCCESS");
-                triggerDependents(taskKey);
+                runJavaTask(taskKey, triggerType, k -> {
+                    int updated = recommendationService.trackRecommendationPerformance();
+                    log.info("[ScheduleService] 推荐追踪完成: 更新{}条", updated);
+                });
                 return;
             }
 
             // Phase 2: 每日自动推荐任务
             if ("DAILY_RECOMMENDATION".equals(taskKey)) {
-                executeDailyRecommendation();
-                // executeDailyRecommendation 内部已更新状态
+                long hid = insertHistory(taskKey, triggerType, null);
+                try {
+                    executeDailyRecommendation();
+                    // executeDailyRecommendation 内部已更新 data_schedule_config 状态
+                    finishHistoryStatus(hid);
+                } catch (Throwable t) {
+                    log.error("[ScheduleService] 每日推荐执行失败: {}", taskKey, t);
+                    jdbcTemplate.update(
+                        "UPDATE data_schedule_config SET last_run_status='FAILED', last_run_time=? WHERE task_key=?",
+                        LocalDateTime.now(), taskKey);
+                    finishHistory(hid, "FAILED", t.getMessage());
+                    sendFailureAlert(taskKey, t);
+                    scheduleRetry(taskKey);
+                }
                 triggerDependents(taskKey);
                 return;
             }
 
-            // 普通数据更新任务
+            // 普通数据更新任务（历史记录由 DataUpdateService 内部落库，这里仅更新 RUNNING 状态）
             Map<String, Object> configRow = null;
             try {
                 configRow = jdbcTemplate.queryForMap(
@@ -426,6 +496,7 @@ public class ScheduleService implements SchedulingConfigurer {
 
             String extraConfigJson = configRow != null ? (String) configRow.get("extra_config") : null;
             DataUpdateRequest request = buildRequestFromKey(taskKey, extraConfigJson);
+            request.setTriggerType(triggerType);
             dataUpdateService.submitTaskConcurrent(request);
 
             jdbcTemplate.update(
@@ -443,26 +514,99 @@ public class ScheduleService implements SchedulingConfigurer {
             log.error("[ScheduleService] 定时执行失败: {}", taskKey, t);
 
             // P1-2.2: 失败后5分钟自动重试一次（同一天同一任务只重试一次）
-            String retryKey = taskKey + ":" + LocalDate.now();
-            if (retryTracker.putIfAbsent(retryKey, true) == null) {
-                log.info("[ScheduleService] 5分钟后自动重试: {}", taskKey);
-                taskScheduler.schedule(
-                    () -> {
-                        try {
-                            log.info("[ScheduleService] 重试执行: {}", taskKey);
-                            executeTask(taskKey);
-                        } catch (Exception retryEx) {
-                            log.error("[ScheduleService] 重试仍然失败: {}", taskKey, retryEx);
-                        }
-                    },
-                    new java.util.Date(System.currentTimeMillis() + 5 * 60 * 1000)
-                );
-            } else {
-                log.info("[ScheduleService] 今日已重试过，不再重试: {}", taskKey);
-            }
+            scheduleRetry(taskKey);
 
-            // 10: 失败告警推送通知
+            // 失败告警推送通知
             sendFailureAlert(taskKey, t);
+        }
+    }
+
+    /** 兼容旧调用（默认 CRON 触发） */
+    public void executeTask(String taskKey) {
+        executeTask(taskKey, "CRON");
+    }
+
+    /** 包装 Java 型定时任务：统一写入执行历史 + 失败告警 + 重试 */
+    private void runJavaTask(String taskKey, String triggerType, java.util.function.Consumer<String> action) {
+        long hid = insertHistory(taskKey, triggerType, null);
+        try {
+            action.accept(taskKey);
+            updateTaskStatus(taskKey, "SUCCESS");
+            finishHistory(hid, "SUCCESS", null);
+            triggerDependents(taskKey);
+        } catch (Throwable t) {
+            log.error("[ScheduleService] 任务执行失败: {}", taskKey, t);
+            updateTaskStatus(taskKey, "FAILED");
+            finishHistory(hid, "FAILED", t.getMessage());
+            sendFailureAlert(taskKey, t);
+            scheduleRetry(taskKey);
+        }
+    }
+
+    /** 插入一条 RUNNING 执行历史，返回 history id */
+    private long insertHistory(String taskKey, String triggerType, String upstreamKey) {
+        TaskRunHistoryService svc = getTaskRunHistoryService();
+        if (svc == null) return -1;
+        try {
+            return svc.insertRunning(
+                taskKey, resolveTaskName(taskKey), triggerType, null, upstreamKey);
+        } catch (Exception e) {
+            log.warn("[ScheduleService] 写入执行历史失败: {}", e.getMessage());
+            return -1;
+        }
+    }
+
+    private void finishHistory(long hid, String status, String errorMsg) {
+        TaskRunHistoryService svc = getTaskRunHistoryService();
+        if (svc != null && hid > 0) {
+            try {
+                svc.finish(hid, status, null, errorMsg);
+            } catch (Exception e) {
+                log.warn("[ScheduleService] 回填执行历史失败: {}", e.getMessage());
+            }
+        }
+    }
+
+    /** DAILY_RECOMMENDATION 已自行更新状态，这里按 data_schedule_config 当前状态回填历史 */
+    private void finishHistoryStatus(long hid) {
+        TaskRunHistoryService svc = getTaskRunHistoryService();
+        if (svc == null || hid <= 0) return;
+        try {
+            String st = jdbcTemplate.queryForObject(
+                "SELECT last_run_status FROM data_schedule_config WHERE task_key = ?", String.class, "DAILY_RECOMMENDATION");
+            svc.finish(hid, st != null ? st : "SUCCESS", null, null);
+        } catch (Exception e) {
+            log.warn("[ScheduleService] 回填每日推荐历史失败: {}", e.getMessage());
+        }
+    }
+
+    private String resolveTaskName(String taskKey) {
+        try {
+            return jdbcTemplate.queryForObject(
+                "SELECT task_name FROM data_schedule_config WHERE task_key = ?", String.class, taskKey);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** 失败后5分钟自动重试一次（同一天同一任务只重试一次） */
+    private void scheduleRetry(String taskKey) {
+        String retryKey = taskKey + ":" + LocalDate.now();
+        if (retryTracker.putIfAbsent(retryKey, true) == null) {
+            log.info("[ScheduleService] 5分钟后自动重试: {}", taskKey);
+            taskScheduler.schedule(
+                () -> {
+                    try {
+                        log.info("[ScheduleService] 重试执行: {}", taskKey);
+                        executeTask(taskKey, "CRON");
+                    } catch (Exception retryEx) {
+                        log.error("[ScheduleService] 重试仍然失败: {}", taskKey, retryEx);
+                    }
+                },
+                new java.util.Date(System.currentTimeMillis() + 5 * 60 * 1000)
+            );
+        } else {
+            log.info("[ScheduleService] 今日已重试过，不再重试: {}", taskKey);
         }
     }
 
@@ -566,7 +710,7 @@ public class ScheduleService implements SchedulingConfigurer {
                 () -> {
                     try {
                         log.info("[ScheduleService] 依赖触发: {} (from {})", fDepKey, taskKey);
-                        executeTask(fDepKey);
+                        executeTask(fDepKey, "DEPENDENCY");
                     } catch (Exception ex) {
                         log.error("[ScheduleService] 依赖触发失败: {} (from {})", fDepKey, taskKey, ex);
                     }
@@ -581,6 +725,15 @@ public class ScheduleService implements SchedulingConfigurer {
     public void onDataUpdateCompleted(DataUpdateCompletedEvent event) {
         if (!event.isSuccess()) {
             log.warn("[ScheduleService] 任务 {} 执行失败，不触发下游依赖", event.getTaskKey());
+            // P0-2 / P1-2: Python 任务在独立 worker 线程失败，不走 executeTask 的 catch 分支，
+            // 必须在此补上告警与重试，否则会静默失败。
+            try {
+                sendFailureAlert(event.getTaskKey(),
+                    new RuntimeException("数据更新任务执行失败(耗时" + event.getDurationSeconds() + "s)"));
+            } catch (Exception ignored) {}
+            try {
+                scheduleRetry(event.getTaskKey());
+            } catch (Exception ignored) {}
             return;
         }
         log.info("[ScheduleService] 收到任务完成事件: {}, 耗时{}s", event.getTaskKey(), event.getDurationSeconds());

@@ -102,6 +102,12 @@ public class DataUpdateTask {
      */
     @JsonIgnore
     private transient Process process;
+
+    /**
+     * 执行历史记录 id（task_run_history.id），任务开始时写入，结束时回填状态。
+     * 用于把一次执行与历史表行关联。
+     */
+    private Long historyId = -1L;
     /** Python 子进程 PID */
     @JsonIgnore
     private transient long processPid = -1;

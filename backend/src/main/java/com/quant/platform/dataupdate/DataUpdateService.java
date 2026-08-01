@@ -68,6 +68,14 @@ public class DataUpdateService {
     @Autowired(required = false)
     private TradeCalendarService tradeCalendarService;
 
+    /** 执行历史服务（写入 task_run_history，供监控页展示） */
+    @Autowired(required = false)
+    private TaskRunHistoryService taskRunHistoryService;
+
+    /** 单脚本最大执行时长（分钟），超时则强杀进程并标记失败 */
+    @Value("${quant.data-update.script-timeout-minutes:120}")
+    private int scriptTimeoutMinutes;
+
     /**
      * 正在运行的任务
      */
@@ -260,6 +268,24 @@ public class DataUpdateService {
         // 记录 updateType 映射（即使任务从 activeTasks 移除后仍可查到，确保日志分流正确）
         if (request.getUpdateType() != null) {
             taskUpdateTypes.put(taskId, request.getUpdateType());
+        }
+
+        // ★ 写入执行历史（RUNNING），并记录 historyId 供结束时回填
+        if (taskRunHistoryService != null) {
+            try {
+                String taskName = null;
+                try {
+                    taskName = jdbcTemplate.queryForObject(
+                        "SELECT task_name FROM data_schedule_config WHERE task_key = ?",
+                        String.class, request.getTaskKey() != null ? request.getTaskKey() : request.getUpdateType());
+                } catch (Exception ignored) {}
+                long hid = taskRunHistoryService.insertRunning(
+                    request.getTaskKey() != null ? request.getTaskKey() : request.getUpdateType(),
+                    taskName, request.getTriggerType(), request.getUpdateType(), null);
+                task.setHistoryId(hid);
+            } catch (Exception e) {
+                log.warn("[DataUpdate] 写入执行历史失败(不影响主流程): {}", e.getMessage());
+            }
         }
 
         // 在新线程中执行
@@ -791,6 +817,17 @@ public class DataUpdateService {
                         ? request.getTaskKey() : ut;
                 eventPublisher.publishEvent(new DataUpdateCompletedEvent(this, eventKey, taskOk, durationSec));
             }
+
+            // ★ 回填执行历史记录（状态/耗时/错误信息）
+            if (taskRunHistoryService != null && task.getHistoryId() != null && task.getHistoryId() > 0) {
+                try {
+                    taskRunHistoryService.finish(task.getHistoryId(), task.getStatus(),
+                        null, task.getError());
+                    log.info("[DataUpdate] ★ 回写执行历史: historyId={}, status={}", task.getHistoryId(), task.getStatus());
+                } catch (Exception histEx) {
+                    log.warn("[DataUpdate] 回写执行历史失败: {}", histEx.getMessage());
+                }
+            }
         }
     }
 
@@ -1040,10 +1077,31 @@ public class DataUpdateService {
             }
         }
 
-        int exitCode = process.waitFor();
+        boolean finished;
+        int exitCode;
+        try {
+            finished = process.waitFor(scriptTimeoutMinutes, java.util.concurrent.TimeUnit.MINUTES);
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            finished = false;
+            exitCode = -1;
+        }
         task.setProcess(null);
         task.setProcessPid(-1);
         if ("CANCELLED".equals(task.getStatus())) return false;
+        if (!finished) {
+            // 超时：强杀进程，避免永久挂起导致状态一直 RUNNING
+            try {
+                process.destroyForcibly();
+                broadcastLog(taskId, "[TIMEOUT] 脚本执行超过 " + scriptTimeoutMinutes +
+                    " 分钟，已强制终止");
+                task.setError("脚本执行超时(>" + scriptTimeoutMinutes + "分钟)已终止");
+            } catch (Exception ex) {
+                log.warn("[DataUpdate] 强杀超时进程失败: {}", ex.getMessage());
+            }
+            return false;
+        }
+        exitCode = process.exitValue();
         if (exitCode == 0) {
             broadcastLog(taskId, "[OK] 脚本执行成功");
             task.setLastScriptError(null); // 成功则清除错误

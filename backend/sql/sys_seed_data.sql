@@ -84,6 +84,14 @@ INSERT IGNORE INTO sys_role_menu (role_id, menu_id) VALUES
 (1,17),(1,18),(1,19),(1,20),(1,21),(1,22),(1,23),(1,24),(1,25),(1,26),(1,27),(1,28),(1,29),(1,30),(1,31),(1,32),(1,33),
 (1,34),(1,35),(1,36),(1,37),(1,38),(1,39),(1,40),(1,41),(1,42),(1,43),(1,44),(1,45),(1,46),(1,47);
 
+-- ---------- 4.1 确保"任务监控"菜单存在（按 path 幂等；id 用 MAX(id)+1 自动避开库内任何已占用 id） ----------
+INSERT INTO sys_menu (id, parent_id, menu_name, menu_type, path, component, icon, permission, sort, status, create_time, update_time, deleted)
+SELECT COALESCE((SELECT MAX(id) FROM sys_menu), 0) + 1, 40, '任务监控', 1, '/task-monitor', 'dataupdate/TaskRunHistory', 'BellOutlined', 'data:view', 7, 1, NOW(), NOW(), 0
+FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM sys_menu WHERE path = '/task-monitor');
+INSERT IGNORE INTO sys_role_menu (role_id, menu_id)
+SELECT 1, id FROM sys_menu WHERE path = '/task-monitor';
+
 -- ---------- 6. 抬高自增计数器（避免后续 AUTO 插入与固定种子 id 冲突） ----------
 -- 若表中已有更大 id，MySQL 会自动忽略此处设置（保持 max+1），因此安全。
 ALTER TABLE sys_role      AUTO_INCREMENT = 100;

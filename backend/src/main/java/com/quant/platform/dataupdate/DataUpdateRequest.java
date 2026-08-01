@@ -20,6 +20,12 @@ public class DataUpdateRequest {
     private String taskKey;
 
     /**
+     * 触发方式: CRON / MANUAL / DEPENDENCY
+     * 由 ScheduleService 在提交前写入，供执行历史记录区分来源。
+     */
+    private String triggerType = "MANUAL";
+
+    /**
      * 数据源: BAOSTOCK (SH/SZ), TENCENT (BJ), ALL
      */
     private String source = "ALL";

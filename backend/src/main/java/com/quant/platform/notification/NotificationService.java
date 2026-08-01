@@ -2,15 +2,19 @@ package com.quant.platform.notification;
 
 import com.quant.platform.recommendation.domain.StockRecommendation;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.*;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
-import java.util.stream.Collectors;
 
 /**
  * 通知推送服务
@@ -23,9 +27,13 @@ public class NotificationService {
 
     private final RestTemplate restTemplate = new RestTemplate();
 
-    /** 推送渠道: none / serverchan / wecom / dingtalk */
+    /** 推送渠道: none / serverchan / wecom / dingtalk（默认值，实际以 notification_config 表为准） */
     @Value("${quant.notification.channel:none}")
     private String channel;
+
+    /** 通知配置服务（从 DB 读取，前端可动态配置）。懒注入避免循环依赖风险。 */
+    @Autowired(required = false)
+    private NotificationConfigService configService;
 
     /** Server酱 SendKey */
     @Value("${quant.notification.serverchan.sendkey:}")
@@ -43,64 +51,46 @@ public class NotificationService {
     @Value("${quant.notification.dingtalk.secret:}")
     private String dingtalkSecret;
 
-    /**
-     * 发送每日推荐通知
-     */
     /** 发送紧急提醒（买入信号/止损/止盈等） */
     public boolean sendAlert(String message) {
-        if ("none".equals(channel) || channel == null || channel.isEmpty()) {
-            log.info("[Notification] 通知渠道未配置, 跳过提醒: {}", message.substring(0, Math.min(50, message.length())));
+        NotificationConfig cfg = effectiveConfig();
+        if (!cfg.isEnabled()) {
+            log.info("[Notification] 通知渠道未配置或未启用, 跳过提醒: {}",
+                message != null ? message.substring(0, Math.min(50, message.length())) : "");
             return false;
         }
-        String title = "⚡ 交易信号提醒 | " + LocalDate.now().format(DateTimeFormatter.ISO_DATE);
-        return switch (channel.toLowerCase()) {
-            case "serverchan" -> sendServerChan(title, message);
-            case "wecom" -> sendWeComMarkdown(title, message);
-            case "dingtalk" -> sendDingTalkMarkdown(title, message);
-            default -> false;
-        };
+        String title = "⚡ 任务告警 | " + LocalDate.now().format(DateTimeFormatter.ISO_DATE);
+        return dispatch(cfg, title, message);
     }
 
     /** 发送每日持仓报告 */
     public boolean sendDailyReport(java.util.Map<String, Object> report) {
-        if ("none".equals(channel) || channel == null || channel.isEmpty()) {
-            log.info("[Notification] 通知渠道未配置, 跳过报告推送");
+        NotificationConfig cfg = effectiveConfig();
+        if (!cfg.isEnabled()) {
+            log.info("[Notification] 通知渠道未配置或未启用, 跳过报告推送");
             return false;
         }
         String title = String.format("📋 每日持仓报告 | %s", report.getOrDefault("date", ""));
-        StringBuilder content = new StringBuilder();
-        content.append(String.format("## 每日持仓报告 %s\n\n", report.get("date")));
-        content.append(String.format("- 持仓数: %s\n", report.get("openCount")));
-        content.append(String.format("- 总市值: %s\n", report.get("totalMarketValue")));
-        content.append(String.format("- 总盈亏: %s (%s%%)\n", report.get("totalProfitLoss"), report.get("totalProfitLossPct")));
-        content.append(String.format("- 今日平仓: %s\n", report.get("closedTodayCount")));
+        String content = String.format("## 每日持仓报告 %s\n\n", report.get("date")) +
+                String.format("- 持仓数: %s\n", report.get("openCount")) +
+                String.format("- 总市值: %s\n", report.get("totalMarketValue")) +
+                String.format("- 总盈亏: %s (%s%%)\n", report.get("totalProfitLoss"), report.get("totalProfitLossPct")) +
+                String.format("- 今日平仓: %s\n", report.get("closedTodayCount"));
 
-        return switch (channel.toLowerCase()) {
-            case "serverchan" -> sendServerChan(title, content.toString());
-            case "wecom" -> sendWeComMarkdown(title, content.toString());
-            case "dingtalk" -> sendDingTalkMarkdown(title, content.toString());
-            default -> false;
-        };
+        return dispatch(cfg, title, content);
     }
 
-    public boolean sendDailyRecommendation(List<StockRecommendation> recommendations, String factorProfile) {
-        if ("none".equals(channel) || channel == null || channel.isEmpty()) {
-            log.info("[Notification] 通知渠道未配置(channel={}), 跳过推送", channel);
-            return false;
+    public void sendDailyRecommendation(List<StockRecommendation> recommendations, String factorProfile) {
+        NotificationConfig cfg = effectiveConfig();
+        if (!cfg.isEnabled()) {
+            log.info("[Notification] 通知渠道未配置或未启用, 跳过推送");
+            return;
         }
 
         String title = String.format("📊 每日推荐 | %s | %s", factorProfile, LocalDate.now().format(DateTimeFormatter.ISO_DATE));
         String content = buildRecommendationMarkdown(recommendations, factorProfile);
 
-        return switch (channel.toLowerCase()) {
-            case "serverchan" -> sendServerChan(title, content);
-            case "wecom" -> sendWeComMarkdown(title, content);
-            case "dingtalk" -> sendDingTalkMarkdown(title, content);
-            default -> {
-                log.warn("[Notification] 未知推送渠道: {}", channel);
-                yield false;
-            }
-        };
+        dispatch(cfg, title, content);
     }
 
     /**
@@ -135,7 +125,7 @@ public class NotificationService {
         List<StockRecommendation> withReason = recommendations.stream()
                 .filter(r -> r.getBuyReason() != null && !r.getBuyReason().isEmpty())
                 .limit(3)
-                .collect(Collectors.toList());
+                .toList();
         if (!withReason.isEmpty()) {
             sb.append("\n### 重点标的\n\n");
             for (StockRecommendation rec : withReason) {
@@ -148,16 +138,66 @@ public class NotificationService {
     }
 
     /**
+     * 获取生效通知配置：优先 notification_config 表（前端可配），
+     * 若服务不可用则回退到 application.yml 的 @Value 默认。
+     */
+    private NotificationConfig effectiveConfig() {
+        if (configService != null) {
+            NotificationConfig cfg = configService.get();
+            if (cfg != null) return cfg;
+        }
+        // 回退：用 @Value 字段拼一个配置对象
+        NotificationConfig fallback = new NotificationConfig();
+        fallback.setChannel(channel);
+        fallback.setServerchanSendkey(serverChanSendKey);
+        fallback.setWecomWebhookUrl(wecomWebhookUrl);
+        fallback.setDingtalkWebhookUrl(dingtalkWebhookUrl);
+        fallback.setDingtalkSecret(dingtalkSecret);
+        fallback.setEnabled(!"none".equals(channel) && channel != null && !channel.isEmpty());
+        return fallback;
+    }
+
+    /** 根据生效配置分发到对应渠道 */
+    private boolean dispatch(NotificationConfig cfg, String title, String content) {
+        return switch (cfg.getChannel().toLowerCase()) {
+            case "serverchan" -> sendServerChan(title, content);
+            case "wecom" -> sendWeComMarkdown(title, content);
+            case "dingtalk" -> sendDingTalkMarkdown(title, content);
+            default -> {
+                log.warn("[Notification] 未知推送渠道: {}", cfg.getChannel());
+                yield false;
+            }
+        };
+    }
+
+    /** 生效的 Server酱 SendKey（DB 优先） */
+    private String effectiveServerChanSendKey() {
+        NotificationConfig cfg = effectiveConfig();
+        return cfg.getServerchanSendkey() != null && !cfg.getServerchanSendkey().isEmpty()
+            ? cfg.getServerchanSendkey() : serverChanSendKey;
+    }
+    private String effectiveWecomUrl() {
+        NotificationConfig cfg = effectiveConfig();
+        return cfg.getWecomWebhookUrl() != null && !cfg.getWecomWebhookUrl().isEmpty()
+            ? cfg.getWecomWebhookUrl() : wecomWebhookUrl;
+    }
+    private String effectiveDingtalkUrl() {
+        NotificationConfig cfg = effectiveConfig();
+        return cfg.getDingtalkWebhookUrl() != null && !cfg.getDingtalkWebhookUrl().isEmpty()
+            ? cfg.getDingtalkWebhookUrl() : dingtalkWebhookUrl;
+    }
+    /**
      * Server酱推送
-     * API: https://sctapi.ftqq.com/{sendkey}.send
+     * API: <a href="https://sctapi.ftqq.com/">...</a>{sendkey}.send
      */
     private boolean sendServerChan(String title, String content) {
-        if (serverChanSendKey == null || serverChanSendKey.isEmpty()) {
+        String key = effectiveServerChanSendKey();
+        if (key == null || key.isEmpty()) {
             log.warn("[Notification] Server酱SendKey未配置");
             return false;
         }
         try {
-            String url = "https://sctapi.ftqq.com/" + serverChanSendKey + ".send";
+            String url = "https://sctapi.ftqq.com/" + key + ".send";
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
 
@@ -178,7 +218,8 @@ public class NotificationService {
      * 企业微信 Webhook 推送（Markdown 格式）
      */
     private boolean sendWeComMarkdown(String title, String content) {
-        if (wecomWebhookUrl == null || wecomWebhookUrl.isEmpty()) {
+        String url = effectiveWecomUrl();
+        if (url == null || url.isEmpty()) {
             log.warn("[Notification] 企业微信Webhook URL未配置");
             return false;
         }
@@ -209,7 +250,8 @@ public class NotificationService {
      * 钉钉 Webhook 推送（Markdown 格式）
      */
     private boolean sendDingTalkMarkdown(String title, String content) {
-        if (dingtalkWebhookUrl == null || dingtalkWebhookUrl.isEmpty()) {
+        String url = effectiveDingtalkUrl();
+        if (url == null || url.isEmpty()) {
             log.warn("[Notification] 钉钉Webhook URL未配置");
             return false;
         }
@@ -226,7 +268,7 @@ public class NotificationService {
             headers.setContentType(MediaType.APPLICATION_JSON);
             HttpEntity<String> entity = new HttpEntity<>(jsonBody, headers);
 
-            ResponseEntity<String> response = restTemplate.postForEntity(dingtalkWebhookUrl, entity, String.class);
+            ResponseEntity<String> response = restTemplate.postForEntity(url, entity, String.class);
             boolean success = response.getStatusCode().is2xxSuccessful();
             log.info("[Notification] 钉钉推送: {}", success ? "成功" : "失败");
             return success;
@@ -236,10 +278,15 @@ public class NotificationService {
         }
     }
 
+    /** 公开测试方法：发送一条测试告警（供前端"发送测试"按钮调用） */
+    public boolean testSend(String message) {
+        return sendAlert(message);
+    }
+
     /** URL编码 */
     private String encode(String s) {
         try {
-            return java.net.URLEncoder.encode(s, "UTF-8");
+            return java.net.URLEncoder.encode(s, StandardCharsets.UTF_8);
         } catch (Exception e) {
             return s;
         }

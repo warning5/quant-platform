@@ -108,6 +108,7 @@ export const COMPONENT_OPTIONS = [
   { value: 'market/SectorRanking', label: 'market/SectorRanking（行业排行）' },
   { value: 'dataupdate/ScheduledTasks', label: 'dataupdate/ScheduledTasks（定时任务）' },
   { value: 'dataupdate/DataQualityDashboard', label: 'dataupdate/DataQualityDashboard（质量监控）' },
+  { value: 'dataupdate/TaskRunHistory', label: 'dataupdate/TaskRunHistory（任务监控）' },
   { value: 'Manual/ManualFullPage', label: 'Manual/ManualFullPage（使用手册）' },
   { value: 'System/UserManage', label: 'System/UserManage（用户管理）' },
   { value: 'System/RoleManage', label: 'System/RoleManage（角色管理）' },
