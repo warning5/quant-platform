@@ -51,6 +51,12 @@ public class MetricsCollector implements Filter {
     private final ConcurrentLinkedDeque<PageView> pageViews = new ConcurrentLinkedDeque<>();
     private static final int MAX_RECENT = 500;
 
+    /** GC 累计值采样（用于计算最近 N 分钟的 GC 增量） */
+    private final ConcurrentLinkedDeque<GcSample> gcSamples = new ConcurrentLinkedDeque<>();
+    private static final int MAX_GC_SAMPLES = 200;
+    private static final long GC_WINDOW_MS = 5 * 60 * 1000; // 5 分钟窗口
+    record GcSample(long ts, long gcCount, long gcTimeMs) {}
+
     record RequestRecord(long ts, String method, String path, int status, long durationMs) {}
     record PageView(long ts, String username, String path) {}
 
@@ -139,8 +145,21 @@ public class MetricsCollector implements Filter {
         }
         long uptimeSec = ManagementFactory.getRuntimeMXBean().getUptime() / 1000;
         int processors = Runtime.getRuntime().availableProcessors();
+
+        // 记录 GC 累计值采样，并计算最近 5 分钟增量（处理服务重启计数归零）
+        long now = System.currentTimeMillis();
+        gcSamples.addLast(new GcSample(now, gcCount, gcTime));
+        while (gcSamples.size() > MAX_GC_SAMPLES) gcSamples.pollFirst();
+        long baseCount = gcCount, baseTime = gcTime;
+        for (GcSample s : gcSamples) {
+            if (s.ts >= now - GC_WINDOW_MS) { baseCount = s.gcCount; baseTime = s.gcTimeMs; break; }
+        }
+        // 基准点计数大于当前值 → 中途重启过，无法可靠计算窗口增量，回退为 0
+        long gcCountRecent = baseCount > gcCount ? 0 : Math.max(0, gcCount - baseCount);
+        long gcTimeMsRecent = baseTime > gcTime ? 0 : Math.max(0, gcTime - baseTime);
+
         return new JvmStat(heapUsed, heapCommitted, heapMax, threads.getThreadCount(),
-                threads.getPeakThreadCount(), gcCount, gcTime, uptimeSec, processors);
+                threads.getPeakThreadCount(), gcCount, gcTime, gcCountRecent, gcTimeMsRecent, uptimeSec, processors);
     }
 
     private HttpStat http() {
@@ -165,15 +184,24 @@ public class MetricsCollector implements Filter {
 
     private ClickHouseStat clickhouse() {
         if (clickHouseJdbcTemplate == null) {
-            return new ClickHouseStat(false, false, -1);
+            return new ClickHouseStat(false, false, -1, null, 0);
         }
         long start = System.nanoTime();
         try {
             clickHouseJdbcTemplate.queryForObject("SELECT 1", Integer.class);
             long latencyMs = (System.nanoTime() - start) / 1_000_000;
-            return new ClickHouseStat(true, true, latencyMs);
+            String version = null;
+            int tableCount = 0;
+            try {
+                version = clickHouseJdbcTemplate.queryForObject("SELECT version()", String.class);
+            } catch (Exception ignored) { }
+            try {
+                tableCount = clickHouseJdbcTemplate.queryForObject(
+                        "SELECT COUNT(*) FROM system.tables WHERE database = currentDatabase()", Integer.class);
+            } catch (Exception ignored) { }
+            return new ClickHouseStat(true, true, latencyMs, version, tableCount);
         } catch (Exception e) {
-            return new ClickHouseStat(true, false, -1);
+            return new ClickHouseStat(true, false, -1, null, 0);
         }
     }
 
@@ -183,15 +211,28 @@ public class MetricsCollector implements Filter {
                     "SELECT COUNT(*) FROM task_run_history WHERE status='RUNNING'", Integer.class);
             Integer failedToday = jdbcTemplate.queryForObject(
                     "SELECT COUNT(*) FROM task_run_history WHERE status='FAILED' AND start_time >= CURDATE()", Integer.class);
+            Integer successToday = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM task_run_history WHERE status='SUCCESS' AND start_time >= CURDATE()", Integer.class);
+            Integer totalToday = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM task_run_history WHERE start_time >= CURDATE()", Integer.class);
             TaskLast last = jdbcTemplate.queryForObject(
                     "SELECT task_key, status, start_time, end_time, duration_sec FROM task_run_history ORDER BY start_time DESC LIMIT 1",
                     (rs, i) -> new TaskLast(rs.getString("task_key"), rs.getString("status"),
                             toLdt(rs.getTimestamp("start_time")), toLdt(rs.getTimestamp("end_time")),
                             rs.getObject("duration_sec") == null ? null : rs.getInt("duration_sec")));
-            return new TaskStat(running == null ? 0 : running, failedToday == null ? 0 : failedToday, last);
+            List<TaskLast> recentTasks = jdbcTemplate.query(
+                    "SELECT task_key, status, start_time, end_time, duration_sec FROM task_run_history ORDER BY start_time DESC LIMIT 5",
+                    (rs, i) -> new TaskLast(rs.getString("task_key"), rs.getString("status"),
+                            toLdt(rs.getTimestamp("start_time")), toLdt(rs.getTimestamp("end_time")),
+                            rs.getObject("duration_sec") == null ? null : rs.getInt("duration_sec")));
+            return new TaskStat(running == null ? 0 : running,
+                    failedToday == null ? 0 : failedToday,
+                    successToday == null ? 0 : successToday,
+                    totalToday == null ? 0 : totalToday,
+                    last, recentTasks);
         } catch (Exception e) {
             log.warn("[MetricsCollector] 读取任务指标失败: {}", e.getMessage());
-            return new TaskStat(0, 0, null);
+            return new TaskStat(0, 0, 0, 0, null, Collections.emptyList());
         }
     }
 
@@ -202,9 +243,11 @@ public class MetricsCollector implements Filter {
     // ---- DTO ----
     public record Overview(JvmStat jvm, HttpStat http, ClickHouseStat clickhouse, TaskStat tasks) {}
     public record JvmStat(long heapUsedMb, long heapCommittedMb, long heapMaxMb, int threadCount, int peakThreadCount,
-                          long gcCount, long gcTimeMs, long uptimeSec, int processors) {}
+                          long gcCount, long gcTimeMs, long gcCountRecent, long gcTimeMsRecent, long uptimeSec, int processors) {}
     public record HttpStat(int total, int lastMinute, int errors, long avgMs, long p95Ms, double qps) {}
-    public record ClickHouseStat(boolean enabled, boolean healthy, long latencyMs) {}
-    public record TaskStat(int runningCount, int failedToday, TaskLast last) {}
+    public record ClickHouseStat(boolean enabled, boolean healthy, long latencyMs,
+                                  String version, int tableCount) {}
+    public record TaskStat(int runningCount, int failedToday, int successToday, int totalToday,
+                           TaskLast last, List<TaskLast> recentTasks) {}
     public record TaskLast(String taskKey, String status, LocalDateTime startTime, LocalDateTime endTime, Integer durationSec) {}
 }

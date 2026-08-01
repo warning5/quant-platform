@@ -121,6 +121,7 @@ export default function SystemMonitor() {
   // 时间序列历史（用于趋势图）
   const heapHistory = useRef([]);
   const qpsHistory = useRef([]);
+  const chLatencyHistory = useRef([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -141,6 +142,10 @@ export default function SystemMonitor() {
       if (ov?.http?.qps != null) {
         qpsHistory.current.push({ t: Date.now(), v: ov.http.qps });
         if (qpsHistory.current.length > 60) qpsHistory.current.shift();
+      }
+      if (ov?.clickhouse?.latencyMs != null && ov.clickhouse.latencyMs >= 0) {
+        chLatencyHistory.current.push({ t: Date.now(), v: ov.clickhouse.latencyMs });
+        if (chLatencyHistory.current.length > 60) chLatencyHistory.current.shift();
       }
     } catch (e) {
       message.error('加载监控数据失败');
@@ -241,7 +246,8 @@ export default function SystemMonitor() {
                 <Row gutter={[8, 0]} style={{ marginTop: 8 }}>
                   <Col span={12}><Text type="secondary" style={{ fontSize: 11 }}>提交 {jvm.heapCommittedMb}MB</Text></Col>
                   <Col span={12}><Text type="secondary" style={{ fontSize: 11 }}>线程 {jvm.threadCount}/{jvm.peakThreadCount}</Text></Col>
-                  <Col span={12}><Text type="secondary" style={{ fontSize: 11 }}>GC {jvm.gcCount}次\u00B7{jvm.gcTimeMs}ms</Text></Col>
+                  <Col span={12}><Text type="secondary" style={{ fontSize: 11 }}>近5分钟 GC {jvm.gcCountRecent ?? 0}次·{jvm.gcTimeMsRecent ?? 0}ms</Text></Col>
+                  <Col span={12}><Text type="secondary" style={{ fontSize: 11 }}>累计 {jvm.gcCount ?? 0}次</Text></Col>
                   <Col span={12}><Text type="secondary" style={{ fontSize: 11 }}>CPU {jvm.processors}核</Text></Col>
                 </Row>
               </Card>
@@ -268,36 +274,102 @@ export default function SystemMonitor() {
 
             <Col xs={24} md={12} lg={6}>
               <Card size="small" title="ClickHouse" style={{ height: '100%' }}>
-                <div style={{ display: 'flex', justifyContent: 'center', margin: '12px 0' }}>
+                <div style={{ display: 'flex', justifyContent: 'center' }}>
                   <StatusRing
                     value={ch.enabled ? (ch.healthy ? 100 : 0) : -1}
                     label={ch.enabled ? (ch.healthy ? '正常' : '异常') : '未启用'}
                     sub={ch.enabled ? `${ch.latencyMs}ms` : '-'}
                     color={ch.healthy ? '#3f8600' : ch.enabled ? '#cf1322' : '#8c8c8c'}
-                    size={80}
+                    size={72}
                   />
                 </div>
-                {!ch.enabled && <Text type="secondary" style={{ fontSize: 12, display: 'block', textAlign: 'center' }}>配置中 disabled</Text>}
+                {/* 状态标签行 */}
+                <div style={{ display: 'flex', justifyContent: 'center', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+                  <Tag color={ch.enabled ? 'green' : 'default'}>{ch.enabled ? '已启用' : '未配置'}</Tag>
+                  <Tag color={ch.healthy ? 'blue' : ch.enabled ? 'red' : 'default'}>{ch.healthy ? '健康' : ch.enabled ? '异常' : '-'}</Tag>
+                  {ch.tableCount > 0 && <Tag color="purple">{ch.tableCount} 张表</Tag>}
+                </div>
+                {/* 延迟趋势 */}
+                {ch.enabled && ch.healthy && (
+                  <div style={{ marginTop: 6 }}>
+                    <Text type="secondary" style={{ fontSize: 11 }}>查询延迟趋势</Text>
+                    <Sparkline data={chLatencyHistory.current.map((h) => h.v)} color="#722ed1" height={40} maxPoints={15} />
+                  </div>
+                )}
+                {/* 版本与详情 */}
+                <Row gutter={[8, 0]} style={{ marginTop: 6 }}>
+                  {ch.version && (
+                    <Col span={12}><Text type="secondary" style={{ fontSize: 11 }}>版本 <Text copyable style={{ fontSize: 10 }}>{ch.version}</Text></Text></Col>
+                  )}
+                  <Col span={ch.version ? 12 : 24}><Text type="secondary" style={{ fontSize: 11 }}>延迟 {ch.latencyMs >= 0 ? ch.latencyMs + 'ms' : '-'}</Text></Col>
+                </Row>
+                {!ch.enabled && <Text type="secondary" style={{ fontSize: 11, display: 'block', textAlign: 'center', marginTop: 4 }}>未配置 ClickHouse 数据源</Text>}
               </Card>
             </Col>
 
             <Col xs={24} md={12} lg={6}>
               <Card size="small" title="调度任务" style={{ height: '100%' }}>
-                <div style={{ display: 'flex', justifyContent: 'center', margin: '12px 0' }}>
+                <div style={{ display: 'flex', justifyContent: 'center' }}>
                   <StatusRing
-                    value={tasks.runningCount > 0 ? 100 : (tasks.failedToday > 0 ? 50 : 0)}
+                    value={tasks.runningCount > 0 ? 100 : (tasks.failedToday > 0 ? 50 : (tasks.totalToday > 0 ? 80 : 0))}
                     label={`${tasks.runningCount} 运行中`}
                     sub={`今日失败 ${tasks.failedToday}`}
-                    color={tasks.runningCount > 0 ? '#1677ff' : tasks.failedToday > 0 ? '#faad14' : '#8c8c8c'}
-                    size={80}
+                    color={tasks.runningCount > 0 ? '#1677ff' : tasks.failedToday > 0 ? '#faad14' : tasks.totalToday > 0 ? '#52c41a' : '#8c8c8c'}
+                    size={72}
                   />
                 </div>
-                {tasks.last && (
-                  <Tooltip title={`${tasks.last.taskKey} · ${tasks.last.status} · ${fmtDuration(tasks.last.durationSec)}`}>
-                    <Text type="secondary" ellipsis style={{ fontSize: 11, display: 'block', textAlign: 'center' }}>
-                      最近: {tasks.last.taskKey} {tasks.last.status}
+                {/* 今日统计行 */}
+                <div style={{ display: 'flex', justifyContent: 'center', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+                  <Tag color="blue">总计 {tasks.totalToday}</Tag>
+                  <Tag color="green">成功 {tasks.successToday}</Tag>
+                  <Tag color={tasks.failedToday > 0 ? 'red' : 'default'}>失败 {tasks.failedToday}</Tag>
+                </div>
+                {/* 成功率 */}
+                {tasks.totalToday > 0 && (
+                  <div style={{ marginTop: 4, textAlign: 'center' }}>
+                    <Text type="secondary" style={{ fontSize: 11 }}>
+                      成功率{' '}
+                      <Text strong style={{
+                        fontSize: 13,
+                        color: (tasks.successToday / tasks.totalToday) >= 0.95 ? '#52c41a'
+                          : (tasks.successToday / tasks.totalToday) >= 0.8 ? '#faad14' : '#cf1322',
+                      }}>
+                        {(tasks.successToday / tasks.totalToday * 100).toFixed(1)}%
+                      </Text>
                     </Text>
-                  </Tooltip>
+                    <Progress
+                      percent={Math.round(tasks.successToday / tasks.totalToday * 100)}
+                      size="small"
+                      strokeColor={(tasks.successToday / tasks.totalToday) >= 0.95 ? '#52c41a'
+                        : (tasks.successToday / tasks.totalToday) >= 0.8 ? '#faad14' : '#cf1322'}
+                      style={{ margin: '2px 0' }}
+                    />
+                  </div>
+                )}
+                {/* 最近执行记录（迷你表） */}
+                {tasks.recentTasks && tasks.recentTasks.length > 0 && (
+                  <div style={{ marginTop: 6, fontSize: 11 }}>
+                    <Text type="secondary" style={{ fontSize: 11 }}>最近执行</Text>
+                    <div style={{ maxHeight: 100, overflowY: 'auto', marginTop: 2 }}>
+                      {tasks.recentTasks.map((t, i) => (
+                        <div key={`${t.taskKey}-${i}`} style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                          padding: '3px 4px', borderBottom: i < tasks.recentTasks.length - 1 ? '1px solid #f5f5f5' : 'none',
+                          borderRadius: 2,
+                        }}>
+                          <Tooltip title={`${t.taskKey} · ${t.status} · 开始${t.startTime?.replace('T', ' ') || '-'} · 耗时${fmtDuration(t.durationSec)}`}>
+                            <Text ellipsis style={{ maxWidth: 120, fontSize: 11 }}>{t.taskKey}</Text>
+                          </Tooltip>
+                          <Tag
+                            color={t.status === 'SUCCESS' ? 'green' : t.status === 'FAILED' ? 'red' : t.status === 'RUNNING' ? 'blue' : 'default'}
+                            style={{ marginLeft: 4, fontSize: 10, lineHeight: '16px', padding: '0 4px' }}
+                          >
+                            {t.status === 'SUCCESS' ? '成功' : t.status === 'FAILED' ? '失败' : t.status === 'RUNNING' ? '运行中' : t.status}
+                          </Tag>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 )}
               </Card>
             </Col>

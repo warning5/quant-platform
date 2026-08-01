@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
   Card, Table, Button, Space, Modal, Form, Input, InputNumber, Switch,
-  Tag, Popconfirm, App, Empty, Typography, Select, Row, Col,
+  Tag, Popconfirm, App, Empty, Typography, Select, Row, Col, ColorPicker,
 } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined } from '@ant-design/icons';
 import dictApi from '../../api/dict';
@@ -337,15 +337,15 @@ function DataModal({ open, title, editingData, initialValues, onCancel, onSubmit
             </Form.Item>
           </Col>
           <Col span={12}>
-            <Form.Item name="dictValue" label="值(dictValue)" rules={[{ required: true, message: '业务代码读取的值' }]}>
-              <Input disabled={!!editingData} placeholder="HIGH" />
+            <Form.Item name="dictValue" label="值(dictValue)" rules={[{ required: true, message: '请输入值' }]}>
+              <Input disabled={!!editingData} placeholder="请输入值，如 HIGH" />
             </Form.Item>
           </Col>
         </Row>
         <Row gutter={16}>
           <Col span={12}>
-            <Form.Item name="dictLabel" label="显示标签" rules={[{ required: true }]}>
-              <Input placeholder="高" />
+            <Form.Item name="dictLabel" label="显示标签" rules={[{ required: true, message: '请输入标签' }]}>
+              <Input placeholder="请输入标签，如 高" />
             </Form.Item>
           </Col>
           <Col span={12}>
@@ -356,8 +356,32 @@ function DataModal({ open, title, editingData, initialValues, onCancel, onSubmit
         </Row>
         <Row gutter={16}>
           <Col span={12}>
-            <Form.Item name="color" label="颜色（AntD 色名或 hex）">
-              <Input placeholder="red / #ff4d4f" />
+            <Form.Item
+              name="color"
+              label="颜色"
+              getValueProps={(val) => ({ value: val || undefined })}
+              getValueFromEvent={(color) => {
+                // ColorPicker 返回 Color 对象，取 hex 字符串；清空时返回空串
+                if (!color) return '';
+                return typeof color === 'string' ? color : color?.toHexString() || '';
+              }}
+            >
+              <ColorPicker
+                size="small"
+                showText
+                format="hex"
+                allowClear
+                presets={[
+                  { label: '常用', colors: [
+                    '#ff4d4f', '#ff7a45', '#ffa940', '#fadb14', '#52c41a',
+                    '#13c2c2', '#1677ff', '#2f54eb', '#722ed1', '#eb2f96',
+                  ]},
+                  { label: '灰度', colors: [
+                    '#000000', '#333333', '#666666', '#999999', '#cccccc', '#ffffff',
+                  ]},
+                ]}
+                style={{ width: '100%' }}
+              />
             </Form.Item>
           </Col>
           <Col span={12}>
