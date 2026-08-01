@@ -8,14 +8,9 @@ import {
 import api, { llmApi } from '../../api';
 import { useAuthStore } from '../../stores/authStore';
 import { message } from '../../utils/messageUtil';
+import { useDict } from '../../utils/useDict';
 
 const { Title, Text, Paragraph } = Typography;
-
-/** 风险等级颜色 */
-const RISK_COLORS = { LOW: 'green', MEDIUM: 'orange', HIGH: 'red' };
-const RISK_LABELS = { LOW: '低风险', MEDIUM: '中风险', HIGH: '高风险' };
-const REC_COLORS = { BUY: 'red', WATCH: 'orange', SKIP: 'default' };
-const REC_LABELS = { BUY: '建议买入', WATCH: '持续观察', SKIP: '暂不介入' };
 
 const LlmAnalysisPage = () => {
   const [analyses, setAnalyses] = useState([]);
@@ -25,6 +20,8 @@ const LlmAnalysisPage = () => {
   const [strategies, setStrategies] = useState([]);
   const [selectedStrategyId, setSelectedStrategyId] = useState(74);
   const canEdit = useAuthStore((s) => s.hasPermission('llm:edit'));
+  const { dictMap: riskMap } = useDict('LLM_RISK_LEVEL');
+  const { dictMap: recMap } = useDict('LLM_REC');
 
   useEffect(() => {
     fetchAnalyses();
@@ -172,8 +169,8 @@ const LlmAnalysisPage = () => {
               <Space>
                 <StockOutlined />
                 <span>{a.stockName} ({a.stockCode})</span>
-                <Tag color={REC_COLORS[a.recommendation]}>{REC_LABELS[a.recommendation] || a.recommendation}</Tag>
-                <Tag color={RISK_COLORS[a.riskLevel]}>{RISK_LABELS[a.riskLevel] || a.riskLevel}</Tag>
+                <Tag color={recMap[a.recommendation]?.color ?? 'default'}>{recMap[a.recommendation]?.dictLabel ?? a.recommendation}</Tag>
+                <Tag color={riskMap[a.riskLevel]?.color ?? 'default'}>{riskMap[a.riskLevel]?.dictLabel ?? a.riskLevel}</Tag>
               </Space>
             }
             extra={<Text type="secondary">{a.model} · {a.analysisDate}</Text>}

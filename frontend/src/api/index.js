@@ -54,9 +54,11 @@ api.interceptors.response.use(
       // HTTP 5xx / 429 等错误：统一友好提示（silent 模式不弹）
       if (!silent) message.error(FRIENDLY_ERRORS[status]);
     } else if (status === 401) {
-      // 登录态失效：清理本地 token 并跳回登录页
+      // 登录态失效：保存来源路径，清理本地 token 并跳回登录页
       clearAuth();
       if (window.location.pathname !== '/login') {
+        // 保存当前路径，登录成功后回跳（兼容 window.location.href 整页跳转无法携带 react-router state）
+        try { sessionStorage.setItem('redirect_after_login', window.location.pathname + window.location.search); } catch (_) {}
         if (!silent) message.error('登录已过期，请重新登录');
         window.location.href = '/login';
       }

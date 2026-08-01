@@ -14,7 +14,7 @@ import api, { factorApi } from '../../api';
 import { useAuthStore } from '../../stores/authStore';
 import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { useMarketThermometer } from '../../hooks/useMarketThermometer';
-import { CATEGORY_LABELS as CATEGORY_LABEL } from '../factors/constants';
+import { useDict } from '../../utils/useDict';
 import RollingBacktestModal from './RollingBacktestModal';
 
 const { Title, Text, Paragraph } = Typography;
@@ -28,34 +28,6 @@ const CATEGORY_COLOR = {
   LIQUIDITY: 'volcano', VOLUME_PRICE: 'geekblue', CUSTOM: 'default',
 };
 // 分类中文标签统一从 constants.js 导入（别名 CATEGORY_LABEL）
-
-const OUTLIER_OPTIONS = [
-  { value: 'NONE', label: '不处理' },
-  { value: 'MAD', label: '中位数去极值法' },
-  { value: 'SIGMA3', label: '3σ法' },
-  { value: 'PERCENTILE', label: '百分位截断' },
-];
-const NORMALIZE_OPTIONS = [
-  { value: 'NONE', label: '不处理' },
-  { value: 'ZSCORE', label: '标准化法 (Z-Score)' },
-  { value: 'MINMAX', label: 'Min-Max 归一化' },
-  { value: 'RANK', label: '百分位排名' },
-];
-const ORTHOGONAL_OPTIONS = [
-  { value: 'NONE', label: '不正交化' },
-  { value: 'SCHMIDT', label: '施密特正交化 (Gram-Schmidt)' },
-];
-const NEUTRALIZATION_OPTIONS = [
-  { value: 'NONE', label: '不中性化' },
-  { value: 'INDUSTRY', label: '行业中性化' },
-  { value: 'MARKET_CAP', label: '市值中性化' },
-  { value: 'BOTH', label: '行业+市值双重中性化' },
-];
-const WEIGHT_MODE_OPTIONS = [
-  { value: 'EQUAL', label: '等权（使用配置权重）' },
-  { value: 'IC', label: 'IC动态加权（近60日均值）' },
-  { value: 'IR', label: 'IR动态加权（信噪比）' },
-];
 
 /** 根据因子类型组合，给出中性化方式推荐 */
 function recommendNeutralization(factors, availableFactors) {
@@ -75,14 +47,6 @@ function recommendNeutralization(factors, availableFactors) {
   if (needMarketCap) return { method: 'MARKET_CAP', reason: '含流动性/波动率/量价因子，市值中性化（避免大小盘偏差）' };
   return { method: 'NONE', reason: '动量/技术/情绪类因子，无需中性化（方向性信号跨组可比）' };
 }
-const FILTER_OP_OPTIONS = [
-  { value: 'NONE', label: '无' },
-  { value: 'GT', label: '大于 (>)' },
-  { value: 'GTE', label: '大于等于 (≥)' },
-  { value: 'LT', label: '小于 (<)' },
-  { value: 'LTE', label: '小于等于 (≤)' },
-];
-
 /* ── 预设组合说明数据 ────────────────────────────────────────────── */
 /* ── 默认单条因子配置 ──────────────────────────────────────────────── */
 const DEFAULT_FACTOR = (factorCode) => ({
@@ -215,6 +179,15 @@ export default function StockScreen() {
   const { message } = App.useApp();
   const canEdit = useAuthStore((s) => s.hasPermission('screen:edit'));
   const canBacktest = useAuthStore((s) => s.hasPermission('strategy:edit'));
+
+  /* ── 字典（消费后端字典 API）────────────────────────────────── */
+  const { dictList: outlierList, dictMap: outlierMap } = useDict('SCREEN_OUTLIER');
+  const { dictList: normalizeList, dictMap: normalizeMap } = useDict('SCREEN_NORMALIZE');
+  const { dictList: orthogonalList, dictMap: orthogonalMap } = useDict('SCREEN_ORTHOGONAL');
+  const { dictList: neutralList, dictMap: neutralMap } = useDict('SCREEN_NEUTRAL');
+  const { dictList: weightModeList, dictMap: weightModeMap } = useDict('SCREEN_WEIGHT_MODE');
+  const { dictList: filterOpList, dictMap: filterOpMap } = useDict('SCREEN_FILTER_OP');
+  const { dictMap: factorCatMap } = useDict('FACTOR_CATEGORY');
   /* ── 可用因子 ──────────────────────────────────────────────────── */
   const [availableFactors, setAvailableFactors] = useState([]);
   const [loadingFactors, setLoadingFactors] = useState(false);
@@ -918,7 +891,7 @@ export default function StockScreen() {
                     return (
                       <tr key={idx} style={{ borderBottom: '1px solid #f5f5f5' }}>
                         <td style={tdStyle}>
-                          <Tooltip title={info ? `${info.factorName}（${CATEGORY_LABEL[info.category] || info.category}）` : f.factorCode}>
+                          <Tooltip title={info ? `${info.factorName}（${factorCatMap[info.category]?.dictLabel ?? info.category}）` : f.factorCode}>
                             <Select
                               value={f.factorCode}
                               size="small"
@@ -939,7 +912,7 @@ export default function StockScreen() {
                                       color={CATEGORY_COLOR[af.category] || 'default'}
                                       style={{ fontSize: 10, padding: '0 3px', margin: 0 }}
                                     >
-                                      {CATEGORY_LABEL[af.category] || af.category}
+                                      {factorCatMap[af.category]?.dictLabel ?? af.category}
                                     </Tag>
                                     <span>{af.factorCode}</span>
                                   </Space>
@@ -978,9 +951,9 @@ export default function StockScreen() {
                             value={f.filterOp} size="small" style={{ width: 100 }}
                             onChange={v => updateFactor(idx, { filterOp: v, filterValue: null })}
                           >
-                            {FILTER_OP_OPTIONS.map(o => (
-                              <Option key={o.value} value={o.value}>{o.label}</Option>
-                            ))}
+                            {filterOpList.length ? filterOpList.map(o => (
+                              <Option key={o.dictValue} value={o.dictValue}>{o.dictLabel}</Option>
+                            )) : null}
                           </Select>
                         </td>
                         <td style={tdStyle}>
@@ -1101,7 +1074,7 @@ export default function StockScreen() {
                   </Tooltip>
                 </div>
                 <Select value={globalOutlier} onChange={setGlobalOutlier} style={{ width: '100%' }} size="small">
-                  {OUTLIER_OPTIONS.map(o => <Option key={o.value} value={o.value}>{o.label}</Option>)}
+                  {outlierList.length ? outlierList.map(o => <Option key={o.dictValue} value={o.dictValue}>{o.dictLabel}</Option>) : null}
                 </Select>
               </Col>
 
@@ -1121,7 +1094,7 @@ export default function StockScreen() {
                   </Tooltip>
                 </div>
                 <Select value={globalNormalize} onChange={setGlobalNormalize} style={{ width: '100%' }} size="small">
-                  {NORMALIZE_OPTIONS.map(o => <Option key={o.value} value={o.value}>{o.label}</Option>)}
+                  {normalizeList.length ? normalizeList.map(o => <Option key={o.dictValue} value={o.dictValue}>{o.dictLabel}</Option>) : null}
                 </Select>
               </Col>
 
@@ -1161,7 +1134,7 @@ export default function StockScreen() {
                   </Tooltip>
                 </div>
                 <Select value={orthogonalMethod} onChange={setOrthogonalMethod} style={{ width: '100%' }} size="small">
-                  {ORTHOGONAL_OPTIONS.map(o => <Option key={o.value} value={o.value}>{o.label}</Option>)}
+                  {orthogonalList.length ? orthogonalList.map(o => <Option key={o.dictValue} value={o.dictValue}>{o.dictLabel}</Option>) : null}
                 </Select>
               </Col>
 
@@ -1178,7 +1151,7 @@ export default function StockScreen() {
                       style={{ marginLeft: 4, fontSize: 10, cursor: 'pointer', lineHeight: '16px' }}
                       onClick={() => setNeutralizationMethod(neutralizationRecommendation.method)}
                     >
-                      推荐: {NEUTRALIZATION_OPTIONS.find(o => o.value === neutralizationRecommendation.method)?.label}
+                      推荐: {neutralMap[neutralizationRecommendation.method]?.dictLabel ?? neutralizationRecommendation.method}
                     </Tag>
                   )}
                 </div>
@@ -1188,13 +1161,13 @@ export default function StockScreen() {
                   style={{ width: '100%' }}
                   size="small"
                 >
-                  {NEUTRALIZATION_OPTIONS.map(o => (
-                    <Option key={o.value} value={o.value}>
-                      {o.label === '不中性化' && neutralizationRecommendation && neutralizationRecommendation.method !== 'NONE' ? (
-                        <span>{o.label} <Text type="secondary" style={{ fontSize: 11 }}>（不推荐）</Text></span>
-                      ) : o.label}
+                  {neutralList.length ? neutralList.map(o => (
+                    <Option key={o.dictValue} value={o.dictValue}>
+                      {o.dictLabel === '不中性化' && neutralizationRecommendation && neutralizationRecommendation.method !== 'NONE' ? (
+                        <span>{o.dictLabel} <Text type="secondary" style={{ fontSize: 11 }}>（不推荐）</Text></span>
+                      ) : o.dictLabel}
                     </Option>
-                  ))}
+                  )) : null}
                 </Select>
               </Col>
               <Col span={12}>
@@ -1205,7 +1178,7 @@ export default function StockScreen() {
                   </Tooltip>
                 </div>
                 <Select value={weightMode} onChange={setWeightMode} style={{ width: '100%' }} size="small">
-                  {WEIGHT_MODE_OPTIONS.map(o => <Option key={o.value} value={o.value}>{o.label}</Option>)}
+                  {weightModeList.length ? weightModeList.map(o => <Option key={o.dictValue} value={o.dictValue}>{o.dictLabel}</Option>) : null}
                 </Select>
               </Col>
 
@@ -1395,13 +1368,13 @@ export default function StockScreen() {
                   <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
                     <span style={{ marginRight: 4 }}>筛选结果</span>
                     <Tag color="blue" style={{ marginRight: 0 }}>{direction === 'LONG' ? '做多' : '做空'}</Tag>
-                    <Tag color="purple">{OUTLIER_OPTIONS.find(o => o.value === globalOutlier)?.label}</Tag>
-                    <Tag color="cyan">{NORMALIZE_OPTIONS.find(o => o.value === globalNormalize)?.label}</Tag>
+                    <Tag color="purple">{outlierMap[globalOutlier]?.dictLabel ?? globalOutlier}</Tag>
+                    <Tag color="cyan">{normalizeMap[globalNormalize]?.dictLabel ?? globalNormalize}</Tag>
                     {orthogonalMethod !== 'NONE' && (
-                      <Tag color="magenta">{ORTHOGONAL_OPTIONS.find(o => o.value === orthogonalMethod)?.label}</Tag>
+                      <Tag color="magenta">{orthogonalMap[orthogonalMethod]?.dictLabel ?? orthogonalMethod}</Tag>
                     )}
                     {weightMode !== 'EQUAL' && (
-                      <Tag color="volcano">{WEIGHT_MODE_OPTIONS.find(o => o.value === weightMode)?.label}</Tag>
+                      <Tag color="volcano">{weightModeMap[weightMode]?.dictLabel ?? weightMode}</Tag>
                     )}
                   </div>
                 }

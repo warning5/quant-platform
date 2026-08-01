@@ -13,6 +13,7 @@ import ReactECharts from '../../components/LazyECharts';
 import { paperTradingApi, strategyApi, backtestApi } from '../../api';
 import { useMarketThermometer } from '../../hooks/useMarketThermometer';
 import { useAuthStore } from '../../stores/authStore';
+import { useDict } from '../../utils/useDict';
 
 const { Text, Title } = Typography;
 const fmt = v => v != null ? (+v).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '-';
@@ -273,16 +274,11 @@ function CreateModal({ visible, onClose, onCreated }) {
   );
 }
 
-// ─── 预警类型映射 ─────────────────────────────────────────────────────────────
-const ALERT_TYPE_MAP = {
-  MA_BREAK: '均线破位', DROP: '大跌', NOTICE: '公告', REPORT: '研报',
-  RISK_CONCENTRATION: '集中度风险', RISK_INDUSTRY: '行业暴露', RISK_DRAWDOWN: '回撤超限',
-};
-const EVENT_TYPE_MAP = { EVENT_INCREASE: '定增', EVENT_UNLOCK: '解禁', EVENT_INCENTIVE: '股权激励', EVENT_FORECAST: '业绩预告', EVENT快报: '业绩快报' };
-
 // ─── 模拟盘详情 ───────────────────────────────────────────────────────────────
 function PaperDetail({ paperId, onBack }) {
   const [loading, setLoading] = useState(true);
+  const { dictMap: alertDictMap } = useDict('ALERT_TYPE');
+  const { dictMap: eventDictMap } = useDict('EVENT_TYPE');
   const [data, setData] = useState(null);
   const [signals, setSignals] = useState([]);
   const [genLoading, setGenLoading] = useState(false);
@@ -870,13 +866,8 @@ function PaperDetail({ paperId, onBack }) {
                         {
                           title: '类型', dataIndex: 'alertType', width: 90,
                           render: v => {
-                            const map = {
-                              MA_BREAK: '均线破位', DROP: '大跌', NOTICE: '公告', REPORT: '研报',
-                              RISK_CONCENTRATION: '集中度', RISK_INDUSTRY: '行业暴露', RISK_DRAWDOWN: '回撤',
-                              EVENT_INCREASE: '定增', EVENT_UNLOCK: '解禁', EVENT_INCENTIVE: '股权激励',
-                              EVENT_FORECAST: '业绩预告', EVENT_EXPRESS: '业绩快报',
-                            };
-                            return map[v] || (v?.startsWith('EVENT_') ? '事件驱动' : v);
+                            const label = alertDictMap[v]?.dictLabel ?? eventDictMap[v]?.dictLabel ?? (v?.startsWith('EVENT_') ? '事件驱动' : v);
+                            return label;
                           },
                         },
                         {

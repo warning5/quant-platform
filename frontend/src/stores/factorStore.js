@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { factorApi } from '../api';
-import { CATEGORY_LABELS } from '../pages/factors/constants';
+import dictApi from '../api/dict';
 
 /**
  * 全局因子元信息 Zustand Store
@@ -20,17 +20,22 @@ const useFactorStore = create((set, get) => ({
 
     set({ loading: true });
     try {
-      const res = await factorApi.getAllDefinitions();
+      const [res, catRes] = await Promise.all([
+        factorApi.getAllDefinitions(),
+        dictApi.listData('FACTOR_CATEGORY'),
+      ]);
       const content = res?.records || res?.content || res || [];
       const list = Array.isArray(content) ? content : [];
 
       // 构建 factorCode -> 元信息映射
+      const catMap = {};
+      (Array.isArray(catRes) ? catRes : []).forEach((d) => { catMap[d.dictValue] = d.dictLabel; });
       const meta = {};
       for (const f of list) {
         const code = f.factorCode;
         const category = f.category;
         meta[code] = {
-          cat: CATEGORY_LABELS[category] || category || '',
+          cat: catMap[category] || category || '',
           desc: f.factorName || f.description || code,
           category,
           factorName: f.factorName || '',

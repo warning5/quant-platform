@@ -8,39 +8,14 @@ import {
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import ReactECharts from '../../components/LazyECharts';
 import { backtestApi } from '../../api';
+import { useDict } from '../../utils/useDict';
 
 const { Title, Text } = Typography;
 
-const STATUS_COLOR = {
-  COMPLETED: 'green',
-  RUNNING: 'blue',
-  FAILED: 'red',
-  CANCELLED: 'default',
-  PENDING: 'orange',
-};
-
-// 调仓频率中文映射
-const FREQ_LABEL = {
-  WEEKLY: '每周',
-  BIWEEKLY: '每两周',
-  MONTHLY: '每月',
-};
-
 // 权重分配中文映射
-const WEIGHT_MODE_LABEL = {
-  EQUAL: '等权',
-  SCORE_PROPORTIONAL: '按得分比例',
-};
 const WEIGHT_MODE_TOOLTIP = {
   EQUAL: '每只入选股票分配相同权重，不区分因子得分高低',
   SCORE_PROPORTIONAL: '因子得分越高的股票获得越多仓位。权重 = 该股得分 ÷ 所有入选股得分之和',
-};
-
-// 成交价模式中文映射
-const ORDER_TYPE_LABEL = {
-  CLOSE: '收盘价',
-  NEXT_OPEN: '次日开盘价',
-  VWAP: '成交量加权均价',
 };
 
 const PCT = (v) => v != null ? `${(v * 100).toFixed(2)}%` : '-';
@@ -73,6 +48,7 @@ function ScreenConfigCard({ screenConfigJson }) {
 
   const [expanded, setExpanded] = useState(false);
   const navigate = useNavigate();
+  const { dictMap: opMap } = useDict('ROLLING_OP');
   const factors = Array.isArray(config.factors) ? config.factors : [];
   const maFilter = config.maPositionFilter || null;
   const isMultiDay = !!(config.screenStartDate && config.screenEndDate);
@@ -229,10 +205,9 @@ function ScreenConfigCard({ screenConfigJson }) {
                     title: '过滤条件', width: 160,
                     render: (_, r) => {
                       if (!r.filterOp || r.filterOp === 'NONE') return <Text type="secondary">-</Text>;
-                      const OP_LABEL = { GT: '>', GTE: '≥', LT: '<', LTE: '≤', EQ: '=' };
                       return (
                         <Text code>
-                          {OP_LABEL[r.filterOp] || r.filterOp} {r.filterValue != null ? r.filterValue : ''}
+                          {opMap[r.filterOp]?.dictLabel ?? r.filterOp} {r.filterValue != null ? r.filterValue : ''}
                         </Text>
                       );
                     },
@@ -259,6 +234,10 @@ export function ReportDetail({ taskId, onBack }) {
   const [curveData, setCurveData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [polling, setPolling] = useState(false);
+  const { dictMap: statusMap } = useDict('BACKTEST_STATUS');
+  const { dictMap: freqMap } = useDict('ROLLING_FREQ');
+  const { dictMap: weightModeMap } = useDict('ROLLING_WEIGHT_MODE');
+  const { dictMap: orderTypeMap } = useDict('ROLLING_ORDER_TYPE');
 
   const fetchAll = useCallback(async () => {
     try {
@@ -457,7 +436,7 @@ export function ReportDetail({ taskId, onBack }) {
         title={
           <Space>
             <span style={{ fontWeight: 600 }}>{task.taskName}</span>
-            <Tag color={STATUS_COLOR[task.status] ?? 'default'}>{task.status}</Tag>
+            <Tag color={statusMap[task.status]?.color ?? 'default'}>{task.status}</Tag>
             {polling && <Spin size="small" />}
           </Space>
         }
@@ -468,9 +447,9 @@ export function ReportDetail({ taskId, onBack }) {
         )}
         <Descriptions column={{ xxl: 4, xl: 3, lg: 2, md: 2, sm: 1 }} size="small" bordered>
           <Descriptions.Item label="回测区间">{task.startDate} ~ {task.endDate}</Descriptions.Item>
-          <Descriptions.Item label="调仓频率">{FREQ_LABEL[task.rebalanceFreq] ?? task.rebalanceFreq}</Descriptions.Item>
+          <Descriptions.Item label="调仓频率">{freqMap[task.rebalanceFreq]?.dictLabel ?? task.rebalanceFreq}</Descriptions.Item>
           <Descriptions.Item label="权重模式">
-            {WEIGHT_MODE_LABEL[task.weightMode] ?? task.weightMode}
+            {weightModeMap[task.weightMode]?.dictLabel ?? task.weightMode}
             <Tooltip title={WEIGHT_MODE_TOOLTIP[task.weightMode] || `${task.weightMode} 模式`}>
               <QuestionCircleOutlined style={{ marginLeft: 4, color: '#999', fontSize: 12 }} />
             </Tooltip>
@@ -484,7 +463,7 @@ export function ReportDetail({ taskId, onBack }) {
                 <QuestionCircleOutlined style={{ color: '#999', marginLeft: 4 }} />
               </Tooltip>
             </span>
-          }>{ORDER_TYPE_LABEL[task.orderType] ?? task.orderType}</Descriptions.Item>
+          }>{orderTypeMap[task.orderType]?.dictLabel ?? task.orderType}</Descriptions.Item>
           <Descriptions.Item label="创建时间">{task.createdAt?.replace('T', ' ')}</Descriptions.Item>
         </Descriptions>
         {task.status === 'FAILED' && (
@@ -779,6 +758,8 @@ function RollingBacktestList({ onSelect }) {
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const { dictMap: statusMap } = useDict('BACKTEST_STATUS');
+  const { dictMap: freqMap } = useDict('ROLLING_FREQ');
 
   const loadTasks = useCallback(() => {
     setLoading(true);
@@ -864,14 +845,14 @@ function RollingBacktestList({ onSelect }) {
             },
             {
               title: '状态', dataIndex: 'status', width: 100, align: 'center',
-              render: s => <Tag color={STATUS_COLOR[s] ?? 'default'}>{s}</Tag>,
+              render: s => <Tag color={statusMap[s]?.color ?? 'default'}>{s}</Tag>,
             },
             {
               title: '回测区间', width: 220,
               render: (_, r) => `${r.startDate} ~ ${r.endDate}`,
             },
             { title: '频率', dataIndex: 'rebalanceFreq', width: 90, align: 'center',
-              render: v => FREQ_LABEL[v] ?? v },
+              render: v => freqMap[v]?.dictLabel ?? v },
             {
               title: '选股策略', width: 180, ellipsis: true,
               render: (_, r) => {

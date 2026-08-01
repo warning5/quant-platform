@@ -1,24 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { Card, Table, Tag, Space, Typography, Row, Col, Statistic, Input, Button, Popconfirm, Spin, Tooltip, DatePicker, Select } from 'antd';
 import { message } from '../../utils/messageUtil';
+import { useDict } from '../../utils/useDict';
 import { SearchOutlined, ReloadOutlined, FileTextOutlined, BankOutlined, CalendarOutlined, QuestionCircleOutlined, DeleteOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { researchApi, silentConfig } from '../../api';
 
 const { Title, Text } = Typography;
-
-// 评级颜色映射
-const RATING_COLORS = {
-  '买入': 'red',
-  '强烈推荐': 'volcano',
-  '推荐': 'orange',
-  '增持': 'gold',
-  '中性': 'blue',
-  '持有': 'cyan',
-  '减持': 'green',
-  '卖出': 'purple',
-};
-const RATING_OPTIONS = ['全部', ...Object.keys(RATING_COLORS)];
 
 const { Option } = Select;
 
@@ -35,6 +23,11 @@ function parseForecast(epsForecast) {
 }
 
 function ResearchData() {
+  const { dictMap, dictList } = useDict('RESEARCH_RATING');
+  const ratingOptions = [
+    { value: '全部', label: '全部' },
+    ...(dictList.length ? dictList.map(d => ({ value: d.dictValue, label: d.dictLabel, color: d.color })) : []),
+  ];
   const [overview, setOverview] = useState(null);
   const [loading, setLoading] = useState(true);
   const [reports, setReports] = useState([]);
@@ -139,7 +132,7 @@ function ResearchData() {
     { title: '报告标题', dataIndex: 'reportTitle', width: 280, ellipsis: true,
       render: (title) => title || '-' },
     { title: '评级', dataIndex: 'rating', width: 100, align: 'center',
-      render: (rating) => rating ? <Tag color={RATING_COLORS[rating] || 'default'}>{rating}</Tag> : '-' },
+      render: (rating) => rating ? <Tag color={dictMap[rating]?.color ?? 'default'}>{rating}</Tag> : '-' },
     { title: '机构', dataIndex: 'institution', width: 150, ellipsis: true },
     { title: '行业', dataIndex: 'industry', width: 120, ellipsis: true },
     { title: <Tooltip title={epsTip} classNames={{ root: 'tip-light' }} styles={{ root: { maxWidth: 420 } }}><span style={{ cursor: 'pointer' }}>EPS预测<QuestionCircleOutlined style={{ fontSize: 12, marginLeft: 4 }} /></span></Tooltip>, key: 'eps', width: 220, align: 'right',
@@ -233,7 +226,7 @@ function ResearchData() {
               allowClear style={{ width: 240 }} />
             <Select placeholder="按评级" value={rating || '全部'} onChange={val => setRating(val === '全部' ? '' : val)}
               style={{ width: 120 }}>
-              {RATING_OPTIONS.map(r => <Option key={r} value={r}>{r}</Option>)}
+              {ratingOptions.map(r => <Option key={r.value} value={r.value}>{r.label}</Option>)}
             </Select>
             <Button type="primary" icon={<SearchOutlined />} onClick={() => fetchReports(1)}>搜索</Button>
             <Button icon={<ReloadOutlined />} onClick={() => { setKeyword(''); setDateRange(null); setRating(''); fetchReports(1); }}>重置</Button>

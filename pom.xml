@@ -20,7 +20,8 @@
 
     <modules>
         <module>common</module>
-        <module>backend</module>
+        <module>platform-core</module>
+        <module>stock-service</module>
         <module>backend-mp</module>
     </modules>
 

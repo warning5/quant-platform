@@ -7,7 +7,7 @@ import {
 } from '@ant-design/icons';
 import ReactECharts from '../../components/LazyECharts';
 import { factorApi } from '../../api';
-import { CATEGORY_LABELS as categoryNames } from './constants';
+import { useDict } from '../../utils/useDict';
 
 const { Text, Title } = Typography;
 const fmtPct = (v, d = 2) => v != null ? `${(+v * 100).toFixed(d)}%` : '-';
@@ -225,7 +225,7 @@ const checkFactorDiversity = (codes, factorList) => {
   
   // 情况1：所有因子都是同一类别
   if (uniqueCategories.length === 1 && codes.length > 1) {
-    const cnName = categoryNames[uniqueCategories[0]] || uniqueCategories[0];
+    const cnName = factorCatMap[uniqueCategories[0]]?.dictLabel ?? uniqueCategories[0];
     return `您选择的因子均为同一类别（${cnName}），建议搭配不同类别的因子（如动量+价值+质量）以获得更好的分散效果`;
   }
   
@@ -236,7 +236,7 @@ const checkFactorDiversity = (codes, factorList) => {
   const maxCategory = Object.keys(categoryCounts).find(k => categoryCounts[k] === maxCount);
   
   if (maxCount >= 2 && maxCount / codes.length >= 0.6) {
-    const cnName = categoryNames[maxCategory] || maxCategory;
+    const cnName = factorCatMap[maxCategory]?.dictLabel ?? maxCategory;
     return `${maxCount}个因子属于${cnName}类，占比过高。建议搭配不同风格的因子以降低相关性`;
   }
   
@@ -245,6 +245,7 @@ const checkFactorDiversity = (codes, factorList) => {
 
 export default function FactorWeightOptimizePanel({ defaultFactorCodes = [] }) {
   const [factorList, setFactorList] = useState([]);
+  const { dictMap: factorCatMap } = useDict('FACTOR_CATEGORY');
   const [selectedCodes, setSelectedCodes] = useState(defaultFactorCodes);
   const [method, setMethod] = useState('MARKOWITZ');
   const [startDate, setStartDate] = useState('2025-01-01');
@@ -432,12 +433,12 @@ export default function FactorWeightOptimizePanel({ defaultFactorCodes = [] }) {
             options={factorList.map(f => ({
               value: f.factorCode,
               label: `${f.factorCode} — ${f.factorName}`,
-              searchText: `${f.factorCode} ${f.factorName} ${categoryNames[f.category] || ''}`,
+              searchText: `${f.factorCode} ${f.factorName} ${factorCatMap[f.category]?.dictLabel || ''}`,
               disabled: WEIGHT_OPTIMIZE_UNSUITABLE.has(f.factorCode),
             }))}
             optionRender={(opt) => {
               const f = factorList.find(ff => ff.factorCode === opt.value);
-              const cat = f?.category ? categoryNames[f.category] || f.category : null;
+              const cat = f?.category ? factorCatMap[f.category]?.dictLabel ?? f.category : null;
               const unsuitable = WEIGHT_OPTIMIZE_UNSUITABLE.has(opt.value);
               return (
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, opacity: unsuitable ? 0.45 : 1 }}>

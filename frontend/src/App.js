@@ -6,11 +6,12 @@ import {
   MenuFoldOutlined, MenuUnfoldOutlined,
   MoonOutlined, SunOutlined,
   LogoutOutlined, AppstoreOutlined,
-  DashboardOutlined, UserOutlined,
+  DashboardOutlined, UserOutlined, SettingOutlined,
 } from '@ant-design/icons';
 import { useAuthStore } from './stores/authStore';
 import { ICON_MAP } from './utils/iconMap';
 import RequireAuth from './components/RequireAuth';
+import monitorApi from './api/monitor';
 
 // ── 页面懒加载（React.lazy + Suspense）──
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -56,6 +57,10 @@ const AuditLog = lazy(() => import('./pages/system/AuditLog'));
 const CredentialManage = lazy(() => import('./pages/system/CredentialManage'));
 const DataPermissionManage = lazy(() => import('./pages/system/DataPermissionManage'));
 const DepartmentManage = lazy(() => import('./pages/system/DepartmentManage'));
+const DictManage = lazy(() => import('./pages/system/DictManage'));
+const ConfigCenter = lazy(() => import('./pages/system/ConfigCenter'));
+const SystemMonitor = lazy(() => import('./pages/system/SystemMonitor'));
+const OnlineUser = lazy(() => import('./pages/system/OnlineUser'));
 
 // 在菜单树中查找当前路由对应的所有祖先目录 key（用于自动展开）
 function findOpenKeys(nodes, pathname, trail = []) {
@@ -134,6 +139,13 @@ function AppLayout({ isDark, setIsDark }) {
     const keys = findOpenKeys(menus, location.pathname);
     if (keys) setOpenKeys(keys);
   }, [location.pathname, menus]);
+
+  // 行为统计埋点：路由切换时上报当前页面路径（失败静默，不影响导航）
+  useEffect(() => {
+    if (location.pathname && location.pathname !== '/login') {
+      monitorApi.track(location.pathname).catch(() => {});
+    }
+  }, [location.pathname]);
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -340,6 +352,10 @@ function AppLayout({ isDark, setIsDark }) {
               <Route path="/credentials" element={<CredentialManage />} />
               <Route path="/data-permissions" element={<DataPermissionManage />} />
               <Route path="/system/departments" element={<DepartmentManage />} />
+              <Route path="/system/dict" element={<DictManage />} />
+              <Route path="/system/config" element={<ConfigCenter />} />
+              <Route path="/system/monitor" element={<SystemMonitor />} />
+              <Route path="/system/online" element={<OnlineUser />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </Suspense>

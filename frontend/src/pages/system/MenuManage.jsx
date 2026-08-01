@@ -5,9 +5,7 @@ import { menuApi } from '../../api/system';
 import { useAuthStore } from '../../stores/authStore';
 import { message as msg } from '../../utils/messageUtil';
 import { ICON_MAP, ICON_OPTIONS, COMPONENT_OPTIONS } from '../../utils/iconMap';
-
-const TYPE_LABEL = { 0: '目录', 1: '菜单', 2: '按钮' };
-const TYPE_COLOR = { 0: 'blue', 1: 'green', 2: 'orange' };
+import { useDict } from '../../utils/useDict';
 
 function toTreeSelect(nodes, disableId) {
   return (nodes || []).map((n) => ({
@@ -34,6 +32,7 @@ function filterTree(nodes, kw) {
 }
 
 export default function MenuManage() {
+  const { dictMap } = useDict('MENU_TYPE');
   const [form] = Form.useForm();
   const [data, setData] = useState([]);
   const [tree, setTree] = useState([]);
@@ -105,7 +104,7 @@ export default function MenuManage() {
       title: '类型',
       dataIndex: 'menuType',
       width: 90,
-      render: (t) => <Tag color={TYPE_COLOR[t]}>{TYPE_LABEL[t]}</Tag>,
+      render: (t) => <Tag color={dictMap[String(t)]?.color ?? 'default'}>{dictMap[String(t)]?.dictLabel ?? t}</Tag>,
     },
     { title: '路由', dataIndex: 'path' },
     {

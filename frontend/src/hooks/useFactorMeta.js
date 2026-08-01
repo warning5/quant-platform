@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { factorApi } from '../api';
-import { CATEGORY_LABELS } from '../pages/factors/constants';
+import { useDict } from '../utils/useDict';
 
 /**
  * 全局因子元信息 Hook
@@ -15,6 +15,7 @@ import { CATEGORY_LABELS } from '../pages/factors/constants';
 export function useFactorMeta() {
   const [factorList, setFactorList] = useState([]);
   const [loading, setLoading] = useState(true);
+  const { dictMap } = useDict('FACTOR_CATEGORY');
 
   useEffect(() => {
     factorApi.getAllDefinitions()
@@ -32,7 +33,7 @@ export function useFactorMeta() {
     const code = f.factorCode;
     const category = f.category; // 枚举值，如 MOMENTUM / VALUE
     factorMeta[code] = {
-      cat: CATEGORY_LABELS[category] || category || '',
+      cat: dictMap[category]?.dictLabel ?? category ?? '',
       desc: f.factorName || f.description || code,
       category,
       factorName: f.factorName || '',

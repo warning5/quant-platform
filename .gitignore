@@ -1,9 +1,10 @@
 /frontend/node_modules/
-/backend/.idea/
-/backend/target/
+/stock-service/.idea/
+/stock-service/target/
 /.idea/
-/backend/logs/
-/backend/scripts/
+/stock-service/logs/
+/stock-service/scripts/
+/stock-service-start.log
 /.workbuddy/
 /logs/
 .env
@@ -37,3 +38,4 @@ nul*
 /backend-mp/target/
 /common/target/
 /opc-doc/
+/platform-core/target/

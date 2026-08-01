@@ -6,27 +6,10 @@ import {
 import { ReloadOutlined, BellOutlined, SendOutlined, WarningOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import taskHistoryApi from '../../api/taskHistory';
+import useDict from '../../utils/useDict';
 
 const { RangePicker } = DatePicker;
 
-// 状态 -> 颜色
-const STATUS_COLOR = {
-  RUNNING: 'processing',
-  SUCCESS: 'success',
-  FAILED: 'error',
-  TIMEOUT: 'error',
-  PARTIAL: 'warning',
-  CANCELLED: 'default',
-};
-const STATUS_LABEL = {
-  RUNNING: '运行中',
-  SUCCESS: '成功',
-  FAILED: '失败',
-  TIMEOUT: '超时',
-  PARTIAL: '部分成功',
-  CANCELLED: '已取消',
-};
-const TRIGGER_LABEL = { CRON: '定时', MANUAL: '手动', DEPENDENCY: '依赖触发' };
 const SEVERITY_COLOR = { HIGH: 'red', MEDIUM: 'orange', LOW: 'blue' };
 
 export default function TaskRunHistory() {
@@ -41,6 +24,9 @@ export default function TaskRunHistory() {
   const [notif, setNotif] = useState({ channel: 'none', enabled: false });
   const [notifForm] = Form.useForm();
   const [savingNotif, setSavingNotif] = useState(false);
+
+  const { dictMap: statusMap, dictList: statusList } = useDict('TASK_STATUS');
+  const { dictMap: triggerMap, dictList: triggerList } = useDict('TASK_TRIGGER_TYPE');
 
   // ── 加载历史 ──
   const loadList = useCallback(async () => {
@@ -122,11 +108,11 @@ export default function TaskRunHistory() {
     { title: '名称', dataIndex: 'taskName', width: 140, ellipsis: true, render: (v) => v || '-' },
     {
       title: '触发', dataIndex: 'triggerType', width: 90,
-      render: (v) => <Tag>{TRIGGER_LABEL[v] || v || '-'}</Tag>,
+      render: (v) => <Tag>{triggerMap[v]?.dictLabel ?? (v || '-')}</Tag>,
     },
     {
       title: '状态', dataIndex: 'status', width: 100,
-      render: (v) => <Tag color={STATUS_COLOR[v] || 'default'}>{STATUS_LABEL[v] || v}</Tag>,
+      render: (v) => <Tag color={statusMap[v]?.color ?? 'default'}>{statusMap[v]?.dictLabel ?? v}</Tag>,
     },
     {
       title: '开始', dataIndex: 'startTime', width: 160,
@@ -169,13 +155,13 @@ export default function TaskRunHistory() {
                 placeholder="状态" allowClear style={{ width: 110 }}
                 value={filters.status}
                 onChange={(v) => setFilters((f) => ({ ...f, status: v }))}
-                options={Object.keys(STATUS_LABEL).map((k) => ({ value: k, label: STATUS_LABEL[k] }))}
+                options={statusList.length ? statusList.map((d) => ({ value: d.dictValue, label: d.dictLabel, color: d.color })) : []}
               />
               <Select
                 placeholder="触发" allowClear style={{ width: 110 }}
                 value={filters.triggerType}
                 onChange={(v) => setFilters((f) => ({ ...f, triggerType: v }))}
-                options={Object.keys(TRIGGER_LABEL).map((k) => ({ value: k, label: TRIGGER_LABEL[k] }))}
+                options={triggerList.length ? triggerList.map((d) => ({ value: d.dictValue, label: d.dictLabel, color: d.color })) : []}
               />
               <RangePicker value={filters.range} onChange={(v) => setFilters((f) => ({ ...f, range: v }))} />
               <Button icon={<ReloadOutlined />} onClick={loadList}>查询</Button>
@@ -204,10 +190,17 @@ export default function TaskRunHistory() {
         <Row gutter={[12, 12]}>
           {sla.map((s) => (
             <Col xs={24} sm={12} md={8} key={s.taskKey}>
-              <Card size="small" title={s.taskName || s.taskKey}>
+              <Card size="small"
+                title={
+                  <span>
+                    {s.taskName || s.taskKey}
+                    {s.slaConfigured !== 1 && <Tag color="default" style={{ marginLeft: 6 }}>未设SLA</Tag>}
+                  </span>
+                }
+              >
                 <Descriptions column={1} size="small">
                   <Descriptions.Item label="今日状态">
-                    <Tag color={STATUS_COLOR[s.lastStatus] || 'default'}>{STATUS_LABEL[s.lastStatus] || '未执行'}</Tag>
+                    <Tag color={statusMap[s.lastStatus]?.color ?? 'default'}>{statusMap[s.lastStatus]?.dictLabel ?? '未执行'}</Tag>
                   </Descriptions.Item>
                   <Descriptions.Item label="期望完成">
                     {s.expectedFinishHour != null ? `${s.expectedFinishHour}:00 前` : '不限'}
@@ -216,10 +209,14 @@ export default function TaskRunHistory() {
                     {s.maxDurationMin != null ? `${s.maxDurationMin} 分钟` : '不限'}
                   </Descriptions.Item>
                   <Descriptions.Item label="级别">
-                    <Tag color={SEVERITY_COLOR[s.severity]}>{s.severity}</Tag>
+                    <Tag color={s.severityColor || SEVERITY_COLOR[s.severity]}>{s.severity}</Tag>
                   </Descriptions.Item>
                   <Descriptions.Item label="SLA">
-                    {s.slaMet ? <Tag color="success">达标</Tag> : <Tag color="error">未达标</Tag>}
+                    {s.slaConfigured !== 1
+                      ? <Tag color="default">未设SLA（仅展示运行）</Tag>
+                      : s.slaMet
+                        ? <Tag color="success">达标</Tag>
+                        : <Tag color="error">未达标</Tag>}
                   </Descriptions.Item>
                 </Descriptions>
                 {s.errorMsg && <Alert type="error" showIcon message={s.errorMsg} style={{ marginTop: 8 }} />}

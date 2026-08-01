@@ -4,16 +4,13 @@ import { message } from '../../utils/messageUtil';
 import { PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined, PlayCircleOutlined, ClearOutlined, SearchOutlined, CalculatorOutlined, ThunderboltOutlined, DownloadOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { factorApi } from '../../api';
-import { CATEGORY_OPTIONS, CATEGORY_LABELS } from './constants';
+import { useDict } from '../../utils/useDict';
 import { exportCsv } from '../../utils/exportUtil';
 import dayjs from 'dayjs';
 import { useAuthStore } from '../../stores/authStore';
 
 const { Title } = Typography;
 const { Option } = Select;
-const STATUS_COLORS = { DRAFT:'default', TESTING:'processing', ACTIVE:'success', DEPRECATED:'default', DEGRADED:'error' };
-const STATUS_LABELS = { DRAFT:'草稿', TESTING:'测试中', ACTIVE:'已激活', DEPRECATED:'已废弃', DEGRADED:'已降级' };
-const TYPE_LABELS = { BUILTIN:'内置', SCRIPTED:'脚本', COMPOSITE:'合成' };
 
 /**
  * 格式化因子值数量
@@ -29,6 +26,8 @@ export default function FactorList() {
   const navigate = useNavigate();
   const canEdit = useAuthStore((s) => s.hasPermission('factor:edit'));
   const canDelete = useAuthStore((s) => s.hasPermission('factor:delete'));
+  const { dictMap: statusMap, dictList: statusList } = useDict('FACTOR_STATUS');
+  const { dictMap: categoryMap, dictList: categoryList } = useDict('FACTOR_CATEGORY');
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState({ records: [], total: 0 });
   const [params, setParams] = useState({ page: 0, size: 15, keyword: '', category: undefined, status: undefined });
@@ -165,7 +164,7 @@ export default function FactorList() {
     if (!canEdit) { message.warning('无权限修改因子状态'); return; }
     const newStatus = record.status === 'ACTIVE' ? 'DRAFT' : 'ACTIVE';
     factorApi.changeStatus(record.id, newStatus).then(() => {
-      message.success(`状态已更新为 ${STATUS_LABELS[newStatus]}`);
+      message.success(`状态已更新为 ${statusMap[newStatus]?.dictLabel ?? newStatus}`);
       fetchData(params);
     });
   };
@@ -253,11 +252,11 @@ export default function FactorList() {
   const columns = [
     { title: '因子代码', dataIndex: 'factorCode', key: 'code', width: 220, render: v => <Tag color="blue">{v}</Tag> },
     { title: '因子名称', dataIndex: 'factorName', key: 'name', width: 150, ellipsis: true },
-    { title: '分类', dataIndex: 'category', key: 'cat', width: 110, render: v => <Tag>{CATEGORY_LABELS[v] || v}</Tag> },
+    { title: '分类', dataIndex: 'category', key: 'cat', width: 110, render: v => <Tag>{categoryMap[v]?.dictLabel ?? v}</Tag> },
     { title: '计算状态', key: 'calcStatus', width: 300, render: renderCalcStatus },
     {
       title: '状态', dataIndex: 'status', key: 'st', width: 80,
-      render: v => <Tag color={STATUS_COLORS[v]}>{STATUS_LABELS[v] || v}</Tag>
+      render: v => <Tag color={statusMap[v]?.color ?? 'default'}>{statusMap[v]?.dictLabel ?? v}</Tag>
     },
     { title: '创建人', dataIndex: 'author', key: 'author', width: 80 },
     {
@@ -308,12 +307,12 @@ export default function FactorList() {
           <Select
             placeholder="因子分类" allowClear style={{ width: 140 }}
             onChange={v => { const p = { ...params, category: v, page: 0 }; setParams(p); fetchData(p); }}>
-            {CATEGORY_OPTIONS.map(c => <Option key={c} value={c}>{CATEGORY_LABELS[c] || c}</Option>)}
+            {categoryList.length ? categoryList.map(d => <Option key={d.dictValue} value={d.dictValue}>{d.dictLabel}</Option>) : []}
           </Select>
           <Select
             placeholder="状态" allowClear style={{ width: 110 }}
             onChange={v => { const p = { ...params, status: v, page: 0 }; setParams(p); fetchData(p); }}>
-            {Object.entries(STATUS_LABELS).map(([k, v]) => <Option key={k} value={k}>{v}</Option>)}
+            {statusList.length ? statusList.map(d => <Option key={d.dictValue} value={d.dictValue}>{d.dictLabel}</Option>) : []}
           </Select>
           <span style={{ color: '#999', marginLeft: 8 }}>|</span>
           <DatePicker

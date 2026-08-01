@@ -1,63 +1,71 @@
+import { useMemo } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Result, Button } from 'antd';
 import { useAuthStore } from '../stores/authStore';
 
 /**
- * 路由 → 所需后端 view 权限
- * key 取路由前两段（/system/* 取两段，其余取首段），与 Controller 类级 @SaCheckPermission 一一对应。
- * 未列出的路由（如 /manual/full 用户手册）保持放行（fail-open），由后端接口 403 兜底。
+ * 路由级权限守卫（数据驱动，无硬编码）。
+ *
+ * 设计：权限映射完全来自后端 /auth/me 返回的菜单树（每个菜单节点带 path + permission，
+ * 与 Controller 类级 @SaCheckPermission 一一对应）。新增/调整菜单权限只改后端 DB，
+ * 前端零改动。
+ *
+ * 匹配规则：对当前路由逐级回退取候选 path（/a/b/c → /a/b/c → /a/b → /a），
+ * 命中菜单树中任一节点的 path 即取其 permission 做校验。
+ *
+ * 未命中任何菜单节点的路由（如 /manual/full 用户手册）fail-open 放行，由后端接口 403 兜底。
+ * 菜单尚未加载完成（menus 为空）时也放行，避免启动空窗误挡；加载后 store 变化会触发重渲染拦截。
  */
-const ROUTE_PERMISSIONS = {
-  '/market': 'market:view',
-  '/market-thermometer': 'market:view',
-  '/sector-ranking': 'market:view',
-  '/data-detail/research': 'research:view',
-  '/data-detail/financial': 'financial:view',
-  '/data-update': 'data:view',
-  '/scheduled-tasks': 'data:view',
-  '/data-quality': 'data:view',
-  '/factors': 'factor:view',
-  '/factor-correlation': 'factor:view',
-  '/factor-monitor': 'factor:view',
-  '/factor-weight-optimize': 'factor:view',
-  '/factor-ic-ir': 'factor:view',
-  '/strategies': 'strategy:view',
-  '/paper-trading': 'strategy:view',
-  '/backtests': 'strategy:view',
-  '/screen': 'screen:view',
-  '/recommendation': 'recommendation:view',
-  '/llm': 'llm:view',
-  '/monitor': 'monitor:view',
-  '/stock-analysis': 'stock:view',
-  '/calendar': 'calendar:view',
-  '/system/users': 'system:user:list',
-  '/system/roles': 'system:role:list',
-  '/system/menus': 'system:menu:list',
-  '/audit-logs': 'system:audit:list',
-  '/credentials': 'system:credential:list',
-};
 
-function routeBase(pathname) {
+/** 展平菜单树，构建 path -> permission 映射 */
+function buildPermissionMap(menus) {
+  const map = new Map();
+  const walk = (nodes) => {
+    for (const n of nodes || []) {
+      if (n.path && n.permission) map.set(n.path, n.permission);
+      if (Array.isArray(n.children) && n.children.length) walk(n.children);
+    }
+  };
+  walk(menus);
+  return map;
+}
+
+/** 当前路径的逐级回退候选（用于匹配菜单节点 path） */
+function pathCandidates(pathname) {
   const parts = pathname.split('/').filter(Boolean);
-  if (parts.length === 0) return '/';
-  if (parts[0] === 'system' && parts[1]) return `/${parts[0]}/${parts[1]}`;
-  return `/${parts[0]}`;
+  const res = [];
+  for (let i = parts.length; i >= 1; i--) {
+    res.push('/' + parts.slice(0, i).join('/'));
+  }
+  return res;
 }
 
 export default function RequireAuth({ children }) {
   const token = useAuthStore((s) => s.token);
   const permissions = useAuthStore((s) => s.permissions);
+  const menus = useAuthStore((s) => s.menus);
   const hasPermission = useAuthStore((s) => s.hasPermission);
   const location = useLocation();
   const navigate = useNavigate();
+
+  const permMap = useMemo(() => buildPermissionMap(menus), [menus]);
 
   if (!token) {
     return <Navigate to="/login" replace state={{ from: location }} />;
   }
 
-  // 登录态已确认，但权限尚未从后端加载完成（permissions 为空）——放行避免启动空窗误挡；
+  // 登录态已确认，但菜单/权限尚未从后端加载完成——放行避免启动空窗误挡；
   // 加载完成后若当前路由确无权限，store 变化会触发本组件重渲染并拦截。
-  const required = ROUTE_PERMISSIONS[routeBase(location.pathname)];
+  let required = null;
+  if (menus.length > 0) {
+    for (const c of pathCandidates(location.pathname)) {
+      if (permMap.has(c)) {
+        required = permMap.get(c);
+        break;
+      }
+    }
+  }
+
   if (required && permissions.length > 0 && !hasPermission(required)) {
     return (
       <Result

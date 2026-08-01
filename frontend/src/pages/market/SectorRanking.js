@@ -3,6 +3,7 @@ import { Card, Table, Tag, Spin, Empty, Typography, Tabs, Statistic, Row, Col, B
 import { ArrowUpOutlined, ArrowDownOutlined, StockOutlined, ArrowLeftOutlined, RocketOutlined } from '@ant-design/icons';
 import ReactECharts from '../../components/LazyECharts';
 import { stockAnalysisApi } from '../../api';
+import { useDict } from '../../utils/useDict';
 
 const { Title, Text } = Typography;
 
@@ -22,17 +23,7 @@ const renderChangePct = (v) => {
 };
 
 /* ── 热门板块视图常量与组件（从 HotSectorPage.js 迁移）──────────────── */
-const CATEGORY_MAP = {
-  '人工智能': '科技', '半导体概念': '科技', '国产芯片': '科技', '算力/AI': '科技',
-  '机器人概念': '科技', '人形机器人': '科技', '信创': '科技', '数字经济': '科技', '消费电子概念': '科技',
-  '储能概念': '新能源', '光伏概念': '新能源', '新能源车': '新能源', '锂电池概念': '新能源',
-  '新能源': '新能源', '氢能源': '新能源', '充电桩': '新能源',
-  '军工': '国防', '低空经济': '国防',
-  '医疗器械概念': '医药', '创新药': '医药',
-};
-const CATEGORY_COLORS = {
-  '科技': '#1890ff', '新能源': '#52c41a', '国防': '#fa8c16', '医药': '#722ed1',
-};
+// 板块分类（科技/新能源/国防/医药）由后端字典 SECTOR_CATEGORY 提供（dictValue=概念名）
 const fmtChg = v => v != null ? `${(+v).toFixed(2)}%` : '-';
 const fmtCapHot = v => {
   if (v == null) return '-';
@@ -43,9 +34,10 @@ const fmtCapHot = v => {
 };
 const chgColorHot = v => v > 0 ? '#ef5350' : v < 0 ? '#26a69a' : '#999';
 
-function SectorCard({ sector, onClick }) {
-  const cat = CATEGORY_MAP[sector.conceptName] || '其他';
-  const catColor = CATEGORY_COLORS[cat] || '#999';
+function SectorCard({ sector, dictMap, onClick }) {
+  const catEntry = dictMap[sector.conceptName];
+  const cat = catEntry?.dictLabel ?? '其他';
+  const catColor = catEntry?.color ?? '#999';
   const avgChg = sector.avgChange != null ? +sector.avgChange : 0;
   return (
     <Card hoverable size="small" style={{ cursor: 'pointer', borderLeft: `3px solid ${catColor}` }}
@@ -175,6 +167,7 @@ const stockColumns = [
 ];
 
 export default function SectorRanking() {
+  const { dictMap } = useDict('SECTOR_CATEGORY');
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState(null);
   const [drillDown, setDrillDown] = useState(null); // { type: 'industry'|'concept', name: string }
@@ -397,7 +390,7 @@ export default function SectorRanking() {
           {(() => {
             const catStats = {};
             hotSectors.forEach(s => {
-              const cat = CATEGORY_MAP[s.conceptName] || '其他';
+              const cat = dictMap[s.conceptName]?.dictLabel ?? '其他';
               if (!catStats[cat]) catStats[cat] = { count: 0, up: 0, down: 0 };
               catStats[cat].count++;
               const chg = s.avgChange != null ? +s.avgChange : 0;
@@ -407,7 +400,7 @@ export default function SectorRanking() {
               <Row gutter={12} style={{ marginBottom: 16 }}>
                 {Object.entries(catStats).map(([cat, stat]) => (
                   <Col key={cat}>
-                    <Tag color={CATEGORY_COLORS[cat]} style={{ fontSize: 13, padding: '4px 12px' }}>
+                    <Tag color={dictMap[s.conceptName]?.color ?? '#999'} style={{ fontSize: 13, padding: '4px 12px' }}>
                       {cat}：{stat.count}板块 <ArrowUpOutlined style={{ color: '#fff' }} />{stat.up} <ArrowDownOutlined style={{ color: '#fff' }} />{stat.down}
                     </Tag>
                   </Col>
@@ -419,7 +412,7 @@ export default function SectorRanking() {
             <Row gutter={[16, 16]}>
               {hotSectors.map(s => (
                 <Col key={s.conceptName} xs={24} sm={12} md={8} lg={6}>
-                  <SectorCard sector={s} onClick={setSelectedSector} />
+                  <SectorCard sector={s} dictMap={dictMap} onClick={setSelectedSector} />
                 </Col>
               ))}
             </Row>

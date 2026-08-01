@@ -6,18 +6,14 @@ import {
   SyncOutlined, ReloadOutlined, ClockCircleOutlined, ThunderboltOutlined
 } from '@ant-design/icons';
 import { message } from '../../utils/messageUtil';
+import { useDict } from '../../utils/useDict';
 import api from '../../api/index';
 import dayjs from 'dayjs';
 
 const { Text, Title } = Typography;
 
-const DATA_QUALITY_LABELS = {
-  stockDaily: '股票日线',
-  factorValue: '因子数据',
-  financialIndicator: '财务数据',
-};
-
 function DataQualityDashboard() {
+  const { dictMap } = useDict('DATA_QUALITY_LEVEL');
   const [loading, setLoading] = useState(false);
   const [freshness, setFreshness] = useState(null);
   const [anomalies, setAnomalies] = useState(null);
@@ -149,7 +145,7 @@ function DataQualityDashboard() {
                       }}
                     >
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <Text strong>{DATA_QUALITY_LABELS[key] || key}</Text>
+                        <Text strong>{dictMap[key]?.dictLabel ?? key}</Text>
                         <Badge
                           status={item.stale ? 'error' : 'success'}
                           text={getStatusText(item.stale)}

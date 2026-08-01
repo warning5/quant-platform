@@ -7,7 +7,7 @@ import {
   QuestionCircleOutlined, PlusOutlined, CodeOutlined,
 } from '@ant-design/icons';
 import { factorApi } from '../../api';
-import { CATEGORY_DISPLAY, CATEGORY_LABELS } from './constants';
+import { useDict } from '../../utils/useDict';
 import { useAuthStore } from '../../stores/authStore';
 
 const { Title, Text } = Typography;
@@ -25,6 +25,7 @@ export default function FactorEditor() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [form] = Form.useForm();
+  const { dictList: factorCatList } = useDict('FACTOR_CATEGORY');
   const [loading, setLoading] = useState(!!id);
   const [saving, setSaving] = useState(false);
   const [validating, setValidating] = useState(false);
@@ -126,7 +127,7 @@ export default function FactorEditor() {
                 </Form.Item>
                 <Form.Item name="category" label="因子分类" rules={[{ required: true }]}>
                   <Select showSearch optionFilterProp="children" placeholder="选择分类">
-                    {CATEGORY_DISPLAY.map(o => <Option key={o.value} value={o.value}>{o.label}</Option>)}
+                    {factorCatList.map(o => <Option key={o.dictValue} value={o.dictValue}>{o.dictLabel}</Option>)}
                   </Select>
                 </Form.Item>
                 <Form.Item name="description" label="因子描述">

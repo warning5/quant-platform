@@ -6,18 +6,10 @@ import { useNavigate } from 'react-router-dom';
 import { backtestApi, strategyApi } from '../../api';
 import { useAuthStore } from '../../stores/authStore';
 import { exportCsv } from '../../utils/exportUtil';
+import { useDict } from '../../utils/useDict';
 import dayjs from 'dayjs';
 
 const { Title, Text } = Typography;
-
-const STATUS_COLORS = {
-  PENDING: 'default', RUNNING: 'processing', COMPLETED: 'success',
-  FAILED: 'error', CANCELLED: 'warning'
-};
-const STATUS_LABELS = {
-  PENDING: '等待中', RUNNING: '运行中', COMPLETED: '已完成',
-  FAILED: '失败', CANCELLED: '已取消'
-};
 
 const SIGNAL_LABELS = {
   STRATEGY: { color: 'blue', text: '策略因子' },
@@ -25,6 +17,7 @@ const SIGNAL_LABELS = {
 };
 
 export default function BacktestList() {
+  const { dictMap } = useDict('BACKTEST_STATUS');
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const canEdit = useAuthStore((s) => s.hasPermission('strategy:edit'));
@@ -185,7 +178,7 @@ export default function BacktestList() {
       render: (_, r) => r.status === 'RUNNING' ? (
         <Progress percent={r.progress || 0} size="small" status="active" />
       ) : (
-        <Tag color={STATUS_COLORS[r.status]}>{STATUS_LABELS[r.status]}</Tag>
+        <Tag color={dictMap[r.status]?.color ?? 'default'}>{dictMap[r.status]?.dictLabel ?? r.status}</Tag>
       )
     },
     { title: '创建时间', dataIndex: 'createdAt', key: 'created', width: 160, ellipsis: true, render: v => v ? v.replace('T', ' ').substring(0, 19) : '-' },

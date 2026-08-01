@@ -30,7 +30,7 @@ cd quant-platform
 
 ## 第 2 步：初始化数据库（2 分钟）
 
-> ⚠️ **重要：表结构不会自动创建。** 项目使用 MyBatis-Plus，**应用启动时不执行任何 DDL**。数据库脚本位于 `backend/sql/`，分 MySQL 和 ClickHouse 两份：
+> ⚠️ **重要：表结构不会自动创建。** 项目使用 MyBatis-Plus，**应用启动时不执行任何 DDL**。数据库脚本位于 `stock-service/sql/`，分 MySQL 和 ClickHouse 两份：
 > - `stock.sql` — MySQL `stock` 库表结构脚本（61 张表，含表结构 + 索引 + 注释，不含数据）
 > - `ch.sql` — ClickHouse 表结构脚本（仅建表，数据由应用运行时写入）
 
@@ -41,13 +41,13 @@ cd quant-platform
 ```bash
 # 方式 A：命令行导入（推荐）
 mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS stock CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-mysql -u root -p stock < backend/sql/stock.sql
+mysql -u root -p stock < stock-service/sql/stock.sql
 
 # 方式 B：进入 mysql 客户端后用 source
 mysql -u root -p
 mysql> CREATE DATABASE IF NOT EXISTS stock CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 mysql> USE stock;
-mysql> SOURCE backend/sql/stock.sql;
+mysql> SOURCE stock-service/sql/stock.sql;
 ```
 
 > `stock.sql` 仅创建表结构，不含种子数据。启动应用后需通过「数据更新」页面采集基础数据（股票信息、交易日历等），策略和因子定义可在前端手动配置。
@@ -59,7 +59,7 @@ ClickHouse 用于存储日线行情（`stock_daily`）、因子值（`factor_val
 ```bash
 # HTTP 接口（默认 8123 端口）
 clickhouse-client --host 172.19.72.140 --port 9000 --user default --password 123456 \
-  --multiquery < backend/sql/ch.sql
+  --multiquery < stock-service/sql/ch.sql
 ```
 
 > `ch.sql` 仅创建表结构（如 `stock_daily`、`factor_value`、`factor_premium` 等），不含数据。行情数据需要启动应用后通过「数据更新」页面采集。
@@ -71,7 +71,7 @@ clickhouse-client --host 172.19.72.140 --port 9000 --user default --password 123
 `.env` 文件**已被 `.gitignore` 排除**，新 clone 的项目里没有，需要自建：
 
 ```bash
-# 在 backend/src/main/resources/ 下创建 .env 文件
+# 在 stock-service/src/main/resources/ 下创建 .env 文件
 # 内容参考（按需修改）：
 DB_BACKEND=clickhouse              # 数据后端（时序数据走 ClickHouse）
 DATA_SOURCE=baostock               # 数据源：baostock | tencent
@@ -96,7 +96,7 @@ CLICKHOUSE_DATABASE=stock
 mvn clean package -DskipTests
 
 # 启动
-java -jar backend/target/backend-1.0.0.jar
+java -jar stock-service/target/stock-service-1.0.0.jar
 ```
 
 看到以下日志说明启动成功：
@@ -180,7 +180,7 @@ netstat -ano | findstr :8080
 taskkill /PID <进程号> /F
 
 # 或换端口启动
-java -jar backend/target/backend-1.0.0.jar --server.port=8081
+java -jar stock-service/target/stock-service-1.0.0.jar --server.port=8081
 ```
 
 ### 3. 前端 npm install 失败
@@ -239,7 +239,7 @@ ClickHouse exception: Connection refused
 Table 'stock.xxx' doesn't exist
 ```
 
-**原因**：未执行 `backend/sql/` 下的初始化脚本，或脚本执行不完整。
+**原因**：未执行 `stock-service/sql/` 下的初始化脚本，或脚本执行不完整。
 
 **解决**：
 - MySQL：确认 `stock.sql` 已导入 `stock` 库

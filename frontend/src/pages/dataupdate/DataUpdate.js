@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Card, Row, Col, Statistic, Button, Input, InputNumber, Select, DatePicker, Form, Checkbox, Tag, Typography, Space, Alert, Table, Tooltip, Progress, Badge, Divider, Tabs, Spin, Modal, Popconfirm, Radio, Collapse } from 'antd';
 import { QuestionCircleOutlined } from '@ant-design/icons';
 import { message } from '../../utils/messageUtil';
+import { useDict } from '../../utils/useDict';
 import {
   PlayCircleOutlined, StopOutlined, ReloadOutlined,
   ClockCircleOutlined, ThunderboltOutlined, WarningOutlined,
@@ -62,13 +63,6 @@ const SOURCE_OPTIONS = [
   { value: 'TENCENT_ALL', label: '腾讯证券 (全市场 SH/SZ/BJ)' },
 ];
 
-const MARKET_OPTIONS = [
-  { value: 'ALL', label: '全部市场' },
-  { value: 'SH', label: '沪市 (SH)' },
-  { value: 'SZ', label: '深市 (SZ)' },
-  { value: 'BJ', label: '北交所 (BJ)' },
-];
-
 const POOL_OPTIONS = [
   { value: 'ALL', label: '全部股票' },
   { value: 'SH300', label: '沪深300' },
@@ -77,9 +71,6 @@ const POOL_OPTIONS = [
   { value: 'ZZ1000', label: '中证1000' },
   { value: 'STAR50', label: '科创板50' },
 ];
-
-const MARKET_NAMES = { SH: '沪市', SZ: '深市', BJ: '北交所' };
-const MARKET_COLORS = { SH: '#1677ff', SZ: '#52c41a', BJ: '#fa8c16' };
 
 // 指数数据明细列定义（工厂函数，传入最新交易日用于状态判断）
 const getIndexStatsColumns = (latestTradeDate) => [
@@ -236,6 +227,11 @@ const renderLogs = (logs, logRef, taskStatus) => (
 );
 
 function DataUpdate() {
+  const { dictMap, dictList } = useDict('MARKET');
+  const marketOptions = [
+    { value: 'ALL', label: '全部市场' },
+    ...(dictList.length ? dictList.map(d => ({ value: d.dictValue, label: d.dictLabel, color: d.color })) : []),
+  ];
   const [form] = Form.useForm();
   const [indexForm] = Form.useForm();
   const [dividendForm] = Form.useForm();
@@ -403,7 +399,7 @@ function DataUpdate() {
     { title: '名称', dataIndex: 'name', width: 120,
       render: (v) => v?.includes('退') ? <Tag color="error">{v}</Tag> : <span>{v}</span> },
     { title: '市场', dataIndex: 'market', width: 70, align: 'center',
-      render: (v) => <Tag color={MARKET_COLORS[v]}>{MARKET_NAMES[v]}</Tag> },
+      render: (v) => <Tag color={dictMap[v]?.color ?? 'default'}>{dictMap[v]?.dictLabel ?? v}</Tag> },
     { title: '来源', dataIndex: 'source', width: 90, align: 'center',
       render: (v) => {
         const map = { akshare: '官方数据', clickhouse: '数据缺失', name_pattern: '名称检测' };
@@ -1375,7 +1371,7 @@ function DataUpdate() {
               </Col>
               <Col>
                 <Form.Item name="market" label="市场">
-                  <Select options={MARKET_OPTIONS} style={{ width: 140 }} />
+                  <Select options={marketOptions} style={{ width: 140 }} />
                 </Form.Item>
               </Col>
               <Col>
@@ -2953,7 +2949,7 @@ function DataUpdate() {
         <Col>
           <Text>市场:</Text>
           <Select value={missingMarket} onChange={setMissingMarket}
-            options={MARKET_OPTIONS} style={{ marginLeft: 8, width: 130 }} />
+            options={marketOptions} style={{ marginLeft: 8, width: 130 }} />
         </Col>
         <Col>
           <Button type="primary" icon={<SearchOutlined />}
@@ -3094,9 +3090,9 @@ function DataUpdate() {
                       <Col>
                         <span style={{ fontSize: 13, color: '#8c8c8c', marginRight: 8 }}>最新日覆盖</span>
                         {markets.map(m => (
-                          <Tooltip key={m.market} title={`${MARKET_NAMES[m.market]}：${m.infoCount}只中 ${m.latestDayCount}只有数据 (${m.latestDate})`}>
-                            <Tag color={MARKET_COLORS[m.market]} style={{ fontSize: 12, marginRight: 4 }}>
-                              {MARKET_NAMES[m.market]} {m.latestDayCount}/{m.infoCount}
+                          <Tooltip key={m.market} title={`${dictMap[m.market]?.dictLabel ?? m.market}：${m.infoCount}只中 ${m.latestDayCount}只有数据 (${m.latestDate})`}>
+                            <Tag color={dictMap[m.market]?.color ?? 'default'} style={{ fontSize: 12, marginRight: 4 }}>
+                              {dictMap[m.market]?.dictLabel ?? m.market} {m.latestDayCount}/{m.infoCount}
                             </Tag>
                           </Tooltip>
                         ))}

@@ -16,7 +16,7 @@
    `@cn.dev33.satoken.annotation.SaCheckPermission("xxx:view")`。
 3. **权限来源**：`StpInterfaceImpl.getPermissionList` → `SysUserMapper.selectPermissionByUserId`
    查 `sys_menu.permission`（经 `sys_role_menu`、`sys_user_role` 关联，过滤空串）。
-4. **菜单 seed**：`backend/sql/sys_seed_data.sql` 业务节点均带 `xxx:view` 权限串，
+4. **菜单 seed**：`stock-service/sql/sys_seed_data.sql` 业务节点均带 `xxx:view` 权限串，
    ADMIN(role_id=1) 绑定全部 47 个菜单 → admin 拥有全部 `xxx:view`。
 
 ---
@@ -101,8 +101,8 @@ seed 里只有系统管理模块有 `menu_type=2`（按钮）节点（id 3-7 / 9
    POST/PUT/PATCH→`module:edit`、DELETE→`module:delete`，4 个 GET-触发写标 `module:edit`。
    AND 模式保证只读角色写接口返回 403，且不出现"能写不能读"怪象。**reactor 编译通过（BUILD SUCCESS）**。
 2. **菜单按钮节点（task10）**：`sys_seed_data.sql` 追加 14 个 `menu_type=2` 节点（id 60-73），permission 与后端一一对应并绑定 ADMIN。
-   另提取独立幂等脚本 `backend/sql/append_button_perms.sql`（库已初始化时单独补执行用）。
-3. **编译与验证（task12）**：`mvn -pl common,backend -am clean package -DskipTests` → BUILD SUCCESS；
+   另提取独立幂等脚本 `stock-service/sql/append_button_perms.sql`（库已初始化时单独补执行用）。
+3. **编译与验证（task12）**：`mvn -pl common,stock-service -am clean package -DskipTests` → BUILD SUCCESS；
    `verify_auth.sh` 扩展 [14]~[16]：仅 view 角色调 factor 写接口 403、追加 factor:edit 后非 403。
 
 ### ✅ 前端按钮显隐（task11，部分落地：4/12 业务模块，强依赖 seed 落库）

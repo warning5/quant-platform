@@ -18,6 +18,7 @@ import { StockPerformanceTab } from './StockPerformanceTab';
 import { ShareholderStructureTab } from './ShareholderStructureTab';
 import { TriggerDashboard } from './TriggerDashboard';
 import { message } from '../../utils/messageUtil';
+import { useDict } from '../../utils/useDict';
 import { useAuthStore } from '../../stores/authStore';
 
 const { Title, Text, Paragraph } = Typography;
@@ -3838,13 +3839,13 @@ const PATTERN_INFO = {
   BOTTOM_CONFIRMED: { name: '底部探明', color: '#722ed1', desc: '长下影线探底 + 缩量 + MACD底背离' },
 };
 
-const SELL_ACTION_COLOR = { HOLD: 'default', REDUCE: 'orange', SELL: 'red' };
-const SELL_ACTION_NAME = { HOLD: '持有', REDUCE: '减仓', SELL: '卖出' };
+// 卖出动作（持有/减仓/卖出）由后端字典 SELL_ACTION 提供
 
 function PatternSellTab({ code }) {
   const [patternData, setPatternData] = useState(null);
   const [sellData, setSellData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const { dictMap } = useDict('SELL_ACTION');
 
   const fetchData = useCallback(async () => {
     if (!code) return;
@@ -3911,8 +3912,8 @@ function PatternSellTab({ code }) {
         <Col span={12}>
           <Card size="small" title="卖出信号检测">
             <div style={{ marginBottom: 12 }}>
-              <Tag color={SELL_ACTION_COLOR[sellAction]} style={{ fontSize: 14, padding: '4px 12px' }}>
-                {SELL_ACTION_NAME[sellAction]}
+              <Tag color={dictMap[sellAction]?.color ?? 'default'} style={{ fontSize: 14, padding: '4px 12px' }}>
+                {dictMap[sellAction]?.dictLabel ?? sellAction}
               </Tag>
               <span style={{ marginLeft: 12, fontSize: 13, color: 'var(--sa-text-secondary)' }}>
                 卖出信号强度: {sellScore}分

@@ -138,7 +138,7 @@ PR 模板会引导你填写：
 5. **与其他因子的相关性**：是否高度冗余
 
 因子代码位置：
-- 内置因子：`backend/factor/.../builtinCalculators`
+- 内置因子：`stock-service/factor/.../builtinCalculators`
 - 脚本因子：通过前端因子编辑器，使用 Groovy 脚本
 
 ---
@@ -161,7 +161,7 @@ PR 模板会引导你填写：
 **开发建议**：
 - 后端调试：IDE 启动 `QuantPlatformApplication`，开启热加载
 - 前端调试：`npm start` 默认在 3000 端口，代理到 8080 后端
-- 改了 `common` 模块后，需要先 `mvn -pl common install` 再构建 backend
+- 改了 `common` 模块后，需要先 `mvn -pl common install` 再构建 stock-service
 
 ---
 

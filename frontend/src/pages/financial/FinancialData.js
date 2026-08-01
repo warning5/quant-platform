@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Card, Table, Tag, Space, Typography, Row, Col, Statistic, Select, Spin, Tabs, Descriptions, Input, Button, Tooltip } from 'antd';
 import { message } from '../../utils/messageUtil';
+import { useDict } from '../../utils/useDict';
 import {
   SearchOutlined, ReloadOutlined, FundOutlined, RiseOutlined, FallOutlined,
   PieChartOutlined, BarChartOutlined, QuestionCircleOutlined,
@@ -11,10 +12,6 @@ import ReactECharts from '../../components/LazyECharts';
 import { financialApi, marketApi, silentConfig } from '../../api';
 
 const { Title, Text } = Typography;
-
-// 报告类型映射
-const REPORT_TYPE_MAP = { 1: '一季报', 2: '中报', 3: '三季报', 4: '年报' };
-const REPORT_TYPE_COLORS = { 1: 'blue', 2: 'cyan', 3: 'orange', 4: 'green' };
 
 // 金额格式化（元 → 亿/万）
 function fmtAmount(val, unit = '亿') {
@@ -37,9 +34,9 @@ function fmtVal(val, decimals = 2) {
 }
 
 // 利润表列
-const incomeColumns = [
+const getIncomeColumns = (dictMap) => [
   { title: '报告期', dataIndex: 'reportDate', width: 100, render: (v, r) => (
-    <span><Tag color={REPORT_TYPE_COLORS[r.reportType]} style={{ marginRight: 4 }}>{REPORT_TYPE_MAP[r.reportType]}</Tag>{v}</span>
+    <span><Tag color={dictMap[r.reportType]?.color ?? 'default'} style={{ marginRight: 4 }}>{dictMap[r.reportType]?.dictLabel ?? r.reportType}</Tag>{v}</span>
   )},
   { title: '营业收入', dataIndex: 'revenue', width: 120, align: 'right', render: v => fmtAmount(v) },
   { title: '营业利润', dataIndex: 'operatingProfit', width: 120, align: 'right', render: v => fmtAmount(v) },
@@ -53,9 +50,9 @@ const incomeColumns = [
 ];
 
 // 资产负债表列
-const balanceColumns = [
+const getBalanceColumns = (dictMap) => [
   { title: '报告期', dataIndex: 'reportDate', width: 100, render: (v, r) => (
-    <span><Tag color={REPORT_TYPE_COLORS[r.reportType]} style={{ marginRight: 4 }}>{REPORT_TYPE_MAP[r.reportType]}</Tag>{v}</span>
+    <span><Tag color={dictMap[r.reportType]?.color ?? 'default'} style={{ marginRight: 4 }}>{dictMap[r.reportType]?.dictLabel ?? r.reportType}</Tag>{v}</span>
   )},
   { title: '总资产', dataIndex: 'totalAssets', width: 120, align: 'right', render: v => fmtAmount(v) },
   { title: '总负债', dataIndex: 'totalLiabilities', width: 120, align: 'right', render: v => fmtAmount(v) },
@@ -69,9 +66,9 @@ const balanceColumns = [
 ];
 
 // 现金流量表列
-const cashflowColumns = [
+const getCashflowColumns = (dictMap) => [
   { title: '报告期', dataIndex: 'reportDate', width: 100, render: (v, r) => (
-    <span><Tag color={REPORT_TYPE_COLORS[r.reportType]} style={{ marginRight: 4 }}>{REPORT_TYPE_MAP[r.reportType]}</Tag>{v}</span>
+    <span><Tag color={dictMap[r.reportType]?.color ?? 'default'} style={{ marginRight: 4 }}>{dictMap[r.reportType]?.dictLabel ?? r.reportType}</Tag>{v}</span>
   )},
   { title: '经营净现金流', dataIndex: 'netOperateCf', width: 130, align: 'right',
     render: v => v != null ? <Text type={v >= 0 ? 'danger' : 'success'}>{fmtAmount(v)}</Text> : '-' },
@@ -89,9 +86,9 @@ const cashflowColumns = [
 ];
 
 // 财务指标列
-const indicatorColumns = [
+const getIndicatorColumns = (dictMap) => [
   { title: '报告期', dataIndex: 'reportDate', width: 100, render: (v, r) => (
-    <span><Tag color={REPORT_TYPE_COLORS[r.reportType]} style={{ marginRight: 4 }}>{REPORT_TYPE_MAP[r.reportType]}</Tag>{v}</span>
+    <span><Tag color={dictMap[r.reportType]?.color ?? 'default'} style={{ marginRight: 4 }}>{dictMap[r.reportType]?.dictLabel ?? r.reportType}</Tag>{v}</span>
   )},
   { title: 'ROE(%)', dataIndex: 'roe', width: 90, align: 'right', render: v => fmtPct(v) },
   { title: '毛利率(%)', dataIndex: 'grossProfitMargin', width: 90, align: 'right', render: v => fmtPct(v) },
@@ -319,6 +316,7 @@ function StylePicksCards({ onSelect }) {
 }
 
 export default function FinancialData() {
+  const { dictMap } = useDict('REPORT_TYPE');
   const [searchParams, setSearchParams] = useSearchParams();
   const codeFromUrl = searchParams.get('code');
   const [selectedCode, setSelectedCode] = useState(codeFromUrl || null);
@@ -495,7 +493,7 @@ export default function FinancialData() {
       label: <><FundOutlined /> 财务指标</>,
       children: (
         <Card size="small">
-          <Table dataSource={indicatorData} columns={indicatorColumns} rowKey="reportDate"
+          <Table dataSource={indicatorData} columns={getIndicatorColumns(dictMap)} rowKey="reportDate"
                  size="small" loading={tableLoading} scroll={{ x: 1500 }} pagination={false} />
         </Card>
       ),
@@ -505,7 +503,7 @@ export default function FinancialData() {
       label: <><PieChartOutlined /> 利润表</>,
       children: (
         <Card size="small">
-          <Table dataSource={incomeData} columns={incomeColumns} rowKey="reportDate"
+          <Table dataSource={incomeData} columns={getIncomeColumns(dictMap)} rowKey="reportDate"
                  size="small" loading={tableLoading} scroll={{ x: 1100 }} pagination={false} />
         </Card>
       ),
@@ -515,7 +513,7 @@ export default function FinancialData() {
       label: <><BarChartOutlined /> 资产负债表</>,
       children: (
         <Card size="small">
-          <Table dataSource={balanceData} columns={balanceColumns} rowKey="reportDate"
+          <Table dataSource={balanceData} columns={getBalanceColumns(dictMap)} rowKey="reportDate"
                  size="small" loading={tableLoading} scroll={{ x: 1100 }} pagination={false} />
         </Card>
       ),
@@ -525,7 +523,7 @@ export default function FinancialData() {
       label: <><BarChartOutlined /> 现金流量表</>,
       children: (
         <Card size="small">
-          <Table dataSource={cashflowData} columns={cashflowColumns} rowKey="reportDate"
+          <Table dataSource={cashflowData} columns={getCashflowColumns(dictMap)} rowKey="reportDate"
                  size="small" loading={tableLoading} scroll={{ x: 1100 }} pagination={false} />
         </Card>
       ),

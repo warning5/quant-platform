@@ -266,7 +266,7 @@ DATA_FRESHNESS ─→ DAILY(行情采集) ─→ QFQ_REFRESH(前复权刷新)
 mvn clean package -DskipTests
 
 # 启动
-java -jar backend/target/backend-1.0.0.jar
+java -jar stock-service/target/stock-service-1.0.0.jar
 ```
 
 后端地址：`http://localhost:8080/api` | Swagger：`http://localhost:8080/api/swagger-ui.html`
@@ -287,17 +287,17 @@ npm start
 CREATE DATABASE stock CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ```
 
-导入表结构脚本（`backend/sql/stock.sql`，61 张表，仅结构不含数据）：
+导入表结构脚本（`stock-service/sql/stock.sql`，61 张表，仅结构不含数据）：
 
 ```bash
-mysql -u root -p stock < backend/sql/stock.sql
+mysql -u root -p stock < stock-service/sql/stock.sql
 ```
 
-ClickHouse 建表脚本（`backend/sql/ch.sql`，仅结构）：
+ClickHouse 建表脚本（`stock-service/sql/ch.sql`，仅结构）：
 
 ```bash
 clickhouse-client --host <CH_HOST> --port 9000 --user default --password <CH_PASSWORD> \
-  --multiquery < backend/sql/ch.sql
+  --multiquery < stock-service/sql/ch.sql
 ```
 
 > ⚠️ 应用启动时不执行任何 DDL，必须手动导入上述脚本。表结构创建后，启动应用通过「数据更新」页面采集行情数据。
@@ -381,7 +381,7 @@ P6: ICW 融合    → IC 加权，上限 35%，反转有害因子
 
 ```
 quant-platform/
-├── backend/                     # Spring Boot 3 后端
+├── stock-service/                # Spring Boot 3 后端（股票量化业务服务）
 │   ├── factor/                  # 因子引擎（计算/测试/衰减/健康/权重优化）
 │   ├── strategy/                # 策略引擎（选股/信号/置信度）
 │   ├── backtest/                # 回测引擎（Brinson/FF3/MC/Walk-Forward）

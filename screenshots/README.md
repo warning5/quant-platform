@@ -27,7 +27,7 @@
 - **命名**：小写 + 连字符，按上表文件名，**不要用中文或空格**
 
 ### 截图前准备
-1. 启动后端：`java -jar backend/target/backend-1.0.0.jar`
+1. 启动后端：`java -jar stock-service/target/stock-service-1.0.0.jar`
 2. 启动前端：`cd frontend && npm start`
 3. 浏览器访问 `http://localhost:3000`
 4. **数据准备**：确保有真实数据。如果是空库，先跑一次数据采集和因子计算

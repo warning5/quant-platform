@@ -8,23 +8,10 @@ import {
   CheckCircleOutlined
 } from '@ant-design/icons';
 import { strategyApi, backtestApi } from '../../api';
+import { useDict } from '../../utils/useDict';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
-
-const TYPE_LABELS = {
-  FACTOR_LONG: '因子多头', LONG_SHORT: '多空策略', MARKET_NEUTRAL: '市场中性',
-  MOMENTUM: '动量策略', MEAN_REVERSION: '均值回归', PATTERN: '形态驱动', CUSTOM: '自定义脚本'
-};
-const STATUS_COLORS   = { DRAFT: 'default', TESTING: 'processing', ACTIVE: 'success', DEPRECATED: 'default' };
-const STATUS_LABELS   = { DRAFT: '草稿', TESTING: '测试中', ACTIVE: '已激活', DEPRECATED: '已废弃' };
-const BT_STATUS_COLORS = {
-  PENDING: 'default', RUNNING: 'processing', COMPLETED: 'success', FAILED: 'error', CANCELLED: 'warning'
-};
-const BT_STATUS_LABELS = {
-  PENDING: '等待中', RUNNING: '运行中', COMPLETED: '已完成', FAILED: '失败', CANCELLED: '已取消'
-};
-const FREQ_LABELS = { DAILY: '日频', WEEKLY: '周频', MONTHLY: '月频', QUARTERLY: '季频' };
 
 export default function StrategyDetail() {
   const { id } = useParams();
@@ -36,6 +23,11 @@ export default function StrategyDetail() {
   const [statusModal, setStatusModal]   = useState(false);
   const [statusUpdating, setStatusUpdating] = useState(false);
   const [newStatus, setNewStatus]       = useState('');
+
+  const { dictMap: dictMapStatus, dictList: dictListStatus } = useDict('STRATEGY_STATUS');
+  const { dictMap: dictMapType } = useDict('STRATEGY_TYPE');
+  const { dictMap: dictMapFreq } = useDict('STRATEGY_FREQ');
+  const { dictMap: dictMapBt, dictList: dictListBt } = useDict('BACKTEST_STATUS');
 
   const loadStrategy = () => {
     strategyApi.getById(id).then(res => {
@@ -72,7 +64,7 @@ export default function StrategyDetail() {
     setStatusUpdating(true);
     strategyApi.changeStatus(id, newStatus)
       .then(() => {
-        message.success(`策略状态已更新为「${STATUS_LABELS[newStatus]}」`);
+        message.success(`策略状态已更新为「${dictMapStatus[newStatus]?.dictLabel ?? newStatus}」`);
         setStatusModal(false);
         loadStrategy();
       })
@@ -102,7 +94,7 @@ export default function StrategyDetail() {
     },
     {
       title: '状态', dataIndex: 'status', width: 90,
-      render: v => <Tag color={BT_STATUS_COLORS[v]}>{BT_STATUS_LABELS[v] || v}</Tag>,
+      render: v => <Tag color={dictMapBt[v]?.color ?? 'default'}>{dictMapBt[v]?.dictLabel ?? v}</Tag>,
     },
     { title: '创建时间', dataIndex: 'createdAt', width: 160, ellipsis: true },
     {
@@ -123,7 +115,7 @@ export default function StrategyDetail() {
           <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/strategies')}>返回</Button>
           <Title level={4} style={{ margin: 0 }}>{strategy.strategyName}</Title>
           <Tag color="geekblue">{strategy.strategyCode}</Tag>
-          <Tag color={STATUS_COLORS[strategy.status]}>{STATUS_LABELS[strategy.status] || strategy.status}</Tag>
+          <Tag color={dictMapStatus[strategy.status]?.color ?? 'default'}>{dictMapStatus[strategy.status]?.dictLabel ?? strategy.status}</Tag>
         </Space>
         <Space>
           <Button
@@ -154,8 +146,8 @@ export default function StrategyDetail() {
                 contentStyle={{ minWidth: 200 }}>
                 <Descriptions.Item label="策略代码">{strategy.strategyCode}</Descriptions.Item>
                 <Descriptions.Item label="策略名称">{strategy.strategyName}</Descriptions.Item>
-                <Descriptions.Item label="策略类型">{TYPE_LABELS[strategy.strategyType] || strategy.strategyType}</Descriptions.Item>
-                <Descriptions.Item label="调仓频率">{FREQ_LABELS[strategy.rebalanceFrequency] || strategy.rebalanceFrequency || '-'}</Descriptions.Item>
+                <Descriptions.Item label="策略类型">{dictMapType[strategy.strategyType]?.dictLabel ?? strategy.strategyType}</Descriptions.Item>
+                <Descriptions.Item label="调仓频率">{dictMapFreq[strategy.rebalanceFrequency]?.dictLabel ?? (strategy.rebalanceFrequency || '-')}</Descriptions.Item>
                 <Descriptions.Item label="最大持仓数">{strategy.maxPositionCount || '-'}</Descriptions.Item>
                 <Descriptions.Item label="仓位方式">{strategy.positionSizeType || '-'}</Descriptions.Item>
                 <Descriptions.Item label="止损比例">
@@ -166,8 +158,8 @@ export default function StrategyDetail() {
                 </Descriptions.Item>
                 <Descriptions.Item label="当前状态">
                   <Badge status={strategy.status === 'ACTIVE' ? 'success' : strategy.status === 'TESTING' ? 'processing' : 'default'} />
-                  <Tag color={STATUS_COLORS[strategy.status]} style={{ marginLeft: 4 }}>
-                    {STATUS_LABELS[strategy.status] || strategy.status}
+                  <Tag color={dictMapStatus[strategy.status]?.color ?? 'default'} style={{ marginLeft: 4 }}>
+                    {dictMapStatus[strategy.status]?.dictLabel ?? strategy.status}
                   </Tag>
                 </Descriptions.Item>
                 <Descriptions.Item label="版本">v{strategy.version}</Descriptions.Item>
@@ -243,8 +235,8 @@ export default function StrategyDetail() {
         <Space direction="vertical" style={{ width: '100%' }} size={12}>
           <div>
             <Text>当前状态：</Text>
-            <Tag color={STATUS_COLORS[strategy.status]} style={{ marginLeft: 8 }}>
-              {STATUS_LABELS[strategy.status]}
+            <Tag color={dictMapStatus[strategy.status]?.color ?? 'default'} style={{ marginLeft: 8 }}>
+              {dictMapStatus[strategy.status]?.dictLabel ?? strategy.status}
             </Tag>
           </div>
           <div>
@@ -254,9 +246,9 @@ export default function StrategyDetail() {
               onChange={setNewStatus}
               style={{ width: 160, marginLeft: 8 }}
             >
-              {Object.entries(STATUS_LABELS).map(([k, v]) => (
-                <Option key={k} value={k}>{v}</Option>
-              ))}
+              {dictListStatus.length ? dictListStatus.map(d => (
+                <Option key={d.dictValue} value={d.dictValue}>{d.dictLabel}</Option>
+              )) : []}
             </Select>
           </div>
           <Text type="secondary" style={{ fontSize: 12 }}>

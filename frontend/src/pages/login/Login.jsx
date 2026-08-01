@@ -18,6 +18,18 @@ export default function Login() {
   const [wechatLoading, setWechatLoading] = useState(false);
   const popupRef = useRef(null);
 
+  // 统一获取登录后回跳路径：优先 react-router state（SPA 内跳转），其次 sessionStorage（401 整页刷新）
+  const getRedirectPath = () => {
+    return location.state?.from?.pathname
+      || sessionStorage.getItem('redirect_after_login')
+      || '/';
+  };
+
+  // 清除回跳路径（避免重复使用）
+  const clearRedirectPath = () => {
+    try { sessionStorage.removeItem('redirect_after_login'); } catch (_) {}
+  };
+
   // 公众号授权回调：URL 上带有 ?wechat=success&token=xxx
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -28,7 +40,9 @@ export default function Login() {
           setToken(token);
           await fetchMe();
           message.success('微信登录成功');
-          navigate('/', { replace: true });
+          const from = getRedirectPath();
+          clearRedirectPath();
+          navigate(from, { replace: true });
         } catch (e) {
           message.error('微信登录失败，请重试');
         }
@@ -46,7 +60,9 @@ export default function Login() {
           await fetchMe();
           message.success('微信登录成功');
           if (popupRef.current && !popupRef.current.closed) popupRef.current.close();
-          navigate('/', { replace: true });
+          const from = getRedirectPath();
+          clearRedirectPath();
+          navigate(from, { replace: true });
         } catch (err) {
           message.error('微信登录失败，请重试');
         }
@@ -63,7 +79,8 @@ export default function Login() {
       const result = await authApi.login(values.username, values.password);
       login(result);
       message.success('登录成功');
-      const from = location.state?.from?.pathname || '/';
+      const from = getRedirectPath();
+      clearRedirectPath();
       navigate(from, { replace: true });
     } catch (e) {
       // 错误提示已由 axios 拦截器统一处理

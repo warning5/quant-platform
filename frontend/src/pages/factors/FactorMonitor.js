@@ -9,25 +9,12 @@ import {
 import ReactECharts from '../../components/LazyECharts';
 import dayjs from 'dayjs';
 import { factorApi } from '../../api/index';
-import { CATEGORY_LABELS } from './constants';
+import { useDict } from '../../utils/useDict';
 import { useStompWebSocket } from '../../hooks/useStompWebSocket';
 import { exportCsv } from '../../utils/exportUtil';
 
 const { Text, Title } = Typography;
 const { RangePicker } = DatePicker;
-
-// 分类颜色（保留用于 UI 展示），中文标签统一从 constants.js 导入
-const CATEGORY_COLORS = {
-  TECHNICAL: '#38bdf8',
-  MOMENTUM: '#fb923c',
-  VOLATILITY: '#f472b6',
-  VOLUME_PRICE: '#34d399',
-  VALUE: '#a78bfa',
-  FINANCIAL: '#22c55e',
-  QUALITY: '#facc15',
-  SENTIMENT: '#ef4444',
-  LIQUIDITY: '#94a3b8',
-};
 
 const TARGET_DAYS = 310;
 const TARGET_STOCKS = 5280;
@@ -37,6 +24,7 @@ const TARGET_REPORT_PERIODS = 12;
 const FINANCIAL_CATEGORIES = ['FINANCIAL', 'VALUE'];
 
 function FactorMonitor() {
+  const { dictMap: categoryMap, dictList: categoryList } = useDict('FACTOR_CATEGORY');
   const [factors, setFactors] = useState([]);
   const [factorsLoading, setFactorsLoading] = useState(true);
   const [monitorData, setMonitorData] = useState(null);
@@ -203,7 +191,7 @@ function FactorMonitor() {
           code: r.factorCode,
           name: r.factorName,
           category: r.category,
-          color: CATEGORY_COLORS[r.category] || '#8c8c8c',
+          color: categoryMap[r.category]?.color || '#8c8c8c',
         })));
       } catch (e) {
         console.error('获取因子定义失败:', e);
@@ -378,11 +366,11 @@ function FactorMonitor() {
       title: '分类',
       dataIndex: 'category',
       width: 80,
-      filters: Object.entries(CATEGORY_LABELS).map(([k, v]) => ({ text: v, value: k })),
+      filters: categoryList.map(d => ({ text: d.dictLabel, value: d.dictValue })),
       onFilter: (val, row) => row.category === val,
       render: cat => (
-        <Tag color={CATEGORY_COLORS[cat]} style={{ fontSize: 11 }}>
-          {CATEGORY_LABELS[cat] || cat}
+        <Tag color={categoryMap[cat]?.color} style={{ fontSize: 11 }}>
+          {categoryMap[cat]?.dictLabel || cat}
         </Tag>
       ),
     },
@@ -713,8 +701,10 @@ function FactorMonitor() {
                 加载因子定义中...
               </div>
             ) : (
-              Object.entries(CATEGORY_LABELS)
-                .map(([cat, label]) => {
+              categoryList
+                .map((d) => {
+                  const cat = d.dictValue;
+                  const label = d.dictLabel;
                   const total = factorsWithStats.filter(f => f.category === cat).length;
                   const done = factorsWithStats.filter(f => f.category === cat && f.isDone).length;
                   return { cat, label, total, done };
@@ -727,7 +717,7 @@ function FactorMonitor() {
                   <div key={cat} style={{ marginBottom: 8 }}>
                     <Row justify="space-between" style={{ marginBottom: 2 }}>
                       <Col>
-                        <Text style={{ fontSize: 12, color: CATEGORY_COLORS[cat] }}>{label}</Text>
+                        <Text style={{ fontSize: 12, color: categoryMap[cat]?.color }}>{label}</Text>
                       </Col>
                       <Col>
                         <Text type="secondary" style={{ fontSize: 11 }}>{done}/{total}</Text>
@@ -736,7 +726,7 @@ function FactorMonitor() {
                     <Progress
                       percent={pct}
                       size={[null, 5]}
-                      strokeColor={CATEGORY_COLORS[cat]}
+                      strokeColor={categoryMap[cat]?.color}
                       showInfo={false}
                     />
                   </div>
@@ -809,8 +799,8 @@ function FactorMonitor() {
                 value: f.code,
                 label: (
                   <Space size={4}>
-                    <Tag color={CATEGORY_COLORS[f.category]} style={{ fontSize: 10, margin: 0 }}>
-                      {CATEGORY_LABELS[f.category]}
+                    <Tag color={categoryMap[f.category]?.color} style={{ fontSize: 10, margin: 0 }}>
+                      {categoryMap[f.category]?.dictLabel || f.category}
                     </Tag>
                     <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{f.code}</span>
                     <Text type="secondary" style={{ fontSize: 11 }}>{f.name}</Text>
@@ -842,13 +832,15 @@ function FactorMonitor() {
           </Row>
           {/* 按分类选择未完成因子 */}
           <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {Object.entries(CATEGORY_LABELS).map(([cat, label]) => {
+            {categoryList.map((d) => {
+              const cat = d.dictValue;
+              const label = d.dictLabel;
               const pending = pendingFactors.filter(f => f.category === cat);
               if (pending.length === 0) return null;
               return (
                 <Tag
                   key={cat}
-                  color={CATEGORY_COLORS[cat]}
+                  color={categoryMap[cat]?.color}
                   style={{ cursor: 'pointer', userSelect: 'none' }}
                   onClick={() => {
                     const current = form.getFieldValue('factorCodes') || [];

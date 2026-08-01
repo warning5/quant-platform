@@ -9,6 +9,7 @@ import useFactorStore from '../../stores/factorStore';
 import { useAuthStore } from '../../stores/authStore';
 import ReactECharts from '../../components/LazyECharts';
 import { exportCsv } from '../../utils/exportUtil';
+import { useDict } from '../../utils/useDict';
 
 const { Title, Text } = Typography;
 
@@ -38,17 +39,6 @@ const INDUSTRY_CORR_GROUPS = [
   ['医药生物', '公用事业'],
   ['电子', '国防军工'],
 ];
-const CORR_GROUP_LABEL = {
-  '银行': '金融板块',
-  '房地产开发': '地产链',
-  '煤炭': '能源链',
-  '食品饮料': '消费链',
-  '计算机': 'TMT',
-  '汽车': '制造链',
-  '医药生物': '防御板块',
-  '电子': '科技制造',
-};
-
 // ── 市值格式化 ──
 function formatMarketCap(val) {
   if (!val) return '-';
@@ -78,6 +68,8 @@ export default function RecommendationList() {
   const canEditRec = hasPermission('recommendation:edit');
   const canDeleteBlack = hasPermission('recommendation:delete');
   const canPaperBuy = hasPermission('strategy:edit');
+  const { dictMap: corrGroupMap } = useDict('RECOMMEND_CORR_GROUP');
+  const { dictMap: reasonMap } = useDict('RECOMMEND_REASON');
   useEffect(() => { loadFactorMeta(); }, [loadFactorMeta]);
   const [recommendations, setRecommendations] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -618,14 +610,6 @@ export default function RecommendationList() {
     setBlacklistLoading(false);
   };
 
-  // 原因中文映射
-  const REASON_MAP = {
-    CONSECUTIVE_LOSS: { label: '连续失利', color: 'orange', desc: '连续N次推荐次日收益为负' },
-    LOW_HIT_RATE: { label: '低命中率', color: 'gold', desc: '近N次推荐命中率过低' },
-    SEVERE_LOSS: { label: '踩雷', color: 'red', desc: '单日跌幅过大(≥8%)' },
-    REPEATED_SEVERE_LOSS: { label: '多次踩雷', color: 'volcano', desc: '近10次推荐中≥2次严重亏损，永久拉黑' },
-    MANUAL: { label: '手动屏蔽', color: 'blue', desc: '用户手动加入' },
-  };
   const isExpired = (until) => until && dayjs(until).isBefore(dayjs(), 'day');
 
   // ── 方案C: 置信度操作函数 ──
@@ -818,7 +802,7 @@ export default function RecommendationList() {
         const regime = rec.industryRegime;
         const momentum = rec.industryMomentum;
         const gKey = rec.corrGroup;
-        const gLabel = gKey ? CORR_GROUP_LABEL[gKey] : null;
+        const gLabel = gKey ? corrGroupMap[gKey]?.dictLabel ?? gKey : null;
         let icon = null;
         let tag = null;
         if (regime === 'BULL') icon = '📈';
@@ -2417,8 +2401,10 @@ export default function RecommendationList() {
                   title: '原因',
                   width: 120,
                   render: (_, bl) => {
-                    const r = REASON_MAP[bl.reason] || { label: bl.reason, color: 'default', desc: '' };
-                    return <Tag color={r.color}>{r.label}</Tag>;
+                    const r = reasonMap[bl.reason];
+                    const label = r?.dictLabel ?? bl.reason;
+                    const color = r?.color ?? 'default';
+                    return <Tag color={color}>{label}</Tag>;
                   },
                 },
                 {
