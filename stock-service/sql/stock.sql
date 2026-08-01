@@ -11,7 +11,7 @@
  Target Server Version : 90300 (9.3.0)
  File Encoding         : 65001
 
- Date: 01/08/2026 22:44:30
+ Date: 02/08/2026 00:11:13
 */
 
 SET NAMES utf8mb4;
@@ -1617,21 +1617,21 @@ CREATE TABLE `strategy_definition`  (
 DROP TABLE IF EXISTS `sys_config`;
 CREATE TABLE `sys_config`  (
   `id` bigint NOT NULL AUTO_INCREMENT,
-  `config_key` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '閰嶇疆閿?鍞?竴)',
-  `config_value` varchar(2000) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT '' COMMENT '閰嶇疆鍊',
-  `config_group` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT 'DEFAULT' COMMENT '鍒嗙粍(渚夸簬鍓嶇?鍒嗘爮)',
-  `config_label` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT '' COMMENT '鏄剧ず鏍囩?',
+  `config_key` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '配置键(全局唯一)',
+  `config_value` varchar(2000) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT '' COMMENT '配置值',
+  `config_group` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT 'DEFAULT' COMMENT '分组(便于前端分组展示)',
+  `config_label` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT '' COMMENT '显示标签',
   `config_type` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT 'STRING' COMMENT 'STRING/NUMBER/BOOLEAN/JSON',
-  `enabled` tinyint NOT NULL DEFAULT 1 COMMENT '0绂佺敤 1鍚?敤',
-  `sort` int NOT NULL DEFAULT 0 COMMENT '灞曠ず椤哄簭',
-  `remark` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT '' COMMENT '澶囨敞',
+  `enabled` tinyint NOT NULL DEFAULT 1 COMMENT '0=禁用 1=启用',
+  `sort` int NOT NULL DEFAULT 0 COMMENT '展示顺序',
+  `remark` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT '' COMMENT '备注',
   `create_time` datetime NULL DEFAULT CURRENT_TIMESTAMP,
   `update_time` datetime NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `deleted` tinyint NOT NULL DEFAULT 0,
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `uk_config_key`(`config_key` ASC) USING BTREE,
   INDEX `idx_group`(`config_group` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 9 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '绯荤粺鍙傛暟閰嶇疆琛' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 9 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '系统参数配置表' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for sys_credential
@@ -1762,7 +1762,7 @@ CREATE TABLE `sys_operation_log`  (
   INDEX `idx_module`(`module` ASC) USING BTREE,
   INDEX `idx_action`(`action` ASC) USING BTREE,
   INDEX `idx_op_time`(`operation_time` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 1055 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '操作审计日志' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 1059 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '操作审计日志' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for sys_role
