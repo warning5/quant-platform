@@ -348,9 +348,13 @@ function AppLayout({ isDark, setIsDark }) {
               <Route path="/system/users" element={<SystemUserManage />} />
               <Route path="/system/roles" element={<SystemRoleManage />} />
               <Route path="/system/menus" element={<SystemMenuManage />} />
-              <Route path="/audit-logs" element={<AuditLog />} />
-              <Route path="/credentials" element={<CredentialManage />} />
-              <Route path="/data-permissions" element={<DataPermissionManage />} />
+              <Route path="/system/audit-logs" element={<AuditLog />} />
+              <Route path="/system/credentials" element={<CredentialManage />} />
+              <Route path="/system/data-permissions" element={<DataPermissionManage />} />
+              {/* 兼容旧路由：重定向到统一的 /system/* 命名 */}
+              <Route path="/audit-logs" element={<Navigate to="/system/audit-logs" replace />} />
+              <Route path="/credentials" element={<Navigate to="/system/credentials" replace />} />
+              <Route path="/data-permissions" element={<Navigate to="/system/data-permissions" replace />} />
               <Route path="/system/departments" element={<DepartmentManage />} />
               <Route path="/system/dict" element={<DictManage />} />
               <Route path="/system/config" element={<ConfigCenter />} />

@@ -2,6 +2,7 @@ package com.quant.platform.system.controller;
 
 import cn.dev33.satoken.annotation.SaCheckPermission;
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import jakarta.validation.Valid;
 import com.quant.platform.common.dto.ApiResponse;
 import com.quant.platform.common.dto.PageRequest;
 import com.quant.platform.system.dto.CreateUserRequest;
@@ -36,13 +37,13 @@ public class UserController {
 
     @PostMapping
     @SaCheckPermission("system:user:add")
-    public ApiResponse<SysUser> add(@RequestBody CreateUserRequest request) {
+    public ApiResponse<SysUser> add(@Valid @RequestBody CreateUserRequest request) {
         return ApiResponse.success(userService.createUser(request));
     }
 
     @PutMapping
     @SaCheckPermission("system:user:edit")
-    public ApiResponse<SysUser> edit(@RequestBody UpdateUserRequest request) {
+    public ApiResponse<SysUser> edit(@Valid @RequestBody UpdateUserRequest request) {
         return ApiResponse.success(userService.updateUser(request));
     }
 
@@ -55,7 +56,7 @@ public class UserController {
 
     @PostMapping("/{id}/reset-password")
     @SaCheckPermission("system:user:reset")
-    public ApiResponse<Void> reset(@PathVariable Long id, @RequestBody ResetPasswordRequest request) {
+    public ApiResponse<Void> reset(@PathVariable Long id, @Valid @RequestBody ResetPasswordRequest request) {
         userService.resetPassword(id, request.getPassword());
         return ApiResponse.ok();
     }

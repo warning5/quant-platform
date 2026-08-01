@@ -2,9 +2,11 @@ package com.quant.platform.system.controller;
 
 import cn.dev33.satoken.annotation.SaCheckPermission;
 import com.quant.platform.common.dto.ApiResponse;
+import com.quant.platform.system.dto.DepartmentRequest;
 import com.quant.platform.system.dto.DepartmentTreeVO;
 import com.quant.platform.system.entity.SysDepartment;
 import com.quant.platform.system.service.DepartmentService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -29,14 +31,14 @@ public class DepartmentController {
 
     @PostMapping
     @SaCheckPermission("system:dept:add")
-    public ApiResponse<SysDepartment> add(@RequestBody SysDepartment dept) {
-        return ApiResponse.success(departmentService.create(dept));
+    public ApiResponse<SysDepartment> add(@Valid @RequestBody DepartmentRequest req) {
+        return ApiResponse.success(departmentService.create(req));
     }
 
     @PutMapping
     @SaCheckPermission("system:dept:edit")
-    public ApiResponse<Void> edit(@RequestBody SysDepartment dept) {
-        departmentService.update(dept);
+    public ApiResponse<Void> edit(@Valid @RequestBody DepartmentRequest req) {
+        departmentService.update(req);
         return ApiResponse.ok();
     }
 

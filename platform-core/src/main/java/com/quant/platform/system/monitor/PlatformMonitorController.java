@@ -1,5 +1,6 @@
 package com.quant.platform.system.monitor;
 
+import cn.dev33.satoken.annotation.SaCheckLogin;
 import cn.dev33.satoken.annotation.SaCheckPermission;
 import cn.dev33.satoken.stp.StpUtil;
 import com.quant.platform.common.dto.ApiResponse;
@@ -79,6 +80,7 @@ public class PlatformMonitorController {
 
     /** 前端路由切换埋点（任意已登录用户可上报自身导航，限流由全局限流承担） */
     @PostMapping("/track")
+    @SaCheckLogin
     public ApiResponse<?> track(@RequestBody Map<String, String> body) {
         String path = body.get("path");
         if (path == null || path.isBlank()) return ApiResponse.success("ok");

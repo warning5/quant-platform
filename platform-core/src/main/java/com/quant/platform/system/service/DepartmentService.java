@@ -45,8 +45,13 @@ public class DepartmentService {
         return roots;
     }
 
-    /** 新增部门：自动计算 dept_path 与 dept_level */
-    public SysDepartment create(SysDepartment req) {
+    /** 新增部门：自动计算 dept_path 与 dept_level（dept_path / dept_level 由服务端计算，不接收客户端输入） */
+    public SysDepartment create(DepartmentRequest req) {
+        SysDepartment d = new SysDepartment();
+        d.setParentId(req.getParentId());
+        d.setDeptName(req.getDeptName());
+        d.setSort(req.getSort());
+        d.setStatus(req.getStatus());
         String parentPath = "/";
         int level = 1;
         if (req.getParentId() != null && req.getParentId() != 0) {
@@ -55,43 +60,47 @@ public class DepartmentService {
                 parentPath = p.getDeptPath();
                 level = (p.getDeptLevel() == null ? 1 : p.getDeptLevel()) + 1;
             } else {
-                req.setParentId(0L);
+                d.setParentId(0L);
             }
         } else {
-            req.setParentId(0L);
+            d.setParentId(0L);
         }
-        req.setDeptLevel(level);
-        req.setCreateTime(LocalDateTime.now());
-        deptMapper.insert(req);
-        req.setDeptPath(parentPath + "/" + req.getId());
-        deptMapper.updateById(req);
-        return req;
+        d.setDeptLevel(level);
+        d.setCreateTime(LocalDateTime.now());
+        deptMapper.insert(d);
+        d.setDeptPath(parentPath + "/" + d.getId());
+        deptMapper.updateById(d);
+        return d;
     }
 
     /** 更新部门：父级变化时级联刷新 dept_path / dept_level（含所有子孙） */
-    public void update(SysDepartment req) {
+    public void update(DepartmentRequest req) {
+        if (req.getId() == null) {
+            throw new IllegalArgumentException("部门ID不能为空");
+        }
         SysDepartment existing = deptMapper.selectById(req.getId());
         if (existing == null) {
             throw new IllegalArgumentException("部门不存在或已删除");
         }
         String parentPath = "/";
         int level = 1;
-        if (req.getParentId() != null && req.getParentId() != 0) {
-            SysDepartment p = deptMapper.selectById(req.getParentId());
+        Long parentId = req.getParentId();
+        if (parentId != null && parentId != 0) {
+            SysDepartment p = deptMapper.selectById(parentId);
             if (p != null) {
                 parentPath = p.getDeptPath();
                 level = (p.getDeptLevel() == null ? 1 : p.getDeptLevel()) + 1;
             } else {
-                req.setParentId(0L);
+                parentId = 0L;
             }
         } else {
-            req.setParentId(0L);
+            parentId = 0L;
         }
         String oldPath = existing.getDeptPath();
         String newPath = parentPath + "/" + existing.getId();
 
         existing.setDeptName(req.getDeptName());
-        existing.setParentId(req.getParentId());
+        existing.setParentId(parentId);
         existing.setSort(req.getSort());
         existing.setStatus(req.getStatus());
         existing.setDeptLevel(levelFromPath(newPath));

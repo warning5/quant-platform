@@ -29,7 +29,7 @@ public class AuditController {
     }
 
     @DeleteMapping("/{id}")
-    @SaCheckPermission("system:audit:list")
+    @SaCheckPermission("system:audit:delete")
     public ApiResponse<Void> delete(@PathVariable Long id) {
         operationLogService.delete(id);
         return ApiResponse.ok();

@@ -2,6 +2,7 @@ package com.quant.platform.credential.controller;
 
 import cn.dev33.satoken.annotation.SaCheckPermission;
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import jakarta.validation.Valid;
 import com.quant.platform.audit.annotation.OperationLog;
 import com.quant.platform.common.dto.ApiResponse;
 import com.quant.platform.common.dto.PageRequest;
@@ -31,7 +32,7 @@ public class CredentialController {
     @PostMapping
     @SaCheckPermission("system:credential:add")
     @OperationLog(module = "system:credential", action = "add", recordParam = false)
-    public ApiResponse<Void> add(@RequestBody CredentialRequest req) {
+    public ApiResponse<Void> add(@Valid @RequestBody CredentialRequest req) {
         credentialService.create(req);
         return ApiResponse.ok();
     }
@@ -39,7 +40,7 @@ public class CredentialController {
     @PutMapping
     @SaCheckPermission("system:credential:edit")
     @OperationLog(module = "system:credential", action = "edit", recordParam = false)
-    public ApiResponse<Void> update(@RequestBody CredentialRequest req) {
+    public ApiResponse<Void> update(@Valid @RequestBody CredentialRequest req) {
         credentialService.update(req);
         return ApiResponse.ok();
     }

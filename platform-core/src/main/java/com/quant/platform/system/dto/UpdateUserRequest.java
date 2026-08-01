@@ -1,5 +1,7 @@
 package com.quant.platform.system.dto;
 
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
 import java.util.List;
@@ -9,8 +11,10 @@ import java.util.List;
  */
 @Data
 public class UpdateUserRequest {
+    @NotNull(message = "ID不能为空")
     private Long id;
     private String nickname;
+    @Email(message = "邮箱格式不正确")
     private String email;
     private String phone;
     private Integer status;

@@ -70,7 +70,7 @@ export default function AuditLog() {
       render: (_, row) => (
         <Space>
           <Button size="small" icon={<EyeOutlined />} onClick={() => showDetail(row)}>详情</Button>
-          {has('system:audit:list') && (
+          {has('system:audit:delete') && (
             <Popconfirm title="确认删除该日志记录?" onConfirm={() => onDelete(row.id)}>
               <Button size="small" danger icon={<DeleteOutlined />} />
             </Popconfirm>

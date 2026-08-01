@@ -69,12 +69,40 @@ public class MenuService {
         return menuMapper.selectById(id);
     }
 
-    public void create(SysMenu menu) {
+    public void create(MenuRequest req) {
+        SysMenu menu = new SysMenu();
+        menu.setParentId(req.getParentId());
+        menu.setMenuName(req.getMenuName());
+        menu.setMenuType(req.getMenuType());
+        menu.setPath(req.getPath());
+        menu.setComponent(req.getComponent());
+        menu.setIcon(req.getIcon());
+        menu.setPermission(req.getPermission());
+        menu.setSort(req.getSort());
+        menu.setStatus(req.getStatus());
+        menu.setDeleted(0);
         menuMapper.insert(menu);
     }
 
-    public void update(SysMenu menu) {
-        menuMapper.updateById(menu);
+    public void update(MenuRequest req) {
+        if (req.getId() == null) {
+            throw new IllegalArgumentException("菜单ID不能为空");
+        }
+        SysMenu existing = menuMapper.selectById(req.getId());
+        if (existing == null) {
+            throw new IllegalArgumentException("菜单不存在");
+        }
+        // 只复制白名单字段，避免覆盖 createTime / deleted 等系统字段
+        existing.setParentId(req.getParentId());
+        existing.setMenuName(req.getMenuName());
+        existing.setMenuType(req.getMenuType());
+        existing.setPath(req.getPath());
+        existing.setComponent(req.getComponent());
+        existing.setIcon(req.getIcon());
+        existing.setPermission(req.getPermission());
+        existing.setSort(req.getSort());
+        existing.setStatus(req.getStatus());
+        menuMapper.updateById(existing);
     }
 
     /** 递归删除菜单（含子菜单与角色关联） */

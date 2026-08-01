@@ -1,8 +1,9 @@
 package com.quant.platform.system.controller;
 
 import cn.dev33.satoken.annotation.SaCheckPermission;
-import cn.dev33.satoken.annotation.SaMode;
+import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import jakarta.validation.Valid;
 import com.quant.platform.common.dto.ApiResponse;
 import com.quant.platform.common.dto.PageRequest;
 import com.quant.platform.system.dto.RoleRequest;
@@ -19,7 +20,6 @@ import java.util.List;
 @RestController
 @RequestMapping("/system/role")
 @RequiredArgsConstructor
-@SaCheckPermission("system:role:list")
 public class RoleController {
 
     private final RoleService roleService;
@@ -34,20 +34,20 @@ public class RoleController {
 
     @GetMapping("/list")
     // 角色列表是用户管理表单（角色下拉框）的依赖数据：拥有角色管理权限 或 用户管理权限均可读取
-    @SaCheckPermission(value = {"system:role:list", "system:user:list"}, mode = SaMode.OR)
     public ApiResponse<List<SysRole>> list() {
+        StpUtil.checkPermissionOr("system:role:list", "system:user:list");
         return ApiResponse.success(roleService.listAll());
     }
 
     @PostMapping
     @SaCheckPermission("system:role:add")
-    public ApiResponse<SysRole> add(@RequestBody RoleRequest request) {
+    public ApiResponse<SysRole> add(@Valid @RequestBody RoleRequest request) {
         return ApiResponse.success(roleService.create(request));
     }
 
     @PutMapping
     @SaCheckPermission("system:role:edit")
-    public ApiResponse<SysRole> edit(@RequestBody RoleRequest request) {
+    public ApiResponse<SysRole> edit(@Valid @RequestBody RoleRequest request) {
         return ApiResponse.success(roleService.update(request));
     }
 

@@ -1,9 +1,12 @@
 package com.quant.platform.system.controller;
 
 import cn.dev33.satoken.annotation.SaCheckPermission;
+import cn.dev33.satoken.stp.StpUtil;
 import com.quant.platform.common.dto.ApiResponse;
+import com.quant.platform.system.dto.MenuRequest;
 import com.quant.platform.system.entity.SysMenu;
 import com.quant.platform.system.service.MenuService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -15,15 +18,14 @@ import java.util.List;
 @RestController
 @RequestMapping("/system/menu")
 @RequiredArgsConstructor
-@SaCheckPermission("system:menu:list")
 public class MenuController {
 
     private final MenuService menuService;
 
-    /** 菜单树（含按钮） */
+    /** 菜单树（含按钮）—— 角色分配菜单时也需要读取，故对 system:role:assign 开放 */
     @GetMapping("/tree")
-    @SaCheckPermission("system:menu:list")
     public ApiResponse<List<SysMenu>> tree() {
+        StpUtil.checkPermissionOr("system:menu:list", "system:role:assign");
         return ApiResponse.success(menuService.tree());
     }
 
@@ -36,16 +38,16 @@ public class MenuController {
 
     @PostMapping
     @SaCheckPermission("system:menu:add")
-    public ApiResponse<SysMenu> add(@RequestBody SysMenu menu) {
-        menuService.create(menu);
-        return ApiResponse.success(menu);
+    public ApiResponse<SysMenu> add(@Valid @RequestBody MenuRequest req) {
+        menuService.create(req);
+        return ApiResponse.success(new SysMenu());
     }
 
     @PutMapping
     @SaCheckPermission("system:menu:edit")
-    public ApiResponse<SysMenu> edit(@RequestBody SysMenu menu) {
-        menuService.update(menu);
-        return ApiResponse.success(menu);
+    public ApiResponse<SysMenu> edit(@Valid @RequestBody MenuRequest req) {
+        menuService.update(req);
+        return ApiResponse.success(new SysMenu());
     }
 
     @DeleteMapping("/{id}")
