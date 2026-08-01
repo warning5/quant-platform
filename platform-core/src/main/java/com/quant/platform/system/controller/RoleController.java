@@ -1,6 +1,7 @@
 package com.quant.platform.system.controller;
 
 import cn.dev33.satoken.annotation.SaCheckPermission;
+import cn.dev33.satoken.annotation.SaMode;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.quant.platform.common.dto.ApiResponse;
 import com.quant.platform.common.dto.PageRequest;
@@ -32,7 +33,8 @@ public class RoleController {
     }
 
     @GetMapping("/list")
-    @SaCheckPermission("system:role:list")
+    // 角色列表是用户管理表单（角色下拉框）的依赖数据：拥有角色管理权限 或 用户管理权限均可读取
+    @SaCheckPermission(value = {"system:role:list", "system:user:list"}, mode = SaMode.OR)
     public ApiResponse<List<SysRole>> list() {
         return ApiResponse.success(roleService.listAll());
     }

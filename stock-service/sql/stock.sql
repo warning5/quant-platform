@@ -11,7 +11,7 @@
  Target Server Version : 90300 (9.3.0)
  File Encoding         : 65001
 
- Date: 26/07/2026 11:19:28
+ Date: 01/08/2026 22:44:30
 */
 
 SET NAMES utf8mb4;
@@ -146,7 +146,7 @@ CREATE TABLE `data_task_dependency`  (
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `uk_upstream_downstream`(`upstream_key` ASC, `downstream_key` ASC) USING BTREE,
   INDEX `idx_downstream`(`downstream_key` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 13 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '任务上下游依赖关系' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 20 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '任务上下游依赖关系' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for equity_curve
@@ -215,7 +215,7 @@ CREATE TABLE `factor_health_log`  (
   INDEX `idx_factor_code`(`factor_code` ASC) USING BTREE,
   INDEX `idx_event_type`(`event_type` ASC) USING BTREE,
   INDEX `idx_created_at`(`created_at` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 13 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '因子健康日志(降级/复活事件)' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 14 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '因子健康日志(降级/复活事件)' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for factor_ic_record
@@ -240,7 +240,7 @@ CREATE TABLE `factor_ic_record`  (
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `uk_factor_date_fwd`(`factor_code` ASC, `trade_date` ASC, `forward_days` ASC) USING BTREE,
   INDEX `idx_factor_date`(`factor_code` ASC, `trade_date` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 12018 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '因子IC记录表（信息系数历史）' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 18178 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '因子IC记录表（信息系数历史）' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for factor_test_report
@@ -311,7 +311,7 @@ CREATE TABLE `factor_value`  (
   UNIQUE INDEX `uk_factor_symbol_date`(`factor_code` ASC, `symbol` ASC, `calc_date` ASC) USING BTREE,
   INDEX `idx_factor_symbol_date`(`factor_code` ASC, `symbol` ASC, `calc_date` ASC) USING BTREE,
   INDEX `idx_factor_date`(`factor_code` ASC, `calc_date` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '因子值表' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '因子值表' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for index_daily
@@ -379,7 +379,7 @@ CREATE TABLE `macro_bond_yield`  (
   `created_at` datetime NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `uk_date`(`trade_date` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 1626 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '宏观债券收益率表（国债收益率/利差）' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 1631 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '宏观债券收益率表（国债收益率/利差）' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for market_regime_calendar
@@ -403,7 +403,7 @@ CREATE TABLE `market_sentiment`  (
   `value` double NOT NULL,
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `uk_date_ind`(`trade_date` ASC, `indicator` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 257810 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 270250 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for monitor_custom_stock
@@ -424,6 +424,22 @@ CREATE TABLE `monitor_custom_stock`  (
 ) ENGINE = InnoDB AUTO_INCREMENT = 6 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '盘中监控自定义股票表' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
+-- Table structure for notification_config
+-- ----------------------------
+DROP TABLE IF EXISTS `notification_config`;
+CREATE TABLE `notification_config`  (
+  `id` int NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `channel` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'none' COMMENT 'none / serverchan / wecom / dingtalk',
+  `serverchan_sendkey` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL COMMENT 'Server酱 SendKey',
+  `wecom_webhook_url` varchar(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL COMMENT '企业微信 Webhook URL',
+  `dingtalk_webhook_url` varchar(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL COMMENT '钉钉 Webhook URL',
+  `dingtalk_secret` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL COMMENT '钉钉加签密钥(可选)',
+  `enabled` tinyint(1) NOT NULL DEFAULT 0 COMMENT '总开关: 0=不发送 1=启用',
+  `updated_at` datetime NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`) USING BTREE
+) ENGINE = InnoDB AUTO_INCREMENT = 2 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '任务失败告警通知配置' ROW_FORMAT = Dynamic;
+
+-- ----------------------------
 -- Table structure for paper_cash_flow
 -- ----------------------------
 DROP TABLE IF EXISTS `paper_cash_flow`;
@@ -438,7 +454,7 @@ CREATE TABLE `paper_cash_flow`  (
   PRIMARY KEY (`id`) USING BTREE,
   INDEX `idx_paper_id`(`paper_id` ASC) USING BTREE,
   INDEX `idx_flow_date`(`flow_date` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '模拟盘现金流记录' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '模拟盘现金流记录' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for paper_execution_quality
@@ -461,7 +477,7 @@ CREATE TABLE `paper_execution_quality`  (
   `fill_rate` decimal(5, 4) NULL DEFAULT 1.0000,
   PRIMARY KEY (`id`) USING BTREE,
   INDEX `idx_paper_signal`(`paper_id` ASC, `signal_id` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '模拟盘执行质量记录表' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '模拟盘执行质量记录表' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for paper_nav
@@ -659,6 +675,60 @@ CREATE TABLE `rebalance_record`  (
 ) ENGINE = InnoDB AUTO_INCREMENT = 277 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '调仓记录表' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
+-- Table structure for resource_meta
+-- ----------------------------
+DROP TABLE IF EXISTS `resource_meta`;
+CREATE TABLE `resource_meta`  (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `resource_type` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT 'STRATEGY/BACKTEST/FACTOR/PAPER_TRADING',
+  `resource_id` bigint NOT NULL COMMENT '业务表主键',
+  `owner_id` bigint NOT NULL COMMENT '创建者 user_id',
+  `owner_dept_id` bigint NULL DEFAULT NULL COMMENT '创建者部门id(冗余，便于按部门过滤)',
+  `visibility` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT 'PRIVATE' COMMENT 'PRIVATE/DEPT/PUBLIC',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_res`(`resource_type` ASC, `resource_id` ASC) USING BTREE,
+  INDEX `idx_owner`(`owner_id` ASC) USING BTREE,
+  INDEX `idx_visibility`(`resource_type` ASC, `visibility` ASC) USING BTREE
+) ENGINE = InnoDB AUTO_INCREMENT = 63 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '数据权限-资源归属与可见性' ROW_FORMAT = Dynamic;
+
+-- ----------------------------
+-- Table structure for resource_share
+-- ----------------------------
+DROP TABLE IF EXISTS `resource_share`;
+CREATE TABLE `resource_share`  (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `resource_type` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+  `resource_id` bigint NOT NULL,
+  `grantee_type` varchar(10) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT 'USER/DEPT/ROLE',
+  `grantee_id` bigint NOT NULL,
+  `perm_level` varchar(10) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT 'VIEW' COMMENT 'VIEW/EDIT',
+  `granted_by` bigint NOT NULL COMMENT '授权人 user_id',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_share`(`resource_type` ASC, `resource_id` ASC, `grantee_type` ASC, `grantee_id` ASC) USING BTREE,
+  INDEX `idx_grantee`(`grantee_type` ASC, `grantee_id` ASC) USING BTREE
+) ENGINE = InnoDB AUTO_INCREMENT = 3 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '数据权限-显式授权' ROW_FORMAT = Dynamic;
+
+-- ----------------------------
+-- Table structure for sla_config
+-- ----------------------------
+DROP TABLE IF EXISTS `sla_config`;
+CREATE TABLE `sla_config`  (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `task_key` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '任务标识',
+  `task_name` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL COMMENT '任务名称',
+  `expected_finish_hour` int NULL DEFAULT NULL COMMENT '期望在当天几点前完成(0-23)，NULL=不限',
+  `max_duration_min` int NULL DEFAULT NULL COMMENT '最大允许耗时(分钟)，NULL=不限',
+  `severity` varchar(10) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'HIGH' COMMENT '未达标严重级别: HIGH/MEDIUM/LOW',
+  `enabled` tinyint(1) NOT NULL DEFAULT 1 COMMENT '是否纳入 SLA 监控',
+  `created_at` datetime NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_task_key`(`task_key` ASC) USING BTREE
+) ENGINE = InnoDB AUTO_INCREMENT = 10 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '任务 SLA(服务等级)配置' ROW_FORMAT = Dynamic;
+
+-- ----------------------------
 -- Table structure for stock_announcement
 -- ----------------------------
 DROP TABLE IF EXISTS `stock_announcement`;
@@ -676,7 +746,7 @@ CREATE TABLE `stock_announcement`  (
   INDEX `idx_code`(`code` ASC) USING BTREE,
   INDEX `idx_publish_date`(`publish_date` ASC) USING BTREE,
   INDEX `idx_category`(`category` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '公告表' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '公告表' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for stock_balance
@@ -758,7 +828,7 @@ CREATE TABLE `stock_bid_ask`  (
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `uk_code_date`(`code` ASC, `trade_date` ASC) USING BTREE,
   UNIQUE INDEX `stock_bid_ask_code_trade_date_uindex`(`code` ASC, `trade_date` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 540809 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '内外盘数据表' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 593199 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '内外盘数据表' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for stock_blacklist
@@ -778,7 +848,7 @@ CREATE TABLE `stock_blacklist`  (
   PRIMARY KEY (`id`) USING BTREE,
   INDEX `idx_strategy_active`(`strategy_id` ASC, `stock_code` ASC, `blacklist_until` ASC) USING BTREE,
   INDEX `idx_strategy_id`(`strategy_id` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 743 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '股票黑名单 - 自动/手动屏蔽历史失利或踩雷的股票' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 803 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '股票黑名单 - 自动/手动屏蔽历史失利或踩雷的股票' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for stock_cashflow
@@ -877,7 +947,7 @@ CREATE TABLE `stock_consensus_estimate`  (
   UNIQUE INDEX `uk_code_year`(`code` ASC, `forecast_year` ASC) USING BTREE,
   INDEX `idx_code`(`code` ASC) USING BTREE,
   INDEX `idx_update_time`(`update_time` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 413784 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '一致预期(同花顺)' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 429780 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '一致预期(同花顺)' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for stock_daily
@@ -929,7 +999,7 @@ CREATE TABLE `stock_dividend`  (
   UNIQUE INDEX `uk_code_ex_date`(`code` ASC, `ex_dividend_date` ASC) USING BTREE,
   INDEX `idx_code`(`code` ASC) USING BTREE,
   INDEX `idx_ex_date`(`ex_dividend_date` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 1360844 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '分红送股数据表（含现金分红/送股/转增/配股）' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 1498803 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '分红送股数据表（含现金分红/送股/转增/配股）' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for stock_earnings_report
@@ -954,7 +1024,7 @@ CREATE TABLE `stock_earnings_report`  (
   UNIQUE INDEX `uk_code_report`(`code` ASC, `report_date` ASC) USING BTREE,
   INDEX `idx_code`(`code` ASC) USING BTREE,
   INDEX `idx_announce`(`announce_date` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 42076 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '业绩快报(东财)' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 44075 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '业绩快报(东财)' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for stock_financial_indicator
@@ -1137,7 +1207,7 @@ CREATE TABLE `stock_news`  (
   INDEX `idx_publish_date`(`publish_date` ASC) USING BTREE,
   INDEX `idx_event_tag`(`event_tag` ASC) USING BTREE,
   INDEX `idx_news_type`(`news_type` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 1059391 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '新闻表' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 1240793 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '新闻表' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for stock_recommendation
@@ -1221,7 +1291,7 @@ CREATE TABLE `stock_research_report`  (
   INDEX `idx_code`(`code` ASC) USING BTREE,
   INDEX `idx_report_date`(`report_date` ASC) USING BTREE,
   INDEX `idx_institution`(`institution`(50) ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 58892 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '研报表' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 59008 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '研报表' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for stock_sentiment_activity
@@ -1244,7 +1314,7 @@ CREATE TABLE `stock_sentiment_activity`  (
   `update_time` datetime NULL DEFAULT CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `uk_activity_date`(`trade_date` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 108 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '市场活跃度情绪指标表' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 113 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '市场活跃度情绪指标表' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for stock_sentiment_block_trade
@@ -1269,7 +1339,7 @@ CREATE TABLE `stock_sentiment_block_trade`  (
   `update_time` datetime NULL DEFAULT CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `uk_block_trade`(`code` ASC, `trade_date` ASC, `price` ASC, `volume` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 28777 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '大宗交易表' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 29266 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '大宗交易表' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for stock_sentiment_lhb
@@ -1299,7 +1369,7 @@ CREATE TABLE `stock_sentiment_lhb`  (
   `update_time` datetime NULL DEFAULT CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `uk_lhb`(`code` ASC, `trade_date` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 7622 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '龙虎榜情绪数据表（上榜营业部买卖统计）' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 8090 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '龙虎榜情绪数据表（上榜营业部买卖统计）' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for stock_sentiment_lhb_inst
@@ -1325,7 +1395,7 @@ CREATE TABLE `stock_sentiment_lhb_inst`  (
   `update_time` datetime NULL DEFAULT CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `uk_lhb_inst`(`code` ASC, `trade_date` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 4511 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '龙虎榜机构买卖数据表（机构席位净买卖统计）' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 4795 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '龙虎榜机构买卖数据表（机构席位净买卖统计）' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for stock_sentiment_margin
@@ -1343,7 +1413,7 @@ CREATE TABLE `stock_sentiment_margin`  (
   `update_time` datetime NULL DEFAULT CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `uk_margin_date`(`trade_date` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 405 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '融资融券汇总表（每日融资余额/融券余额）' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 410 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '融资融券汇总表（每日融资余额/融券余额）' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for stock_sentiment_margin_detail
@@ -1363,7 +1433,7 @@ CREATE TABLE `stock_sentiment_margin_detail`  (
   `update_time` datetime NULL DEFAULT CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `uk_margin_detail`(`code` ASC, `trade_date` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 834398 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '融资融券明细表' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 854848 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '融资融券明细表' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for stock_sentiment_moneyflow
@@ -1386,7 +1456,7 @@ CREATE TABLE `stock_sentiment_moneyflow`  (
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `uk_code_date`(`code` ASC, `trade_date` ASC) USING BTREE,
   INDEX `idx_trade_date`(`trade_date` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 977304 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '个股资金流向情绪表（东方财富真实资金流，120天历史）' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 1003882 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '个股资金流向情绪表（东方财富真实资金流，120天历史）' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for stock_sentiment_notice
@@ -1404,7 +1474,7 @@ CREATE TABLE `stock_sentiment_notice`  (
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `uk_code_date_type`(`code` ASC, `notice_date` ASC, `notice_type` ASC) USING BTREE,
   INDEX `idx_notice_date`(`notice_date` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 303879 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '个股公告事件情绪表' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 310501 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '个股公告事件情绪表' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for stock_sentiment_survey
@@ -1425,7 +1495,7 @@ CREATE TABLE `stock_sentiment_survey`  (
   `update_time` datetime NULL DEFAULT CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `uk_survey`(`code` ASC, `meeting_date` ASC, `notice_date` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 51410 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '机构调研事件情绪表' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 51640 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '机构调研事件情绪表' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for stock_sentiment_zt
@@ -1447,7 +1517,7 @@ CREATE TABLE `stock_sentiment_zt`  (
   UNIQUE INDEX `uk_code_date_type`(`code` ASC, `trade_date` ASC, `zt_type` ASC) USING BTREE,
   INDEX `idx_trade_date`(`trade_date` ASC) USING BTREE,
   INDEX `idx_zt_type`(`zt_type` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 32204 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '涨跌停情绪数据表（涨停家数/跌停家数/炸板率）' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 32919 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '涨跌停情绪数据表（涨停家数/跌停家数/炸板率）' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for stock_shareholder
@@ -1511,7 +1581,7 @@ CREATE TABLE `strategy_confidence`  (
   UNIQUE INDEX `uk_confidence_strategy_mode`(`strategy_id` ASC, `weight_mode` ASC, `data_as_of_date` DESC) USING BTREE,
   INDEX `idx_strategy_id`(`strategy_id` ASC) USING BTREE,
   INDEX `idx_level`(`level` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 926 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '策略置信度 - 基于历史追踪表现的风控评分' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 1108 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '策略置信度 - 基于历史追踪表现的风控评分' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for strategy_definition
@@ -1539,7 +1609,256 @@ CREATE TABLE `strategy_definition`  (
   `updated_at` datetime NULL DEFAULT NULL COMMENT '更新时间',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `uk_strategy_code`(`strategy_code` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 90 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '策略定义表（量化策略参数和配置）' ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 95 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '策略定义表（量化策略参数和配置）' ROW_FORMAT = Dynamic;
+
+-- ----------------------------
+-- Table structure for sys_config
+-- ----------------------------
+DROP TABLE IF EXISTS `sys_config`;
+CREATE TABLE `sys_config`  (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `config_key` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '閰嶇疆閿?鍞?竴)',
+  `config_value` varchar(2000) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT '' COMMENT '閰嶇疆鍊',
+  `config_group` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT 'DEFAULT' COMMENT '鍒嗙粍(渚夸簬鍓嶇?鍒嗘爮)',
+  `config_label` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT '' COMMENT '鏄剧ず鏍囩?',
+  `config_type` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT 'STRING' COMMENT 'STRING/NUMBER/BOOLEAN/JSON',
+  `enabled` tinyint NOT NULL DEFAULT 1 COMMENT '0绂佺敤 1鍚?敤',
+  `sort` int NOT NULL DEFAULT 0 COMMENT '灞曠ず椤哄簭',
+  `remark` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT '' COMMENT '澶囨敞',
+  `create_time` datetime NULL DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted` tinyint NOT NULL DEFAULT 0,
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_config_key`(`config_key` ASC) USING BTREE,
+  INDEX `idx_group`(`config_group` ASC) USING BTREE
+) ENGINE = InnoDB AUTO_INCREMENT = 9 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '绯荤粺鍙傛暟閰嶇疆琛' ROW_FORMAT = Dynamic;
+
+-- ----------------------------
+-- Table structure for sys_credential
+-- ----------------------------
+DROP TABLE IF EXISTS `sys_credential`;
+CREATE TABLE `sys_credential`  (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `credential_key` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '凭证标识，如 DEEPSEEK_API_KEY',
+  `name` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT '' COMMENT '展示名称',
+  `category` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT 'llm' COMMENT '分类：llm/wechat/notification/db',
+  `encrypted_value` text CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL COMMENT 'AES加密后的密文(Base64)',
+  `masked_value` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT '' COMMENT '明文掩码，如 sk-****989d（非敏感，可展示）',
+  `enabled` tinyint NULL DEFAULT 1 COMMENT '1=启用 0=禁用',
+  `remark` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT '' COMMENT '备注',
+  `create_time` datetime NULL DEFAULT NULL,
+  `update_time` datetime NULL DEFAULT NULL,
+  `deleted` tinyint NULL DEFAULT 0,
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_cred_key`(`credential_key` ASC, `deleted` ASC) USING BTREE,
+  INDEX `idx_category`(`category` ASC) USING BTREE
+) ENGINE = InnoDB AUTO_INCREMENT = 1006 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '系统凭证(密钥)加密存储' ROW_FORMAT = Dynamic;
+
+-- ----------------------------
+-- Table structure for sys_department
+-- ----------------------------
+DROP TABLE IF EXISTS `sys_department`;
+CREATE TABLE `sys_department`  (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `parent_id` bigint NOT NULL DEFAULT 0 COMMENT '0=根',
+  `dept_name` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+  `dept_path` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT '' COMMENT '/1/3/7 祖先链，用于层级匹配',
+  `dept_level` int NOT NULL DEFAULT 1,
+  `sort` int NOT NULL DEFAULT 0,
+  `status` tinyint NOT NULL DEFAULT 1 COMMENT '1=启用 0=停用',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`) USING BTREE,
+  INDEX `idx_parent`(`parent_id` ASC) USING BTREE
+) ENGINE = InnoDB AUTO_INCREMENT = 101 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '部门表(支持多级)' ROW_FORMAT = Dynamic;
+
+-- ----------------------------
+-- Table structure for sys_dict_data
+-- ----------------------------
+DROP TABLE IF EXISTS `sys_dict_data`;
+CREATE TABLE `sys_dict_data`  (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `dict_type` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '关联 sys_dict_type.dict_type',
+  `dict_value` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '业务实际值(代码读它)，如 HIGH',
+  `dict_label` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '显示标签，如 高',
+  `sort` int NOT NULL DEFAULT 0 COMMENT '同类型内排序(升序)',
+  `color` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL COMMENT '前端颜色，如 red',
+  `ext_json` varchar(1000) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL COMMENT '扩展属性JSON，如 {\"notifyLevel\":1}',
+  `remark` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT '' COMMENT '备注',
+  `status` tinyint NOT NULL DEFAULT 1 COMMENT '0禁用 1启用',
+  `create_time` datetime NULL DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted` tinyint NOT NULL DEFAULT 0,
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_type_value`(`dict_type` ASC, `dict_value` ASC) USING BTREE,
+  INDEX `idx_type_status_sort`(`dict_type` ASC, `status` ASC, `sort` ASC) USING BTREE
+) ENGINE = InnoDB AUTO_INCREMENT = 199 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '字典数据项表' ROW_FORMAT = Dynamic;
+
+-- ----------------------------
+-- Table structure for sys_dict_type
+-- ----------------------------
+DROP TABLE IF EXISTS `sys_dict_type`;
+CREATE TABLE `sys_dict_type`  (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `dict_type` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '类型编码，如 SLA_SEVERITY',
+  `type_name` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '类型名称，如 SLA严重级别',
+  `description` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT '' COMMENT '说明',
+  `status` tinyint NOT NULL DEFAULT 1 COMMENT '0禁用 1启用',
+  `sort` int NOT NULL DEFAULT 0 COMMENT '类型展示顺序',
+  `create_time` datetime NULL DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted` tinyint NOT NULL DEFAULT 0,
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_dict_type`(`dict_type` ASC) USING BTREE,
+  INDEX `idx_status`(`status` ASC) USING BTREE
+) ENGINE = InnoDB AUTO_INCREMENT = 43 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '字典类型表' ROW_FORMAT = Dynamic;
+
+-- ----------------------------
+-- Table structure for sys_menu
+-- ----------------------------
+DROP TABLE IF EXISTS `sys_menu`;
+CREATE TABLE `sys_menu`  (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `parent_id` bigint NULL DEFAULT 0 COMMENT '父菜单ID，0=顶级',
+  `menu_name` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '菜单名称',
+  `menu_type` tinyint NOT NULL DEFAULT 1 COMMENT '0=目录 1=菜单 2=按钮',
+  `path` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT '' COMMENT '路由路径',
+  `component` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT '' COMMENT '前端组件 key',
+  `icon` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT '' COMMENT '图标',
+  `permission` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT '' COMMENT '权限标识，如 system:user:list',
+  `sort` int NULL DEFAULT 0 COMMENT '排序号',
+  `status` tinyint NULL DEFAULT 1 COMMENT '1=显示 0=隐藏',
+  `create_time` datetime NULL DEFAULT NULL,
+  `update_time` datetime NULL DEFAULT NULL,
+  `deleted` tinyint NULL DEFAULT 0,
+  PRIMARY KEY (`id`) USING BTREE,
+  INDEX `idx_parent`(`parent_id` ASC) USING BTREE
+) ENGINE = InnoDB AUTO_INCREMENT = 1000 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '系统菜单/权限' ROW_FORMAT = Dynamic;
+
+-- ----------------------------
+-- Table structure for sys_operation_log
+-- ----------------------------
+DROP TABLE IF EXISTS `sys_operation_log`;
+CREATE TABLE `sys_operation_log`  (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `user_id` bigint NULL DEFAULT NULL COMMENT '操作人ID，未登录为0',
+  `username` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT '' COMMENT '操作人账号',
+  `ip` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT '' COMMENT '请求IP',
+  `request_url` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT '' COMMENT '请求URL',
+  `http_method` varchar(10) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT '' COMMENT 'GET/POST/PUT/DELETE',
+  `module` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT '' COMMENT '功能模块，如 system:user',
+  `action` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT '' COMMENT '操作动作，如 add/edit/delete/query',
+  `method_name` varchar(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT '' COMMENT '目标方法全限定名',
+  `request_param` text CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL COMMENT '请求参数(JSON，敏感字段已脱敏)',
+  `result` tinyint NULL DEFAULT 1 COMMENT '1=成功 0=失败',
+  `error_msg` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT '' COMMENT '失败信息',
+  `duration_ms` int NULL DEFAULT 0 COMMENT '耗时(毫秒)',
+  `user_agent` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT '' COMMENT '浏览器UA',
+  `operation_time` datetime NULL DEFAULT NULL COMMENT '操作时间',
+  `create_time` datetime NULL DEFAULT NULL,
+  `update_time` datetime NULL DEFAULT NULL,
+  `deleted` tinyint NULL DEFAULT 0,
+  PRIMARY KEY (`id`) USING BTREE,
+  INDEX `idx_user`(`user_id` ASC) USING BTREE,
+  INDEX `idx_module`(`module` ASC) USING BTREE,
+  INDEX `idx_action`(`action` ASC) USING BTREE,
+  INDEX `idx_op_time`(`operation_time` ASC) USING BTREE
+) ENGINE = InnoDB AUTO_INCREMENT = 1055 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '操作审计日志' ROW_FORMAT = Dynamic;
+
+-- ----------------------------
+-- Table structure for sys_role
+-- ----------------------------
+DROP TABLE IF EXISTS `sys_role`;
+CREATE TABLE `sys_role`  (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `role_code` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '角色编码（权限标识用）',
+  `role_name` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '角色名称',
+  `remark` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT '' COMMENT '备注',
+  `status` tinyint NULL DEFAULT 1 COMMENT '1=启用 0=禁用',
+  `create_time` datetime NULL DEFAULT NULL,
+  `update_time` datetime NULL DEFAULT NULL,
+  `deleted` tinyint NULL DEFAULT 0,
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_role_code`(`role_code` ASC) USING BTREE
+) ENGINE = InnoDB AUTO_INCREMENT = 100 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '系统角色' ROW_FORMAT = Dynamic;
+
+-- ----------------------------
+-- Table structure for sys_role_menu
+-- ----------------------------
+DROP TABLE IF EXISTS `sys_role_menu`;
+CREATE TABLE `sys_role_menu`  (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `role_id` bigint NOT NULL,
+  `menu_id` bigint NOT NULL,
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_role_menu`(`role_id` ASC, `menu_id` ASC) USING BTREE,
+  INDEX `idx_menu`(`menu_id` ASC) USING BTREE
+) ENGINE = InnoDB AUTO_INCREMENT = 1096 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '角色-菜单关联' ROW_FORMAT = Dynamic;
+
+-- ----------------------------
+-- Table structure for sys_user
+-- ----------------------------
+DROP TABLE IF EXISTS `sys_user`;
+CREATE TABLE `sys_user`  (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `username` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '登录账号',
+  `password` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT 'BCrypt 密码，纯微信用户可为空',
+  `nickname` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT '' COMMENT '昵称',
+  `avatar` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT '' COMMENT '头像 URL',
+  `email` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT '' COMMENT '邮箱',
+  `phone` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT '' COMMENT '手机号',
+  `status` tinyint NULL DEFAULT 1 COMMENT '1=启用 0=禁用',
+  `wechat_openid` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '微信 openid',
+  `wechat_unionid` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '微信 unionid（跨应用唯一，账号型用户为 NULL）',
+  `wechat_type` tinyint NULL DEFAULT 0 COMMENT '0=无 1=网站应用 2=公众号 3=小程序',
+  `last_login_time` datetime NULL DEFAULT NULL COMMENT '最近登录时间',
+  `create_time` datetime NULL DEFAULT NULL,
+  `update_time` datetime NULL DEFAULT NULL,
+  `deleted` tinyint NULL DEFAULT 0,
+  `dept_id` bigint NOT NULL DEFAULT 0 COMMENT '所属部门id,0=未分配',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_username`(`username` ASC) USING BTREE,
+  UNIQUE INDEX `uk_unionid`(`wechat_unionid` ASC) USING BTREE,
+  INDEX `idx_openid`(`wechat_openid` ASC) USING BTREE,
+  INDEX `idx_phone`(`phone` ASC) USING BTREE
+) ENGINE = InnoDB AUTO_INCREMENT = 100 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '系统用户' ROW_FORMAT = Dynamic;
+
+-- ----------------------------
+-- Table structure for sys_user_role
+-- ----------------------------
+DROP TABLE IF EXISTS `sys_user_role`;
+CREATE TABLE `sys_user_role`  (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `user_id` bigint NOT NULL,
+  `role_id` bigint NOT NULL,
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_user_role`(`user_id` ASC, `role_id` ASC) USING BTREE,
+  INDEX `idx_role`(`role_id` ASC) USING BTREE
+) ENGINE = InnoDB AUTO_INCREMENT = 100 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '用户-角色关联' ROW_FORMAT = Dynamic;
+
+-- ----------------------------
+-- Table structure for task_run_history
+-- ----------------------------
+DROP TABLE IF EXISTS `task_run_history`;
+CREATE TABLE `task_run_history`  (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `task_key` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '任务标识(对应 data_schedule_config.task_key)',
+  `task_name` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL COMMENT '任务显示名称(冗余快照)',
+  `trigger_type` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '触发方式: CRON / MANUAL / DEPENDENCY',
+  `update_type` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL COMMENT '数据更新类型(如 DAILY/SENTIMENT/FACTOR_COMPUTE)',
+  `upstream_key` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL COMMENT '依赖触发时的上游任务 key',
+  `start_time` datetime NOT NULL COMMENT '开始时间',
+  `end_time` datetime NULL DEFAULT NULL COMMENT '结束时间(NULL=仍在进行/孤儿)',
+  `status` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'RUNNING/SUCCESS/FAILED/TIMEOUT/PARTIAL/CANCELLED',
+  `exit_code` int NULL DEFAULT NULL COMMENT '进程退出码(Java任务为NULL)',
+  `duration_sec` int NULL DEFAULT NULL COMMENT '执行耗时(秒)',
+  `error_msg` varchar(1000) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL COMMENT '失败/超时错误信息',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '记录创建时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  INDEX `idx_task_key`(`task_key` ASC) USING BTREE,
+  INDEX `idx_start_time`(`start_time` ASC) USING BTREE,
+  INDEX `idx_status`(`status` ASC) USING BTREE,
+  INDEX `idx_trigger`(`trigger_type` ASC) USING BTREE
+) ENGINE = InnoDB AUTO_INCREMENT = 6 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '定时任务执行历史记录' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for trade_calendar
