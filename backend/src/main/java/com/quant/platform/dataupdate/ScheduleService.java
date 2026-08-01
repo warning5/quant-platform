@@ -410,6 +410,21 @@ public class ScheduleService implements SchedulingConfigurer {
      */
     public void executeTask(String taskKey, String triggerType) {
         try {
+            // ── 并发守卫：防止同一任务被 cron + 依赖链同时触发导致双重执行 ──
+            // 以 data_schedule_config.last_run_status 为锁；RUNNING 时跳过（手动触发除外）
+            if (!"MANUAL".equals(triggerType)) {
+                try {
+                    String currentStatus = jdbcTemplate.queryForObject(
+                        "SELECT last_run_status FROM data_schedule_config WHERE task_key = ?",
+                        String.class, taskKey);
+                    if ("RUNNING".equals(currentStatus)) {
+                        log.warn("[ScheduleService] 任务 {} 当前状态为 RUNNING，跳过 {} 触发（防并发重复执行）",
+                            taskKey, triggerType);
+                        return;
+                    }
+                } catch (Exception ignored) { /* 表无记录时放行 */ }
+            }
+
             // 质量检查任务：数据新鲜度
             if ("DATA_FRESHNESS".equals(taskKey)) {
                 runJavaTask(taskKey, triggerType, k -> {
@@ -470,6 +485,10 @@ public class ScheduleService implements SchedulingConfigurer {
             // Phase 2: 每日自动推荐任务
             if ("DAILY_RECOMMENDATION".equals(taskKey)) {
                 long hid = insertHistory(taskKey, triggerType, null);
+                // 立即标记 RUNNING：① 让定时任务列表显示执行中；② 让并发守卫生效（否则依赖链与cron仍会双重触发）
+                jdbcTemplate.update(
+                    "UPDATE data_schedule_config SET last_run_time = ?, last_run_status = 'RUNNING' " +
+                    "WHERE task_key = ?", LocalDateTime.now(), taskKey);
                 try {
                     executeDailyRecommendation();
                     // executeDailyRecommendation 内部已更新 data_schedule_config 状态
