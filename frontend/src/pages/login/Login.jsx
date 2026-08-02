@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Card, Tabs, Form, Input, Button, Alert, Space, Typography } from 'antd'
 import { message } from '../../utils/messageUtil';
-import { UserOutlined, LockOutlined, WechatOutlined } from '@ant-design/icons';
+import { UserOutlined, LockOutlined, WechatOutlined, SafetyOutlined } from '@ant-design/icons';
 import authApi from '../../api/auth';
 import { useAuthStore } from '../../stores/authStore';
 
@@ -16,6 +16,9 @@ export default function Login() {
   const fetchMe = useAuthStore((s) => s.fetchMe);
   const [loading, setLoading] = useState(false);
   const [wechatLoading, setWechatLoading] = useState(false);
+  const [needCaptcha, setNeedCaptcha] = useState(false);
+  const [captchaId, setCaptchaId] = useState('');
+  const [captchaImg, setCaptchaImg] = useState('');
   const popupRef = useRef(null);
 
   // 统一获取登录后回跳路径：优先 react-router state（SPA 内跳转），其次 sessionStorage（401 整页刷新）
@@ -28,6 +31,19 @@ export default function Login() {
   // 清除回跳路径（避免重复使用）
   const clearRedirectPath = () => {
     try { sessionStorage.removeItem('redirect_after_login'); } catch (_) {}
+  };
+
+  // 拉取图形验证码（渐进式：登录失败达阈值后展示）
+  const fetchCaptcha = async () => {
+    try {
+      const result = await authApi.captcha();
+      if (result && result.captchaId) {
+        setCaptchaId(result.captchaId);
+        setCaptchaImg(result.image);
+      }
+    } catch (_) {
+      // 验证码获取失败不阻断登录流程
+    }
   };
 
   // 公众号授权回调：URL 上带有 ?wechat=success&token=xxx
@@ -76,14 +92,25 @@ export default function Login() {
   const onAccountFinish = async (values) => {
     setLoading(true);
     try {
-      const result = await authApi.login(values.username, values.password);
+      const result = await authApi.login(
+        values.username,
+        values.password,
+        needCaptcha ? captchaId : undefined,
+        needCaptcha ? values.captcha : undefined
+      );
       login(result);
       message.success('登录成功');
+      setNeedCaptcha(false);
       const from = getRedirectPath();
       clearRedirectPath();
       navigate(from, { replace: true });
     } catch (e) {
-      // 错误提示已由 axios 拦截器统一处理
+      // 登录失败：若后端要求验证码则展示验证码框并拉取新图
+      const need = e?.response?.data?.data?.needCaptcha;
+      if (need) {
+        setNeedCaptcha(true);
+        fetchCaptcha();
+      }
     } finally {
       setLoading(false);
     }
@@ -116,6 +143,23 @@ export default function Login() {
       <Form.Item name="password" rules={[{ required: true, message: '请输入密码' }]}>
         <Input.Password prefix={<LockOutlined />} placeholder="密码：admin123" />
       </Form.Item>
+      {needCaptcha && (
+        <Form.Item name="captcha" rules={[{ required: true, message: '请输入验证码' }]}>
+          <Input
+            prefix={<SafetyOutlined />}
+            placeholder="请输入右侧验证码"
+            suffix={
+              <img
+                src={captchaImg}
+                alt="验证码"
+                onClick={fetchCaptcha}
+                style={{ cursor: 'pointer', height: 32, borderRadius: 4 }}
+                title="点击刷新验证码"
+              />
+            }
+          />
+        </Form.Item>
+      )}
       <Button type="primary" htmlType="submit" block loading={loading}>
         登录
       </Button>
@@ -159,7 +203,15 @@ export default function Login() {
           type="info"
           showIcon
           style={{ marginBottom: 16 }}
-          message="默认账号 admin / admin123（首次启动自动创建，请尽快修改密码）"
+          message={
+            <span>
+              默认账号 admin / admin123（首次启动自动创建，
+              <Typography.Link onClick={() => navigate('/account/profile')}>
+                请尽快修改密码
+              </Typography.Link>
+              ）
+            </span>
+          }
         />
         <Tabs
           defaultActiveKey="account"

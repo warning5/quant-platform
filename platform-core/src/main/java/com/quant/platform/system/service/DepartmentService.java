@@ -2,6 +2,7 @@ package com.quant.platform.system.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.quant.platform.system.dto.DepartmentTreeVO;
+import com.quant.platform.system.dto.DepartmentRequest;
 import com.quant.platform.system.entity.SysDepartment;
 import com.quant.platform.system.mapper.SysDepartmentMapper;
 import lombok.RequiredArgsConstructor;

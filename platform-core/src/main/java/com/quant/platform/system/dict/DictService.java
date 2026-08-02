@@ -1,5 +1,6 @@
 package com.quant.platform.system.dict;
 
+import com.quant.platform.system.monitor.CacheStats;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -26,6 +27,8 @@ public class DictService {
     private final JdbcTemplate jdbcTemplate;
     /** 字典项缓存：key=dictType，value=该类型下【启用】项列表 */
     private final Map<String, List<SysDictData>> cache = new ConcurrentHashMap<>();
+    /** 缓存运行时统计（供 PlatformMonitorController 暴露给监控面板） */
+    private final CacheStats cacheStats = new CacheStats("dict", () -> cache.size());
 
     private static final RowMapper<SysDictData> DATA_MAPPER = (rs, i) -> {
         SysDictData d = new SysDictData();
@@ -66,7 +69,23 @@ public class DictService {
 
     /** 取某类型全部【启用】项（带缓存）；新增/改/删会 evict */
     public List<SysDictData> listByType(String dictType) {
-        return cache.computeIfAbsent(dictType, this::queryEnabled);
+        List<SysDictData> hit = cache.get(dictType);
+        if (hit != null) {
+            cacheStats.recordHit();
+            return hit;
+        }
+        cacheStats.recordMiss();
+        // computeIfAbsent 保证并发安全：只有一个线程会执行 queryEnabled
+        return cache.computeIfAbsent(dictType, k -> {
+            List<SysDictData> loaded = queryEnabled(k);
+            cacheStats.markLoaded();
+            return loaded;
+        });
+    }
+
+    /** 暴露缓存运行时统计（供监控面板） */
+    public CacheStats.Snapshot getCacheStats() {
+        return cacheStats.snapshot();
     }
 
     /** 取某类型【全部】项（含禁用），供管理页编辑用，不缓存 */

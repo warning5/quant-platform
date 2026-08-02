@@ -1,17 +1,24 @@
 package com.quant.platform.auth.controller;
 
+import com.quant.platform.auth.dto.ChangePasswordRequest;
 import com.quant.platform.auth.dto.LoginRequest;
 import com.quant.platform.auth.dto.LoginResult;
+import com.quant.platform.auth.dto.ProfileVO;
+import com.quant.platform.auth.dto.UpdateProfileRequest;
 import com.quant.platform.auth.dto.WechatMiniLoginRequest;
 import com.quant.platform.auth.service.AuthService;
+import com.quant.platform.auth.service.LoginSecurityService;
 import com.quant.platform.auth.service.WechatAuthService;
 import com.quant.platform.common.dto.ApiResponse;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -27,16 +34,39 @@ public class AuthController {
 
     private final AuthService authService;
     private final WechatAuthService wechatAuthService;
+    private final LoginSecurityService loginSecurityService;
 
-    /** 账号密码登录 */
+    /** 账号密码登录（IP 与 User-Agent 由服务端获取，供锁定与审计使用） */
     @PostMapping("/login")
-    public ApiResponse<LoginResult> login(@RequestBody LoginRequest req) {
-        return ApiResponse.success(authService.login(req.getUsername(), req.getPassword()));
+    public ApiResponse<LoginResult> login(@Valid @RequestBody LoginRequest req, HttpServletRequest request) {
+        String ip = getClientIp(request);
+        String userAgent = request.getHeader("User-Agent");
+        return ApiResponse.success(authService.login(req.getUsername(), req.getPassword(), ip,
+                req.getCaptchaId(), req.getCaptchaCode(), userAgent));
+    }
+
+    /** 获取图形验证码（渐进式：登录失败达阈值后前端调用） */
+    @PostMapping("/captcha")
+    public ApiResponse<LoginSecurityService.CaptchaResult> captcha() {
+        return ApiResponse.success(loginSecurityService.generateCaptcha());
+    }
+
+    /** 从请求中提取真实客户端 IP（兼容反向代理 X-Forwarded-For） */
+    private String getClientIp(HttpServletRequest request) {
+        String ip = request.getHeader("X-Forwarded-For");
+        if (ip != null && !ip.isBlank() && !"unknown".equalsIgnoreCase(ip)) {
+            return ip.split(",")[0].trim();
+        }
+        ip = request.getHeader("X-Real-IP");
+        if (ip != null && !ip.isBlank() && !"unknown".equalsIgnoreCase(ip)) {
+            return ip.trim();
+        }
+        return request.getRemoteAddr();
     }
 
     /** 小程序登录 */
     @PostMapping("/wechat/mini/login")
-    public ApiResponse<LoginResult> wechatMiniLogin(@RequestBody WechatMiniLoginRequest req) {
+    public ApiResponse<LoginResult> wechatMiniLogin(@Valid @RequestBody WechatMiniLoginRequest req) {
         return ApiResponse.success(wechatAuthService.miniLogin(req.getCode()));
     }
 
@@ -83,6 +113,26 @@ public class AuthController {
     @PostMapping("/logout")
     public ApiResponse<Void> logout() {
         authService.logout();
+        return ApiResponse.ok();
+    }
+
+    /** 获取当前登录用户的个人资料（不含密码） */
+    @GetMapping("/profile")
+    public ApiResponse<ProfileVO> profile() {
+        return ApiResponse.success(authService.getProfile());
+    }
+
+    /** 更新当前登录用户自己的资料（昵称/邮箱/手机/头像） */
+    @PutMapping("/profile")
+    public ApiResponse<Void> updateProfile(@Valid @RequestBody UpdateProfileRequest req) {
+        authService.updateProfile(req);
+        return ApiResponse.ok();
+    }
+
+    /** 自助修改密码（校验原密码 + 新密码复杂度） */
+    @PostMapping("/change-password")
+    public ApiResponse<Void> changePassword(@Valid @RequestBody ChangePasswordRequest req) {
+        authService.changePassword(req);
         return ApiResponse.ok();
     }
 

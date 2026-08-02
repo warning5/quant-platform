@@ -1,6 +1,7 @@
 package com.quant.platform.system.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.quant.platform.system.dto.MenuRequest;
 import com.quant.platform.system.entity.SysMenu;
 import com.quant.platform.system.entity.SysRoleMenu;
 import com.quant.platform.system.mapper.SysMenuMapper;

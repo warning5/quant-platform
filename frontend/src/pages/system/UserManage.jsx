@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { Table, Button, Space, Form, Input, Select, Modal, Tag, Popconfirm, Row, Col } from 'antd';
+import { Table, Button, Space, Form, Input, Select, Modal, Tag, Popconfirm, Row, Col, TreeSelect } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, KeyOutlined } from '@ant-design/icons';
 import { userApi, roleApi } from '../../api/system';
+import departmentApi from '../../api/department';
 import { useAuthStore } from '../../stores/authStore';
 import { message as msg } from '../../utils/messageUtil';
 
@@ -19,6 +20,7 @@ export default function UserManage() {
   const [pwOpen, setPwOpen] = useState(false);
   const [pwUser, setPwUser] = useState(null);
   const [roles, setRoles] = useState([]);
+  const [deptTree, setDeptTree] = useState([]);
   const has = useAuthStore((s) => s.hasPermission);
 
   const load = async () => {
@@ -43,6 +45,9 @@ export default function UserManage() {
   }, [page, size]);
   useEffect(() => {
     roleApi.list().then((r) => setRoles(r || [])).catch(() => {});
+  }, []);
+  useEffect(() => {
+    departmentApi.tree().then((t) => setDeptTree(t || [])).catch(() => {});
   }, []);
 
   const openAdd = () => {
@@ -224,6 +229,18 @@ export default function UserManage() {
                   mode="multiple"
                   placeholder="分配角色"
                   options={roles.map((r) => ({ value: r.id, label: r.roleName }))}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="deptId" label="部门">
+                <TreeSelect
+                  allowClear
+                  placeholder="选择部门（留空=未分配）"
+                  treeDefaultExpandAll
+                  treeNodeLabelProp="deptName"
+                  fieldNames={{ label: 'deptName', value: 'id', children: 'children' }}
+                  treeData={[{ id: 0, deptName: '未分配', children: deptTree }]}
                 />
               </Form.Item>
             </Col>

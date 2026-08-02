@@ -3,12 +3,15 @@ package com.quant.platform.recommendation.controller;
 import com.quant.platform.common.dto.ApiResponse;
 import com.quant.platform.recommendation.domain.StockBlacklist;
 import com.quant.platform.recommendation.service.StockBlacklistService;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 /**
@@ -53,12 +56,12 @@ public class StockBlacklistController {
      */
     @cn.dev33.satoken.annotation.SaCheckPermission(value = {"recommendation:view", "recommendation:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping
-    public ApiResponse<StockBlacklist> addBlacklist(@RequestBody Map<String, Object> request) {
-        Long strategyId = Long.valueOf(request.get("strategyId").toString());
-        String stockCode = (String) request.get("stockCode");
-        String stockName = (String) request.get("stockName");
-        String reasonDetail = (String) request.get("reasonDetail");
-        Integer days = request.get("days") != null ? Integer.valueOf(request.get("days").toString()) : null;
+    public ApiResponse<StockBlacklist> addBlacklist(@Valid @RequestBody BlacklistAddRequest request) {
+        Long strategyId = request.getStrategyId();
+        String stockCode = request.getStockCode();
+        String stockName = request.getStockName();
+        String reasonDetail = request.getReasonDetail();
+        Integer days = request.getDays();
 
         StockBlacklist bl = stockBlacklistService.manualAdd(strategyId, stockCode, stockName, reasonDetail, days);
         log.info("[Blacklist] [手动添加] strategyId={}, code={}, by=用户", strategyId, stockCode);
@@ -106,5 +109,20 @@ public class StockBlacklistController {
     public ApiResponse<Void> clearAll(@RequestParam Long strategyId) {
         stockBlacklistService.clearAll(strategyId);
         return ApiResponse.success(null);
+    }
+
+    @Data
+    public static class BlacklistAddRequest {
+        @NotNull(message = "策略ID不能为空")
+        private Long strategyId;
+
+        @NotBlank(message = "股票代码不能为空")
+        private String stockCode;
+
+        private String stockName;
+
+        private String reasonDetail;
+
+        private Integer days;
     }
 }

@@ -61,7 +61,9 @@ public class UserService {
         user.setEmail(request.getEmail());
         user.setPhone(request.getPhone());
         user.setStatus(request.getStatus() == null ? 1 : request.getStatus());
+        user.setDeptId(request.getDeptId() != null ? request.getDeptId() : 0L);
         if (StringUtils.hasText(request.getPassword())) {
+            validatePasswordComplexity(request.getPassword());
             user.setPassword(passwordEncoder.encode(request.getPassword()));
         }
         userMapper.insert(user);
@@ -79,12 +81,18 @@ public class UserService {
         if (StringUtils.hasText(request.getNickname())) {
             user.setNickname(request.getNickname());
         }
-        user.setEmail(request.getEmail());
-        user.setPhone(request.getPhone());
+        if (request.getEmail() != null) {
+            user.setEmail(request.getEmail());
+        }
+        if (request.getPhone() != null) {
+            user.setPhone(request.getPhone());
+        }
         if (request.getStatus() != null) {
             user.setStatus(request.getStatus());
         }
+        user.setDeptId(request.getDeptId() != null ? request.getDeptId() : 0L);
         if (StringUtils.hasText(request.getPassword())) {
+            validatePasswordComplexity(request.getPassword());
             user.setPassword(passwordEncoder.encode(request.getPassword()));
         }
         userMapper.updateById(user);
@@ -107,8 +115,21 @@ public class UserService {
         if (!StringUtils.hasText(newPassword)) {
             throw new BusinessException("新密码不能为空");
         }
+        validatePasswordComplexity(newPassword);
         user.setPassword(passwordEncoder.encode(newPassword));
         userMapper.updateById(user);
+    }
+
+    /** 密码复杂度校验：长度 8-64，且同时包含字母与数字（拦截纯数字/纯字母弱口令） */
+    private void validatePasswordComplexity(String password) {
+        if (password.length() < 8 || password.length() > 64) {
+            throw new BusinessException("密码长度需为 8-64 位");
+        }
+        boolean hasLetter = password.matches(".*[a-zA-Z].*");
+        boolean hasDigit = password.matches(".*[0-9].*");
+        if (!hasLetter || !hasDigit) {
+            throw new BusinessException("密码必须同时包含字母和数字");
+        }
     }
 
     public List<Long> getRoleIds(Long userId) {

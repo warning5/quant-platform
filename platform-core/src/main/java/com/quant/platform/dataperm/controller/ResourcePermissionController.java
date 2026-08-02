@@ -7,6 +7,9 @@ import com.quant.platform.common.exception.BusinessException;
 import com.quant.platform.dataperm.service.DataPermissionService;
 import com.quant.spi.ResourceOptionVO;
 import com.quant.platform.dataperm.service.ResourcePermissionVO;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -57,7 +60,7 @@ public class ResourcePermissionController {
 
     @PostMapping("/{type}/{id}/shares")
     public ApiResponse<Void> addShare(@PathVariable String type, @PathVariable Long id,
-                                        @RequestBody ShareReq req) {
+                                        @Valid @RequestBody ShareReq req) {
         service.addShare(type, id, req.getGranteeType(), req.getGranteeId(),
                 req.getPermLevel(), StpUtil.getLoginIdAsLong());
         return ApiResponse.ok();
@@ -72,8 +75,11 @@ public class ResourcePermissionController {
 
     @Data
     public static class ShareReq {
+        @NotBlank(message = "授权对象类型不能为空")
         private String granteeType;
+        @NotNull(message = "授权对象ID不能为空")
         private Long granteeId;
+        @NotBlank(message = "权限级别不能为空")
         private String permLevel;
     }
 }

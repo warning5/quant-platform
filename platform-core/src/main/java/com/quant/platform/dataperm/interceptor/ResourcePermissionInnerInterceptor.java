@@ -75,13 +75,13 @@ public class ResourcePermissionInnerInterceptor implements InnerInterceptor {
                 + "SELECT resource_id FROM resource_meta m WHERE m.resource_type='" + code + "'"
                 + " AND (m.owner_id=" + uid
                 + " OR m.visibility='PUBLIC'"
-                + " OR (m.visibility='DEPT' AND EXISTS(SELECT 1 FROM sys_department d WHERE d.id=m.owner_dept_id AND '"
-                + escapeSql(deptPath) + "' LIKE CONCAT(d.dept_path,'%')))))"
+                + " OR (m.visibility='DEPT' AND EXISTS(SELECT 1 FROM sys_department d WHERE d.id=m.owner_dept_id AND ('"
+                + escapeSql(deptPath) + "' = d.dept_path OR '" + escapeSql(deptPath) + "' LIKE CONCAT(d.dept_path,'/%'))))))"
                 + " OR id IN ("
                 + "SELECT resource_id FROM resource_share s WHERE s.resource_type='" + code + "'"
                 + " AND ((s.grantee_type='USER' AND s.grantee_id=" + uid + ")"
-                + " OR (s.grantee_type='DEPT' AND EXISTS(SELECT 1 FROM sys_department d WHERE d.id=s.grantee_id AND '"
-                + escapeSql(deptPath) + "' LIKE CONCAT(d.dept_path,'%')))"
+                + " OR (s.grantee_type='DEPT' AND EXISTS(SELECT 1 FROM sys_department d WHERE d.id=s.grantee_id AND ('"
+                + escapeSql(deptPath) + "' = d.dept_path OR '" + escapeSql(deptPath) + "' LIKE CONCAT(d.dept_path,'/%'))))"
                 + " OR (s.grantee_type='ROLE' AND s.grantee_id IN (" + roleIds + "))))";
 
         String sql = boundSql.getSql();
@@ -92,6 +92,9 @@ public class ResourcePermissionInnerInterceptor implements InnerInterceptor {
 
     /** 把条件注入到 WHERE 子句：已有 WHERE 则 AND 追加，否则新建 WHERE；定位在 ORDER BY/LIMIT/GROUP BY 之前。 */
     private String injectWhere(String sql, String cond) {
+        // 注入时把可见性条件定位在 ORDER BY / LIMIT / GROUP BY 之前（这些子句保留在 tail：
+        // 数据查询保持原排序；分页 count 由 PaginationInnerInterceptor 处理。注入后的 SQL 括号已平衡，
+        // 因此 count 子查询 SELECT COUNT(*) FROM (<sql>) TOTAL 合法（jsqlparser 解析或回退包装均可）。
         int idx = sql.length();
         for (String clause : new String[] { " ORDER BY ", " LIMIT ", " GROUP BY " }) {
             int p = sql.toUpperCase().indexOf(clause);

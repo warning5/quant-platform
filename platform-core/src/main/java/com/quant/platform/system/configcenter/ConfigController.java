@@ -5,6 +5,8 @@ import com.quant.platform.common.dto.ApiResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
+import jakarta.validation.Valid;
+
 import java.util.List;
 
 /**
@@ -33,7 +35,7 @@ public class ConfigController {
     /** 新增配置 */
     @PostMapping
     @SaCheckPermission("system:config:add")
-    public ApiResponse<?> add(@RequestBody SysConfig config) {
+    public ApiResponse<?> add(@Valid @RequestBody SysConfig config) {
         config.setId(null);
         configService.save(config);
         return ApiResponse.success("ok");
@@ -42,7 +44,7 @@ public class ConfigController {
     /** 修改配置（保存后缓存失效，下次读取回源） */
     @PutMapping
     @SaCheckPermission("system:config:edit")
-    public ApiResponse<?> update(@RequestBody SysConfig config) {
+    public ApiResponse<?> update(@Valid @RequestBody SysConfig config) {
         configService.save(config);
         return ApiResponse.success("ok");
     }

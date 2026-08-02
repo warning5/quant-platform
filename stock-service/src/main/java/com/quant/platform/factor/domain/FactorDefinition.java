@@ -13,6 +13,8 @@ import java.time.LocalDateTime;
 import com.quant.platform.common.annotation.ResourceMeta;
 import com.quant.platform.common.enums.ResourceType;
 
+import jakarta.validation.constraints.NotBlank;
+
 /**
  * 因子定义实体
  */
@@ -34,12 +36,14 @@ public class FactorDefinition implements Serializable {
      * 因子代码（唯一标识）
      */
     @TableField("factor_code")
+    @NotBlank(message = "因子代码不能为空")
     private String factorCode;
 
     /**
      * 因子名称
      */
     @TableField("factor_name")
+    @NotBlank(message = "因子名称不能为空")
     private String factorName;
 
     /**

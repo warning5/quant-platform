@@ -112,7 +112,7 @@ public class FactorController {
     @PutMapping("/{id}")
     @Operation(summary = "更新因子")
     public ApiResponse<FactorDefinition> update(@PathVariable Long id,
-                                                @RequestBody FactorDefinition factor) {
+                                                @Valid @RequestBody FactorDefinition factor) {
         return ApiResponse.success("因子更新成功", factorService.updateFactor(id, factor));
     }
 

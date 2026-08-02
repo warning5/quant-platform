@@ -20,5 +20,6 @@ public class CreateUserRequest {
     private Integer status;
     @NotBlank(message = "密码不能为空")
     private String password;
+    private Long deptId;
     private List<Long> roleIds;
 }

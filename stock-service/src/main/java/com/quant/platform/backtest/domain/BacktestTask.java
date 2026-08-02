@@ -15,6 +15,9 @@ import java.time.LocalDateTime;
 import com.quant.platform.common.annotation.ResourceMeta;
 import com.quant.platform.common.enums.ResourceType;
 
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+
 /**
  * 回测任务实体
  */
@@ -36,12 +39,14 @@ public class BacktestTask implements Serializable {
      * 策略ID
      */
     @TableField("strategy_id")
+    @NotNull(message = "策略ID不能为空")
     private Long strategyId;
 
     /**
      * 策略代码
      */
     @TableField("strategy_code")
+    @NotBlank(message = "策略代码不能为空")
     private String strategyCode;
 
     /**
@@ -60,18 +65,21 @@ public class BacktestTask implements Serializable {
      * 任务名称
      */
     @TableField("task_name")
+    @NotBlank(message = "任务名称不能为空")
     private String taskName;
 
     /**
      * 开始日期
      */
     @TableField("start_date")
+    @NotNull(message = "开始日期不能为空")
     private LocalDate startDate;
 
     /**
      * 结束日期
      */
     @TableField("end_date")
+    @NotNull(message = "结束日期不能为空")
     private LocalDate endDate;
 
     /**

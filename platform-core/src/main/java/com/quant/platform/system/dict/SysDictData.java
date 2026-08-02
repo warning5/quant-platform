@@ -2,6 +2,7 @@ package com.quant.platform.system.dict;
 
 import lombok.Data;
 
+import jakarta.validation.constraints.NotBlank;
 import java.time.LocalDateTime;
 
 /**
@@ -11,8 +12,11 @@ import java.time.LocalDateTime;
 @Data
 public class SysDictData {
     private Long id;
+    @NotBlank(message = "字典类型不能为空")
     private String dictType;
+    @NotBlank(message = "字典值不能为空")
     private String dictValue;
+    @NotBlank(message = "字典标签不能为空")
     private String dictLabel;
     private Integer sort;
     private String color;

@@ -114,6 +114,7 @@ export default function SystemMonitor() {
   const [overview, setOverview] = useState(null);
   const [httpLog, setHttpLog] = useState([]);
   const [behavior, setBehavior] = useState(null);
+  const [cacheList, setCacheList] = useState([]);
   const [loading, setLoading] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [refreshInterval, setRefreshInterval] = useState(5);
@@ -126,12 +127,14 @@ export default function SystemMonitor() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [ov, beh] = await Promise.all([
+      const [ov, beh, cache] = await Promise.all([
         monitorApi.overview(),
         monitorApi.behavior(),
+        monitorApi.cache().catch(() => []),
       ]);
       setOverview(ov);
       setBehavior(beh);
+      setCacheList(Array.isArray(cache) ? cache : []);
 
       // 记录趋势数据
       if (ov?.jvm) {
@@ -189,6 +192,36 @@ export default function SystemMonitor() {
     {
       title: '耗时', dataIndex: 'durationMs', key: 'durationMs', width: 90,
       render: (v) => <Text style={{ color: v > 1000 ? '#cf1322' : undefined }}>{v}ms</Text>,
+    },
+  ];
+
+  // 缓存监控表列
+  const cacheNameLabel = (n) => n === 'dict' ? '字典缓存' : n === 'config' ? '系统参数缓存' : (n || '-');
+  const cacheColumns = [
+    { title: '缓存', dataIndex: 'name', key: 'name', width: 130, render: (n) => <Tag color="blue">{cacheNameLabel(n)}</Tag> },
+    { title: '大小', dataIndex: 'size', key: 'size', width: 90, render: (v) => <Text strong>{v}</Text> },
+    { title: '命中', dataIndex: 'hits', key: 'hits', width: 90, render: (v) => <Text style={{ color: '#52c41a' }}>{v}</Text> },
+    { title: '未命中', dataIndex: 'misses', key: 'misses', width: 100, render: (v) => <Text style={{ color: v > 0 ? '#faad14' : undefined }}>{v}</Text> },
+    {
+      title: '命中率', dataIndex: 'hitRate', key: 'hitRate', width: 200,
+      render: (v) => {
+        const pct = (v * 100).toFixed(1);
+        const color = v >= 0.9 ? '#52c41a' : v >= 0.6 ? '#1677ff' : v >= 0.3 ? '#faad14' : '#cf1322';
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Text strong style={{ color, minWidth: 52 }}>{pct}%</Text>
+            <Progress percent={Number(pct)} size="small" showInfo={false} strokeColor={color} style={{ flex: 1, marginBottom: 0 }} />
+          </div>
+        );
+      },
+    },
+    {
+      title: '最后加载', dataIndex: 'lastLoadedAt', key: 'lastLoadedAt', width: 180,
+      render: (v) => v ? new Date(v).toLocaleString() : <Text type="secondary">-</Text>,
+    },
+    {
+      title: '状态', dataIndex: 'loaded', key: 'loaded', width: 90,
+      render: (v) => <Tag color={v ? 'green' : 'red'}>{v ? '已加载' : '未加载'}</Tag>,
     },
   ];
 
@@ -371,6 +404,27 @@ export default function SystemMonitor() {
                     </div>
                   </div>
                 )}
+              </Card>
+            </Col>
+          </Row>
+
+          {/* ===== 缓存监控（dict + config） ===== */}
+          <Row gutter={[14, 14]} style={{ marginTop: 4 }}>
+            <Col xs={24}>
+              <Card
+                size="small"
+                title="本地缓存状态"
+                extra={<Text type="secondary" style={{ fontSize: 11 }}>实时命中/未命中/最后加载时间（重启清零）</Text>}
+                styles={{ body: { padding: 0 } }}
+              >
+                <Table
+                  rowKey="name"
+                  columns={cacheColumns}
+                  dataSource={cacheList}
+                  pagination={false}
+                  size="small"
+                  locale={{ emptyText: '暂无缓存数据' }}
+                />
               </Card>
             </Col>
           </Row>

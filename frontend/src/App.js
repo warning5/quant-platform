@@ -54,6 +54,7 @@ const SystemUserManage = lazy(() => import('./pages/system/UserManage'));
 const SystemRoleManage = lazy(() => import('./pages/system/RoleManage'));
 const SystemMenuManage = lazy(() => import('./pages/system/MenuManage'));
 const AuditLog = lazy(() => import('./pages/system/AuditLog'));
+const LoginLog = lazy(() => import('./pages/system/LoginLog'));
 const CredentialManage = lazy(() => import('./pages/system/CredentialManage'));
 const DataPermissionManage = lazy(() => import('./pages/system/DataPermissionManage'));
 const DepartmentManage = lazy(() => import('./pages/system/DepartmentManage'));
@@ -61,6 +62,7 @@ const DictManage = lazy(() => import('./pages/system/DictManage'));
 const ConfigCenter = lazy(() => import('./pages/system/ConfigCenter'));
 const SystemMonitor = lazy(() => import('./pages/system/SystemMonitor'));
 const OnlineUser = lazy(() => import('./pages/system/OnlineUser'));
+const ProfilePage = lazy(() => import('./pages/profile/ProfilePage'));
 
 // 在菜单树中查找当前路由对应的所有祖先目录 key（用于自动展开）
 function findOpenKeys(nodes, pathname, trail = []) {
@@ -283,6 +285,12 @@ function AppLayout({ isDark, setIsDark }) {
                     { key: 'user', label: user.nickname || user.username, disabled: true },
                     { type: 'divider' },
                     {
+                      key: 'profile',
+                      icon: <UserOutlined />,
+                      label: '个人中心',
+                      onClick: () => navigate('/account/profile'),
+                    },
+                    {
                       key: 'logout',
                       icon: <LogoutOutlined />,
                       label: '退出登录',
@@ -349,6 +357,7 @@ function AppLayout({ isDark, setIsDark }) {
               <Route path="/system/roles" element={<SystemRoleManage />} />
               <Route path="/system/menus" element={<SystemMenuManage />} />
               <Route path="/system/audit-logs" element={<AuditLog />} />
+              <Route path="/system/login-logs" element={<LoginLog />} />
               <Route path="/system/credentials" element={<CredentialManage />} />
               <Route path="/system/data-permissions" element={<DataPermissionManage />} />
               {/* 兼容旧路由：重定向到统一的 /system/* 命名 */}
@@ -360,6 +369,7 @@ function AppLayout({ isDark, setIsDark }) {
               <Route path="/system/config" element={<ConfigCenter />} />
               <Route path="/system/monitor" element={<SystemMonitor />} />
               <Route path="/system/online" element={<OnlineUser />} />
+              <Route path="/account/profile" element={<ProfilePage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </Suspense>

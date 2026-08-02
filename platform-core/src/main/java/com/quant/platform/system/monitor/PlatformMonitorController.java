@@ -4,6 +4,8 @@ import cn.dev33.satoken.annotation.SaCheckLogin;
 import cn.dev33.satoken.annotation.SaCheckPermission;
 import cn.dev33.satoken.stp.StpUtil;
 import com.quant.platform.common.dto.ApiResponse;
+import com.quant.platform.system.configcenter.ConfigService;
+import com.quant.platform.system.dict.DictService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
@@ -26,10 +28,15 @@ public class PlatformMonitorController {
 
     private final MetricsCollector metricsCollector;
     private final JdbcTemplate jdbcTemplate;
+    private final DictService dictService;
+    private final ConfigService configService;
 
-    public PlatformMonitorController(MetricsCollector metricsCollector, JdbcTemplate jdbcTemplate) {
+    public PlatformMonitorController(MetricsCollector metricsCollector, JdbcTemplate jdbcTemplate,
+                                     DictService dictService, ConfigService configService) {
         this.metricsCollector = metricsCollector;
         this.jdbcTemplate = jdbcTemplate;
+        this.dictService = dictService;
+        this.configService = configService;
     }
 
     /** 概览：JVM + HTTP + ClickHouse + 任务 */
@@ -76,6 +83,13 @@ public class PlatformMonitorController {
         result.put("onlineCount", onlineCount);
         result.put("todayActiveTasks", todayTasks == null ? 0 : todayTasks);
         return ApiResponse.success(result);
+    }
+
+    /** 缓存监控：dict + config 两组本地缓存的实时统计（大小/命中/未命中/命中率/最后加载时间） */
+    @GetMapping("/cache")
+    @SaCheckPermission("system:monitor:list")
+    public ApiResponse<List<CacheStats.Snapshot>> cache() {
+        return ApiResponse.success(List.of(dictService.getCacheStats(), configService.getCacheStats()));
     }
 
     /** 前端路由切换埋点（任意已登录用户可上报自身导航，限流由全局限流承担） */

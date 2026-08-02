@@ -1,5 +1,6 @@
 package com.quant.platform.system.configcenter;
 
+import com.quant.platform.system.monitor.CacheStats;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -28,6 +29,8 @@ public class ConfigService {
     /** 配置缓存：key=configKey，value=未删除且启用项 */
     private final Map<String, SysConfig> cache = new ConcurrentHashMap<>();
     private volatile boolean loaded = false;
+    /** 缓存运行时统计（供 PlatformMonitorController 暴露给监控面板） */
+    private final CacheStats cacheStats = new CacheStats("config", () -> cache.size());
 
     private static final RowMapper<SysConfig> MAPPER = (rs, i) -> {
         SysConfig c = new SysConfig();
@@ -59,14 +62,25 @@ public class ConfigService {
             cache.put(c.getConfigKey(), c);
         }
         loaded = true;
+        cacheStats.markLoaded();
         log.info("[ConfigService] 加载系统参数 {} 条", cache.size());
+    }
+
+    /** 暴露缓存运行时统计（供监控面板） */
+    public CacheStats.Snapshot getCacheStats() {
+        return cacheStats.snapshot();
     }
 
     /** 读取配置值（带类型转换兜底）。未命中返回 defaultValue */
     public String getValue(String key) {
         if (!loaded) loadAll();
         SysConfig c = cache.get(key);
-        return c == null ? null : c.getConfigValue();
+        if (c == null) {
+            cacheStats.recordMiss();
+            return null;
+        }
+        cacheStats.recordHit();
+        return c.getConfigValue();
     }
 
     public String getValue(String key, String defaultValue) {
@@ -123,6 +137,7 @@ public class ConfigService {
     public void evict() {
         cache.clear();
         loaded = false;
+        cacheStats.markEvicted();
     }
 
     private static LocalDateTime toLdt(Timestamp ts) {

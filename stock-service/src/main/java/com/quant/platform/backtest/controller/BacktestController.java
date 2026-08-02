@@ -21,6 +21,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
@@ -54,7 +55,7 @@ public class BacktestController {
     @PostMapping
     @RateLimit(capacity = 5, duration = 1)
     @Operation(summary = "创建并启动回测任务")
-    public ApiResponse<BacktestTask> create(@RequestBody BacktestTask task) {
+    public ApiResponse<BacktestTask> create(@Valid @RequestBody BacktestTask task) {
         return ApiResponse.success("回测任务已提交", backtestService.createAndRun(task));
     }
 

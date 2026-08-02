@@ -3,9 +3,11 @@ package com.quant.platform.strategy.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.quant.platform.common.enums.ResourceType;
 import com.quant.platform.common.exception.BusinessException;
 import com.quant.platform.common.exception.ResourceNotFoundException;
 import com.quant.platform.common.security.GroovySandboxConfig;
+import com.quant.platform.dataperm.service.DataPermissionService;
 import com.quant.platform.strategy.domain.StrategyDefinition;
 import com.quant.platform.strategy.mapper.StrategyDefinitionMapper;
 import lombok.RequiredArgsConstructor;
@@ -22,6 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class StrategyService {
 
     private final StrategyDefinitionMapper strategyMapper;
+    private final DataPermissionService dataPermissionService;
 
     /**
      * 查询策略列表
@@ -77,6 +80,7 @@ public class StrategyService {
      */
     @Transactional
     public StrategyDefinition updateStrategy(Long id, StrategyDefinition update) {
+        dataPermissionService.assertCanWrite(ResourceType.STRATEGY.getCode(), id);
         StrategyDefinition existing = getById(id);
         // 支持修改策略代码，需校验唯一性
         String newCode = update.getStrategyCode();
@@ -117,7 +121,9 @@ public class StrategyService {
      */
     @Transactional
     public void deleteStrategy(Long id) {
+        dataPermissionService.assertCanWrite(ResourceType.STRATEGY.getCode(), id);
         strategyMapper.deleteById(id);
+        dataPermissionService.deleteResourceMeta(ResourceType.STRATEGY.getCode(), id);
     }
 
     /**
@@ -125,6 +131,7 @@ public class StrategyService {
      */
     @Transactional
     public StrategyDefinition changeStatus(Long id, StrategyDefinition.StrategyStatus status) {
+        dataPermissionService.assertCanWrite(ResourceType.STRATEGY.getCode(), id);
         StrategyDefinition s = getById(id);
         s.setStatus(status);
         strategyMapper.updateById(s);

@@ -70,12 +70,24 @@ clickhouse:
 # ============================================================
 sa-token:
   token-name: satoken
-  timeout: 2592000          # token 有效期：30 天（秒）
-  active-timeout: -1        # 不限制活动超时
-  is-concurrent: true       # 允许同端多端同时登录
+  timeout: 7200             # token 有效期：2 小时（秒）
+  active-timeout: 1800      # 30 分钟无活动则自动过期
+  is-concurrent: false      # 同账号互斥登录（新登录踢旧会话）
   is-share: true            # 同端共享 token
   token-style: uuid
   is-log: false
+
+# ============================================================
+# 登录安全加固（P0 失败锁定 + P1 IP 限流 / 验证码）
+# 作用域：/auth/login 账号密码登录接口
+# ============================================================
+login-security:
+  account-lock-threshold: 5     # 同一账号+IP 连续失败几次后锁定
+  account-lock-minutes: 15      # 账号锁定分钟数
+  ip-lock-threshold: 20         # 同一 IP 总失败次数阈值（防针对不存在账号的爆破）
+  ip-lock-minutes: 15           # IP 维度锁定分钟数
+  captcha-threshold: 3          # 连续失败几次后要求图形验证码
+  captcha-expire-seconds: 300   # 验证码有效期（秒）
 
 # 凭证加密主密钥（P0：凭证管理模块用 AES-256 加密存储 API Key）
 # 生产必须设置强密钥：环境变量 CREDENTIAL_AES_KEY（建议 32 字节随机串）

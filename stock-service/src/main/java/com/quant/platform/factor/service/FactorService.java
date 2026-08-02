@@ -3,8 +3,10 @@ package com.quant.platform.factor.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.quant.platform.common.enums.ResourceType;
 import com.quant.platform.common.exception.BusinessException;
 import com.quant.platform.common.exception.ResourceNotFoundException;
+import com.quant.platform.dataperm.service.DataPermissionService;
 import com.quant.platform.factor.domain.FactorDefinition;
 import com.quant.platform.factor.domain.FactorTestReport;
 import com.quant.platform.factor.domain.FactorValue;
@@ -54,6 +56,7 @@ public class FactorService {
 
     private final FactorDefinitionMapper factorMapper;
     private final ClickHouseFactorValueService clickHouseFactorValueService;
+    private final DataPermissionService dataPermissionService;
     private final FactorTestReportMapper testReportMapper;
     private final FactorComputeEngine computeEngine;
     private final ScriptedFactorEngine scriptedEngine;
@@ -129,6 +132,7 @@ public class FactorService {
      */
     @Transactional
     public int deleteFactorValues(Long factorId) {
+        dataPermissionService.assertCanWrite(ResourceType.FACTOR.getCode(), factorId);
         FactorDefinition factor = getById(factorId);
         long deleted = clickHouseFactorValueService.deleteByFactorCode(factor.getFactorCode());
         log.info("已删除 ClickHouse 中因子 [{}] 的值，约 {} 条（异步）", factor.getFactorCode(), deleted);
@@ -180,6 +184,7 @@ public class FactorService {
      */
     @Transactional
     public FactorDefinition updateFactor(Long id, FactorDefinition update) {
+        dataPermissionService.assertCanWrite(ResourceType.FACTOR.getCode(), id);
         FactorDefinition existing = getById(id);
         if (existing.getFactorType() == FactorDefinition.FactorType.BUILTIN) {
             throw new BusinessException("内置因子不可修改");
@@ -208,11 +213,13 @@ public class FactorService {
      */
     @Transactional
     public void deleteFactor(Long id) {
+        dataPermissionService.assertCanWrite(ResourceType.FACTOR.getCode(), id);
         FactorDefinition f = getById(id);
         if (f.getFactorType() == FactorDefinition.FactorType.BUILTIN) {
             throw new BusinessException("内置因子不可删除");
         }
         factorMapper.deleteById(id);
+        dataPermissionService.deleteResourceMeta(ResourceType.FACTOR.getCode(), id);
     }
 
     /**
@@ -452,6 +459,12 @@ public class FactorService {
         FactorTestReport report = testReportMapper.selectById(reportId);
         if (report == null) {
             throw new ResourceNotFoundException("测试报告", reportId);
+        }
+        // 测试报告归属其因子：经 factorCode 反查因子后校验写权限，防止越权停止/删除他人测试报告
+        FactorDefinition ownerFactor = factorMapper.selectOne(
+                new LambdaQueryWrapper<FactorDefinition>().eq(FactorDefinition::getFactorCode, report.getFactorCode()));
+        if (ownerFactor != null) {
+            dataPermissionService.assertCanWrite(ResourceType.FACTOR.getCode(), ownerFactor.getId());
         }
 
         if (report.getStatus() == FactorTestReport.TestStatus.RUNNING

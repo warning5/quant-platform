@@ -3,6 +3,8 @@ package com.quant.platform.strategy.domain;
 import com.baomidou.mybatisplus.annotation.*;
 import lombok.*;
 
+import jakarta.validation.constraints.NotBlank;
+
 import java.io.Serial;
 import java.io.Serializable;
 import java.math.BigDecimal;
@@ -29,9 +31,11 @@ public class StrategyDefinition implements Serializable {
     private Long id;
 
     @TableField("strategy_code")
+    @NotBlank(message = "策略代码不能为空")
     private String strategyCode;
 
     @TableField("strategy_name")
+    @NotBlank(message = "策略名称不能为空")
     private String strategyName;
 
     @TableField("description")

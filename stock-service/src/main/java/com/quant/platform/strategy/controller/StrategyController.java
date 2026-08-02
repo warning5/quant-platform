@@ -6,6 +6,7 @@ import com.quant.platform.strategy.domain.StrategyDefinition;
 import com.quant.platform.strategy.service.StrategyService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -41,7 +42,7 @@ public class StrategyController {
     @cn.dev33.satoken.annotation.SaCheckPermission(value = {"strategy:view", "strategy:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping
     @Operation(summary = "创建策略")
-    public ApiResponse<StrategyDefinition> create(@RequestBody StrategyDefinition strategy) {
+    public ApiResponse<StrategyDefinition> create(@Valid @RequestBody StrategyDefinition strategy) {
         return ApiResponse.success("策略创建成功", strategyService.createStrategy(strategy));
     }
 
@@ -49,7 +50,7 @@ public class StrategyController {
     @PutMapping("/{id}")
     @Operation(summary = "更新策略")
     public ApiResponse<StrategyDefinition> update(@PathVariable Long id,
-                                                  @RequestBody StrategyDefinition strategy) {
+                                                  @Valid @RequestBody StrategyDefinition strategy) {
         return ApiResponse.success("策略更新成功", strategyService.updateStrategy(id, strategy));
     }
 

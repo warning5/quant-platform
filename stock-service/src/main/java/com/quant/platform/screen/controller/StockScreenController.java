@@ -6,6 +6,7 @@ import com.quant.platform.screen.dto.ScreenResult;
 import com.quant.platform.screen.service.StockScreenService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -31,7 +32,7 @@ public class StockScreenController {
     @Operation(summary = "执行多因子选股")
     @cn.dev33.satoken.annotation.SaCheckPermission(value = {"screen:view", "screen:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/run")
-    public ApiResponse<ScreenResult> run(@RequestBody ScreenRequest req) {
+    public ApiResponse<ScreenResult> run(@Valid @RequestBody ScreenRequest req) {
         ScreenResult result = screenService.screen(req);
         return ApiResponse.success(result);
     }

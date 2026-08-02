@@ -13,8 +13,10 @@ import com.quant.platform.backtest.mapper.BacktestReportMapper;
 import com.quant.platform.backtest.mapper.BacktestTaskMapper;
 import com.quant.platform.backtest.mapper.EquityCurveMapper;
 import com.quant.platform.backtest.mapper.RebalanceRecordMapper;
+import com.quant.platform.common.enums.ResourceType;
 import com.quant.platform.common.exception.BusinessException;
 import com.quant.platform.common.exception.ResourceNotFoundException;
+import com.quant.platform.dataperm.service.DataPermissionService;
 import com.quant.platform.strategy.service.StrategyService;
 import lombok.RequiredArgsConstructor;
 import java.math.BigDecimal;
@@ -38,6 +40,7 @@ public class BacktestService {
     private final BacktestReportMapper reportMapper;
     private final BacktestEngine backtestEngine;
     private final StrategyService strategyService;
+    private final DataPermissionService dataPermissionService;
     private final EquityCurveMapper equityCurveMapper;
     private final RebalanceRecordMapper rebalanceRecordMapper;
 
@@ -130,6 +133,7 @@ public class BacktestService {
      */
     @Transactional
     public BacktestTask cancelTask(Long taskId) {
+        dataPermissionService.assertCanWrite(ResourceType.BACKTEST.getCode(), taskId);
         BacktestTask task = getTask(taskId);
         if (task.getStatus() != BacktestTask.BacktestStatus.PENDING) {
             throw new BusinessException("仅PENDING状态的任务可以取消");
@@ -144,6 +148,7 @@ public class BacktestService {
      */
     @Transactional
     public void deleteTask(Long taskId) {
+        dataPermissionService.assertCanWrite(ResourceType.BACKTEST.getCode(), taskId);
         // 先删 report（子表），再删任务关联记录
         BacktestReport report = reportMapper.findByTaskId(taskId);
         if (report != null) {
@@ -152,6 +157,7 @@ public class BacktestService {
         try { equityCurveMapper.deleteByTaskId(taskId); } catch (Exception ignored) {}
         try { rebalanceRecordMapper.deleteByTaskId(taskId); } catch (Exception ignored) {}
         taskMapper.deleteById(taskId);
+        dataPermissionService.deleteResourceMeta(ResourceType.BACKTEST.getCode(), taskId);
     }
 
     /**
@@ -160,6 +166,7 @@ public class BacktestService {
      */
     @Transactional
     public BacktestTask rerunTask(Long taskId) {
+        dataPermissionService.assertCanWrite(ResourceType.BACKTEST.getCode(), taskId);
         BacktestTask task = getTask(taskId);
         // 1. 清空旧报告
         BacktestReport oldReport = reportMapper.findByTaskId(taskId);

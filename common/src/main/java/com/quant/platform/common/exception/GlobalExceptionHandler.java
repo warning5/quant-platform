@@ -20,9 +20,9 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(BusinessException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
-    public ApiResponse<Void> handleBusinessException(BusinessException ex) {
+    public ApiResponse<Object> handleBusinessException(BusinessException ex) {
         log.warn("Business exception: {}", ex.getMessage());
-        return ApiResponse.error(ex.getCode(), ex.getMessage());
+        return ApiResponse.error(ex.getCode(), ex.getMessage(), ex.getData());
     }
 
     @ExceptionHandler(ResourceNotFoundException.class)

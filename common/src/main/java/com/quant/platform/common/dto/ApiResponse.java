@@ -43,4 +43,9 @@ public class ApiResponse<T> {
     public static <T> ApiResponse<T> error(String message) {
         return new ApiResponse<>(500, message, null);
     }
+
+    /** 带业务扩展数据的错误响应（如登录失败回传 needCaptcha 标志） */
+    public static <T> ApiResponse<T> error(int code, String message, T data) {
+        return new ApiResponse<>(code, message, data);
+    }
 }

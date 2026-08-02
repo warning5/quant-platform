@@ -18,6 +18,7 @@ public class UpdateUserRequest {
     private String email;
     private String phone;
     private Integer status;
+    private Long deptId;
     private String password;
     private List<Long> roleIds;
 }

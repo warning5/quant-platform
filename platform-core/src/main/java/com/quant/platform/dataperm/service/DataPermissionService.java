@@ -202,6 +202,57 @@ public class DataPermissionService {
         }
     }
 
+    /**
+     * 写操作数据权限校验（所有权 / 授权）：用于资源的 UPDATE / DELETE 等业务 CRUD。
+     * 直接取当前登录用户，以下情况放行，其余抛异常：
+     *   1) 当前用户是 ADMIN；
+     *   2) 当前用户是该资源的 owner；
+     *   3) 该资源被以 EDIT 级别显式共享给当前用户（USER）或当前用户所在部门（DEPT）。
+     * 逻辑与查询隔离拦截器互补：拦截器解决「读不到」，本方法解决「改不了/删不了别人的资源」。
+     */
+    public void assertCanWrite(String type, Long id) {
+        if (StpUtil.hasRole("ADMIN")) {
+            return;
+        }
+        Long uid = StpUtil.getLoginIdAsLong();
+        ResourceMetaDO meta = selectMeta(type, id);
+        if (meta != null && uid.equals(meta.getOwnerId())) {
+            return;
+        }
+        boolean editShared = shareMapper.listByResource(type, id).stream()
+                .anyMatch(s -> "EDIT".equals(s.getPermLevel()) && matchGrantee(s, uid));
+        if (editShared) {
+            return;
+        }
+        throw new BusinessException("无权修改或删除该资源");
+    }
+
+    /**
+     * 删除资源时级联清理归属与共享记录（应在调用方 @Transactional 内执行，随业务删除一起回滚）。
+     */
+    public void deleteResourceMeta(String type, Long id) {
+        metaMapper.deleteByResource(type, id);
+        shareMapper.deleteByResource(type, id);
+    }
+
+    private boolean matchGrantee(ResourceShareDO s, Long uid) {
+        return switch (s.getGranteeType()) {
+            case "USER" -> uid.equals(s.getGranteeId());
+            case "DEPT" -> {
+                SysUser u = userMapper.selectById(uid);
+                if (u == null || u.getDeptId() == null) yield false;
+                SysDepartment g = deptMapper.selectById(s.getGranteeId());
+                SysDepartment my = deptMapper.selectById(u.getDeptId());
+                if (g == null || my == null || g.getDeptPath() == null || my.getDeptPath() == null) yield false;
+                String gp = g.getDeptPath();
+                String mp = my.getDeptPath();
+                // 本部门或子部门（与查询隔离拦截器向下包含语义一致）
+                yield mp.equals(gp) || mp.startsWith(gp + "/");
+            }
+            default -> false;
+        };
+    }
+
     private void assertValidType(String type) {
         if (ResourceType.fromCode(type) == null) {
             throw new BusinessException("非法资源类型: " + type);

@@ -5,6 +5,8 @@ import com.quant.platform.common.dto.ApiResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
+import jakarta.validation.Valid;
+
 import java.util.List;
 
 /**
@@ -41,7 +43,7 @@ public class DictController {
     /** 新增字典类型 */
     @PostMapping("/type")
     @SaCheckPermission("system:dict:add")
-    public ApiResponse<?> addType(@RequestBody SysDictType type) {
+    public ApiResponse<?> addType(@Valid @RequestBody SysDictType type) {
         dictService.saveType(type);
         return ApiResponse.success("ok");
     }
@@ -49,7 +51,7 @@ public class DictController {
     /** 修改字典类型（dictType 为唯一键，不可改） */
     @PutMapping("/type")
     @SaCheckPermission("system:dict:edit")
-    public ApiResponse<?> updateType(@RequestBody SysDictType type) {
+    public ApiResponse<?> updateType(@Valid @RequestBody SysDictType type) {
         dictService.updateType(type);
         return ApiResponse.success("ok");
     }
@@ -57,7 +59,7 @@ public class DictController {
     /** 新增字典项 */
     @PostMapping("/data")
     @SaCheckPermission("system:dict:add")
-    public ApiResponse<?> addData(@RequestBody SysDictData data) {
+    public ApiResponse<?> addData(@Valid @RequestBody SysDictData data) {
         dictService.saveData(data);
         return ApiResponse.success("ok");
     }
@@ -65,7 +67,7 @@ public class DictController {
     /** 修改字典项 */
     @PutMapping("/data")
     @SaCheckPermission("system:dict:edit")
-    public ApiResponse<?> updateData(@RequestBody SysDictData data) {
+    public ApiResponse<?> updateData(@Valid @RequestBody SysDictData data) {
         dictService.updateData(data);
         return ApiResponse.success("ok");
     }

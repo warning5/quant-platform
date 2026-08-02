@@ -2,6 +2,8 @@ package com.quant.platform.strategy.paper;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.quant.platform.common.enums.ResourceType;
+import com.quant.platform.dataperm.service.DataPermissionService;
 import com.quant.platform.factor.service.FactorService;
 import com.quant.platform.recommendation.mapper.RecommendationMapper;
 import com.quant.platform.stock.analysis.engine.SellSignalEngine;
@@ -38,6 +40,7 @@ public class PaperTradingService {
     private final PaperRiskConfigMapper paperRiskConfigMapper;
     private final PaperCashFlowMapper paperCashFlowMapper;
     private final com.quant.platform.factor.service.FactorMetaCacheService factorMetaCache;
+    private final DataPermissionService dataPermissionService;
     @Autowired(required = false)
     private PaperExecutionQualityMapper paperExecutionQualityMapper;
     private final JdbcTemplate jdbcTemplate;
@@ -1109,6 +1112,7 @@ public class PaperTradingService {
      * 暂停/恢复/停止模拟盘
      */
     public PaperTrading updateStatus(Long paperId, String status) {
+        dataPermissionService.assertCanWrite(ResourceType.PAPER_TRADING.getCode(), paperId);
         PaperTrading pt = paperTradingMapper.selectById(paperId);
         if (pt == null) throw new IllegalArgumentException("模拟盘不存在");
         pt.setStatus(status);
@@ -1548,6 +1552,7 @@ public class PaperTradingService {
      */
     @Transactional
     public void deletePaperTrading(Long paperId) {
+        dataPermissionService.assertCanWrite(ResourceType.PAPER_TRADING.getCode(), paperId);
         PaperTrading pt = paperTradingMapper.selectById(paperId);
         if (pt == null) throw new IllegalArgumentException("模拟盘不存在");
         // 按依赖顺序删除：信号 → 持仓 → 净值 → 主表
@@ -1582,6 +1587,7 @@ public class PaperTradingService {
             BigDecimal slippagePct, String slippageModel, BigDecimal cashBufferPct,
             String rebalanceFreq, BigDecimal rebalanceThreshold,
             Integer autoBlockEnabled, Integer twapThreshold) {
+        dataPermissionService.assertCanWrite(ResourceType.PAPER_TRADING.getCode(), paperId);
         PaperRiskConfig cfg = paperRiskConfigMapper.selectOne(
             new LambdaQueryWrapper<PaperRiskConfig>().eq(PaperRiskConfig::getPaperId, paperId));
         if (cfg == null) {
