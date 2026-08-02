@@ -10,6 +10,7 @@ import { getToken, setToken, clearAuth } from '../utils/auth';
 const useAuthStore = create((set, get) => ({
   token: getToken(),
   tokenName: 'satoken',
+  userId: null,
   user: null,
   roles: [],
   permissions: [],
@@ -27,7 +28,8 @@ const useAuthStore = create((set, get) => ({
     set({
       token: result.token,
       tokenName: result.tokenName || 'satoken',
-      user: { username: result.username, nickname: result.nickname, avatar: result.avatar },
+      userId: result.userId,
+      user: { id: result.userId, username: result.username, nickname: result.nickname, avatar: result.avatar },
       roles: result.roles || [],
       permissions: result.permissions || [],
       menus: result.menus || [],
@@ -38,7 +40,8 @@ const useAuthStore = create((set, get) => ({
   fetchMe: async () => {
     const res = await authApi.me();
     set({
-      user: { username: res.username, nickname: res.nickname, avatar: res.avatar },
+      userId: res.userId,
+      user: { id: res.userId, username: res.username, nickname: res.nickname, avatar: res.avatar },
       roles: res.roles || [],
       permissions: res.permissions || [],
       menus: res.menus || [],
@@ -54,7 +57,7 @@ const useAuthStore = create((set, get) => ({
       // 忽略网络异常，本地清理即可
     }
     clearAuth();
-    set({ token: '', user: null, roles: [], permissions: [], menus: [] });
+    set({ token: '', userId: null, user: null, roles: [], permissions: [], menus: [] });
   },
 
   hasPermission: (perm) => Array.isArray(get().permissions) && get().permissions.includes(perm),

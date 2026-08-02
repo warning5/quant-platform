@@ -9,9 +9,11 @@ import com.quant.platform.system.dto.CreateUserRequest;
 import com.quant.platform.system.dto.UpdateUserRequest;
 import com.quant.platform.system.entity.SysUser;
 import com.quant.platform.system.entity.SysUserRole;
+import com.quant.platform.system.mapper.SysRoleMapper;
 import com.quant.platform.system.mapper.SysUserMapper;
 import com.quant.platform.system.mapper.SysUserRoleMapper;
 import lombok.RequiredArgsConstructor;
+import cn.dev33.satoken.stp.StpUtil;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -28,6 +30,7 @@ public class UserService {
 
     private final SysUserMapper userMapper;
     private final SysUserRoleMapper userRoleMapper;
+    private final SysRoleMapper roleMapper;
     private final PasswordEncoder passwordEncoder;
 
     public IPage<SysUser> pageUsers(PageRequest req, String username, String nickname, Integer status) {
@@ -103,6 +106,26 @@ public class UserService {
     }
 
     public void deleteUser(Long id) {
+        SysUser user = userMapper.selectById(id);
+        if (user == null) {
+            throw new BusinessException("用户不存在");
+        }
+        // 不能删除当前登录的用户（避免把自己踢下线且无人能恢复）
+        Long currentUserId = StpUtil.getLoginIdAsLong();
+        if (currentUserId != null && currentUserId.equals(id)) {
+            throw new BusinessException("不能删除当前登录的用户");
+        }
+        // 若该用户是管理员，且是最后一个管理员则拦截，避免系统无人可管
+        List<Long> roleIds = userRoleMapper.selectRoleIdsByUserId(id);
+        boolean isAdmin = roleIds.stream()
+                .map(roleMapper::selectById)
+                .anyMatch(r -> r != null && "ADMIN".equalsIgnoreCase(r.getRoleCode()));
+        if (isAdmin) {
+            Long adminCount = roleMapper.countActiveAdminUsers();
+            if (adminCount != null && adminCount <= 1) {
+                throw new BusinessException("不能删除最后一个管理员用户");
+            }
+        }
         userMapper.deleteById(id);
         userRoleMapper.deleteByUserId(id);
     }

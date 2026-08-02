@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Table, Button, Space, Form, Input, Select, Modal, Tag, Popconfirm, Row, Col, TreeSelect } from 'antd';
+import { Table, Button, Space, Form, Input, Select, Modal, Tag, Popconfirm, Tooltip, Row, Col, TreeSelect } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, KeyOutlined } from '@ant-design/icons';
 import { userApi, roleApi } from '../../api/system';
 import departmentApi from '../../api/department';
@@ -21,20 +21,34 @@ export default function UserManage() {
   const [pwUser, setPwUser] = useState(null);
   const [roles, setRoles] = useState([]);
   const [deptTree, setDeptTree] = useState([]);
+  const [userRoleMap, setUserRoleMap] = useState({});
   const has = useAuthStore((s) => s.hasPermission);
+  const currentUserId = useAuthStore((s) => s.userId);
 
   const load = async () => {
     setLoading(true);
     try {
-      const res = await userApi.page({
-        page: page - 1,
-        size,
-        username: form.getFieldValue('username'),
-        nickname: form.getFieldValue('nickname'),
-        status: form.getFieldValue('status'),
-      });
+      const [res, roleList] = await Promise.all([
+        userApi.page({
+          page: page - 1,
+          size,
+          username: form.getFieldValue('username'),
+          nickname: form.getFieldValue('nickname'),
+          status: form.getFieldValue('status'),
+        }),
+        roleApi.list().catch(() => []),
+      ]);
       setData(res.records || []);
       setTotal(res.total || 0);
+      const roleMapById = new Map((roleList || []).map((r) => [r.id, r]));
+      const roleMap = {};
+      await Promise.all(
+        (res.records || []).map(async (u) => {
+          const ids = await userApi.getRoles(u.id).catch(() => []);
+          roleMap[u.id] = ids.map((id) => roleMapById.get(id)).filter(Boolean);
+        })
+      );
+      setUserRoleMap(roleMap);
     } finally {
       setLoading(false);
     }
@@ -102,6 +116,17 @@ export default function UserManage() {
       dataIndex: 'status',
       render: (s) => (s === 1 ? <Tag color="green">启用</Tag> : <Tag color="red">禁用</Tag>),
     },
+    {
+      title: '角色',
+      dataIndex: 'id',
+      width: 160,
+      render: (id) =>
+        (userRoleMap[id] || []).map((r) => (
+          <Tag key={r.id} color={r.roleCode && r.roleCode.toUpperCase() === 'ADMIN' ? 'red' : 'blue'}>
+            {r.roleName}
+          </Tag>
+        )),
+    },
     { title: '创建时间', dataIndex: 'createTime', width: 170 },
     {
       title: '操作',
@@ -118,13 +143,40 @@ export default function UserManage() {
               改密
             </Button>
           )}
-          {has('system:user:delete') && (
-            <Popconfirm title="确认删除该用户?" onConfirm={() => onDelete(row.id)}>
-              <Button size="small" danger icon={<DeleteOutlined />}>
-                删除
-              </Button>
-            </Popconfirm>
-          )}
+          {(() => {
+            if (!has('system:user:delete')) return null;
+            const myRoles = userRoleMap[row.id] || [];
+            const isSelf = row.id === currentUserId;
+            const isAdmin = myRoles.some((r) => r.roleCode && r.roleCode.toUpperCase() === 'ADMIN');
+            if (isSelf || isAdmin) {
+              const tip = isSelf
+                ? '不能删除当前登录的用户'
+                : '管理员账户请先解除角色后再删除';
+              return (
+                <Tooltip title={tip}>
+                  <span>
+                    <Button size="small" danger icon={<DeleteOutlined />} disabled>
+                      删除
+                    </Button>
+                  </span>
+                </Tooltip>
+              );
+            }
+            return (
+              <Popconfirm
+                title={`确认删除用户「${row.username}」？`}
+                description="删除后该用户的所有会话与角色关联将一并清除，且不可恢复。"
+                okText="删除"
+                cancelText="取消"
+                okButtonProps={{ danger: true }}
+                onConfirm={() => onDelete(row.id)}
+              >
+                <Button size="small" danger icon={<DeleteOutlined />}>
+                  删除
+                </Button>
+              </Popconfirm>
+            );
+          })()}
         </Space>
       ),
     },

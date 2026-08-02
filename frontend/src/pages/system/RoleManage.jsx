@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Table, Button, Space, Form, Input, Modal, Tag, Popconfirm, Tree, Select, Row, Col } from 'antd';
+import { Table, Button, Space, Form, Input, Modal, Tag, Popconfirm, Tooltip, Tree, Select, Row, Col } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, SafetyOutlined } from '@ant-design/icons';
 import { roleApi, menuApi } from '../../api/system';
 import { useAuthStore } from '../../stores/authStore';
@@ -150,7 +150,14 @@ export default function RoleManage() {
   const columns = [
     { title: 'ID', dataIndex: 'id', width: 70 },
     { title: '角色编码', dataIndex: 'roleCode', width: 140 },
-    { title: '角色名称', dataIndex: 'roleName' },
+    { title: '角色名称', dataIndex: 'roleName', render: (t, row) => (
+        <span>
+          {t}
+          {row.roleCode && row.roleCode.toUpperCase() === 'ADMIN' && (
+            <Tag color="red" style={{ marginLeft: 8 }}>内置管理员</Tag>
+          )}
+        </span>
+      ) },
     { title: '备注', dataIndex: 'remark' },
     {
       title: '状态',
@@ -172,13 +179,39 @@ export default function RoleManage() {
               分配菜单
             </Button>
           )}
-          {has('system:role:delete') && (
-            <Popconfirm title="确认删除该角色?" onConfirm={() => onDelete(row.id)}>
-              <Button size="small" danger icon={<DeleteOutlined />}>
-                删除
-              </Button>
-            </Popconfirm>
-          )}
+          {(() => {
+            if (!has('system:role:delete')) return null;
+            const isAdminRole = row.roleCode && row.roleCode.toUpperCase() === 'ADMIN';
+            const onlyOne = total <= 1;
+            if (isAdminRole || onlyOne) {
+              const tip = isAdminRole
+                ? '内置管理员(ADMIN)角色不可删除'
+                : '系统至少需要保留一个角色';
+              return (
+                <Tooltip title={tip}>
+                  <span>
+                    <Button size="small" danger icon={<DeleteOutlined />} disabled>
+                      删除
+                    </Button>
+                  </span>
+                </Tooltip>
+              );
+            }
+            return (
+              <Popconfirm
+                title={`确认删除角色「${row.roleName}」？`}
+                description="删除后该角色下所有用户将失去对应权限，且不可恢复。"
+                okText="删除"
+                cancelText="取消"
+                okButtonProps={{ danger: true }}
+                onConfirm={() => onDelete(row.id)}
+              >
+                <Button size="small" danger icon={<DeleteOutlined />}>
+                  删除
+                </Button>
+              </Popconfirm>
+            );
+          })()}
         </Space>
       ),
     },

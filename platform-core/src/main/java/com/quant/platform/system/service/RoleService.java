@@ -82,6 +82,19 @@ public class RoleService {
     }
 
     public void delete(Long id) {
+        SysRole role = roleMapper.selectById(id);
+        if (role == null) {
+            throw new BusinessException("角色不存在");
+        }
+        // 内置 ADMIN 角色不可删除：删掉后系统无人可管
+        if ("ADMIN".equalsIgnoreCase(role.getRoleCode())) {
+            throw new BusinessException("ADMIN 角色不可删除");
+        }
+        // 至少保留一个角色，避免全部清空后无法授权
+        Long total = roleMapper.selectCount(new LambdaQueryWrapper<SysRole>().eq(SysRole::getDeleted, 0));
+        if (total != null && total <= 1) {
+            throw new BusinessException("系统至少需要保留一个角色");
+        }
         menuService.assignMenus(id, Collections.emptyList());
         userRoleMapper.deleteByRoleId(id);
         roleMapper.deleteById(id);

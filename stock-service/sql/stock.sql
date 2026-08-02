@@ -1875,4 +1875,224 @@ CREATE TABLE `trade_calendar`  (
   INDEX `idx_is_trading`(`is_trading` ASC) USING BTREE
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
 
+-- ----------------------------
+-- Table structure for sys_login_fail
+-- ----------------------------
+DROP TABLE IF EXISTS `sys_login_fail`;
+CREATE TABLE `sys_login_fail`  (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `lock_key` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL COMMENT '维度键: U:username|ip 或 I:ip',
+  `fail_count` int NOT NULL DEFAULT 0 COMMENT '连续失败次数',
+  `first_fail_time` datetime NULL DEFAULT NULL COMMENT '首次失败时间',
+  `last_fail_time` datetime NULL DEFAULT NULL COMMENT '最近失败时间',
+  `locked_until` datetime NULL DEFAULT NULL COMMENT '锁定截止时间, NULL=未锁定',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_lock_key`(`lock_key` ASC) USING BTREE
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci COMMENT = '登录失败计数与锁定' ROW_FORMAT = Dynamic;
+
 SET FOREIGN_KEY_CHECKS = 1;
+
+-- ============================ Seed Data ============================
+-- Initial admin user / role / menus / dict for fresh deployment.
+-- Execute after all DDL above. Safe to re-run (INSERT IGNORE).
+
+-- ----------------------------
+-- 1. Department
+-- ----------------------------
+INSERT IGNORE INTO `sys_department` (`id`, `parent_id`, `dept_name`, `dept_path`, `dept_level`, `sort`, `status`)
+VALUES (1, 0, '总部', '/1', 1, 0, 1);
+
+-- ----------------------------
+-- 2. Role
+-- ----------------------------
+INSERT IGNORE INTO `sys_role` (`id`, `role_code`, `role_name`, `remark`, `status`, `deleted`)
+VALUES (1, 'ADMIN', '超级管理员', '拥有全部权限', 1, 0);
+
+-- ----------------------------
+-- 3. Admin User (password: admin123)
+-- ----------------------------
+INSERT IGNORE INTO `sys_user` (`id`, `username`, `password`, `nickname`, `email`, `phone`, `status`, `dept_id`, `deleted`)
+VALUES (1, 'admin', '$2b$10$TXP71uY89MccuDWRgwF1Re35kJLP5jxQ.kch4DF9GlOq7JL7Um1za', 'Administrator', 'admin@quant.local', '', 1, 1, 0);
+
+-- ----------------------------
+-- 4. User-Role binding
+-- ----------------------------
+INSERT IGNORE INTO `sys_user_role` (`id`, `user_id`, `role_id`)
+VALUES (1, 1, 1);
+
+-- ----------------------------
+-- 5. Menus (directory + menu + button)
+-- ----------------------------
+-- 5.1 量化业务目录
+INSERT IGNORE INTO `sys_menu` (`id`, `parent_id`, `menu_name`, `menu_type`, `path`, `component`, `icon`, `permission`, `sort`, `status`, `deleted`) VALUES
+(100, 0, '量化业务', 0, '', '', 'StockOutlined', '', 1, 1, 0),
+-- 因子管理
+(110, 100, '因子管理', 1, '/factors', 'FactorList', 'ExperimentOutlined', 'factor:view', 10, 1, 0),
+(111, 110, '因子查看', 2, '', '', '', 'factor:view', 1, 1, 0),
+(112, 110, '因子编辑', 2, '', '', '', 'factor:edit', 2, 1, 0),
+(113, 110, '因子删除', 2, '', '', '', 'factor:delete', 3, 1, 0),
+-- 策略管理
+(120, 100, '策略管理', 1, '/strategies', 'StrategyList', 'BulbOutlined', 'strategy:view', 20, 1, 0),
+(121, 120, '策略查看', 2, '', '', '', 'strategy:view', 1, 1, 0),
+(122, 120, '策略编辑', 2, '', '', '', 'strategy:edit', 2, 1, 0),
+(123, 120, '策略删除', 2, '', '', '', 'strategy:delete', 3, 1, 0),
+-- 回测管理
+(130, 100, '回测管理', 1, '/backtests', 'BacktestList', 'LineChartOutlined', 'strategy:view', 30, 1, 0),
+(131, 130, '回测查看', 2, '', '', '', 'strategy:view', 1, 1, 0),
+(132, 130, '回测编辑', 2, '', '', '', 'strategy:edit', 2, 1, 0),
+(133, 130, '回测删除', 2, '', '', '', 'strategy:delete', 3, 1, 0),
+-- 模拟盘
+(140, 100, '模拟盘', 1, '/paper-trading', 'PaperTradingPage', 'PlayCircleOutlined', 'strategy:view', 40, 1, 0),
+(141, 140, '模拟盘查看', 2, '', '', '', 'strategy:view', 1, 1, 0),
+(142, 140, '模拟盘编辑', 2, '', '', '', 'strategy:edit', 2, 1, 0),
+(143, 140, '模拟盘删除', 2, '', '', '', 'strategy:delete', 3, 1, 0),
+-- 选股器
+(150, 100, '智能选股', 1, '/screen', 'StockScreen', 'FilterOutlined', 'screen:view', 50, 1, 0),
+(151, 150, '选股查看', 2, '', '', '', 'screen:view', 1, 1, 0),
+(152, 150, '选股编辑', 2, '', '', '', 'screen:edit', 2, 1, 0),
+-- 推荐管理
+(160, 100, '推荐管理', 1, '/recommendation', 'RecommendationList', 'LikeOutlined', 'recommendation:view', 60, 1, 0),
+(161, 160, '推荐查看', 2, '', '', '', 'recommendation:view', 1, 1, 0),
+(162, 160, '推荐编辑', 2, '', '', '', 'recommendation:edit', 2, 1, 0),
+(163, 160, '推荐删除', 2, '', '', '', 'recommendation:delete', 3, 1, 0),
+-- 监控
+(170, 100, '持仓监控', 1, '/monitor', 'MonitorPage', 'MonitorOutlined', 'monitor:view', 70, 1, 0),
+(171, 170, '监控查看', 2, '', '', '', 'monitor:view', 1, 1, 0),
+(172, 170, '监控编辑', 2, '', '', '', 'monitor:edit', 2, 1, 0),
+(173, 170, '监控删除', 2, '', '', '', 'monitor:delete', 3, 1, 0),
+-- 个股分析
+(180, 100, '个股分析', 1, '/stock-analysis', 'StockAnalysis', 'FundOutlined', 'stock:view', 80, 1, 0),
+(181, 180, '个股查看', 2, '', '', '', 'stock:view', 1, 1, 0),
+(182, 180, '个股编辑', 2, '', '', '', 'stock:edit', 2, 1, 0);
+
+-- 5.2 数据管理目录
+INSERT IGNORE INTO `sys_menu` (`id`, `parent_id`, `menu_name`, `menu_type`, `path`, `component`, `icon`, `permission`, `sort`, `status`, `deleted`) VALUES
+(200, 0, '数据管理', 0, '', '', 'DatabaseOutlined', '', 2, 1, 0),
+(210, 200, '数据更新', 1, '/data-update', 'DataUpdate', 'SyncOutlined', 'data:view', 10, 1, 0),
+(211, 210, '数据查看', 2, '', '', '', 'data:view', 1, 1, 0),
+(212, 210, '数据编辑', 2, '', '', '', 'data:edit', 2, 1, 0),
+(213, 210, '数据删除', 2, '', '', '', 'data:delete', 3, 1, 0),
+(220, 200, '研报数据', 1, '/data-detail/research', 'ResearchData', 'FileTextOutlined', 'research:view', 20, 1, 0),
+(221, 220, '研报查看', 2, '', '', '', 'research:view', 1, 1, 0),
+(222, 220, '研报删除', 2, '', '', '', 'research:delete', 2, 1, 0),
+(230, 200, '财务数据', 1, '/data-detail/financial', 'FinancialData', 'AccountBookOutlined', 'financial:view', 30, 1, 0),
+(231, 230, '财务查看', 2, '', '', '', 'financial:view', 1, 1, 0);
+
+-- 5.3 系统管理目录
+INSERT IGNORE INTO `sys_menu` (`id`, `parent_id`, `menu_name`, `menu_type`, `path`, `component`, `icon`, `permission`, `sort`, `status`, `deleted`) VALUES
+(300, 0, '系统管理', 0, '', '', 'SettingOutlined', '', 3, 1, 0),
+-- 用户管理
+(310, 300, '用户管理', 1, '/system/users', 'UserManage', 'UserOutlined', 'system:user:list', 10, 1, 0),
+(311, 310, '用户新增', 2, '', '', '', 'system:user:add', 1, 1, 0),
+(312, 310, '用户编辑', 2, '', '', '', 'system:user:edit', 2, 1, 0),
+(313, 310, '用户删除', 2, '', '', '', 'system:user:delete', 3, 1, 0),
+(314, 310, '密码重置', 2, '', '', '', 'system:user:reset', 4, 1, 0),
+(315, 310, '角色分配', 2, '', '', '', 'system:user:assign', 5, 1, 0),
+-- 角色管理
+(320, 300, '角色管理', 1, '/system/roles', 'RoleManage', 'TeamOutlined', 'system:role:list', 20, 1, 0),
+(321, 320, '角色新增', 2, '', '', '', 'system:role:add', 1, 1, 0),
+(322, 320, '角色编辑', 2, '', '', '', 'system:role:edit', 2, 1, 0),
+(323, 320, '角色删除', 2, '', '', '', 'system:role:delete', 3, 1, 0),
+(324, 320, '菜单分配', 2, '', '', '', 'system:role:assign', 4, 1, 0),
+-- 菜单管理
+(330, 300, '菜单管理', 1, '/system/menus', 'MenuManage', 'MenuOutlined', 'system:menu:list', 30, 1, 0),
+(331, 330, '菜单新增', 2, '', '', '', 'system:menu:add', 1, 1, 0),
+(332, 330, '菜单编辑', 2, '', '', '', 'system:menu:edit', 2, 1, 0),
+(333, 330, '菜单删除', 2, '', '', '', 'system:menu:delete', 3, 1, 0),
+-- 部门管理
+(340, 300, '部门管理', 1, '/system/departments', 'DepartmentManage', 'ApartmentOutlined', 'system:dept:list', 40, 1, 0),
+(341, 340, '部门新增', 2, '', '', '', 'system:dept:add', 1, 1, 0),
+(342, 340, '部门编辑', 2, '', '', '', 'system:dept:edit', 2, 1, 0),
+(343, 340, '部门删除', 2, '', '', '', 'system:dept:delete', 3, 1, 0),
+-- 字典管理
+(350, 300, '字典管理', 1, '/system/dict', 'DictManage', 'BookOutlined', 'system:dict:list', 50, 1, 0),
+(351, 350, '字典新增', 2, '', '', '', 'system:dict:add', 1, 1, 0),
+(352, 350, '字典编辑', 2, '', '', '', 'system:dict:edit', 2, 1, 0),
+(353, 350, '字典删除', 2, '', '', '', 'system:dict:delete', 3, 1, 0),
+-- 参数配置
+(360, 300, '参数配置', 1, '/system/config', 'ConfigCenter', 'ToolOutlined', 'system:config:list', 60, 1, 0),
+(361, 360, '配置新增', 2, '', '', '', 'system:config:add', 1, 1, 0),
+(362, 360, '配置编辑', 2, '', '', '', 'system:config:edit', 2, 1, 0),
+(363, 360, '配置删除', 2, '', '', '', 'system:config:delete', 3, 1, 0),
+-- 凭证管理
+(370, 300, '凭证管理', 1, '/system/credentials', 'CredentialManage', 'KeyOutlined', 'system:credential:list', 70, 1, 0),
+(371, 370, '凭证新增', 2, '', '', '', 'system:credential:add', 1, 1, 0),
+(372, 370, '凭证编辑', 2, '', '', '', 'system:credential:edit', 2, 1, 0),
+(373, 370, '凭证删除', 2, '', '', '', 'system:credential:delete', 3, 1, 0),
+(374, 370, '凭证测试', 2, '', '', '', 'system:credential:list', 4, 1, 0),
+-- 审计日志
+(380, 300, '审计日志', 1, '/system/audit-logs', 'AuditLog', 'FileSearchOutlined', 'system:audit:list', 80, 1, 0),
+(381, 380, '日志删除', 2, '', '', '', 'system:audit:delete', 1, 1, 0),
+-- 登录日志
+(385, 300, '登录日志', 1, '/system/login-logs', 'LoginLog', 'LoginOutlined', 'system:audit:list', 85, 1, 0),
+-- 在线用户
+(390, 300, '在线用户', 1, '/system/online', 'OnlineUser', 'ApiOutlined', 'system:online:list', 90, 1, 0),
+(391, 390, '强制下线', 2, '', '', '', 'system:online:kick', 1, 1, 0),
+-- 系统监控
+(395, 300, '系统监控', 1, '/system/monitor', 'SystemMonitor', 'DashboardOutlined', 'system:monitor:list', 95, 1, 0),
+-- 数据权限
+(398, 300, '数据权限', 1, '/system/data-permissions', 'DataPermissionManage', 'SafetyOutlined', 'system:user:list', 99, 1, 0);
+
+-- ----------------------------
+-- 6. Role-Menu (ADMIN = all menus)
+-- ----------------------------
+INSERT IGNORE INTO `sys_role_menu` (`role_id`, `menu_id`)
+SELECT 1, id FROM `sys_menu` WHERE `deleted` = 0;
+
+-- ----------------------------
+-- 7. Dict Types
+-- ----------------------------
+INSERT IGNORE INTO `sys_dict_type` (`id`, `dict_type`, `type_name`, `description`, `status`, `sort`) VALUES
+(1, 'sys_status', '启用状态', '通用启用/禁用状态', 1, 1),
+(2, 'sys_gender', '性别', '用户性别', 1, 2),
+(3, 'strategy_type', '策略类型', '量化策略分类', 1, 3),
+(4, 'strategy_status', '策略状态', '策略运行状态', 1, 4),
+(5, 'resource_visibility', '资源可见性', '数据权限可见性级别', 1, 5),
+(6, 'resource_perm_level', '资源权限级别', '数据权限共享级别', 1, 6),
+(7, 'notification_channel', '通知渠道', '通知发送渠道类型', 1, 7);
+
+-- ----------------------------
+-- 8. Dict Data
+-- ----------------------------
+INSERT IGNORE INTO `sys_dict_data` (`id`, `dict_type`, `dict_value`, `dict_label`, `sort`, `color`, `status`) VALUES
+-- sys_status
+(1, 'sys_status', '1', '启用', 1, 'green', 1),
+(2, 'sys_status', '0', '禁用', 2, 'red', 1),
+-- sys_gender
+(3, 'sys_gender', 'M', '男', 1, 'blue', 1),
+(4, 'sys_gender', 'F', '女', 2, 'pink', 1),
+(5, 'sys_gender', 'U', '未知', 3, 'default', 1),
+-- strategy_type
+(6, 'strategy_type', 'TIMING', '择时策略', 1, 'blue', 1),
+(7, 'strategy_type', 'STOCK_PICKING', '选股策略', 2, 'cyan', 1),
+(8, 'strategy_type', 'PORTFOLIO', '组合策略', 3, 'purple', 1),
+(9, 'strategy_type', 'ARBITRAGE', '套利策略', 4, 'orange', 1),
+-- strategy_status
+(10, 'strategy_status', 'DRAFT', '草稿', 1, 'default', 1),
+(11, 'strategy_status', 'ACTIVE', '运行中', 2, 'green', 1),
+(12, 'strategy_status', 'PAUSED', '已暂停', 3, 'orange', 1),
+(13, 'strategy_status', 'ARCHIVED', '已归档', 4, 'default', 1),
+-- resource_visibility
+(14, 'resource_visibility', 'PRIVATE', '私有', 1, 'red', 1),
+(15, 'resource_visibility', 'DEPT', '部门可见', 2, 'orange', 1),
+(16, 'resource_visibility', 'PUBLIC', '公开', 3, 'green', 1),
+-- resource_perm_level
+(17, 'resource_perm_level', 'VIEW', '只读', 1, 'blue', 1),
+(18, 'resource_perm_level', 'EDIT', '可编辑', 2, 'green', 1),
+-- notification_channel
+(19, 'notification_channel', 'WECHAT', '微信', 1, 'green', 1),
+(20, 'notification_channel', 'EMAIL', '邮件', 2, 'blue', 1),
+(21, 'notification_channel', 'WEBHOOK', 'Webhook', 3, 'purple', 1);
+
+-- ----------------------------
+-- 9. Default system configs
+-- ----------------------------
+INSERT IGNORE INTO `sys_config` (`id`, `config_key`, `config_value`, `config_group`, `config_label`, `config_type`, `enabled`, `sort`, `remark`) VALUES
+(1, 'login-security.account-lock-threshold', '5', 'security', '账号锁定阈值', 'NUMBER', 1, 1, '连续失败次数达到此值后锁定账号'),
+(2, 'login-security.account-lock-minutes', '15', 'security', '账号锁定时长(分钟)', 'NUMBER', 1, 2, '账号锁定后的解锁等待时间'),
+(3, 'login-security.ip-lock-threshold', '20', 'security', 'IP锁定阈值', 'NUMBER', 1, 3, '同一IP连续失败次数达到此值后锁定'),
+(4, 'login-security.ip-lock-minutes', '15', 'security', 'IP锁定时长(分钟)', 'NUMBER', 1, 4, 'IP锁定后的解锁等待时间'),
+(5, 'login-security.captcha-threshold', '3', 'security', '验证码触发阈值', 'NUMBER', 1, 5, '失败次数达到此值后需要验证码'),
+(6, 'login-security.captcha-expire-seconds', '300', 'security', '验证码有效期(秒)', 'NUMBER', 1, 6, '图形验证码过期时间'),
+(7, 'system.name', '量化交易平台', 'system', '系统名称', 'STRING', 1, 1, '显示在页面标题和导航栏'),
+(8, 'system.version', '1.0.0', 'system', '系统版本', 'STRING', 1, 2, '当前系统版本号');
