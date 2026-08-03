@@ -1,0 +1,39 @@
+# ============================================================
+# Production Profile
+# 所有敏感配置必须通过环境变量注入，无开发默认值
+# 启动方式: java -jar stock-service.jar --spring.profiles.active=prod
+# ============================================================
+
+spring:
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST}:${MYSQL_PORT}/${MYSQL_DATABASE}?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf8&useSSL=true&allowPublicKeyRetrieval=false&tinyInt1isBit=false
+    username: ${MYSQL_USER}
+    password: ${MYSQL_PASSWORD}
+    hikari:
+      maximum-pool-size: 50
+      minimum-idle: 10
+
+# ClickHouse 生产环境连接（无默认值，必须配置）
+clickhouse:
+  host: ${CLICKHOUSE_HOST}
+  port: ${CLICKHOUSE_PORT:8123}
+  database: ${CLICKHOUSE_DATABASE:stock}
+  username: ${CLICKHOUSE_USER:default}
+  password: ${CLICKHOUSE_PASSWORD}
+
+# CORS 生产环境必须配置具体域名（逗号分隔）
+cors:
+  allowed-origins: ${CORS_ALLOWED_ORIGINS}
+
+# HSTS 生产环境启用
+security:
+  hsts:
+    enabled: true
+    max-age-seconds: 31536000
+    include-sub-domains: true
+
+# 生产环境日志级别
+logging:
+  level:
+    com.quant.platform: INFO
+    org.springframework.web: WARN

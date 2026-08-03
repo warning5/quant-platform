@@ -2088,10 +2088,10 @@ public class DataUpdateService {
         // 沪深各市场缺少分红数据的股票数
         for (String market : Arrays.asList("SH", "SZ")) {
             long total = jdbcTemplate.queryForObject(
-                    "SELECT COUNT(*) FROM stock_info WHERE market = '" + market + "'", Long.class);
+                    "SELECT COUNT(*) FROM stock_info WHERE market = ?", Long.class, market);
             long covered = jdbcTemplate.queryForObject(
                     "SELECT COUNT(DISTINCT sd.code) FROM stock_dividend sd " +
-                            "INNER JOIN stock_info si ON sd.code COLLATE utf8mb4_unicode_ci = si.code WHERE si.market = '" + market + "'", Long.class);
+                            "INNER JOIN stock_info si ON sd.code COLLATE utf8mb4_unicode_ci = si.code WHERE si.market = ?", Long.class, market);
             result.put(market, total - covered);
         }
         long totalSh = (long) result.getOrDefault("SH", 0L);

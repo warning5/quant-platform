@@ -7,7 +7,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
-import java.sql.*;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.time.LocalDate;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -20,11 +22,6 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class ClickHouseSentimentService {
-
-    private final ClickHouseConfig clickHouseConfig;
-    private final SentimentService sentimentService;  // MySQL fallback
-    private final TradeCalendarService tradeCalendarService;
-    private final JdbcTemplate jdbcTemplate;  // 用于查询MySQL-only的表（基金持仓/股东人数/新闻）
 
     // 情绪数据表列表（与 SentimentService 一致）
     // 保留：zt(涨跌停池) + moneyflow(资金情绪代理) + notice(公告)
@@ -41,9 +38,17 @@ public class ClickHouseSentimentService {
             "stock_sentiment_block_trade",
             "stock_sentiment_activity"
     );
-
     // 表的中文名和描述
     private static final Map<String, String> TABLE_NAMES = new LinkedHashMap<>();
+    // 各表的日期字段名（notice 用 notice_date，survey 用 meeting_date；MySQL-only 表补充，避免外部调用 getDateColumn 拿到错误的 trade_date）
+    private static final Map<String, String> DATE_COLUMNS = new HashMap<>();
+    // 允许直接拼接到 SQL 中的表名白名单（sentiment 表 + coverage 中追加的 MySQL-only 表 + CH-only 表）
+    private static final Set<String> ALLOWED_TABLES;
+    // 允许直接拼接到 SQL 中的日期列名白名单
+    private static final Set<String> ALLOWED_DATE_COLUMNS = new HashSet<>(Arrays.asList(
+            "trade_date", "notice_date", "meeting_date", "report_date", "publish_date", "update_time"
+    ));
+
     static {
         TABLE_NAMES.put("stock_sentiment_zt", "涨跌停池");
         TABLE_NAMES.put("stock_sentiment_moneyflow", "资金流向");
@@ -57,8 +62,6 @@ public class ClickHouseSentimentService {
         TABLE_NAMES.put("stock_sentiment_activity", "市场活跃度");
     }
 
-    // 各表的日期字段名（notice 用 notice_date，survey 用 meeting_date；MySQL-only 表补充，避免外部调用 getDateColumn 拿到错误的 trade_date）
-    private static final Map<String, String> DATE_COLUMNS = new HashMap<>();
     static {
         DATE_COLUMNS.put("stock_sentiment_notice", "notice_date");
         DATE_COLUMNS.put("stock_sentiment_survey", "meeting_date");
@@ -70,8 +73,6 @@ public class ClickHouseSentimentService {
         DATE_COLUMNS.put("stock_earnings_report", "report_date");
     }
 
-    // 允许直接拼接到 SQL 中的表名白名单（sentiment 表 + coverage 中追加的 MySQL-only 表 + CH-only 表）
-    private static final Set<String> ALLOWED_TABLES;
     static {
         Set<String> set = new HashSet<>(SENTIMENT_TABLES);
         set.add("stock_fund_holder");
@@ -85,10 +86,23 @@ public class ClickHouseSentimentService {
         ALLOWED_TABLES = Collections.unmodifiableSet(set);
     }
 
-    // 允许直接拼接到 SQL 中的日期列名白名单
-    private static final Set<String> ALLOWED_DATE_COLUMNS = new HashSet<>(Arrays.asList(
-            "trade_date", "notice_date", "meeting_date", "report_date", "publish_date", "update_time"
-    ));
+    private final ClickHouseConfig clickHouseConfig;
+    private final SentimentService sentimentService;  // MySQL fallback
+    private final TradeCalendarService tradeCalendarService;
+    private final JdbcTemplate jdbcTemplate;  // 用于查询MySQL-only的表（基金持仓/股东人数/新闻）
+
+    /**
+     * 校验表名和日期列名是否在白名单中，避免 SQL 拼接被注入。
+     * 校验不通过直接抛出 IllegalArgumentException，不执行后续 SQL。
+     */
+    private static void validateTableAndColumn(String table, String dateCol) {
+        if (!ALLOWED_TABLES.contains(table)) {
+            throw new IllegalArgumentException("无效的表名: " + table);
+        }
+        if (!ALLOWED_DATE_COLUMNS.contains(dateCol)) {
+            throw new IllegalArgumentException("无效的日期列: " + dateCol);
+        }
+    }
 
     private String getDateColumn(String table) {
         return DATE_COLUMNS.getOrDefault(table, "trade_date");
@@ -113,37 +127,19 @@ public class ClickHouseSentimentService {
             sb.append(dateCol).append(" >= '").append(startDate).append("'");
         }
         if (isValidDateParam(endDate)) {
-            if (sb.length() > 0) {
+            if (!sb.isEmpty()) {
                 sb.append(" AND ");
             }
             sb.append(dateCol).append(" <= '").append(endDate).append("'");
         }
-        return sb.length() > 0 ? " WHERE " + sb.toString() : "";
+        return !sb.isEmpty() ? " WHERE " + sb.toString() : "";
     }
 
     /**
-     * 校验表名和日期列名是否在白名单中，避免 SQL 拼接被注入。
-     * 校验不通过直接抛出 IllegalArgumentException，不执行后续 SQL。
-     */
-    private static void validateTableAndColumn(String table, String dateCol) {
-        if (!ALLOWED_TABLES.contains(table)) {
-            throw new IllegalArgumentException("无效的表名: " + table);
-        }
-        if (!ALLOWED_DATE_COLUMNS.contains(dateCol)) {
-            throw new IllegalArgumentException("无效的日期列: " + dateCol);
-        }
-    }
-
-    /**
-     * 获取 ClickHouse 连接
+     * 获取 ClickHouse 连接（从 HikariCP 连接池获取）
      */
     private Connection getConnection() throws Exception {
-        Properties props = new Properties();
-        props.setProperty("user", clickHouseConfig.getUsername());
-        if (clickHouseConfig.getPassword() != null && !clickHouseConfig.getPassword().isEmpty()) {
-            props.setProperty("password", clickHouseConfig.getPassword());
-        }
-        return DriverManager.getConnection(clickHouseConfig.getJdbcUrl(), props);
+        return clickHouseConfig.getConnection();
     }
 
     /**
@@ -543,9 +539,9 @@ public class ClickHouseSentimentService {
         List<String> tablesToValidate = (tables == null || tables.isEmpty())
                 ? SENTIMENT_TABLES
                 : tables.stream()
-                        .filter(SENTIMENT_TABLES::contains) // 安全：只处理 ClickHouse 中存在的情绪表
-                        .distinct()
-                        .collect(Collectors.toList());
+                .filter(SENTIMENT_TABLES::contains) // 安全：只处理 ClickHouse 中存在的情绪表
+                .distinct()
+                .collect(Collectors.toList());
 
         for (String table : tablesToValidate) {
             // 白名单校验
@@ -637,8 +633,8 @@ public class ClickHouseSentimentService {
                 try (Connection conn = getConnection();
                      PreparedStatement stmt = conn.prepareStatement(
                              "SELECT COUNT(*) FROM stock_sentiment_moneyflow FINAL " + mfDateRangeCondition +
-                             (mfDateRangeCondition.isEmpty() ? "WHERE " : " AND ") +
-                             "net_main=0 AND net_huge=0 AND net_big=0 AND net_medium=0 AND net_small=0");
+                                     (mfDateRangeCondition.isEmpty() ? "WHERE " : " AND ") +
+                                     "net_main=0 AND net_huge=0 AND net_big=0 AND net_medium=0 AND net_small=0");
                      ResultSet rs = stmt.executeQuery()) {
                     if (rs.next()) {
                         Long allZeroCount = rs.getLong(1);
@@ -665,7 +661,7 @@ public class ClickHouseSentimentService {
                 try (Connection conn = getConnection();
                      PreparedStatement stmt = conn.prepareStatement(
                              "SELECT COUNT(*) FROM stock_sentiment_moneyflow FINAL" + mfDateRangeCondition +
-                             (mfDateRangeCondition.isEmpty() ? " WHERE close=0" : " AND close=0"));
+                                     (mfDateRangeCondition.isEmpty() ? " WHERE close=0" : " AND close=0"));
                      ResultSet rs = stmt.executeQuery()) {
                     if (rs.next()) {
                         Long closeZeroCount = rs.getLong(1);
@@ -749,7 +745,7 @@ public class ClickHouseSentimentService {
     }
 
     private Map<String, Object> mergeValidateDailyResults(Map<String, Object> chResult, Map<String, Object> mysqlResult,
-                                                         List<String> chTables, List<String> mysqlOnlyTables) {
+                                                          List<String> chTables, List<String> mysqlOnlyTables) {
         // 合并表名
         Map<String, String> mergedTableNames = new LinkedHashMap<>();
         mergedTableNames.putAll(getMapString(chResult, "tableNames"));
@@ -837,9 +833,9 @@ public class ClickHouseSentimentService {
         List<String> tablesToValidate = (tables == null || tables.isEmpty())
                 ? SENTIMENT_TABLES
                 : tables.stream()
-                        .filter(SENTIMENT_TABLES::contains) // 安全：只处理 ClickHouse 中存在的情绪表
-                        .distinct()
-                        .collect(Collectors.toList());
+                .filter(SENTIMENT_TABLES::contains) // 安全：只处理 ClickHouse 中存在的情绪表
+                .distinct()
+                .collect(Collectors.toList());
 
         Map<String, String> tableNames = new LinkedHashMap<>();
         Map<String, Map<String, DailyRow>> tableDateMap = new LinkedHashMap<>();
@@ -893,7 +889,7 @@ public class ClickHouseSentimentService {
         List<Map<String, Object>> dailyStats = new ArrayList<>();
         Set<String> tradingDates = isValidDateParam(startDate) && isValidDateParam(endDate)
                 ? tradeCalendarService.getTradingDaysBetween(LocalDate.parse(startDate), LocalDate.parse(endDate))
-                        .stream().map(LocalDate::toString).collect(Collectors.toSet())
+                .stream().map(LocalDate::toString).collect(Collectors.toSet())
                 : null;
         for (String date : allDates) {
             if (tradingDates != null && !tradingDates.contains(date)) {
@@ -927,6 +923,7 @@ public class ClickHouseSentimentService {
         static final DailyRow ZERO = new DailyRow(0L, 0L);
         long count;
         long nullCount;
+
         DailyRow(long count, long nullCount) {
             this.count = count;
             this.nullCount = nullCount;

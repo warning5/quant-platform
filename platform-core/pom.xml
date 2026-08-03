@@ -65,6 +65,12 @@
             <artifactId>clickhouse-jdbc</artifactId>
         </dependency>
 
+        <!-- HikariCP（ClickHouse 连接池，版本由 spring-boot-starter-parent 管理） -->
+        <dependency>
+            <groupId>com.zaxxer</groupId>
+            <artifactId>HikariCP</artifactId>
+        </dependency>
+
         <!-- Sa-Token 权限认证（Spring Boot 3） -->
         <dependency>
             <groupId>cn.dev33</groupId>

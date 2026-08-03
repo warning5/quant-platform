@@ -1132,15 +1132,10 @@ public class ClickHouseStockService {
     }
 
     /**
-     * 获取 ClickHouse 连接
+     * 获取 ClickHouse 连接（从 HikariCP 连接池获取）
      */
     private Connection getConnection() throws SQLException {
-        Properties props = new Properties();
-        props.setProperty("user", clickHouseConfig.getUsername());
-        if (clickHouseConfig.getPassword() != null && !clickHouseConfig.getPassword().isEmpty()) {
-            props.setProperty("password", clickHouseConfig.getPassword());
-        }
-        return DriverManager.getConnection(clickHouseConfig.getJdbcUrl(), props);
+        return clickHouseConfig.getConnection();
     }
 
     /**
@@ -1150,6 +1145,21 @@ public class ClickHouseStockService {
         try (Connection conn = getConnection();
              Statement stmt = conn.createStatement()) {
             stmt.execute(sql);
+        }
+    }
+
+    /**
+     * 执行参数化 DDL/DML 语句（如 ALTER TABLE DELETE WHERE ... IN (?, ?)）
+     * @param sql  含 ? 占位符的 SQL
+     * @param params 参数值数组
+     */
+    public void executeDdlWithParams(String sql, Object[] params) throws SQLException {
+        try (Connection conn = getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            for (int i = 0; i < params.length; i++) {
+                stmt.setObject(i + 1, params[i]);
+            }
+            stmt.execute();
         }
     }
 

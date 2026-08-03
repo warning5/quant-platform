@@ -178,9 +178,9 @@ public class DataLifecycleService {
                     result.put(table + "_before", beforeCount);
 
                     if (beforeCount > 0) {
-                        String inClause = String.join(",", codes.stream().map(c -> "'" + c + "'").toArray(String[]::new));
-                        String deleteSql = "ALTER TABLE stock." + table + " DELETE WHERE " + col + " IN (" + inClause + ")";
-                        clickHouseStockService.executeDdl(deleteSql);
+                        // 使用参数化查询构建 DELETE 语句（表名/列名来自硬编码白名单，参数用 ? 占位）
+                        String deleteSql = "ALTER TABLE stock." + table + " DELETE WHERE " + col + " IN (" + ph + ")";
+                        clickHouseStockService.executeDdlWithParams(deleteSql, codes.toArray());
                         result.put(table + "_deleted", beforeCount);
                         totalDeleted += (int) beforeCount;
                     } else {

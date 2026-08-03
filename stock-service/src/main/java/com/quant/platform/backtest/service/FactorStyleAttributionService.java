@@ -14,7 +14,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Statement;
@@ -550,12 +549,7 @@ public class FactorStyleAttributionService {
         // date → factor_code → List of {factor_val, daily_ret}
         Map<LocalDate, Map<String, List<double[]>>> rawData = new LinkedHashMap<>();
 
-        Properties props = new Properties();
-        props.setProperty("user", clickHouseConfig.getUsername());
-        if (clickHouseConfig.getPassword() != null && !clickHouseConfig.getPassword().isEmpty()) {
-            props.setProperty("password", clickHouseConfig.getPassword());
-        }
-        try (Connection conn = DriverManager.getConnection(clickHouseConfig.getJdbcUrl(), props);
+        try (Connection conn = clickHouseConfig.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
             int idx = 1;
@@ -1118,12 +1112,7 @@ public class FactorStyleAttributionService {
                 """, startDate, endDate);
 
         Map<LocalDate, Map<String, Double>> dailyRetsByDate = new LinkedHashMap<>();
-        Properties props = new Properties();
-        props.setProperty("user", clickHouseConfig.getUsername());
-        if (clickHouseConfig.getPassword() != null && !clickHouseConfig.getPassword().isEmpty()) {
-            props.setProperty("password", clickHouseConfig.getPassword());
-        }
-        try (Connection conn = DriverManager.getConnection(clickHouseConfig.getJdbcUrl(), props);
+        try (Connection conn = clickHouseConfig.getConnection();
              Statement stmt = conn.createStatement()) {
             stmt.setFetchSize(50000);
             try (ResultSet rs = stmt.executeQuery(sql)) {
@@ -1235,13 +1224,7 @@ public class FactorStyleAttributionService {
             VALUES (?, ?, ?, ?, ?, ?, now(), now())
             """;
 
-        Properties props = new Properties();
-        props.setProperty("user", clickHouseConfig.getUsername());
-        if (clickHouseConfig.getPassword() != null && !clickHouseConfig.getPassword().isEmpty()) {
-            props.setProperty("password", clickHouseConfig.getPassword());
-        }
-
-        try (Connection conn = DriverManager.getConnection(clickHouseConfig.getJdbcUrl(), props);
+        try (Connection conn = clickHouseConfig.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
             for (Map.Entry<LocalDate, Map<String, Double>> entry : factorReturns.entrySet()) {
@@ -1283,12 +1266,7 @@ public class FactorStyleAttributionService {
 
         // 查 factor_premium 最新日期
         LocalDate lastDate = null;
-        Properties props = new Properties();
-        props.setProperty("user", clickHouseConfig.getUsername());
-        if (clickHouseConfig.getPassword() != null && !clickHouseConfig.getPassword().isEmpty()) {
-            props.setProperty("password", clickHouseConfig.getPassword());
-        }
-        try (Connection conn = DriverManager.getConnection(clickHouseConfig.getJdbcUrl(), props);
+        try (Connection conn = clickHouseConfig.getConnection();
              Statement stmt = conn.createStatement()) {
             ResultSet rs = stmt.executeQuery("SELECT max(calc_date) FROM stock.factor_premium");
             if (rs.next()) {

@@ -7,17 +7,16 @@ server:
     keep-alive-timeout: 300000
 
 spring:
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
   application:
     name: quant-platform
   # NoHandlerFoundException: 未匹配路径抛异常而非转发到静态资源
   mvc:
     throw-exception-if-no-handler-found: true
-  # MySQL datasource config
+  # MySQL datasource config — 公共连接池参数，host/credentials 由 profile 文件提供
   datasource:
-    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:stock}?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&tinyInt1isBit=false
     driver-class-name: com.mysql.cj.jdbc.Driver
-    username: ${MYSQL_USER:root}
-    password: ${MYSQL_PASSWORD:123456}  # 本地开发默认值，生产通过环境变量覆盖
     hikari:
       maximum-pool-size: 30
       minimum-idle: 5
@@ -57,13 +56,8 @@ springdoc:
     path: /swagger-ui.html
     tags-sorter: alpha
 
-# ClickHouse 配置
+# ClickHouse 公共参数 — host/credentials 由 profile 文件提供
 clickhouse:
-  host: ${CLICKHOUSE_HOST:172.19.72.140}
-  port: ${CLICKHOUSE_PORT:8123}
-  database: ${CLICKHOUSE_DATABASE:stock}
-  username: ${CLICKHOUSE_USER:default}
-  password: ${CLICKHOUSE_PASSWORD:123456}  # 本地开发默认值，生产通过环境变量覆盖
   enabled: true  # 是否启用 ClickHouse 优先查询
 
 # ============================================================
@@ -96,7 +90,7 @@ login-security:
 # 生产必须设置强密钥：环境变量 CREDENTIAL_AES_KEY（建议 32 字节随机串）
 # 未设置则使用内置开发密钥（仅本地开发，不安全）
 credential:
-  aes-key: ${CREDENTIAL_AES_KEY:}
+  aes-key: ${CREDENTIAL_AES_KEY:}  # 各 profile 下行为不同：dev 兜底开发密钥，prod 无密钥则 fail-fast
 
 # 微信联合登录配置（敏感凭据通过环境变量注入，见 .env）
 wechat:
@@ -167,9 +161,16 @@ quant:
       webhook-url: ""  # 钉钉机器人 Webhook URL
       secret: ""      # 钉钉加签密钥（可选）
 
-# CORS 配置：生产环境必须配置具体域名（逗号分隔），未配置时默认允许所有来源（仅开发环境）
+# CORS 配置 — 未配置时默认允许所有来源（仅 dev），生产环境在 application-prod.yml 中强制配置
 cors:
   allowed-origins: ${CORS_ALLOWED_ORIGINS:}
+
+# HSTS 配置 — 仅 prod profile 启用（见 application-prod.yml）
+# security:
+#   hsts:
+#     enabled: false
+#     max-age-seconds: 31536000
+#     include-sub-domains: true
 
 
 

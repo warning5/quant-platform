@@ -14,7 +14,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.time.LocalDate;
@@ -25,7 +24,6 @@ import java.util.stream.Collectors;
 /**
  * 因子健康监控服务（P3-11）
  * 全生命周期管理：ACTIVE → 监控 → 预警 → 降权(DEGRADED) → 复活(ACTIVE)
- *
  * 核心规则：
  * - 衰减检测：90日|IC| < 启用时|IC|×50% → 预警；连续20日衰减>50% → DEGRADED
  * - 复活机制：DEGRADED因子连续10日|IC|>0.03且IR>0.2 → RESURRECTED→ACTIVE
@@ -349,9 +347,7 @@ public class FactorHealthMonitor {
              consecutive_recovery_days, created_at, update_time)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now(), now())
             """;
-        try (Connection conn = DriverManager.getConnection(
-                clickHouseConfig.getJdbcUrl(), clickHouseConfig.getUsername(),
-                clickHouseConfig.getPassword() != null ? clickHouseConfig.getPassword() : "");
+        try (Connection conn = clickHouseConfig.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, factorCode);
             ps.setObject(2, metricDate);

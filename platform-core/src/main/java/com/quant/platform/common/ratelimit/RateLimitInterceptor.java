@@ -1,5 +1,7 @@
 package com.quant.platform.common.ratelimit;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.quant.platform.common.exception.RateLimitExceededException;
 import io.github.bucket4j.Bandwidth;
 import io.github.bucket4j.Bucket;
@@ -11,20 +13,24 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.HandlerInterceptor;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.time.Duration;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 基于 Bucket4j 的 API 限流拦截器。
  * 按 IP / 用户 / IP+用户 维度维护令牌桶，拒绝超频请求。
  * <p>
+ * 使用 Caffeine 缓存存储令牌桶，设置 expireAfterAccess 自动淘汰不活跃的桶，防止内存泄漏。
  * 触发限流时抛出 {@link RateLimitExceededException}，由全局异常处理器统一返回 429 响应。
  */
 @Slf4j
 public class RateLimitInterceptor implements HandlerInterceptor {
 
-    /** key -> Bucket */
-    private final Map<String, Bucket> buckets = new ConcurrentHashMap<>();
+    /** 令牌桶缓存：30 分钟无访问自动淘汰，最大 10000 个桶 */
+    private final Cache<String, Bucket> buckets = Caffeine.newBuilder()
+            .expireAfterAccess(30, TimeUnit.MINUTES)
+            .maximumSize(10_000)
+            .build();
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response,
@@ -39,7 +45,7 @@ public class RateLimitInterceptor implements HandlerInterceptor {
         }
 
         String key = resolveKey(request, annotation.limitType());
-        Bucket bucket = buckets.computeIfAbsent(key, k -> createBucket(annotation));
+        Bucket bucket = buckets.get(key, k -> createBucket(annotation));
 
         ConsumptionProbe probe = bucket.tryConsumeAndReturnRemaining(annotation.tokens());
         if (probe.isConsumed()) {
@@ -58,7 +64,7 @@ public class RateLimitInterceptor implements HandlerInterceptor {
     private Bucket createBucket(RateLimit annotation) {
         Bandwidth bandwidth = Bandwidth.builder()
                 .capacity(annotation.capacity())
-                .refillIntervally(annotation.capacity(), java.time.Duration.ofMillis(annotation.timeUnit().toMillis(annotation.duration())))
+                .refillIntervally(annotation.capacity(), Duration.ofMillis(annotation.timeUnit().toMillis(annotation.duration())))
                 .build();
         return Bucket.builder().addLimit(bandwidth).build();
     }

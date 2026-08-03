@@ -7,7 +7,6 @@ import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
-import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.sql.*;
@@ -15,7 +14,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Properties;
 
 /**
  * ClickHouse 因子值服务
@@ -140,7 +138,8 @@ public class ClickHouseFactorValueService {
         }
 
         // 用 argMax 按 announce_date 取最新一条（announce_date NULL 时退而用 calc_date）
-        String sql = String.format("""
+        // 使用 PreparedStatement 参数化查询
+        String sql = """
                 SELECT symbol,
                        argMax(id, COALESCE(announce_date, calc_date))         AS fv_id,
                        argMax(calc_date, COALESCE(announce_date, calc_date)) AS fv_calc_date,
@@ -149,39 +148,41 @@ public class ClickHouseFactorValueService {
                        argMax(z_score, COALESCE(announce_date, calc_date))    AS fv_zscore,
                        argMax(announce_date, COALESCE(announce_date, calc_date)) AS fv_announce
                 FROM stock.factor_value
-                WHERE factor_code = '%s'
-                  AND (announce_date <= '%s' OR announce_date IS NULL)
+                WHERE factor_code = ?
+                  AND (announce_date <= ? OR announce_date IS NULL)
                 GROUP BY symbol
                 ORDER BY symbol
-                """, factorCode.replace("'", "''"), screenDate);
+                """;
 
         java.util.List<com.quant.platform.factor.domain.FactorValue> result = new ArrayList<>();
         try (java.sql.Connection conn = getConnection();
-             java.sql.Statement stmt = conn.createStatement();
-             java.sql.ResultSet rs = stmt.executeQuery(sql)) {
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, factorCode);
+            stmt.setString(2, screenDate.toString());
+            try (java.sql.ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    com.quant.platform.factor.domain.FactorValue fv = new com.quant.platform.factor.domain.FactorValue();
+                    fv.setId(rs.getLong("fv_id"));
+                    fv.setFactorCode(factorCode);
+                    fv.setSymbol(rs.getString("symbol"));
 
-            while (rs.next()) {
-                com.quant.platform.factor.domain.FactorValue fv = new com.quant.platform.factor.domain.FactorValue();
-                fv.setId(rs.getLong("fv_id"));
-                fv.setFactorCode(factorCode);
-                fv.setSymbol(rs.getString("symbol"));
+                    java.sql.Date calcDate = rs.getDate("fv_calc_date");
+                    fv.setCalcDate(calcDate != null ? calcDate.toLocalDate() : null);
 
-                java.sql.Date calcDate = rs.getDate("fv_calc_date");
-                fv.setCalcDate(calcDate != null ? calcDate.toLocalDate() : null);
+                    double val = rs.getDouble("fv_val");
+                    fv.setFactorVal(rs.wasNull() ? null : java.math.BigDecimal.valueOf(val));
 
-                double val = rs.getDouble("fv_val");
-                fv.setFactorVal(rs.wasNull() ? null : java.math.BigDecimal.valueOf(val));
+                    double rank = rs.getDouble("fv_rank");
+                    fv.setRankValue(rs.wasNull() ? null : java.math.BigDecimal.valueOf(rank));
 
-                double rank = rs.getDouble("fv_rank");
-                fv.setRankValue(rs.wasNull() ? null : java.math.BigDecimal.valueOf(rank));
+                    double z = rs.getDouble("fv_zscore");
+                    fv.setZScore(rs.wasNull() ? null : java.math.BigDecimal.valueOf(z));
 
-                double z = rs.getDouble("fv_zscore");
-                fv.setZScore(rs.wasNull() ? null : java.math.BigDecimal.valueOf(z));
+                    java.sql.Date ad = rs.getDate("fv_announce");
+                    fv.setAnnounceDate(ad != null ? ad.toLocalDate() : null);
 
-                java.sql.Date ad = rs.getDate("fv_announce");
-                fv.setAnnounceDate(ad != null ? ad.toLocalDate() : null);
-
-                result.add(fv);
+                    result.add(fv);
+                }
             }
             log.info("[ClickHouse] 季度因子查询命中: {} screenDate={} size={}",
                     factorCode, screenDate, result.size());
@@ -224,10 +225,10 @@ public class ClickHouseFactorValueService {
             return Map.of();
         }
 
-        String placeholders = String.join(",", factorCodes.stream()
-                .map(c -> "'" + c.replace("'", "''") + "'").toList());
+        String placeholders = factorCodes.stream()
+                .map(c -> "?").collect(java.util.stream.Collectors.joining(","));
 
-        String sql = String.format("""
+        String sql = """
                 SELECT factor_code,
                        count() AS value_count,
                        min(calc_date) AS min_date,
@@ -236,24 +237,27 @@ public class ClickHouseFactorValueService {
                 FROM stock.factor_value FINAL
                 WHERE factor_code IN (%s)
                 GROUP BY factor_code
-                """, placeholders);
+                """.formatted(placeholders);
 
         Map<String, Map<String, Object>> result = new LinkedHashMap<>();
         try (Connection conn = getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql);
-             ResultSet rs = stmt.executeQuery()) {
-
-            while (rs.next()) {
-                String code = rs.getString("factor_code");
-                Map<String, Object> entry = new LinkedHashMap<>();
-                entry.put("valueCount", rs.getLong("value_count"));
-                java.sql.Date minDate = rs.getDate("min_date");
-                java.sql.Date maxDate = rs.getDate("max_date");
-                java.sql.Date latestAnnounce = rs.getDate("latest_announce");
-                if (minDate != null) entry.put("minDate", minDate.toString());
-                if (maxDate != null) entry.put("maxDate", maxDate.toString());
-                if (latestAnnounce != null) entry.put("latestAnnounceDate", latestAnnounce.toString());
-                result.put(code, entry);
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            for (int i = 0; i < factorCodes.size(); i++) {
+                stmt.setString(i + 1, factorCodes.get(i));
+            }
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    String code = rs.getString("factor_code");
+                    Map<String, Object> entry = new LinkedHashMap<>();
+                    entry.put("valueCount", rs.getLong("value_count"));
+                    java.sql.Date minDate = rs.getDate("min_date");
+                    java.sql.Date maxDate = rs.getDate("max_date");
+                    java.sql.Date latestAnnounce = rs.getDate("latest_announce");
+                    if (minDate != null) entry.put("minDate", minDate.toString());
+                    if (maxDate != null) entry.put("maxDate", maxDate.toString());
+                    if (latestAnnounce != null) entry.put("latestAnnounceDate", latestAnnounce.toString());
+                    result.put(code, entry);
+                }
             }
         } catch (Exception e) {
             log.error("[ClickHouse] batchGetStatus 查询失败: {}", e.getMessage(), e);
@@ -357,26 +361,29 @@ public class ClickHouseFactorValueService {
     }
 
     private void queryAndMerge(Map<String, Map<String, Double>> result, String querySymbol) {
-        String escaped = querySymbol.replace("'", "''");
-        String sql = String.format("""
+        // 使用 PreparedStatement 参数化查询，避免 SQL 拼接注入风险
+        String sql = """
                 SELECT factor_code, factor_val, rank_value
                 FROM stock.factor_value FINAL
-                WHERE symbol = '%s'
-                  AND calc_date = (SELECT max(calc_date) FROM stock.factor_value FINAL WHERE symbol = '%s')
-                """, escaped, escaped);
+                WHERE symbol = ?
+                  AND calc_date = (SELECT max(calc_date) FROM stock.factor_value FINAL WHERE symbol = ?)
+                """;
         try (Connection conn = getConnection();
-             java.sql.Statement stmt = conn.createStatement();
-             ResultSet rs = stmt.executeQuery(sql)) {
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, querySymbol);
+            stmt.setString(2, querySymbol);
             int count = 0;
-            while (rs.next()) {
-                String factorCode = rs.getString("factor_code");
-                Map<String, Double> vals = new LinkedHashMap<>();
-                double fv = rs.getDouble("factor_val");
-                vals.put("factorVal", rs.wasNull() ? null : fv);
-                double rv = rs.getDouble("rank_value");
-                vals.put("rankValue", rs.wasNull() ? null : rv);
-                result.put(factorCode, vals); // 后查的会覆盖先查的同名因子
-                count++;
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    String factorCode = rs.getString("factor_code");
+                    Map<String, Double> vals = new LinkedHashMap<>();
+                    double fv = rs.getDouble("factor_val");
+                    vals.put("factorVal", rs.wasNull() ? null : fv);
+                    double rv = rs.getDouble("rank_value");
+                    vals.put("rankValue", rs.wasNull() ? null : rv);
+                    result.put(factorCode, vals); // 后查的会覆盖先查的同名因子
+                    count++;
+                }
             }
             log.debug("[ClickHouse] queryAndMerge: symbol={}, 命中{}个因子", querySymbol, count);
         } catch (Exception e) {
@@ -407,23 +414,25 @@ public class ClickHouseFactorValueService {
         if (!clickHouseConfig.isEnabled() || code == null || code.isBlank()) {
             return Map.of();
         }
-        String escaped = code.replace("'", "''");
-        String sql = String.format("""
+        // 使用 PreparedStatement 参数化查询
+        String sql = """
                 SELECT pe_ttm, pb, close_price, high_price
                 FROM stock_daily
-                WHERE code = '%s'
+                WHERE code = ?
                 ORDER BY trade_date DESC LIMIT 1
-                """, escaped);
+                """;
 
         Map<String, Double> result = new LinkedHashMap<>();
         try (Connection conn = getConnection();
-             java.sql.Statement stmt = conn.createStatement();
-             ResultSet rs = stmt.executeQuery(sql)) {
-            if (rs.next()) {
-                putIfNotNull(result, "pe_ttm", rs.getDouble("pe_ttm"), rs);
-                putIfNotNull(result, "pb", rs.getDouble("pb"), rs);
-                putIfNotNull(result, "close_price", rs.getDouble("close_price"), rs);
-                putIfNotNull(result, "high_price", rs.getDouble("high_price"), rs);
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, code);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    putIfNotNull(result, "pe_ttm", rs.getDouble("pe_ttm"), rs);
+                    putIfNotNull(result, "pb", rs.getDouble("pb"), rs);
+                    putIfNotNull(result, "close_price", rs.getDouble("close_price"), rs);
+                    putIfNotNull(result, "high_price", rs.getDouble("high_price"), rs);
+                }
             }
             log.debug("[ClickHouse] findStockDailyLatest: code={}, result={}", code, result);
         } catch (Exception e) {
@@ -539,14 +548,13 @@ public class ClickHouseFactorValueService {
             log.warn("queryByFactorCodeAndDateFromCH: invalid factorCode rejected: {}", factorCode);
             return java.util.Collections.emptyList();
         }
-        // 使用 <= date + argMax 取最新值，同时兼容日频因子（exact match）和财务因子（latest report）
-        // CH JDBC v0.6.3 对 PreparedStatement 参数绑定处理有问题，改为字符串拼接
+        // 使用 PreparedStatement 参数化查询
         // CH v26.5.1 bug: GROUP BY 别名不能跟 WHERE 子句中的列同名，否则报 ILLEGAL_AGGREGATION
         // 解决：所有 SELECT 别名加 fv_ 前缀，避免与表列名(factor_code, calc_date 等)冲突
-        String sql = String.format("""
+        String sql = """
                 SELECT 
                     any(id) as fv_id,
-                    '%s' as fv_code,
+                    ? as fv_code,
                     symbol,
                     argMax(calc_date, calc_date) as fv_calc_date,
                     argMax(factor_val, calc_date) as fv_val,
@@ -555,18 +563,21 @@ public class ClickHouseFactorValueService {
                     argMax(announce_date, calc_date) as fv_announce,
                     now() as fv_created
                 FROM stock.factor_value
-                WHERE factor_code = '%s' AND calc_date <= '%s'
+                WHERE factor_code = ? AND calc_date <= ?
                 GROUP BY symbol
                 ORDER BY symbol
-                """, factorCode.replace("'", "''"), factorCode.replace("'", "''"), calcDate);
+                """;
 
         java.util.List<com.quant.platform.factor.domain.FactorValue> result = new ArrayList<>();
         try (java.sql.Connection conn = getConnection();
-             java.sql.Statement stmt = conn.createStatement();
-             java.sql.ResultSet rs = stmt.executeQuery(sql)) {
-
-            while (rs.next()) {
-                result.add(convertGroupedResultSet(rs));
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, factorCode);
+            stmt.setString(2, factorCode);
+            stmt.setString(3, calcDate.toString());
+            try (java.sql.ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    result.add(convertGroupedResultSet(rs));
+                }
             }
         } catch (Exception e) {
             log.warn("[ClickHouse] findByFactorCodeAndDate 查询失败: {}", e.getMessage());
@@ -577,21 +588,24 @@ public class ClickHouseFactorValueService {
 
     private java.util.List<com.quant.platform.factor.domain.FactorValue> queryByFactorCodeAndDateRangeFromCH(
             String factorCode, java.time.LocalDate startDate, java.time.LocalDate endDate) {
-        // CH JDBC v0.6.3 对 PreparedStatement 参数绑定处理有问题，改为字符串拼接
-        String sql = String.format("""
+        // 使用 PreparedStatement 参数化查询
+        String sql = """
                 SELECT id, factor_code, symbol, calc_date, factor_val, rank_value, z_score, created_at
                 FROM stock.factor_value FINAL
-                WHERE factor_code = '%s' AND calc_date >= '%s' AND calc_date <= '%s'
+                WHERE factor_code = ? AND calc_date >= ? AND calc_date <= ?
                 ORDER BY calc_date, symbol
-                """, factorCode.replace("'", "''"), startDate, endDate);
+                """;
 
         java.util.List<com.quant.platform.factor.domain.FactorValue> result = new ArrayList<>();
         try (java.sql.Connection conn = getConnection();
-             java.sql.Statement stmt = conn.createStatement();
-             java.sql.ResultSet rs = stmt.executeQuery(sql)) {
-
-            while (rs.next()) {
-                result.add(convertResultSet(rs));
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, factorCode);
+            stmt.setString(2, startDate.toString());
+            stmt.setString(3, endDate.toString());
+            try (java.sql.ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    result.add(convertResultSet(rs));
+                }
             }
         } catch (Exception e) {
             log.warn("[ClickHouse] findByFactorCodeAndDateRange 查询失败: {}", e.getMessage());
@@ -1075,7 +1089,7 @@ public class ClickHouseFactorValueService {
         }
     }
 
-    /** HTTP POST 到 ClickHouse */
+    /** HTTP POST 到 ClickHouse（使用 HTTP Basic Auth，密码不出现在 URL 中） */
     private void httpPost(String query, String body) {
         // 验证query参数（防止SQL注入）
         if (query == null || query.trim().isEmpty()) {
@@ -1087,18 +1101,22 @@ public class ClickHouseFactorValueService {
         }
         
         try {
-            String url = String.format("http://%s:%d/?user=%s&password=%s&query=%s",
-                    clickHouseConfig.getHost(), clickHouseConfig.getPort(),
-                    clickHouseConfig.getUsername(), clickHouseConfig.getPassword(),
-                    java.net.URLEncoder.encode(query, "UTF-8"));
-            // 日志脱敏：不打印完整URL（密码脱敏）
-            log.debug("[ClickHouse] HTTP POST: {}?user={}&password=***&query={}", 
-                      clickHouseConfig.getHost(), clickHouseConfig.getUsername(), 
+            // 密码通过 HTTP Basic Auth header 传递，不出现在 URL 中
+            String url = String.format("http://%s:%d/",
+                    clickHouseConfig.getHost(), clickHouseConfig.getPort());
+            String auth = clickHouseConfig.getUsername() + ":" + clickHouseConfig.getPassword();
+            String encodedAuth = java.util.Base64.getEncoder()
+                    .encodeToString(auth.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            
+            log.debug("[ClickHouse] HTTP POST: {} user={} query={}",
+                      clickHouseConfig.getHost(), clickHouseConfig.getUsername(),
                       query.substring(0, Math.min(50, query.length())) + "...");
             
             java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
                     .uri(java.net.URI.create(url))
                     .header("Content-Type", "application/x-www-form-urlencoded")
+                    .header("Authorization", "Basic " + encodedAuth)
+                    .header("X-ClickHouse-Query", java.net.URLEncoder.encode(query, "UTF-8"))
                     .POST(java.net.http.HttpRequest.BodyPublishers.ofString(body))
                     .timeout(java.time.Duration.ofMinutes(5))
                     .build();
@@ -1134,33 +1152,37 @@ public class ClickHouseFactorValueService {
         }
 
         String placeholders = factorCodes.stream()
-                .map(c -> "'" + c.replace("'", "''") + "'")
-                .collect(java.util.stream.Collectors.joining(","));
+                .map(c -> "?").collect(java.util.stream.Collectors.joining(","));
 
-        String sql = String.format("""
+        String sql = """
                 SELECT factor_code, calc_date, quantileExact(0.5)(factor_val) AS median_val
                 FROM stock.factor_value FINAL
                 WHERE factor_code IN (%s)
-                  AND calc_date >= '%s'
-                  AND calc_date <= '%s'
+                  AND calc_date >= ?
+                  AND calc_date <= ?
                   AND factor_val IS NOT NULL
                   AND factor_val = factor_val
                 GROUP BY factor_code, calc_date
                 ORDER BY factor_code, calc_date
-                """, placeholders, startDate.toString(), endDate.toString());
+                """.formatted(placeholders);
 
         Map<String, Map<java.time.LocalDate, Double>> result = new java.util.LinkedHashMap<>();
         try (Connection conn = getConnection();
-             java.sql.Statement stmt = conn.createStatement();
-             java.sql.ResultSet rs = stmt.executeQuery(sql)) {
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            for (int i = 0; i < factorCodes.size(); i++) {
+                stmt.setString(i + 1, factorCodes.get(i));
+            }
+            stmt.setString(factorCodes.size() + 1, startDate.toString());
+            stmt.setString(factorCodes.size() + 2, endDate.toString());
+            try (java.sql.ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    String fc = rs.getString("factor_code");
+                    java.time.LocalDate date = rs.getDate("calc_date").toLocalDate();
+                    double medianVal = rs.getDouble("median_val");
 
-            while (rs.next()) {
-                String fc = rs.getString("factor_code");
-                java.time.LocalDate date = rs.getDate("calc_date").toLocalDate();
-                double medianVal = rs.getDouble("median_val");
-
-                result.computeIfAbsent(fc, k -> new java.util.LinkedHashMap<>())
-                        .put(date, medianVal);
+                    result.computeIfAbsent(fc, k -> new java.util.LinkedHashMap<>())
+                            .put(date, medianVal);
+                }
             }
             log.info("[ClickHouse] 批量日度中位数查询完成: {} factors, {} dates total",
                     result.size(), 
@@ -1187,33 +1209,37 @@ public class ClickHouseFactorValueService {
         }
 
         String placeholders = factorCodes.stream()
-                .map(c -> "'" + c.replace("'", "''") + "'")
-                .collect(java.util.stream.Collectors.joining(","));
+                .map(c -> "?").collect(java.util.stream.Collectors.joining(","));
 
-        String sql = String.format("""
+        String sql = """
                 SELECT factor_code, calc_date, quantileExact(0.5)(rank_value) AS median_val
                 FROM stock.factor_value FINAL
                 WHERE factor_code IN (%s)
-                  AND calc_date >= '%s'
-                  AND calc_date <= '%s'
+                  AND calc_date >= ?
+                  AND calc_date <= ?
                   AND rank_value IS NOT NULL
                   AND rank_value = rank_value
                 GROUP BY factor_code, calc_date
                 ORDER BY factor_code, calc_date
-                """, placeholders, startDate.toString(), endDate.toString());
+                """.formatted(placeholders);
 
         Map<String, Map<java.time.LocalDate, Double>> result = new java.util.LinkedHashMap<>();
         try (Connection conn = getConnection();
-             java.sql.Statement stmt = conn.createStatement();
-             java.sql.ResultSet rs = stmt.executeQuery(sql)) {
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            for (int i = 0; i < factorCodes.size(); i++) {
+                stmt.setString(i + 1, factorCodes.get(i));
+            }
+            stmt.setString(factorCodes.size() + 1, startDate.toString());
+            stmt.setString(factorCodes.size() + 2, endDate.toString());
+            try (java.sql.ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    String fc = rs.getString("factor_code");
+                    java.time.LocalDate date = rs.getDate("calc_date").toLocalDate();
+                    double medianVal = rs.getDouble("median_val");
 
-            while (rs.next()) {
-                String fc = rs.getString("factor_code");
-                java.time.LocalDate date = rs.getDate("calc_date").toLocalDate();
-                double medianVal = rs.getDouble("median_val");
-
-                result.computeIfAbsent(fc, k -> new java.util.LinkedHashMap<>())
-                        .put(date, medianVal);
+                    result.computeIfAbsent(fc, k -> new java.util.LinkedHashMap<>())
+                            .put(date, medianVal);
+                }
             }
             log.info("[ClickHouse] 批量日度 rank 中位数查询完成: {} factors, {} dates total",
                     result.size(),
@@ -1237,15 +1263,15 @@ public class ClickHouseFactorValueService {
             log.warn("getLatestDate: invalid factorCode rejected: {}", factorCode);
             return null;
         }
-        String sql = String.format(
-                "SELECT max(calc_date) FROM stock.factor_value FINAL WHERE factor_code='%s'",
-                factorCode.replace("'", "''"));
+        String sql = "SELECT max(calc_date) FROM stock.factor_value FINAL WHERE factor_code = ?";
         try (Connection conn = getConnection();
-             java.sql.Statement stmt = conn.createStatement();
-             java.sql.ResultSet rs = stmt.executeQuery(sql)) {
-            if (rs.next()) {
-                java.sql.Date d = rs.getDate(1);
-                return d != null ? d.toLocalDate() : null;
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, factorCode);
+            try (java.sql.ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    java.sql.Date d = rs.getDate(1);
+                    return d != null ? d.toLocalDate() : null;
+                }
             }
         } catch (Exception e) {
             log.warn("[ClickHouse] getLatestDate 查询失败: code={}, error={}", factorCode, e.getMessage());
@@ -1262,15 +1288,15 @@ public class ClickHouseFactorValueService {
     public java.util.Set<String> getDistinctSymbols(String factorCode) {
         if (!clickHouseConfig.isEnabled() || factorCode == null) return java.util.Set.of();
         checkFactorCode(factorCode);
-        String sql = String.format(
-                "SELECT DISTINCT symbol FROM stock.factor_value FINAL WHERE factor_code='%s'",
-                factorCode.replace("'", "''"));
+        String sql = "SELECT DISTINCT symbol FROM stock.factor_value FINAL WHERE factor_code = ?";
         java.util.Set<String> symbols = new java.util.HashSet<>();
         try (Connection conn = getConnection();
-             java.sql.Statement stmt = conn.createStatement();
-             java.sql.ResultSet rs = stmt.executeQuery(sql)) {
-            while (rs.next()) {
-                symbols.add(rs.getString("symbol"));
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, factorCode);
+            try (java.sql.ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    symbols.add(rs.getString("symbol"));
+                }
             }
         } catch (Exception e) {
             log.warn("[ClickHouse] getDistinctSymbols 查询失败: code={}, error={}", factorCode, e.getMessage());
@@ -1284,11 +1310,6 @@ public class ClickHouseFactorValueService {
     }
 
     private Connection getConnection() throws SQLException {
-        Properties props = new Properties();
-        props.setProperty("user", clickHouseConfig.getUsername());
-        if (clickHouseConfig.getPassword() != null && !clickHouseConfig.getPassword().isEmpty()) {
-            props.setProperty("password", clickHouseConfig.getPassword());
-        }
-        return DriverManager.getConnection(clickHouseConfig.getJdbcUrl(), props);
+        return clickHouseConfig.getConnection();
     }
 }
