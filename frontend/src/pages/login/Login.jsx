@@ -12,7 +12,6 @@ export default function Login() {
   const navigate = useNavigate();
   const location = useLocation();
   const login = useAuthStore((s) => s.login);
-  const setToken = useAuthStore((s) => s.setToken);
   const fetchMe = useAuthStore((s) => s.fetchMe);
   const [loading, setLoading] = useState(false);
   const [wechatLoading, setWechatLoading] = useState(false);
@@ -46,14 +45,13 @@ export default function Login() {
     }
   };
 
-  // 公众号授权回调：URL 上带有 ?wechat=success&token=xxx
+  // 公众号授权回调：后端已把 token 写入 httpOnly cookie 并重定向到此，
+  // 这里只负责恢复登录态（不再从 URL 读取 token 字符串，#6）
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const token = params.get('token');
-    if (token && params.get('wechat') === 'success') {
+    if (params.get('wechat') === 'success') {
       (async () => {
         try {
-          setToken(token);
           await fetchMe();
           message.success('微信登录成功');
           const from = getRedirectPath();
@@ -67,16 +65,16 @@ export default function Login() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 监听微信扫码弹窗回传的 token（postMessage）
+  // 监听微信扫码弹窗回传（postMessage）：现在仅通知「登录成功」，
+  // token 已由后端种入 httpOnly cookie，前端不读取，直接恢复登录态（#6）
   useEffect(() => {
     const onMessage = async (e) => {
       // 安全：只接受同源回传，防止任意页面伪造 postMessage 注入 token 完成登录劫持
       if (!e.origin || e.origin !== window.location.origin) {
         return;
       }
-      if (e.data && e.data.type === 'wechat-login' && e.data.token) {
+      if (e.data && e.data.type === 'wechat-login-success') {
         try {
-          setToken(e.data.token);
           await fetchMe();
           message.success('微信登录成功');
           if (popupRef.current && !popupRef.current.closed) popupRef.current.close();

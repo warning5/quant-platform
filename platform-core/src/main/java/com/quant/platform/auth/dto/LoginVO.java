@@ -12,6 +12,8 @@ import java.util.List;
 public class LoginVO {
     private String tokenName;
     private String token;
+    // 仅后端流转用（写 httpOnly cookie），前端不应读取/持久化
+    private String refreshToken;
     private Long userId;
     private String username;
     private String nickname;

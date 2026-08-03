@@ -1,25 +1,41 @@
 import axios from 'axios';
 import { message } from '../utils/messageUtil';
-import { getToken, clearAuth } from '../utils/auth';
+import { clearAuth } from '../utils/auth';
 
 const api = axios.create({
   baseURL: '/api',
   timeout: 120000,
+  withCredentials: true, // #6：浏览器自动携带 httpOnly cookie 中的 token
 });
 
-// 请求拦截器：注入登录态 token（sa-token 默认 token 头名 satoken）
-api.interceptors.request.use((config) => {
-  const token = getToken();
-  if (token) {
-    if (config.headers && typeof config.headers.set === 'function') {
-      config.headers.set('satoken', token);
-    } else {
-      config.headers = config.headers || {};
-      config.headers.satoken = token;
-    }
-  }
-  return config;
+// 独立实例（无拦截器）：专门用于 /auth/refresh，避免触发自身 401 递归
+const refreshAxios = axios.create({
+  baseURL: '/api',
+  timeout: 120000,
+  withCredentials: true,
 });
+
+// 请求拦截器：不再手动注入 satoken（token 在 httpOnly cookie，浏览器自动携带）
+api.interceptors.request.use((config) => config);
+
+// 并发刷新锁：多个请求同时 401 时只发一次 /auth/refresh，其余复用同一结果
+let refreshingPromise = null;
+async function trySilentRefresh() {
+  if (refreshingPromise) {
+    return refreshingPromise;
+  }
+  refreshingPromise = (async () => {
+    try {
+      const res = await refreshAxios.post('/auth/refresh');
+      return res.data && res.data.code === 200;
+    } catch (e) {
+      return false;
+    } finally {
+      refreshingPromise = null;
+    }
+  })();
+  return refreshingPromise;
+}
 
 // 友好错误提示映射：对服务器内部错误统一显示友好文案
 const FRIENDLY_ERRORS = {
@@ -47,17 +63,27 @@ api.interceptors.response.use(
     // 统一返回 res.data.data，code=200 时 data 字段才是真正的响应体
     return res.data.data;
   },
-  (err) => {
+  async (err) => {
     const status = err.response?.status;
     const silent = err.config?._silent;
     if (status && FRIENDLY_ERRORS[status]) {
       // HTTP 5xx / 429 等错误：统一友好提示（silent 模式不弹）
       if (!silent) message.error(FRIENDLY_ERRORS[status]);
     } else if (status === 401) {
-      // 登录态失效：保存来源路径，清理本地 token 并跳回登录页
+      // #29：先尝试静默刷新（用 httpOnly refreshToken 换新 access token），成功则重试原请求
+      if (err.config && !err.config._retry) {
+        const ok = await trySilentRefresh();
+        if (ok) {
+          err.config._retry = true;
+          return api(err.config);
+        }
+      }
+      // 刷新失败：清理内存态并跳登录页
       clearAuth();
+      const { useAuthStore } = await import('../stores/authStore');
+      useAuthStore.getState().setToken('');
       if (window.location.pathname !== '/login') {
-        // 保存当前路径，登录成功后回跳（兼容 window.location.href 整页跳转无法携带 react-router state）
+        // 保存当前路径，登录成功后回跳（兼容整页跳转无法携带 react-router state）
         try { sessionStorage.setItem('redirect_after_login', window.location.pathname + window.location.search); } catch (_) {}
         if (!silent) message.error('登录已过期，请重新登录');
         window.location.href = '/login';

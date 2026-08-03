@@ -39,6 +39,7 @@ public class AuthService {
     private final SysDepartmentMapper departmentMapper;
     private final LoginSecurityService loginSecurityService;
     private final SysOperationLogMapper logMapper;
+    private final RefreshTokenService refreshTokenService;
 
     /**
      * 账号密码登录（含登录安全防护：账号/IP 锁定、渐进式验证码、失败审计）
@@ -172,7 +173,10 @@ public class AuthService {
         StpUtil.getSession().set("roleIds", roleIdStr);
         user.setLastLoginTime(LocalDateTime.now());
         userMapper.updateById(user);
-        return buildResult(user, StpUtil.getTokenValue());
+        LoginVO vo = buildResult(user, StpUtil.getTokenValue());
+        // 生成 refreshToken 供前端静默刷新（#29）；实际写入 httpOnly cookie 由 Controller 层负责
+        vo.setRefreshToken(refreshTokenService.create(user.getId()));
+        return vo;
     }
 
     /**

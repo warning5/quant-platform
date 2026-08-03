@@ -388,11 +388,9 @@ export default function App() {
     document.body.setAttribute('data-theme', isDark ? 'dark' : 'light');
   }, [isDark]);
 
-  // 启动恢复登录态：本地存在 token 时拉取用户信息（失败由拦截器清理并跳登录）
+  // 启动恢复登录态：不再读 localStorage，直接用 httpOnly cookie 调 /auth/me 恢复（bootstrap 守卫防刷新误跳）
   useEffect(() => {
-    if (useAuthStore.getState().token) {
-      useAuthStore.getState().fetchMe().catch(() => {});
-    }
+    useAuthStore.getState().bootstrap();
   }, []);
 
   return (

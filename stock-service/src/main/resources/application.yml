@@ -71,11 +71,25 @@ clickhouse:
 # ============================================================
 sa-token:
   token-name: satoken
-  timeout: 7200             # token 有效期：2 小时（秒）
-  active-timeout: 1800      # 30 分钟无活动则自动过期
+  # access token 有效期缩短到 30 分钟，缩小泄露窗口；配合前端静默刷新（/auth/refresh）实现无感续期
+  timeout: 1800             # token 有效期：30 分钟（秒）
+  active-timeout: 1800      # 30 分钟无活动则自动续期（活跃用户基本不会过期）
   is-concurrent: false      # 同账号互斥登录（新登录踢旧会话）
   is-share: true            # 同端共享 token
   token-style: uuid
+  # 从 cookie 读取 token（#6：token 改存 httpOnly cookie，防 XSS 窃取）
+  is-read-cookie: true
+  # 保留 header 读取：backend-mp 小程序仍走 header 传 token，两个模块互不干扰
+  is-read-header: true
+  cookie:
+    http-only: true         # JS 无法读取 token，XSS 窃取路径被掐断
+    secure: ${SA_TOKEN_COOKIE_SECURE:false}   # 生产 HTTPS 环境改为 true（用环境变量注入）
+    same-site: Lax          # 挡大多数跨站 CSRF
+    path: /
+
+# refresh token（#29 静默刷新用）：长驻、存 httpOnly cookie；TTL 默认 7 天
+auth:
+  refresh-token-ttl-seconds: 604800
   is-log: false
 
 # ============================================================

@@ -38,6 +38,8 @@ public class SaTokenConfigure implements WebMvcConfigurer {
         // 登录与微信联合登录（匿名可访问）
         excludes.add("/auth/login");
         excludes.add("/auth/wechat/**");
+        // 静默刷新（access token 可能已过期，必须匿名可访问）
+        excludes.add("/auth/refresh");
         // 健康检查（匿名）
         excludes.add("/test/**");
         // API 文档仅在 dev / local 环境放开，生产环境需登录后访问

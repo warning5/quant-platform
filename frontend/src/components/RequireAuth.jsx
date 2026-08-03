@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
-import { Result, Button } from 'antd';
+import { Result, Button, Spin } from 'antd';
 import { useAuthStore } from '../stores/authStore';
 
 /**
@@ -45,10 +45,20 @@ export default function RequireAuth({ children }) {
   const permissions = useAuthStore((s) => s.permissions);
   const menus = useAuthStore((s) => s.menus);
   const hasPermission = useAuthStore((s) => s.hasPermission);
+  const bootstrapped = useAuthStore((s) => s.bootstrapped);
   const location = useLocation();
   const navigate = useNavigate();
 
   const permMap = useMemo(() => buildPermissionMap(menus), [menus]);
+
+  // 启动引导尚未完成（fetchMe 进行中）：显示 loading，避免内存态为空时误跳登录
+  if (!bootstrapped) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
+        <Spin size="large" />
+      </div>
+    );
+  }
 
   if (!token) {
     return <Navigate to="/login" replace state={{ from: location }} />;
