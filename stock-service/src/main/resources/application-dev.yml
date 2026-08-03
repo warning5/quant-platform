@@ -23,4 +23,4 @@ cors:
 
 logging:
   level:
-    com.quant.platform: DEBUG
+    com.quant.platform: info
