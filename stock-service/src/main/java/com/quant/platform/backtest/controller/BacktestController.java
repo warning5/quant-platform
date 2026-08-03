@@ -53,6 +53,7 @@ public class BacktestController {
             @RequestParam(required = false) String signalSource,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
+        size = Math.min(size, 100);
         return ApiResponse.success(backtestService.listTasks(strategyCode, status, signalSource, page, size));
     }
 

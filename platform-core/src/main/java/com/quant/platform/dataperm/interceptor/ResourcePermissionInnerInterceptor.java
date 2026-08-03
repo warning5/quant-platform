@@ -16,6 +16,7 @@ import org.springframework.stereotype.Component;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * 数据权限查询隔离（方案C 查询零侵入）。
@@ -29,11 +30,18 @@ import java.util.Map;
  *   id IN (SELECT resource_id FROM resource_meta ...) OR id IN (SELECT resource_id FROM resource_share ...)
  * admin 角色跳过（看全部）。
  *
- * 安全说明：注入的 uid/deptPath/roleIds 全部来自 Sa-Token 登录会话（可信系统值，非前端入参），直接内联为 SQL 字面量无注入风险；
- * deptPath 来自本系统部门表，仍做单引号转义兜底。
+ * 安全说明：注入的 uid/deptPath/roleIds 全部来自 Sa-Token 登录会话（可信系统值，非前端入参），
+ * 但仍做严格格式校验后再内联为 SQL 字面量，防止会话数据被篡改后成为注入点。
  */
 @Component
 public class ResourcePermissionInnerInterceptor implements InnerInterceptor {
+
+    // 资源类型编码：枚举值，只允许大写字母、数字、下划线
+    private static final Pattern CODE_PATTERN = Pattern.compile("^[A-Z][A-Z0-9_]*$");
+    // 角色 ID 串：只允许 "1" 或 "1,2,3"
+    private static final Pattern ROLE_IDS_PATTERN = Pattern.compile("^[0-9]+(,[0-9]+)*$");
+    // 部门路径：如 /1 或 /1/10/30
+    private static final Pattern DEPT_PATH_PATTERN = Pattern.compile("^(/[0-9]+)+$");
 
     private static final Map<String, ResourceType> MAPPER_MAP = new HashMap<>();
     static {
@@ -70,6 +78,11 @@ public class ResourcePermissionInnerInterceptor implements InnerInterceptor {
         } catch (NotWebContextException e) {
             return;
         }
+
+        // 严格校验后再拼入 SQL
+        assertSafeCode(code);
+        assertSafeDeptPath(deptPath);
+        assertSafeRoleIds(roleIds);
 
         String cond = "id IN ("
                 + "SELECT resource_id FROM resource_meta m WHERE m.resource_type='" + code + "'"
@@ -150,5 +163,23 @@ public class ResourcePermissionInnerInterceptor implements InnerInterceptor {
             return "";
         }
         return v.replace("'", "''");
+    }
+
+    private static void assertSafeCode(String code) {
+        if (code == null || !CODE_PATTERN.matcher(code).matches()) {
+            throw new IllegalArgumentException("非法的资源类型编码: " + code);
+        }
+    }
+
+    private static void assertSafeDeptPath(String deptPath) {
+        if (deptPath == null || !DEPT_PATH_PATTERN.matcher(deptPath).matches()) {
+            throw new IllegalArgumentException("非法的部门路径: " + deptPath);
+        }
+    }
+
+    private static void assertSafeRoleIds(String roleIds) {
+        if (roleIds == null || !ROLE_IDS_PATTERN.matcher(roleIds).matches()) {
+            throw new IllegalArgumentException("非法的角色 ID 列表: " + roleIds);
+        }
     }
 }

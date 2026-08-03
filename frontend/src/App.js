@@ -11,6 +11,7 @@ import {
 import { useAuthStore } from './stores/authStore';
 import { ICON_MAP } from './utils/iconMap';
 import RequireAuth from './components/RequireAuth';
+import ErrorBoundary from './components/ErrorBoundary';
 import monitorApi from './api/monitor';
 
 // ── 页面懒加载（React.lazy + Suspense）──
@@ -395,12 +396,13 @@ export default function App() {
   }, []);
 
   return (
-    <BrowserRouter
-      future={{
-        v7_startTransition: true,
-        v7_relativeSplatPath: true,
-      }}
-    >
+    <ErrorBoundary>
+      <BrowserRouter
+        future={{
+          v7_startTransition: true,
+          v7_relativeSplatPath: true,
+        }}
+      >
       <ConfigProvider
         theme={{
           algorithm: isDark ? theme.darkAlgorithm : theme.defaultAlgorithm,
@@ -426,5 +428,6 @@ export default function App() {
         </AntApp>
       </ConfigProvider>
     </BrowserRouter>
+    </ErrorBoundary>
   );
 }

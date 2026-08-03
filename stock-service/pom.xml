@@ -178,6 +178,12 @@
             <version>7.4</version>
         </dependency>
 
+        <!-- Actuator（Docker HEALTHCHECK 依赖 /actuator/health） -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
         <!-- Test -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
-    <!-- MDC traceId -- 为每条日志注入请求级 traceId, 便于全链路追踪 -->
+    <!-- MDC traceId  为每条日志注入请求级 traceId, 便于全链路追踪 -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
             <charset>UTF-8</charset>
@@ -8,7 +8,7 @@
         </encoder>
     </appender>
 
-    <!-- JSON 结构化日志文件 -- 供 ELK / Loki 等日志系统采集 -->
+    <!-- JSON 结构化日志文件  供 ELK / Loki 等日志系统采集 -->
     <appender name="JSON_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <file>logs/quant-platform-json.log</file>
         <encoder class="net.logstash.logback.encoder.LogstashEncoder">
@@ -29,7 +29,7 @@
         </rollingPolicy>
     </appender>
 
-    <!-- 人类可读日志文件 -- 便于本地排查 -->
+    <!-- 人类可读日志文件  便于本地排查 -->
     <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <file>logs/quant-platform.log</file>
         <encoder>
@@ -44,7 +44,7 @@
         </rollingPolicy>
     </appender>
 
-    <!-- 慢查询日志文件 -- P2-19 慢查询单独输出 -->
+    <!-- 慢查询日志文件  P2-19 慢查询单独输出 -->
     <appender name="SLOW_SQL_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <file>logs/slow-sql.log</file>
         <encoder>

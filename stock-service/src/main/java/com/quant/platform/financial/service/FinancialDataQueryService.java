@@ -18,6 +18,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.regex.Pattern;
 
 /**
  * 财务数据查询/统计业务逻辑层
@@ -35,6 +36,16 @@ public class FinancialDataQueryService {
     private final StockCashflowMapper cashflowMapper;
     private final StockFinancialIndicatorMapper indicatorMapper;
     private final JdbcTemplate jdbcTemplate;
+
+    // 允许拼入 SQL 的表名与字段名白名单（仅内部常量使用）
+    private static final Set<String> ALLOWED_TABLES = new HashSet<>(Arrays.asList(
+            "stock_financial_indicator", "stock_income", "stock_balance", "stock_cashflow"
+    ));
+    private static final Set<String> ALLOWED_FIELDS = new HashSet<>(Arrays.asList(
+            "revenue", "net_profit", "total_assets", "total_liabilities",
+            "gross_profit_margin", "net_profit_margin"
+    ));
+    private static final Pattern SAFE_IDENTIFIER = Pattern.compile("^[a-z_][a-z0-9_]*$");
 
     /**
      * 财务数据更新进度
@@ -113,6 +124,7 @@ public class FinancialDataQueryService {
                 {"stock_balance", "资产负债表"},
                 {"stock_cashflow", "现金流量表"}
         }) {
+            assertSafeIdentifier(table[0]);
             Map<String, Object> stats = jdbcTemplate.queryForMap(
                     "SELECT COUNT(*) as cnt, COUNT(DISTINCT code) as stock_cnt FROM " + table[0]);
             Map<String, Object> item = new LinkedHashMap<>();
@@ -146,6 +158,8 @@ public class FinancialDataQueryService {
         for (Map.Entry<String, String> entry : fieldTableMap.entrySet()) {
             String field = entry.getKey();
             String table = entry.getValue();
+            assertSafeIdentifier(table);
+            assertSafeField(field);
             try {
                 Long nonNull = jdbcTemplate.queryForObject(
                         "SELECT COUNT(*) FROM " + table + " WHERE " + field + " IS NOT NULL AND " + field + " != 0",
@@ -208,6 +222,18 @@ public class FinancialDataQueryService {
         result.put("totalStocks", totalStocks != null ? totalStocks : 0);
 
         return result;
+    }
+
+    private static void assertSafeIdentifier(String table) {
+        if (table == null || !ALLOWED_TABLES.contains(table) || !SAFE_IDENTIFIER.matcher(table).matches()) {
+            throw new IllegalArgumentException("非法表名: " + table);
+        }
+    }
+
+    private static void assertSafeField(String field) {
+        if (field == null || !ALLOWED_FIELDS.contains(field) || !SAFE_IDENTIFIER.matcher(field).matches()) {
+            throw new IllegalArgumentException("非法字段名: " + field);
+        }
     }
 
     private long countDistinctFiltered(StockIncomeMapper mapper, Set<String> validCodes) {

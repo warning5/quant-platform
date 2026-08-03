@@ -169,6 +169,18 @@ quant:
 cors:
   allowed-origins: ${CORS_ALLOWED_ORIGINS:}
 
+# Actuator 健康检查（供 Docker HEALTHCHECK 使用；因 context-path=/api，实际路径为 /api/actuator/health）
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
+  server:
+    port: 8080
+
 # HSTS 配置 — 仅 prod profile 启用（见 application-prod.yml）
 # security:
 #   hsts:

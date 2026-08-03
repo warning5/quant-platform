@@ -28,25 +28,11 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import com.quant.platform.common.dto.ApiResponse;
 
 /**
  * 统一包装响应体，与前端 api.interceptors.response 约定格式一致
  */
-class ApiResponse<T> {
-    public int code;
-    public T data;
-    public String message;
-
-    public ApiResponse(T data) {
-        this.code = 200;
-        this.data = data;
-    }
-
-    public ApiResponse(int code, String message) {
-        this.code = code;
-        this.message = message;
-    }
-}
 
 /**
  * 个股分析 Controller
@@ -105,7 +91,7 @@ public class StockAnalysisController {
         
         try {
             AnalysisOverview overview = analysisService.getOverview(code.trim());
-            return ResponseEntity.ok(new ApiResponse<>(overview));
+            return ResponseEntity.ok(ApiResponse.success(overview));
         } catch (Exception e) {
             log.error("分析失败: code={}, error={}", code, e.getMessage(), e);
             return ResponseEntity.internalServerError().body(errorBody("分析失败：" + e.getMessage()));
@@ -124,7 +110,7 @@ public class StockAnalysisController {
 
         try {
             List<TradingSignalEngine.ScoreRule> rules = tradingSignalEngine.getScoreRules();
-            return ResponseEntity.ok(new ApiResponse<>(rules));
+            return ResponseEntity.ok(ApiResponse.success(rules));
         } catch (Exception e) {
             log.error("获取评分规则失败: error={}", e.getMessage(), e);
             return ResponseEntity.internalServerError().body(errorBody("获取规则失败：" + e.getMessage()));
@@ -148,7 +134,7 @@ public class StockAnalysisController {
 
         try {
             Map<String, Object> data = analysisService.getResearchAnalysis(code.trim());
-            return ResponseEntity.ok(new ApiResponse<>(data));
+            return ResponseEntity.ok(ApiResponse.success(data));
         } catch (Exception e) {
             log.error("研报分析失败: code={}, error={}", code, e.getMessage(), e);
             return ResponseEntity.internalServerError().body(errorBody("研报分析失败：" + e.getMessage()));
@@ -166,11 +152,11 @@ public class StockAnalysisController {
             return ResponseEntity.status(503).body(errorBody("分析服务不可用，ClickHouse未启用"));
         }
         if (keyword == null || keyword.trim().isEmpty()) {
-            return ResponseEntity.ok(new ApiResponse<>(Collections.emptyList()));
+            return ResponseEntity.ok(ApiResponse.success(Collections.emptyList()));
         }
         try {
             List<Map<String, Object>> results = analysisService.searchStocks(keyword.trim());
-            return ResponseEntity.ok(new ApiResponse<>(results));
+            return ResponseEntity.ok(ApiResponse.success(results));
         } catch (Exception e) {
             log.error("股票搜索失败: keyword={}, error={}", keyword, e.getMessage(), e);
             return ResponseEntity.internalServerError().body(errorBody("搜索失败：" + e.getMessage()));
@@ -192,7 +178,7 @@ public class StockAnalysisController {
         }
         try {
             Map<String, Object> data = analysisService.getPeerComparison(code.trim());
-            return ResponseEntity.ok(new ApiResponse<>(data));
+            return ResponseEntity.ok(ApiResponse.success(data));
         } catch (Exception e) {
             log.error("同业对比失败: code={}, error={}", code, e.getMessage(), e);
             return ResponseEntity.internalServerError().body(errorBody("同业对比失败：" + e.getMessage()));
@@ -215,7 +201,7 @@ public class StockAnalysisController {
         }
         try {
             Map<String, Object> data = analysisService.getValuationPercentile(code.trim(), years);
-            return ResponseEntity.ok(new ApiResponse<>(data));
+            return ResponseEntity.ok(ApiResponse.success(data));
         } catch (Exception e) {
             log.error("估值分位查询失败: code={}, error={}", code, e.getMessage(), e);
             return ResponseEntity.internalServerError().body(errorBody("估值分位查询失败：" + e.getMessage()));
@@ -233,7 +219,7 @@ public class StockAnalysisController {
         }
         try {
             Map<String, Object> data = analysisService.getSectorRanking();
-            return ResponseEntity.ok(new ApiResponse<>(data));
+            return ResponseEntity.ok(ApiResponse.success(data));
         } catch (Exception e) {
             log.error("板块排行查询失败: error={}", e.getMessage(), e);
             return ResponseEntity.internalServerError().body(errorBody("板块排行查询失败：" + e.getMessage()));
@@ -254,7 +240,7 @@ public class StockAnalysisController {
         }
         try {
             List<Map<String, Object>> data = analysisService.getIndustryStocks(industry, sortBy, sortOrder);
-            return ResponseEntity.ok(new ApiResponse<>(data));
+            return ResponseEntity.ok(ApiResponse.success(data));
         } catch (Exception e) {
             log.error("行业内个股查询失败: error={}", e.getMessage(), e);
             return ResponseEntity.internalServerError().body(errorBody("行业内个股查询失败：" + e.getMessage()));
@@ -275,7 +261,7 @@ public class StockAnalysisController {
         }
         try {
             List<Map<String, Object>> data = analysisService.getConceptStocks(conceptName, sortBy, sortOrder);
-            return ResponseEntity.ok(new ApiResponse<>(data));
+            return ResponseEntity.ok(ApiResponse.success(data));
         } catch (Exception e) {
             log.error("概念板块个股查询失败: error={}", e.getMessage(), e);
             return ResponseEntity.internalServerError().body(errorBody("概念板块个股查询失败：" + e.getMessage()));
@@ -293,7 +279,7 @@ public class StockAnalysisController {
         }
         try {
             Map<String, Object> data = analysisService.getIndustryCorrelation(code.trim());
-            return ResponseEntity.ok(new ApiResponse<>(data));
+            return ResponseEntity.ok(ApiResponse.success(data));
         } catch (Exception e) {
             log.error("行业关联分析失败: code={}, error={}", code, e.getMessage(), e);
             return ResponseEntity.internalServerError().body(errorBody("行业关联分析失败：" + e.getMessage()));
@@ -311,7 +297,7 @@ public class StockAnalysisController {
         }
         try {
             Map<String, Object> data = analysisService.getLimitUpAnalysis(code.trim());
-            return ResponseEntity.ok(new ApiResponse<>(data));
+            return ResponseEntity.ok(ApiResponse.success(data));
         } catch (Exception e) {
             log.error("涨跌停分析失败: code={}, error={}", code, e.getMessage(), e);
             return ResponseEntity.internalServerError().body(errorBody("涨跌停分析失败：" + e.getMessage()));
@@ -329,7 +315,7 @@ public class StockAnalysisController {
         }
         try {
             Map<String, Object> data = analysisService.getBlockTradeAnalysis(code.trim());
-            return ResponseEntity.ok(new ApiResponse<>(data));
+            return ResponseEntity.ok(ApiResponse.success(data));
         } catch (Exception e) {
             log.error("大宗交易分析失败: code={}, error={}", code, e.getMessage(), e);
             return ResponseEntity.internalServerError().body(errorBody("大宗交易分析失败：" + e.getMessage()));
@@ -351,7 +337,7 @@ public class StockAnalysisController {
         }
         try {
             Map<String, Object> data = newsService.getNewsAnalysis(code.trim());
-            return ResponseEntity.ok(new ApiResponse<>(data));
+            return ResponseEntity.ok(ApiResponse.success(data));
         } catch (Exception e) {
             log.error("新闻分析失败: code={}, error={}", code, e.getMessage(), e);
             return ResponseEntity.internalServerError().body(errorBody("新闻分析失败：" + e.getMessage()));
@@ -370,7 +356,7 @@ public class StockAnalysisController {
         }
         try {
             List<Map<String, Object>> data = newsService.getNewsByTag(code.trim(), tag);
-            return ResponseEntity.ok(new ApiResponse<>(data));
+            return ResponseEntity.ok(ApiResponse.success(data));
         } catch (Exception e) {
             log.error("标签新闻查询失败: code={}, tag={}, error={}", code, tag, e.getMessage(), e);
             return ResponseEntity.internalServerError().body(errorBody("标签新闻查询失败：" + e.getMessage()));
@@ -388,7 +374,7 @@ public class StockAnalysisController {
         }
         try {
             Map<String, Object> data = newsService.getNewsSignal(code.trim());
-            return ResponseEntity.ok(new ApiResponse<>(data));
+            return ResponseEntity.ok(ApiResponse.success(data));
         } catch (Exception e) {
             log.error("新闻信号获取失败: code={}, error={}", code, e.getMessage(), e);
             return ResponseEntity.internalServerError().body(errorBody("新闻信号获取失败：" + e.getMessage()));
@@ -406,7 +392,7 @@ public class StockAnalysisController {
         }
         try {
             Map<String, Object> data = bidAskService.getBidAskAnalysis(code.trim());
-            return ResponseEntity.ok(new ApiResponse<>(data));
+            return ResponseEntity.ok(ApiResponse.success(data));
         } catch (Exception e) {
             log.error("内外盘比获取失败: code={}, error={}", code, e.getMessage(), e);
             return ResponseEntity.internalServerError().body(errorBody("内外盘比获取失败：" + e.getMessage()));
@@ -424,7 +410,7 @@ public class StockAnalysisController {
         }
         try {
             Map<String, Object> data = bidAskService.getBidAskSignal(code.trim());
-            return ResponseEntity.ok(new ApiResponse<>(data));
+            return ResponseEntity.ok(ApiResponse.success(data));
         } catch (Exception e) {
             log.error("内外盘比信号获取失败: code={}, error={}", code, e.getMessage(), e);
             return ResponseEntity.internalServerError().body(errorBody("内外盘比信号获取失败：" + e.getMessage()));
@@ -442,7 +428,7 @@ public class StockAnalysisController {
         }
         try {
             Map<String, Object> data = institutionCoverageService.getInstitutionCoverage(code.trim());
-            return ResponseEntity.ok(new ApiResponse<>(data));
+            return ResponseEntity.ok(ApiResponse.success(data));
         } catch (Exception e) {
             log.error("机构覆盖度获取失败: code={}, error={}", code, e.getMessage(), e);
             return ResponseEntity.internalServerError().body(errorBody("机构覆盖度获取失败：" + e.getMessage()));
@@ -461,7 +447,7 @@ public class StockAnalysisController {
         }
         try {
             Map<String, Object> data = marketThermometerService.getThermometer();
-            return ResponseEntity.ok(new ApiResponse<>(data));
+            return ResponseEntity.ok(ApiResponse.success(data));
         } catch (Exception e) {
             log.error("大盘温度计查询失败: error={}", e.getMessage(), e);
             return ResponseEntity.internalServerError().body(errorBody("大盘温度计查询失败：" + e.getMessage()));
@@ -483,7 +469,7 @@ public class StockAnalysisController {
         }
         try {
             Map<String, Object> data = analysisService.getChanChart(code.trim());
-            return ResponseEntity.ok(new ApiResponse<>(data));
+            return ResponseEntity.ok(ApiResponse.success(data));
         } catch (Exception e) {
             log.error("缠论K线图查询失败: code={}, error={}", code, e.getMessage(), e);
             return ResponseEntity.internalServerError().body(errorBody("缠论K线图查询失败：" + e.getMessage()));
@@ -506,7 +492,7 @@ public class StockAnalysisController {
         try {
             double[][] ohlcv = analysisService.fetchKlineData(code.trim(), 120);
             if (ohlcv == null || ohlcv[3].length < 30) {
-                return ResponseEntity.ok(new ApiResponse<>(Map.of("detected", List.of(), "message", "K线数据不足")));
+                return ResponseEntity.ok(ApiResponse.success(Map.of("detected", List.of(), "message", "K线数据不足")));
             }
             List<PatternDetector.PatternResult> results = PatternDetector.detectAll(
                     ohlcv[1], ohlcv[2], ohlcv[0], ohlcv[3], ohlcv[4]);
@@ -516,7 +502,7 @@ public class StockAnalysisController {
             data.put("detected", results);
             data.put("strongest", strongest);
             data.put("code", code.trim());
-            return ResponseEntity.ok(new ApiResponse<>(data));
+            return ResponseEntity.ok(ApiResponse.success(data));
         } catch (Exception e) {
             log.error("形态检测失败: code={}, error={}", code, e.getMessage(), e);
             return ResponseEntity.internalServerError().body(errorBody("形态检测失败：" + e.getMessage()));
@@ -539,12 +525,12 @@ public class StockAnalysisController {
         try {
             double[][] ohlcv = analysisService.fetchKlineData(code.trim(), 120);
             if (ohlcv == null || ohlcv[3].length < 30) {
-                return ResponseEntity.ok(new ApiResponse<>(
+                return ResponseEntity.ok(ApiResponse.success(
                         Map.of("action", "HOLD", "score", 0, "message", "K线数据不足")));
             }
             SellSignalEngine.SellSignalResult result = sellSignalEngine.checkSellSignals(
                     ohlcv[3], ohlcv[1], ohlcv[2], ohlcv[0], ohlcv[4]);
-            return ResponseEntity.ok(new ApiResponse<>(result));
+            return ResponseEntity.ok(ApiResponse.success(result));
         } catch (Exception e) {
             log.error("卖点检测失败: code={}, error={}", code, e.getMessage(), e);
             return ResponseEntity.internalServerError().body(errorBody("卖点检测失败：" + e.getMessage()));
@@ -567,7 +553,7 @@ public class StockAnalysisController {
         }
         try {
             Map<String, Object> data = analysisService.getMoneyFlowHistory(code.trim(), days);
-            return ResponseEntity.ok(new ApiResponse<>(data));
+            return ResponseEntity.ok(ApiResponse.success(data));
         } catch (Exception e) {
             log.error("资金流向历史查询失败: code={}, error={}", code, e.getMessage(), e);
             return ResponseEntity.internalServerError().body(errorBody("资金流向历史查询失败：" + e.getMessage()));
@@ -589,7 +575,7 @@ public class StockAnalysisController {
         }
         try {
             Map<String, Object> data = analysisService.getRelativeStrength(code.trim());
-            return ResponseEntity.ok(new ApiResponse<>(data));
+            return ResponseEntity.ok(ApiResponse.success(data));
         } catch (Exception e) {
             log.error("相对强弱分析失败: code={}, error={}", code, e.getMessage(), e);
             return ResponseEntity.internalServerError().body(errorBody("相对强弱分析失败：" + e.getMessage()));
@@ -610,7 +596,7 @@ public class StockAnalysisController {
         }
         try {
             Map<String, Object> data = analysisService.getStockPerformance(code.trim());
-            return ResponseEntity.ok(new ApiResponse<>(data));
+            return ResponseEntity.ok(ApiResponse.success(data));
         } catch (Exception e) {
             log.error("个股长周期表现分析失败: code={}, error={}", code, e.getMessage(), e);
             return ResponseEntity.internalServerError().body(errorBody("个股长周期表现分析失败：" + e.getMessage()));
@@ -629,7 +615,7 @@ public class StockAnalysisController {
         }
         try {
             Map<String, Object> data = analysisService.getHotSectors();
-            return ResponseEntity.ok(new ApiResponse<>(data));
+            return ResponseEntity.ok(ApiResponse.success(data));
         } catch (Exception e) {
             log.error("热门行业查询失败: error={}", e.getMessage(), e);
             return ResponseEntity.internalServerError().body(errorBody("热门行业查询失败：" + e.getMessage()));
@@ -648,7 +634,7 @@ public class StockAnalysisController {
         }
         try {
             Map<String, Object> data = analysisService.getHotSectorDetail(conceptName);
-            return ResponseEntity.ok(new ApiResponse<>(data));
+            return ResponseEntity.ok(ApiResponse.success(data));
         } catch (Exception e) {
             log.error("热门行业详情查询失败: conceptName={}, error={}", conceptName, e.getMessage(), e);
             return ResponseEntity.internalServerError().body(errorBody("热门行业详情查询失败：" + e.getMessage()));
@@ -675,7 +661,7 @@ public class StockAnalysisController {
             data.put("conclusion", report.getConclusion());
             data.put("totalScore", report.getTotalScore());
             data.put("bias", report.getBias());
-            return ResponseEntity.ok(new ApiResponse<>(data));
+            return ResponseEntity.ok(ApiResponse.success(data));
         } catch (Exception e) {
             log.error("多空辩论生成失败: code={}, error={}", code, e.getMessage(), e);
             return ResponseEntity.internalServerError().body(errorBody("多空辩论生成失败：" + e.getMessage()));
@@ -729,7 +715,7 @@ public class StockAnalysisController {
         }
         try {
             Map<String, Object> data = analysisService.getShareholderStructure(code.trim());
-            return ResponseEntity.ok(new ApiResponse<>(data));
+            return ResponseEntity.ok(ApiResponse.success(data));
         } catch (Exception e) {
             log.error("股东结构查询失败: code={}, error={}", code, e.getMessage(), e);
             return ResponseEntity.internalServerError().body(errorBody("股东结构查询失败：" + e.getMessage()));
@@ -744,11 +730,8 @@ public class StockAnalysisController {
                 .replace("\"", "&quot;");
     }
 
-    private Map<String, Object> errorBody(String message) {
-        Map<String, Object> body = new HashMap<>();
-        body.put("error", message);
-        body.put("code", 500);
-        return body;
+    private ApiResponse<Object> errorBody(String message) {
+        return ApiResponse.error(500, message);
     }
 
     /**
@@ -763,7 +746,7 @@ public class StockAnalysisController {
         }
         try {
             List<Map<String, Object>> kline = analysisService.getKLine(code.trim(), days);
-            return ResponseEntity.ok(new ApiResponse<>(kline));
+            return ResponseEntity.ok(ApiResponse.success(kline));
         } catch (Exception e) {
             log.error("K线数据获取失败: code={}, error={}", code, e.getMessage(), e);
             return ResponseEntity.internalServerError().body(errorBody("K线数据获取失败：" + e.getMessage()));
@@ -785,7 +768,7 @@ public class StockAnalysisController {
             Map<String, Object> data = new HashMap<>();
             data.put("parsedCount", count);
             data.put("message", "成功解析 " + count + " 条新闻");
-            return ResponseEntity.ok(new ApiResponse<>(data));
+            return ResponseEntity.ok(ApiResponse.success(data));
         } catch (Exception e) {
             log.error("新闻事件解析失败: error={}", e.getMessage(), e);
             return ResponseEntity.internalServerError().body(errorBody("新闻事件解析失败：" + e.getMessage()));
@@ -803,7 +786,7 @@ public class StockAnalysisController {
         }
         try {
             EventSignalService.EventSignal signal = eventSignalService.getEventSignal(code.trim());
-            return ResponseEntity.ok(new ApiResponse<>(signal));
+            return ResponseEntity.ok(ApiResponse.success(signal));
         } catch (Exception e) {
             log.error("事件信号获取失败: code={}, error={}", code, e.getMessage(), e);
             return ResponseEntity.internalServerError().body(errorBody("事件信号获取失败：" + e.getMessage()));

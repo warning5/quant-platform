@@ -70,6 +70,10 @@ export default function Login() {
   // 监听微信扫码弹窗回传的 token（postMessage）
   useEffect(() => {
     const onMessage = async (e) => {
+      // 安全：只接受同源回传，防止任意页面伪造 postMessage 注入 token 完成登录劫持
+      if (!e.origin || e.origin !== window.location.origin) {
+        return;
+      }
       if (e.data && e.data.type === 'wechat-login' && e.data.token) {
         try {
           setToken(e.data.token);

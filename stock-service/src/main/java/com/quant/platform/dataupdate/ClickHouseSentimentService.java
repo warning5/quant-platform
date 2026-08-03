@@ -12,6 +12,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.time.LocalDate;
 import java.util.*;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -48,6 +49,9 @@ public class ClickHouseSentimentService {
     private static final Set<String> ALLOWED_DATE_COLUMNS = new HashSet<>(Arrays.asList(
             "trade_date", "notice_date", "meeting_date", "report_date", "publish_date", "update_time"
     ));
+
+    // SQL 标识符安全规则：只允许小写字母、数字、下划线，且必须以字母或下划线开头
+    private static final Pattern SAFE_IDENTIFIER = Pattern.compile("^[a-z_][a-z0-9_]*$");
 
     static {
         TABLE_NAMES.put("stock_sentiment_zt", "涨跌停池");
@@ -96,10 +100,10 @@ public class ClickHouseSentimentService {
      * 校验不通过直接抛出 IllegalArgumentException，不执行后续 SQL。
      */
     private static void validateTableAndColumn(String table, String dateCol) {
-        if (!ALLOWED_TABLES.contains(table)) {
+        if (table == null || !ALLOWED_TABLES.contains(table) || !SAFE_IDENTIFIER.matcher(table).matches()) {
             throw new IllegalArgumentException("无效的表名: " + table);
         }
-        if (!ALLOWED_DATE_COLUMNS.contains(dateCol)) {
+        if (dateCol == null || !ALLOWED_DATE_COLUMNS.contains(dateCol) || !SAFE_IDENTIFIER.matcher(dateCol).matches()) {
             throw new IllegalArgumentException("无效的日期列: " + dateCol);
         }
     }

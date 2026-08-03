@@ -33,6 +33,10 @@ WORKDIR /app
 # 从 builder 阶段复制构建产物
 COPY --from=builder /build/stock-service/target/*.jar app.jar
 
+# 以非 root 用户运行，降低容器逃逸影响面
+RUN groupadd -r appuser && useradd -r -g appuser appuser && chown -R appuser:appuser /app
+USER appuser
+
 # 时区设置
 ENV TZ=Asia/Shanghai
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
@@ -46,9 +50,9 @@ ENV SPRING_PROFILES_ACTIVE=prod
 # 暴露端口
 EXPOSE 8080
 
-# 健康检查
+# 健康检查（stock-service 已引入 spring-boot-starter-actuator，且 context-path=/api，故路径为 /api/actuator/health）
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8080/actuator/health || exit 1
+    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/api/actuator/health || exit 1
 
 # 启动
 ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]

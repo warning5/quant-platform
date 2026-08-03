@@ -70,6 +70,7 @@ public class FactorController {
             @RequestParam(required = false) String status,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
+        size = Math.min(size, 100);
         return ApiResponse.success(factorService.searchFactors(keyword, category, status, page, size));
     }
 

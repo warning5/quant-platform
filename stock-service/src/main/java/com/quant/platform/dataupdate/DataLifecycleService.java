@@ -15,6 +15,7 @@ import java.io.FileNotFoundException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.regex.Pattern;
 
 /**
  * 退市股票生命周期管理业务逻辑层
@@ -32,6 +33,9 @@ public class DataLifecycleService {
 
     @Value("${quant.data-update.python-path:python}")
     private String pythonPath;
+
+    // 允许拼入 ClickHouse DDL 的表名/列名安全规则（下划线小写标识符）
+    private static final Pattern SAFE_IDENTIFIER = Pattern.compile("^[a-z_][a-z0-9_]*$");
 
     /**
      * 调用 find_delisted_stocks.py 脚本获取退市股票列表
@@ -169,6 +173,8 @@ public class DataLifecycleService {
             for (Map.Entry<String, String> entry : codeColumns.entrySet()) {
                 String table = entry.getKey();
                 String col = entry.getValue();
+                assertSafeIdentifier(table);
+                assertSafeIdentifier(col);
                 try {
                     String ph = String.join(",", codes.stream().map(c -> "?").toArray(String[]::new));
                     Object bc = clickHouseStockService.queryForObject(
@@ -198,6 +204,12 @@ public class DataLifecycleService {
         } catch (Exception e) {
             log.error("退市清理失败", e);
             return ApiResponse.error("清理失败: " + e.getMessage());
+        }
+    }
+
+    private static void assertSafeIdentifier(String identifier) {
+        if (identifier == null || !SAFE_IDENTIFIER.matcher(identifier).matches()) {
+            throw new IllegalArgumentException("非法 SQL 标识符: " + identifier);
         }
     }
 }

@@ -30,6 +30,7 @@ public class StrategyController {
             @RequestParam(required = false) String status,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
+        size = Math.min(size, 100);
         return ApiResponse.success(strategyService.searchStrategies(keyword, type, status, page, size));
     }
 

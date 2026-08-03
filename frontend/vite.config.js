@@ -7,6 +7,7 @@ export default defineConfig({
     loader: 'jsx',
     include: /src\/.*\.(js|jsx)$/,
     exclude: [],
+    drop: ['console', 'debugger'], // 生产构建剔除 console.log / debugger
   },
   optimizeDeps: {
     esbuildOptions: {

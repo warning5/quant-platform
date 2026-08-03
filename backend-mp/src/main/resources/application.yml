@@ -1,6 +1,6 @@
 spring:
   profiles:
-    active: dev
+    active: ${SPRING_PROFILES_ACTIVE:dev}
   application:
     name: quant-platform-mp
   jackson:

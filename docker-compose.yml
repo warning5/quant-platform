@@ -22,13 +22,14 @@ services:
       - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-quantRedis123}
     depends_on:
       mysql:
         condition: service_healthy
       clickhouse:
-        condition: service_started
+        condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - quant-net
@@ -66,6 +67,11 @@ services:
       nofile:
         soft: 262144
         hard: 262144
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
     networks:
       - quant-net
@@ -73,10 +79,18 @@ services:
   redis:
     image: redis:7-alpine
     container_name: quant-redis
-    ports:
-      - "6379:6379"
+    # 设置访问密码，避免未授权访问（默认密码仅兜底，生产须覆盖 REDIS_PASSWORD）
+    command: redis-server --requirepass ${REDIS_PASSWORD:-quantRedis123}
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-quantRedis123}
+    # 不向宿主机暴露端口，仅容器内通过服务名 redis:6379 互访，消除公网未授权访问风险
     volumes:
       - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
     networks:
       - quant-net
