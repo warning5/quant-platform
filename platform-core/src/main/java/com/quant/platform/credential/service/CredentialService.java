@@ -5,7 +5,7 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.quant.platform.common.dto.PageRequest;
 import com.quant.platform.common.exception.BusinessException;
-import com.quant.platform.credential.dto.CredentialDetail;
+import com.quant.platform.credential.dto.CredentialVO;
 import com.quant.platform.credential.dto.CredentialRequest;
 import com.quant.platform.credential.entity.SysCredential;
 import com.quant.platform.credential.mapper.SysCredentialMapper;
@@ -101,12 +101,12 @@ public class CredentialService {
         log.info("[Credential] 删除凭证: id={}, key={}", id, c.getCredentialKey());
     }
 
-    public CredentialDetail detail(Long id) {
+    public CredentialVO detail(Long id) {
         SysCredential c = mapper.selectById(id);
         if (c == null) {
             throw new BusinessException("凭证不存在");
         }
-        CredentialDetail d = new CredentialDetail();
+        CredentialVO d = new CredentialVO();
         d.setId(c.getId());
         d.setCredentialKey(c.getCredentialKey());
         d.setName(c.getName());

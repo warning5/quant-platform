@@ -4,7 +4,7 @@ import cn.dev33.satoken.stp.StpUtil;
 import com.quant.platform.audit.entity.SysOperationLog;
 import com.quant.platform.audit.mapper.SysOperationLogMapper;
 import com.quant.platform.auth.dto.ChangePasswordRequest;
-import com.quant.platform.auth.dto.LoginResult;
+import com.quant.platform.auth.dto.LoginVO;
 import com.quant.platform.auth.dto.ProfileVO;
 import com.quant.platform.auth.dto.UpdateProfileRequest;
 import com.quant.platform.auth.service.LoginSecurityService;
@@ -47,7 +47,7 @@ public class AuthService {
      * @param captchaId    图形验证码 id（失败达阈值后必填）
      * @param captchaCode  图形验证码输入值
      */
-    public LoginResult login(String username, String password, String ip, String captchaId, String captchaCode, String userAgent) {
+    public LoginVO login(String username, String password, String ip, String captchaId, String captchaCode, String userAgent) {
         String accountKey = LoginSecurityService.accountKey(username, ip);
         String ipKey = LoginSecurityService.ipKey(ip);
 
@@ -151,7 +151,7 @@ public class AuthService {
     /**
      * 已解析出用户后发放登录态并构建返回结果（微信登录复用）
      */
-    public LoginResult issueToken(SysUser user) {
+    public LoginVO issueToken(SysUser user) {
         StpUtil.login(user.getId());
         StpUtil.getSession().set("username", user.getUsername());
         // 数据权限上下文：部门路径 + 角色id（查询拦截器与插入拦截器读取）
@@ -178,7 +178,7 @@ public class AuthService {
     /**
      * 获取当前登录用户信息（刷新用）
      */
-    public LoginResult getMe() {
+    public LoginVO getMe() {
         StpUtil.checkLogin();
         Long uid = Long.parseLong(StpUtil.getLoginIdAsString());
         SysUser user = userMapper.selectById(uid);
@@ -272,8 +272,8 @@ public class AuthService {
         }
     }
 
-    private LoginResult buildResult(SysUser user, String token) {
-        LoginResult result = new LoginResult();
+    private LoginVO buildResult(SysUser user, String token) {
+        LoginVO result = new LoginVO();
         result.setTokenName(StpUtil.getTokenName());
         result.setToken(token);
         result.setUserId(user.getId());

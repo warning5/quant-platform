@@ -18,7 +18,7 @@ import java.time.LocalDateTime;
 public class MyBatisPlusConfig {
 
     /**
-     * 分页插件配置
+     * 分页插件配置 + 慢查询拦截器注册
      */
     @Bean
     public MybatisPlusInterceptor mybatisPlusInterceptor(
@@ -27,6 +27,14 @@ public class MyBatisPlusConfig {
         interceptor.addInnerInterceptor(resourcePermissionInnerInterceptor);
         interceptor.addInnerInterceptor(new PaginationInnerInterceptor(DbType.MYSQL));
         return interceptor;
+    }
+
+    /**
+     * 慢查询拦截器 -- 超过 1s 的 SQL 记录到 SLOW_SQL logger
+     */
+    @Bean
+    public SlowSqlInterceptor slowSqlInterceptor() {
+        return new SlowSqlInterceptor();
     }
 
     /**

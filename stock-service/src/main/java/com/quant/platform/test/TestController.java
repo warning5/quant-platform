@@ -9,7 +9,7 @@ import org.springframework.web.bind.annotation.RestController;
  * 用于验证后端是否正常运行，不包含敏感信息
  */
 @RestController
-@RequestMapping("/api/test")
+@RequestMapping("/test")
 public class TestController {
 
     /**

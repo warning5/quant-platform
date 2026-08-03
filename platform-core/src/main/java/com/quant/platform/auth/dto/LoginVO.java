@@ -6,10 +6,10 @@ import lombok.Data;
 import java.util.List;
 
 /**
- * 登录结果（含 token、用户信息、角色、权限、菜单树）
+ * 登录视图（含 token、用户信息、角色、权限、菜单树）
  */
 @Data
-public class LoginResult {
+public class LoginVO {
     private String tokenName;
     private String token;
     private Long userId;

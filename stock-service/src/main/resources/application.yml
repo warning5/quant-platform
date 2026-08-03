@@ -49,6 +49,10 @@ mybatis-plus:
     map-underscore-to-camel-case: true
     log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
 
+# 慢查询日志配置（P2-19）
+slow-sql:
+  threshold-ms: 1000  # SQL 执行超过此值(毫秒) 记录到 slow-sql.log
+
 springdoc:
   api-docs:
     path: /v3/api-docs

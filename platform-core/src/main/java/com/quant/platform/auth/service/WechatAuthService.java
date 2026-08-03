@@ -3,7 +3,7 @@ package com.quant.platform.auth.service;
 import cn.dev33.satoken.stp.StpUtil;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.quant.platform.auth.config.WechatProperties;
-import com.quant.platform.auth.dto.LoginResult;
+import com.quant.platform.auth.dto.LoginVO;
 import com.quant.platform.common.exception.BusinessException;
 import com.quant.platform.system.entity.SysUser;
 import com.quant.platform.system.mapper.SysUserMapper;
@@ -54,7 +54,7 @@ public class WechatAuthService {
     // ---------------- 回调 / 登录 ----------------
 
     /** 网站应用回调：code -> access_token -> userinfo */
-    public LoginResult handleWebsiteCallback(String code) {
+    public LoginVO handleWebsiteCallback(String code) {
         WechatProperties.Web cfg = wechat.getWeb();
         checkConfigured(cfg.getAppId(), cfg.getAppSecret());
         JsonNode tokenNode = getAccessToken(cfg.getAppId(), cfg.getAppSecret(), code);
@@ -67,7 +67,7 @@ public class WechatAuthService {
     }
 
     /** 公众号网页授权回调 */
-    public LoginResult handleMpCallback(String code) {
+    public LoginVO handleMpCallback(String code) {
         WechatProperties.Mp cfg = wechat.getMp();
         checkConfigured(cfg.getAppId(), cfg.getAppSecret());
         JsonNode tokenNode = getAccessToken(cfg.getAppId(), cfg.getAppSecret(), code);
@@ -80,7 +80,7 @@ public class WechatAuthService {
     }
 
     /** 小程序登录：wx.login 拿到的 code -> openid */
-    public LoginResult miniLogin(String code) {
+    public LoginVO miniLogin(String code) {
         WechatProperties.Mini cfg = wechat.getMini();
         checkConfigured(cfg.getAppId(), cfg.getAppSecret());
         JsonNode node = code2Session(cfg.getAppId(), cfg.getAppSecret(), code);
@@ -94,7 +94,7 @@ public class WechatAuthService {
 
     // ---------------- 内部工具 ----------------
 
-    private LoginResult resolveUser(String openid, String unionid, String nickname, String avatar, int type) {
+    private LoginVO resolveUser(String openid, String unionid, String nickname, String avatar, int type) {
         SysUser user = null;
         if (unionid != null && !unionid.isBlank()) {
             user = userMapper.selectByUnionid(unionid);

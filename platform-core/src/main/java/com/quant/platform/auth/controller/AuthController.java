@@ -2,7 +2,7 @@ package com.quant.platform.auth.controller;
 
 import com.quant.platform.auth.dto.ChangePasswordRequest;
 import com.quant.platform.auth.dto.LoginRequest;
-import com.quant.platform.auth.dto.LoginResult;
+import com.quant.platform.auth.dto.LoginVO;
 import com.quant.platform.auth.dto.ProfileVO;
 import com.quant.platform.auth.dto.UpdateProfileRequest;
 import com.quant.platform.auth.dto.WechatMiniLoginRequest;
@@ -38,7 +38,7 @@ public class AuthController {
 
     /** 账号密码登录（IP 与 User-Agent 由服务端获取，供锁定与审计使用） */
     @PostMapping("/login")
-    public ApiResponse<LoginResult> login(@Valid @RequestBody LoginRequest req, HttpServletRequest request) {
+    public ApiResponse<LoginVO> login(@Valid @RequestBody LoginRequest req, HttpServletRequest request) {
         String ip = getClientIp(request);
         String userAgent = request.getHeader("User-Agent");
         return ApiResponse.success(authService.login(req.getUsername(), req.getPassword(), ip,
@@ -66,7 +66,7 @@ public class AuthController {
 
     /** 小程序登录 */
     @PostMapping("/wechat/mini/login")
-    public ApiResponse<LoginResult> wechatMiniLogin(@Valid @RequestBody WechatMiniLoginRequest req) {
+    public ApiResponse<LoginVO> wechatMiniLogin(@Valid @RequestBody WechatMiniLoginRequest req) {
         return ApiResponse.success(wechatAuthService.miniLogin(req.getCode()));
     }
 
@@ -81,7 +81,7 @@ public class AuthController {
     public ResponseEntity<String> wechatWebsiteCallback(@RequestParam("code") String code,
                                                         @RequestParam(value = "state", required = false) String state,
                                                         @RequestParam(value = "redirect", required = false) String redirect) {
-        LoginResult result = wechatAuthService.handleWebsiteCallback(code);
+        LoginVO result = wechatAuthService.handleWebsiteCallback(code);
         String html = buildPopupHtml(result.getToken(), redirect);
         return ResponseEntity.ok()
                 .contentType(MediaType.valueOf("text/html;charset=utf-8"))
@@ -98,14 +98,14 @@ public class AuthController {
     @GetMapping("/wechat/mp/callback")
     public void wechatMpCallback(@RequestParam("code") String code,
                                  HttpServletResponse response) throws java.io.IOException {
-        LoginResult result = wechatAuthService.handleMpCallback(code);
+        LoginVO result = wechatAuthService.handleMpCallback(code);
         String base = wechatAuthService.getFrontendBaseUrl();
         response.sendRedirect(base + "/login?wechat=success&token=" + result.getToken());
     }
 
     /** 当前登录用户信息（用于刷新） */
     @GetMapping("/me")
-    public ApiResponse<LoginResult> me() {
+    public ApiResponse<LoginVO> me() {
         return ApiResponse.success(authService.getMe());
     }
 

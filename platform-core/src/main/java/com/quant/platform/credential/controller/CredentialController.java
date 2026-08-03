@@ -6,7 +6,7 @@ import jakarta.validation.Valid;
 import com.quant.platform.audit.annotation.OperationLog;
 import com.quant.platform.common.dto.ApiResponse;
 import com.quant.platform.common.dto.PageRequest;
-import com.quant.platform.credential.dto.CredentialDetail;
+import com.quant.platform.credential.dto.CredentialVO;
 import com.quant.platform.credential.dto.CredentialRequest;
 import com.quant.platform.credential.entity.SysCredential;
 import com.quant.platform.credential.service.CredentialService;
@@ -55,7 +55,7 @@ public class CredentialController {
 
     @GetMapping("/{id}")
     @SaCheckPermission("system:credential:list")
-    public ApiResponse<CredentialDetail> detail(@PathVariable Long id) {
+    public ApiResponse<CredentialVO> detail(@PathVariable Long id) {
         return ApiResponse.success(credentialService.detail(id));
     }
 }

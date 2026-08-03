@@ -5,10 +5,10 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 /**
- * 凭证详情（含解密明文，仅详情接口返回）
+ * 凭证视图（含解密明文，仅详情接口返回）
  */
 @Data
-public class CredentialDetail {
+public class CredentialVO {
     private Long id;
     private String credentialKey;
     private String name;
