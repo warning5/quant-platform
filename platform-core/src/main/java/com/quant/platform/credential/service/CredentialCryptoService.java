@@ -14,8 +14,10 @@ import java.util.Base64;
 
 /**
  * 凭证加解密服务（AES-256-CBC）
- * 主密钥取自配置 credential.aes-key（环境变量 CREDENTIAL_AES_KEY）；
- * 未配置时使用内置开发密钥并强烈告警（伪安全，生产必须配置）。
+ * 主密钥取自配置 credential.aes-key（环境变量 CREDENTIAL_AES_KEY）。
+ * <p>
+ * 开发环境（spring.profiles.active=dev 或未配置）允许使用内置开发密钥并告警；
+ * 生产环境必须配置 credential.aes-key，否则启动直接失败。
  */
 @Slf4j
 @Service
@@ -26,13 +28,24 @@ public class CredentialCryptoService {
 
     private final byte[] key;
 
-    public CredentialCryptoService(@Value("${credential.aes-key:}") String aesKey) {
-        String master = (aesKey == null || aesKey.isEmpty()) ? DEV_MASTER_KEY : aesKey;
+    public CredentialCryptoService(
+            @Value("${credential.aes-key:}") String aesKey,
+            @Value("${spring.profiles.active:dev}") String activeProfile) {
+        boolean isDev = "dev".equalsIgnoreCase(activeProfile) || activeProfile == null || activeProfile.isBlank();
         if (aesKey == null || aesKey.isEmpty()) {
-            log.warn("[CredentialCrypto] 未配置 credential.aes-key，使用内置开发密钥，凭证仅为伪安全；"
-                    + "生产环境请通过环境变量 CREDENTIAL_AES_KEY 设置强密钥（建议 32 字节随机串）！");
+            if (isDev) {
+                log.warn("[CredentialCrypto] 未配置 credential.aes-key，使用内置开发密钥，凭证仅为伪安全；"
+                        + "生产环境请通过环境变量 CREDENTIAL_AES_KEY 设置强密钥（建议 32 字节随机串）！");
+                this.key = sha256(DEV_MASTER_KEY);
+            } else {
+                throw new IllegalStateException(
+                        "[CredentialCrypto] 生产环境(" + activeProfile + ")必须配置 credential.aes-key"
+                        + "（环境变量 CREDENTIAL_AES_KEY），拒绝使用开发密钥启动。");
+            }
+        } else {
+            this.key = sha256(aesKey);
+            log.info("[CredentialCrypto] AES 主密钥已从配置加载。");
         }
-        this.key = sha256(master);
     }
 
     private static byte[] sha256(String s) {

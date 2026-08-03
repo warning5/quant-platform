@@ -1,5 +1,6 @@
 package com.quant.platform.common.ratelimit;
 
+import com.quant.platform.common.exception.RateLimitExceededException;
 import io.github.bucket4j.Bandwidth;
 import io.github.bucket4j.Bucket;
 import io.github.bucket4j.ConsumptionProbe;
@@ -16,6 +17,8 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * 基于 Bucket4j 的 API 限流拦截器。
  * 按 IP / 用户 / IP+用户 维度维护令牌桶，拒绝超频请求。
+ * <p>
+ * 触发限流时抛出 {@link RateLimitExceededException}，由全局异常处理器统一返回 429 响应。
  */
 @Slf4j
 public class RateLimitInterceptor implements HandlerInterceptor {
@@ -46,14 +49,10 @@ public class RateLimitInterceptor implements HandlerInterceptor {
 
         long retryAfterSeconds = probe.getNanosToWaitForRefill() / 1_000_000_000L + 1;
         response.setHeader("X-RateLimit-Retry-After", String.valueOf(retryAfterSeconds));
-        response.setStatus(429);
-        response.setContentType("application/json;charset=UTF-8");
-        response.getWriter().write(
-                String.format("{\"code\":429,\"message\":\"请求过于频繁，请 %d 秒后重试\"}", retryAfterSeconds)
-        );
         log.warn("[RateLimit] 触发限流: method={} path={} key={} retryAfter={}s",
                 hm.getMethod().getName(), request.getRequestURI(), key, retryAfterSeconds);
-        return false;
+        throw new RateLimitExceededException(
+                String.format("请求过于频繁，请 %d 秒后重试", retryAfterSeconds), retryAfterSeconds);
     }
 
     private Bucket createBucket(RateLimit annotation) {

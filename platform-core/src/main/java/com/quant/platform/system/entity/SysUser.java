@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -23,6 +24,7 @@ public class SysUser {
     private String username;
 
     /** BCrypt 密码，纯微信用户可为空 */
+    @JsonIgnore
     private String password;
 
     /** 昵称 */

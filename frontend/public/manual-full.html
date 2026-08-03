@@ -104,7 +104,9 @@
 <div class="nav-group"><a class="nav-main" href="#part6">六、数据管理</a>
 <a class="nav-item" href="#s6-1">6.1 数据更新</a><a class="nav-item" href="#s6-2">6.2 财务数据</a><a class="nav-item" href="#s6-3">6.3 研报数据</a><a class="nav-item" href="#s6-4">6.4 行业排行</a><a class="nav-item" href="#s6-5">6.5 定时任务</a><a class="nav-item" href="#s6-6">6.6 质量监控</a><a class="nav-item" href="#s6-7">6.7 缠论筛选</a><a class="nav-item" href="#s6-8">6.8 黑名单</a></div>
 <div class="nav-group"><a class="nav-main" href="#part7">七、系统管理</a>
-<a class="nav-item" href="#s7-1">7.1 系统管理总览</a><a class="nav-item" href="#s7-2">7.2 用户管理</a><a class="nav-item" href="#s7-3">7.3 角色管理</a><a class="nav-item" href="#s7-4">7.4 菜单与权限管理</a><a class="nav-item" href="#s7-5">7.5 权限模型与排错</a></div>
+<a class="nav-item" href="#s7-1">7.1 系统管理总览</a><a class="nav-item" href="#s7-2">7.2 用户管理</a><a class="nav-item" href="#s7-3">7.3 角色管理</a><a class="nav-item" href="#s7-4">7.4 菜单与权限管理</a><a class="nav-item" href="#s7-5">7.5 权限模型与排错</a><a class="nav-item" href="#s7-6">7.6 字典管理</a><a class="nav-item" href="#s7-7">7.7 配置中心</a><a class="nav-item" href="#s7-8">7.8 部门管理</a><a class="nav-item" href="#s7-9">7.9 数据权限管理</a><a class="nav-item" href="#s7-10">7.10 凭证管理</a></div>
+<div class="nav-group"><a class="nav-main" href="#part8">八、系统监控</a>
+<a class="nav-item" href="#s8-1">8.1 系统监控面板</a><a class="nav-item" href="#s8-2">8.2 在线用户</a><a class="nav-item" href="#s8-3">8.3 审计日志</a><a class="nav-item" href="#s8-4">8.4 登录日志</a></div>
 </nav>
 <div class="main">
 <h1>量化因子平台 · 使用手册</h1>
@@ -198,6 +200,13 @@
 <li>10秒高频轮询 + 4线程并行拉取K线</li>
 <li>SSE 推送，无需前端轮询</li>
 <li>同时监控上证/深证/创业板等 9 大指数</li></ul>
+<h4>监控的股票从哪来</h4>
+<p>盘中监控列表里的股票<b>不是</b>手工维护的静态清单，而是后端在<b>每个交易日 9:30 监控启动时</b>（或点击「刷新 / 手动触发扫描」时）按下面三个来源<b>实时聚合</b>出来的，列表「来源」列用三种颜色区分：</p>
+<table><tr><th>来源（页面标签）</th><th>数据表</th><th>取数规则</th><th>买入区间 / 止损 / 目标价如何确定</th></tr>
+<tr><td>推荐（蓝）</td><td><code>stock_recommendation</code></td><td>取最新交易日 <code>recommend_date</code> 且 <code>action_tag='BUY'</code>、<code>suggested_buy_price</code> 非空</td><td>区间 = 建议买入价 ±5%（<code>buyPrice×[0.95, 1.05]</code>）；止损优先读 <code>suggested_stop_loss</code>，无则回退 <code>buyPrice×0.92</code>；目标价优先读 <code>suggested_target_price</code>，无则回退 <code>收盘价×1.20</code></td></tr>
+<tr><td>LLM（紫）</td><td><code>llm_analysis</code></td><td>取最新 <code>analysis_date</code> 且 <code>recommendation='BUY'</code>、<code>buy_price_high</code> 非空</td><td>直接采用 LLM 给出的 <code>buy_price_low / buy_price_high / stop_loss / target_price</code></td></tr>
+<tr><td>客户定义（金）</td><td><code>monitor_custom_stock</code></td><td>用户在监控页「添加自定义」手工录入并持久化到数据库</td><td>用户自行填写买入区间、止损价、目标价</td></tr></table>
+<div class="alert info"><strong>聚合与优先级</strong>：三者取<b>并集</b>。同一只股票若同时出现在 LLM 与推荐中，<b>LLM 优先</b>（推荐源会跳过重复代码）；<b>客户定义始终最后覆盖</b>——你手动录入的买入区间 / 止损会替代推荐值。<br><br><strong>何时刷新候选池</strong>：监控只在交易时段（09:30–11:30、13:00–15:00）运行，非交易日 / 周末 / 节假日不会重建。页面顶部「数据日期」优先显示推荐日期（一定是交易日），无推荐时回退到 LLM 日期并对齐到前一个交易日。<br><br><strong>列表为空怎么办</strong>：提示「暂无监控股票，请先通过『智能推荐』生成 BUY 推荐」。即先在「智能推荐」或「AI推理分析」模块跑出当日 BUY 推荐，再到盘中监控点「刷新」即可自动纳入。若 <code>market_regime_calendar</code> 连续 ≥3 个交易日为 BEAR，系统会自动暂停推荐生成，列表可能为空或停留在最近有效推荐，页面以黄色告警提示「连续 N 日熊市，已暂停推荐生成」。</div>
 <h4>关键算法 — 信号判定</h4>
 <div class="formula">1. price &le; stopLoss → STOP（跌破止损）<br>2. buyLow &le; price &le; buyHigh → IN_RANGE（在买入区间内）<br>3. buyLow×(1-2%) &le; price &le; buyHigh×(1+2%) → WATCH（接近买入区间）<br>4. price &lt; buyLow → BELOW（低于下沿）<br>5. price &gt; buyHigh → ABOVE（高于上沿）</div>
 </div></div>
@@ -1324,7 +1333,7 @@ R_portfolio = Σ (β_i × F_i) + ε
 </div></div>
 
 <h2 id="part7">七、系统管理</h2>
-<p>系统管理是平台的<strong>治理层</strong>——它不参与因子计算、策略回测，却控制着"谁能访问哪些功能"。平台所有业务模块（因子、策略、回测、推荐、评估、数据）的访问入口都由它管控。三个核心页面：<strong>用户管理</strong>、<strong>角色管理</strong>、<strong>菜单管理</strong>，配合 Sa-Token 权限框架实现菜单级 + 按钮级两级鉴权。</p>
+<p>系统管理是平台的<strong>治理层</strong>——它不参与因子计算、策略回测，却控制着"谁能访问哪些功能"。平台所有业务模块（因子、策略、回测、推荐、评估、数据）的访问入口都由它管控。它包含账号与权限（用户 / 角色 / 菜单）、可配置化基础数据（字典 / 配置中心）、组织与隔离（部门 / 数据权限）、以及密钥托管（凭证管理）共 8 类页面，配合 Sa-Token 权限框架实现菜单级 + 按钮级两级鉴权。</p>
 
 <div class="section" id="s7-1"><h3>7.1 系统管理总览</h3><div class="module-box">
 <h4>作用与价值</h4><p>把"平台账号"和"功能权限"解耦成三层结构，让权限分配可复用、可审计：<strong>用户</strong>被赋予<strong>角色</strong>，<strong>角色</strong>被赋予<strong>菜单/权限</strong>，最终用户的可访问范围 = 其所有角色权限的并集。</p>
@@ -1426,9 +1435,105 @@ R_portfolio = Σ (β_i × F_i) + ε
 <h4>默认账号</h4><p>系统初始化时内置 <code>admin</code> 账号（角色 ADMIN，拥有全部权限）。其他账号需由 admin 在用户管理页创建并赋角色。</p>
 </div></div>
 
+<div class="section" id="s7-6"><h3>7.6 字典管理</h3><div class="module-box">
+<h4>作用与价值</h4><p>字典把"可变的下拉选项 / 枚举 / 标签"从代码里抽出来集中维护——例如 SLA 严重级别、信号类型、行业分类等，前端下拉直接读字典，改字典无需改代码发版。</p>
+<h4>页面结构</h4><ul>
+<li><strong>字典类型</strong>：类型编码（dictType，如 <code>SLA_SEVERITY</code>）+ 类型名称 + 描述 + 排序 + 状态；编码新增后不可改。</li>
+<li><strong>字典项</strong>：先选类型，再维护其下数据项——值（dictValue）、显示标签、颜色、扩展属性（JSON）、排序、状态；值新增后不可改。</li>
+<li>新增 / 编辑类型与项均走独立弹窗（带颜色选择器）。</li>
+</ul>
+<h4>权限与说明</h4><p>后端 <code>DictController</code>（<code>/system/dict</code>），权限 <code>system:dict:list/add/edit/delete</code>。字典是"数据而非代码"——字典缓存由 8.1 的"本地缓存状态"监控。</p>
+</div></div>
+
+<div class="section" id="s7-7"><h3>7.7 配置中心</h3><div class="module-box">
+<h4>作用与价值</h4><p>把散落在配置文件 / 代码常量里的运行参数（如限流 QPS、调度开关、各类阈值）集中为可热改的键值对，多数修改无需重启即可生效。</p>
+<h4>页面字段</h4><table>
+<tr><th>字段</th><th>说明</th></tr>
+<tr><td>配置键（configKey）</td><td>唯一键，如 <code>rate_limit_qps</code>，新增后不可改</td></tr>
+<tr><td>显示标签 / 分组</td><td>分组如 SYSTEM / SCHEDULE，便于归类</td></tr>
+<tr><td>值（configValue）</td><td>按类型填写：文本 / 数字 / true|false / JSON</td></tr>
+<tr><td>类型</td><td>STRING / NUMBER / BOOLEAN / JSON</td></tr>
+<tr><td>状态</td><td>启用 / 禁用</td></tr>
+</table>
+<h4>权限与说明</h4><p>后端 <code>ConfigController</code>（<code>/system/config</code>），权限 <code>system:config:list/add/edit/delete</code>。配置启动时整体加载进缓存；命中率可在 8.1 查看。新增配置键后需同步前端使用方。</p>
+</div></div>
+
+<div class="section" id="s7-8"><h3>7.8 部门管理</h3><div class="module-box">
+<h4>作用与价值</h4><p>维护组织树（部门），是"按部门做数据权限隔离"的基础。用户归属部门后，按部门授权的资源可"含子部门"向下可见。</p>
+<h4>页面操作</h4><ul>
+<li>左侧部门树（默认展开），右侧表单维护<strong>部门名称</strong>、<strong>上级部门</strong>（TreeSelect）、排序、状态（启用 / 禁用）。</li>
+<li>支持新增根部门 / 子部门、编辑、删除；<strong>存在子部门时拒绝删除</strong>。</li>
+</ul>
+<h4>权限与说明</h4><p>后端 <code>DepartmentController</code>（<code>/system/department</code>），权限 <code>system:dept:list/add/edit/delete</code>。层级路径 <code>dept_path = parentPath + "/" + id</code>，数据权限拦截器据此做"本部门 + 子部门"匹配（见 7.9）。</p>
+</div></div>
+
+<div class="section" id="s7-9"><h3>7.9 数据权限管理</h3><div class="module-box">
+<h4>作用与价值</h4><p>在菜单级权限之上做更细的<strong>行级数据隔离</strong>——决定某条策略 / 回测 / 因子 / 模拟盘记录对谁可见、谁可改。</p>
+<h4>两类控制</h4><ul>
+<li><strong>全局可见性（visibility）</strong>：PRIVATE（仅自己）/ DEPT（部门可见，含子部门）/ PUBLIC（所有人）。</li>
+<li><strong>显式授权（shares）</strong>：把资源额外授权给 用户（USER）/ 部门（DEPT，树选择）/ 角色（ROLE），权限分 VIEW（查看）/ EDIT（编辑）。</li>
+</ul>
+<h4>读写校验</h4><p>仅资源 <strong>owner</strong> 与 <strong>ADMIN</strong> 可改；非 owner 写时后端 <code>assertCanWrite</code> 校验 EDIT 级授权，否则返回 400。读时后端拦截器按"资源 meta + share"注入 WHERE 条件做隔离，admin 跳过。</p>
+<h4>实现思路</h4><p><code>resource_meta</code>（owner / visibility）+ <code>resource_share</code>（grantee）；InnerInterceptor 在 Mapper 层注入隔离条件。</p>
+</div></div>
+
+<div class="section" id="s7-10"><h3>7.10 凭证管理</h3><div class="module-box">
+<h4>作用与价值</h4><p>集中存储第三方密钥（LLM API Key、微信、通知推送、数据库等）。明文输入保存后<strong>加密存储</strong>，列表只显示掩码；编辑时留空表示不改。</p>
+<h4>页面字段</h4><table>
+<tr><th>字段</th><th>说明</th></tr>
+<tr><td>凭证标识（credentialKey）</td><td>如 <code>DEEPSEEK_API_KEY</code>，新增后不可改</td></tr>
+<tr><td>名称 / 分类</td><td>分类：llm / wechat / notification / db</td></tr>
+<tr><td>密文掩码</td><td>列表展示脱敏值，详情接口才返回明文</td></tr>
+<tr><td>状态 / 备注 / 创建时间</td><td>—</td></tr>
+</table>
+<h4>权限与说明</h4><p>后端 <code>CredentialController</code>（<code>/system/credential</code>），权限 <code>system:credential:list/add/edit/delete</code>。业务代码（如 LLM 模块）按 credentialKey 读取解密后的值。</p>
+</div></div>
+
+<h2 id="part8">八、系统监控</h2>
+<p>系统监控是平台的<strong>可观测与安全层</strong>——它实时反映后端运行时健康、当前在线会话，以及"谁在何时做了什么"的操作留痕。运维与安全管理员借此快速定位异常、追溯问题、发现安全风险。</p>
+
+<div class="section" id="s8-1"><h3>8.1 系统监控面板</h3><div class="module-box">
+<h4>作用与价值</h4><p>一站式运行时健康看板，实时反映后端 JVM、HTTP、ClickHouse、调度任务、本地缓存与访问行为，便于快速定位异常。</p>
+<h4>四大核心卡片</h4><ul>
+<li><strong>JVM 堆内存</strong>：使用率环图 + 堆使用趋势；提交内存、线程数、近 5 分钟 / 累计 GC 次数与耗时、CPU 核数。</li>
+<li><strong>HTTP 流量</strong>：QPS（含趋势）、累计请求、近 1 分钟、错误数、平均耗时、P95 耗时；异常阈值黄色 / 红色提示。</li>
+<li><strong>ClickHouse</strong>：启用 / 健康状态环、查询延迟(ms)、版本、表数量；未配置时显示"未配置"。</li>
+<li><strong>调度任务</strong>：运行中数量、今日总计 / 成功 / 失败、成功率进度条、最近执行记录。</li>
+</ul>
+<h4>本地缓存状态（表）</h4><p>字典缓存（dict）与系统参数缓存（config）的 大小 / 命中 / 未命中 / 命中率（按 90/60/30% 分色）/ 最后加载时间 / 已加载状态——<strong>重启清零</strong>。</p>
+<h4>请求与行为</h4><ul>
+<li><strong>最近请求</strong>：时间 / 方法 / 路径 / 状态 / 耗时；状态码分布（2xx / 3xx / 4xx·5xx）水平条。</li>
+<li><strong>行为统计</strong>：页面访问分布（前端路由切换埋点实时上报，内存环形缓冲上限 500 条）、在线会话数、今日活跃任务、运行时长、堆峰值、CPU 核数。</li>
+</ul>
+<h4>自动刷新</h4><p>默认 5s 轮询（可选 3 / 5 / 10 / 30s），可暂停或手动刷新。后端 <code>PlatformMonitorController</code>（<code>/system/monitor</code>），权限 <code>system:monitor:list</code>。</p>
+</div></div>
+
+<div class="section" id="s8-2"><h3>8.2 在线用户</h3><div class="module-box">
+<h4>作用与价值</h4><p>查看当前所有登录会话，必要时<strong>强制某用户下线</strong>（如异常登录、账号回收）。</p>
+<h4>页面字段</h4><table>
+<tr><th>字段</th><th>说明</th></tr>
+<tr><td>用户 / 登录ID / 设备</td><td>当前会话标记"当前"，不可踢</td></tr>
+<tr><td>登录时间</td><td>由 Sa-Token 会话 lastActivityTime 解析</td></tr>
+<tr><td>操作</td><td>下线（<code>system:online:kick</code>），每 8s 自动刷新</td></tr>
+</table>
+<h4>实现思路</h4><p>后端读 Sa-Token 会话列表；kick 调 <code>/system/online/kick?loginId=...</code> 使该 token 失效。权限 <code>system:online:list</code> / <code>system:online:kick</code>。</p>
+</div></div>
+
+<div class="section" id="s8-3"><h3>8.3 审计日志</h3><div class="module-box">
+<h4>作用与价值</h4><p>记录关键操作（增删改查）的"谁、什么时间、对什么、做了什么、结果如何"，用于合规追溯与问题定位。</p>
+<h4>页面字段</h4><p>操作人、IP、URL、模块、动作（add / edit / delete / query）、结果（成功 / 失败）、耗时(ms)、操作时间；支持按操作人 / 模块 / 动作 / 时间范围筛选；点"详情"看方法名、错误信息、请求参数（JSON）。可删除单条。</p>
+<h4>实现思路</h4><p>通过 <code>@OperationLog</code> 注解 + AOP 切面自动落库（SysOperationLog），业务代码无需手工记。后端 <code>AuditController</code>（<code>/system/audit</code>），权限 <code>system:audit:list</code> / <code>system:audit:delete</code>。</p>
+</div></div>
+
+<div class="section" id="s8-4"><h3>8.4 登录日志</h3><div class="module-box">
+<h4>作用与价值</h4><p>审计日志的"登录视角"筛选——专看登录成功 / 失败、来源 IP、User-Agent、失败原因，用于安全审计（如暴力破解、异地登录）。</p>
+<h4>页面字段</h4><p>登录时间、账号、IP、User-Agent、结果（登录成功 / 登录失败）、失败原因；支持按账号 / 结果 / 时间范围筛选；详情同审计日志。</p>
+<h4>说明</h4><p>复用审计日志接口（<code>/system/audit</code>，模块固定为 <code>auth</code>），权限同为 <code>system:audit:list</code> / <code>system:audit:delete</code>。</p>
+</div></div>
+
 <div class="alert info">
 <strong>手册到此结束</strong>。总结本手册的核心逻辑链：<br><br>
-<strong>因子</strong>（选股能力的量化表达）→ <strong>策略</strong>（因子组合+风控规则）→ <strong>回测</strong>（策略在历史中的验证）→ <strong>选股/推荐</strong>（策略在当下生成具体股票）→ <strong>评估</strong>（验证收益的真实来源和持续性）→ <strong>数据管理</strong>（支撑以上所有模块的底层数据质量）→ <strong>系统管理</strong>（用户 / 角色 / 权限，贯穿所有模块的访问治理层）<br><br>
+<strong>因子</strong>（选股能力的量化表达）→ <strong>策略</strong>（因子组合+风控规则）→ <strong>回测</strong>（策略在历史中的验证）→ <strong>选股/推荐</strong>（策略在当下生成具体股票）→ <strong>评估</strong>（验证收益的真实来源和持续性）→ <strong>数据管理</strong>（支撑以上所有模块的底层数据质量）→ <strong>系统管理</strong>（用户 / 角色 / 菜单 / 字典 / 配置中心 / 部门 / 数据权限 / 凭证，访问治理层）→ <strong>系统监控</strong>（运行时健康、在线用户、审计与登录日志，安全与可观测层）<br><br>
 每一步都不是孤立的——因子质量决定策略上限，回测质量决定策略可信度，推荐管线质量决定策略执行效果，评估质量决定策略迭代方向，数据质量决定以上一切的根基，而系统管理决定了"谁能使用这一切"。<strong>量化投资不是"找到一个好因子"那么简单，而是一个需要全链路质量保障的系统工程。</strong>
 </div>
 </div>
