@@ -12,19 +12,16 @@ import com.quant.platform.recommendation.domain.StockRecommendation;
 import com.quant.platform.recommendation.mapper.RecommendationMapper;
 import com.quant.platform.screen.dto.ScreenRequest;
 import com.quant.platform.screen.dto.ScreenResult;
-import com.quant.platform.screen.service.StockScreenService;
 import com.quant.platform.stock.analysis.domain.AnalysisOverview;
 import com.quant.platform.stock.analysis.domain.ScoreDetail;
 import com.quant.platform.stock.analysis.service.AnalysisService;
 import com.quant.platform.stock.analysis.service.EventSignalService;
 import com.quant.platform.stock.analysis.service.NewsEventParser;
 import com.quant.platform.stock.analysis.mapper.StockAnalysisMapper;
-import com.quant.platform.factor.engine.PatternDetector;
 import com.quant.platform.stock.entity.StockDaily;
 import com.quant.platform.stock.entity.StockInfo;
 import com.quant.platform.stock.mapper.StockInfoMapper;
 import com.quant.platform.stock.service.ClickHouseStockService;
-import com.quant.platform.stock.service.DividendService;
 import com.quant.platform.strategy.domain.StrategyDefinition;
 import com.quant.platform.strategy.mapper.StrategyDefinitionMapper;
 import lombok.Data;
@@ -34,9 +31,6 @@ import org.springframework.stereotype.Service;
 import jakarta.annotation.PostConstruct;
 
 import java.math.BigDecimal;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
 import java.time.LocalDate;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -57,10 +51,6 @@ import java.util.stream.Collectors;
 @Service
 public class RecommendationService {
 
-    /**
-     * 因子选股取 Top N（广筛）
-     */
-    private static final int SCREEN_TOP_N = 50;
     /**
      * 个股深度分析取 Top N（精筛）
      */
@@ -127,14 +117,6 @@ public class RecommendationService {
             Map.entry("电子", "电子")
     );
     /**
-     * ATR 计算周期
-     */
-    private static final int ATR_PERIOD = 20;
-    /**
-     * ATR 历史分位数回溯天数
-     */
-    private static final int ATR_LOOKBACK_DAYS = 250;
-    /**
      * P1: 默认IR预筛选阈值
      * IR = |IC均值| / IC标准差，衡量因子信号的稳定性
      * 0.1: 剔除IC波动过大（不稳定）的噪声因子，保留信号稳定的因子
@@ -167,17 +149,6 @@ public class RecommendationService {
     /** 高置信档不足时保底保留的 topN（避免低信号期策略无票） */
     private static final int MIN_HIGH_CONVICTION_PICKS = 5;
     /**
-     * 优化②：熊市降仓系数。BEAR regime 下建议仓位 ×0.6，降低下行暴露
-     * （评估发现 BEAR 即使高置信仍日亏、胜率偏低，老策略无有效防御；×0.4 过度减仓被回测证伪）
-     */
-    private static final double BEAR_POSITION_FACTOR = 0.6;
-    /**
-     * 优化③：高 beta 限仓。688(科创板)/300(创业板) 为 20% 涨跌停、高波动个股，
-     * 仓位 ×0.7 且硬上限 5%（评估发现 final≥0.9 顶端档集中这些高波动成长股次日大幅回撤）
-     */
-    private static final double HIGH_BETA_POSITION_FACTOR = 0.7;
-    private static final double HIGH_BETA_POSITION_CAP = 0.05;
-    /**
      * 优化④：连续 BEAR 暂停生成（离散开关）。
      * 回测发现 BEAR 是小样本噪声区（胜率<50%、日亏），激进降仓/提门槛均被证伪。
      * 改用更干净的离散防御：最近 N 个交易日(含当日) detectRegime 全部判为 BEAR 时，
@@ -209,7 +180,6 @@ public class RecommendationService {
             List.of("医药生物", "公用事业"),        // 防御板块
             List.of("电子", "国防军工")            // 科技制造
     );
-    private final StockScreenService stockScreenService;
     private final AnalysisService analysisService;
     private final MarketDataService marketDataService;
     private final ClickHouseStockService clickHouseStockService;
@@ -219,7 +189,6 @@ public class RecommendationService {
     private final ObjectMapper objectMapper;
     private final FactorIcService factorIcService;
     private final FactorAnalysisService factorAnalysisService;
-    private final DividendService dividendService;
     private final StockBlacklistService stockBlacklistService;
     private final StrategyConfidenceService strategyConfidenceService;
     private final NewsEventParser newsEventParser;
@@ -227,7 +196,6 @@ public class RecommendationService {
     private final com.quant.platform.market.MarketSentimentService marketSentimentService;
     private final FactorCorrelationService factorCorrelationService;
     private final QuarterlyFactorAnalysisService quarterlyFactorAnalysisService;
-    private final javax.sql.DataSource dataSource;
     private final StockAnalysisMapper stockAnalysisMapper;
     private final com.quant.platform.factor.ic.mapper.FactorIcRecordMapper factorIcRecordMapper;
     private final com.quant.platform.factor.service.FactorMetaCacheService factorMetaCache;
@@ -240,6 +208,12 @@ public class RecommendationService {
 
     private final RecommendationQueryService queryService;
 
+    // ── God Class 拆分 Phase 3 抽出的专责协作者（本类相关方法退化为薄委托）──
+    private final MarketRegimeDetector marketRegimeDetector;
+    private final CandidateScreener candidateScreener;
+    private final PricePlanCalculator pricePlanCalculator;
+    private final RecommendationTracker recommendationTracker;
+
     @PostConstruct
     public void initRegimeCalendar() {
         if (regimeCalendarService != null) {
@@ -248,8 +222,7 @@ public class RecommendationService {
         }
     }
 
-    public RecommendationService(StockScreenService stockScreenService,
-                                 AnalysisService analysisService,
+    public RecommendationService(AnalysisService analysisService,
                                  MarketDataService marketDataService,
                                  ClickHouseStockService clickHouseStockService,
                                  StockInfoMapper stockInfoMapper,
@@ -258,7 +231,6 @@ public class RecommendationService {
                                  ObjectMapper objectMapper,
                                  FactorIcService factorIcService,
                                  FactorAnalysisService factorAnalysisService,
-                                 DividendService dividendService,
                                  StockBlacklistService stockBlacklistService,
                                  StrategyConfidenceService strategyConfidenceService,
                                  NewsEventParser newsEventParser,
@@ -266,14 +238,16 @@ public class RecommendationService {
                                  com.quant.platform.market.MarketSentimentService marketSentimentService,
                                  FactorCorrelationService factorCorrelationService,
                                  QuarterlyFactorAnalysisService quarterlyFactorAnalysisService,
-                                 javax.sql.DataSource dataSource,
                                  StockAnalysisMapper stockAnalysisMapper,
                                  com.quant.platform.factor.ic.mapper.FactorIcRecordMapper factorIcRecordMapper,
                                  com.quant.platform.factor.service.FactorMetaCacheService factorMetaCache,
                                  com.quant.platform.factor.mapper.FactorDefinitionMapper factorDefinitionMapper,
                                  com.quant.platform.factor.dynamic.DynamicIndustryCorrelationService dynamicIndustryCorrService,
-                                 RecommendationQueryService queryService) {
-        this.stockScreenService = stockScreenService;
+                                 RecommendationQueryService queryService,
+                                 MarketRegimeDetector marketRegimeDetector,
+                                 CandidateScreener candidateScreener,
+                                 PricePlanCalculator pricePlanCalculator,
+                                 RecommendationTracker recommendationTracker) {
         this.analysisService = analysisService;
         this.marketDataService = marketDataService;
         this.clickHouseStockService = clickHouseStockService;
@@ -283,7 +257,6 @@ public class RecommendationService {
         this.objectMapper = objectMapper;
         this.factorIcService = factorIcService;
         this.factorAnalysisService = factorAnalysisService;
-        this.dividendService = dividendService;
         this.stockBlacklistService = stockBlacklistService;
         this.strategyConfidenceService = strategyConfidenceService;
         this.newsEventParser = newsEventParser;
@@ -291,13 +264,16 @@ public class RecommendationService {
         this.marketSentimentService = marketSentimentService;
         this.factorCorrelationService = factorCorrelationService;
         this.quarterlyFactorAnalysisService = quarterlyFactorAnalysisService;
-        this.dataSource = dataSource;
         this.stockAnalysisMapper = stockAnalysisMapper;
         this.factorIcRecordMapper = factorIcRecordMapper;
         this.factorMetaCache = factorMetaCache;
         this.factorDefinitionMapper = factorDefinitionMapper;
         this.dynamicIndustryCorrService = dynamicIndustryCorrService;
         this.queryService = queryService;
+        this.marketRegimeDetector = marketRegimeDetector;
+        this.candidateScreener = candidateScreener;
+        this.pricePlanCalculator = pricePlanCalculator;
+        this.recommendationTracker = recommendationTracker;
     }
 
     /**
@@ -798,135 +774,14 @@ public class RecommendationService {
     // ── 私有方法 ──
 
     /**
-     * 追踪推荐表现（Phase 3.2）
-     * 对未追踪或需要更新的推荐批次，计算:
-     * - 次日收益率
-     * - 一周收益率
-     * - 一月收益率
+     * 追踪推荐表现（Phase 3.2）：次日 / 一周 / 一月收益 + 超额收益，并联动黑名单与策略置信度。
+     * <p>
+     * God Class 拆分 Phase 3：实现已迁移至 {@link RecommendationTracker}，对外方法签名不变。
      *
      * @return 更新的记录数
      */
     public int trackRecommendationPerformance() {
-        // 按 (strategy_id, recommend_date, weight_mode) 三元组去重，确保每种模式的快照都能被追踪
-        // P1-4 修复：放宽 LIMIT，避免老 combo（周/月可补全的）被截断丢失。
-        // 配合 RecommendationMapper 中完成标志改为 next_month_return，确保历史周/月收益持续补算。
-        List<Map<String, Object>> recentCombos = recommendationMapper.findUntrackedStrategyDateModes(1000);
-        if (recentCombos.isEmpty()) {
-            log.info("[Recommendation] 所有近期组合均已追踪，跳过");
-            return 0;
-        }
-        int totalUpdated = 0;
-
-        LocalDate today = LocalDate.now();
-
-        for (Map<String, Object> combo : recentCombos) {
-            Object sidObj = combo.get("strategy_id");
-            if (sidObj == null) continue; // 跳过 strategy_id 为空的脏数据
-            Long sid = ((Number) sidObj).longValue();
-            java.sql.Date sqlDate = (java.sql.Date) combo.get("recommend_date");
-            if (sqlDate == null) continue;
-            LocalDate recDate = sqlDate.toLocalDate();
-            String weightMode = (String) combo.get("weight_mode");
-
-            // 按模式读取该模式下的快照（多模式快照隔离追踪）
-            List<StockRecommendation> recs = weightMode != null
-                ? recommendationMapper.findByStrategyAndDateAndMode(sid, recDate, weightMode)
-                : recommendationMapper.findByStrategyAndDate(sid, recDate);
-            if (recs.isEmpty()) continue;
-
-            int daysSince = (int) java.time.temporal.ChronoUnit.DAYS.between(recDate, today);
-            if (daysSince <= 0) continue; // 推荐当天或未来，不追踪
-
-            for (StockRecommendation rec : recs) {
-                try {
-                    boolean updated = false;
-
-                    // 次日收益率（总是重新计算，覆盖旧值，以支持除权修正/数据修正）
-                    if (daysSince >= 1) {
-                        Double val = calcForwardReturn(rec.getStockCode(), recDate, 1);
-                        if (val != null) {
-                            rec.setNextDayReturn(val);
-                            // P0-2: 计算超额收益 = 个股收益 - 沪深300收益
-                            Double benchReturn = calcForwardReturn(SSE300_CODE, recDate, 1);
-                            if (benchReturn != null) {
-                                rec.setNextDayExcessReturn(Math.round((val - benchReturn) * 100.0) / 100.0);
-                            }
-                            updated = true;
-                        }
-                    }
-
-                    // 一周收益率
-                    if (daysSince >= 5) {
-                        Double val = calcForwardReturn(rec.getStockCode(), recDate, 5);
-                        if (val != null) {
-                            rec.setNextWeekReturn(val);
-                            Double benchReturn = calcForwardReturn(SSE300_CODE, recDate, 5);
-                            if (benchReturn != null) {
-                                rec.setNextWeekExcessReturn(Math.round((val - benchReturn) * 100.0) / 100.0);
-                            }
-                            updated = true;
-                        }
-                    }
-
-                    // 一月收益率
-                    if (daysSince >= 22) {
-                        Double val = calcForwardReturn(rec.getStockCode(), recDate, 22);
-                        if (val != null) {
-                            rec.setNextMonthReturn(val);
-                            Double benchReturn = calcForwardReturn(SSE300_CODE, recDate, 22);
-                            if (benchReturn != null) {
-                                rec.setNextMonthExcessReturn(Math.round((val - benchReturn) * 100.0) / 100.0);
-                            }
-                            updated = true;
-                        }
-                    }
-
-                    if (updated) {
-                        rec.setTrackingUpdatedAt(java.time.LocalDateTime.now());
-                        recommendationMapper.updateById(rec);
-                        totalUpdated++;
-                    }
-                } catch (Exception e) {
-                    log.warn("[Recommendation] 追踪失败: code={} strategyId={} date={} error={}",
-                            rec.getStockCode(), sid, recDate, e.getMessage());
-                }
-            }
-        }
-
-        log.info("[Recommendation] 表现追踪完成: 更新{}条记录", totalUpdated);
-
-        // 追踪完成后，自动评估并更新黑名单（方案B）
-        for (Map<String, Object> combo : recentCombos) {
-            Object sidObj = combo.get("strategy_id");
-            Object dateObj = combo.get("recommend_date");
-            if (sidObj == null || dateObj == null) continue;
-            Long sid = ((Number) sidObj).longValue();
-            LocalDate recDate = ((java.sql.Date) dateObj).toLocalDate();
-            try {
-                stockBlacklistService.evaluateAndBlacklist(sid, recDate);
-            } catch (Exception e) {
-                log.warn("[Recommendation] 黑名单自动评估异常: strategyId={} date={} error={}", sid, recDate, e.getMessage());
-            }
-        }
-
-        // 追踪完成后，自动更新策略置信度（方案C）
-        // P1优化: 按 (strategyId, weightMode) 去重，分别计算每种模式的置信度
-        Set<String> seenStrategyModes = new HashSet<>();
-        for (Map<String, Object> combo : recentCombos) {
-            Object sidObj = combo.get("strategy_id");
-            if (sidObj == null) continue;
-            Long sid = ((Number) sidObj).longValue();
-            String mode = combo.get("weight_mode") != null ? combo.get("weight_mode").toString() : "ICW";
-            String key = sid + ":" + mode;
-            if (!seenStrategyModes.add(key)) continue; // 已处理过该策略+模式
-            try {
-                strategyConfidenceService.calculateAndSave(sid, mode);
-            } catch (Exception e) {
-                log.warn("[Recommendation] 置信度自动计算异常: strategyId={}, mode={} error={}", sid, mode, e.getMessage());
-            }
-        }
-
-        return totalUpdated;
+        return recommendationTracker.trackRecommendationPerformance();
     }
 
     /**
@@ -992,303 +847,27 @@ public class RecommendationService {
     }
 
     /**
-     * 多维市场环境识别 (Phase 2)
-     * 三个维度综合判断:
-     * 1. 指数趋势: 沪深300 MA20/MA60 排列
-     * 2. 波动率体制: ATR20 分位数 (高波动=Risk-off, 低波动=Risk-on)
-     * 3. 市场宽度: 涨跌家数比 (扩散好=Risk-on, 极端分化=Risk-off)
-     * 综合打分:
-     * BULL:   trend=BULL 且 (波动率低 或 宽度好) → 动量/成长友好
-     * BEAR:   trend=BEAR 且 (波动率高 或 宽度差) → 防御/价值优先
-     * SIDEWAYS: 其他情况
+     * 多维市场环境识别 (Phase 2)。
+     * <p>
+     * God Class 拆分 Phase 3：实现已整体迁移至 {@link MarketRegimeDetector}（方法体逐字搬运），
+     * 此处仅保留薄委托，调用方与行为均不变。
      */
     private RegimeInfo detectRegime(LocalDate date) {
-        LocalDate startDate = date.minusDays(Math.max(250, ATR_LOOKBACK_DAYS + 30));
-        List<MarketDailyBar> bars = marketDataService.getBarsInRange(SSE300_CODE, startDate, date);
-        RegimeInfo info = new RegimeInfo();
-
-        if (bars == null || bars.size() < 60) {
-            log.warn("[Recommendation] 沪深300数据不足({}条)，无法判断市场环境", bars != null ? bars.size() : 0);
-            info.regime = "SIDEWAYS";
-            return info;
-        }
-
-        List<Double> closes = bars.stream()
-                .map(b -> b.getClose().doubleValue())
-                .collect(Collectors.toList());
-
-        // ── 维度1: 指数趋势 ──
-        MarketDailyBar latestBar = bars.getLast();
-        info.indexClose = latestBar.getClose().doubleValue();
-        info.indexChangePct = latestBar.getPctChg() != null ? latestBar.getPctChg().doubleValue() : null;
-        double ma20 = RecommendationMath.avg(closes, 20);
-        double ma60 = RecommendationMath.avg(closes, 60);
-        info.indexMa20 = ma20;
-        info.indexMa60 = ma60;
-
-        // 引入0.5%缓冲带，避免单日噪声导致Regime频繁切换
-        double trendBuffer = info.indexClose * 0.005;
-        boolean bullishTrend = info.indexClose > ma20 + trendBuffer && ma20 > ma60 + trendBuffer;
-        boolean bearishTrend = info.indexClose < ma20 - trendBuffer && ma20 < ma60 - trendBuffer;
-
-        // ── 维度2: 波动率体制 (ATR20 分位数) ──
-        List<Double> highs = bars.stream().map(b -> b.getHigh().doubleValue()).collect(Collectors.toList());
-        List<Double> lows = bars.stream().map(b -> b.getLow().doubleValue()).collect(Collectors.toList());
-
-        // 当前 ATR20
-        double currentATR = calcATR(highs, lows, closes, ATR_PERIOD);
-        info.atrValue = currentATR;
-
-        // 历史 ATR20 序列（滚动计算）
-        List<Double> atrHistory = new ArrayList<>();
-        for (int i = 60; i <= closes.size() - ATR_PERIOD; i++) {
-            atrHistory.add(calcATR(
-                    highs.subList(0, i + ATR_PERIOD),
-                    lows.subList(0, i + ATR_PERIOD),
-                    closes.subList(0, i + ATR_PERIOD),
-                    ATR_PERIOD));
-        }
-        if (!atrHistory.isEmpty()) {
-            atrHistory.add(currentATR);
-            double atrPercentile = calcPercentile(currentATR, atrHistory);
-            info.atrPercentile = atrPercentile; // 0~1, 越高波动越大
-            info.volatilityRegime = atrPercentile > 0.7 ? "HIGH" : atrPercentile < 0.3 ? "LOW" : "MEDIUM";
-        }
-
-        // ── 维度3: 市场宽度 ──
-        try {
-            Map<String, Object> overview = clickHouseStockService.getOverviewStats(date);
-            if (overview != null) {
-                long riseCount = RecommendationMath.toLong(overview.get("riseCount"));
-                long fallCount = RecommendationMath.toLong(overview.get("fallCount"));
-                long totalCount = riseCount + fallCount + RecommendationMath.toLong(overview.get("flatCount"));
-                info.riseCount = riseCount;
-                info.fallCount = fallCount;
-                if (totalCount > 0) {
-                    info.breadthRatio = (double) riseCount / totalCount; // 0~1
-                    // 宽度判断: 涨家>60%=好, <40%=差
-                    info.breadthQuality = info.breadthRatio > 0.6 ? "GOOD"
-                            : info.breadthRatio < 0.4 ? "POOR" : "NEUTRAL";
-                }
-            }
-        } catch (Exception e) {
-            log.warn("[Recommendation] 市场宽度获取失败: {}", e.getMessage());
-        }
-
-        // ── 综合判断 ──
-        if (bullishTrend) {
-            // 牛市趋势中，高波动或差宽度降级为 SIDEWAYS
-            boolean confirmed = "LOW".equals(info.volatilityRegime) || "GOOD".equals(info.breadthQuality);
-            info.regime = confirmed ? "BULL" : "SIDEWAYS";
-        } else if (bearishTrend) {
-            // 熊市趋势中，高波动或差宽度确认 BEAR
-            boolean confirmed = "HIGH".equals(info.volatilityRegime) || "POOR".equals(info.breadthQuality);
-            info.regime = confirmed ? "BEAR" : "SIDEWAYS";
-        } else {
-            info.regime = "SIDEWAYS";
-        }
-
-        // ── 维度4: 大小盘风格 (P1-1) ──
-        // 用沪深300(大盘) vs 中证1000(小盘) 近20日涨幅差判断
-        String zz1000Code = "000852"; // 中证1000
-        List<MarketDailyBar> zz1000Bars = marketDataService.getBarsInRange(zz1000Code,
-                date.minusDays(30), date);
-        if (zz1000Bars != null && zz1000Bars.size() >= 20) {
-            double zz1000Return = calcRecentReturn(zz1000Bars, 20);
-            double hs300Return = calcRecentReturn(bars, 20);
-            info.sizeSpread = hs300Return - zz1000Return;
-            info.sizeRegime = info.sizeSpread > 0.02 ? "LARGE"
-                    : info.sizeSpread < -0.02 ? "SMALL" : "NEUTRAL";
-        }
-
-        // ── 维度5: 价值/成长风格 (P1-1) ──
-        // 用国证价值(399371) vs 国证成长(399370) 近20日涨幅差判断
-        String valueIdx = "399371", growthIdx = "399370";
-        List<MarketDailyBar> valueBars = marketDataService.getBarsInRange(valueIdx,
-                date.minusDays(30), date);
-        List<MarketDailyBar> growthBars = marketDataService.getBarsInRange(growthIdx,
-                date.minusDays(30), date);
-        if (valueBars != null && growthBars != null
-                && valueBars.size() >= 20 && growthBars.size() >= 20) {
-            double valueReturn = calcRecentReturn(valueBars, 20);
-            double growthReturn = calcRecentReturn(growthBars, 20);
-            info.valueGrowthSpread = valueReturn - growthReturn;
-            info.styleRegime = info.valueGrowthSpread > 0.02 ? "VALUE"
-                    : info.valueGrowthSpread < -0.02 ? "GROWTH" : "NEUTRAL";
-        }
-
-        // ── 维度6: 利率/流动性环境 (P2-2) ──
-        try {
-            List<Double> bondYields = loadBondYield10y(date, 25);
-            if (bondYields != null && bondYields.size() >= 20) {
-                double currentYield = bondYields.getLast();
-                double yieldMa20 = bondYields.stream()
-                        .mapToDouble(Double::doubleValue)
-                        .limit(Math.max(1, bondYields.size() - 1))
-                        .average().orElse(currentYield);
-                info.bondYield10y = currentYield;
-                info.bondYieldMa20 = yieldMa20;
-                // 利率趋势：当前值 vs MA20
-                double yieldDiff = currentYield - yieldMa20;
-                info.rateRegime = yieldDiff > 0.05 ? "UP"
-                        : yieldDiff < -0.05 ? "DOWN" : "NEUTRAL";
-            }
-            // 利差（10年-2年）
-            Double spread = loadYieldCurveSpread(date);
-            if (spread != null) {
-                info.yieldCurveSpread = spread;
-            }
-        } catch (Exception e) {
-            log.warn("[Recommendation] 利率环境检测失败: {}", e.getMessage());
-        }
-
-        log.info("[Recommendation] Regime详情: regime={} trend={} vol={}({}%) breadth={}({}%) ATR={} style={} size={} rate={}",
-                info.regime,
-                bullishTrend ? "BULL_TREND" : bearishTrend ? "BEAR_TREND" : "MIXED",
-                info.volatilityRegime, info.atrPercentile != null ? info.atrPercentile * 100 : 0,
-                info.breadthQuality, info.breadthRatio != null ? info.breadthRatio * 100 : 0,
-                info.atrValue,
-                info.styleRegime, info.sizeRegime, info.rateRegime);
-
-        // 落库 regime 到日历，供 ICW 按 regime 取 IC 历史（避免跨体制 IC 互相污染）
-        if (regimeCalendarService != null) {
-            try {
-                regimeCalendarService.upsert(date, info.regime);
-            } catch (Exception ignore) {
-                // 落库失败不影响主流程
-            }
-        }
-
-        return info;
+        return marketRegimeDetector.detectRegime(date);
     }
 
     /** 公开暴露 regime 名称，供 MarketRegimeCalendarService 的 detector 回调使用（无副作用） */
     public String detectRegimeName(LocalDate date) {
-        return detectRegime(date).regime;
+        return marketRegimeDetector.detectRegimeName(date);
     }
 
     /**
      * 优化④：判断最近 consecutiveDays 个交易日(含 date 当日)是否全部为 BEAR regime。
-     * 复用 detectRegime 逐日回看，全部 BEAR 才返回 true，用于触发暂停生成开关。
-     * 注意：回看依赖沪深300历史K线，若某日数据缺失 detectRegime 会返回 SIDEWAYS（保守不触发）。
-     *
-     * @param date            当前选股日期
-     * @param consecutiveDays 连续天数阈值（含当日）
-     * @return 连续全部 BEAR 则为 true
+     * <p>
+     * God Class 拆分 Phase 3：实现已迁移至 {@link MarketRegimeDetector}。
      */
     private boolean isConsecutiveBear(LocalDate date, int consecutiveDays) {
-        for (int k = 0; k < consecutiveDays; k++) {
-            LocalDate d = date.minusDays(k);
-            try {
-                RegimeInfo r = detectRegime(d);
-                if (!"BEAR".equals(r.regime)) {
-                    return false;
-                }
-            } catch (Exception e) {
-                // 单日 regime 计算异常，保守视为非 BEAR，不触发暂停
-                log.debug("[Recommendation] 连续BEAR回看 {} 失败: {}", d, e.getMessage());
-                return false;
-            }
-        }
-        return true;
-    }
-
-    /**
-     * 计算最近N日的收益率
-     */
-    private double calcRecentReturn(List<MarketDailyBar> bars, int days) {
-        if (bars.size() < days + 1) return 0;
-        double latest = bars.get(bars.size() - 1).getClose().doubleValue();
-        double past = bars.get(bars.size() - 1 - days).getClose().doubleValue();
-        return past > 0 ? (latest - past) / past : 0;
-    }
-
-    /**
-     * 加载10年期国债收益率历史序列（P2-2）
-     */
-    private List<Double> loadBondYield10y(LocalDate date, int days) {
-        try {
-            LocalDate startDate = date.minusDays(days + 10);
-            List<Double> yields = new ArrayList<>();
-            try (Connection conn = dataSource.getConnection();
-                 PreparedStatement ps = conn.prepareStatement(
-                         "SELECT yield_10y FROM macro_bond_yield WHERE trade_date <= ? AND trade_date >= ? ORDER BY trade_date")) {
-                ps.setString(1, date.toString());
-                ps.setString(2, startDate.toString());
-                try (ResultSet rs = ps.executeQuery()) {
-                    while (rs.next()) {
-                        double y = rs.getDouble("yield_10y");
-                        if (y > 0) yields.add(y);
-                    }
-                }
-            }
-            return yields;
-        } catch (Exception e) {
-            log.debug("[Recommendation] 加载国债收益率失败: {}", e.getMessage());
-            return null;
-        }
-    }
-
-    /**
-     * 加载最新利差（10年-2年）（P2-2）
-     */
-    private Double loadYieldCurveSpread(LocalDate date) {
-        try {
-            try (Connection conn = dataSource.getConnection();
-                 PreparedStatement ps = conn.prepareStatement(
-                         "SELECT yield_spread FROM macro_bond_yield WHERE trade_date <= ? ORDER BY trade_date DESC LIMIT 1")) {
-                ps.setString(1, date.toString());
-                try (ResultSet rs = ps.executeQuery()) {
-                    if (rs.next()) {
-                        double spread = rs.getDouble("yield_spread");
-                        return spread != 0 ? spread : null;
-                    }
-                }
-            }
-            return null;
-        } catch (Exception e) {
-            log.debug("[Recommendation] 加载利差失败: {}", e.getMessage());
-            return null;
-        }
-    }
-
-    /**
-     * 计算 ATR (Average True Range)
-     */
-    private double calcATR(List<Double> highs, List<Double> lows, List<Double> closes, int period) {
-        int size = closes.size();
-        if (size < period + 1) return 0;
-
-        double atr;
-        // 初始值用第一个真实波幅
-        double prevClose = closes.get(size - period - 1);
-        atr = Math.max(
-                Math.abs(highs.get(size - period) - lows.get(size - period)),
-                Math.max(
-                        Math.abs(highs.get(size - period) - prevClose),
-                        Math.abs(lows.get(size - period) - prevClose)));
-
-        for (int i = size - period + 1; i < size; i++) {
-            double prevC = closes.get(i - 1);
-            double tr = Math.max(
-                    Math.abs(highs.get(i) - lows.get(i)),
-                    Math.max(
-                            Math.abs(highs.get(i) - prevC),
-                            Math.abs(lows.get(i) - prevC)));
-            atr = (atr * (period - 1) + tr) / period; // EMA 平滑
-        }
-        return atr;
-    }
-
-    /**
-     * 计算当前值在历史序列中的分位数
-     *
-     * @return 0~1, 越大说明当前值相对历史越高
-     */
-    private double calcPercentile(double value, List<Double> history) {
-        if (history == null || history.isEmpty()) return 0.5;
-        long countBelow = history.stream().filter(v -> v < value).count();
-        return (double) countBelow / history.size();
+        return marketRegimeDetector.isConsecutiveBear(date, consecutiveDays);
     }
 
     /**
@@ -1833,7 +1412,7 @@ public class RecommendationService {
             boolean bearishTrend = latestClose < ma20 - buffer && ma20 < ma60 - buffer;
 
             // ── 维度2: ATR 波动率 ──
-            double atr20 = calcATR(highs, lows, closes, 20);
+            double atr20 = RecommendationMath.calcATR(highs, lows, closes, 20);
             // 计算 ATR 相对值: ATR / close * 100 (%)
             double atrPct = atr20 / latestClose * 100;
             String volRegime;
@@ -1889,154 +1468,21 @@ public class RecommendationService {
     }
 
     /**
-     * 计算未来N日收益率 (Phase 3.2)
+     * 计算推荐买入价（MA20 动态支撑位）。
      * <p>
-     * 通过 MarketDataService 获取目标日和基准日收盘价
-     * stockCode 格式可能是 "600027.SH" 或纯代码
-     */
-    private Double calcForwardReturn(String stockCode, LocalDate baseDate, int forwardDays) {
-        try {
-            // 先取 baseDate 前后足够多的行情，找到 baseDate 对应的交易日及之后第 forwardDays 个交易日
-            LocalDate searchStart = baseDate.minusDays(5); // 确保包含baseDate当天
-            LocalDate searchEnd = baseDate.plusDays(forwardDays * 2L + 10); // 多取一些确保有足够交易日
-            List<MarketDailyBar> bars = marketDataService.getBarsInRange(stockCode, searchStart, searchEnd);
-            if (bars == null || bars.isEmpty()) return null;
-
-            // 找到 >= baseDate 的第一个交易日（作为基准日）
-            int baseIdx = -1;
-            for (int i = 0; i < bars.size(); i++) {
-                if (!bars.get(i).getTradeDate().isBefore(baseDate)) {
-                    baseIdx = i;
-                    break;
-                }
-            }
-            if (baseIdx < 0) return null;
-
-            // 找到基准日之后第 forwardDays 个交易日
-            int targetIdx = baseIdx + forwardDays;
-            if (targetIdx >= bars.size()) return null; // 数据不足，无法计算
-
-            double baseClose = bars.get(baseIdx).getClose().doubleValue();
-            double targetClose = bars.get(targetIdx).getClose().doubleValue();
-            if (baseClose <= 0 || targetClose <= 0) return null;
-
-            // 前复权调整：用累积复权因子消除除权除息的价格跳空
-            LocalDate targetDate = bars.get(targetIdx).getTradeDate();
-            double baseAdj = dividendService.getCumulativeAdjFactor(stockCode, baseDate).doubleValue();
-            double targetAdj = dividendService.getCumulativeAdjFactor(stockCode, targetDate).doubleValue();
-            if (baseAdj <= 0 || targetAdj <= 0) {
-                // 复权因子异常，回退到不复权计算
-                return Math.round((targetClose / baseClose - 1.0) * 10000.0) / 100.0;
-            }
-
-            double adjBaseClose = baseClose * baseAdj;
-            double adjTargetClose = targetClose * targetAdj;
-            return Math.round((adjTargetClose / adjBaseClose - 1.0) * 10000.0) / 100.0; // 百分比，保留2位
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    /**
-     * 计算推荐买入价
-     * <p>
-     * 基于MA20作为动态支撑位：
-     * - 若MA20可获取且 < closePrice，返回MA20（回踩支撑买入）
-     * - 若MA20可获取且 >= closePrice，返回closePrice×0.95（保守折扣）
-     * - 若MA20无法获取，返回closePrice×0.95
+     * God Class 拆分 Phase 3：实现已迁移至 {@link PricePlanCalculator}。
      */
     private Double calcSuggestedBuyPrice(String stockCode, LocalDate date) {
-        try {
-            LocalDate startDate = date.minusDays(40); // 多取一些保证20个交易日
-            List<MarketDailyBar> bars = marketDataService.getBarsInRange(stockCode, startDate, date);
-            if (bars == null || bars.isEmpty()) {
-                log.warn("[calcSuggestedBuyPrice] {} getBarsInRange返回空, date={}, startDate={}", stockCode, date, startDate);
-                return null;
-            }
-
-            // 计算MA20：取最近20根K线的收盘均值
-            int count = Math.min(20, bars.size());
-            double sum = 0;
-            for (int i = bars.size() - count; i < bars.size(); i++) {
-                sum += bars.get(i).getClose().doubleValue();
-            }
-            double ma20 = sum / count;
-            double closePrice = bars.get(bars.size() - 1).getClose().doubleValue();
-
-            // MA20作为支撑位：如果MA20低于现价，推荐在MA20附近买入
-            if (ma20 < closePrice) {
-                return Math.round(ma20 * 100.0) / 100.0;
-            }
-            // 否则保守给5%折扣
-            return Math.round(closePrice * 0.95 * 100.0) / 100.0;
-        } catch (Exception e) {
-            return null;
-        }
+        return pricePlanCalculator.calcSuggestedBuyPrice(stockCode, date);
     }
 
     /**
-     * 计算价格计划：止损价、止盈价、目标价、建议仓位 (#5 + #9)
+     * 计算价格计划：止损价、止盈价、目标价、建议仓位 (#5 + #9)。
      * <p>
-     * 止损价：基于 ATR 2倍宽度，回退 buyPrice×0.92，下限 buyPrice×0.88
-     * 止盈价：盈亏比 R:R = 1:2，即 buyPrice + 2 × (buyPrice - stopLoss)
-     * 目标价：盈亏比 R:R = 1:3，即 buyPrice + 3 × (buyPrice - stopLoss)
-     * 建议仓位：riskScore(0-15) + liquidityScore(0-10) 映射，范围 2.1%~10%
-     *   - basePct = 0.03 + (riskScore/15) × 0.07  → 3%~10%（风险越低仓位越高）
-     *   - liquidityFactor = 0.7 + 0.3 × (liquidityScore/10)  → 0.7~1.0（流动性补偿）
-     *   - finalPct = min(0.10, basePct × liquidityFactor)
+     * God Class 拆分 Phase 3：实现已迁移至 {@link PricePlanCalculator}。
      */
     private void calcPricePlan(StockRecommendation rec, AnalysisOverview overview) {
-        Double buyPrice = rec.getSuggestedBuyPrice();
-        if (buyPrice == null || buyPrice <= 0) return;
-
-        Double atr = (overview != null) ? overview.getAtr() : null;
-
-        // ── 止损价 ──
-        double stopLoss;
-        if (atr != null && atr > 0) {
-            stopLoss = buyPrice - 2.0 * atr;
-        } else {
-            stopLoss = buyPrice * 0.92; // 回退8%止损
-        }
-        // 止损下限：不低于买入价的-12%（避免异常ATR导致止损过远）
-        stopLoss = Math.max(stopLoss, buyPrice * 0.88);
-        rec.setSuggestedStopLoss(Math.round(stopLoss * 100.0) / 100.0);
-
-        // ── 止盈价 (R:R = 1:2) ──
-        double risk = buyPrice - stopLoss;
-        double takeProfit = buyPrice + 2.0 * risk;
-        rec.setSuggestedTakeProfit(Math.round(takeProfit * 100.0) / 100.0);
-
-        // ── 目标价 (R:R = 1:3) ──
-        double targetPrice = buyPrice + 3.0 * risk;
-        rec.setSuggestedTargetPrice(Math.round(targetPrice * 100.0) / 100.0);
-
-        // ── 建议仓位 ──
-        Integer riskScore = rec.getRiskScore();
-        Integer liquidityScore = rec.getLiquidityScore();
-        int rs = (riskScore != null) ? riskScore : 7;       // 默认中等风险
-        int ls = (liquidityScore != null) ? liquidityScore : 5; // 默认中等流动性
-        double basePct = 0.03 + (rs / 15.0) * 0.07;          // 3%~10%
-        double liquidityFactor = 0.7 + 0.3 * (ls / 10.0);    // 0.7~1.0
-        double positionPct = Math.min(0.10, basePct * liquidityFactor);
-
-        // 优化②：熊市降仓（BEAR regime 下仓位 ×0.6，降低下行暴露）
-        if ("BEAR".equals(rec.getRegime())) {
-            positionPct *= BEAR_POSITION_FACTOR;
-        }
-
-        // 优化③：高 beta 限仓（688 科创板 / 300 创业板 高波动 → 仓位 ×0.7 且硬上限 5%）
-        String code = rec.getStockCode();
-        if (code != null && (code.startsWith("688") || code.startsWith("300"))) {
-            positionPct *= HIGH_BETA_POSITION_FACTOR;
-            positionPct = Math.min(positionPct, HIGH_BETA_POSITION_CAP);
-        }
-
-        rec.setSuggestedPositionPct(Math.round(positionPct * 10000.0) / 10000.0);
-
-        log.debug("[PricePlan] code={} buy={} stop={} takeProfit={} target={} pos={}%",
-                rec.getStockCode(), buyPrice, stopLoss, takeProfit, targetPrice,
-                String.format("%.1f", positionPct * 100));
+        pricePlanCalculator.calcPricePlan(rec, overview);
     }
 
     /**
@@ -2052,65 +1498,27 @@ public class RecommendationService {
 
     /**
      * 多因子选股（支持高级选项覆盖）
+     * <p>
+     * God Class 拆分 Phase 3：选股实现已迁移至 {@link CandidateScreener}；因子配置解析
+     * （getFactorConfig / applyDynamicFactorWeights）仍属本类职责，故以 Supplier 形式传入，
+     * 由 CandidateScreener 仅在非 PATTERN 分支求值，保持原有短路顺序不变。
      *
-     * @param strategyId 策略ID（必须）
+     * @param strategyId      策略ID（必须）
      * @param advancedOptions 高级选项（中性化/正交化/极值/标准化/均线），null 则使用默认
      */
     private ScreenResult screenStocks(LocalDate date, Long strategyId,
                                       boolean useDynamicIc, String effectiveWeightMode,
                                       List<FactorDiagnostic> diagnostics,
                                       AdvancedScreenOptions advancedOptions) {
-        // 检查是否为形态驱动策略
-        StrategyDefinition strategy = strategyDefinitionMapper.selectById(strategyId);
-        if (strategy != null && strategy.getStrategyType() == StrategyDefinition.StrategyType.PATTERN) {
-            return screenByPattern(date, strategyId);
-        }
-
-        // 从策略因子配置获取因子列表
-        List<ScreenRequest.FactorWeight> factors = getFactorConfig(strategyId);
-
-        // 动态调整因子权重（基于IC），同时收集诊断信息
-        if (useDynamicIc) {
-            factors = applyDynamicFactorWeights(factors, date, effectiveWeightMode, diagnostics);
-        }
-
-        ScreenRequest req = new ScreenRequest();
-        req.setScreenDate(date);
-        req.setFactors(factors);
-        req.setStrategyId(strategyId);
-        req.setTopN(SCREEN_TOP_N);
-        req.setDirection("LONG");
-        req.setExcludeSt(true);
-        // 智能推荐使用IC加权或等权
-        String screenWeightMode = switch (effectiveWeightMode) {
-            case "EQW", "STATIC" -> "EQUAL";
-            default -> "IC";
-        };
-        req.setWeightMode(screenWeightMode);
-
-        // 高级选项覆盖（默认行为不变）
-        if (advancedOptions != null) {
-            if (advancedOptions.neutralizationMethod != null) {
-                req.setNeutralizationMethod(advancedOptions.neutralizationMethod);
+        return candidateScreener.screenStocks(date, strategyId, effectiveWeightMode, advancedOptions, () -> {
+            // 从策略因子配置获取因子列表
+            List<ScreenRequest.FactorWeight> factors = getFactorConfig(strategyId);
+            // 动态调整因子权重（基于IC），同时收集诊断信息
+            if (useDynamicIc) {
+                factors = applyDynamicFactorWeights(factors, date, effectiveWeightMode, diagnostics);
             }
-            if (advancedOptions.orthogonalizationMethod != null) {
-                req.setOrthogonalizationMethod(advancedOptions.orthogonalizationMethod);
-            }
-            if (advancedOptions.globalOutlierMethod != null) {
-                req.setGlobalOutlierMethod(advancedOptions.globalOutlierMethod);
-            }
-            if (advancedOptions.globalNormalizeMethod != null) {
-                req.setGlobalNormalizeMethod(advancedOptions.globalNormalizeMethod);
-            }
-            if (advancedOptions.maPositionFilter != null) {
-                req.setMaPositionFilter(advancedOptions.maPositionFilter);
-            }
-            log.info("[Recommendation] advanced options applied: neutralization={}, orthogonal={}, outlier={}, normalize={}, maFilter={}",
-                    advancedOptions.neutralizationMethod, advancedOptions.orthogonalizationMethod,
-                    advancedOptions.globalOutlierMethod, advancedOptions.globalNormalizeMethod,
-                    advancedOptions.maPositionFilter != null);
-        }
-        return stockScreenService.screen(req);
+            return factors;
+        });
     }
 
     /**
@@ -2128,79 +1536,6 @@ public class RecommendationService {
         private String globalNormalizeMethod;
         /** 均线过滤（多头排列） */
         private ScreenRequest.MaPositionFilter maPositionFilter;
-    }
-
-    /**
-     * 形态驱动选股：使用 PatternDetector 检测全市场股票形态
-     * 从 filterConfigJson 读取 patternType（可选，不指定则检测全部形态）
-     */
-    private ScreenResult screenByPattern(LocalDate date, Long strategyId) {
-        log.info("[Recommendation] 形态驱动选股开始, strategyId={}", strategyId);
-        StrategyDefinition strategy = strategyDefinitionMapper.selectById(strategyId);
-
-        // 解析 filterConfigJson 获取形态类型和股票池
-        String patternTypeFilter = null;
-        if (strategy.getFilterConfigJson() != null) {
-            try {
-                Map<String, Object> filter = objectMapper.readValue(strategy.getFilterConfigJson(), Map.class);
-                patternTypeFilter = (String) filter.get("patternType");
-            } catch (Exception e) {
-                log.warn("[Recommendation] 解析filterConfigJson失败: {}", e.getMessage());
-            }
-        }
-
-        // 获取候选股票池（排除ST、退市）
-        List<StockInfo> allStocks = stockInfoMapper.selectList(
-                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<StockInfo>()
-                        .isNull(StockInfo::getDelistDate)
-                        .eq(StockInfo::getIsSt, 0));
-        log.info("[Recommendation] 形态选股候选池: {} 只", allStocks.size());
-
-        // 批量获取全市场K线数据（一次ClickHouse查询）
-        Map<String, double[][]> klineMap = analysisService.batchFetchKlineData(120);
-        log.info("[Recommendation] 批量K线数据: {} 只股票", klineMap.size());
-
-        List<ScreenResult.StockScore> results = new ArrayList<>();
-        for (StockInfo stock : allStocks) {
-            try {
-                double[][] ohlcv = klineMap.get(stock.getCode());
-                if (ohlcv == null || ohlcv[3].length < 30) continue;
-
-                    PatternDetector.PatternResult strongest = PatternDetector.getStrongestPattern(
-                            ohlcv[1], ohlcv[2], ohlcv[0], ohlcv[3], ohlcv[4]);
-                    if (strongest == null) continue;
-
-                    // 如果指定了形态类型，只保留匹配的
-                    if (patternTypeFilter != null && !patternTypeFilter.isEmpty()
-                            && !strongest.getPatternType().name().equals(patternTypeFilter)) continue;
-
-                    Map<String, Double> patternInfo = new HashMap<>();
-                    patternInfo.put(strongest.getPatternType().name(), strongest.getScore());
-                    ScreenResult.StockScore ss = ScreenResult.StockScore.builder()
-                            .symbol(stock.getCode())
-                            .name(stock.getName())
-                            .compositeScore(strongest.getScore() / 100.0)
-                            .factorValues(patternInfo)
-                            .build();
-                    results.add(ss);
-            } catch (Exception e) {
-                // 单只股票失败跳过
-            }
-        }
-        log.info("[Recommendation] 形态选股扫描完成: 命中 {} 只", results.size());
-
-        // 按形态得分排序取 TopN
-        results.sort((a, b) -> Double.compare(b.getCompositeScore(), a.getCompositeScore()));
-        int topN = Math.min(SCREEN_TOP_N, results.size());
-        results = results.subList(0, topN);
-
-        ScreenResult result = ScreenResult.builder()
-                .screenDate(date != null ? date : LocalDate.now())
-                .stocks(results)
-                .candidateCount(results.size())
-                .build();
-        log.info("[Recommendation] 形态选股完成: 命中 {} 只, 取 Top {}", results.size(), topN);
-        return result;
     }
 
     /**
@@ -3133,42 +2468,6 @@ public class RecommendationService {
         public double originalWeight;
         public double adjustedWeight;
         public String reason;       // 简要中文说明
-    }
-
-    /**
-     * 市场环境信息 (Phase 2 多维)
-     */
-    static class RegimeInfo {
-        String regime; // BULL, BEAR, SIDEWAYS
-
-        // 指数趋势
-        double indexClose;
-        double indexMa20;
-        double indexMa60;
-        Double indexChangePct; // 沪深300当日涨跌幅%
-
-        // 波动率
-        double atrValue;
-        Double atrPercentile;  // 0~1
-        String volatilityRegime; // LOW, MEDIUM, HIGH
-
-        // 市场宽度
-        Long riseCount;
-        Long fallCount;
-        Double breadthRatio;    // 0~1
-        String breadthQuality;  // GOOD, NEUTRAL, POOR
-
-        // 风格维度 (P1-1)
-        String styleRegime;      // GROWTH, VALUE, NEUTRAL
-        String sizeRegime;       // LARGE, SMALL, NEUTRAL
-        Double sizeSpread;       // 大盘-小盘相对强度
-        Double valueGrowthSpread; // 价值-成长相对强度
-
-        // 利率/流动性环境 (P2-2)
-        String rateRegime;       // UP, DOWN, NEUTRAL
-        Double bondYield10y;     // 10年期国债收益率(%)
-        Double bondYieldMa20;     // 10年国债20日均线(%)
-        Double yieldCurveSpread;  // 10年-2年利差(%)
     }
 
     /**

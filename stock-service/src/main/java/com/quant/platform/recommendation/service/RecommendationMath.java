@@ -87,4 +87,43 @@ public final class RecommendationMath {
         }
         return sum / n;
     }
+
+    /**
+     * 计算 ATR (Average True Range)
+     */
+    public static double calcATR(List<Double> highs, List<Double> lows, List<Double> closes, int period) {
+        int size = closes.size();
+        if (size < period + 1) return 0;
+
+        double atr;
+        // 初始值用第一个真实波幅
+        double prevClose = closes.get(size - period - 1);
+        atr = Math.max(
+                Math.abs(highs.get(size - period) - lows.get(size - period)),
+                Math.max(
+                        Math.abs(highs.get(size - period) - prevClose),
+                        Math.abs(lows.get(size - period) - prevClose)));
+
+        for (int i = size - period + 1; i < size; i++) {
+            double prevC = closes.get(i - 1);
+            double tr = Math.max(
+                    Math.abs(highs.get(i) - lows.get(i)),
+                    Math.max(
+                            Math.abs(highs.get(i) - prevC),
+                            Math.abs(lows.get(i) - prevC)));
+            atr = (atr * (period - 1) + tr) / period; // EMA 平滑
+        }
+        return atr;
+    }
+
+    /**
+     * 计算当前值在历史序列中的分位数
+     *
+     * @return 0~1, 越大说明当前值相对历史越高
+     */
+    public static double calcPercentile(double value, List<Double> history) {
+        if (history == null || history.isEmpty()) return 0.5;
+        long countBelow = history.stream().filter(v -> v < value).count();
+        return (double) countBelow / history.size();
+    }
 }
