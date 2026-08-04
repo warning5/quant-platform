@@ -33,6 +33,8 @@ import com.quant.platform.common.enums.JobStatus;
 @RequiredArgsConstructor
 public class PaperTradingService {
 
+    private final PaperAccountService accountService;
+
     private final PaperPriceService priceService;
 
     private final PaperTradingMapper paperTradingMapper;
@@ -281,75 +283,16 @@ public class PaperTradingService {
 
                 // ── 信息比率（IR）= 滚动N日超额收益均值 / 超额收益标准差 ──
                 // 传入 indexRows（全量基准数据）和 basePrice，用于逐日超额收益计算
-                calculateInformationRatio(result, navs, indexRows, basePrice);
+                accountService.calculateInformationRatio(result, navs, indexRows, basePrice);
             } catch (Exception e) {
                 log.debug("基准指数净值查询失败: paperId={}, error={}", paperId, e.getMessage());
             }
         }
 
         // 刷新/追加快照当日净值（非交易时段也能看到最新净值）
-        refreshTodayNav(pt);
+        accountService.refreshTodayNav(pt);
 
         return result;
-    }
-
-    /**
-     * 刷新/追加当日净值快照，确保 getDetail 返回时 navHistory 包含今日最新数据
-     */
-    private void refreshTodayNav(PaperTrading pt) {
-        if (clickHouseJdbcTemplate == null) return;
-        try {
-            // 获取最新交易日作为"今日"（非自然日）
-            List<String> dates = clickHouseJdbcTemplate.query(
-                "SELECT max(trade_date) as d FROM stock.stock_daily FINAL",
-                (rs, rowNum) -> rs.getString("d"));
-            if (dates.isEmpty() || dates.getFirst() == null) return;
-            LocalDate today = LocalDate.parse(dates.getFirst());
-
-            // 前一交易日 NAV（用于计算 dailyReturn）
-            PaperNav prevNav = paperNavMapper.selectOne(
-                new LambdaQueryWrapper<PaperNav>()
-                    .eq(PaperNav::getPaperId, pt.getId())
-                    .ne(PaperNav::getNavDate, today)
-                    .orderByDesc(PaperNav::getNavDate)
-                    .last("LIMIT 1"));
-
-            BigDecimal prevTotalAssets = prevNav != null
-                ? prevNav.getTotalAssets() : pt.getInitialCapital();
-
-            BigDecimal dailyReturn = prevTotalAssets.compareTo(BigDecimal.ZERO) > 0
-                ? pt.getTotalAssets().subtract(prevTotalAssets)
-                    .divide(prevTotalAssets, 6, RoundingMode.HALF_UP)
-                : BigDecimal.ZERO;
-
-            BigDecimal cumulativeReturn = pt.getInitialCapital().compareTo(BigDecimal.ZERO) > 0
-                ? pt.getTotalAssets().subtract(pt.getInitialCapital())
-                    .divide(pt.getInitialCapital(), 6, RoundingMode.HALF_UP)
-                : BigDecimal.ZERO;
-
-            PaperNav todayNav = paperNavMapper.selectOne(
-                new LambdaQueryWrapper<PaperNav>()
-                    .eq(PaperNav::getPaperId, pt.getId())
-                    .eq(PaperNav::getNavDate, today));
-
-            if (todayNav != null) {
-                todayNav.setTotalAssets(pt.getTotalAssets());
-                todayNav.setDailyReturn(dailyReturn);
-                todayNav.setCumulativeReturn(cumulativeReturn);
-                paperNavMapper.updateById(todayNav);
-            } else {
-                PaperNav nav = PaperNav.builder()
-                    .paperId(pt.getId())
-                    .navDate(today)
-                    .totalAssets(pt.getTotalAssets())
-                    .dailyReturn(dailyReturn)
-                    .cumulativeReturn(cumulativeReturn)
-                    .build();
-                paperNavMapper.insert(nav);
-            }
-        } catch (Exception e) {
-            log.warn("刷新当日净值快照失败: paperId={}, error={}", pt.getId(), e.getMessage());
-        }
     }
 
     /**
@@ -1025,7 +968,7 @@ public class PaperTradingService {
             paperSignalMapper.updateById(signal);
             saveExecutionQuality(signal, price, shares);
 
-            updateTotalAssets(pt);
+            accountService.updateTotalAssets(pt);
             // 注意：不在此处调用 appendNavRecord，日收益需在收盘后统一按收盘价计算
             return pos;
 
@@ -1074,7 +1017,7 @@ public class PaperTradingService {
             paperSignalMapper.updateById(signal);
             saveExecutionQuality(signal, price, pos.getShares());
 
-            updateTotalAssets(pt);
+            accountService.updateTotalAssets(pt);
             // 注意：不在此处调用 appendNavRecord，日收益需在收盘后统一按收盘价计算
             return pos;
         }
@@ -1220,73 +1163,11 @@ public class PaperTradingService {
         }
 
         paperTradingMapper.updateById(pt);
-        updateTotalAssets(pt);
+        accountService.updateTotalAssets(pt);
         // 注意：不在此处调用 appendNavRecord，日收益需在收盘后统一按收盘价计算
     }
 
     // ─── 内部方法 ──────────────────────────────────────────────────────
-
-    private void updateTotalAssets(PaperTrading pt) {
-        List<PaperPosition> positions = paperPositionMapper.selectList(
-            new LambdaQueryWrapper<PaperPosition>().eq(PaperPosition::getPaperId, pt.getId()));
-        BigDecimal posValue = positions.stream()
-            .map(p -> p.getMarketValue() != null ? p.getMarketValue() : BigDecimal.ZERO)
-            .reduce(BigDecimal.ZERO, BigDecimal::add);
-        pt.setTotalAssets(pt.getCurrentCapital().add(posValue));
-        paperTradingMapper.updateById(pt);
-    }
-
-    /**
-     * 追加/更新当日 NAV 记录（收盘后统一调用，基于收盘价计算日收益）
-     * 同一天多次交易时，更新当日已存在的记录，不重复插入
-     */
-    public void appendNavRecord(Long paperId) {
-        PaperTrading pt = paperTradingMapper.selectById(paperId);
-        LocalDate today = LocalDate.now();
-
-        // 尝试获取今日已有 NAV 记录
-        PaperNav todayNav = paperNavMapper.selectOne(
-            new LambdaQueryWrapper<PaperNav>()
-                .eq(PaperNav::getPaperId, paperId)
-                .eq(PaperNav::getNavDate, today)
-                .last("LIMIT 1"));
-
-        // 获取前一交易日 NAV（取最近一条非今日的记录）
-        PaperNav prevNav = paperNavMapper.selectOne(
-            new LambdaQueryWrapper<PaperNav>()
-                .eq(PaperNav::getPaperId, paperId)
-                .ne(PaperNav::getNavDate, today)
-                .orderByDesc(PaperNav::getNavDate)
-                .last("LIMIT 1"));
-
-        BigDecimal prevTotalAssets = prevNav != null ? prevNav.getTotalAssets() : pt.getInitialCapital();
-        BigDecimal dailyReturn = prevTotalAssets.compareTo(BigDecimal.ZERO) > 0
-            ? pt.getTotalAssets().subtract(prevTotalAssets)
-                .divide(prevTotalAssets, 6, RoundingMode.HALF_UP)
-            : BigDecimal.ZERO;
-        BigDecimal cumulativeReturn = pt.getInitialCapital().compareTo(BigDecimal.ZERO) > 0
-            ? pt.getTotalAssets().subtract(pt.getInitialCapital())
-                .divide(pt.getInitialCapital(), 6, RoundingMode.HALF_UP)
-            : BigDecimal.ZERO;
-
-        if (todayNav != null) {
-            // 更新今日已有记录
-            todayNav.setTotalAssets(pt.getTotalAssets());
-            todayNav.setDailyReturn(dailyReturn);
-            todayNav.setCumulativeReturn(cumulativeReturn);
-            paperNavMapper.updateById(todayNav);
-        } else {
-            // 插入新记录
-            PaperNav nav = PaperNav.builder()
-                .paperId(paperId)
-                .navDate(today)
-                .totalAssets(pt.getTotalAssets())
-                .dailyReturn(dailyReturn)
-                .cumulativeReturn(cumulativeReturn)
-                .build();
-            paperNavMapper.insert(nav);
-        }
-    }
 
     /**
      * 判断是否可以执行信号（严格：必须是今天或未来）
@@ -1389,59 +1270,6 @@ public class PaperTradingService {
 
         log.info("风控配置已更新: paperId={}", paperId);
         return cfg;
-    }
-
-    /** 追加入金 */
-    public PaperCashFlow deposit(Long paperId, BigDecimal amount, String note) {
-        PaperTrading pt = paperTradingMapper.selectById(paperId);
-        if (pt == null) throw new IllegalArgumentException("模拟盘不存在: " + paperId);
-        if (amount.compareTo(BigDecimal.ZERO) <= 0) throw new IllegalArgumentException("入金金额必须大于0");
-
-        pt.setInitialCapital(pt.getInitialCapital().add(amount));
-        pt.setCurrentCapital(pt.getCurrentCapital().add(amount));
-        paperTradingMapper.updateById(pt);
-
-        PaperCashFlow flow = PaperCashFlow.builder()
-            .paperId(paperId)
-            .flowDate(LocalDate.now())
-            .amount(amount)
-            .flowType("DEPOSIT")
-            .note(note != null ? note : "追加入金")
-            .build();
-        paperCashFlowMapper.insert(flow);
-        log.info("入金: paperId={} amount={}", paperId, amount);
-        return flow;
-    }
-
-    /** 提取出金 */
-    public PaperCashFlow withdraw(Long paperId, BigDecimal amount, String note) {
-        PaperTrading pt = paperTradingMapper.selectById(paperId);
-        if (pt == null) throw new IllegalArgumentException("模拟盘不存在: " + paperId);
-        if (amount.compareTo(BigDecimal.ZERO) <= 0) throw new IllegalArgumentException("出金金额必须大于0");
-        if (amount.compareTo(pt.getCurrentCapital()) > 0) throw new IllegalArgumentException("出金金额超过可用资金");
-
-        pt.setInitialCapital(pt.getInitialCapital().subtract(amount));
-        pt.setCurrentCapital(pt.getCurrentCapital().subtract(amount));
-        paperTradingMapper.updateById(pt);
-
-        PaperCashFlow flow = PaperCashFlow.builder()
-            .paperId(paperId)
-            .flowDate(LocalDate.now())
-            .amount(amount.negate())
-            .flowType("WITHDRAW")
-            .note(note != null ? note : "提取出金")
-            .build();
-        paperCashFlowMapper.insert(flow);
-        log.info("出金: paperId={} amount={}", paperId, amount);
-        return flow;
-    }
-
-    /** 查询现金流记录 */
-    public List<PaperCashFlow> getCashFlows(Long paperId) {
-        return paperCashFlowMapper.selectList(
-            new LambdaQueryWrapper<PaperCashFlow>()
-                .eq(PaperCashFlow::getPaperId, paperId)
-                .orderByDesc(PaperCashFlow::getFlowDate));
     }
 
     private String getStrategyFactorConfig(Long strategyId) {
@@ -1553,99 +1381,6 @@ public class PaperTradingService {
         } catch (Exception e) {
             log.debug("凯利参数计算失败: paperId={}, error={}", paperId, e.getMessage());
             return null;
-        }
-    }
-
-    /**
-     * 计算信息比率（Information Ratio）
-     * IR = 超额收益均值 / 超额收益标准差，滚动N日窗口
-     * 超额收益 = 模拟盘累计收益率 - 基准累计收益率（归一化：基准净值/基准起点净值 - 1）
-     *
-     * @param result    放入 IR 计算结果的 Map
-     * @param navs      模拟盘净值历史
-     * @param indexRows 全量基准指数数据（含 close_price）
-     * @param basePrice 基准归一化起点价格（navStartDate前一日收盘价）
-     */
-    @SuppressWarnings("unchecked")
-    private void calculateInformationRatio(
-            Map<String, Object> result,
-            List<PaperNav> navs,
-            List<Map<String, Object>> indexRows,
-            BigDecimal basePrice) {
-
-        if (navs == null || navs.isEmpty()
-                || indexRows == null || indexRows.isEmpty()
-                || basePrice == null || basePrice.compareTo(BigDecimal.ZERO) <= 0) {
-            return;
-        }
-
-        // 构建日期 -> 归一化基准净值的映射（全量 indexRows）
-        Map<String, Double> benchNormMap = new java.util.HashMap<>();
-        for (Map<String, Object> row : indexRows) {
-            String date = String.valueOf(row.get("date"));
-            BigDecimal close = (BigDecimal) row.get("close");
-            if (date != null && close != null) {
-                double nav = close.divide(basePrice, 6, RoundingMode.HALF_UP).doubleValue();
-                benchNormMap.put(date, nav);
-            }
-        }
-
-        // 计算每日超额收益 = 模拟盘累计收益 - (基准净值 - 1)
-        List<Double> excessList = new java.util.ArrayList<>();
-        List<Map<String, Object>> excessDailyList = new java.util.ArrayList<>();
-        for (PaperNav nav : navs) {
-            String date = nav.getNavDate().toString();
-            if (!benchNormMap.containsKey(date)) continue;
-            double benchReturn = benchNormMap.get(date) - 1.0;
-            double paperReturn = nav.getCumulativeReturn() != null
-                ? nav.getCumulativeReturn().doubleValue() : 0.0;
-            double excess = paperReturn - benchReturn;
-            excessList.add(excess);
-
-            Map<String, Object> entry = new java.util.LinkedHashMap<>();
-            entry.put("date", date);
-            entry.put("excessReturn", Math.round(excess * 10000.0) / 10000.0);
-            excessDailyList.add(entry);
-        }
-
-        if (excessList.size() < 3) {
-            log.info("[信息比率] 数据点不足({}<3)，跳过计算", excessList.size());
-            return;
-        }
-
-        // 滚动窗口 IR（窗口 = min(20, 数据长度)）
-        int windowDays = Math.min(20, excessList.size());
-        List<Double> irList = new java.util.ArrayList<>();
-        for (int i = windowDays - 1; i < excessList.size(); i++) {
-            int start = i - windowDays + 1;
-            double mean = 0;
-            for (int j = start; j <= i; j++) mean += excessList.get(j);
-            mean /= windowDays;
-            double variance = 0;
-            for (int j = start; j <= i; j++) {
-                double d = excessList.get(j) - mean;
-                variance += d * d;
-            }
-            variance /= windowDays;
-            double std = Math.sqrt(Math.max(0, variance));
-            if (std > 1e-10) {
-                irList.add(mean / std);
-            }
-        }
-
-        if (!irList.isEmpty()) {
-            double latestIR = irList.get(irList.size() - 1);
-            double avgIR = irList.stream().mapToDouble(Double::doubleValue).sum() / irList.size();
-            result.put("informationRatio", Math.round(latestIR * 10000.0) / 10000.0);
-            result.put("informationRatioAnnualized", Math.round(latestIR * Math.sqrt(252) * 10000.0) / 10000.0);
-            result.put("informationRatioAvg", Math.round(avgIR * 10000.0) / 10000.0);
-            result.put("informationRatioAvgAnnualized", Math.round(avgIR * Math.sqrt(252) * 10000.0) / 10000.0);
-            result.put("irWindowDays", windowDays);
-            result.put("irExcessReturns", excessDailyList);
-            log.info("[信息比率] 最新{}-日IR={}, 年化={}, 均值IR={}, 数据点={}",
-                windowDays, latestIR, latestIR * Math.sqrt(252), avgIR, excessList.size());
-        } else {
-            log.info("[信息比率] 滚动IR全为NaN（标准差≈0），数据点={}", excessList.size());
         }
     }
 
@@ -1885,4 +1620,21 @@ public class PaperTradingService {
                 position != null ? position.getId() : "null");
         return position;
     }
+
+    public void appendNavRecord(Long paperId) {
+        accountService.appendNavRecord(paperId);
+    }
+
+    public PaperCashFlow deposit(Long paperId, BigDecimal amount, String note) {
+        return accountService.deposit(paperId, amount, note);
+    }
+
+    public PaperCashFlow withdraw(Long paperId, BigDecimal amount, String note) {
+        return accountService.withdraw(paperId, amount, note);
+    }
+
+    public List<PaperCashFlow> getCashFlows(Long paperId) {
+        return accountService.getCashFlows(paperId);
+    }
+
 }
