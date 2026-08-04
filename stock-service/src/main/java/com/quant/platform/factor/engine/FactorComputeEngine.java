@@ -44,21 +44,20 @@ import com.quant.platform.common.enums.JobStatus;
 @RequiredArgsConstructor
 public class FactorComputeEngine {
 
+    private final FactorProgressService progressService;
+
+
     private final MarketDataService marketDataService;
     private final FactorValueMapper factorValueMapper;
     private final ClickHouseFactorValueService clickHouseFactorValueService;
     private final FactorTestReportMapper testReportMapper;
     private final ScriptedFactorEngine scriptedEngine;
-    private final SimpMessagingTemplate messagingTemplate;
     private final ObjectMapper objectMapper;
     private final StockFinancialIndicatorMapper financialIndicatorMapper;
     private final com.quant.platform.factor.service.FactorMetaCacheService factorMetaCache;
     private final com.quant.platform.stock.mapper.StockInfoMapper stockInfoMapper;
     private final Map<String, FactorCalculator> builtinCalculators = new HashMap<>();
     private final Map<String, FinancialFactorCalculator> financialCalculators = new HashMap<>();
-    // 跟踪正在计算的因子代码（供前端查询当前运行状态）
-    private final java.util.Set<String> runningFactors =
-            java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
     org.springframework.jdbc.core.JdbcTemplate clickHouseJdbcTemplate;
     /**
      * 写入阶段起始时间（用于计算速度）
@@ -186,7 +185,7 @@ public class FactorComputeEngine {
     @Async("backtestTaskExecutor")
     public void computeFactor(FactorDefinition factor, LocalDate startDate, LocalDate endDate, List<String> symbols) {
         self.computeFactorSync(factor, startDate, endDate, symbols);
-        sendProgress(factor.getFactorCode(), JobStatus.DONE.name(), 100, "因子计算完成");
+        progressService.sendProgress(factor.getFactorCode(), JobStatus.DONE.name(), 100, "因子计算完成");
     }
 
     /**
@@ -196,17 +195,17 @@ public class FactorComputeEngine {
     public void computeFactorWithBars(FactorDefinition factor, LocalDate startDate, LocalDate endDate,
                                       List<String> symbols, Map<String, List<MarketDailyBar>> preloadedBars) {
         String code = factor.getFactorCode();
-        runningFactors.add(code);
+        progressService.markRunning(code);
         try {
             if (isFinancialFactor(code)) {
                 computeFinancialFactorSync(code, startDate, endDate, symbols);
-                sendProgress(code, JobStatus.DONE.name(), 100, "财务因子计算完成");
+                progressService.sendProgress(code, JobStatus.DONE.name(), 100, "财务因子计算完成");
                 return;
             }
             self.doComputeFactorSync(factor, startDate, endDate, symbols, preloadedBars);
-            sendProgress(code, JobStatus.DONE.name(), 100, "因子计算完成");
+            progressService.sendProgress(code, JobStatus.DONE.name(), 100, "因子计算完成");
         } finally {
-            runningFactors.remove(code);
+            progressService.unmarkRunning(code);
         }
     }
 
@@ -216,7 +215,7 @@ public class FactorComputeEngine {
      */
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
     public void computeFactorSync(FactorDefinition factor, LocalDate startDate, LocalDate endDate, List<String> symbols) {
-        runningFactors.add(factor.getFactorCode());
+        progressService.markRunning(factor.getFactorCode());
         try {
             if (isFinancialFactor(factor.getFactorCode())) {
                 computeFinancialFactorSync(factor.getFactorCode(), startDate, endDate, symbols);
@@ -224,7 +223,7 @@ public class FactorComputeEngine {
             }
             // 自行预加载
             LocalDate histStart = startDate.minusDays(400);
-            sendProgress(factor.getFactorCode(), "COMPUTING", 0, String.format("预加载K线数据 %s ~ %s ...", histStart, endDate));
+            progressService.sendProgress(factor.getFactorCode(), "COMPUTING", 0, String.format("预加载K线数据 %s ~ %s ...", histStart, endDate));
             long preloadStart = System.currentTimeMillis();
             Map<String, List<MarketDailyBar>> allBarsData = marketDataService.getBarsBatch(symbols, histStart, endDate, false);
             long preloadMs = System.currentTimeMillis() - preloadStart;
@@ -233,7 +232,7 @@ public class FactorComputeEngine {
 
             doComputeFactorSync(factor, startDate, endDate, symbols, allBarsData);
         } finally {
-            runningFactors.remove(factor.getFactorCode());
+            progressService.unmarkRunning(factor.getFactorCode());
         }
     }
 
@@ -269,13 +268,13 @@ public class FactorComputeEngine {
             int totalStocks = symbols.size();
             long totalTasks = (long) totalDates * totalStocks;
 
-            sendProgress(factor.getFactorCode(), "COMPUTING", 0, String.format("开始计算 [%s]，共 %d 交易日 × %d 只股票 = %,d 条", factor.getFactorCode(), totalDates, totalStocks, totalTasks));
+            progressService.sendProgress(factor.getFactorCode(), "COMPUTING", 0, String.format("开始计算 [%s]，共 %d 交易日 × %d 只股票 = %,d 条", factor.getFactorCode(), totalDates, totalStocks, totalTasks));
 
             // ── 并行参数 ──
-            int maxInternalThreads = Math.max(1, 30 / Math.max(runningFactors.size(), 1) - 2);
+            int maxInternalThreads = Math.max(1, 30 / Math.max(progressService.runningCount(), 1) - 2);
             int threads = Math.min(Math.max(Runtime.getRuntime().availableProcessors(), 2), Math.min(8, maxInternalThreads));
             ExecutorService pool = Executors.newFixedThreadPool(threads);
-            log.info("[{}] [sync] Using {} threads (runningFactors={})", factor.getFactorCode(), threads, runningFactors.size());
+            log.info("[{}] [sync] Using {} threads (runningFactors={})", factor.getFactorCode(), threads, progressService.runningCount());
 
             AtomicInteger datesCompleted = new AtomicInteger(0);
             AtomicLong startTimeMs = new AtomicLong(System.currentTimeMillis());
@@ -327,7 +326,7 @@ public class FactorComputeEngine {
                     double speed = elapsed > 0 ? (double) datesCompleted.get() / elapsed * 1000 : 0;
                     int remaining = totalDates - datesCompleted.get();
                     long etaSec = speed > 0 ? (long) (remaining / speed) : 0;
-                    sendProgress(factor.getFactorCode(), "COMPUTING", pct,
+                    progressService.sendProgress(factor.getFactorCode(), "COMPUTING", pct,
                             String.format("计算中 %d/%d 交易日 (%d%%) | 已处理 %,d 行 | 已写入 %,d 行 | 速度 %.1f 日/s | 剩余约 %s",
                                     datesCompleted.get(), totalDates, pct,
                                     rowsCollected.get(),
@@ -346,16 +345,16 @@ public class FactorComputeEngine {
             long totalMs = System.currentTimeMillis() - collectStart;
             log.info("[{}] 完成: {} 个交易日, 已写入 {} 行, 总耗时 {}ms (收集+写入流水线)", factor.getFactorCode(), totalDates, rowsWritten.get(), totalMs);
 
-            sendProgress(factor.getFactorCode(), "COMPUTING", 90,
+            progressService.sendProgress(factor.getFactorCode(), "COMPUTING", 90,
                     String.format("全部写入完成，共 %,d 行，总耗时 %.1f 秒。开始归一化 %d 个交易日...",
                             rowsWritten.get(), totalMs / 1000.0, totalDates));
             normalizeFactorValues(factor.getFactorCode(), tradingDates);
-            sendProgress(factor.getFactorCode(), JobStatus.DONE.name(), 100, String.format("归一化完成，共处理 %d 个交易日，写入 %,d 条因子值", totalDates, rowsWritten.get()));
+            progressService.sendProgress(factor.getFactorCode(), JobStatus.DONE.name(), 100, String.format("归一化完成，共处理 %d 个交易日，写入 %,d 条因子值", totalDates, rowsWritten.get()));
 
             log.info("[{}] computation done: {} dates, {} rows", factor.getFactorCode(), totalDates, rowsWritten.get());
         } catch (Exception e) {
             log.error("[{}] 全量计算异常: {}", factor.getFactorCode(), e.getMessage(), e);
-            sendProgress(factor.getFactorCode(), "ERROR", -1, "全量计算异常: " + e.getMessage());
+            progressService.sendProgress(factor.getFactorCode(), "ERROR", -1, "全量计算异常: " + e.getMessage());
             throw e;
         }
     }
@@ -393,7 +392,7 @@ public class FactorComputeEngine {
     @Async("backtestTaskExecutor")
     public void computeFactorIncremental(FactorDefinition factor, LocalDate startDate, LocalDate endDate, List<String> symbols) {
         String code = factor.getFactorCode();
-        runningFactors.add(code);
+        progressService.markRunning(code);
 
         try {
             // 财务因子走专门的增量计算逻辑（基于财报报告期，而非交易日）
@@ -408,7 +407,7 @@ public class FactorComputeEngine {
             List<LocalDate> newDates = tradingDates.stream().filter(d -> !existingDates.contains(d)).toList();
 
             if (newDates.isEmpty()) {
-                sendProgress(code, JobStatus.DONE.name(), 100, "增量计算：无新日期需要计算（已有数据到 " + (existingDates.isEmpty() ? "无" : Collections.max(existingDates)) + "）");
+                progressService.sendProgress(code, JobStatus.DONE.name(), 100, "增量计算：无新日期需要计算（已有数据到 " + (existingDates.isEmpty() ? "无" : Collections.max(existingDates)) + "）");
                 return;
             }
 
@@ -416,7 +415,7 @@ public class FactorComputeEngine {
 
             // 自行预加载K线
             LocalDate histStart = newDates.getFirst().minusDays(400);
-            sendProgress(code, "COMPUTING", 0, String.format("[增量] 预加载K线数据 %s ~ %s ...", histStart, endDate));
+            progressService.sendProgress(code, "COMPUTING", 0, String.format("[增量] 预加载K线数据 %s ~ %s ...", histStart, endDate));
             long preloadStart = System.currentTimeMillis();
             Map<String, List<MarketDailyBar>> allBarsData = marketDataService.getBarsBatch(symbols, histStart, endDate, false);
             long preloadMs = System.currentTimeMillis() - preloadStart;
@@ -424,7 +423,7 @@ public class FactorComputeEngine {
 
             doComputeIncremental(factor, newDates, existingDates, symbols, allBarsData);
         } finally {
-            runningFactors.remove(code);
+            progressService.unmarkRunning(code);
         }
     }
 
@@ -436,7 +435,7 @@ public class FactorComputeEngine {
     public void computeFactorIncrementalWithBars(FactorDefinition factor, LocalDate startDate, LocalDate endDate,
                                                  List<String> symbols, Map<String, List<MarketDailyBar>> preloadedBars) {
         String code = factor.getFactorCode();
-        runningFactors.add(code);
+        progressService.markRunning(code);
 
         try {
             // 财务因子不走预加载路径，回退到自行处理
@@ -451,16 +450,16 @@ public class FactorComputeEngine {
             List<LocalDate> newDates = tradingDates.stream().filter(d -> !existingDates.contains(d)).toList();
 
             if (newDates.isEmpty()) {
-                sendProgress(code, JobStatus.DONE.name(), 100, "增量计算：无新日期需要计算（已有数据到 " + (existingDates.isEmpty() ? "无" : Collections.max(existingDates)) + "）");
+                progressService.sendProgress(code, JobStatus.DONE.name(), 100, "增量计算：无新日期需要计算（已有数据到 " + (existingDates.isEmpty() ? "无" : Collections.max(existingDates)) + "）");
                 return;
             }
 
             log.info("[{}] incremental[共享预加载]: total {} dates, {} new (skipping {} existing)", code, tradingDates.size(), newDates.size(), existingDates.size());
-            sendProgress(code, "COMPUTING", 0, "[增量] 使用共享K线数据，跳过预加载");
+            progressService.sendProgress(code, "COMPUTING", 0, "[增量] 使用共享K线数据，跳过预加载");
 
             doComputeIncremental(factor, newDates, existingDates, symbols, preloadedBars);
         } finally {
-            runningFactors.remove(code);
+            progressService.unmarkRunning(code);
         }
     }
 
@@ -532,12 +531,12 @@ public class FactorComputeEngine {
 
             // ── 并行参数 ──
             // 预加载后不再需要DB连接，可以更激进地使用线程
-            int maxInternalThreads = Math.max(1, 30 / Math.max(runningFactors.size(), 1) - 2);
+            int maxInternalThreads = Math.max(1, 30 / Math.max(progressService.runningCount(), 1) - 2);
             int threads = Math.min(Math.max(Runtime.getRuntime().availableProcessors(), 2), Math.min(8, maxInternalThreads));
             ExecutorService pool = Executors.newFixedThreadPool(threads);
-            log.info("[{}] [增量] Using {} threads (runningFactors={}, newDates={})", code, threads, runningFactors.size(), totalDates);
+            log.info("[{}] [增量] Using {} threads (runningFactors={}, newDates={})", code, threads, progressService.runningCount(), totalDates);
 
-            sendProgress(code, "COMPUTING", 1, String.format("[增量] 开始计算 [%s]，新增 %d 交易日 × %d 只股票 = %,d 条（跳过 %d 已有）", code, totalDates, totalStocks, totalTasks, existingDates.size()));
+            progressService.sendProgress(code, "COMPUTING", 1, String.format("[增量] 开始计算 [%s]，新增 %d 交易日 × %d 只股票 = %,d 条（跳过 %d 已有）", code, totalDates, totalStocks, totalTasks, existingDates.size()));
 
             AtomicInteger datesCompleted = new AtomicInteger(0);
             AtomicLong startTimeMs = new AtomicLong(System.currentTimeMillis());
@@ -594,7 +593,7 @@ public class FactorComputeEngine {
                     double speed = elapsed > 0 ? (double) datesCompleted.get() / elapsed * 1000 : 0;
                     int remaining = totalDates - datesCompleted.get();
                     long etaSec = speed > 0 ? (long) (remaining / speed) : 0;
-                    sendProgress(code, "COMPUTING", pct,
+                    progressService.sendProgress(code, "COMPUTING", pct,
                             String.format("[增量] 计算中 %d/%d 交易日 (%d%%) | 已处理 %,d 行 | 已写入 %,d 行 | 速度 %.1f 日/s | 剩余约 %s",
                                     datesCompleted.get(), totalDates, pct,
                                     rowsCollected.get(),
@@ -614,18 +613,18 @@ public class FactorComputeEngine {
             long totalMs = System.currentTimeMillis() - collectStart;
             log.info("[{}] [增量] 完成: {} 个交易日, 已写入 {} 行, 总耗时 {}ms (收集+写入流水线)", code, totalDates, rowsWritten.get(), totalMs);
 
-            sendProgress(code, "COMPUTING", 90,
+            progressService.sendProgress(code, "COMPUTING", 90,
                     String.format("[增量] 全部写入完成，共 %,d 行，总耗时 %.1f 秒。开始归一化 %d 个新日期...",
                             rowsWritten.get(), totalMs / 1000.0, newDates.size()));
 
             // ── 归一化（只对新日期做） ──
             normalizeFactorValues(code, newDates);
-            sendProgress(code, JobStatus.DONE.name(), 100, String.format("[增量] 全部完成，新增 %,d 条", rowsWritten.get()));
+            progressService.sendProgress(code, JobStatus.DONE.name(), 100, String.format("[增量] 全部完成，新增 %,d 条", rowsWritten.get()));
 
             log.info("[{}] incremental done: {} new dates, {} rows", code, totalDates, rowsWritten.get());
         } catch (Exception e) {
             log.error("[{}] 增量计算异常: {}", code, e.getMessage(), e);
-            sendProgress(code, "ERROR", -1, "增量计算异常: " + e.getMessage());
+            progressService.sendProgress(code, "ERROR", -1, "增量计算异常: " + e.getMessage());
             throw e;
         }
     }
@@ -657,7 +656,7 @@ public class FactorComputeEngine {
                 .toList();
 
         if (reportDates.isEmpty()) {
-            sendProgress(factorCode, JobStatus.DONE.name(), 100, "财务因子计算：无财报数据（" + startDate + " ~ " + endDate + "）");
+            progressService.sendProgress(factorCode, JobStatus.DONE.name(), 100, "财务因子计算：无财报数据（" + startDate + " ~ " + endDate + "）");
             return;
         }
 
@@ -680,7 +679,7 @@ public class FactorComputeEngine {
                 .toList();
 
         if (newDates.isEmpty()) {
-            sendProgress(factorCode, JobStatus.DONE.name(), 100, "财务因子：无新报告期需要计算（已有数据到 " + (existingDatesFinal.isEmpty() ? "无" : Collections.max(existingDatesFinal)) + "）");
+            progressService.sendProgress(factorCode, JobStatus.DONE.name(), 100, "财务因子：无新报告期需要计算（已有数据到 " + (existingDatesFinal.isEmpty() ? "无" : Collections.max(existingDatesFinal)) + "）");
             return;
         }
 
@@ -691,7 +690,7 @@ public class FactorComputeEngine {
         int totalStocks = symbols.size();
         long totalTasks = (long) totalDates * totalStocks;
 
-        sendProgress(factorCode, "COMPUTING", 0, String.format("[财务] 开始计算 [%s]，新增 %d 个报告期 × %d 只股票 = %,d 条", factorCode, totalDates, totalStocks, totalTasks));
+        progressService.sendProgress(factorCode, "COMPUTING", 0, String.format("[财务] 开始计算 [%s]，新增 %d 个报告期 × %d 只股票 = %,d 条", factorCode, totalDates, totalStocks, totalTasks));
 
         AtomicLong rowsInserted = new AtomicLong(0);
         long startTimeMs = System.currentTimeMillis();
@@ -720,13 +719,13 @@ public class FactorComputeEngine {
             double speed = elapsed > 0 ? (double) (i + 1) / elapsed * 1000 : 0;
             int remaining = totalDates - i - 1;
             long etaSec = speed > 0 ? (long) (remaining / speed) : 0;
-            sendProgress(factorCode, "COMPUTING", pct, String.format("[财务] %d/%d 报告期 (%d%%) | 已写 %,d 行 | 剩余约 %s", i + 1, totalDates, pct, rowsInserted.get(), formatEta(etaSec)), etaSec);
+            progressService.sendProgress(factorCode, "COMPUTING", pct, String.format("[财务] %d/%d 报告期 (%d%%) | 已写 %,d 行 | 剩余约 %s", i + 1, totalDates, pct, rowsInserted.get(), formatEta(etaSec)), etaSec);
         }
 
         // 归一化
-        sendProgress(factorCode, "COMPUTING", 91, String.format("财务因子写入完成，%,d 条。开始归一化...", rowsInserted.get()));
+        progressService.sendProgress(factorCode, "COMPUTING", 91, String.format("财务因子写入完成，%,d 条。开始归一化...", rowsInserted.get()));
         normalizeFactorValues(factorCode, newDates);
-        sendProgress(factorCode, JobStatus.DONE.name(), 100, String.format("[财务] 全部完成，新增 %,d 条", rowsInserted.get()));
+        progressService.sendProgress(factorCode, JobStatus.DONE.name(), 100, String.format("[财务] 全部完成，新增 %,d 条", rowsInserted.get()));
         log.info("[{}] financial incremental done: {} new dates, {} rows", factorCode, totalDates, rowsInserted.get());
     }
 
@@ -837,7 +836,7 @@ public class FactorComputeEngine {
                 .toList();
 
         if (reportDates.isEmpty()) {
-            sendProgress(factorCode, JobStatus.DONE.name(), 100, "财务因子：无财报数据（" + startDate + " ~ " + endDate + "）");
+            progressService.sendProgress(factorCode, JobStatus.DONE.name(), 100, "财务因子：无财报数据（" + startDate + " ~ " + endDate + "）");
             return;
         }
 
@@ -848,7 +847,7 @@ public class FactorComputeEngine {
         // 不再 ALTER TABLE DELETE，直接 INSERT 覆盖（ReplacingMergeTree 按 update_time 去重）。
         log.info("[财务全量] 跳过删除，直接覆盖写入: factor={}, {}~{}", factorCode, startDate, endDate);
 
-        sendProgress(factorCode, "COMPUTING", 0, String.format("[财务全量] 开始计算 [%s]，共 %d 个报告期 × %d 只股票 = %,d 条", factorCode, totalDates, totalStocks, totalTasks));
+        progressService.sendProgress(factorCode, "COMPUTING", 0, String.format("[财务全量] 开始计算 [%s]，共 %d 个报告期 × %d 只股票 = %,d 条", factorCode, totalDates, totalStocks, totalTasks));
 
         AtomicLong rowsInserted = new AtomicLong(0);
         long startTimeMs = System.currentTimeMillis();
@@ -877,13 +876,13 @@ public class FactorComputeEngine {
             double speed = elapsed > 0 ? (double) (i + 1) / elapsed * 1000 : 0;
             int remaining = totalDates - i - 1;
             long etaSec = speed > 0 ? (long) (remaining / speed) : 0;
-            sendProgress(factorCode, "COMPUTING", pct, String.format("[财务全量] %d/%d 报告期 (%d%%) | 已写 %,d 行 | 剩余约 %s", i + 1, totalDates, pct, rowsInserted.get(), formatEta(etaSec)), etaSec);
+            progressService.sendProgress(factorCode, "COMPUTING", pct, String.format("[财务全量] %d/%d 报告期 (%d%%) | 已写 %,d 行 | 剩余约 %s", i + 1, totalDates, pct, rowsInserted.get(), formatEta(etaSec)), etaSec);
         }
 
         // 归一化
-        sendProgress(factorCode, "COMPUTING", 91, String.format("财务因子写入完成，%,d 条。开始归一化...", rowsInserted.get()));
+        progressService.sendProgress(factorCode, "COMPUTING", 91, String.format("财务因子写入完成，%,d 条。开始归一化...", rowsInserted.get()));
         normalizeFactorValues(factorCode, reportDates);
-        sendProgress(factorCode, JobStatus.DONE.name(), 100, String.format("[财务全量] 全部完成，共 %,d 条", rowsInserted.get()));
+        progressService.sendProgress(factorCode, JobStatus.DONE.name(), 100, String.format("[财务全量] 全部完成，共 %,d 条", rowsInserted.get()));
         log.info("[{}] financial sync done: {} dates, {} rows", factorCode, totalDates, rowsInserted.get());
     }
 
@@ -1383,7 +1382,7 @@ public class FactorComputeEngine {
                 value.setCreatedAt(now);
             }
         }
-        sendProgress(factorCode, "COMPUTING", 65,
+        progressService.sendProgress(factorCode, "COMPUTING", 65,
                 String.format("开始写入 ClickHouse（HTTP）%,d 行...", values.size()), null);
         long start = System.currentTimeMillis();
         try {
@@ -1395,7 +1394,7 @@ public class FactorComputeEngine {
         }
         long ms = System.currentTimeMillis() - start;
         double speed = ms > 0 ? (double) values.size() / ms * 1000 : 0;
-        sendProgress(factorCode, "COMPUTING", 90,
+        progressService.sendProgress(factorCode, "COMPUTING", 90,
                 String.format("写入完成，%,d 行，耗时 %.1f 秒，速度 %.0f 行/s", values.size(), ms / 1000.0, speed), null);
     }
 
@@ -1443,7 +1442,7 @@ public class FactorComputeEngine {
                     }
                 }
 
-                sendProgress(factorCode, "COMPUTING", 99, String.format(
+                progressService.sendProgress(factorCode, "COMPUTING", 99, String.format(
                         "归一化完成 | %d 日期 × 均值 %d 只/日 ≈ %,d 行 | 耗时 %.1f 秒",
                         dates.size(), rowCount > 0 && !dates.isEmpty() ? rowCount / dates.size() : 0,
                         rowCount, elapsed / 1000.0));
@@ -1521,7 +1520,7 @@ public class FactorComputeEngine {
                 int remaining = totalDates - di - 1;
                 long etaSec = speed > 0 ? (long) (remaining / speed) : 0;
                 int pct = 91 + (int) ((double) (di + 1) / totalDates * 9);
-                sendProgress(factorCode, "COMPUTING", Math.min(pct, 99), String.format("归一化 %d/%d (%s) | 本日 %d 只 | 速度 %.1f 日/s | 剩余约 %s", di + 1, totalDates, date, n, speed, formatEta(etaSec)), etaSec);
+                progressService.sendProgress(factorCode, "COMPUTING", Math.min(pct, 99), String.format("归一化 %d/%d (%s) | 本日 %d 只 | 速度 %.1f 日/s | 剩余约 %s", di + 1, totalDates, date, n, speed, formatEta(etaSec)), etaSec);
             }
         }
     }
@@ -1580,36 +1579,36 @@ public class FactorComputeEngine {
             }
             if (valueCount == 0) {
                 log.info("Factor [{}] has no values, computing before test...", factor.getFactorCode());
-                sendProgress(factor.getFactorCode(), "TEST_START", 1, "因子值不存在，正在自动计算...");
+                progressService.sendProgress(factor.getFactorCode(), "TEST_START", 1, "因子值不存在，正在自动计算...");
                 try {
                     List<String> symbols = marketDataService.getAllSymbols();
                     self.computeFactorSync(factor, report.getStartDate(), report.getEndDate(), symbols);
-                    sendProgress(factor.getFactorCode(), "TEST_START", 5, "因子值计算完成，开始检测");
+                    progressService.sendProgress(factor.getFactorCode(), "TEST_START", 5, "因子值计算完成，开始检测");
                 } catch (Exception e) {
                     log.error("Auto compute failed for [{}]", factor.getFactorCode(), e);
                     report.setStatus(FactorTestReport.TestStatus.FAILED);
                     report.setErrorMessage("因子值自动计算失败: " + e.getMessage());
                     testReportMapper.updateById(report);
-                    sendProgress(factor.getFactorCode(), JobStatus.FAILED.name(), 0, "因子值计算失败: " + e.getMessage());
+                    progressService.sendProgress(factor.getFactorCode(), JobStatus.FAILED.name(), 0, "因子值计算失败: " + e.getMessage());
                     return;
                 }
             }
 
-            sendProgress(factor.getFactorCode(), "TEST_START", 6, "开始因子检测");
+            progressService.sendProgress(factor.getFactorCode(), "TEST_START", 6, "开始因子检测");
 
             List<LocalDate> allDates = marketDataService.getTradingDates(report.getStartDate(), report.getEndDate());
             if (allDates.size() < 2) throw new RuntimeException("测试日期不足");
-            sendProgress(factor.getFactorCode(), "TEST_START", 3, "获取交易日期完成，共" + allDates.size() + "个交易日");
+            progressService.sendProgress(factor.getFactorCode(), "TEST_START", 3, "获取交易日期完成，共" + allDates.size() + "个交易日");
 
             // ── 调仓频率过滤：仅保留符合调仓周期的日期 ──────────────
             List<LocalDate> dates = filterByRebalanceFreq(allDates, report.getRebalanceFreq());
             if (dates.size() < 2) throw new RuntimeException("调仓周期过滤后日期不足");
-            sendProgress(factor.getFactorCode(), "TEST_START", 5, "调仓频率过滤完成，有效交易日" + dates.size() + "个");
+            progressService.sendProgress(factor.getFactorCode(), "TEST_START", 5, "调仓频率过滤完成，有效交易日" + dates.size() + "个");
 
             // ── 股票池白名单 ────────────────────────────────────────
             Set<String> poolSymbols = getStockPoolSymbols(report.getStockPool());
             String poolDesc = poolSymbols.isEmpty() ? "全A（不限制）" : poolSymbols.size() + "只股票";
-            sendProgress(factor.getFactorCode(), "TEST_START", 6, "股票池加载完成，" + poolDesc);
+            progressService.sendProgress(factor.getFactorCode(), "TEST_START", 6, "股票池加载完成，" + poolDesc);
 
             final int GROUP_COUNT = 5;
 
@@ -1626,7 +1625,7 @@ public class FactorComputeEngine {
             }
             long datesWithFactor = dates.stream().filter(validDates::contains).count();
             long datesWithoutFactor = dates.size() - datesWithFactor;
-            sendProgress(factor.getFactorCode(), "TEST_START", 7, String.format(
+            progressService.sendProgress(factor.getFactorCode(), "TEST_START", 7, String.format(
                     "因子值日期扫描完成：有数据 %d 天，无数据 %d 天（将跳过）", datesWithFactor, datesWithoutFactor));
 
             // 如果有效日期不足，提前结束
@@ -1643,7 +1642,7 @@ public class FactorComputeEngine {
                 report.setGroupCount(GROUP_COUNT);
                 report.setErrorMessage("检测区间内无因子值数据，无法进行检测");
                 testReportMapper.updateById(report);
-                sendProgress(factor.getFactorCode(), JobStatus.COMPLETED.name(), 100,
+                progressService.sendProgress(factor.getFactorCode(), JobStatus.COMPLETED.name(), 100,
                         "检测完成：检测区间内无因子值数据，请先计算因子值或调整检测日期范围");
                 return;
             }
@@ -1901,17 +1900,17 @@ public class FactorComputeEngine {
                     detail.append(String.format(" G%d:%.2f%%", g + 1, todayGroupRet[g] * 100));
                 }
                 detail.append(String.format(" | 基准:%.2f%%", benchmarkRet * 100));
-                sendProgress(factor.getFactorCode(), "TESTING", pct, detail.toString());
+                progressService.sendProgress(factor.getFactorCode(), "TESTING", pct, detail.toString());
             }
 
             // ── 跳过日期汇总日志 ──
             if (skippedNoData > 0 || skippedNoReturn > 0) {
-                sendProgress(factor.getFactorCode(), "TESTING", 93, String.format(
+                progressService.sendProgress(factor.getFactorCode(), "TESTING", 93, String.format(
                         "跳过汇总：无因子值 %d 天 | 无下期行情 %d 天 | 有效计算 %d 天",
                         skippedNoData, skippedNoReturn, icList.size()));
             }
 
-            sendProgress(factor.getFactorCode(), "TESTING", 95, "回测计算完成，开始计算统计指标");
+            progressService.sendProgress(factor.getFactorCode(), "TESTING", 95, "回测计算完成，开始计算统计指标");
 
             // ── 因子换手率计算（#6 新增）────────────────────────────
             double avgTurnover = 0;
@@ -1964,7 +1963,7 @@ public class FactorComputeEngine {
                     factor.getFactorCode(), avgTurnover, autoCorr1, turnoverCount);
 
             // ── 汇总：IC 统计 ────────────────────────────────────
-            sendProgress(factor.getFactorCode(), "TESTING", 96, "计算IC统计指标");
+            progressService.sendProgress(factor.getFactorCode(), "TESTING", 96, "计算IC统计指标");
             if (!icList.isEmpty()) {
                 double icMean = avg(icList);
                 double icStdV = std(icList);
@@ -1981,7 +1980,7 @@ public class FactorComputeEngine {
                 double pValue = tStatToPValue(tStat, n - 1);
                 report.setIcTStat(bd(tStat));
                 report.setIcPValue(bd(pValue));
-                sendProgress(factor.getFactorCode(), "TESTING", 96, String.format("IC统计完成，样本数%d | IC均值:%.4f | ICIR:%.4f | 正IC率:%.1f%% | t统计:%.2f | p值:%.4f", icList.size(), icMean, icir, (double) posC / icList.size() * 100, tStat, pValue));
+                progressService.sendProgress(factor.getFactorCode(), "TESTING", 96, String.format("IC统计完成，样本数%d | IC均值:%.4f | ICIR:%.4f | 正IC率:%.1f%% | t统计:%.2f | p值:%.4f", icList.size(), icMean, icir, (double) posC / icList.size() * 100, tStat, pValue));
             }
 
             if (!rankIcList.isEmpty()) {
@@ -2026,11 +2025,11 @@ public class FactorComputeEngine {
                 double winRate = (double) winDays / topGroupDailyList.size();
                 report.setActiveVolatility(bd(activeVol));
                 report.setWinRateVsBenchmark(bd(winRate));
-                sendProgress(factor.getFactorCode(), "TESTING", 97, "主动指标计算完成");
+                progressService.sendProgress(factor.getFactorCode(), "TESTING", 97, "主动指标计算完成");
             }
 
             // ── 汇总：最佳夏普 + 各组详细指标 ──────────────────────
-            sendProgress(factor.getFactorCode(), "TESTING", 97, "计算分组收益和夏普比");
+            progressService.sendProgress(factor.getFactorCode(), "TESTING", 97, "计算分组收益和夏普比");
             double bestSharpe = Double.NEGATIVE_INFINITY;
             List<Map<String, Object>> groupReturnData = new ArrayList<>();
             for (int g = 0; g < GROUP_COUNT; g++) {
@@ -2085,7 +2084,7 @@ public class FactorComputeEngine {
                 groupSummary.append(String.format(" G%d:%.2f%%", g + 1, annualReturns[g] * 100));
             }
             groupSummary.append(String.format(" | 多空:%.2f%% | 单调性:%.4f", (annualReturns[GROUP_COUNT - 1] - annualReturns[0]) * 100, report.getMonotonicity() != null ? report.getMonotonicity().doubleValue() : 0));
-            sendProgress(factor.getFactorCode(), "TESTING", 97, groupSummary.toString());
+            progressService.sendProgress(factor.getFactorCode(), "TESTING", 97, groupSummary.toString());
 
             report.setIcSeriesJson(objectMapper.writeValueAsString(icSeriesData));
             report.setGroupReturnsJson(objectMapper.writeValueAsString(groupReturnData));
@@ -2093,7 +2092,7 @@ public class FactorComputeEngine {
             report.setLongShortNavJson(objectMapper.writeValueAsString(longShortNavData));
 
             // ── 因子衰减分析(因子有效期) ──────────────────────────────────────────
-            sendProgress(factor.getFactorCode(), "TESTING", 98, "计算因子衰减分析");
+            progressService.sendProgress(factor.getFactorCode(), "TESTING", 98, "计算因子衰减分析");
             Map<String, Object> decayAnalysis = computeFactorDecayAnalysis(icListLag, DECAY_LAGS);
             report.setDecayPeriods((BigDecimal) decayAnalysis.get("decayPeriods"));
             report.setHalfLifePeriods((BigDecimal) decayAnalysis.get("halfLifePeriods"));
@@ -2109,7 +2108,7 @@ public class FactorComputeEngine {
             report.setCompletedAt(java.time.LocalDateTime.now());
             testReportMapper.updateById(report);
 
-            sendProgress(factor.getFactorCode(), JobStatus.TEST_DONE.name(), 100, "因子测试完成，reportId=" + report.getId());
+            progressService.sendProgress(factor.getFactorCode(), JobStatus.TEST_DONE.name(), 100, "因子测试完成，reportId=" + report.getId());
             log.info("Factor test [{}] completed, IC={}, mono={}", factor.getFactorCode(), report.getIcMean(), report.getMonotonicity());
 
         } catch (Exception e) {
@@ -2119,7 +2118,7 @@ public class FactorComputeEngine {
             if (errMsg != null && errMsg.length() > 200) errMsg = errMsg.substring(0, 200) + "...";
             report.setErrorMessage(errMsg);
             testReportMapper.updateById(report);
-            sendProgress(factor.getFactorCode(), "TEST_FAILED", 0, "因子检测失败: " + errMsg);
+            progressService.sendProgress(factor.getFactorCode(), "TEST_FAILED", 0, "因子检测失败: " + errMsg);
         }
     }
 
@@ -2289,50 +2288,13 @@ public class FactorComputeEngine {
         return BigDecimal.valueOf(v).setScale(6, RoundingMode.HALF_UP);
     }
 
-    private void sendProgress(String factorCode, String stage, int pct, String message) {
-        sendProgress(factorCode, stage, pct, message, null);
-    }
 
-    private void sendProgress(String factorCode, String stage, int pct, String message, Long etaSec) {
-        // 维护 runningFactors 集合
-        if ("COMPUTING".equals(stage)) {
-            runningFactors.add(factorCode);
-        } else if (JobStatus.DONE.name().equals(stage) || JobStatus.FAILED.name().equals(stage) || JobStatus.TEST_DONE.name().equals(stage)) {
-            runningFactors.remove(factorCode);
-        }
-        try {
-            Map<String, Object> msg = new java.util.HashMap<>();
-            msg.put("factorCode", factorCode);
-            msg.put("stage", stage);
-            msg.put("progress", pct);
-            msg.put("message", message);
-            if (etaSec != null) {
-                msg.put("etaSec", etaSec);
-                log.info("[sendProgress] pushing etaSec={} for {}/{}, msg={}", etaSec, factorCode, stage, msg);
-            } else {
-                log.info("[sendProgress] etaSec is NULL for {}/{} — NOT pushing etaSec", factorCode, stage);
-            }
-            messagingTemplate.convertAndSend("/topic/factor/" + factorCode, msg);
-            // 同时广播到批量日志通道，供监控页面聚合展示
-            Map<String, Object> batchMsg = new java.util.HashMap<>();
-            batchMsg.put("type", "FACTOR_PROGRESS");
-            batchMsg.put("factorCode", factorCode);
-            batchMsg.put("stage", stage);
-            batchMsg.put("progress", pct);
-            batchMsg.put("message", message);
-            batchMsg.put("timestamp", LocalDateTime.now().toString());
-            if (etaSec != null) batchMsg.put("etaSec", etaSec);
-            messagingTemplate.convertAndSend("/topic/factor/batch-log", batchMsg);
-        } catch (Exception e) {
-            log.warn("[sendProgress] WebSocket推送失败: {}/{} — {}", factorCode, stage, e.getMessage());
-        }
-    }
 
     /**
      * 返回当前正在计算的因子代码集合（供 Controller 暴露给前端）
      */
     public Set<String> getRunningFactorCodes() {
-        return new HashSet<>(runningFactors);
+        return progressService.getRunningFactorCodes();
     }
 
     /**
