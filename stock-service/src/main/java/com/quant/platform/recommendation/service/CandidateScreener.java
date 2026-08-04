@@ -20,6 +20,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 /**
  * 候选池筛选器：多因子选股 + 形态驱动选股。
@@ -178,5 +179,91 @@ public class CandidateScreener {
                 .build();
         log.info("[Recommendation] 形态选股完成: 命中 {} 只, 取 Top {}", results.size(), topN);
         return result;
+    }
+
+    /**
+     * 从策略 filterConfigJson 获取行业排除列表（全部走数据库，无硬编码兜底）
+     */
+    @SuppressWarnings("unchecked")
+    List<String> getExcludeIndustries(Long strategyId) {
+        if (strategyId == null) {
+            return List.of(); // 无策略时不排除
+        }
+        StrategyDefinition strategy = strategyDefinitionMapper.selectById(strategyId);
+        if (strategy == null || strategy.getFilterConfigJson() == null || strategy.getFilterConfigJson().isEmpty()) {
+            return List.of();
+        }
+        try {
+            Map<String, Object> filterConfig = objectMapper.readValue(strategy.getFilterConfigJson(), Map.class);
+            Object exclude = filterConfig.get("excludeIndustries");
+            if (exclude instanceof List && !((List<?>) exclude).isEmpty()) {
+                List<String> result = ((List<?>) exclude).stream()
+                        .map(Object::toString)
+                        .collect(Collectors.toList());
+                log.info("[Recommendation] 从策略[{}]加载行业排除: {}个", strategy.getStrategyName(), result.size());
+                return result;
+            }
+        } catch (Exception e) {
+            log.warn("[Recommendation] 策略过滤配置解析失败 strategyId={}", strategyId, e);
+        }
+        return List.of();
+    }
+
+    /**
+     * 从策略 filterConfigJson 获取行业白名单（includeIndustries）
+     * 配置白名单后，只有属于白名单行业的股票才能进入候选池
+     */
+    @SuppressWarnings("unchecked")
+    List<String> getIncludeIndustries(Long strategyId) {
+        if (strategyId == null) {
+            return List.of();
+        }
+        StrategyDefinition strategy = strategyDefinitionMapper.selectById(strategyId);
+        if (strategy == null || strategy.getFilterConfigJson() == null || strategy.getFilterConfigJson().isEmpty()) {
+            return List.of();
+        }
+        try {
+            Map<String, Object> filterConfig = objectMapper.readValue(strategy.getFilterConfigJson(), Map.class);
+            Object include = filterConfig.get("includeIndustries");
+            if (include instanceof List && !((List<?>) include).isEmpty()) {
+                List<String> result = ((List<?>) include).stream()
+                        .map(Object::toString)
+                        .collect(Collectors.toList());
+                log.info("[Recommendation] 从策略[{}]加载行业白名单: {}个", strategy.getStrategyName(), result.size());
+                return result;
+            }
+        } catch (Exception e) {
+            log.warn("[Recommendation] 策略行业白名单解析失败 strategyId={}", strategyId, e);
+        }
+        return List.of();
+    }
+
+    /**
+     * 从策略 filterConfigJson 获取概念板块名称列表（conceptNames）
+     * 配置后，从 stock_concept 表加载对应概念成分股作为候选池白名单
+     */
+    @SuppressWarnings("unchecked")
+    List<String> getConceptNames(Long strategyId) {
+        if (strategyId == null) {
+            return List.of();
+        }
+        StrategyDefinition strategy = strategyDefinitionMapper.selectById(strategyId);
+        if (strategy == null || strategy.getFilterConfigJson() == null || strategy.getFilterConfigJson().isEmpty()) {
+            return List.of();
+        }
+        try {
+            Map<String, Object> filterConfig = objectMapper.readValue(strategy.getFilterConfigJson(), Map.class);
+            Object concepts = filterConfig.get("conceptNames");
+            if (concepts instanceof List && !((List<?>) concepts).isEmpty()) {
+                List<String> result = ((List<?>) concepts).stream()
+                        .map(Object::toString)
+                        .collect(Collectors.toList());
+                log.info("[Recommendation] 从策略[{}]加载概念板块: {}", strategy.getStrategyName(), result);
+                return result;
+            }
+        } catch (Exception e) {
+            log.warn("[Recommendation] 策略概念板块配置解析失败 strategyId={}", strategyId, e);
+        }
+        return List.of();
     }
 }
