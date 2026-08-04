@@ -35,13 +35,22 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 import com.quant.platform.common.enums.JobStatus;
+
+/**
+ * 因子计算进度服务
+ * <p>从 {@link FactorComputeEngine} 拆出：WebSocket 进度推送、运行中因子集合维护、ETA 文案格式化。
+ * 行为与拆分前逐字一致。</p>
+ */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class FactorProgressService {
+
     private final SimpMessagingTemplate messagingTemplate;
+
     private final java.util.Set<String> runningFactors =
             java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
+
     public void sendProgress(String factorCode, String stage, int pct, String message) {
         sendProgress(factorCode, stage, pct, message, null);
     }
@@ -79,6 +88,16 @@ public class FactorProgressService {
         } catch (Exception e) {
             log.warn("[sendProgress] WebSocket推送失败: {}/{} — {}", factorCode, stage, e.getMessage());
         }
+    }
+
+    /**
+     * 格式化剩余时间：秒->分:秒 或 时:分
+     */
+    public String formatEta(long seconds) {
+        if (seconds <= 0) return "计算中";
+        if (seconds < 60) return seconds + "秒";
+        if (seconds < 3600) return (seconds / 60) + "分" + (seconds % 60) + "秒";
+        return (seconds / 3600) + "时" + (seconds % 3600 / 60) + "分";
     }
 
     public void markRunning(String code) { runningFactors.add(code); }

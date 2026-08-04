@@ -45,10 +45,12 @@ import com.quant.platform.common.enums.JobStatus;
 public class FactorComputeEngine {
 
     // ===== 拆分出的专责协作者 =====
-    /** 进度推送 + 运行中因子状态 */
+    /** 进度推送 + 运行中因子状态 + ETA 文案 */
     private final FactorProgressService progressService;
     /** 因子值批量落库（ClickHouse） */
     private final FactorPersistenceService factorPersistenceService;
+    /** 横截面归一化（Z-Score + 百分位排名） */
+    private final FactorNormalizationService factorNormalizationService;
 
     private final MarketDataService marketDataService;
     private final FactorValueMapper factorValueMapper;
@@ -333,7 +335,7 @@ public class FactorComputeEngine {
                             String.format("计算中 %d/%d 交易日 (%d%%) | 已处理 %,d 行 | 已写入 %,d 行 | 速度 %.1f 日/s | 剩余约 %s",
                                     datesCompleted.get(), totalDates, pct,
                                     rowsCollected.get(),
-                                    rowsWritten.get(), speed, formatEta(etaSec)),
+                                    rowsWritten.get(), speed, progressService.formatEta(etaSec)),
                             etaSec);
                 }
             }
@@ -351,7 +353,7 @@ public class FactorComputeEngine {
             progressService.sendProgress(factor.getFactorCode(), "COMPUTING", 90,
                     String.format("全部写入完成，共 %,d 行，总耗时 %.1f 秒。开始归一化 %d 个交易日...",
                             rowsWritten.get(), totalMs / 1000.0, totalDates));
-            normalizeFactorValues(factor.getFactorCode(), tradingDates);
+            factorNormalizationService.normalizeFactorValues(factor.getFactorCode(), tradingDates);
             progressService.sendProgress(factor.getFactorCode(), JobStatus.DONE.name(), 100, String.format("归一化完成，共处理 %d 个交易日，写入 %,d 条因子值", totalDates, rowsWritten.get()));
 
             log.info("[{}] computation done: {} dates, {} rows", factor.getFactorCode(), totalDates, rowsWritten.get());
@@ -600,7 +602,7 @@ public class FactorComputeEngine {
                             String.format("[增量] 计算中 %d/%d 交易日 (%d%%) | 已处理 %,d 行 | 已写入 %,d 行 | 速度 %.1f 日/s | 剩余约 %s",
                                     datesCompleted.get(), totalDates, pct,
                                     rowsCollected.get(),
-                                    rowsWritten.get(), speed, formatEta(etaSec)),
+                                    rowsWritten.get(), speed, progressService.formatEta(etaSec)),
                             etaSec);
                 }
             }
@@ -621,7 +623,7 @@ public class FactorComputeEngine {
                             rowsWritten.get(), totalMs / 1000.0, newDates.size()));
 
             // ── 归一化（只对新日期做） ──
-            normalizeFactorValues(code, newDates);
+            factorNormalizationService.normalizeFactorValues(code, newDates);
             progressService.sendProgress(code, JobStatus.DONE.name(), 100, String.format("[增量] 全部完成，新增 %,d 条", rowsWritten.get()));
 
             log.info("[{}] incremental done: {} new dates, {} rows", code, totalDates, rowsWritten.get());
@@ -722,12 +724,12 @@ public class FactorComputeEngine {
             double speed = elapsed > 0 ? (double) (i + 1) / elapsed * 1000 : 0;
             int remaining = totalDates - i - 1;
             long etaSec = speed > 0 ? (long) (remaining / speed) : 0;
-            progressService.sendProgress(factorCode, "COMPUTING", pct, String.format("[财务] %d/%d 报告期 (%d%%) | 已写 %,d 行 | 剩余约 %s", i + 1, totalDates, pct, rowsInserted.get(), formatEta(etaSec)), etaSec);
+            progressService.sendProgress(factorCode, "COMPUTING", pct, String.format("[财务] %d/%d 报告期 (%d%%) | 已写 %,d 行 | 剩余约 %s", i + 1, totalDates, pct, rowsInserted.get(), progressService.formatEta(etaSec)), etaSec);
         }
 
         // 归一化
         progressService.sendProgress(factorCode, "COMPUTING", 91, String.format("财务因子写入完成，%,d 条。开始归一化...", rowsInserted.get()));
-        normalizeFactorValues(factorCode, newDates);
+        factorNormalizationService.normalizeFactorValues(factorCode, newDates);
         progressService.sendProgress(factorCode, JobStatus.DONE.name(), 100, String.format("[财务] 全部完成，新增 %,d 条", rowsInserted.get()));
         log.info("[{}] financial incremental done: {} new dates, {} rows", factorCode, totalDates, rowsInserted.get());
     }
@@ -879,12 +881,12 @@ public class FactorComputeEngine {
             double speed = elapsed > 0 ? (double) (i + 1) / elapsed * 1000 : 0;
             int remaining = totalDates - i - 1;
             long etaSec = speed > 0 ? (long) (remaining / speed) : 0;
-            progressService.sendProgress(factorCode, "COMPUTING", pct, String.format("[财务全量] %d/%d 报告期 (%d%%) | 已写 %,d 行 | 剩余约 %s", i + 1, totalDates, pct, rowsInserted.get(), formatEta(etaSec)), etaSec);
+            progressService.sendProgress(factorCode, "COMPUTING", pct, String.format("[财务全量] %d/%d 报告期 (%d%%) | 已写 %,d 行 | 剩余约 %s", i + 1, totalDates, pct, rowsInserted.get(), progressService.formatEta(etaSec)), etaSec);
         }
 
         // 归一化
         progressService.sendProgress(factorCode, "COMPUTING", 91, String.format("财务因子写入完成，%,d 条。开始归一化...", rowsInserted.get()));
-        normalizeFactorValues(factorCode, reportDates);
+        factorNormalizationService.normalizeFactorValues(factorCode, reportDates);
         progressService.sendProgress(factorCode, JobStatus.DONE.name(), 100, String.format("[财务全量] 全部完成，共 %,d 条", rowsInserted.get()));
         log.info("[{}] financial sync done: {} dates, {} rows", factorCode, totalDates, rowsInserted.get());
     }
@@ -1322,16 +1324,6 @@ public class FactorComputeEngine {
     }
 
     /**
-     * 格式化剩余时间：秒->分:秒 或 时:分
-     */
-    private String formatEta(long seconds) {
-        if (seconds <= 0) return "计算中";
-        if (seconds < 60) return seconds + "秒";
-        if (seconds < 3600) return (seconds / 60) + "分" + (seconds % 60) + "秒";
-        return (seconds / 3600) + "时" + (seconds % 3600 / 60) + "分";
-    }
-
-    /**
      * 计算单个因子值（带context参数）
      */
     private BigDecimal computeSingleValue(FactorDefinition factor, String symbol, LocalDate calcDate,
@@ -1346,142 +1338,6 @@ public class FactorComputeEngine {
             return scriptedEngine.calculate(factor.getScriptCode(), factor.getFactorCode(), symbol, calcDate, history, context);
         }
         return null;
-    }
-
-    /**
-     * 对因子值做横截面归一化（Z-Score + 百分位排名）
-     * 优化：ClickHouse 窗口函数一次性算完所有日期，INSERT 覆盖（ReplacingMergeTree 去重）
-     * 性能：从 ~178万次 UPDATE 优化为 2次SQL，提速 10x+
-     */
-    private void normalizeFactorValues(String factorCode, List<LocalDate> dates) {
-        if (clickHouseConfig.isEnabled()) {
-            try {
-                long normStart = System.currentTimeMillis();
-                long rowCount = clickHouseFactorValueService.batchNormalize(factorCode, dates);
-                long elapsed = System.currentTimeMillis() - normStart;
-                double speed = elapsed > 0 ? (double) dates.size() / elapsed * 1000 : 0;
-                log.info("[{}] 归一化完成(CH): {} 日期, {} 行, 耗时 {}ms, 速度 {} 日/s",
-                        factorCode, dates.size(), rowCount, elapsed, speed);
-
-                // 归一化写入后触发 OPTIMIZE，合并旧行（z_score/rank_value=NULL），避免查询读到脏数据
-                if (rowCount > 0) {
-                    try {
-                        long optStart = System.currentTimeMillis();
-                        clickHouseFactorValueService.optimizeFactorValue();
-                        long optMs = System.currentTimeMillis() - optStart;
-                        log.info("[{}] OPTIMIZE factor_value 完成, 耗时 {}ms", factorCode, optMs);
-                    } catch (Exception optEx) {
-                        log.warn("[{}] OPTIMIZE 失败（不影响结果，下次查询带FINAL仍正确）: {}", factorCode, optEx.getMessage());
-                    }
-                }
-
-                progressService.sendProgress(factorCode, "COMPUTING", 99, String.format(
-                        "归一化完成 | %d 日期 × 均值 %d 只/日 ≈ %,d 行 | 耗时 %.1f 秒",
-                        dates.size(), rowCount > 0 && !dates.isEmpty() ? rowCount / dates.size() : 0,
-                        rowCount, elapsed / 1000.0));
-                return;
-            } catch (Exception e) {
-                log.warn("[{}] CH归一化失败，回退Java内存计算: {}", factorCode, e.getMessage());
-            }
-        }
-
-        // 回退：Java 内存归一化（CH 不可用时）
-        normalizeFactorValuesFallback(factorCode, dates);
-    }
-
-    /**
-     * Java 内存归一化（回退方案）
-     */
-    private void normalizeFactorValuesFallback(String factorCode, List<LocalDate> dates) {
-        int totalDates = dates.size();
-        long normStart = System.currentTimeMillis();
-
-        for (int di = 0; di < totalDates; di++) {
-            LocalDate date = dates.get(di);
-            List<FactorValue> values;
-            if (clickHouseConfig.isEnabled()) {
-                try {
-                    values = clickHouseFactorValueService.findByFactorCodeAndDate(factorCode, date);
-                    if (values.isEmpty()) {
-                        LambdaQueryWrapper<FactorValue> wrapper = new LambdaQueryWrapper<>();
-                        wrapper.eq(FactorValue::getFactorCode, factorCode).eq(FactorValue::getCalcDate, date).orderByAsc(FactorValue::getSymbol);
-                        values = factorValueMapper.selectList(wrapper);
-                    }
-                } catch (Exception e) {
-                    LambdaQueryWrapper<FactorValue> wrapper = new LambdaQueryWrapper<>();
-                    wrapper.eq(FactorValue::getFactorCode, factorCode).eq(FactorValue::getCalcDate, date).orderByAsc(FactorValue::getSymbol);
-                    values = factorValueMapper.selectList(wrapper);
-                }
-            } else {
-                LambdaQueryWrapper<FactorValue> wrapper = new LambdaQueryWrapper<>();
-                wrapper.eq(FactorValue::getFactorCode, factorCode).eq(FactorValue::getCalcDate, date).orderByAsc(FactorValue::getSymbol);
-                values = factorValueMapper.selectList(wrapper);
-            }
-            if (values.isEmpty()) continue;
-
-            double[] raw = values.stream().mapToDouble(v -> v.getFactorVal().doubleValue()).toArray();
-
-            int n = raw.length;
-            double mean = Arrays.stream(raw).average().orElse(0);
-            double std = Math.sqrt(Arrays.stream(raw).map(v -> (v - mean) * (v - mean)).average().orElse(1));
-
-            double[] sorted = raw.clone();
-            Arrays.sort(sorted);
-            double[] pctRanks = new double[n];
-            for (int i = 0; i < n; i++) {
-                int lo = lowerBound(sorted, raw[i]);
-                int hi = upperBound(sorted, raw[i]);
-                double avgRank = lo + (hi - lo) / 2.0;
-                pctRanks[i] = n <= 1 ? 0.5 : avgRank / (n - 1);
-            }
-
-            for (int i = 0; i < values.size(); i++) {
-                FactorValue fv = values.get(i);
-                double zScore = std == 0 ? 0 : (raw[i] - mean) / std;
-                fv.setZScore(BigDecimal.valueOf(zScore).setScale(6, RoundingMode.HALF_UP));
-                fv.setRankValue(BigDecimal.valueOf(pctRanks[i]).setScale(6, RoundingMode.HALF_UP));
-            }
-            int batchSize = 500;
-            for (int i = 0; i < values.size(); i += batchSize) {
-                List<FactorValue> sub = values.subList(i, Math.min(i + batchSize, values.size()));
-                for (FactorValue fv : sub) factorValueMapper.updateById(fv);
-            }
-
-            if ((di + 1) % Math.max(1, totalDates / 20) == 0 || di == totalDates - 1) {
-                long elapsed = System.currentTimeMillis() - normStart;
-                double speed = elapsed > 0 ? (di + 1.0) / elapsed * 1000 : 0;
-                int remaining = totalDates - di - 1;
-                long etaSec = speed > 0 ? (long) (remaining / speed) : 0;
-                int pct = 91 + (int) ((double) (di + 1) / totalDates * 9);
-                progressService.sendProgress(factorCode, "COMPUTING", Math.min(pct, 99), String.format("归一化 %d/%d (%s) | 本日 %d 只 | 速度 %.1f 日/s | 剩余约 %s", di + 1, totalDates, date, n, speed, formatEta(etaSec)), etaSec);
-            }
-        }
-    }
-
-    /**
-     * 二分查找第一个 >= target 的下标（0-based）
-     */
-    private int lowerBound(double[] sorted, double target) {
-        int lo = 0, hi = sorted.length;
-        while (lo < hi) {
-            int mid = (lo + hi) >>> 1;
-            if (sorted[mid] < target) lo = mid + 1;
-            else hi = mid;
-        }
-        return lo;
-    }
-
-    /**
-     * 二分查找第一个 > target 的下标（0-based）
-     */
-    private int upperBound(double[] sorted, double target) {
-        int lo = 0, hi = sorted.length;
-        while (lo < hi) {
-            int mid = (lo + hi) >>> 1;
-            if (sorted[mid] <= target) lo = mid + 1;
-            else hi = mid;
-        }
-        return lo;
     }
 
     /**
