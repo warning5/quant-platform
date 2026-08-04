@@ -61,6 +61,8 @@ public class BacktestEngine {
     private final BacktestScoring backtestScoring;
     /** 调仓触发判断 / 成交明细生成 / 现金重算 —— God Class 拆分 Phase 5 */
     private final BacktestRebalancer backtestRebalancer;
+    /** 止损止盈 / 技术面卖点等被动退出 —— God Class 拆分 Phase 5 */
+    private final BacktestRiskExit backtestRiskExit;
     @Autowired(required = false)
     private ClickHouseFactorValueService clickHouseFactorValueService;
     @Autowired(required = false)
@@ -90,65 +92,7 @@ public class BacktestEngine {
      */
     @Async("backtestTaskExecutor")
     public void runBacktest(Long taskId) {
-        // 调用方事务可能尚未提交，最多重试 10 次（每次等 200ms）
-        BacktestTask task = null;
-        for (int i = 0; i < 10; i++) {
-            task = taskMapper.selectById(taskId);
-            if (task != null) {
-                break;
-            }
-            try {
-                Thread.sleep(200);
-            } catch (InterruptedException ie) {
-                Thread.currentThread().interrupt();
-            }
-        }
-        if (task == null) {
-            log.error("Backtest task [{}] not found in DB after retries, aborting", taskId);
-            return;
-        }
-
-        task.setStatus(JobStatus.RUNNING);
-        task.setStartedAt(LocalDateTime.now());
-        taskMapper.updateById(task);
-
-        // 立即推送状态变更，让前端知道回测已开始
-        sendProgress(task.getId(), JobStatus.RUNNING.name(), 0, "回测初始化中...");
-
-        try {
-            boolean isScreen = "SCREEN".equalsIgnoreCase(task.getSignalSource());
-            String modeLabel = isScreen ? "SCREEN" : "STRATEGY";
-            StrategyDefinition strategy = isScreen ? null : strategyService.getById(task.getStrategyId());
-
-            if (!isScreen && strategy == null) {
-                throw new RuntimeException("策略不存在: strategyId=" + task.getStrategyId());
-            }
-            if (isScreen && (stockScreenService == null || rebalanceRecordMapper == null || equityCurveMapper == null)) {
-                throw new RuntimeException("SCREEN 模式需要 StockScreenService/RebalanceRecordMapper/EquityCurveMapper 可用");
-            }
-
-            BacktestResult result = isScreen
-                    ? executeScreenBacktest(task)
-                    : executeBacktest(task, strategy);
-
-            BacktestReport report = buildReport(task, result);
-            reportMapper.insert(report);
-
-            task.setStatus(JobStatus.COMPLETED);
-            task.setProgress(100);
-            task.setCompletedAt(LocalDateTime.now());
-            taskMapper.updateById(task);
-
-            sendProgress(taskId, JobStatus.COMPLETED.name(), 100, "回测完成，reportId=" + report.getId());
-            log.info("Backtest task [{}] completed, mode={}", taskId, modeLabel);
-
-        } catch (Exception e) {
-            log.error("Backtest task [{}] failed", taskId, e);
-            task.setStatus(JobStatus.FAILED);
-            task.setErrorMessage(e.getMessage());
-            taskMapper.updateById(task);
-            sendProgress(taskId, JobStatus.FAILED.name(), task.getProgress(), "回测失败: " + e.getMessage());
-        }
+        runInternal(taskId, true);
     }
 
     /**
@@ -156,14 +100,61 @@ public class BacktestEngine {
      * 任务记录必须已存入 DB
      */
     public void runBacktestSync(Long taskId) {
-        BacktestTask task = taskMapper.selectById(taskId);
-        if (task == null) {
-            log.error("runBacktestSync: task [{}] not found", taskId);
-            return;
+        runInternal(taskId, false);
+    }
+
+    /**
+     * 回测执行主流程 —— 异步 / 同步两条入口的公共实现。
+     *
+     * <p>God Class 拆分 Phase 5：原 {@code runBacktest} 与 {@code runBacktestSync} 有 30 余行
+     * 完全重复的主干（模式判定 → 前置校验 → 执行 → 建报告 → 落库 → 状态流转），此处合并为单一
+     * 实现，两者的全部差异收敛到 {@code notifyProgress} 分支上：</p>
+     * <ul>
+     *   <li>{@code true}（异步入口）：任务加载带重试（调用方事务可能尚未提交）、推送 WebSocket
+     *       进度、完成时打 info 日志、失败时打 error + 堆栈</li>
+     *   <li>{@code false}（同步入口）：任务加载不重试、不推进度、失败时仅打 warn 摘要</li>
+     * </ul>
+     *
+     * @param taskId         回测任务 ID
+     * @param notifyProgress true=异步入口，false=同步入口
+     */
+    private void runInternal(Long taskId, boolean notifyProgress) {
+        BacktestTask task;
+        if (notifyProgress) {
+            // 调用方事务可能尚未提交，最多重试 10 次（每次等 200ms）
+            task = null;
+            for (int i = 0; i < 10; i++) {
+                task = taskMapper.selectById(taskId);
+                if (task != null) {
+                    break;
+                }
+                try {
+                    Thread.sleep(200);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+            if (task == null) {
+                log.error("Backtest task [{}] not found in DB after retries, aborting", taskId);
+                return;
+            }
+        } else {
+            task = taskMapper.selectById(taskId);
+            if (task == null) {
+                log.error("runBacktestSync: task [{}] not found", taskId);
+                return;
+            }
         }
+
         task.setStatus(JobStatus.RUNNING);
         task.setStartedAt(LocalDateTime.now());
         taskMapper.updateById(task);
+
+        if (notifyProgress) {
+            // 立即推送状态变更，让前端知道回测已开始
+            sendProgress(task.getId(), JobStatus.RUNNING.name(), 0, "回测初始化中...");
+        }
+
         try {
             boolean isScreen = "SCREEN".equalsIgnoreCase(task.getSignalSource());
             StrategyDefinition strategy = isScreen ? null : strategyService.getById(task.getStrategyId());
@@ -181,15 +172,28 @@ public class BacktestEngine {
 
             BacktestReport report = buildReport(task, result);
             reportMapper.insert(report);
+
             task.setStatus(JobStatus.COMPLETED);
             task.setProgress(100);
             task.setCompletedAt(LocalDateTime.now());
             taskMapper.updateById(task);
+
+            if (notifyProgress) {
+                sendProgress(taskId, JobStatus.COMPLETED.name(), 100, "回测完成，reportId=" + report.getId());
+                log.info("Backtest task [{}] completed, mode={}", taskId, isScreen ? "SCREEN" : "STRATEGY");
+            }
         } catch (Exception e) {
-            log.warn("runBacktestSync task [{}] failed: {}", taskId, e.getMessage());
+            if (notifyProgress) {
+                log.error("Backtest task [{}] failed", taskId, e);
+            } else {
+                log.warn("runBacktestSync task [{}] failed: {}", taskId, e.getMessage());
+            }
             task.setStatus(JobStatus.FAILED);
             task.setErrorMessage(e.getMessage());
             taskMapper.updateById(task);
+            if (notifyProgress) {
+                sendProgress(taskId, JobStatus.FAILED.name(), task.getProgress(), "回测失败: " + e.getMessage());
+            }
         }
     }
 
@@ -262,69 +266,18 @@ public class BacktestEngine {
         List<Map<String, Object>> positionHistory = new ArrayList<>();
         Map<String, Map<String, Double>> monthlyReturns = new TreeMap<>();
 
-        // ── 加载基准指数行情 ──────────────────────────────────────────
-        String benchmarkSymbol = task.getBenchmarkCode() != null ? task.getBenchmarkCode() : "000300.SH";
-        List<MarketDailyBar> benchmarkBars = new ArrayList<>();
-        try {
-            benchmarkBars = marketDataService.getBarsInRange(benchmarkSymbol, startDate, endDate);
-        } catch (Exception e) {
-            log.warn("Failed to load benchmark bars for {}: {}", benchmarkSymbol, e.getMessage());
-        }
-        log.info("Loaded {} benchmark bars for {} from {} to {}", benchmarkBars.size(), benchmarkSymbol, startDate, endDate);
-
-        // 建立日期→收盘价映射
-        Map<LocalDate, Double> benchmarkClose = new LinkedHashMap<>();
-        for (MarketDailyBar b : benchmarkBars) {
-            benchmarkClose.put(b.getTradeDate(), b.getClose().doubleValue());
-        }
-
-        // ── 基准数据完整性检查 ─────────────────────────────────────
-        if (benchmarkClose.isEmpty()) {
-            throw new RuntimeException("基准指数 " + benchmarkSymbol + " 在 " + startDate + " 至 " + endDate
-                    + " 期间无数据，请先在「数据更新」页面更新指数日线数据");
-        }
-
-        // 检查基准数据覆盖情况
-        LocalDate firstBmDate = benchmarkClose.keySet().iterator().next();
-        LocalDate lastBmDate = new ArrayList<>(benchmarkClose.keySet()).get(benchmarkClose.size() - 1);
-        int missingStart = 0, missingEnd = 0;
-        for (LocalDate d : tradingDates) {
-            if (d.isBefore(firstBmDate)) missingStart++;
-            else break;
-        }
-        for (int i = tradingDates.size() - 1; i >= 0; i--) {
-            if (tradingDates.get(i).isAfter(lastBmDate)) missingEnd++;
-            else break;
-        }
-        if (missingStart > 0 || missingEnd > 0) {
-            log.warn("基准指数 {} 数据范围 {} ~ {}，回测区间 {} ~ {}，"
-                            + "起始缺失{}个交易日、末尾缺失{}个交易日，未覆盖部分将使用前向填充",
-                    benchmarkSymbol, firstBmDate, lastBmDate, startDate, endDate, missingStart, missingEnd);
-        }
-
-        // 找到第一个有效的基准价格（从回测开始日期往后找）
-        Double startDateClose = null;
-        Double firstValidClose = null;
-        for (Map.Entry<LocalDate, Double> entry : benchmarkClose.entrySet()) {
-            if (firstValidClose == null) {
-                firstValidClose = entry.getValue();
-            }
-            if (!entry.getKey().isBefore(startDate)) {
-                startDateClose = entry.getValue();
-                break;
-            }
-        }
-
-        // 基准初始价（回测开始日期或之后的第一个有效收盘价）
-        double benchmarkBase = startDateClose != null ? startDateClose
-                : (firstValidClose != null ? firstValidClose : 1.0);
-
-        if (benchmarkBase <= 0) benchmarkBase = 1.0;
+        // ── 加载基准指数行情（含完整性校验与基准初始价确定）──────────────
+        // 实现已迁移至 BacktestDataLoader#loadBenchmarkSeries
+        BacktestDataLoader.BenchmarkSeries benchmarkSeries =
+                backtestDataLoader.loadBenchmarkSeries(task, startDate, endDate, tradingDates);
+        Map<LocalDate, Double> benchmarkClose = benchmarkSeries.closes();
+        double benchmarkBase = benchmarkSeries.base();
 
         // 用于基准价格前向填充的变量
         double lastValidBmClose = benchmarkBase;
 
-        log.info("Benchmark base price: {}, firstValidClose: {}, startDateClose: {}", benchmarkBase, firstValidClose, startDateClose);
+        log.info("Benchmark base price: {}, firstValidClose: {}, startDateClose: {}", benchmarkBase,
+                benchmarkSeries.firstValidClose(), benchmarkSeries.startDateClose());
         log.info("First trading date: {}, Last trading date: {}", tradingDates.getFirst(), tradingDates.getLast());
 
         double peakValue = initialCapital;
@@ -384,136 +337,26 @@ public class BacktestEngine {
             portfolioValue = cash + holdingValue;
 
             // ── 止损止盈检查（参数优化时启用）────────────────────────────────
-            if ((stopLossPct > 0 || stopProfitPct > 0) && !positions.isEmpty()) {
-                List<String> toSell = new ArrayList<>();
-                for (Map.Entry<String, Double> pos : positions.entrySet()) {
-                    String symbol = pos.getKey();
-                    MarketDailyBar bar = barMap.get(symbol);
-                    if (bar == null) continue;
-
-                    double cost = positionCosts.getOrDefault(symbol, 0.0);
-                    if (cost <= 0) continue;
-
-                    double shares = pos.getValue();
-                    double adj = adjFactors.getOrDefault(symbol, 1.0);
-                    double currentValue = shares * bar.getClose().doubleValue() * adj;
-                    double returnPct = (currentValue - cost) / cost;
-
-                    // 止损：亏损超过阈值
-                    if (stopLossPct > 0 && returnPct <= -stopLossPct) {
-                        log.debug("[{}] {} 触发止损: 收益率={}, 阈值={}", today, symbol, returnPct, -stopLossPct);
-                        toSell.add(symbol);
-                    }
-                    // 止盈：盈利超过阈值
-                    else if (stopProfitPct > 0 && returnPct >= stopProfitPct) {
-                        log.debug("[{}] {} 触发止盈: 收益率={}, 阈值={}", today, symbol, returnPct, stopProfitPct);
-                        toSell.add(symbol);
-                    }
-                }
-
-                // 执行止损止盈卖出
-                if (!toSell.isEmpty()) {
-                    for (String symbol : toSell) {
-                        MarketDailyBar bar = barMap.get(symbol);
-                        if (bar == null) continue;
-
-                        // 停牌/涨跌停过滤
-                        if (suspendFilter && BacktestUtils.isSuspended(bar)) {
-                            log.debug("[{}] {} 停牌，跳过止损止盈", today, symbol);
-                            continue;
-                        }
-                        if (limitFilter && BacktestUtils.isLimitDown(bar)) {
-                            log.debug("[{}] {} 跌停，跳过止损止盈", today, symbol);
-                            continue;
-                        }
-
-                        double shares = positions.get(symbol);
-                        double cost = positionCosts.get(symbol);
-                        double execPrice = BacktestUtils.getExecutionPrice(bar, tradingDates, di, orderType, nextDayBarMap);
-                        double closePrice = bar.getClose().doubleValue();
-                        double amount = shares * closePrice;
-                        double dayAmount = bar.getAmount() != null ? bar.getAmount().doubleValue() * 1000 : 0;
-                        double price = BacktestUtils.applySlippage(execPrice, false, slippage, amount, dayAmount, slippageModel);
-                        double fee = BacktestUtils.calcFee(amount, true, commission, stampTaxRate, minCommission, symbol, transferFeeRate);
-
-                        Map<String, Object> trade = new HashMap<>();
-                        trade.put("date", today.toString());
-                        trade.put("symbol", symbol);
-                        trade.put("name", bar.getName());
-                        trade.put("action", "STOP_LOSS_SELL");  // STOP_LOSS 或 STOP_PROFIT
-                        trade.put("price", BacktestUtils.round(price, 4));
-                        trade.put("amount", BacktestUtils.round(shares, 2));
-                        trade.put("total", BacktestUtils.round(amount - fee, 2));
-                        trade.put("commission", BacktestUtils.round(fee, 2));
-                        trade.put("fee", BacktestUtils.round(fee, 2));
-                        trade.put("returnPct", BacktestUtils.round(BacktestUtils.returnPct(amount, cost), 4));
-                        tradeLog.add(trade);
-
-                        cash += (shares * price) - fee;
-                        totalTrades++;
-                        positions.remove(symbol);
-                        positionCosts.remove(symbol);
-                    }
-                }
-            }
+            // 实现已迁移至 BacktestRiskExit#applyStopLossTakeProfit；同上以引用回写现金与成交笔数
+            double[] stopCashRef = {cash};
+            int[] stopTradeRef = {totalTrades};
+            backtestRiskExit.applyStopLossTakeProfit(stopCashRef, stopTradeRef, positions, positionCosts,
+                    barMap, adjFactors, tradeLog, today, tradingDates, di, nextDayBarMap, orderType,
+                    slippage, slippageModel, commission, stampTaxRate, minCommission, transferFeeRate,
+                    limitFilter, suspendFilter, stopLossPct, stopProfitPct);
+            cash = stopCashRef[0];
+            totalTrades = stopTradeRef[0];
 
             // ── 技术面卖点信号检查（可选，通过参数 sellSignalEnabled 控制）─────────
-            if (sellSignalEngine != null && sellSignalEnabled && !positions.isEmpty()) {
-                List<String> toSellBySignal = new ArrayList<>();
-                for (String symbol : positions.keySet()) {
-                    try {
-                        List<MarketDailyBar> histBars = marketDataService.getBarsBySymbol(
-                                symbol, today.minusDays(90), today);
-                        if (histBars == null || histBars.size() < 30) continue;
-                        int n = histBars.size();
-                        double[] hClose = new double[n], hHigh = new double[n], hLow = new double[n], hOpen = new double[n], hVol = new double[n];
-                        for (int i = 0; i < n; i++) {
-                            MarketDailyBar b = histBars.get(i);
-                            hClose[i] = b.getClose().doubleValue();
-                            hHigh[i] = b.getHigh().doubleValue();
-                            hLow[i] = b.getLow().doubleValue();
-                            hOpen[i] = b.getOpen().doubleValue();
-                            hVol[i] = b.getVol() != null ? b.getVol().doubleValue() : 0;
-                        }
-                        SellSignalEngine.SellAction action = sellSignalEngine.getSellAction(hClose, hHigh, hLow, hOpen, hVol);
-                        if (action == SellSignalEngine.SellAction.SELL) {
-                            toSellBySignal.add(symbol);
-                        }
-                    } catch (Exception e) {
-                        // 卖点检测失败不影响回测主流程
-                    }
-                }
-                for (String symbol : toSellBySignal) {
-                    MarketDailyBar bar = barMap.get(symbol);
-                    if (bar == null) continue;
-                    if (suspendFilter && BacktestUtils.isSuspended(bar)) continue;
-                    if (limitFilter && BacktestUtils.isLimitDown(bar)) continue;
-                    double shares = positions.get(symbol);
-                    double cost = positionCosts.getOrDefault(symbol, 0.0);
-                    double execPrice = BacktestUtils.getExecutionPrice(bar, tradingDates, di, orderType, nextDayBarMap);
-                    double closePrice = bar.getClose().doubleValue();
-                    double amount = shares * closePrice;
-                    double dayAmount = bar.getAmount() != null ? bar.getAmount().doubleValue() * 1000 : 0;
-                    double price = BacktestUtils.applySlippage(execPrice, false, slippage, amount, dayAmount, slippageModel);
-                    double fee = BacktestUtils.calcFee(amount, true, commission, stampTaxRate, minCommission, symbol, transferFeeRate);
-                    Map<String, Object> trade = new HashMap<>();
-                    trade.put("date", today.toString());
-                    trade.put("symbol", symbol);
-                    trade.put("name", bar.getName());
-                    trade.put("action", "SELL_SIGNAL");
-                    trade.put("price", BacktestUtils.round(price, 4));
-                    trade.put("amount", BacktestUtils.round(shares, 2));
-                    trade.put("total", BacktestUtils.round(amount - fee, 2));
-                    trade.put("commission", BacktestUtils.round(fee, 2));
-                    trade.put("fee", BacktestUtils.round(fee, 2));
-                    trade.put("returnPct", cost > 0 ? BacktestUtils.round(BacktestUtils.returnPct(amount, cost), 4) : 0);
-                    tradeLog.add(trade);
-                    cash += (shares * price) - fee;
-                    totalTrades++;
-                    positions.remove(symbol);
-                    positionCosts.remove(symbol);
-                }
-            }
+            // 实现已迁移至 BacktestRiskExit#applySellSignals；cash/totalTrades 经引用回写保持累加顺序
+            double[] signalCashRef = {cash};
+            int[] signalTradeRef = {totalTrades};
+            backtestRiskExit.applySellSignals(signalCashRef, signalTradeRef, positions, positionCosts,
+                    barMap, tradeLog, today, tradingDates, di, nextDayBarMap, orderType, slippage,
+                    slippageModel, commission, stampTaxRate, minCommission, transferFeeRate,
+                    limitFilter, suspendFilter, sellSignalEnabled);
+            cash = signalCashRef[0];
+            totalTrades = signalTradeRef[0];
 
             // 判断是否调仓
             boolean shouldRebalance = shouldRebalance(today, lastRebalanceDate, freq);
