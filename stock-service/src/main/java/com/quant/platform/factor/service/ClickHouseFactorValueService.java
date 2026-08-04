@@ -601,7 +601,7 @@ public class ClickHouseFactorValueService {
             String factorCode, java.time.LocalDate startDate, java.time.LocalDate endDate) {
         // 使用 PreparedStatement 参数化查询
         String sql = """
-                SELECT id, factor_code, symbol, calc_date, factor_val, rank_value, z_score, created_at
+                SELECT id, factor_code, symbol, calc_date, factor_val, rank_value, z_score, created_at, announce_date
                 FROM stock.factor_value FINAL
                 WHERE factor_code = ? AND calc_date >= ? AND calc_date <= ?
                 ORDER BY calc_date, symbol
