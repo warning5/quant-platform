@@ -33,6 +33,8 @@ import com.quant.platform.common.enums.JobStatus;
 @RequiredArgsConstructor
 public class PaperTradingService {
 
+    private final PaperPriceService priceService;
+
     private final PaperTradingMapper paperTradingMapper;
     private final PaperPositionMapper paperPositionMapper;
     private final PaperSignalMapper paperSignalMapper;
@@ -379,7 +381,7 @@ public class PaperTradingService {
 
         for (PaperPosition pos : positions) {
             try {
-                BigDecimal latestPrice = getOpenPrice(pos.getCode(), latestDate);
+                BigDecimal latestPrice = priceService.getOpenPrice(pos.getCode(), latestDate);
                 if (latestPrice == null || latestPrice.compareTo(BigDecimal.ZERO) <= 0) continue;
 
                 pos.setCurrentPrice(latestPrice);
@@ -438,9 +440,9 @@ public class PaperTradingService {
             throw new IllegalArgumentException("止损单/止损限价单/追踪止损单只能用于卖出方向");
         }
 
-        String name = getStockName(code);
+        String name = priceService.getStockName(code);
         if (signalPrice == null) {
-            signalPrice = getExecutionPrice(code, paperId);
+            signalPrice = priceService.getExecutionPrice(code, paperId);
         }
         if (reason == null) {
             reason = String.format("%s条件单 %s@%s", orderType, direction, code);
@@ -493,7 +495,7 @@ public class PaperTradingService {
         if (PaperTradingStatus.RUNNING != pt.getStatus()) throw new IllegalArgumentException("模拟盘未运行");
 
         // 交易日门控：若今天非交易日（周末/节假日），跳过信号生成
-        if (!isTradingDay()) {
+        if (!priceService.isTradingDay()) {
             log.info("generateSignals: 最近3日内无有效交易日数据（因子可能断档），跳过信号生成");
             return List.of();
         }
@@ -556,7 +558,7 @@ public class PaperTradingService {
         LocalDate maxDailyDate = null;
         for (String fc : usedFactorCodes) {
             if (factorMetaCache.isFinancial(fc)) continue; // 排除财务因子（季频，不依赖日频行情）
-            String d = getFactorLatestDate(fc);
+            String d = priceService.getFactorLatestDate(fc);
             if (d != null) {
                 LocalDate ld = LocalDate.parse(d);
                 if (maxDailyDate == null || ld.isAfter(maxDailyDate)) {
@@ -593,7 +595,7 @@ public class PaperTradingService {
             // 从 CH 获取因子值：每个因子用自己的最新日期
             if (clickHouseJdbcTemplate != null) {
                 try {
-                    String factorDate = getFactorLatestDate(factorCode);
+                    String factorDate = priceService.getFactorLatestDate(factorCode);
                     if (factorDate == null) {
                         log.warn("generateSignals: 因子 {} 无数据，跳过", factorCode);
                         continue;
@@ -680,7 +682,7 @@ public class PaperTradingService {
             // 无风控/因子触发时，检查技术面卖点信号
             if (triggerType == null && sellSignalEngine != null) {
                 try {
-                    double[][] ohlcv = fetchKlineForSellCheck(pos.getCode());
+                    double[][] ohlcv = priceService.fetchKlineForSellCheck(pos.getCode());
                     if (ohlcv != null && ohlcv[3].length >= 30) {
                         SellSignalEngine.SellSignalResult sellResult = sellSignalEngine.checkSellSignals(
                                 ohlcv[3], ohlcv[1], ohlcv[2], ohlcv[0], ohlcv[4]);
@@ -769,14 +771,14 @@ public class PaperTradingService {
                 }
             }
             if (price == null) {
-                price = getOpenPrice(e.getKey(), null);
+                price = priceService.getOpenPrice(e.getKey(), null);
             }
             PaperSignal buySignal = PaperSignal.builder()
                 .paperId(paperId)
                 .signalDate(LocalDate.parse(signalDate))
                 .factorDate(LocalDate.parse(signalDate))
                 .code(e.getKey())
-                .name(getStockName(e.getKey()))
+                .name(priceService.getStockName(e.getKey()))
                 .direction("BUY")
                 .signalPrice(price)
                 .factorScore(BigDecimal.valueOf(e.getValue()).setScale(4, RoundingMode.HALF_UP))
@@ -819,7 +821,7 @@ public class PaperTradingService {
         // 【缺陷1修复】条件单触发检查：限价单/止损单/追踪止损需满足触发条件才执行
         String orderType = signal.getOrderType() != null ? signal.getOrderType() : "MARKET";
         if (!"MARKET".equals(orderType)) {
-            BigDecimal currentPrice = getExecutionPrice(signal.getCode(), signal.getPaperId());
+            BigDecimal currentPrice = priceService.getExecutionPrice(signal.getCode(), signal.getPaperId());
             if (currentPrice == null || currentPrice.compareTo(BigDecimal.ZERO) <= 0) {
                 log.warn("条件单无法获取当前价格: signalId={} code={}", signalId, signal.getCode());
                 return null;  // 价格不可用，等待下次检查
@@ -849,7 +851,7 @@ public class PaperTradingService {
             String allocationMode = riskConfig.getAllocationMode() != null ? riskConfig.getAllocationMode() : "equal";
 
             // 手动执行时按规则确定成交价：交易日收盘价 / 非交易日下个交易日开盘价
-            BigDecimal price = getExecutionPrice(signal.getCode(), signal.getPaperId());
+            BigDecimal price = priceService.getExecutionPrice(signal.getCode(), signal.getPaperId());
             if (price == null || price.compareTo(BigDecimal.ZERO) <= 0) {
                 signal.setStatus(PaperSignalStatus.SKIPPED);
                 signal.setReason("价格无效");
@@ -857,7 +859,7 @@ public class PaperTradingService {
                 return null;
             }
             // 买入加滑点
-            price = applySlippage(price, true, signal.getPaperId());
+            price = priceService.applySlippage(price, true, signal.getPaperId());
 
             // 计算分配金额
             BigDecimal perStock;
@@ -1041,9 +1043,9 @@ public class PaperTradingService {
                 return null;
             }
 
-            BigDecimal price = getExecutionPrice(signal.getCode(), signal.getPaperId());
+            BigDecimal price = priceService.getExecutionPrice(signal.getCode(), signal.getPaperId());
             // 卖出减滑点
-            price = applySlippage(price, false, signal.getPaperId());
+            price = priceService.applySlippage(price, false, signal.getPaperId());
             BigDecimal sellAmount = price.multiply(BigDecimal.valueOf(pos.getShares()));
             pt.setCurrentCapital(pt.getCurrentCapital().add(sellAmount));
             pt.setPositionCount(Math.max(0, pt.getPositionCount() - 1));
@@ -1287,98 +1289,6 @@ public class PaperTradingService {
     }
 
     /**
-     * 获取最新交易日期
-     * 策略：取每个因子各自最新 calc_date 的最小值，确保所有因子在该日期都有数据
-     * 回退链：逐因子MAX最小值 → 全局MAX(排除CHAN/FIN) → stock_daily MAX → 今天
-     */
-    private String getLatestTradeDate(Set<String> factorCodes) {
-        if (clickHouseJdbcTemplate == null) return LocalDate.now().toString();
-
-        if (factorCodes != null && !factorCodes.isEmpty()) {
-            // 对每个因子取各自最新日期，返回最小值（所有因子都有的日期）
-            LocalDate minDate = null;
-            for (String code : factorCodes) {
-                try {
-                    List<String> dates = clickHouseJdbcTemplate.query(
-                        "SELECT MAX(calc_date) FROM stock.factor_value FINAL WHERE factor_code = ?",
-                        new Object[]{code},
-                        (rs, rowNum) -> rs.getString(1));
-                    if (!dates.isEmpty() && dates.getFirst() != null) {
-                        LocalDate d = LocalDate.parse(dates.getFirst());
-                        if (minDate == null || d.isBefore(minDate)) {
-                            minDate = d;
-                        }
-                    }
-                } catch (Exception e) {
-                    log.debug("查询因子 {} 最新日期失败: {}", code, e.getMessage());
-                }
-            }
-            if (minDate != null) {
-                log.info("getLatestTradeDate: 逐因子取MIN={}, factors={}", minDate, factorCodes);
-                return minDate.toString();
-            }
-        }
-
-        // 回退：全局 MAX 排除季频因子（DB元数据驱动）
-        Set<String> quarterlyCodes = factorMetaCache.getQuarterlyCodes();
-        String excludeClause = quarterlyCodes.isEmpty()
-                ? ""
-                : " WHERE factor_code NOT IN (" + quarterlyCodes.stream()
-                        .map(c -> "'" + c + "'").collect(Collectors.joining(",")) + ")";
-        List<String> dates = clickHouseJdbcTemplate.query(
-            "SELECT MAX(calc_date) FROM stock.factor_value FINAL" + excludeClause,
-            (rs, rowNum) -> rs.getString(1));
-        if (dates.isEmpty() || dates.getFirst() == null) {
-            dates = clickHouseJdbcTemplate.query(
-                "SELECT MAX(calc_date) FROM stock.factor_value FINAL",
-                (rs, rowNum) -> rs.getString(1));
-        }
-        if (dates.isEmpty() || dates.getFirst() == null) {
-            dates = clickHouseJdbcTemplate.query(
-                "SELECT MAX(trade_date) FROM stock.stock_daily FINAL",
-                (rs, rowNum) -> rs.getString(1));
-        }
-        return dates.isEmpty() || dates.getFirst() == null ? LocalDate.now().toString() : dates.getFirst();
-    }
-
-    /**
-     * 获取单个因子的最新日期
-     * 财务因子和日频因子分别更新，每个因子用自己的最新日期
-     */
-    private String getFactorLatestDate(String factorCode) {
-        if (clickHouseJdbcTemplate == null) return LocalDate.now().toString();
-        try {
-            List<String> dates = clickHouseJdbcTemplate.query(
-                "SELECT MAX(calc_date) FROM stock.factor_value FINAL WHERE factor_code = ?",
-                new Object[]{factorCode},
-                (rs, rowNum) -> rs.getString(1));
-            return dates.isEmpty() || dates.getFirst() == null ? null : dates.getFirst();
-        } catch (Exception e) {
-            log.debug("查询因子 {} 最新日期失败: {}", factorCode, e.getMessage());
-            return null;
-        }
-    }
-
-    /**
-     * 判断是否可以生成信号（有可用的最新因子数据）
-     * 严格模式：最新交易日必须是今天或未来（不允许周末生成信号）
-     */
-    /**
-     * 判断是否可以生成信号（允许最近3天内有交易日数据，覆盖周末/节假日补跑）
-     */
-    private boolean isTradingDay() {
-        if (tradeCalendarService == null) {
-            log.warn("isTradingDay: tradeCalendarService 为 null，拦截");
-            return false;
-        }
-        boolean result = tradeCalendarService.isTradingDay(LocalDate.now());
-        if (!result) {
-            log.info("isTradingDay: 今天({})非交易日，拦截", LocalDate.now());
-        }
-        return result;
-    }
-
-    /**
      * 判断是否可以执行信号（严格：必须是今天或未来）
      */
     private boolean canExecuteSignal() {
@@ -1403,152 +1313,6 @@ public class PaperTradingService {
         } catch (Exception e) {
             log.warn("canExecuteSignal 查询失败，拦截: {}", e.getMessage());
             return false;
-        }
-    }
-
-    /**
-     * 获取最新收盘价（原有逻辑，供其他场景使用）
-     */
-    private BigDecimal getLatestPrice(String code, String date) {
-        if (clickHouseJdbcTemplate == null) return BigDecimal.ZERO;
-        try {
-            // date 为 null 时自动取 stock_daily 最新交易日的价格
-            List<BigDecimal> prices;
-            if (date == null || date.isBlank()) {
-                prices = clickHouseJdbcTemplate.query(
-                    "SELECT close_price FROM stock.stock_daily FINAL WHERE code = ? ORDER BY trade_date DESC LIMIT 1",
-                    new Object[]{code},
-                    (rs, rowNum) -> rs.getBigDecimal("close_price"));
-            } else {
-                prices = clickHouseJdbcTemplate.query(
-                    "SELECT close_price FROM stock.stock_daily FINAL WHERE code = ? AND trade_date = ?",
-                    new Object[]{code, date},
-                    (rs, rowNum) -> rs.getBigDecimal("close_price"));
-            }
-            return prices.isEmpty() ? BigDecimal.ZERO : prices.getFirst();
-        } catch (Exception e) {
-            return BigDecimal.ZERO;
-        }
-    }
-
-    /**
-     * 获取指定日期的开盘价（用于模拟盘成交执行）
-     * date 为 null 时取最新交易日的开盘价
-     */
-    private BigDecimal getOpenPrice(String code, String date) {
-        if (clickHouseJdbcTemplate == null) return BigDecimal.ZERO;
-        try {
-            List<BigDecimal> prices;
-            if (date == null || date.isBlank()) {
-                prices = clickHouseJdbcTemplate.query(
-                    "SELECT open_price FROM stock.stock_daily FINAL WHERE code = ? ORDER BY trade_date DESC LIMIT 1",
-                    new Object[]{code},
-                    (rs, rowNum) -> rs.getBigDecimal("open_price"));
-            } else {
-                prices = clickHouseJdbcTemplate.query(
-                    "SELECT open_price FROM stock.stock_daily FINAL WHERE code = ? AND trade_date = ?",
-                    new Object[]{code, date},
-                    (rs, rowNum) -> rs.getBigDecimal("open_price"));
-            }
-            if (prices.isEmpty() || prices.getFirst() == null || prices.getFirst().compareTo(BigDecimal.ZERO) <= 0) {
-                // 开盘价为空时降级为收盘价
-                log.warn("getOpenPrice: {} {} 开盘价为空，降级为收盘价", code, date);
-                return getLatestPrice(code, date);
-            }
-            return prices.getFirst();
-        } catch (Exception e) {
-            log.warn("getOpenPrice 查询失败 code={}, date={}: {}", code, date, e.getMessage());
-            return BigDecimal.ZERO;
-        }
-    }
-
-    /**
-     * 手动执行信号时的成交价（调用前需先通过 isTradingDay() 拦截非交易日）
-     * - 今天是交易日 → 今天收盘价
-     */
-    private BigDecimal getExecutionPrice(String code) {
-        return getExecutionPrice(code, null);
-    }
-
-    /** 获取成交价（含滑点调整）
-     * @param paperId 模拟盘ID（用于读取滑点配置），null时不加滑点 */
-    private BigDecimal getExecutionPrice(String code, Long paperId) {
-        if (clickHouseJdbcTemplate == null) return BigDecimal.ZERO;
-        try {
-            LocalDate today = LocalDate.now();
-            BigDecimal closePrice = getLatestPrice(code, today.toString());
-            if (closePrice == null || closePrice.compareTo(BigDecimal.ZERO) <= 0) {
-                log.warn("getExecutionPrice: {} {} 收盘价无效，降级为开盘价", code, today);
-                closePrice = getOpenPrice(code, today.toString());
-            }
-            return closePrice;
-        } catch (Exception e) {
-            log.warn("getExecutionPrice 查询失败 code={}: {}", code, e.getMessage());
-            return getOpenPrice(code, null);
-        }
-    }
-
-    /** 滑点调整：买入加滑点，卖出减滑点 */
-    private BigDecimal applySlippage(BigDecimal price, boolean isBuy, Long paperId) {
-        if (paperId == null) return price;
-        PaperRiskConfig cfg = paperRiskConfigMapper.selectOne(
-            new LambdaQueryWrapper<PaperRiskConfig>().eq(PaperRiskConfig::getPaperId, paperId));
-        if (cfg == null) cfg = PaperRiskConfig.defaults(paperId);
-
-        String model = cfg.getSlippageModel();
-        BigDecimal slipPct = cfg.getSlippagePct();
-        if (model == null || "NONE".equals(model) || slipPct == null || slipPct.compareTo(BigDecimal.ZERO) <= 0) {
-            return price;
-        }
-
-        // FIXED模型：固定滑点比例
-        BigDecimal factor = isBuy
-            ? BigDecimal.ONE.add(slipPct)     // 买入加滑点
-            : BigDecimal.ONE.subtract(slipPct); // 卖出减滑点
-        BigDecimal adjusted = price.multiply(factor).setScale(2, RoundingMode.HALF_UP);
-        log.debug("applySlippage: isBuy={} raw={} slip={} adjusted={}",
-            isBuy, price, slipPct, adjusted);
-        return adjusted;
-    }
-
-    private String getStockName(String code) {
-        try {
-            List<Map<String, Object>> rows = jdbcTemplate.query(
-                "SELECT name FROM stock_info WHERE code = ? LIMIT 1",
-                (rs, rowNum) -> Map.of("name", rs.getString("name")), code);
-            return rows.isEmpty() ? code : (String) rows.getFirst().get("name");
-        } catch (Exception e) {
-            return code;
-        }
-    }
-
-    /**
-     * 从ClickHouse拉取K线数据用于卖点检测
-     * @return [open[], high[], low[], close[], volume[]] 或 null
-     */
-    private double[][] fetchKlineForSellCheck(String code) {
-        if (clickHouseJdbcTemplate == null) return null;
-        try {
-            String pureCode = code.split("\\.")[0];
-            List<Map<String, Object>> rows = clickHouseJdbcTemplate.queryForList(
-                "SELECT open_price, high_price, low_price, close_price, volume FROM stock.stock_daily FINAL " +
-                "WHERE code = ? ORDER BY trade_date DESC LIMIT 120",
-                pureCode);
-            if (rows.isEmpty()) return null;
-            int n = rows.size();
-            double[] open = new double[n], high = new double[n], low = new double[n], close = new double[n], volume = new double[n];
-            for (int i = 0; i < n; i++) {
-                Map<String, Object> row = rows.get(n - 1 - i);
-                open[i] = ((Number) row.get("open_price")).doubleValue();
-                high[i] = ((Number) row.get("high_price")).doubleValue();
-                low[i] = ((Number) row.get("low_price")).doubleValue();
-                close[i] = ((Number) row.get("close_price")).doubleValue();
-                volume[i] = ((Number) row.get("volume")).doubleValue();
-            }
-            return new double[][] { open, high, low, close, volume };
-        } catch (Exception e) {
-            log.warn("[PaperTrading] 拉取K线失败: {} - {}", code, e.getMessage());
-            return null;
         }
     }
 
@@ -1774,7 +1538,7 @@ public class PaperTradingService {
                 String code = (String) sell.get("code");
                 BigDecimal sellPrice = (BigDecimal) sell.get("sellPrice");
                 // 找对应BUY信号获取买入价
-                BigDecimal buyPrice = getBuyPriceForCode(paperId, code, (String) sell.get("sellDate"));
+                BigDecimal buyPrice = priceService.getBuyPriceForCode(paperId, code, (String) sell.get("sellDate"));
                 if (buyPrice == null || sellPrice == null || buyPrice.compareTo(BigDecimal.ZERO) <= 0) continue;
                 double ret = sellPrice.subtract(buyPrice).divide(buyPrice, 6, RoundingMode.HALF_UP).doubleValue();
                 if (ret > 0) { wins++; totalWin += ret; }
@@ -1788,18 +1552,6 @@ public class PaperTradingService {
             return new KellyParams(winRate, avgWin, avgLoss);
         } catch (Exception e) {
             log.debug("凯利参数计算失败: paperId={}, error={}", paperId, e.getMessage());
-            return null;
-        }
-    }
-
-    /** 查某只股票在指定卖出日期之前最近一次BUY信号的成交价 */
-    private BigDecimal getBuyPriceForCode(Long paperId, String code, String beforeSellDate) {
-        try {
-            List<Map<String, Object>> rows = jdbcTemplate.query(
-                "SELECT executed_price FROM paper_signal WHERE paper_id = ? AND code = ? AND direction = 'BUY' AND status = 'EXECUTED' AND signal_date <= ? ORDER BY signal_date DESC LIMIT 1",
-                (rs, rowNum) -> Map.of("price", rs.getBigDecimal("executed_price")), paperId, code, beforeSellDate);
-            return rows.isEmpty() ? null : (BigDecimal) rows.getFirst().get("price");
-        } catch (Exception e) {
             return null;
         }
     }
@@ -1919,14 +1671,14 @@ public class PaperTradingService {
         }
 
         // 创建SELL信号
-        String name = getStockName(code);
-        BigDecimal price = getExecutionPrice(code, paperId);
+        String name = priceService.getStockName(code);
+        BigDecimal price = priceService.getExecutionPrice(code, paperId);
         if (price == null || price.compareTo(BigDecimal.ZERO) <= 0) {
             log.warn("autoSellByStopLoss: {} 无法获取有效价格，跳过", code);
             return;
         }
         // 卖出减滑点
-        price = applySlippage(price, false, paperId);
+        price = priceService.applySlippage(price, false, paperId);
 
         PaperSignal signal = PaperSignal.builder()
             .paperId(paperId)
@@ -2090,7 +1842,7 @@ public class PaperTradingService {
         if (pt == null) throw new IllegalArgumentException("模拟盘不存在");
         if (PaperTradingStatus.RUNNING != pt.getStatus()) throw new IllegalArgumentException("模拟盘未运行");
 
-        if (name == null) name = getStockName(code);
+        if (name == null) name = priceService.getStockName(code);
 
         // 优先使用传入的 price（前端可从 recommendation 取 suggestedBuyPrice）
         // 若未传入，则查询推荐表的最新 suggested_buy_price
@@ -2105,7 +1857,7 @@ public class PaperTradingService {
             }
         }
         if (price == null) {
-            price = getExecutionPrice(code, paperId);
+            price = priceService.getExecutionPrice(code, paperId);
         }
         if (price == null || price.compareTo(BigDecimal.ZERO) <= 0) {
             throw new IllegalStateException("无法获取有效买入价格: " + code);
