@@ -1,5 +1,6 @@
 package com.quant.platform.backtest.engine;
 
+import com.quant.platform.common.utils.LimitUpUtils;
 import com.quant.platform.market.domain.MarketDailyBar;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.lang.Nullable;
@@ -24,6 +25,9 @@ public class BacktestUtils {
 
     /** VOLUME 滑点模型的市场冲击系数（成交额占比开方后的放大倍数）。 */
     public static final double VOLUME_IMPACT_COEFF = 10.0;
+
+    /** 单笔买入金额不得超过日成交额的比例上限。 */
+    public static final double MAX_PARTICIPATION = 0.08;
 
     // ============================================================
     //  费用计算
@@ -250,5 +254,88 @@ public class BacktestUtils {
     public static double returnPct(double exitValue, double entryValue) {
         if (entryValue <= 0) return 0.0;
         return (exitValue - entryValue) / entryValue;
+    }
+
+    // ============================================================
+    //  市场规则（涨跌停 / 停牌 / 容量约束 / 成交价）
+    // ============================================================
+
+    /**
+     * 判断是否涨停（无法买入）。
+     * <p>由 BacktestEngine 迁入（Phase5），方法体逐字迁移，行为不变。
+     */
+    public static boolean isLimitUp(MarketDailyBar bar) {
+        if (bar.getPreClose() == null || bar.getPreClose().doubleValue() <= 0) return false;
+        if (bar.getPctChg() == null) return false;
+        double pct = bar.getPctChg().doubleValue();
+        boolean isSt = LimitUpUtils.isStName(bar.getName());
+        return LimitUpUtils.isLimitUp(pct, bar.getSymbol(), bar.getTradeDate(), isSt);
+    }
+
+    /**
+     * 判断是否跌停（无法卖出）。
+     * <p>由 BacktestEngine 迁入（Phase5），方法体逐字迁移，行为不变。
+     */
+    public static boolean isLimitDown(MarketDailyBar bar) {
+        if (bar.getPreClose() == null || bar.getPreClose().doubleValue() <= 0) return false;
+        if (bar.getPctChg() == null) return false;
+        double pct = bar.getPctChg().doubleValue();
+        boolean isSt = LimitUpUtils.isStName(bar.getName());
+        return LimitUpUtils.isLimitDown(pct, bar.getSymbol(), bar.getTradeDate(), isSt);
+    }
+
+    /**
+     * 判断是否停牌（成交量为0）。
+     * <p>由 BacktestEngine 迁入（Phase5），方法体逐字迁移，行为不变。
+     */
+    public static boolean isSuspended(MarketDailyBar bar) {
+        return bar.getVol() == null || bar.getVol().doubleValue() <= 0;
+    }
+
+    /**
+     * 容量约束：买入金额不得超过日成交额 MAX_PARTICIPATION，否则缩金额。
+     * 仅用于买入侧（卖出侧缩股会导致持仓丢失，VOLUME 滑点已覆盖大额卖出惩罚）。
+     * <p>由 BacktestEngine 迁入（Phase5），方法体逐字迁移，行为不变。
+     */
+    public static double scaleAmountToCapacity(double amount, MarketDailyBar bar) {
+        if (bar == null || bar.getAmount() == null) return amount;
+        double dayAmount = bar.getAmount().doubleValue() * 1000; // 千元→元
+        if (dayAmount <= 0) return amount;
+        double maxAmount = dayAmount * MAX_PARTICIPATION;
+        return Math.min(amount, maxAmount);
+    }
+
+    /**
+     * 根据 orderType 获取实际成交价格。
+     * <ul>
+     *   <li>CLOSE    → 当日收盘价（默认，最保守）</li>
+     *   <li>NEXT_OPEN → 次日开盘价（从预加载的 nextDayBarMap 获取，更真实）</li>
+     *   <li>VWAP     → 当日成交量加权均价，用 (high+low+close)/3 近似</li>
+     * </ul>
+     * <p>由 BacktestEngine 迁入（Phase5），方法体逐字迁移，行为不变。
+     *
+     * @param bar           当日行情
+     * @param tradingDates  全部交易日列表
+     * @param di            当前交易日下标
+     * @param orderType     成交模式
+     * @param nextDayBarMap 次日行情快照（NEXT_OPEN 模式使用）
+     * @return 成交参考价格
+     */
+    public static double getExecutionPrice(MarketDailyBar bar, List<LocalDate> tradingDates,
+                                            int di, String orderType,
+                                            Map<String, MarketDailyBar> nextDayBarMap) {
+        double close = bar.getClose().doubleValue();
+        if ("NEXT_OPEN".equalsIgnoreCase(orderType)) {
+            MarketDailyBar nextBar = nextDayBarMap.get(bar.getSymbol());
+            if (nextBar != null && nextBar.getOpen() != null && nextBar.getOpen().doubleValue() > 0) {
+                return nextBar.getOpen().doubleValue();
+            }
+            return close;
+        } else if ("VWAP".equalsIgnoreCase(orderType)) {
+            double high = bar.getHigh() != null ? bar.getHigh().doubleValue() : close;
+            double low = bar.getLow() != null ? bar.getLow().doubleValue() : close;
+            return (high + low + close) / 3.0;
+        }
+        return close;
     }
 }

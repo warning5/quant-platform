@@ -8,8 +8,6 @@ import com.quant.platform.backtest.mapper.BacktestReportMapper;
 import com.quant.platform.backtest.mapper.BacktestTaskMapper;
 import com.quant.platform.backtest.mapper.EquityCurveMapper;
 import com.quant.platform.backtest.mapper.RebalanceRecordMapper;
-import com.quant.platform.common.security.GroovySandboxConfig;
-import com.quant.platform.common.utils.LimitUpUtils;
 import com.quant.platform.factor.domain.FactorValue;
 import com.quant.platform.factor.ic.service.FactorIcService;
 import com.quant.platform.factor.mapper.FactorValueMapper;
@@ -23,7 +21,6 @@ import com.quant.platform.stock.analysis.engine.SellSignalEngine;
 import com.quant.platform.stock.service.DividendService;
 import com.quant.platform.strategy.domain.StrategyDefinition;
 import com.quant.platform.strategy.service.StrategyService;
-import groovy.lang.Binding;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -46,7 +43,6 @@ import com.quant.platform.common.enums.JobStatus;
 public class BacktestEngine {
 
     /** 单笔成交金额占日成交额上限（复刻模拟盘 8% 规则） */
-    private static final double MAX_PARTICIPATION = 0.08;
 
     private final BacktestTaskMapper taskMapper;
     private final BacktestReportMapper reportMapper;
@@ -61,6 +57,10 @@ public class BacktestEngine {
     private final BacktestProgressNotifier progressNotifier;
     /** 绩效报告构建 + 逐日净值落库 —— God Class 拆分 Phase 2 */
     private final BacktestReportBuilder backtestReportBuilder;
+    /** 因子打分 / Top N 选股 / 动态权重 —— God Class 拆分 Phase 5 */
+    private final BacktestScoring backtestScoring;
+    /** 调仓触发判断 / 成交明细生成 / 现金重算 —— God Class 拆分 Phase 5 */
+    private final BacktestRebalancer backtestRebalancer;
     @Autowired(required = false)
     private ClickHouseFactorValueService clickHouseFactorValueService;
     @Autowired(required = false)
@@ -418,18 +418,18 @@ public class BacktestEngine {
                         if (bar == null) continue;
 
                         // 停牌/涨跌停过滤
-                        if (suspendFilter && isSuspended(bar)) {
+                        if (suspendFilter && BacktestUtils.isSuspended(bar)) {
                             log.debug("[{}] {} 停牌，跳过止损止盈", today, symbol);
                             continue;
                         }
-                        if (limitFilter && isLimitDown(bar)) {
+                        if (limitFilter && BacktestUtils.isLimitDown(bar)) {
                             log.debug("[{}] {} 跌停，跳过止损止盈", today, symbol);
                             continue;
                         }
 
                         double shares = positions.get(symbol);
                         double cost = positionCosts.get(symbol);
-                        double execPrice = getExecutionPrice(bar, tradingDates, di, orderType, nextDayBarMap);
+                        double execPrice = BacktestUtils.getExecutionPrice(bar, tradingDates, di, orderType, nextDayBarMap);
                         double closePrice = bar.getClose().doubleValue();
                         double amount = shares * closePrice;
                         double dayAmount = bar.getAmount() != null ? bar.getAmount().doubleValue() * 1000 : 0;
@@ -441,12 +441,12 @@ public class BacktestEngine {
                         trade.put("symbol", symbol);
                         trade.put("name", bar.getName());
                         trade.put("action", "STOP_LOSS_SELL");  // STOP_LOSS 或 STOP_PROFIT
-                        trade.put("price", round(price, 4));
-                        trade.put("amount", round(shares, 2));
-                        trade.put("total", round(amount - fee, 2));
-                        trade.put("commission", round(fee, 2));
-                        trade.put("fee", round(fee, 2));
-                        trade.put("returnPct", round(BacktestUtils.returnPct(amount, cost), 4));
+                        trade.put("price", BacktestUtils.round(price, 4));
+                        trade.put("amount", BacktestUtils.round(shares, 2));
+                        trade.put("total", BacktestUtils.round(amount - fee, 2));
+                        trade.put("commission", BacktestUtils.round(fee, 2));
+                        trade.put("fee", BacktestUtils.round(fee, 2));
+                        trade.put("returnPct", BacktestUtils.round(BacktestUtils.returnPct(amount, cost), 4));
                         tradeLog.add(trade);
 
                         cash += (shares * price) - fee;
@@ -486,11 +486,11 @@ public class BacktestEngine {
                 for (String symbol : toSellBySignal) {
                     MarketDailyBar bar = barMap.get(symbol);
                     if (bar == null) continue;
-                    if (suspendFilter && isSuspended(bar)) continue;
-                    if (limitFilter && isLimitDown(bar)) continue;
+                    if (suspendFilter && BacktestUtils.isSuspended(bar)) continue;
+                    if (limitFilter && BacktestUtils.isLimitDown(bar)) continue;
                     double shares = positions.get(symbol);
                     double cost = positionCosts.getOrDefault(symbol, 0.0);
-                    double execPrice = getExecutionPrice(bar, tradingDates, di, orderType, nextDayBarMap);
+                    double execPrice = BacktestUtils.getExecutionPrice(bar, tradingDates, di, orderType, nextDayBarMap);
                     double closePrice = bar.getClose().doubleValue();
                     double amount = shares * closePrice;
                     double dayAmount = bar.getAmount() != null ? bar.getAmount().doubleValue() * 1000 : 0;
@@ -501,12 +501,12 @@ public class BacktestEngine {
                     trade.put("symbol", symbol);
                     trade.put("name", bar.getName());
                     trade.put("action", "SELL_SIGNAL");
-                    trade.put("price", round(price, 4));
-                    trade.put("amount", round(shares, 2));
-                    trade.put("total", round(amount - fee, 2));
-                    trade.put("commission", round(fee, 2));
-                    trade.put("fee", round(fee, 2));
-                    trade.put("returnPct", cost > 0 ? round(BacktestUtils.returnPct(amount, cost), 4) : 0);
+                    trade.put("price", BacktestUtils.round(price, 4));
+                    trade.put("amount", BacktestUtils.round(shares, 2));
+                    trade.put("total", BacktestUtils.round(amount - fee, 2));
+                    trade.put("commission", BacktestUtils.round(fee, 2));
+                    trade.put("fee", BacktestUtils.round(fee, 2));
+                    trade.put("returnPct", cost > 0 ? BacktestUtils.round(BacktestUtils.returnPct(amount, cost), 4) : 0);
                     tradeLog.add(trade);
                     cash += (shares * price) - fee;
                     totalTrades++;
@@ -523,14 +523,14 @@ public class BacktestEngine {
                 Map<String, Map<String, FactorValue>> factorValueMap = new HashMap<>();
                 for (FactorWeight fw : factorWeights) {
                     List<FactorValue> fvList = (clickHouseFactorValueService != null)
-                            ? clickHouseFactorValueService.findByFactorCodeAndDate(fw.factorCode, today)
+                            ? clickHouseFactorValueService.findByFactorCodeAndDate(fw.factorCode(), today)
                             : factorValueMapper.selectList(
                             new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<FactorValue>()
-                                    .eq(FactorValue::getFactorCode, fw.factorCode)
+                                    .eq(FactorValue::getFactorCode, fw.factorCode())
                                     .eq(FactorValue::getCalcDate, today));
                     Map<String, FactorValue> fvMap = fvList.stream()
                             .collect(Collectors.toMap(FactorValue::getSymbol, fv -> fv));
-                    factorValueMap.put(fw.factorCode, fvMap);
+                    factorValueMap.put(fw.factorCode(), fvMap);
                 }
 
                 // 计算动态因子权重（基于近期IC/IR）
@@ -566,8 +566,8 @@ public class BacktestEngine {
                     if (targetWeights.containsKey(sym)) continue;
                     MarketDailyBar bar = barMap.get(sym);
                     if (bar == null) continue;
-                    if (suspendFilter && isSuspended(bar)) continue;
-                    if (limitFilter && isLimitDown(bar)) continue;
+                    if (suspendFilter && BacktestUtils.isSuspended(bar)) continue;
+                    if (limitFilter && BacktestUtils.isLimitDown(bar)) continue;
                     double amount = oldPositions.get(sym) * bar.getClose().doubleValue();
                     sellFee += BacktestUtils.calcFee(amount, true, commission, stampTaxRate, minCommission, sym, transferFeeRate);
                 }
@@ -579,8 +579,8 @@ public class BacktestEngine {
                     if (oldPositions.containsKey(entry.getKey())) continue;
                     MarketDailyBar bar = barMap.get(entry.getKey());
                     if (bar == null) continue;
-                    if (suspendFilter && isSuspended(bar)) continue;
-                    if (limitFilter && isLimitUp(bar)) continue;
+                    if (suspendFilter && BacktestUtils.isSuspended(bar)) continue;
+                    if (limitFilter && BacktestUtils.isLimitUp(bar)) continue;
                     double amount = portfolioValue * entry.getValue();
                     rawInvestedValue += amount;
                     newBuyFee += BacktestUtils.calcFee(amount, false, commission, stampTaxRate, minCommission, entry.getKey(), transferFeeRate);
@@ -614,8 +614,8 @@ public class BacktestEngine {
                 for (String sym : new HashSet<>(effectiveTargets.keySet())) {
                     MarketDailyBar bar = barMap.get(sym);
                     if (bar == null) effectiveTargets.remove(sym);
-                    else if (suspendFilter && isSuspended(bar)) effectiveTargets.remove(sym);
-                    else if (limitFilter && isLimitUp(bar)) effectiveTargets.remove(sym);
+                    else if (suspendFilter && BacktestUtils.isSuspended(bar)) effectiveTargets.remove(sym);
+                    else if (limitFilter && BacktestUtils.isLimitUp(bar)) effectiveTargets.remove(sym);
                 }
 
                 // 计算实际可卖出的标的（排除跌停/停牌）
@@ -627,8 +627,8 @@ public class BacktestEngine {
                         soldSymbols.add(sym);
                         continue;
                     }
-                    if (suspendFilter && isSuspended(bar)) continue; // 停牌不卖
-                    if (limitFilter && isLimitDown(bar)) continue; // 跌停不卖
+                    if (suspendFilter && BacktestUtils.isSuspended(bar)) continue; // 停牌不卖
+                    if (limitFilter && BacktestUtils.isLimitDown(bar)) continue; // 跌停不卖
                     soldSymbols.add(sym);
                 }
 
@@ -686,8 +686,8 @@ public class BacktestEngine {
             // 记录净值曲线
             Map<String, Object> ep = new HashMap<>();
             ep.put("date", today.toString());
-            ep.put("value", round(portfolioValue / initialCapital, 6));
-            ep.put("drawdown", round(-drawdown, 6));
+            ep.put("value", BacktestUtils.round(portfolioValue / initialCapital, 6));
+            ep.put("drawdown", BacktestUtils.round(-drawdown, 6));
             equityCurve.add(ep);
 
             // 记录基准净值曲线（基准当日收盘 / 基准首日收盘）
@@ -702,7 +702,7 @@ public class BacktestEngine {
             if (benchmarkBase > 0) {
                 Map<String, Object> bm = new HashMap<>();
                 bm.put("date", today.toString());
-                bm.put("value", round(bmClose / benchmarkBase, 6));
+                bm.put("value", BacktestUtils.round(bmClose / benchmarkBase, 6));
                 benchmarkCurve.add(bm);
             }
 
@@ -719,7 +719,7 @@ public class BacktestEngine {
                 double bmVal = benchmarkCurve.isEmpty() ? 1.0
                         : ((Number) benchmarkCurve.getLast().get("value")).doubleValue();
                 sendProgressWithCurve(task.getId(), pct, today.toString(),
-                        round(portfolioValue / initialCapital, 6), bmVal);
+                        BacktestUtils.round(portfolioValue / initialCapital, 6), bmVal);
             }
 
             // ── 滚动更新次日行情缓存（NEXT_OPEN 成交模式用）──────────
@@ -741,7 +741,7 @@ public class BacktestEngine {
             double monthRet = prevValue > 0 ? (curValue - prevValue) / prevValue : 0;
             Map<String, Object> m = new HashMap<>();
             m.put("month", entry.getKey());
-            m.put("return", round(monthRet, 6));
+            m.put("return", BacktestUtils.round(monthRet, 6));
             monthlyReturnsList.add(m);
             prevValue = curValue;
         }
@@ -910,10 +910,10 @@ public class BacktestEngine {
                 for (String symbol : toSell) {
                     MarketDailyBar bar = barMap.get(symbol);
                     if (bar == null) continue;
-                    if (suspendFilter && isSuspended(bar)) continue;
-                    if (limitFilter && isLimitDown(bar)) continue;
+                    if (suspendFilter && BacktestUtils.isSuspended(bar)) continue;
+                    if (limitFilter && BacktestUtils.isLimitDown(bar)) continue;
                     double shares = positions.get(symbol);
-                    double execPrice = getExecutionPrice(bar, tradingDates, di, orderType, nextDayBarMap);
+                    double execPrice = BacktestUtils.getExecutionPrice(bar, tradingDates, di, orderType, nextDayBarMap);
                     double amount = shares * bar.getClose().doubleValue();
                     double dayAmount = bar.getAmount() != null ? bar.getAmount().doubleValue() * 1000 : 0;
                     double price = BacktestUtils.applySlippage(execPrice, false, slippage, amount, dayAmount, slippageModel);
@@ -923,11 +923,11 @@ public class BacktestEngine {
                     trade.put("symbol", symbol);
                     trade.put("name", bar.getName());
                     trade.put("action", "STOP_LOSS_SELL");
-                    trade.put("price", round(price, 4));
-                    trade.put("amount", round(shares, 2));
-                    trade.put("total", round(amount - fee, 2));
-                    trade.put("commission", round(fee, 2));
-                    trade.put("fee", round(fee, 2));
+                    trade.put("price", BacktestUtils.round(price, 4));
+                    trade.put("amount", BacktestUtils.round(shares, 2));
+                    trade.put("total", BacktestUtils.round(amount - fee, 2));
+                    trade.put("commission", BacktestUtils.round(fee, 2));
+                    trade.put("fee", BacktestUtils.round(fee, 2));
                     tradeLog.add(trade);
                     cash += (shares * price) - fee;
                     totalTrades++;
@@ -978,8 +978,8 @@ public class BacktestEngine {
                     if (oldPositions.containsKey(entry.getKey())) continue;
                     MarketDailyBar bar = barMap.get(entry.getKey());
                     if (bar == null) continue;
-                    if (suspendFilter && isSuspended(bar)) continue;
-                    if (limitFilter && isLimitUp(bar)) continue;
+                    if (suspendFilter && BacktestUtils.isSuspended(bar)) continue;
+                    if (limitFilter && BacktestUtils.isLimitUp(bar)) continue;
                     double amount = portfolioValue * entry.getValue();
                     rawInvestedValue += amount;
                     newBuyFee += BacktestUtils.calcFee(amount, false, commission, stampTaxRate, minCommission, entry.getKey(), transferFeeRate);
@@ -996,8 +996,8 @@ public class BacktestEngine {
                     if (targetWeights.containsKey(sym)) continue;
                     MarketDailyBar bar = barMap.get(sym);
                     if (bar == null) continue;
-                    if (suspendFilter && isSuspended(bar)) continue;
-                    if (limitFilter && isLimitDown(bar)) continue;
+                    if (suspendFilter && BacktestUtils.isSuspended(bar)) continue;
+                    if (limitFilter && BacktestUtils.isLimitDown(bar)) continue;
                     double amount = oldPositions.get(sym) * bar.getClose().doubleValue();
                     sellFee += BacktestUtils.calcFee(amount, true, commission, stampTaxRate, minCommission, sym, transferFeeRate);
                 }
@@ -1072,8 +1072,8 @@ public class BacktestEngine {
                         soldSymbols.add(sym);
                         continue;
                     }
-                    if (suspendFilter && isSuspended(bar)) continue;
-                    if (limitFilter && isLimitDown(bar)) continue;
+                    if (suspendFilter && BacktestUtils.isSuspended(bar)) continue;
+                    if (limitFilter && BacktestUtils.isLimitDown(bar)) continue;
                     soldSymbols.add(sym);
                 }
                 positions = new HashMap<>();
@@ -1131,8 +1131,8 @@ public class BacktestEngine {
 
             Map<String, Object> ep = new HashMap<>();
             ep.put("date", today.toString());
-            ep.put("value", round(portfolioValue / initialCapital, 6));
-            ep.put("drawdown", round(-drawdown, 6));
+            ep.put("value", BacktestUtils.round(portfolioValue / initialCapital, 6));
+            ep.put("drawdown", BacktestUtils.round(-drawdown, 6));
             equityCurve.add(ep);
 
             Double bmClose = benchmarkClose.get(today);
@@ -1141,7 +1141,7 @@ public class BacktestEngine {
             if (benchmarkBase > 0) {
                 Map<String, Object> bm = new HashMap<>();
                 bm.put("date", today.toString());
-                bm.put("value", round(bmClose / benchmarkBase, 6));
+                bm.put("value", BacktestUtils.round(bmClose / benchmarkBase, 6));
                 benchmarkCurve.add(bm);
             }
 
@@ -1155,7 +1155,7 @@ public class BacktestEngine {
                 double bmVal = benchmarkCurve.isEmpty() ? 1.0
                         : ((Number) benchmarkCurve.getLast().get("value")).doubleValue();
                 sendProgressWithCurve(task.getId(), pct, today.toString(),
-                        round(portfolioValue / initialCapital, 6), bmVal);
+                        BacktestUtils.round(portfolioValue / initialCapital, 6), bmVal);
             }
 
             if (di + 2 < tradingDates.size()) {
@@ -1179,7 +1179,7 @@ public class BacktestEngine {
             double monthRet = prevValue > 0 ? (curValue - prevValue) / prevValue : 0;
             Map<String, Object> m = new HashMap<>();
             m.put("month", entry.getKey());
-            m.put("return", round(monthRet, 6));
+            m.put("return", BacktestUtils.round(monthRet, 6));
             monthlyReturnsList.add(m);
             prevValue = curValue;
         }
@@ -1221,8 +1221,8 @@ public class BacktestEngine {
     }
 
     /**
-     * 计算综合因子得分
-     * 优先使用 rank_value（预计算百分位排名），若为 NULL 则回退用 factor_val 实时做截面 z-score 归一化。
+     * 计算综合因子得分（rank_value 优先，缺失回退截面 z-score；CUSTOM 策略走 Groovy 脚本）。
+     * <p>实现已迁移至 {@link BacktestScoring#computeScores}。</p>
      */
     private Map<String, Double> computeScores(List<MarketDailyBar> bars,
                                               List<FactorWeight> factorWeights,
@@ -1231,274 +1231,22 @@ public class BacktestEngine {
                                               StrategyDefinition strategy,
                                               LocalDate rebalanceDate,
                                               Map<String, Double> dynamicFactorWeights) {
-        Map<String, Double> scores = new HashMap<>();
-
-        // 如果是自定义脚本策略，使用Groovy脚本执行
-        if (strategy.getStrategyType() == StrategyDefinition.StrategyType.CUSTOM
-                && strategy.getScriptCode() != null && !strategy.getScriptCode().isBlank()) {
-            return computeScoresWithScript(bars, factorValueMap, task, strategy, rebalanceDate);
-        }
-
-        // 检查每个因子是否有 rank_value，如果没有则需要实时计算截面 z-score
-        // key: factorCode, value: { symbol -> normalized score }
-        Map<String, Map<String, Double>> normalizedMap = new HashMap<>();
-        for (FactorWeight fw : factorWeights) {
-            Map<String, FactorValue> fvMap = factorValueMap.get(fw.factorCode);
-            if (fvMap == null || fvMap.isEmpty()) continue;
-
-            // 判断是否有 rank_value 可用
-            boolean hasRankValue = fvMap.values().stream()
-                    .anyMatch(fv -> fv.getRankValue() != null);
-
-            if (hasRankValue) {
-                // 直接使用 rank_value
-                Map<String, Double> scoreMap = new HashMap<>();
-                for (Map.Entry<String, FactorValue> entry : fvMap.entrySet()) {
-                    if (entry.getValue().getRankValue() != null) {
-                        scoreMap.put(entry.getKey(), entry.getValue().getRankValue().doubleValue());
-                    }
-                }
-                normalizedMap.put(fw.factorCode, scoreMap);
-            } else {
-                // 回退：使用 factor_val 实时做截面 z-score 归一化
-                Map<String, Double> scoreMap = normalizeFactorVals(fvMap);
-                normalizedMap.put(fw.factorCode, scoreMap);
-            }
-        }
-
-        // 综合评分：使用动态权重（如果有）或静态权重
-        for (MarketDailyBar bar : bars) {
-            double score = 0;
-            boolean hasAnyFactor = false;
-            for (FactorWeight fw : factorWeights) {
-                Map<String, Double> scoreMap = normalizedMap.get(fw.factorCode);
-                if (scoreMap == null) continue;
-                Double val = scoreMap.get(bar.getSymbol());
-                if (val == null) continue;
-                // 优先使用动态权重，回退到静态配置权重
-                double effectiveWeight = (dynamicFactorWeights != null && dynamicFactorWeights.containsKey(fw.factorCode))
-                        ? dynamicFactorWeights.get(fw.factorCode)
-                        : fw.weight;
-                score += val * effectiveWeight;
-                hasAnyFactor = true;
-            }
-            if (hasAnyFactor) {
-                scores.put(bar.getSymbol(), score);
-            }
-        }
-        return scores;
+        return backtestScoring.computeScores(bars, factorWeights, factorValueMap, task, strategy,
+                rebalanceDate, dynamicFactorWeights);
     }
 
     /**
-     * 对 factor_val 做截面 z-score 归一化，返回 { symbol -> zScore }
-     */
-    private Map<String, Double> normalizeFactorVals(Map<String, FactorValue> fvMap) {
-        // 收集有效值
-        double[] raw = fvMap.values().stream()
-                .filter(fv -> fv.getFactorVal() != null)
-                .mapToDouble(fv -> fv.getFactorVal().doubleValue())
-                .toArray();
-
-        if (raw.length == 0) return Map.of();
-
-        double mean = Arrays.stream(raw).average().orElse(0);
-        double std = Math.sqrt(Arrays.stream(raw).map(v -> (v - mean) * (v - mean)).average().orElse(1));
-        // 避免除零
-        if (std < 1e-10) std = 1.0;
-
-        Map<String, Double> result = new HashMap<>();
-        for (Map.Entry<String, FactorValue> entry : fvMap.entrySet()) {
-            if (entry.getValue().getFactorVal() != null) {
-                double z = (entry.getValue().getFactorVal().doubleValue() - mean) / std;
-                result.put(entry.getKey(), z);
-            }
-        }
-        return result;
-    }
-
-    /**
-     * 使用Groovy脚本计算股票得分
-     */
-    private Map<String, Double> computeScoresWithScript(List<MarketDailyBar> bars,
-                                                        Map<String, Map<String, FactorValue>> factorValueMap,
-                                                        BacktestTask task,
-                                                        StrategyDefinition strategy,
-                                                        LocalDate rebalanceDate) {
-        Map<String, Double> scores = new HashMap<>();
-
-        try {
-            Binding binding = new Binding();
-            binding.setVariable("marketBars", bars);
-            binding.setVariable("factorValues", factorValueMap);
-            binding.setVariable("rebalanceDate", rebalanceDate.toString());
-            // 优先用任务级持仓数，没有则用策略定义，都没有则默认20
-            int maxPositions = task.getMaxPositionCount() != null
-                    ? task.getMaxPositionCount()
-                    : (strategy.getMaxPositionCount() != null ? strategy.getMaxPositionCount() : 20);
-            binding.setVariable("maxPositions", maxPositions);
-
-            // ── 新增绑定变量（供策略脚本使用）──
-            // indexBars: 沪深300指数K线（供RSRS择时等策略使用）
-            List<MarketDailyBar> indexBars = marketDataService.getBarsInRange(
-                    "000300.SH", rebalanceDate.minusDays(1200), rebalanceDate);
-            binding.setVariable("indexBars", indexBars);
-
-            // industryMap: 股票代码 → 行业名称（从 stock_info）
-            Map<String, String> industryMap = loadIndustryMap(bars);
-            binding.setVariable("industryMap", industryMap);
-
-            // stockInfoMap: 股票代码 → 上市日期等信息
-            Map<String, Map<String, Object>> stockInfoMap = loadStockInfoMap(bars);
-            binding.setVariable("stockInfoMap", stockInfoMap);
-
-            // historicalFactors: 多期因子历史值（用于RSRS等需要序列的策略）
-            // 格式: { factorCode -> { symbol -> [FactorValue...] } }
-            Map<String, Map<String, List<FactorValue>>> historicalFactors = loadHistoricalFactors(
-                    factorValueMap.keySet(), rebalanceDate, 120);
-            binding.setVariable("historicalFactors", historicalFactors);
-
-            // 安全预检 + 带超时执行（统一由 GroovySandboxConfig 提供双重防护 + 超时保护）
-            Object result = GroovySandboxConfig.evaluateScriptWithTimeout(
-                    binding, strategy.getScriptCode(), GroovySandboxConfig.BACKTEST_TIMEOUT_SECONDS);
-
-            if (result instanceof Map<?, ?> resultMap) {
-                for (Map.Entry<?, ?> entry : resultMap.entrySet()) {
-                    if (entry.getKey() instanceof String symbol && entry.getValue() instanceof Number weight) {
-                        scores.put(symbol, weight.doubleValue());
-                    }
-                }
-            }
-
-            log.debug("Script strategy [{}] computed scores for {} stocks", strategy.getStrategyCode(), scores.size());
-        } catch (Exception e) {
-            log.error("Failed to execute script strategy [{}]: {}", strategy.getStrategyCode(), e.getMessage(), e);
-        }
-
-        return scores;
-    }
-
-    /**
-     * 选取Top N股票，等权
+     * 选取 Top N 股票，等权。
+     * <p>实现已迁移至 {@link BacktestScoring#selectTopStocks}。</p>
      */
     private Map<String, Double> selectTopStocks(Map<String, Double> scores, int topN) {
-        return scores.entrySet().stream()
-                .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
-                .limit(topN)
-                .collect(Collectors.toMap(
-                        Map.Entry::getKey,
-                        entry -> 1.0 / Math.min(topN, scores.size())
-                ));
-    }
-
-    // ======================== Groovy 绑定变量辅助方法 ========================
-
-    /**
-     * 加载候选股票的行业映射（code → industry）
-     * 从 stock_info 表批量查询
-     */
-    private Map<String, String> loadIndustryMap(List<MarketDailyBar> bars) {
-        return backtestDataLoader.loadIndustryMap(bars);
+        return backtestScoring.selectTopStocks(scores, topN);
     }
 
     /**
-     * 加载候选股票的基本信息映射（code → {listDate, totalShare, name}）
-     * <p>实现已迁移至 {@link BacktestDataLoader#loadStockInfoMap}。</p>
+     * 生成调仓成交明细（买卖双边，含停牌/涨跌停过滤、容量约束、滑点与费用）。
+     * <p>实现已迁移至 {@link BacktestRebalancer#rebalance}。</p>
      */
-    private Map<String, Map<String, Object>> loadStockInfoMap(List<MarketDailyBar> bars) {
-        return backtestDataLoader.loadStockInfoMap(bars);
-    }
-
-    /**
-     * 加载指定因子在最近 N 天内的历史值
-     * 格式: { factorCode -> { symbol -> [FactorValue...] } }
-     * <p>实现已迁移至 {@link BacktestDataLoader#loadHistoricalFactors}。</p>
-     */
-    private Map<String, Map<String, List<FactorValue>>> loadHistoricalFactors(
-            Set<String> factorCodes, LocalDate endDate, int lookbackDays) {
-        return backtestDataLoader.loadHistoricalFactors(factorCodes, endDate, lookbackDays);
-    }
-
-    /**
-     * 判断是否涨停（无法买入）
-     * 使用 LimitUpUtils 统一处理板块差异、ST股、创业板改革日期。
-     * - 主板：10%（ST 5%）
-     * - 创业板 300/301：2020-08-24前10%，之后20%
-     * - 科创板 688：20%
-     * - 北交所：30%
-     */
-    private boolean isLimitUp(MarketDailyBar bar) {
-        if (bar.getPreClose() == null || bar.getPreClose().doubleValue() <= 0) return false;
-        if (bar.getPctChg() == null) return false;
-        double pct = bar.getPctChg().doubleValue();
-        boolean isSt = LimitUpUtils.isStName(bar.getName());
-        return LimitUpUtils.isLimitUp(pct, bar.getSymbol(), bar.getTradeDate(), isSt);
-    }
-
-    /**
-     * 判断是否跌停（无法卖出）
-     */
-    private boolean isLimitDown(MarketDailyBar bar) {
-        if (bar.getPreClose() == null || bar.getPreClose().doubleValue() <= 0) return false;
-        if (bar.getPctChg() == null) return false;
-        double pct = bar.getPctChg().doubleValue();
-        boolean isSt = LimitUpUtils.isStName(bar.getName());
-        return LimitUpUtils.isLimitDown(pct, bar.getSymbol(), bar.getTradeDate(), isSt);
-    }
-
-    /**
-     * 判断是否停牌（成交量为0）
-     */
-    private boolean isSuspended(MarketDailyBar bar) {
-        return bar.getVol() == null || bar.getVol().doubleValue() <= 0;
-    }
-
-    /**
-     * 容量约束：买入金额不得超过日成交额 MAX_PARTICIPATION，否则缩金额
-     * 仅用于买入侧（卖出侧缩股会导致持仓丢失，VOLUME 滑点已覆盖大额卖出惩罚）
-     */
-    private double scaleAmountToCapacity(double amount, MarketDailyBar bar) {
-        if (bar == null || bar.getAmount() == null) return amount;
-        double dayAmount = bar.getAmount().doubleValue() * 1000; // 千元→元
-        if (dayAmount <= 0) return amount;
-        double maxAmount = dayAmount * MAX_PARTICIPATION;
-        return Math.min(amount, maxAmount);
-    }
-
-    /**
-     * 根据 orderType 获取实际成交价格。
-     * CLOSE    → 当日收盘价（默认，最保守）
-     * NEXT_OPEN → 次日开盘价（从预加载的 nextDayBarMap 获取，更真实）
-     * VWAP     → 当日成交量加权均价，用 (high+low+close)/3 近似
-     *
-     * @param bar           当日行情
-     * @param tradingDates  全部交易日列表
-     * @param di            当前交易日下标
-     * @param orderType     成交模式
-     * @param nextDayBarMap 次日行情快照（NEXT_OPEN 模式使用）
-     * @return 成交参考价格
-     */
-    private double getExecutionPrice(MarketDailyBar bar, List<LocalDate> tradingDates,
-                                     int di, String orderType,
-                                     Map<String, MarketDailyBar> nextDayBarMap) {
-        double close = bar.getClose().doubleValue();
-        if ("NEXT_OPEN".equalsIgnoreCase(orderType)) {
-            // 次日开盘价：从预加载的次日行情中获取真实开盘价
-            MarketDailyBar nextBar = nextDayBarMap.get(bar.getSymbol());
-            if (nextBar != null && nextBar.getOpen() != null && nextBar.getOpen().doubleValue() > 0) {
-                return nextBar.getOpen().doubleValue();
-            }
-            // 回退：次日数据缺失时使用当日收盘价
-            return close;
-        } else if ("VWAP".equalsIgnoreCase(orderType)) {
-            // VWAP 近似：(high + low + close) / 3
-            double high = bar.getHigh() != null ? bar.getHigh().doubleValue() : close;
-            double low = bar.getLow() != null ? bar.getLow().doubleValue() : close;
-            return (high + low + close) / 3.0;
-        }
-        // CLOSE（默认）
-        return close;
-    }
-
     private List<Map<String, Object>> rebalance(Map<String, Double> oldPositions,
                                                 Map<String, Double> targetWeights,
                                                 Map<String, MarketDailyBar> barMap,
@@ -1518,95 +1266,15 @@ public class BacktestEngine {
                                                 Map<String, MarketDailyBar> nextDayBarMap,
                                                 Map<String, Double> positionCosts,
                                                 double buyScale) {
-        List<Map<String, Object>> trades = new ArrayList<>();
-
-        // 记录卖出
-        for (String symbol : new HashSet<>(oldPositions.keySet())) {
-            if (!targetWeights.containsKey(symbol)) {
-                MarketDailyBar bar = barMap.get(symbol);
-                if (bar == null) continue;
-
-                // 停牌过滤
-                if (suspendFilter && isSuspended(bar)) {
-                    log.debug("[{}] {} 停牌，跳过卖出", date, symbol);
-                    continue;
-                }
-                // 跌停过滤
-                if (limitFilter && isLimitDown(bar)) {
-                    log.debug("[{}] {} 跌停，跳过卖出", date, symbol);
-                    continue;
-                }
-
-                double execPrice = getExecutionPrice(bar, tradingDates, di, orderType, nextDayBarMap);
-                double closePrice = bar.getClose().doubleValue();
-                double shares = oldPositions.getOrDefault(symbol, 0.0);
-                double amount = shares * closePrice;
-                double dayAmount = bar.getAmount() != null ? bar.getAmount().doubleValue() * 1000 : 0;
-                double price = BacktestUtils.applySlippage(execPrice, false, slippage, amount, dayAmount, slippageModel);
-                double fee = BacktestUtils.calcFee(amount, true, commission, stampTaxRate, minCommission, symbol, transferFeeRate);
-
-                Map<String, Object> trade = new HashMap<>();
-                trade.put("date", date.toString());
-                trade.put("symbol", symbol);
-                trade.put("name", bar.getName());
-                trade.put("action", "SELL");
-                trade.put("price", round(price, 4));
-                trade.put("amount", round(shares, 2));
-                trade.put("total", round(amount, 2));
-                trade.put("commission", round(fee, 2));
-                trade.put("fee", round(fee, 2));
-                trades.add(trade);
-            }
-        }
-
-        // 记录买入
-        for (Map.Entry<String, Double> entry : targetWeights.entrySet()) {
-            if (!oldPositions.containsKey(entry.getKey())) {
-                MarketDailyBar bar = barMap.get(entry.getKey());
-                if (bar == null) continue;
-
-                // 停牌过滤
-                if (suspendFilter && isSuspended(bar)) {
-                    log.debug("[{}] {} 停牌，跳过买入", date, entry.getKey());
-                    continue;
-                }
-                // 涨停过滤
-                if (limitFilter && isLimitUp(bar)) {
-                    log.debug("[{}] {} 涨停，跳过买入", date, entry.getKey());
-                    continue;
-                }
-
-                double execPrice = getExecutionPrice(bar, tradingDates, di, orderType, nextDayBarMap);
-                double closePrice = bar.getClose().doubleValue();
-                double amount = portfolioValue * entry.getValue() * buyScale;
-                double dayAmount = bar.getAmount() != null ? bar.getAmount().doubleValue() * 1000 : 0;
-                amount = scaleAmountToCapacity(amount, bar); // 容量约束：买入不超日成交额8%
-                double price = BacktestUtils.applySlippage(execPrice, true, slippage, amount, dayAmount, slippageModel);
-                double fee = BacktestUtils.calcFee(amount, false, commission, stampTaxRate, minCommission, entry.getKey(), transferFeeRate);
-
-                // 记录买入成本（用于止损止盈计算）
-                double totalCost = amount + fee;
-                positionCosts.merge(entry.getKey(), totalCost, Double::sum);
-
-                Map<String, Object> trade = new HashMap<>();
-                trade.put("date", date.toString());
-                trade.put("symbol", entry.getKey());
-                trade.put("name", bar.getName());
-                trade.put("action", "BUY");
-                trade.put("price", round(price, 4));
-                trade.put("amount", round(amount / price, 2));
-                trade.put("total", round(amount, 2));
-                trade.put("commission", round(fee, 2));
-                trade.put("fee", round(fee, 2));
-                trades.add(trade);
-            }
-        }
-
-        return trades;
+        return backtestRebalancer.rebalance(oldPositions, targetWeights, barMap, portfolioValue,
+                commission, slippage, date, positionValues, slippageModel, stampTaxRate,
+                minCommission, limitFilter, suspendFilter, transferFeeRate, orderType,
+                tradingDates, di, nextDayBarMap, positionCosts, buyScale);
     }
 
     /**
-     * 重新计算现金
+     * 重新计算现金。
+     * <p>实现已迁移至 {@link BacktestRebalancer#recalcCash}。</p>
      */
     private double recalcCash(Map<String, Double> oldPositions,
                               Map<String, Double> targetWeights,
@@ -1619,108 +1287,28 @@ public class BacktestEngine {
                               boolean suspendFilter,
                               double transferFeeRate,
                               double buyScale) {
-        double totalFee = 0;
-
-        // 买入费用（应用缩放）
-        for (Map.Entry<String, Double> entry : targetWeights.entrySet()) {
-            if (oldPositions.containsKey(entry.getKey())) continue;
-            MarketDailyBar bar = barMap.get(entry.getKey());
-            if (bar == null) continue;
-            if (suspendFilter && isSuspended(bar)) continue;
-            if (limitFilter && isLimitUp(bar)) continue;
-
-            double amount = portfolioValue * entry.getValue() * buyScale;
-            totalFee += BacktestUtils.calcFee(amount, false, commission, stampTaxRate, minCommission, entry.getKey(), transferFeeRate);
-        }
-
-        // 卖出费用
-        for (String symbol : oldPositions.keySet()) {
-            if (targetWeights.containsKey(symbol)) continue;
-            MarketDailyBar bar = barMap.get(symbol);
-            if (bar == null) continue;
-            if (suspendFilter && isSuspended(bar)) continue;
-            if (limitFilter && isLimitDown(bar)) continue;
-
-            double amount = oldPositions.get(symbol) * bar.getClose().doubleValue();
-            totalFee += BacktestUtils.calcFee(amount, true, commission, stampTaxRate, minCommission, symbol, transferFeeRate);
-        }
-
-        // 实际投入金额（扣除被过滤掉的买入，应用缩放）
-        double investedValue = 0;
-        for (Map.Entry<String, Double> entry : targetWeights.entrySet()) {
-            if (oldPositions.containsKey(entry.getKey())) continue;
-            MarketDailyBar bar = barMap.get(entry.getKey());
-            if (bar == null) continue;
-            if (suspendFilter && isSuspended(bar)) continue;
-            if (limitFilter && isLimitUp(bar)) continue;
-            investedValue += portfolioValue * entry.getValue() * buyScale;
-        }
-
-        // 扣除保留持仓的市值：这些持仓没卖，不能当现金用
-        double keptValue = 0;
-        for (String sym : oldPositions.keySet()) {
-            if (!targetWeights.containsKey(sym)) continue;
-            MarketDailyBar bar = barMap.get(sym);
-            if (bar == null) continue;
-            keptValue += oldPositions.get(sym) * bar.getClose().doubleValue();
-        }
-
-        double cash = portfolioValue - keptValue - investedValue - totalFee;
-        if (cash < -0.01) {
-            log.warn("Residual negative cash after rebalance: {} (scale={}, portfolioValue={}, keptValue={}, invested={}, fee={})",
-                    String.format("%.2f", cash), String.format("%.4f", buyScale),
-                    String.format("%.2f", portfolioValue), String.format("%.2f", keptValue),
-                    String.format("%.2f", investedValue), String.format("%.2f", totalFee));
-        }
-        return Math.max(0, cash);
+        return backtestRebalancer.recalcCash(oldPositions, targetWeights, barMap, portfolioValue,
+                commission, slippage, slippageModel, stampTaxRate, minCommission,
+                limitFilter, suspendFilter, transferFeeRate, buyScale);
     }
 
     /**
-     * 再平衡触发判断：支持日历频率+偏离阈值+波动率自适应+混合
+     * 再平衡触发判断：支持日历频率+偏离阈值+波动率自适应+混合。
+     * <p>实现已迁移至 {@link BacktestRebalancer#shouldRebalance}。</p>
      */
     private boolean shouldRebalance(LocalDate today, LocalDate lastDate, String freq,
                                     double currentDeviation, double volatilityLevel,
                                     double threshold) {
-        if (lastDate == null) return true;
-
-        // 日历频率基础判断
-        boolean calendarTrigger = switch (freq.toUpperCase()) {
-            case "DAILY" -> true;
-            case "WEEKLY" -> today.getYear() != lastDate.getYear() ||
-                    today.get(java.time.temporal.IsoFields.WEEK_OF_WEEK_BASED_YEAR) !=
-                            lastDate.get(java.time.temporal.IsoFields.WEEK_OF_WEEK_BASED_YEAR);
-            case "MONTHLY" -> today.getYear() != lastDate.getYear() ||
-                    today.getMonthValue() != lastDate.getMonthValue();
-            case "QUARTERLY" -> today.getYear() != lastDate.getYear() ||
-                    (today.getMonthValue() - 1) / 3 != (lastDate.getMonthValue() - 1) / 3;
-            default -> today.getMonthValue() != lastDate.getMonthValue();
-        };
-
-        // 根据触发模式组合
-        // THRESHOLD: 仅偏离触发
-        // VOL_ADAPTIVE: 日历触发（高波动时周频，低波动时月频）
-        // HYBRID: 日历+偏离双重触发
-        if ("THRESHOLD".equalsIgnoreCase(freq)) {
-            return currentDeviation > threshold;
-        } else if ("VOL_ADAPTIVE".equalsIgnoreCase(freq)) {
-            // 高波动(volatility>0.03日波动≈年化48%) → 周频
-            // 低波动(volatility<=0.02日波动≈年化32%) → 月频
-            // 中间 → 两周频
-            String adaptedFreq = volatilityLevel > 0.03 ? "WEEKLY" :
-                    volatilityLevel <= 0.02 ? "MONTHLY" : "WEEKLY";
-            return shouldRebalance(today, lastDate, adaptedFreq, 0, 0, threshold);
-        } else if ("HYBRID".equalsIgnoreCase(freq)) {
-            return calendarTrigger || currentDeviation > threshold;
-        } else {
-            return calendarTrigger;
-        }
+        return backtestRebalancer.shouldRebalance(today, lastDate, freq, currentDeviation,
+                volatilityLevel, threshold);
     }
 
     /**
-     * 简化版：仅日历频率触发
+     * 简化版：仅日历频率触发。
+     * <p>实现已迁移至 {@link BacktestRebalancer#shouldRebalance}。</p>
      */
     private boolean shouldRebalance(LocalDate today, LocalDate lastDate, String freq) {
-        return shouldRebalance(today, lastDate, freq, 0, 0, 0);
+        return backtestRebalancer.shouldRebalance(today, lastDate, freq);
     }
 
     /**
@@ -1744,99 +1332,22 @@ public class BacktestEngine {
         progressNotifier.sendProgressWithCurve(taskId, pct, date, stratValue, bmValue);
     }
 
-    /** 委托 {@link BacktestUtils#round}，保持全局舍入语义单一来源。 */
-    private double round(double v, int scale) {
-        return BacktestUtils.round(v, scale);
-    }
-
+    /**
+     * 解析策略的因子配置 JSON。
+     * <p>实现已迁移至 {@link BacktestScoring#parseFactorConfig}。</p>
+     */
     private List<FactorWeight> parseFactorConfig(String json) {
-        if (json == null || json.isBlank()) return List.of();
-        try {
-            var node = objectMapper.readTree(json);
-            var factorsNode = node.get("factors");
-            if (factorsNode == null || !factorsNode.isArray()) return List.of();
-            List<FactorWeight> result = new ArrayList<>();
-            for (var fn : factorsNode) {
-                result.add(new FactorWeight(
-                        fn.get("code").asText(),
-                        fn.get("weight").asDouble()
-                ));
-            }
-            return result;
-        } catch (Exception e) {
-            return List.of();
-        }
+        return backtestScoring.parseFactorConfig(json);
     }
 
     /**
-     * 基于近期IC/IR计算动态因子权重（与StockScreenService.getDynamicWeights逻辑对齐）
-     *
-     * @param factorWeights 因子列表（含静态配置权重）
-     * @param weightMode    权重模式：IC / IR
-     * @param rebalanceDate 调仓日期
-     * @return factorCode -> 动态权重系数（已与静态权重乘算）
+     * 基于近期IC/IR计算动态因子权重（与StockScreenService.getDynamicWeights逻辑对齐）。
+     * <p>实现已迁移至 {@link BacktestScoring#computeDynamicFactorWeights}。</p>
      */
     private Map<String, Double> computeDynamicFactorWeights(List<FactorWeight> factorWeights,
                                                             String weightMode,
                                                             LocalDate rebalanceDate) {
-        Map<String, Double> dynamicWeights = new LinkedHashMap<>();
-        Map<String, Double> icScores = new LinkedHashMap<>();
-
-        // 1. 获取每个因子的IC/IR值
-        for (FactorWeight fw : factorWeights) {
-            String fc = fw.factorCode;
-            try {
-                List<Double> icValues = factorIcService.getIcHistory(fc, rebalanceDate, 60);
-                if (icValues == null || icValues.isEmpty()) {
-                    // 优化X：无IC历史时回退到配置权重(fw.weight)，使配置权重有话语权
-                    double cfgW = (fw.weight > 0) ? fw.weight : 0.05;
-                    log.debug("[BacktestEngine DynamicWeight] 因子 {} 在 {} 无IC历史数据，回退到配置权重{}", fc, rebalanceDate, cfgW);
-                    icScores.put(fc, cfgW);
-                    continue;
-                }
-
-                double score;
-                if ("IR".equalsIgnoreCase(weightMode)) {
-                    double avg = icValues.stream().mapToDouble(Double::doubleValue).average().orElse(0);
-                    double std = Math.sqrt(icValues.stream().mapToDouble(v -> Math.pow(v - avg, 2)).average().orElse(0));
-                    score = std > 0 ? Math.abs(avg) / std : 0;
-                } else {
-                    score = icValues.stream().mapToDouble(Double::doubleValue).average().orElse(0);
-                }
-                icScores.put(fc, score);
-            } catch (Exception e) {
-                log.debug("[BacktestEngine DynamicWeight] 获取因子 {} IC失败: {}", fc, e.getMessage());
-                icScores.put(fc, 1.0);
-            }
-        }
-
-        // 2. 计算IC>0的因子IC之和
-        double sumPositiveIc = icScores.values().stream()
-                .filter(v -> v > 0)
-                .mapToDouble(Double::doubleValue)
-                .sum();
-
-        if (sumPositiveIc > 0) {
-            for (FactorWeight fw : factorWeights) {
-                String fc = fw.factorCode;
-                double ic = icScores.getOrDefault(fc, 1.0);
-                if (ic > 0) {
-                    double normalized = ic / sumPositiveIc;
-                    normalized = Math.max(0.1, Math.min(5.0, normalized));
-                    dynamicWeights.put(fc, normalized * fw.weight);
-                } else {
-                    dynamicWeights.put(fc, 0.0);
-                }
-            }
-        } else {
-            // 所有IC均<=0，回退到静态权重
-            log.debug("[BacktestEngine DynamicWeight] {} 所有因子IC均<=0，回退静态权重", rebalanceDate);
-            for (FactorWeight fw : factorWeights) {
-                dynamicWeights.put(fw.factorCode, fw.weight);
-            }
-        }
-
-        return dynamicWeights;
+        return backtestScoring.computeDynamicFactorWeights(factorWeights, weightMode, rebalanceDate);
     }
 
     /**
@@ -1846,9 +1357,6 @@ public class BacktestEngine {
      */
     private Map<String, LocalDate> loadDelistDateMap() {
         return backtestDataLoader.loadDelistDateMap();
-    }
-
-    record FactorWeight(String factorCode, double weight) {
     }
 
     record BacktestResult(
