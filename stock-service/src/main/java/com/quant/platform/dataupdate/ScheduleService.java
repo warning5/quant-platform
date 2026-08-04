@@ -21,7 +21,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
-
+import com.quant.platform.common.enums.JobStatus;
 /**
  * 定时调度服务
  * - 启动时从 DB 加载所有 enabled=1 的配置，按 cron 注册调度任务
@@ -417,7 +417,7 @@ public class ScheduleService implements SchedulingConfigurer {
                     String currentStatus = jdbcTemplate.queryForObject(
                         "SELECT last_run_status FROM data_schedule_config WHERE task_key = ?",
                         String.class, taskKey);
-                    if ("RUNNING".equals(currentStatus)) {
+                    if (JobStatus.RUNNING.name().equals(currentStatus)) {
                         log.warn("[ScheduleService] 任务 {} 当前状态为 RUNNING，跳过 {} 触发（防并发重复执行）",
                             taskKey, triggerType);
                         return;
@@ -498,7 +498,7 @@ public class ScheduleService implements SchedulingConfigurer {
                     jdbcTemplate.update(
                         "UPDATE data_schedule_config SET last_run_status='FAILED', last_run_time=? WHERE task_key=?",
                         LocalDateTime.now(), taskKey);
-                    finishHistory(hid, "FAILED", t.getMessage());
+                    finishHistory(hid, JobStatus.FAILED, t.getMessage());
                     sendFailureAlert(taskKey, t);
                     scheduleRetry(taskKey);
                 }
@@ -550,13 +550,13 @@ public class ScheduleService implements SchedulingConfigurer {
         long hid = insertHistory(taskKey, triggerType, null);
         try {
             action.accept(taskKey);
-            updateTaskStatus(taskKey, "SUCCESS");
-            finishHistory(hid, "SUCCESS", null);
+            updateTaskStatus(taskKey, JobStatus.SUCCESS.name());
+            finishHistory(hid, JobStatus.SUCCESS, null);
             triggerDependents(taskKey);
         } catch (Throwable t) {
             log.error("[ScheduleService] 任务执行失败: {}", taskKey, t);
-            updateTaskStatus(taskKey, "FAILED");
-            finishHistory(hid, "FAILED", t.getMessage());
+            updateTaskStatus(taskKey, JobStatus.FAILED.name());
+            finishHistory(hid, JobStatus.FAILED, t.getMessage());
             sendFailureAlert(taskKey, t);
             scheduleRetry(taskKey);
         }
@@ -575,7 +575,7 @@ public class ScheduleService implements SchedulingConfigurer {
         }
     }
 
-    private void finishHistory(long hid, String status, String errorMsg) {
+    private void finishHistory(long hid, JobStatus status, String errorMsg) {
         TaskRunHistoryService svc = getTaskRunHistoryService();
         if (svc != null && hid > 0) {
             try {
@@ -593,7 +593,8 @@ public class ScheduleService implements SchedulingConfigurer {
         try {
             String st = jdbcTemplate.queryForObject(
                 "SELECT last_run_status FROM data_schedule_config WHERE task_key = ?", String.class, "DAILY_RECOMMENDATION");
-            svc.finish(hid, st != null ? st : "SUCCESS", null, null);
+            JobStatus stEnum = JobStatus.fromCode(st);
+            svc.finish(hid, stEnum != null ? stEnum : JobStatus.SUCCESS, null, null);
         } catch (Exception e) {
             log.warn("[ScheduleService] 回填每日推荐历史失败: {}", e.getMessage());
         }
@@ -1071,9 +1072,9 @@ public class ScheduleService implements SchedulingConfigurer {
         jdbcTemplate.update(
             "UPDATE data_schedule_config SET last_run_time = ?, last_run_status = ?, last_run_duration_sec = ? " +
             "WHERE task_key = 'DAILY_RECOMMENDATION'",
-            LocalDateTime.now(), allSuccess ? "SUCCESS" : "PARTIAL", durationSec);
+            LocalDateTime.now(), allSuccess ? JobStatus.SUCCESS.name() : JobStatus.PARTIAL.name(), durationSec);
         log.info("[ScheduleService] 每日自动推荐完成: 策略数={}, 推荐总数={}, 耗时={}s, 状态={}",
-            strategyIds.size(), allRecommendations.size(), durationSec, allSuccess ? "SUCCESS" : "PARTIAL");
+            strategyIds.size(), allRecommendations.size(), durationSec, allSuccess ? JobStatus.SUCCESS.name() : JobStatus.PARTIAL.name());
 
         // P3-12: 发布推荐生成完成事件
         if (eventPublisher != null) {

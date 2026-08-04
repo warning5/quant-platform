@@ -10,7 +10,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Map;
-
+import com.quant.platform.common.enums.JobStatus;
 /**
  * 定时任务执行历史 / 监控告警查询接口
  */
@@ -137,7 +137,7 @@ public class TaskRunHistoryController {
             }
             return true;
         }
-        if (!"SUCCESS".equals(lastStatus) && !"PARTIAL".equals(lastStatus)) return false;
+        if (!JobStatus.SUCCESS.name().equals(lastStatus) && !JobStatus.PARTIAL.name().equals(lastStatus)) return false;
         // 检查耗时是否超 max_duration_min
         Object md = r.get("maxDurationMin");
         Object dur = r.get("lastDurationSec");

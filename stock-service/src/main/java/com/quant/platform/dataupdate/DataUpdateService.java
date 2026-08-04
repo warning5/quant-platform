@@ -35,7 +35,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-
+import com.quant.platform.common.enums.JobStatus;
 /**
  * 数据更新服务
  * 通过 ProcessBuilder 调用 Python 脚本，解析 stdout 实时推送进度
@@ -261,7 +261,7 @@ public class DataUpdateService {
         DataUpdateTask task = new DataUpdateTask();
         task.setTaskId(taskId);
         task.setRequest(request);
-        task.setStatus("RUNNING");
+        task.setStatus(JobStatus.RUNNING);
         task.setStartTime(LocalDateTime.now());
         task.setCurrentStep("准备启动...");
         activeTasks.put(taskId, task);
@@ -360,7 +360,7 @@ public class DataUpdateService {
                 info.put("taskKey", taskKey);
                 info.put("name", row.get("task_name"));
                 info.put("lastRunTime", row.get("last_run_time").toString());
-                info.put("status", "RUNNING");
+                info.put("status", JobStatus.RUNNING.name());
                 info.put("isOrphan", true);  // 标记为孤儿（DB 说在跑但内存中没有）
                 result.add(info);
             }
@@ -377,7 +377,7 @@ public class DataUpdateService {
         DataUpdateTask task = activeTasks.get(taskId);
         if (task == null || !task.isRunning()) return false;
 
-        task.setStatus("CANCELLED");
+        task.setStatus(JobStatus.CANCELLED);
         task.setEndTime(LocalDateTime.now());
         task.setCurrentStep("用户取消");
 
@@ -480,8 +480,8 @@ public class DataUpdateService {
                 task.setCurrentStep("指数日线");
                 broadcastStatus(task);
                 boolean indexOk = runSingleScript(taskId, task, cmd, "指数日线");
-                if (!"CANCELLED".equals(task.getStatus())) {
-                    task.setStatus(indexOk ? "SUCCESS" : "FAILED");
+                if (JobStatus.CANCELLED != task.getStatus()) {
+                    task.setStatus(indexOk ? JobStatus.SUCCESS : JobStatus.FAILED);
                     task.setProgress(100);
                     task.setCurrentStep(indexOk ? "更新完成" : "更新失败");
                 }
@@ -491,8 +491,8 @@ public class DataUpdateService {
                 task.setCurrentStep("分红除权");
                 broadcastStatus(task);
                 boolean divOk = runSingleScript(taskId, task, cmd, "分红除权");
-                if (!"CANCELLED".equals(task.getStatus())) {
-                    task.setStatus(divOk ? "SUCCESS" : "FAILED");
+                if (JobStatus.CANCELLED != task.getStatus()) {
+                    task.setStatus(divOk ? JobStatus.SUCCESS : JobStatus.FAILED);
                     task.setProgress(100);
                     task.setCurrentStep(divOk ? "更新完成" : "更新失败");
                 }
@@ -502,8 +502,8 @@ public class DataUpdateService {
                 task.setCurrentStep("前复权因子刷新");
                 broadcastStatus(task);
                 boolean qfqOk = runSingleScript(taskId, task, cmd, "前复权刷新");
-                if (!"CANCELLED".equals(task.getStatus())) {
-                    task.setStatus(qfqOk ? "SUCCESS" : "FAILED");
+                if (JobStatus.CANCELLED != task.getStatus()) {
+                    task.setStatus(qfqOk ? JobStatus.SUCCESS : JobStatus.FAILED);
                     task.setProgress(100);
                     task.setCurrentStep(qfqOk ? "更新完成" : "更新失败");
                 }
@@ -541,15 +541,15 @@ public class DataUpdateService {
                     broadcastStatus(task);
                     boolean sinaOk = runSingleScript(taskId, task, sinaCmd, "财务-新浪");
 
-                    if (!"CANCELLED".equals(task.getStatus())) {
-                        task.setStatus(thsOk && sinaOk ? "SUCCESS" : "FAILED");
+                    if (JobStatus.CANCELLED != task.getStatus()) {
+                        task.setStatus(thsOk && sinaOk ? JobStatus.SUCCESS : JobStatus.FAILED);
                         task.setProgress(100);
                         task.setCurrentStep(thsOk && sinaOk ? "采集完成" : "部分失败");
                     }
                 } else {
                     boolean finOk = runSingleScript(taskId, task, cmd, "财务数据");
-                    if (!"CANCELLED".equals(task.getStatus())) {
-                        task.setStatus(finOk ? "SUCCESS" : "FAILED");
+                    if (JobStatus.CANCELLED != task.getStatus()) {
+                        task.setStatus(finOk ? JobStatus.SUCCESS : JobStatus.FAILED);
                         task.setProgress(100);
                         task.setCurrentStep(finOk ? "采集完成" : "采集失败");
                     }
@@ -562,7 +562,7 @@ public class DataUpdateService {
                 boolean senOk = runSingleScript(taskId, task, cmd, "情绪数据");
 
                 // 串行执行国债收益率脚本
-                if (senOk && request.isFetchBondYield() && !"CANCELLED".equals(task.getStatus())) {
+                if (senOk && request.isFetchBondYield() && JobStatus.CANCELLED != task.getStatus()) {
                     List<String> bondCmd = new ArrayList<>();
                     bondCmd.add(pythonPath);
                     bondCmd.add("-u");
@@ -578,7 +578,7 @@ public class DataUpdateService {
                 }
 
                 // 串行执行申万行业指数脚本
-                if (request.isFetchShenwanIndex() && !"CANCELLED".equals(task.getStatus())) {
+                if (request.isFetchShenwanIndex() && JobStatus.CANCELLED != task.getStatus()) {
                     List<String> swCmd = new ArrayList<>();
                     swCmd.add(pythonPath);
                     swCmd.add("-u");
@@ -605,7 +605,7 @@ public class DataUpdateService {
                 }
 
                 // 串行执行一致预期脚本（同花顺）
-                if (request.isFetchConsensusEstimate() && !"CANCELLED".equals(task.getStatus())) {
+                if (request.isFetchConsensusEstimate() && JobStatus.CANCELLED != task.getStatus()) {
                     List<String> ceCmd = new ArrayList<>();
                     ceCmd.add(pythonPath);
                     ceCmd.add("-u");
@@ -620,7 +620,7 @@ public class DataUpdateService {
                 }
 
                 // 串行执行业绩快报脚本（东方财富）
-                if (request.isFetchEarningsReport() && !"CANCELLED".equals(task.getStatus())) {
+                if (request.isFetchEarningsReport() && JobStatus.CANCELLED != task.getStatus()) {
                     List<String> erCmd = new ArrayList<>();
                     erCmd.add(pythonPath);
                     erCmd.add("-u");
@@ -635,7 +635,7 @@ public class DataUpdateService {
                 }
 
                 // 串行执行 QVIX 中国恐慌指数采集脚本
-                if (request.isFetchQvix() && !"CANCELLED".equals(task.getStatus())) {
+                if (request.isFetchQvix() && JobStatus.CANCELLED != task.getStatus()) {
                     List<String> qvixCmd = new ArrayList<>();
                     qvixCmd.add(pythonPath);
                     qvixCmd.add("-u");
@@ -649,8 +649,8 @@ public class DataUpdateService {
                     }
                 }
 
-                if (!"CANCELLED".equals(task.getStatus())) {
-                    task.setStatus(senOk ? "SUCCESS" : "FAILED");
+                if (JobStatus.CANCELLED != task.getStatus()) {
+                    task.setStatus(senOk ? JobStatus.SUCCESS : JobStatus.FAILED);
                     task.setProgress(100);
                     task.setCurrentStep(senOk ? "采集完成" : "部分采集失败");
                 }
@@ -660,8 +660,8 @@ public class DataUpdateService {
                 task.setCurrentStep("内外盘数据");
                 broadcastStatus(task);
                 boolean bidaskOk = runSingleScript(taskId, task, cmd, "内外盘数据");
-                if (!"CANCELLED".equals(task.getStatus())) {
-                    task.setStatus(bidaskOk ? "SUCCESS" : "FAILED");
+                if (JobStatus.CANCELLED != task.getStatus()) {
+                    task.setStatus(bidaskOk ? JobStatus.SUCCESS : JobStatus.FAILED);
                     task.setProgress(100);
                     task.setCurrentStep(bidaskOk ? "采集完成" : "采集失败");
                     // 成功后从数据库查询日期维度统计
@@ -702,17 +702,17 @@ public class DataUpdateService {
                     Object skipObj = result.getOrDefault("skipped", java.util.Collections.emptyList());
                     long skipped = skipObj instanceof Number ? ((Number) skipObj).longValue() : skipObj instanceof List<?> l ? l.size() : 0;
                     task.setCurrentStep(String.format("计算完成（提交 %d, 跳过 %d）", submitted, skipped));
-                    task.setStatus("SUCCESS");
+                    task.setStatus(JobStatus.SUCCESS);
                 } catch (Exception e) {
                     log.error("[因子计算] 失败", e);
                     task.setCurrentStep("计算失败: " + e.getMessage());
-                    task.setStatus("FAILED");
+                    task.setStatus(JobStatus.FAILED);
                 }
                 task.setProgress(100);
                 task.setCurrentStep("计算完成");
                 // P3-12: 发布因子计算完成事件
                 if (eventPublisher != null) {
-                    boolean computeOk = "SUCCESS".equals(task.getStatus());
+                    boolean computeOk = JobStatus.SUCCESS == task.getStatus();
                     LocalDate computeDate = (request.getEndDate() != null && !request.getEndDate().isEmpty())
                         ? LocalDate.parse(request.getEndDate()) : LocalDate.now();
                     int factorCnt = computeOk ? task.getTotalStocks() : 0;
@@ -730,8 +730,8 @@ public class DataUpdateService {
                 task.setCurrentStep("股票信息");
                 broadcastStatus(task);
                 boolean ok = runSingleScript(taskId, task, cmd, "股票信息");
-                if (!"CANCELLED".equals(task.getStatus())) {
-                    task.setStatus(ok ? "SUCCESS" : "FAILED");
+                if (JobStatus.CANCELLED != task.getStatus()) {
+                    task.setStatus(ok ? JobStatus.SUCCESS : JobStatus.FAILED);
                     task.setProgress(100);
                     task.setCurrentStep(ok ? "更新完成" : "更新失败");
                 }
@@ -752,8 +752,8 @@ public class DataUpdateService {
                 boolean ok = runSingleScript(taskId, task, cmd, marketLabel);
 
                 // 不再使用 akshare 作为备用数据源
-                if (!"CANCELLED".equals(task.getStatus())) {
-                    task.setStatus(ok ? "SUCCESS" : "FAILED");
+                if (JobStatus.CANCELLED != task.getStatus()) {
+                    task.setStatus(ok ? JobStatus.SUCCESS : JobStatus.FAILED);
                     task.setProgress(100);
                     task.setCurrentStep(ok ? "更新完成" : "更新失败");
                 }
@@ -761,8 +761,8 @@ public class DataUpdateService {
         } catch (Exception e) {
             log.error("[DataUpdate] 任务 {} 异常", taskId, e);
             // 不覆盖 CANCELLED 状态（用户已手动取消时保留取消状态）
-            if (!"CANCELLED".equals(task.getStatus())) {
-                task.setStatus("FAILED");
+            if (JobStatus.CANCELLED != task.getStatus()) {
+                task.setStatus(JobStatus.FAILED);
                 task.setError(e.getMessage());
                 task.setCurrentStep("执行异常: " + e.getMessage());
             }
@@ -792,13 +792,13 @@ public class DataUpdateService {
             String dbKey = resolveDbTaskKey(request);
             long durationSec = 0;
             try {
-                String finalStatus = task.getStatus();
+                JobStatus finalStatus = task.getStatus();
                 durationSec = java.time.Duration.between(task.getStartTime(), task.getEndTime()).getSeconds();
                 // 直接按 task_key 更新，不依赖 RUNNING 条件（更健壮）
                 int rows = jdbcTemplate.update(
                     "UPDATE data_schedule_config SET last_run_status=?, last_run_duration_sec=?, updated_at=? " +
                     "WHERE task_key=?",
-                    finalStatus, durationSec, LocalDateTime.now(), dbKey
+                    finalStatus.name(), durationSec, LocalDateTime.now(), dbKey
                 );
                 if (rows > 0) {
                     log.info("[DataUpdate] ★ 回写 DB: task_key={}, status={}, 耗时{}s", dbKey, finalStatus, durationSec);
@@ -811,7 +811,7 @@ public class DataUpdateService {
 
             // ★ 发布任务完成事件，供依赖调度使用
             if (eventPublisher != null && ut != null && !ut.isEmpty()) {
-                boolean taskOk = "SUCCESS".equals(task.getStatus());
+                boolean taskOk = JobStatus.SUCCESS == task.getStatus();
                 // 使用原始调度任务 key，确保 SENTIMENT_MF/SENTIMENT_OTHER 等子任务能正确触发依赖链
                 String eventKey = request.getTaskKey() != null && !request.getTaskKey().isEmpty()
                         ? request.getTaskKey() : ut;
@@ -858,8 +858,8 @@ public class DataUpdateService {
         if (request.isInfoOnly()) {
             broadcastLog(taskId, "[INFO] 仅更新 stock_info，跳过日线行情...");
             boolean ok = runUpdateStockInfo(taskId, task);
-            if (!"CANCELLED".equals(task.getStatus())) {
-                task.setStatus(ok ? "SUCCESS" : "FAILED");
+            if (JobStatus.CANCELLED != task.getStatus()) {
+                task.setStatus(ok ? JobStatus.SUCCESS : JobStatus.FAILED);
                 task.setProgress(100);
                 task.setCurrentStep(ok ? "全部完成" : "部分失败");
             }
@@ -884,7 +884,7 @@ public class DataUpdateService {
         // 所有市场顺序执行
         boolean baostockDegraded = false; // 是否已降级到腾讯
         for (String[] ms : marketScripts) {
-            if ("CANCELLED".equals(task.getStatus())) break;
+            if (JobStatus.CANCELLED == task.getStatus()) break;
             // 已降级到腾讯全市场时跳过北交所（已包含在腾讯全量中）
             if (baostockDegraded) break;
 
@@ -942,7 +942,7 @@ public class DataUpdateService {
         }
 
         // ─── Part 1.5: 更新指数日线（仅非 dailyOnly 时）────────────
-        if (!request.isDailyOnly() && !"CANCELLED".equals(task.getStatus())) {
+        if (!request.isDailyOnly() && JobStatus.CANCELLED != task.getStatus()) {
             broadcastLog(taskId, "\n========== 指数日线 ==========");
             task.setCurrentStep("指数日线");
             task.setProcessedStocks(0);
@@ -978,13 +978,13 @@ public class DataUpdateService {
         }
 
         // ─── 自动执行 OPTIMIZE TABLE FINAL 去重 ─────────────────────
-        if (!"CANCELLED".equals(task.getStatus())) {
+        if (JobStatus.CANCELLED != task.getStatus()) {
             optimizeClickHouseTable(taskId);
         }
 
         broadcastLog(taskId, "\n========== 全部完成 ==========");
-        if (!"CANCELLED".equals(task.getStatus())) {
-            task.setStatus(allSuccess ? "SUCCESS" : "FAILED");
+        if (JobStatus.CANCELLED != task.getStatus()) {
+            task.setStatus(allSuccess ? JobStatus.SUCCESS : JobStatus.FAILED);
             task.setProgress(100);
             task.setCurrentStep(allSuccess ? "全部完成" : "部分失败");
         }
@@ -1064,7 +1064,7 @@ public class DataUpdateService {
                 new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
             String line;
             while ((line = reader.readLine()) != null) {
-                if ("CANCELLED".equals(task.getStatus())) break;
+                if (JobStatus.CANCELLED == task.getStatus()) break;
                 String trimmed = line.trim();
                 broadcastLog(taskId, trimmed);
                 parseProgress(line, task);
@@ -1088,7 +1088,7 @@ public class DataUpdateService {
         }
         task.setProcess(null);
         task.setProcessPid(-1);
-        if ("CANCELLED".equals(task.getStatus())) return false;
+        if (JobStatus.CANCELLED == task.getStatus()) return false;
         if (!finished) {
             // 超时：强杀进程，避免永久挂起导致状态一直 RUNNING
             try {
@@ -1132,7 +1132,7 @@ public class DataUpdateService {
         cmd.add("-u");
         cmd.add("update_stock_info_daily.py");
         boolean ok = runSingleScript(taskId, task, cmd, "股票信息");
-        if (ok && !"CANCELLED".equals(task.getStatus())) {
+        if (ok && JobStatus.CANCELLED != task.getStatus()) {
             autoMarkDelistedStocks(taskId);
         }
         return ok;

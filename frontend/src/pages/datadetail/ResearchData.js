@@ -24,6 +24,7 @@ function parseForecast(epsForecast) {
 
 function ResearchData() {
   const { dictMap, dictList } = useDict('RESEARCH_RATING');
+  const canDelete = useAuthStore((s) => s.hasPermission('research:delete'));
   const ratingOptions = [
     { value: '全部', label: '全部' },
     ...(dictList.length ? dictList.map(d => ({ value: d.dictValue, label: d.dictLabel, color: d.color })) : []),
@@ -230,7 +231,7 @@ function ResearchData() {
             </Select>
             <Button type="primary" icon={<SearchOutlined />} onClick={() => fetchReports(1)}>搜索</Button>
             <Button icon={<ReloadOutlined />} onClick={() => { setKeyword(''); setDateRange(null); setRating(''); fetchReports(1); }}>重置</Button>
-            {selectedRowKeys.length > 0 && (
+            {canDelete && selectedRowKeys.length > 0 && (
               <Popconfirm title={`确定删除 ${selectedRowKeys.length} 条记录？`} onConfirm={handleBatchDelete}
                 okText="确定" cancelText="取消" okButtonProps={{ danger: true }}>
                 <Button danger icon={<DeleteOutlined />} loading={deleteLoading}>

@@ -16,7 +16,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.Stack;
 import java.util.concurrent.CompletableFuture;
-
+import com.quant.platform.common.enums.JobStatus;
 /**
  * 定时任务配置业务逻辑层
  * 承接原 ScheduleConfigController 中直接内联的 JdbcTemplate 访问、内联 SQL、
@@ -250,7 +250,7 @@ public class ScheduleConfigService {
             log.info("[ScheduleConfig] 手动触发(异步): {}", taskKey);
             Map<String, Object> result = new java.util.HashMap<>();
             result.put("taskKey", taskKey);
-            result.put("status", "RUNNING");
+            result.put("status", JobStatus.RUNNING.name());
             result.put("message", "任务已异步提交执行");
             return ApiResponse.success(result);
         } catch (Exception e) {

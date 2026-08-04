@@ -215,6 +215,7 @@ export default function RecommendationList() {
   };
 
   const handleBatchBlacklist = async () => {
+    if (!canEditRec) { message.warning('无权限批量屏蔽'); return; }
     if (selectedRowKeys.length === 0) return;
     setBatchLoading(true);
     const selectedRecs = recommendations.filter(r => selectedRowKeys.includes(r.id));
@@ -630,6 +631,7 @@ export default function RecommendationList() {
 
   // 手动重算置信度（改了算法/追踪数据后主动刷新）
   const handleRecalculate = async () => {
+    if (!canEditRec) { message.warning('无权限重算置信度'); return; }
     if (!selectedStrategyId || recalculating) return;
     setRecalculating(true);
     try {
@@ -1593,7 +1595,7 @@ export default function RecommendationList() {
                     okText="确认"
                     cancelText="取消"
                   >
-                    <Button size="small" danger icon={<StopOutlined />}>
+                    <Button size="small" danger icon={<StopOutlined />} disabled={!canEditRec}>
                       批量屏蔽 ({selectedRowKeys.length})
                     </Button>
                   </Popconfirm>
@@ -1673,6 +1675,7 @@ export default function RecommendationList() {
                       style={{ padding: 0, fontSize: 11 }}
                       loading={recalculating}
                       onClick={handleRecalculate}
+                      disabled={!canEditRec}
                     >
                       重算置信度
                     </Button>

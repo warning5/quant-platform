@@ -34,7 +34,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
-
+import com.quant.platform.common.enums.JobStatus;
 /**
  * 因子计算调度引擎
  * 负责调度因子计算、IC分析和分组回测
@@ -186,7 +186,7 @@ public class FactorComputeEngine {
     @Async("backtestTaskExecutor")
     public void computeFactor(FactorDefinition factor, LocalDate startDate, LocalDate endDate, List<String> symbols) {
         self.computeFactorSync(factor, startDate, endDate, symbols);
-        sendProgress(factor.getFactorCode(), "DONE", 100, "因子计算完成");
+        sendProgress(factor.getFactorCode(), JobStatus.DONE.name(), 100, "因子计算完成");
     }
 
     /**
@@ -200,11 +200,11 @@ public class FactorComputeEngine {
         try {
             if (isFinancialFactor(code)) {
                 computeFinancialFactorSync(code, startDate, endDate, symbols);
-                sendProgress(code, "DONE", 100, "财务因子计算完成");
+                sendProgress(code, JobStatus.DONE.name(), 100, "财务因子计算完成");
                 return;
             }
             self.doComputeFactorSync(factor, startDate, endDate, symbols, preloadedBars);
-            sendProgress(code, "DONE", 100, "因子计算完成");
+            sendProgress(code, JobStatus.DONE.name(), 100, "因子计算完成");
         } finally {
             runningFactors.remove(code);
         }
@@ -350,7 +350,7 @@ public class FactorComputeEngine {
                     String.format("全部写入完成，共 %,d 行，总耗时 %.1f 秒。开始归一化 %d 个交易日...",
                             rowsWritten.get(), totalMs / 1000.0, totalDates));
             normalizeFactorValues(factor.getFactorCode(), tradingDates);
-            sendProgress(factor.getFactorCode(), "DONE", 100, String.format("归一化完成，共处理 %d 个交易日，写入 %,d 条因子值", totalDates, rowsWritten.get()));
+            sendProgress(factor.getFactorCode(), JobStatus.DONE.name(), 100, String.format("归一化完成，共处理 %d 个交易日，写入 %,d 条因子值", totalDates, rowsWritten.get()));
 
             log.info("[{}] computation done: {} dates, {} rows", factor.getFactorCode(), totalDates, rowsWritten.get());
         } catch (Exception e) {
@@ -408,7 +408,7 @@ public class FactorComputeEngine {
             List<LocalDate> newDates = tradingDates.stream().filter(d -> !existingDates.contains(d)).toList();
 
             if (newDates.isEmpty()) {
-                sendProgress(code, "DONE", 100, "增量计算：无新日期需要计算（已有数据到 " + (existingDates.isEmpty() ? "无" : Collections.max(existingDates)) + "）");
+                sendProgress(code, JobStatus.DONE.name(), 100, "增量计算：无新日期需要计算（已有数据到 " + (existingDates.isEmpty() ? "无" : Collections.max(existingDates)) + "）");
                 return;
             }
 
@@ -451,7 +451,7 @@ public class FactorComputeEngine {
             List<LocalDate> newDates = tradingDates.stream().filter(d -> !existingDates.contains(d)).toList();
 
             if (newDates.isEmpty()) {
-                sendProgress(code, "DONE", 100, "增量计算：无新日期需要计算（已有数据到 " + (existingDates.isEmpty() ? "无" : Collections.max(existingDates)) + "）");
+                sendProgress(code, JobStatus.DONE.name(), 100, "增量计算：无新日期需要计算（已有数据到 " + (existingDates.isEmpty() ? "无" : Collections.max(existingDates)) + "）");
                 return;
             }
 
@@ -620,7 +620,7 @@ public class FactorComputeEngine {
 
             // ── 归一化（只对新日期做） ──
             normalizeFactorValues(code, newDates);
-            sendProgress(code, "DONE", 100, String.format("[增量] 全部完成，新增 %,d 条", rowsWritten.get()));
+            sendProgress(code, JobStatus.DONE.name(), 100, String.format("[增量] 全部完成，新增 %,d 条", rowsWritten.get()));
 
             log.info("[{}] incremental done: {} new dates, {} rows", code, totalDates, rowsWritten.get());
         } catch (Exception e) {
@@ -657,7 +657,7 @@ public class FactorComputeEngine {
                 .toList();
 
         if (reportDates.isEmpty()) {
-            sendProgress(factorCode, "DONE", 100, "财务因子计算：无财报数据（" + startDate + " ~ " + endDate + "）");
+            sendProgress(factorCode, JobStatus.DONE.name(), 100, "财务因子计算：无财报数据（" + startDate + " ~ " + endDate + "）");
             return;
         }
 
@@ -680,7 +680,7 @@ public class FactorComputeEngine {
                 .toList();
 
         if (newDates.isEmpty()) {
-            sendProgress(factorCode, "DONE", 100, "财务因子：无新报告期需要计算（已有数据到 " + (existingDatesFinal.isEmpty() ? "无" : Collections.max(existingDatesFinal)) + "）");
+            sendProgress(factorCode, JobStatus.DONE.name(), 100, "财务因子：无新报告期需要计算（已有数据到 " + (existingDatesFinal.isEmpty() ? "无" : Collections.max(existingDatesFinal)) + "）");
             return;
         }
 
@@ -726,7 +726,7 @@ public class FactorComputeEngine {
         // 归一化
         sendProgress(factorCode, "COMPUTING", 91, String.format("财务因子写入完成，%,d 条。开始归一化...", rowsInserted.get()));
         normalizeFactorValues(factorCode, newDates);
-        sendProgress(factorCode, "DONE", 100, String.format("[财务] 全部完成，新增 %,d 条", rowsInserted.get()));
+        sendProgress(factorCode, JobStatus.DONE.name(), 100, String.format("[财务] 全部完成，新增 %,d 条", rowsInserted.get()));
         log.info("[{}] financial incremental done: {} new dates, {} rows", factorCode, totalDates, rowsInserted.get());
     }
 
@@ -837,7 +837,7 @@ public class FactorComputeEngine {
                 .toList();
 
         if (reportDates.isEmpty()) {
-            sendProgress(factorCode, "DONE", 100, "财务因子：无财报数据（" + startDate + " ~ " + endDate + "）");
+            sendProgress(factorCode, JobStatus.DONE.name(), 100, "财务因子：无财报数据（" + startDate + " ~ " + endDate + "）");
             return;
         }
 
@@ -883,7 +883,7 @@ public class FactorComputeEngine {
         // 归一化
         sendProgress(factorCode, "COMPUTING", 91, String.format("财务因子写入完成，%,d 条。开始归一化...", rowsInserted.get()));
         normalizeFactorValues(factorCode, reportDates);
-        sendProgress(factorCode, "DONE", 100, String.format("[财务全量] 全部完成，共 %,d 条", rowsInserted.get()));
+        sendProgress(factorCode, JobStatus.DONE.name(), 100, String.format("[财务全量] 全部完成，共 %,d 条", rowsInserted.get()));
         log.info("[{}] financial sync done: {} dates, {} rows", factorCode, totalDates, rowsInserted.get());
     }
 
@@ -1590,7 +1590,7 @@ public class FactorComputeEngine {
                     report.setStatus(FactorTestReport.TestStatus.FAILED);
                     report.setErrorMessage("因子值自动计算失败: " + e.getMessage());
                     testReportMapper.updateById(report);
-                    sendProgress(factor.getFactorCode(), "FAILED", 0, "因子值计算失败: " + e.getMessage());
+                    sendProgress(factor.getFactorCode(), JobStatus.FAILED.name(), 0, "因子值计算失败: " + e.getMessage());
                     return;
                 }
             }
@@ -1643,7 +1643,7 @@ public class FactorComputeEngine {
                 report.setGroupCount(GROUP_COUNT);
                 report.setErrorMessage("检测区间内无因子值数据，无法进行检测");
                 testReportMapper.updateById(report);
-                sendProgress(factor.getFactorCode(), "COMPLETED", 100,
+                sendProgress(factor.getFactorCode(), JobStatus.COMPLETED.name(), 100,
                         "检测完成：检测区间内无因子值数据，请先计算因子值或调整检测日期范围");
                 return;
             }
@@ -2109,7 +2109,7 @@ public class FactorComputeEngine {
             report.setCompletedAt(java.time.LocalDateTime.now());
             testReportMapper.updateById(report);
 
-            sendProgress(factor.getFactorCode(), "TEST_DONE", 100, "因子测试完成，reportId=" + report.getId());
+            sendProgress(factor.getFactorCode(), JobStatus.TEST_DONE.name(), 100, "因子测试完成，reportId=" + report.getId());
             log.info("Factor test [{}] completed, IC={}, mono={}", factor.getFactorCode(), report.getIcMean(), report.getMonotonicity());
 
         } catch (Exception e) {
@@ -2297,7 +2297,7 @@ public class FactorComputeEngine {
         // 维护 runningFactors 集合
         if ("COMPUTING".equals(stage)) {
             runningFactors.add(factorCode);
-        } else if ("DONE".equals(stage) || "FAILED".equals(stage) || "TEST_DONE".equals(stage)) {
+        } else if (JobStatus.DONE.name().equals(stage) || JobStatus.FAILED.name().equals(stage) || JobStatus.TEST_DONE.name().equals(stage)) {
             runningFactors.remove(factorCode);
         }
         try {

@@ -23,7 +23,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
-
+import com.quant.platform.common.enums.JobStatus;
 /**
  * 模拟盘交易服务
  * 基于策略配置生成信号、管理持仓、追踪净值
@@ -94,7 +94,7 @@ public class PaperTradingService {
             .strategyId(strategyId)
             .strategyCode(strategyCode)
             .strategyConfigJson(strategyConfigJson)
-            .status("RUNNING")
+            .status(PaperTradingStatus.RUNNING)
             .initialCapital(initialCapital)
             .currentCapital(initialCapital)
             .totalAssets(initialCapital)
@@ -468,7 +468,7 @@ public class PaperTradingService {
             .direction(direction)
             .signalPrice(signalPrice)
             .reason(reason)
-            .status("PENDING")
+            .status(PaperSignalStatus.PENDING)
             .orderType(orderType)
             .triggerPrice(triggerPrice)
             .limitPrice(limitPrice)
@@ -490,7 +490,7 @@ public class PaperTradingService {
     public List<PaperSignal> generateSignals(Long paperId) {
         PaperTrading pt = paperTradingMapper.selectById(paperId);
         if (pt == null) throw new IllegalArgumentException("模拟盘不存在");
-        if (!"RUNNING".equals(pt.getStatus())) throw new IllegalArgumentException("模拟盘未运行");
+        if (PaperTradingStatus.RUNNING != pt.getStatus()) throw new IllegalArgumentException("模拟盘未运行");
 
         // 交易日门控：若今天非交易日（周末/节假日），跳过信号生成
         if (!isTradingDay()) {
@@ -502,7 +502,7 @@ public class PaperTradingService {
         int cleared = paperSignalMapper.delete(
                 new LambdaQueryWrapper<PaperSignal>()
                         .eq(PaperSignal::getPaperId, paperId)
-                        .eq(PaperSignal::getStatus, "PENDING"));
+                        .eq(PaperSignal::getStatus, PaperSignalStatus.PENDING));
         if (cleared > 0) {
             log.info("generateSignals: 清除旧 PENDING 信号 {} 条", cleared);
         }
@@ -643,7 +643,7 @@ public class PaperTradingService {
         Set<String> skippedCodes = paperSignalMapper.selectList(
                 new LambdaQueryWrapper<PaperSignal>()
                         .eq(PaperSignal::getPaperId, paperId)
-                        .eq(PaperSignal::getStatus, "SKIPPED")
+                        .eq(PaperSignal::getStatus, PaperSignalStatus.SKIPPED)
                         .eq(PaperSignal::getDirection, "BUY"))
                 .stream()
                 .map(PaperSignal::getCode)
@@ -714,7 +714,7 @@ public class PaperTradingService {
                     .signalPrice(pos.getCurrentPrice())
                     .factorScore(pos.getProfitLossPct())
                     .reason(reason)
-                    .status("PENDING")
+                    .status(PaperSignalStatus.PENDING)
                     .build();
                 paperSignalMapper.insert(sellSignal);
                 signals.add(sellSignal);
@@ -781,7 +781,7 @@ public class PaperTradingService {
                 .signalPrice(price)
                 .factorScore(BigDecimal.valueOf(e.getValue()).setScale(4, RoundingMode.HALF_UP))
                 .reason(String.format("因子得分%.2f，排名靠前%s", e.getValue(), marketBearish ? "（大盘多头）" : ""))
-                .status("PENDING")
+                .status(PaperSignalStatus.PENDING)
                 .build();
             paperSignalMapper.insert(buySignal);
             signals.add(buySignal);
@@ -809,7 +809,7 @@ public class PaperTradingService {
     public PaperPosition executeSignal(Long signalId) {
         PaperSignal signal = paperSignalMapper.selectById(signalId);
         if (signal == null) throw new IllegalArgumentException("信号不存在");
-        if (!"PENDING".equals(signal.getStatus())) throw new IllegalArgumentException("信号已处理");
+        if (PaperSignalStatus.PENDING != signal.getStatus()) throw new IllegalArgumentException("信号已处理");
 
         // 非交易日禁止手动执行，避免价格不匹配
         if (!canExecuteSignal()) {
@@ -851,7 +851,7 @@ public class PaperTradingService {
             // 手动执行时按规则确定成交价：交易日收盘价 / 非交易日下个交易日开盘价
             BigDecimal price = getExecutionPrice(signal.getCode(), signal.getPaperId());
             if (price == null || price.compareTo(BigDecimal.ZERO) <= 0) {
-                signal.setStatus("SKIPPED");
+                signal.setStatus(PaperSignalStatus.SKIPPED);
                 signal.setReason("价格无效");
                 paperSignalMapper.updateById(signal);
                 return null;
@@ -907,7 +907,7 @@ public class PaperTradingService {
                 RiskCheckResult risk = positionAlertService.checkBeforeTrade(
                     signal.getPaperId(), signal.getCode(), cost);
                 if (risk.isBlocked()) {
-                    signal.setStatus("BLOCKED");
+                    signal.setStatus(PaperSignalStatus.BLOCKED);
                     signal.setReason("风控阻断：" + risk.getBlockReason());
                     paperSignalMapper.updateById(signal);
                     log.warn("风控阻断买入: code={}, reason={}", signal.getCode(), risk.getBlockReason());
@@ -922,7 +922,7 @@ public class PaperTradingService {
             BigDecimal availableCapital = pt.getCurrentCapital().subtract(cashBuffer);
 
             if (availableCapital.compareTo(BigDecimal.ZERO) <= 0) {
-                signal.setStatus("SKIPPED");
+                signal.setStatus(PaperSignalStatus.SKIPPED);
                 signal.setReason("可用资金不足（缓冲后可用0）");
                 paperSignalMapper.updateById(signal);
                 return null;
@@ -935,7 +935,7 @@ public class PaperTradingService {
                     .divide(price, 0, RoundingMode.DOWN)
                     .divide(BigDecimal.valueOf(100), 0, RoundingMode.DOWN).intValue() * 100;
                 if (maxAffordableShares <= 0) {
-                    signal.setStatus("SKIPPED");
+                    signal.setStatus(PaperSignalStatus.SKIPPED);
                     signal.setReason(String.format("资金不足（可用%.0f，最低需买100股）",
                         availableCapital.doubleValue()));
                     paperSignalMapper.updateById(signal);
@@ -1011,7 +1011,7 @@ public class PaperTradingService {
                 .build());
 
             // 更新信号
-            signal.setStatus("EXECUTED");
+            signal.setStatus(PaperSignalStatus.EXECUTED);
             signal.setExecutedPrice(price);
             // 记录执行价与信号价的偏差
             if (signal.getSignalPrice() != null && signal.getSignalPrice().compareTo(BigDecimal.ZERO) > 0) {
@@ -1035,7 +1035,7 @@ public class PaperTradingService {
                     .eq(PaperPosition::getCode, signal.getCode()));
 
             if (pos == null) {
-                signal.setStatus("SKIPPED");
+                signal.setStatus(PaperSignalStatus.SKIPPED);
                 signal.setReason("持仓不存在");
                 paperSignalMapper.updateById(signal);
                 return null;
@@ -1060,7 +1060,7 @@ public class PaperTradingService {
 
             paperPositionMapper.deleteById(pos.getId());
 
-            signal.setStatus("EXECUTED");
+            signal.setStatus(PaperSignalStatus.EXECUTED);
             signal.setExecutedPrice(price);
             // 记录执行价与信号价的偏差
             if (signal.getSignalPrice() != null && signal.getSignalPrice().compareTo(BigDecimal.ZERO) > 0) {
@@ -1115,7 +1115,12 @@ public class PaperTradingService {
         dataPermissionService.assertCanWrite(ResourceType.PAPER_TRADING.getCode(), paperId);
         PaperTrading pt = paperTradingMapper.selectById(paperId);
         if (pt == null) throw new IllegalArgumentException("模拟盘不存在");
-        pt.setStatus(status);
+        // 入参来自 HTTP，必须校验：枚举化前此处可写入任意字符串
+        PaperTradingStatus target = PaperTradingStatus.fromCode(status);
+        if (target == null) {
+            throw new IllegalArgumentException("非法的模拟盘状态: " + status + "，仅支持 RUNNING/PAUSED/STOPPED");
+        }
+        pt.setStatus(target);
         paperTradingMapper.updateById(pt);
         return pt;
     }
@@ -1127,12 +1132,12 @@ public class PaperTradingService {
     public List<PaperPosition> executeAllSignals(Long paperId) {
         PaperTrading pt = paperTradingMapper.selectById(paperId);
         if (pt == null) throw new IllegalArgumentException("模拟盘不存在");
-        if (!"RUNNING".equals(pt.getStatus())) throw new IllegalArgumentException("模拟盘未运行");
+        if (PaperTradingStatus.RUNNING != pt.getStatus()) throw new IllegalArgumentException("模拟盘未运行");
 
         List<PaperSignal> pendingSignals = paperSignalMapper.selectList(
             new LambdaQueryWrapper<PaperSignal>()
                 .eq(PaperSignal::getPaperId, paperId)
-                .eq(PaperSignal::getStatus, "PENDING")
+                .eq(PaperSignal::getStatus, PaperSignalStatus.PENDING)
                 .orderByAsc(PaperSignal::getSignalDate)
                 .orderByAsc(PaperSignal::getId));
 
@@ -1900,7 +1905,7 @@ public class PaperTradingService {
     @Transactional
     public void autoSellByStopLoss(Long paperId, String code, String reason) {
         PaperTrading pt = paperTradingMapper.selectById(paperId);
-        if (pt == null || !"RUNNING".equals(pt.getStatus())) {
+        if (pt == null || PaperTradingStatus.RUNNING != pt.getStatus()) {
             log.debug("autoSellByStopLoss: paperId={} 不存在或未运行，跳过", paperId);
             return;
         }
@@ -1932,7 +1937,7 @@ public class PaperTradingService {
             .direction("SELL")
             .signalPrice(price)
             .reason(reason != null ? reason : "盘中止损触发")
-            .status("PENDING")
+            .status(PaperSignalStatus.PENDING)
             .build();
         paperSignalMapper.insert(signal);
 
@@ -2054,7 +2059,7 @@ public class PaperTradingService {
         List<PaperSignal> pendingOrders = paperSignalMapper.selectList(
             new LambdaQueryWrapper<PaperSignal>()
                 .eq(PaperSignal::getPaperId, paperId)
-                .eq(PaperSignal::getStatus, "PENDING")
+                .eq(PaperSignal::getStatus, PaperSignalStatus.PENDING)
                 .isNotNull(PaperSignal::getOrderType)
                 .ne(PaperSignal::getOrderType, "MARKET"));
 
@@ -2083,7 +2088,7 @@ public class PaperTradingService {
     public PaperPosition quickBuy(Long paperId, String code, String name, BigDecimal price) {
         PaperTrading pt = paperTradingMapper.selectById(paperId);
         if (pt == null) throw new IllegalArgumentException("模拟盘不存在");
-        if (!"RUNNING".equals(pt.getStatus())) throw new IllegalArgumentException("模拟盘未运行");
+        if (PaperTradingStatus.RUNNING != pt.getStatus()) throw new IllegalArgumentException("模拟盘未运行");
 
         if (name == null) name = getStockName(code);
 
@@ -2117,7 +2122,7 @@ public class PaperTradingService {
                 .orderType("MARKET")
                 .signalPrice(price)
                 .reason("一键买入（推荐页）")
-                .status("PENDING")
+                .status(PaperSignalStatus.PENDING)
                 .build();
         paperSignalMapper.insert(signal);
         log.info("quickBuy: 信号已创建 paperId={} code={} price={}", paperId, code, price);

@@ -1,7 +1,7 @@
 package com.quant.platform.common.event;
 
 import org.springframework.context.ApplicationEvent;
-
+import com.quant.platform.factor.domain.FactorDefinition.FactorStatus;
 /**
  * 因子状态变更事件（P3-12 服务解耦）
  *
@@ -29,6 +29,6 @@ public class FactorStatusChangedEvent extends ApplicationEvent {
     public String getNewStatus() { return newStatus; }
     public String getReason() { return reason; }
 
-    public boolean isDegraded() { return "DEGRADED".equals(newStatus); }
-    public boolean isResurrected() { return "ACTIVE".equals(newStatus) && "DEGRADED".equals(oldStatus); }
+    public boolean isDegraded() { return FactorStatus.DEGRADED.name().equals(newStatus); }
+    public boolean isResurrected() { return FactorStatus.ACTIVE.name().equals(newStatus) && FactorStatus.DEGRADED.name().equals(oldStatus); }
 }

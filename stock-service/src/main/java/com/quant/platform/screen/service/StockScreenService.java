@@ -30,7 +30,7 @@ import java.sql.ResultSet;
 import java.time.LocalDate;
 import java.util.*;
 import java.util.stream.Collectors;
-
+import com.quant.platform.factor.domain.FactorDefinition.FactorStatus;
 /**
  * 多因子选股服务
  */
@@ -1028,7 +1028,7 @@ public class StockScreenService {
      */
     public List<Map<String, Object>> getAvailableFactors() {
         return factorDefMapper.selectList(null).stream()
-                .filter(fd -> fd.getStatus() != null && fd.getStatus().name().equals("ACTIVE"))
+                .filter(fd -> fd.getStatus() == FactorStatus.ACTIVE)
                 .map(fd -> {
                     Map<String, Object> m = new LinkedHashMap<>();
                     m.put("factorCode", fd.getFactorCode());

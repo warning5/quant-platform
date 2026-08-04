@@ -89,6 +89,23 @@ public class GlobalExceptionHandler {
         return ApiResponse.error(400, ex.getMessage());
     }
 
+    /**
+     * 处理非法参数异常。
+     * <p>
+     * 项目内大量 Service 用 {@code IllegalArgumentException} 承载用户可读的参数校验提示
+     * （如"不支持的回测状态: XXX"、"策略不存在"），若落到兜底 handler 会返回 500 +
+     * "系统内部错误"，前端无法展示真实原因。此处统一按 400 处理并回显原始文案。
+     * <p>
+     * 仍打印完整堆栈到日志，便于区分"业务校验"与"JDK 内部误抛"。
+     */
+    @ExceptionHandler(IllegalArgumentException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public ApiResponse<Void> handleIllegalArgumentException(IllegalArgumentException ex) {
+        String msg = ex.getMessage();
+        log.warn("非法参数: {}", msg, ex);
+        return ApiResponse.error(400, msg != null && !msg.isBlank() ? msg : "请求参数不合法");
+    }
+
     // ===== 请求格式 / 路由异常 =====
 
     /**
@@ -131,6 +148,21 @@ public class GlobalExceptionHandler {
     public ApiResponse<Void> handleNoHandlerFoundException(NoHandlerFoundException ex) {
         log.warn("路径不存在: {}", ex.getRequestURL());
         return ApiResponse.error(404, "请求路径不存在: " + ex.getRequestURL());
+    }
+
+    /**
+     * 请求路径不存在（Spring Boot 3.2+ 静态资源兜底抛出的异常）。
+     * <p>
+     * 未匹配到任何 Controller 映射时，DispatcherServlet 会转交
+     * ResourceHttpRequestHandler，最终抛出 {@code NoResourceFoundException}。
+     * 若不单独处理会落到兜底 handler 返回 500 "系统内部错误"，掩盖真实的 404。
+     */
+    @ExceptionHandler(org.springframework.web.servlet.resource.NoResourceFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public ApiResponse<Void> handleNoResourceFoundException(
+            org.springframework.web.servlet.resource.NoResourceFoundException ex) {
+        log.warn("路径不存在: {}", ex.getResourcePath());
+        return ApiResponse.error(404, "请求路径不存在: " + ex.getResourcePath());
     }
 
     // ===== 限流异常 =====

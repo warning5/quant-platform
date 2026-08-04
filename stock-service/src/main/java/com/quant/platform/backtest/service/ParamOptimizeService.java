@@ -23,7 +23,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
-
+import com.quant.platform.common.enums.JobStatus;
 /**
  * 参数优化服务 —— 网格搜索（Grid Search）
  * <p>
@@ -104,7 +104,7 @@ public class ParamOptimizeService {
      */
     public static class OptimizeJob {
         public String jobId;
-        public String status; // RUNNING / COMPLETED / FAILED
+        public JobStatus status; // RUNNING / COMPLETED / FAILED
         public int total;
         public final AtomicInteger done = new AtomicInteger(0);
         public final List<Map<String, Object>> results = Collections.synchronizedList(new ArrayList<>());
@@ -119,7 +119,7 @@ public class ParamOptimizeService {
      */
     public void runGridSearch(String jobId, OptimizeRequest req, StrategyDefinition strategy) {
         OptimizeJob job = jobs.get(jobId);
-        job.status = "RUNNING";
+        job.status = JobStatus.RUNNING;
         job.startMs = System.currentTimeMillis();
 
         try {
@@ -137,7 +137,7 @@ public class ParamOptimizeService {
                         .endDate(req.endDate)
                         .objective(req.objective)
                         .paramGridJson(paramGridJson)
-                        .status("RUNNING")
+                        .status(JobStatus.RUNNING)
                         .total(0)
                         .done(0)
                         .progress(0)
@@ -204,7 +204,7 @@ public class ParamOptimizeService {
                 return Double.compare(sb, sa);
             });
 
-            job.status = "COMPLETED";
+            job.status = JobStatus.COMPLETED;
             job.endMs = System.currentTimeMillis();
             log.info("ParamOptimize [{}] done in {}ms, best={}", jobId,
                     job.endMs - job.startMs, job.bestResult);
@@ -214,7 +214,7 @@ public class ParamOptimizeService {
 
         } catch (Exception e) {
             log.error("ParamOptimize [{}] failed", jobId, e);
-            job.status = "FAILED";
+            job.status = JobStatus.FAILED;
             job.errorMessage = e.getMessage();
             // 保存失败状态到DB
             updateDbReport(jobId);
@@ -230,7 +230,7 @@ public class ParamOptimizeService {
         log.info("[ParamOptimize] submit() jobId={}", jobId);
         OptimizeJob job = new OptimizeJob();
         job.jobId = jobId;
-        job.status = "RUNNING";
+        job.status = JobStatus.RUNNING;
         jobs.put(jobId, job);
         log.info("[ParamOptimize] submit() 策略验证前, strategyId={}", req.strategyId);
 
@@ -296,7 +296,7 @@ public class ParamOptimizeService {
             }
         }
 
-        if (job.status.equals("COMPLETED") || job.status.equals("FAILED")) {
+        if (job.status == JobStatus.COMPLETED || job.status == JobStatus.FAILED) {
             jobs.put(jobId, job);
         }
 
@@ -363,7 +363,7 @@ public class ParamOptimizeService {
      */
     public List<OptimizeJob> findRunningJobs() {
         return jobs.values().stream()
-                .filter(j -> "RUNNING".equals(j.status) || "PENDING".equals(j.status))
+                .filter(j -> j.status == JobStatus.RUNNING || j.status == JobStatus.PENDING)
                 .toList();
     }
 
@@ -401,7 +401,7 @@ public class ParamOptimizeService {
                 .dividendReinvest(true)
                 .transferFeeRate(BigDecimal.valueOf(0.00002))
                 .orderType("CLOSE")
-                .status(BacktestTask.BacktestStatus.PENDING)
+                .status(JobStatus.PENDING)
                 .progress(0)
                 .build();
 

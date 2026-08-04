@@ -13,6 +13,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 import com.quant.platform.common.annotation.ResourceMeta;
+import com.quant.platform.common.enums.JobStatus;
 import com.quant.platform.common.enums.ResourceType;
 
 import jakarta.validation.constraints.NotBlank;
@@ -202,7 +203,7 @@ public class BacktestTask implements Serializable {
      * 状态
      */
     @TableField("status")
-    private BacktestStatus status;
+    private JobStatus status;
 
     /**
      * 进度 0-100
@@ -234,10 +235,4 @@ public class BacktestTask implements Serializable {
     @TableField("completed_at")
     private LocalDateTime completedAt;
 
-    /**
-     * 回测状态枚举
-     */
-    public enum BacktestStatus {
-        PENDING, RUNNING, COMPLETED, FAILED, CANCELLED
-    }
 }

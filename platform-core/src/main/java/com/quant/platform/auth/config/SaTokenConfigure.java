@@ -40,8 +40,6 @@ public class SaTokenConfigure implements WebMvcConfigurer {
         excludes.add("/auth/wechat/**");
         // 静默刷新（access token 可能已过期，必须匿名可访问）
         excludes.add("/auth/refresh");
-        // 健康检查（匿名）
-        excludes.add("/test/**");
         // API 文档仅在 dev / local 环境放开，生产环境需登录后访问
         boolean devProfile = Arrays.stream(environment.getActiveProfiles())
                 .anyMatch(p -> "dev".equals(p) || "local".equals(p));
@@ -50,6 +48,8 @@ public class SaTokenConfigure implements WebMvcConfigurer {
             excludes.add("/swagger-ui/**");
             excludes.add("/swagger-resources/**");
             excludes.add("/webjars/**");
+            // 健康检查（仅开发/本地环境匿名放行，生产环境需登录）
+            excludes.add("/test/**");
         }
         // 注意：context-path 为 /api 时，Spring 对拦截器匹配的是「去掉 context-path 后」的路径
         // （如 /strategies、/auth/login），因此必须用 /** 而非 /api/**，否则拦截器对所有业务接口都不生效。

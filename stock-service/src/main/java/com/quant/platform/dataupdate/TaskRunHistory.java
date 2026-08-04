@@ -3,6 +3,7 @@ package com.quant.platform.dataupdate;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import com.quant.platform.common.enums.JobStatus;
 
 /**
  * 定时任务执行历史记录（对应表 task_run_history）
@@ -20,7 +21,7 @@ public class TaskRunHistory {
     private String upstreamKey;   // 依赖触发时的上游 key
     private LocalDateTime startTime;
     private LocalDateTime endTime;
-    private String status;        // RUNNING / SUCCESS / FAILED / TIMEOUT / PARTIAL / CANCELLED
+    private JobStatus status;     // RUNNING / SUCCESS / FAILED / TIMEOUT / PARTIAL / CANCELLED
     private Integer exitCode;
     private Integer durationSec;
     private String errorMsg;

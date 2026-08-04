@@ -16,7 +16,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
 import java.util.*;
-
+import com.quant.platform.common.enums.JobStatus;
 /**
  * 回测报告/曲线的组装与归因方案推荐。
  * 承载原 BacktestController 内联的业务计算逻辑，让 Controller 退化为
@@ -49,7 +49,7 @@ public class BacktestReportService {
 
         boolean isScreen = "SCREEN".equalsIgnoreCase(task.getSignalSource());
 
-        if (task.getStatus() == BacktestTask.BacktestStatus.COMPLETED) {
+        if (task.getStatus() == JobStatus.COMPLETED) {
             if (isScreen) {
                 // SCREEN 模式：从 equity_curve 表读取
                 List<EquityCurve> curves = backtestService.getEquityCurves(taskId);
@@ -225,7 +225,7 @@ public class BacktestReportService {
             result.put("objective", report.getObjective());
         }
         // 运行中（COMPLETED/RUNNING/PENDING）都返回已完成的 results，前端实时展示最新结果
-        if ("COMPLETED".equals(job.status) || "RUNNING".equals(job.status)) {
+        if (JobStatus.COMPLETED.name().equals(job.status) || JobStatus.RUNNING.name().equals(job.status)) {
             result.put("results", new ArrayList<>(job.results));
             result.put("bestResult", job.bestResult);
             // DEBUG: 打印 bestResult 的所有参数字段

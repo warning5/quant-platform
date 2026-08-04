@@ -238,8 +238,12 @@ export default function FactorList() {
     // 如果有因子值但无检测 → 脏数据警告
     if (valueCount > 0 && testCount === 0) {
       items.push(
-        <Tooltip key="warn" title="有因子值但未检测，建议清理或执行检测">
-          <Tag color="warning" style={{ cursor: 'pointer' }} onClick={(e) => { e.stopPropagation(); handleDeleteValues(record); }}>
+        <Tooltip key="warn" title={canDelete ? '有因子值但未检测，建议清理或执行检测' : '无权限清理因子值'}>
+          <Tag
+            color="warning"
+            style={{ cursor: canDelete ? 'pointer' : 'not-allowed', opacity: canDelete ? 1 : 0.5 }}
+            onClick={(e) => { e.stopPropagation(); handleDeleteValues(record); }}
+          >
             <ClearOutlined /> 清理
           </Tag>
         </Tooltip>

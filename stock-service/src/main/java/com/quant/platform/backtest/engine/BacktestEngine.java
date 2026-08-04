@@ -45,7 +45,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
-
+import com.quant.platform.common.enums.JobStatus;
 /**
  * 核心回测引擎
  * 基于事件驱动的历史模拟框架，支持因子选股策略回测
@@ -120,12 +120,12 @@ public class BacktestEngine {
             return;
         }
 
-        task.setStatus(BacktestTask.BacktestStatus.RUNNING);
+        task.setStatus(JobStatus.RUNNING);
         task.setStartedAt(LocalDateTime.now());
         taskMapper.updateById(task);
 
         // 立即推送状态变更，让前端知道回测已开始
-        sendProgress(task.getId(), "RUNNING", 0, "回测初始化中...");
+        sendProgress(task.getId(), JobStatus.RUNNING.name(), 0, "回测初始化中...");
 
         try {
             boolean isScreen = "SCREEN".equalsIgnoreCase(task.getSignalSource());
@@ -146,20 +146,20 @@ public class BacktestEngine {
             BacktestReport report = buildReport(task, result);
             reportMapper.insert(report);
 
-            task.setStatus(BacktestTask.BacktestStatus.COMPLETED);
+            task.setStatus(JobStatus.COMPLETED);
             task.setProgress(100);
             task.setCompletedAt(LocalDateTime.now());
             taskMapper.updateById(task);
 
-            sendProgress(taskId, "COMPLETED", 100, "回测完成，reportId=" + report.getId());
+            sendProgress(taskId, JobStatus.COMPLETED.name(), 100, "回测完成，reportId=" + report.getId());
             log.info("Backtest task [{}] completed, mode={}", taskId, modeLabel);
 
         } catch (Exception e) {
             log.error("Backtest task [{}] failed", taskId, e);
-            task.setStatus(BacktestTask.BacktestStatus.FAILED);
+            task.setStatus(JobStatus.FAILED);
             task.setErrorMessage(e.getMessage());
             taskMapper.updateById(task);
-            sendProgress(taskId, "FAILED", task.getProgress(), "回测失败: " + e.getMessage());
+            sendProgress(taskId, JobStatus.FAILED.name(), task.getProgress(), "回测失败: " + e.getMessage());
         }
     }
 
@@ -173,7 +173,7 @@ public class BacktestEngine {
             log.error("runBacktestSync: task [{}] not found", taskId);
             return;
         }
-        task.setStatus(BacktestTask.BacktestStatus.RUNNING);
+        task.setStatus(JobStatus.RUNNING);
         task.setStartedAt(LocalDateTime.now());
         taskMapper.updateById(task);
         try {
@@ -193,13 +193,13 @@ public class BacktestEngine {
 
             BacktestReport report = buildReport(task, result);
             reportMapper.insert(report);
-            task.setStatus(BacktestTask.BacktestStatus.COMPLETED);
+            task.setStatus(JobStatus.COMPLETED);
             task.setProgress(100);
             task.setCompletedAt(LocalDateTime.now());
             taskMapper.updateById(task);
         } catch (Exception e) {
             log.warn("runBacktestSync task [{}] failed: {}", taskId, e.getMessage());
-            task.setStatus(BacktestTask.BacktestStatus.FAILED);
+            task.setStatus(JobStatus.FAILED);
             task.setErrorMessage(e.getMessage());
             taskMapper.updateById(task);
         }
@@ -2254,7 +2254,7 @@ public class BacktestEngine {
             if (messagingTemplate != null) {
                 Map<String, Object> msg = new HashMap<>();
                 msg.put("taskId", taskId);
-                msg.put("stage", "RUNNING");
+                msg.put("stage", JobStatus.RUNNING.name());
                 msg.put("progress", pct);
                 msg.put("message", "回测进行中 " + date);
                 msg.put("date", date);

@@ -34,7 +34,7 @@ public class PaperTrading {
     private String strategyConfigJson;
 
     @TableField("status")
-    private String status; // RUNNING/PAUSED/STOPPED
+    private PaperTradingStatus status;
 
     @TableField("initial_capital")
     private BigDecimal initialCapital;

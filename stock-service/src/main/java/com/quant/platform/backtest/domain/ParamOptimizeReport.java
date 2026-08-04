@@ -10,6 +10,7 @@ import java.io.Serial;
 import java.io.Serializable;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import com.quant.platform.common.enums.JobStatus;
 
 /**
  * 参数优化报告实体
@@ -79,7 +80,7 @@ public class ParamOptimizeReport implements Serializable {
      * 状态：PENDING / RUNNING / COMPLETED / FAILED
      */
     @TableField("status")
-    private String status;
+    private JobStatus status;
 
     /**
      * 总参数组合数

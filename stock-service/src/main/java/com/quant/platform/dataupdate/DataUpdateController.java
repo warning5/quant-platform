@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.*;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import com.quant.platform.common.enums.JobStatus;
 
 /**
  * 数据更新管理 API（瘦控制器）
@@ -72,7 +73,7 @@ public class DataUpdateController {
         if (task == null) {
             DataUpdateTask idle = new DataUpdateTask();
             idle.setTaskId("IDLE");
-            idle.setStatus("IDLE");
+            idle.setStatus(JobStatus.IDLE);
             idle.setCurrentStep("暂无任务");
             return ApiResponse.success(idle);
         }

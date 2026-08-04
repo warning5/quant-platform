@@ -259,6 +259,7 @@ public class BacktestController {
      * 蒙特卡洛模拟 —— 基于历史日收益率 Bootstrap
      * GET /backtests/{taskId}/montecarlo?simulations=500&horizonDays=252
      */
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"strategy:view", "strategy:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @GetMapping("/{taskId}/montecarlo")
     @RateLimit(capacity = 5, duration = 1)
     @Operation(summary = "蒙特卡洛模拟（P1）")

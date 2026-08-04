@@ -20,7 +20,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
-
+import com.quant.platform.factor.domain.FactorDefinition.FactorStatus;
 /**
  * 因子健康监控服务（P3-11）
  * 全生命周期管理：ACTIVE → 监控 → 预警 → 降权(DEGRADED) → 复活(ACTIVE)
@@ -76,7 +76,7 @@ public class FactorHealthMonitor {
             try {
                 FactorHealthStatus status = evaluateHealth(code);
                 if (status.hasIcData) {
-                    String healthStatus = status.shouldDegrade ? "DEGRADED" : "ACTIVE";
+                    String healthStatus = status.shouldDegrade ? FactorStatus.DEGRADED.name() : FactorStatus.ACTIVE.name();
                     saveHealthMetric(code, status.latestTradeDate, status, healthStatus);
                 }
                 if (status.isWarning) {
@@ -102,7 +102,7 @@ public class FactorHealthMonitor {
             try {
                 FactorHealthStatus status = evaluateHealth(code);
                 if (status.hasIcData) {
-                    String healthStatus = status.shouldResurrect ? "ACTIVE" : "DEGRADED";
+                    String healthStatus = status.shouldResurrect ? FactorStatus.ACTIVE.name() : FactorStatus.DEGRADED.name();
                     saveHealthMetric(code, status.latestTradeDate, status, healthStatus);
                 }
                 if (status.shouldResurrect) {
@@ -247,7 +247,7 @@ public class FactorHealthMonitor {
         log.info("[FactorHealth] 因子 {} 已降级为DEGRADED: {}", factorCode, reason);
         // P3-12: 发布因子状态变更事件
         eventPublisher.publishEvent(new com.quant.platform.common.event.FactorStatusChangedEvent(
-            this, factorCode, "ACTIVE", "DEGRADED", reason));
+            this, factorCode, FactorStatus.ACTIVE.name(), FactorStatus.DEGRADED.name(), reason));
     }
 
     /**
@@ -275,7 +275,7 @@ public class FactorHealthMonitor {
         log.info("[FactorHealth] 因子 {} 手动降级为DEGRADED: {}", factorCode, reason);
         // P3-12: 发布因子状态变更事件
         eventPublisher.publishEvent(new com.quant.platform.common.event.FactorStatusChangedEvent(
-            this, factorCode, "ACTIVE", "DEGRADED", "手动降级: " + reason));
+            this, factorCode, FactorStatus.ACTIVE.name(), FactorStatus.DEGRADED.name(), "手动降级: " + reason));
     }
 
     /**
@@ -303,7 +303,7 @@ public class FactorHealthMonitor {
         log.info("[FactorHealth] 因子 {} 手动复活为ACTIVE", factorCode);
         // P3-12: 发布因子状态变更事件
         eventPublisher.publishEvent(new com.quant.platform.common.event.FactorStatusChangedEvent(
-            this, factorCode, "DEGRADED", "ACTIVE", "手动复活"));
+            this, factorCode, FactorStatus.DEGRADED.name(), FactorStatus.ACTIVE.name(), "手动复活"));
     }
 
     /**
@@ -326,7 +326,7 @@ public class FactorHealthMonitor {
         log.info("[FactorHealth] 因子 {} 已复活为ACTIVE: {}", factorCode, reason);
         // P3-12: 发布因子状态变更事件
         eventPublisher.publishEvent(new com.quant.platform.common.event.FactorStatusChangedEvent(
-            this, factorCode, "DEGRADED", "ACTIVE", reason));
+            this, factorCode, FactorStatus.DEGRADED.name(), FactorStatus.ACTIVE.name(), reason));
     }
 
     /**

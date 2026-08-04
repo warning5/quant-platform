@@ -54,8 +54,8 @@ public class PaperSignal {
     /** 信号原因/依据 */
     private String reason;
 
-    /** 信号状态：PENDING/EXECUTED/SKIPPED/EXPIRED */
-    private String status;
+    /** 信号状态：PENDING/EXECUTED/SKIPPED/BLOCKED/EXPIRED */
+    private PaperSignalStatus status;
 
     /** 实际成交价格 */
     @TableField("executed_price")

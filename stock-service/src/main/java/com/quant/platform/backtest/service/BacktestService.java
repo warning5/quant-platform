@@ -27,6 +27,7 @@ import java.util.List;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.quant.platform.common.enums.JobStatus;
 
 /**
  * 回测服务
@@ -75,7 +76,15 @@ public class BacktestService {
      * 查询回测任务列表
      */
     public IPage<BacktestTask> listTasks(String strategyCode, String status, String signalSource, int page, int size) {
-        BacktestTask.BacktestStatus st = status != null ? BacktestTask.BacktestStatus.valueOf(status) : null;
+        // JobStatus 为跨子系统共用词表，此处限定为回测适用的状态子集，
+        // 防止 TEST_DONE / TIMEOUT 等无关状态被当作查询条件传入
+        JobStatus st = null;
+        if (status != null && !status.isBlank()) {
+            st = JobStatus.fromCode(status);
+            if (st == null || !JobStatus.BACKTEST_STATES.contains(st)) {
+                throw new IllegalArgumentException("不支持的回测状态: " + status);
+            }
+        }
 
         LambdaQueryWrapper<BacktestTask> wrapper = new LambdaQueryWrapper<>();
         wrapper.like(strategyCode != null, BacktestTask::getStrategyCode, strategyCode)
@@ -135,10 +144,10 @@ public class BacktestService {
     public BacktestTask cancelTask(Long taskId) {
         dataPermissionService.assertCanWrite(ResourceType.BACKTEST.getCode(), taskId);
         BacktestTask task = getTask(taskId);
-        if (task.getStatus() != BacktestTask.BacktestStatus.PENDING) {
+        if (task.getStatus() != JobStatus.PENDING) {
             throw new BusinessException("仅PENDING状态的任务可以取消");
         }
-        task.setStatus(BacktestTask.BacktestStatus.CANCELLED);
+        task.setStatus(JobStatus.CANCELLED);
         taskMapper.updateById(task);
         return task;
     }
@@ -177,7 +186,7 @@ public class BacktestService {
         try { equityCurveMapper.deleteByTaskId(taskId); } catch (Exception ignored) {}
         try { rebalanceRecordMapper.deleteByTaskId(taskId); } catch (Exception ignored) {}
         // 2. 重置任务状态
-        task.setStatus(BacktestTask.BacktestStatus.PENDING);
+        task.setStatus(JobStatus.PENDING);
         task.setProgress(0);
         task.setErrorMessage(null);
         taskMapper.updateById(task);

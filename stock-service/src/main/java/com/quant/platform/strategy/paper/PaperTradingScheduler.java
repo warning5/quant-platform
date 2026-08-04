@@ -9,7 +9,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
 import java.util.List;
-
+import com.quant.platform.common.enums.JobStatus;
 /**
  * 模拟盘定时调度器
  * 每个交易日收盘后自动：
@@ -43,7 +43,7 @@ public class PaperTradingScheduler {
 
         List<PaperTrading> runningPapers = paperTradingMapper.selectList(
                 new LambdaQueryWrapper<PaperTrading>()
-                        .eq(PaperTrading::getStatus, "RUNNING"));
+                        .eq(PaperTrading::getStatus, PaperTradingStatus.RUNNING));
 
         if (runningPapers.isEmpty()) {
             log.info("没有运行中的模拟盘，跳过");
@@ -127,7 +127,7 @@ public class PaperTradingScheduler {
     public void autoCheckConditionalOrders() {
         List<PaperTrading> runningPapers = paperTradingMapper.selectList(
                 new LambdaQueryWrapper<PaperTrading>()
-                        .eq(PaperTrading::getStatus, "RUNNING"));
+                        .eq(PaperTrading::getStatus, PaperTradingStatus.RUNNING));
 
         if (runningPapers.isEmpty()) return;
 

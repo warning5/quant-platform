@@ -14,7 +14,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-
+import com.quant.platform.common.enums.JobStatus;
 /**
  * 定时任务执行历史服务
  * 封装 task_run_history 表的写入、查询与聚合统计（供监控页展示）。
@@ -36,7 +36,7 @@ public class TaskRunHistoryService {
         h.setStartTime(rs.getTimestamp("start_time").toLocalDateTime());
         Timestamp end = rs.getTimestamp("end_time");
         h.setEndTime(end != null ? end.toLocalDateTime() : null);
-        h.setStatus(rs.getString("status"));
+        h.setStatus(JobStatus.fromCode(rs.getString("status")));
         int ec = rs.getInt("exit_code");
         h.setExitCode(rs.wasNull() ? null : ec);
         int dur = rs.getInt("duration_sec");
@@ -76,13 +76,13 @@ public class TaskRunHistoryService {
     /**
      * 结束一条历史记录（成功/失败/超时/部分）
      */
-    public void finish(long historyId, String status, Integer exitCode, String errorMsg) {
+    public void finish(long historyId, JobStatus status, Integer exitCode, String errorMsg) {
         if (historyId <= 0) return;
         try {
             jdbcTemplate.update(
                 "UPDATE task_run_history SET end_time=?, status=?, exit_code=?, error_msg=?, " +
                 "duration_sec = TIMESTAMPDIFF(SECOND, start_time, ?) WHERE id=?",
-                LocalDateTime.now(), status, exitCode, truncate(errorMsg, 1000),
+                LocalDateTime.now(), status != null ? status.name() : null, exitCode, truncate(errorMsg, 1000),
                 LocalDateTime.now(), historyId);
         } catch (Exception e) {
             log.error("[TaskRunHistory] 更新历史记录失败 id={}: {}", historyId, e.getMessage());
@@ -183,8 +183,8 @@ public class TaskRunHistoryService {
             String.class, taskKey);
         int count = 0;
         for (String s : recent) {
-            if ("SUCCESS".equals(s) || "PARTIAL".equals(s)) break;
-            if ("FAILED".equals(s) || "TIMEOUT".equals(s)) count++;
+            if (JobStatus.SUCCESS.name().equals(s) || JobStatus.PARTIAL.name().equals(s)) break;
+            if (JobStatus.FAILED.name().equals(s) || JobStatus.TIMEOUT.name().equals(s)) count++;
         }
         return count;
     }

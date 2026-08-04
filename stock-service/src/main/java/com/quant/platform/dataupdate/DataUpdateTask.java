@@ -8,7 +8,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-
+import com.quant.platform.common.enums.JobStatus;
 /**
  * 数据更新任务状态（可序列化推送给前端）
  */
@@ -21,9 +21,9 @@ public class DataUpdateTask {
     private String taskId;
 
     /**
-     * 任务状态: IDLE, RUNNING, SUCCESS, FAILED, CANCELLED
+     * 任务状态: IDLE / RUNNING / SUCCESS / FAILED / CANCELLED
      */
-    private String status = "IDLE";
+    private JobStatus status = JobStatus.IDLE;
 
     /**
      * 当前步骤描述
@@ -113,10 +113,10 @@ public class DataUpdateTask {
     private transient long processPid = -1;
 
     public boolean isRunning() {
-        return "RUNNING".equals(status);
+        return JobStatus.RUNNING == status;
     }
 
     public boolean isIdle() {
-        return "IDLE".equals(status);
+        return JobStatus.IDLE == status;
     }
 }

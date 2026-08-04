@@ -5,6 +5,7 @@ import {
 } from '@ant-design/icons';
 import ReactECharts from '../../components/LazyECharts';
 import { backtestApi } from '../../api';
+import { useAuthStore } from '../../stores/authStore';
 
 const { Text } = Typography;
 const fmtPct = (v, d = 2) => v != null ? `${(+v * 100).toFixed(d)}%` : '-';
@@ -110,6 +111,7 @@ export default function MonteCarloPanel({ taskId }) {
   const [error, setError] = useState(null);
   const [simulations, setSimulations] = useState(500);
   const [horizonDays, setHorizonDays] = useState(252);
+  const canEdit = useAuthStore((s) => s.hasPermission('strategy:edit'));
 
   const runSimulation = () => {
     setLoading(true);
@@ -141,9 +143,11 @@ export default function MonteCarloPanel({ taskId }) {
               <option value={252}>1年</option>
               <option value={504}>2年</option>
             </select>
+            {canEdit && (
             <Button type="primary" onClick={runSimulation} icon={<ExperimentOutlined />}>
               运行模拟
             </Button>
+            )}
           </Space>
         }
         style={{ marginBottom: 16 }}
@@ -165,7 +169,7 @@ export default function MonteCarloPanel({ taskId }) {
         <Space>
           <Tag color="blue">{result?.simulations} 次模拟</Tag>
           <Tag>{result?.horizonDays} 交易日预测</Tag>
-          <Button size="small" icon={<ReloadOutlined />} onClick={runSimulation} loading={loading}>重新运行</Button>
+          {canEdit && <Button size="small" icon={<ReloadOutlined />} onClick={runSimulation} loading={loading}>重新运行</Button>}
         </Space>
       }
       style={{ marginBottom: 16 }}

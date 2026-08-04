@@ -16,6 +16,7 @@ const { Option } = Select;
 export default function StrategyDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const canEdit = useAuthStore((s) => s.hasPermission('strategy:edit'));
   const [strategy, setStrategy]         = useState(null);
   const [loading, setLoading]           = useState(true);
   const [backtests, setBacktests]       = useState([]);
@@ -118,19 +119,25 @@ export default function StrategyDetail() {
           <Tag color={dictMapStatus[strategy.status]?.color ?? 'default'}>{dictMapStatus[strategy.status]?.dictLabel ?? strategy.status}</Tag>
         </Space>
         <Space>
-          <Button
-            icon={<CheckCircleOutlined />}
-            onClick={() => { setNewStatus(strategy.status); setStatusModal(true); }}
-          >
-            状态切换
-          </Button>
-          <Button icon={<ExperimentOutlined />} type="primary"
-                  onClick={() => navigate(`/backtests/new?strategyId=${id}`)}>
-            创建回测
-          </Button>
-          <Button icon={<EditOutlined />} onClick={() => navigate(`/strategies/${id}/edit`)}>
-            编辑策略
-          </Button>
+          {canEdit && (
+            <Button
+              icon={<CheckCircleOutlined />}
+              onClick={() => { setNewStatus(strategy.status); setStatusModal(true); }}
+            >
+              状态切换
+            </Button>
+          )}
+          {canEdit && (
+            <Button icon={<ExperimentOutlined />} type="primary"
+                    onClick={() => navigate(`/backtests/new?strategyId=${id}`)}>
+              创建回测
+            </Button>
+          )}
+          {canEdit && (
+            <Button icon={<EditOutlined />} onClick={() => navigate(`/strategies/${id}/edit`)}>
+              编辑策略
+            </Button>
+          )}
         </Space>
       </div>
 

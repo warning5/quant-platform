@@ -13,6 +13,7 @@ import { useStompWebSocket } from '../../hooks/useStompWebSocket';
 import ReactECharts from '../../components/LazyECharts';
 import dayjs from 'dayjs';
 import { factorApi } from '../../api';
+import { useAuthStore } from '../../stores/authStore';
 
 const { Title, Text } = Typography;
 const { RangePicker } = DatePicker;
@@ -32,6 +33,7 @@ export default function FactorDetail() {
   const { message } = App.useApp();
   const { id } = useParams();
   const navigate = useNavigate();
+  const canEdit = useAuthStore((s) => s.hasPermission('factor:edit'));
 
   const [factor, setFactor]           = useState(null);
   const [testReports, setTestReports] = useState([]);
@@ -844,7 +846,7 @@ export default function FactorDetail() {
           }
         </Space>
         <Space>
-          {factor.factorType !== 'BUILTIN' && (
+          {canEdit && factor.factorType !== 'BUILTIN' && (
             <Button icon={<EditOutlined />} onClick={() => navigate(`/factors/${id}/edit`)}>编辑因子</Button>
           )}
         </Space>

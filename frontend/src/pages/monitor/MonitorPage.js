@@ -237,6 +237,7 @@ export default function MonitorPage() {
 
   // 合并刷新：同时刷新状态和目标价
   const handleRefresh = useCallback(async () => {
+    if (!canEdit) { message.warning('无权限刷新'); return; }
     setLoading(true);
     try {
       await api.post('/monitor/refresh-targets');
@@ -248,7 +249,7 @@ export default function MonitorPage() {
     } finally {
       setLoading(false);
     }
-  }, [fetchStatus]);
+  }, [fetchStatus, canEdit]);
 
   // 手动触发扫描
   const handleTriggerScan = async () => {
@@ -695,7 +696,7 @@ export default function MonitorPage() {
           </Tooltip>
         </Space>
         <Space>
-          <Button icon={<ReloadOutlined />} onClick={handleRefresh} loading={loading}>刷新</Button>
+          <Button icon={<ReloadOutlined />} onClick={handleRefresh} loading={loading} disabled={!canEdit}>刷新</Button>
           <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleTriggerScan} loading={scanLoading} disabled={!canEdit}>
             手动触发扫描
           </Button>
