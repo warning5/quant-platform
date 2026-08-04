@@ -1,13 +1,6 @@
 package com.quant.platform.strategy.paper;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.quant.platform.common.enums.ResourceType;
-import com.quant.platform.dataperm.service.DataPermissionService;
-import com.quant.platform.factor.service.FactorService;
-import com.quant.platform.recommendation.mapper.RecommendationMapper;
-import com.quant.platform.stock.analysis.engine.SellSignalEngine;
-import com.quant.platform.stock.analysis.service.MarketThermometerService;
 import com.quant.platform.calendar.service.TradeCalendarService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -15,15 +8,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.util.*;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
-import com.quant.platform.common.enums.JobStatus;
 
 /**
  * 模拟盘行情取价服务
@@ -59,9 +51,8 @@ public class PaperPriceService {
             for (String code : factorCodes) {
                 try {
                     List<String> dates = clickHouseJdbcTemplate.query(
-                        "SELECT MAX(calc_date) FROM stock.factor_value FINAL WHERE factor_code = ?",
-                        new Object[]{code},
-                        (rs, rowNum) -> rs.getString(1));
+                            "SELECT MAX(calc_date) FROM stock.factor_value FINAL WHERE factor_code = ?",
+                            (rs, rowNum) -> rs.getString(1), code);
                     if (!dates.isEmpty() && dates.getFirst() != null) {
                         LocalDate d = LocalDate.parse(dates.getFirst());
                         if (minDate == null || d.isBefore(minDate)) {
@@ -83,19 +74,19 @@ public class PaperPriceService {
         String excludeClause = quarterlyCodes.isEmpty()
                 ? ""
                 : " WHERE factor_code NOT IN (" + quarterlyCodes.stream()
-                        .map(c -> "'" + c + "'").collect(Collectors.joining(",")) + ")";
+                .map(c -> "'" + c + "'").collect(Collectors.joining(",")) + ")";
         List<String> dates = clickHouseJdbcTemplate.query(
-            "SELECT MAX(calc_date) FROM stock.factor_value FINAL" + excludeClause,
-            (rs, rowNum) -> rs.getString(1));
+                "SELECT MAX(calc_date) FROM stock.factor_value FINAL" + excludeClause,
+                (rs, rowNum) -> rs.getString(1));
         if (dates.isEmpty() || dates.getFirst() == null) {
             dates = clickHouseJdbcTemplate.query(
-                "SELECT MAX(calc_date) FROM stock.factor_value FINAL",
-                (rs, rowNum) -> rs.getString(1));
+                    "SELECT MAX(calc_date) FROM stock.factor_value FINAL",
+                    (rs, rowNum) -> rs.getString(1));
         }
         if (dates.isEmpty() || dates.getFirst() == null) {
             dates = clickHouseJdbcTemplate.query(
-                "SELECT MAX(trade_date) FROM stock.stock_daily FINAL",
-                (rs, rowNum) -> rs.getString(1));
+                    "SELECT MAX(trade_date) FROM stock.stock_daily FINAL",
+                    (rs, rowNum) -> rs.getString(1));
         }
         return dates.isEmpty() || dates.getFirst() == null ? LocalDate.now().toString() : dates.getFirst();
     }
@@ -108,9 +99,8 @@ public class PaperPriceService {
         if (clickHouseJdbcTemplate == null) return LocalDate.now().toString();
         try {
             List<String> dates = clickHouseJdbcTemplate.query(
-                "SELECT MAX(calc_date) FROM stock.factor_value FINAL WHERE factor_code = ?",
-                new Object[]{factorCode},
-                (rs, rowNum) -> rs.getString(1));
+                    "SELECT MAX(calc_date) FROM stock.factor_value FINAL WHERE factor_code = ?",
+                    (rs, rowNum) -> rs.getString(1), factorCode);
             return dates.isEmpty() || dates.getFirst() == null ? null : dates.getFirst();
         } catch (Exception e) {
             log.debug("查询因子 {} 最新日期失败: {}", factorCode, e.getMessage());
@@ -118,10 +108,6 @@ public class PaperPriceService {
         }
     }
 
-    /**
-     * 判断是否可以生成信号（有可用的最新因子数据）
-     * 严格模式：最新交易日必须是今天或未来（不允许周末生成信号）
-     */
     /**
      * 判断是否可以生成信号（允许最近3天内有交易日数据，覆盖周末/节假日补跑）
      */
@@ -147,14 +133,12 @@ public class PaperPriceService {
             List<BigDecimal> prices;
             if (date == null || date.isBlank()) {
                 prices = clickHouseJdbcTemplate.query(
-                    "SELECT close_price FROM stock.stock_daily FINAL WHERE code = ? ORDER BY trade_date DESC LIMIT 1",
-                    new Object[]{code},
-                    (rs, rowNum) -> rs.getBigDecimal("close_price"));
+                        "SELECT close_price FROM stock.stock_daily FINAL WHERE code = ? ORDER BY trade_date DESC LIMIT 1",
+                        (rs, rowNum) -> rs.getBigDecimal("close_price"), code);
             } else {
                 prices = clickHouseJdbcTemplate.query(
-                    "SELECT close_price FROM stock.stock_daily FINAL WHERE code = ? AND trade_date = ?",
-                    new Object[]{code, date},
-                    (rs, rowNum) -> rs.getBigDecimal("close_price"));
+                        "SELECT close_price FROM stock.stock_daily FINAL WHERE code = ? AND trade_date = ?",
+                        (rs, rowNum) -> rs.getBigDecimal("close_price"), code, date);
             }
             return prices.isEmpty() ? BigDecimal.ZERO : prices.getFirst();
         } catch (Exception e) {
@@ -172,14 +156,12 @@ public class PaperPriceService {
             List<BigDecimal> prices;
             if (date == null || date.isBlank()) {
                 prices = clickHouseJdbcTemplate.query(
-                    "SELECT open_price FROM stock.stock_daily FINAL WHERE code = ? ORDER BY trade_date DESC LIMIT 1",
-                    new Object[]{code},
-                    (rs, rowNum) -> rs.getBigDecimal("open_price"));
+                        "SELECT open_price FROM stock.stock_daily FINAL WHERE code = ? ORDER BY trade_date DESC LIMIT 1",
+                        (rs, rowNum) -> rs.getBigDecimal("open_price"), code);
             } else {
                 prices = clickHouseJdbcTemplate.query(
-                    "SELECT open_price FROM stock.stock_daily FINAL WHERE code = ? AND trade_date = ?",
-                    new Object[]{code, date},
-                    (rs, rowNum) -> rs.getBigDecimal("open_price"));
+                        "SELECT open_price FROM stock.stock_daily FINAL WHERE code = ? AND trade_date = ?",
+                        (rs, rowNum) -> rs.getBigDecimal("open_price"), code, date);
             }
             if (prices.isEmpty() || prices.getFirst() == null || prices.getFirst().compareTo(BigDecimal.ZERO) <= 0) {
                 // 开盘价为空时降级为收盘价
@@ -201,8 +183,11 @@ public class PaperPriceService {
         return getExecutionPrice(code, null);
     }
 
-    /** 获取成交价（含滑点调整）
-     * @param paperId 模拟盘ID（用于读取滑点配置），null时不加滑点 */
+    /**
+     * 获取成交价（含滑点调整）
+     *
+     * @param paperId 模拟盘ID（用于读取滑点配置），null时不加滑点
+     */
     public BigDecimal getExecutionPrice(String code, Long paperId) {
         if (clickHouseJdbcTemplate == null) return BigDecimal.ZERO;
         try {
@@ -219,11 +204,13 @@ public class PaperPriceService {
         }
     }
 
-    /** 滑点调整：买入加滑点，卖出减滑点 */
+    /**
+     * 滑点调整：买入加滑点，卖出减滑点
+     */
     public BigDecimal applySlippage(BigDecimal price, boolean isBuy, Long paperId) {
         if (paperId == null) return price;
         PaperRiskConfig cfg = paperRiskConfigMapper.selectOne(
-            new LambdaQueryWrapper<PaperRiskConfig>().eq(PaperRiskConfig::getPaperId, paperId));
+                new LambdaQueryWrapper<PaperRiskConfig>().eq(PaperRiskConfig::getPaperId, paperId));
         if (cfg == null) cfg = PaperRiskConfig.defaults(paperId);
 
         String model = cfg.getSlippageModel();
@@ -234,19 +221,19 @@ public class PaperPriceService {
 
         // FIXED模型：固定滑点比例
         BigDecimal factor = isBuy
-            ? BigDecimal.ONE.add(slipPct)     // 买入加滑点
-            : BigDecimal.ONE.subtract(slipPct); // 卖出减滑点
+                ? BigDecimal.ONE.add(slipPct)     // 买入加滑点
+                : BigDecimal.ONE.subtract(slipPct); // 卖出减滑点
         BigDecimal adjusted = price.multiply(factor).setScale(2, RoundingMode.HALF_UP);
         log.debug("applySlippage: isBuy={} raw={} slip={} adjusted={}",
-            isBuy, price, slipPct, adjusted);
+                isBuy, price, slipPct, adjusted);
         return adjusted;
     }
 
     public String getStockName(String code) {
         try {
             List<Map<String, Object>> rows = jdbcTemplate.query(
-                "SELECT name FROM stock_info WHERE code = ? LIMIT 1",
-                (rs, rowNum) -> Map.of("name", rs.getString("name")), code);
+                    "SELECT name FROM stock_info WHERE code = ? LIMIT 1",
+                    (rs, rowNum) -> Map.of("name", rs.getString("name")), code);
             return rows.isEmpty() ? code : (String) rows.getFirst().get("name");
         } catch (Exception e) {
             return code;
@@ -255,6 +242,7 @@ public class PaperPriceService {
 
     /**
      * 从ClickHouse拉取K线数据用于卖点检测
+     *
      * @return [open[], high[], low[], close[], volume[]] 或 null
      */
     public double[][] fetchKlineForSellCheck(String code) {
@@ -262,9 +250,9 @@ public class PaperPriceService {
         try {
             String pureCode = code.split("\\.")[0];
             List<Map<String, Object>> rows = clickHouseJdbcTemplate.queryForList(
-                "SELECT open_price, high_price, low_price, close_price, volume FROM stock.stock_daily FINAL " +
-                "WHERE code = ? ORDER BY trade_date DESC LIMIT 120",
-                pureCode);
+                    "SELECT open_price, high_price, low_price, close_price, volume FROM stock.stock_daily FINAL " +
+                            "WHERE code = ? ORDER BY trade_date DESC LIMIT 120",
+                    pureCode);
             if (rows.isEmpty()) return null;
             int n = rows.size();
             double[] open = new double[n], high = new double[n], low = new double[n], close = new double[n], volume = new double[n];
@@ -276,19 +264,21 @@ public class PaperPriceService {
                 close[i] = ((Number) row.get("close_price")).doubleValue();
                 volume[i] = ((Number) row.get("volume")).doubleValue();
             }
-            return new double[][] { open, high, low, close, volume };
+            return new double[][]{open, high, low, close, volume};
         } catch (Exception e) {
             log.warn("[PaperTrading] 拉取K线失败: {} - {}", code, e.getMessage());
             return null;
         }
     }
 
-    /** 查某只股票在指定卖出日期之前最近一次BUY信号的成交价 */
+    /**
+     * 查某只股票在指定卖出日期之前最近一次BUY信号的成交价
+     */
     public BigDecimal getBuyPriceForCode(Long paperId, String code, String beforeSellDate) {
         try {
             List<Map<String, Object>> rows = jdbcTemplate.query(
-                "SELECT executed_price FROM paper_signal WHERE paper_id = ? AND code = ? AND direction = 'BUY' AND status = 'EXECUTED' AND signal_date <= ? ORDER BY signal_date DESC LIMIT 1",
-                (rs, rowNum) -> Map.of("price", rs.getBigDecimal("executed_price")), paperId, code, beforeSellDate);
+                    "SELECT executed_price FROM paper_signal WHERE paper_id = ? AND code = ? AND direction = 'BUY' AND status = 'EXECUTED' AND signal_date <= ? ORDER BY signal_date DESC LIMIT 1",
+                    (rs, rowNum) -> Map.of("price", rs.getBigDecimal("executed_price")), paperId, code, beforeSellDate);
             return rows.isEmpty() ? null : (BigDecimal) rows.getFirst().get("price");
         } catch (Exception e) {
             return null;
