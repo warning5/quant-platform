@@ -36,8 +36,72 @@ import java.util.stream.Collectors;
 @ConditionalOnBean(AnalysisChMapper.class)
 public class AnalysisService {
 
-    private final OverviewAssembler overviewAssembler;
+    // ==================== 本体自持依赖 ====================
 
+    private final AnalysisChMapper analysisChMapper;
+    private final StockAnalysisMapper stockAnalysisMapper;
+    private final NewsMapper newsMapper;
+    private final BidAskMapper bidAskMapper;
+    private final TradingSignalEngine tradingSignalEngine;
+    private final ClickHouseStockService clickHouseStockService;
+
+    // ==================== 共享辅助（编码归一化/最新交易日/中位数/格式化） ====================
+    private final AnalysisCommonService analysisCommon;
+
+    // ==================== 技术指标（MA/EMA/RSI/量价背离/目标价） ====================
+    private final TechIndicatorService techIndicatorService;
+    public List<TradingSignalEngine.ScoreRule> getScoreRules() { return techIndicatorService.getScoreRules(); }
+    private void supplementTechIndicators(TechSignal tech, List<DailyBarRow> bars) { techIndicatorService.supplementTechIndicators(tech, bars); }
+    private void detectVolumePriceDivergence(TechSignal tech, String code) { techIndicatorService.detectVolumePriceDivergence(tech, code); }
+    private BigDecimal calcTargetPrice2(BigDecimal currentPrice, FundamentalSignal fs) { return techIndicatorService.calcTargetPrice2(currentPrice, fs); }
+    private BigDecimal calcExtremeTargetPrice(BigDecimal currentPrice, FundamentalSignal fs, Map<String, Object> stockInfo) { return techIndicatorService.calcExtremeTargetPrice(currentPrice, fs, stockInfo); }
+
+    // ==================== 资金面（主力净流入/资金流历史/日度资金分） ====================
+    private final MoneyFlowService moneyFlowService;
+    private MoneyFlowSignal calcMoneyFlowSignal(String code) { return moneyFlowService.calcMoneyFlowSignal(code); }
+    public Map<String, Object> getMoneyFlowHistory(String code, int days) { return moneyFlowService.getMoneyFlowHistory(code, days); }
+
+    // ==================== 研报与股东（EPS一致预期/评级趋势/股东结构） ====================
+    private final ResearchAnalysisService researchAnalysisService;
+    private int calcResearchScore(String rating) { return researchAnalysisService.calcResearchScore(rating); }
+    public Map<String, Object> getResearchAnalysis(String code) { return researchAnalysisService.getResearchAnalysis(code); }
+    public Map<String, Object> getShareholderStructure(String code) { return researchAnalysisService.getShareholderStructure(code); }
+
+    // ==================== 板块行业（排行/成分股/相关性/热门板块） ====================
+    private final SectorAnalysisService sectorAnalysisService;
+    public Map<String, Object> getSectorRanking() { return sectorAnalysisService.getSectorRanking(); }
+    public List<Map<String, Object>> getConceptStocks(String conceptName, String sortBy, String sortOrder) { return sectorAnalysisService.getConceptStocks(conceptName, sortBy, sortOrder); }
+    public List<Map<String, Object>> getIndustryStocks(String industry, String sortBy, String sortOrder) { return sectorAnalysisService.getIndustryStocks(industry, sortBy, sortOrder); }
+    public Map<String, Object> getIndustryCorrelation(String code) { return sectorAnalysisService.getIndustryCorrelation(code); }
+    public Map<String, Object> getHotSectors() { return sectorAnalysisService.getHotSectors(); }
+    public Map<String, Object> getHotSectorDetail(String conceptName) { return sectorAnalysisService.getHotSectorDetail(conceptName); }
+
+    // ==================== 事件（涨停分析/大宗交易） ====================
+    private final EventAnalysisService eventAnalysisService;
+    public Map<String, Object> getLimitUpAnalysis(String code) { return eventAnalysisService.getLimitUpAnalysis(code); }
+    public Map<String, Object> getBlockTradeAnalysis(String code) { return eventAnalysisService.getBlockTradeAnalysis(code); }
+
+    // ==================== 行情数据（K线/缠论/相对强度/估值分位/搜索） ====================
+    private final QuoteDataService quoteDataService;
+    public double[][] fetchKlineData(String code, int days) { return quoteDataService.fetchKlineData(code, days); }
+    public Map<String, double[][]> batchFetchKlineData(int days) { return quoteDataService.batchFetchKlineData(days); }
+    public Map<String, Object> getChanChart(String code) { return quoteDataService.getChanChart(code); }
+    public List<Map<String, Object>> getKLine(String code, int days) { return quoteDataService.getKLine(code, days); }
+    public Map<String, Object> getStockPerformance(String code) { return quoteDataService.getStockPerformance(code); }
+    public Map<String, Object> getRelativeStrength(String code) { return quoteDataService.getRelativeStrength(code); }
+    public Map<String, Object> getPeerComparison(String code) { return quoteDataService.getPeerComparison(code); }
+    public Map<String, Object> getValuationPercentile(String code, int years) { return quoteDataService.getValuationPercentile(code, years); }
+    public List<Map<String, Object>> searchStocks(String keyword) { return quoteDataService.searchStocks(keyword); }
+
+    // ==================== 总览风险（尾部风险/催化剂/多空辩论/多分析师评分） ====================
+    private final OverviewRiskService overviewRiskService;
+    private List<TailRisk> buildTailRisks(String code, FundamentalSignal fs, Map<String, Object> stockInfo, BigDecimal currentPrice) { return overviewRiskService.buildTailRisks(code, fs, stockInfo, currentPrice); }
+    private List<CatalystItem> buildCatalysts(String code, FundamentalSignal fs, SentimentSignal ss, ResearchSignal rs) { return overviewRiskService.buildCatalysts(code, fs, ss, rs); }
+    private void calcMultiAnalystScores(AnalysisOverview overview, TechSignal tech, MoneyFlowSignal money, SentimentSignal sentiment, FundamentalSignal fundamental, boolean isBlueChip, BigDecimal currentPrice, BigDecimal supportPrice, BigDecimal resistancePrice) { overviewRiskService.calcMultiAnalystScores(overview, tech, money, sentiment, fundamental, isBlueChip, currentPrice, supportPrice, resistancePrice); }
+    private void buildBullBearDebate(AnalysisOverview overview) { overviewRiskService.buildBullBearDebate(overview); }
+
+    // ==================== 总览装配（结论/执行计划/仓位/风险等级） ====================
+    private final OverviewAssembler overviewAssembler;
     private String buildConclusion(AnalysisOverview o, TradingSignal signal) { return overviewAssembler.buildConclusion(o, signal); }
     private String buildExecutionPlan(TradingSignal signal, BigDecimal currentPrice, String targetPrice, String stopLossPrice, String targetPrice2, String riskLevel, String confidenceLevel) { return overviewAssembler.buildExecutionPlan(signal, currentPrice, targetPrice, stopLossPrice, targetPrice2, riskLevel, confidenceLevel); }
     private String calcSuggestedPositionPct(TradingSignal signal, String confidenceLevel, FundamentalSignal fundamental, boolean isBlueChip) { return overviewAssembler.calcSuggestedPositionPct(signal, confidenceLevel, fundamental, isBlueChip); }
@@ -46,94 +110,6 @@ public class AnalysisService {
     private String calcConfidenceLevel(FundamentalSignal fundamental, ResearchSignal research) { return overviewAssembler.calcConfidenceLevel(fundamental, research); }
     private int calcNewsScore(int positive, int negative, int tagged, double sentimentBias) { return overviewAssembler.calcNewsScore(positive, negative, tagged, sentimentBias); }
 
-
-    private final OverviewRiskService overviewRiskService;
-
-    private List<TailRisk> buildTailRisks(String code, FundamentalSignal fs, Map<String, Object> stockInfo, BigDecimal currentPrice) { return overviewRiskService.buildTailRisks(code, fs, stockInfo, currentPrice); }
-    private List<CatalystItem> buildCatalysts(String code, FundamentalSignal fs, SentimentSignal ss, ResearchSignal rs) { return overviewRiskService.buildCatalysts(code, fs, ss, rs); }
-    private void calcMultiAnalystScores(AnalysisOverview overview, TechSignal tech, MoneyFlowSignal money, SentimentSignal sentiment, FundamentalSignal fundamental, boolean isBlueChip, BigDecimal currentPrice, BigDecimal supportPrice, BigDecimal resistancePrice) { overviewRiskService.calcMultiAnalystScores(overview, tech, money, sentiment, fundamental, isBlueChip, currentPrice, supportPrice, resistancePrice); }
-    private void buildBullBearDebate(AnalysisOverview overview) { overviewRiskService.buildBullBearDebate(overview); }
-
-
-private final QuoteDataService quoteDataService;
-
-public double[][] fetchKlineData(String code, int days) { return quoteDataService.fetchKlineData(code, days); }
-public Map<String, double[][]> batchFetchKlineData(int days) { return quoteDataService.batchFetchKlineData(days); }
-public Map<String, Object> getChanChart(String code) { return quoteDataService.getChanChart(code); }
-public List<Map<String, Object>> getKLine(String code, int days) { return quoteDataService.getKLine(code, days); }
-public Map<String, Object> getStockPerformance(String code) { return quoteDataService.getStockPerformance(code); }
-public Map<String, Object> getRelativeStrength(String code) { return quoteDataService.getRelativeStrength(code); }
-public Map<String, Object> getPeerComparison(String code) { return quoteDataService.getPeerComparison(code); }
-public Map<String, Object> getValuationPercentile(String code, int years) { return quoteDataService.getValuationPercentile(code, years); }
-public List<Map<String, Object>> searchStocks(String keyword) { return quoteDataService.searchStocks(keyword); }
-
-
-private final EventAnalysisService eventAnalysisService;
-
-public Map<String, Object> getLimitUpAnalysis(String code) { return eventAnalysisService.getLimitUpAnalysis(code); }
-public Map<String, Object> getBlockTradeAnalysis(String code) { return eventAnalysisService.getBlockTradeAnalysis(code); }
-
-
-private final SectorAnalysisService sectorAnalysisService;
-
-public Map<String, Object> getSectorRanking() { return sectorAnalysisService.getSectorRanking(); }
-public List<Map<String, Object>> getConceptStocks(String conceptName, String sortBy, String sortOrder) { return sectorAnalysisService.getConceptStocks(conceptName, sortBy, sortOrder); }
-public List<Map<String, Object>> getIndustryStocks(String industry, String sortBy, String sortOrder) { return sectorAnalysisService.getIndustryStocks(industry, sortBy, sortOrder); }
-public Map<String, Object> getIndustryCorrelation(String code) { return sectorAnalysisService.getIndustryCorrelation(code); }
-public Map<String, Object> getHotSectors() { return sectorAnalysisService.getHotSectors(); }
-public Map<String, Object> getHotSectorDetail(String conceptName) { return sectorAnalysisService.getHotSectorDetail(conceptName); }
-
-
-private final ResearchAnalysisService researchAnalysisService;
-
-private int calcResearchScore(String rating) { return researchAnalysisService.calcResearchScore(rating); }
-public Map<String, Object> getResearchAnalysis(String code) { return researchAnalysisService.getResearchAnalysis(code); }
-public Map<String, Object> getShareholderStructure(String code) { return researchAnalysisService.getShareholderStructure(code); }
-
-
-private final MoneyFlowService moneyFlowService;
-
-private MoneyFlowSignal calcMoneyFlowSignal(String code) { return moneyFlowService.calcMoneyFlowSignal(code); }
-public Map<String, Object> getMoneyFlowHistory(String code, int days) { return moneyFlowService.getMoneyFlowHistory(code, days); }
-
-
-    private final TechIndicatorService techIndicatorService;
-
-    public List<TradingSignalEngine.ScoreRule> getScoreRules() {
-        return techIndicatorService.getScoreRules();
-    }
-
-    private void supplementTechIndicators(TechSignal tech, List<DailyBarRow> bars) {
-        techIndicatorService.supplementTechIndicators(tech, bars);
-    }
-
-    private void detectVolumePriceDivergence(TechSignal tech, String code) {
-        techIndicatorService.detectVolumePriceDivergence(tech, code);
-    }
-
-    private BigDecimal calcTargetPrice2(BigDecimal currentPrice, FundamentalSignal fs) {
-        return techIndicatorService.calcTargetPrice2(currentPrice, fs);
-    }
-
-    private BigDecimal calcExtremeTargetPrice(BigDecimal currentPrice, FundamentalSignal fs, Map<String, Object> stockInfo) {
-        return techIndicatorService.calcExtremeTargetPrice(currentPrice, fs, stockInfo);
-    }
-
-
-    private final AnalysisCommonService analysisCommon;
-
-    
-    private final AnalysisChMapper analysisChMapper;
-
-    private final StockAnalysisMapper stockAnalysisMapper;
-
-    private final NewsMapper newsMapper;
-
-    private final BidAskMapper bidAskMapper;
-
-    private final TradingSignalEngine tradingSignalEngine;
-
-    private final ClickHouseStockService clickHouseStockService;
     
     /**
      * 获取个股分析总览
