@@ -12,11 +12,18 @@ import java.util.Map;
  * 回测公共工具类
  * <p>
  * 抽取自 {@link BacktestEngine}，供 RollingScreenEngine 等新引擎复用。
+ * <p>
+ * <b>唯一实现来源</b>：本类中的方法为回测费用/滑点/复权计算的唯一实现，
+ * {@code BacktestEngine} 中不得再保留同名私有副本（历史上曾出现双轨实现且数学不等价，
+ * 详见 {@code docs/god-class-refactor-plan-2026-08-04.md} §2）。
  */
 @Slf4j
 public class BacktestUtils {
 
     private BacktestUtils() {}  // 工具类，不实例化
+
+    /** VOLUME 滑点模型的市场冲击系数（成交额占比开方后的放大倍数）。 */
+    public static final double VOLUME_IMPACT_COEFF = 10.0;
 
     // ============================================================
     //  费用计算
@@ -53,6 +60,11 @@ public class BacktestUtils {
      * 更新复权因子（用于 dividendReinvest=false 时消除除权价格跳空）。
      * 仅在除权日（有送转股）更新 adjFactor。
      *
+     * @apiNote <b>已知缺陷（KNOWN-ISSUE-BT-01，待单独修复）</b>：本方法只处理送转股，
+     * <b>未处理现金分红</b>对复权因子的调整（应为 {@code adj *= (preClose - cashDiv) / preClose}）。
+     * {@code BacktestEngine} 中曾存在的私有同名方法逻辑完整，但从未被调用（死代码，已于 Phase 0 删除）。
+     * 此处保持现状以确保 Phase 0 重构「输出逐位不变」，修复须单独提交并重跑基准比对。
+     *
      * @param adjFactors   symbol → 复权因子（会被直接修改）
      * @param barMap       当日行情快照
      * @param today       当前日期
@@ -79,6 +91,11 @@ public class BacktestUtils {
     /**
      * 处理分红除权事件（dividendReinvest=true 时调用）。
      * 修改 positions（送转股增加股数），并通过 cashRef 返回现金分红。
+     *
+     * @apiNote <b>已知缺陷（KNOWN-ISSUE-BT-02，待单独修复）</b>：末尾「未持仓但有除权事件」的补偿循环
+     * 只处理了现金分红，<b>漏掉了送转股</b>对复权因子的调整（应先 {@code adj /= (1 + stockConvert)}）。
+     * {@code BacktestEngine} 中曾存在的私有同名方法两者都处理，但从未被调用（死代码，已于 Phase 0 删除）。
+     * 此处保持现状以确保 Phase 0 重构「输出逐位不变」，修复须单独提交并重跑基准比对。
      *
      * @param positions      symbol → 持股数（会被直接修改）
      * @param cashRef       长度为1的数组，用于返回累计现金分红
@@ -179,37 +196,57 @@ public class BacktestUtils {
     // ============================================================
 
     /**
-     * 应用滑点模型。
+     * 应用滑点模型，返回实际成交价。
+     * <ul>
+     *   <li>FIXED ：固定比例滑点，买入加价、卖出减价。</li>
+     *   <li>VOLUME：在基础滑点上叠加市场冲击，
+     *       {@code slip = baseSlippage × (1 + √ratio × VOLUME_IMPACT_COEFF)}，
+     *       其中 {@code ratio = min(tradeAmount / dayAmount, 1.0)}。
+     *       成交额占当日成交额比例越高，滑点越大；ratio 上限 1.0 防止极端值放大。</li>
+     * </ul>
      *
      * @param basePrice     基准价（收盘价或次日均价）
-     * @param isBuy        是否买入（买入滑点使成交价偏高）
-     * @param slippageRate 滑点率（如 0.001 = 0.1%）
-     * @param amount       成交金额（VOLUME 模式用）
-     * @param dayAmount    当日成交额（VOLUME 模式用）
+     * @param isBuy         是否买入（买入滑点使成交价偏高）
+     * @param baseSlippage  基础滑点率（如 0.001 = 0.1%）
+     * @param tradeAmount   本笔成交金额（VOLUME 模式用）
+     * @param dayAmount     当日成交额（VOLUME 模式用）
      * @param slippageModel FIXED / VOLUME
      * @return 实际成交价
      */
     public static double applySlippage(double basePrice, boolean isBuy,
-                                        double slippageRate, double amount,
+                                        double baseSlippage, double tradeAmount,
                                         double dayAmount, String slippageModel) {
+        double slip = baseSlippage;
         if ("VOLUME".equalsIgnoreCase(slippageModel) && dayAmount > 0) {
-            double impact = Math.sqrt(amount / dayAmount) * slippageRate * basePrice;
-            return isBuy ? basePrice + impact : basePrice - impact;
+            // 成交量比例滑点：成交额占日成交额比例越高，滑点越大
+            double ratio = Math.min(tradeAmount / dayAmount, 1.0);
+            slip = baseSlippage * (1 + Math.sqrt(ratio) * VOLUME_IMPACT_COEFF);
         }
-        // 默认 FIXED
-        return isBuy ? basePrice * (1 + slippageRate) : basePrice * (1 - slippageRate);
+        return isBuy ? basePrice * (1 + slip) : basePrice * (1 - slip);
     }
 
     // ============================================================
     //  工具方法
     // ============================================================
 
+    /**
+     * 四舍五入到指定小数位。
+     * <p>
+     * 使用 {@link java.math.BigDecimal#valueOf(double)}（走 {@code Double.toString} 的最短表示）
+     * 而非 {@code new BigDecimal(double)}（走精确二进制值），两者在舍入边界上结果不同，
+     * 例如 {@code round(2.675, 2)}：前者得 2.68，后者得 2.67。
+     * 全项目回测统一采用前者语义。NaN / Infinity 一律归零，避免 BigDecimal 抛异常。
+     */
     public static double round(double value, int scale) {
-        return new java.math.BigDecimal(value)
+        if (Double.isNaN(value) || Double.isInfinite(value)) return 0;
+        return java.math.BigDecimal.valueOf(value)
                 .setScale(scale, java.math.RoundingMode.HALF_UP)
                 .doubleValue();
     }
 
+    /**
+     * 计算收益率（小数形式，0.05 表示 +5%）。成本非正时返回 0。
+     */
     public static double returnPct(double exitValue, double entryValue) {
         if (entryValue <= 0) return 0.0;
         return (exitValue - entryValue) / entryValue;

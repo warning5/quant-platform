@@ -55,8 +55,6 @@ import com.quant.platform.common.enums.JobStatus;
 @RequiredArgsConstructor
 public class BacktestEngine {
 
-    /** VOLUME 滑点冲击系数（可调） */
-    private static final double VOLUME_IMPACT_COEFF = 10.0;
     /** 单笔成交金额占日成交额上限（复刻模拟盘 8% 规则） */
     private static final double MAX_PARTICIPATION = 0.08;
 
@@ -445,7 +443,7 @@ public class BacktestEngine {
                         double closePrice = bar.getClose().doubleValue();
                         double amount = shares * closePrice;
                         double dayAmount = bar.getAmount() != null ? bar.getAmount().doubleValue() * 1000 : 0;
-                        double price = applySlippage(execPrice, false, slippage, amount, dayAmount, slippageModel);
+                        double price = BacktestUtils.applySlippage(execPrice, false, slippage, amount, dayAmount, slippageModel);
                         double fee = BacktestUtils.calcFee(amount, true, commission, stampTaxRate, minCommission, symbol, transferFeeRate);
 
                         Map<String, Object> trade = new HashMap<>();
@@ -458,7 +456,7 @@ public class BacktestEngine {
                         trade.put("total", round(amount - fee, 2));
                         trade.put("commission", round(fee, 2));
                         trade.put("fee", round(fee, 2));
-                        trade.put("returnPct", round(returnPct(amount, cost), 4));
+                        trade.put("returnPct", round(BacktestUtils.returnPct(amount, cost), 4));
                         tradeLog.add(trade);
 
                         cash += (shares * price) - fee;
@@ -506,7 +504,7 @@ public class BacktestEngine {
                     double closePrice = bar.getClose().doubleValue();
                     double amount = shares * closePrice;
                     double dayAmount = bar.getAmount() != null ? bar.getAmount().doubleValue() * 1000 : 0;
-                    double price = applySlippage(execPrice, false, slippage, amount, dayAmount, slippageModel);
+                    double price = BacktestUtils.applySlippage(execPrice, false, slippage, amount, dayAmount, slippageModel);
                     double fee = BacktestUtils.calcFee(amount, true, commission, stampTaxRate, minCommission, symbol, transferFeeRate);
                     Map<String, Object> trade = new HashMap<>();
                     trade.put("date", today.toString());
@@ -518,7 +516,7 @@ public class BacktestEngine {
                     trade.put("total", round(amount - fee, 2));
                     trade.put("commission", round(fee, 2));
                     trade.put("fee", round(fee, 2));
-                    trade.put("returnPct", cost > 0 ? round(returnPct(amount, cost), 4) : 0);
+                    trade.put("returnPct", cost > 0 ? round(BacktestUtils.returnPct(amount, cost), 4) : 0);
                     tradeLog.add(trade);
                     cash += (shares * price) - fee;
                     totalTrades++;
@@ -581,7 +579,7 @@ public class BacktestEngine {
                     if (suspendFilter && isSuspended(bar)) continue;
                     if (limitFilter && isLimitDown(bar)) continue;
                     double amount = oldPositions.get(sym) * bar.getClose().doubleValue();
-                    sellFee += calcFee(amount, true, commission, stampTaxRate, minCommission, sym, transferFeeRate);
+                    sellFee += BacktestUtils.calcFee(amount, true, commission, stampTaxRate, minCommission, sym, transferFeeRate);
                 }
 
                 // 3. 新买入费用 + 原始买入总额
@@ -595,7 +593,7 @@ public class BacktestEngine {
                     if (limitFilter && isLimitUp(bar)) continue;
                     double amount = portfolioValue * entry.getValue();
                     rawInvestedValue += amount;
-                    newBuyFee += calcFee(amount, false, commission, stampTaxRate, minCommission, entry.getKey(), transferFeeRate);
+                    newBuyFee += BacktestUtils.calcFee(amount, false, commission, stampTaxRate, minCommission, entry.getKey(), transferFeeRate);
                 }
 
                 // 4. 计算买入缩放比例
@@ -928,8 +926,8 @@ public class BacktestEngine {
                     double execPrice = getExecutionPrice(bar, tradingDates, di, orderType, nextDayBarMap);
                     double amount = shares * bar.getClose().doubleValue();
                     double dayAmount = bar.getAmount() != null ? bar.getAmount().doubleValue() * 1000 : 0;
-                    double price = applySlippage(execPrice, false, slippage, amount, dayAmount, slippageModel);
-                    double fee = calcFee(amount, true, commission, stampTaxRate, minCommission, symbol, transferFeeRate);
+                    double price = BacktestUtils.applySlippage(execPrice, false, slippage, amount, dayAmount, slippageModel);
+                    double fee = BacktestUtils.calcFee(amount, true, commission, stampTaxRate, minCommission, symbol, transferFeeRate);
                     Map<String, Object> trade = new HashMap<>();
                     trade.put("date", today.toString());
                     trade.put("symbol", symbol);
@@ -994,7 +992,7 @@ public class BacktestEngine {
                     if (limitFilter && isLimitUp(bar)) continue;
                     double amount = portfolioValue * entry.getValue();
                     rawInvestedValue += amount;
-                    newBuyFee += calcFee(amount, false, commission, stampTaxRate, minCommission, entry.getKey(), transferFeeRate);
+                    newBuyFee += BacktestUtils.calcFee(amount, false, commission, stampTaxRate, minCommission, entry.getKey(), transferFeeRate);
                 }
                 double keptValue = 0;
                 for (String sym : oldPositions.keySet()) {
@@ -1011,7 +1009,7 @@ public class BacktestEngine {
                     if (suspendFilter && isSuspended(bar)) continue;
                     if (limitFilter && isLimitDown(bar)) continue;
                     double amount = oldPositions.get(sym) * bar.getClose().doubleValue();
-                    sellFee += calcFee(amount, true, commission, stampTaxRate, minCommission, sym, transferFeeRate);
+                    sellFee += BacktestUtils.calcFee(amount, true, commission, stampTaxRate, minCommission, sym, transferFeeRate);
                 }
                 double maxInvestable = portfolioValue - keptValue - sellFee - newBuyFee;
                 double scale = rawInvestedValue > 0 ? Math.max(0, Math.min(1.0, maxInvestable / rawInvestedValue)) : 0;
@@ -1559,22 +1557,6 @@ public class BacktestEngine {
     }
 
     /**
-     * 计算滑点后的成交价格
-     * FIXED: 固定比例滑点（买入加滑点，卖出减滑点）
-     * VOLUME: 按成交量比例计算滑点，滑点 = baseRate × (tradeAmount / dayAmount)^0.5
-     */
-    private double applySlippage(double price, boolean isBuy, double baseSlippage,
-                                 double tradeAmount, double dayAmount, String model) {
-        double slip = baseSlippage;
-        if ("VOLUME".equalsIgnoreCase(model) && dayAmount > 0) {
-            // 成交量比例滑点：成交额占日成交额比例越高，滑点越大
-            double ratio = Math.min(tradeAmount / dayAmount, 1.0);
-            slip = baseSlippage * (1 + Math.sqrt(ratio) * VOLUME_IMPACT_COEFF);
-        }
-        return isBuy ? price * (1 + slip) : price * (1 - slip);
-    }
-
-    /**
      * 容量约束：买入金额不得超过日成交额 MAX_PARTICIPATION，否则缩金额
      * 仅用于买入侧（卖出侧缩股会导致持仓丢失，VOLUME 滑点已覆盖大额卖出惩罚）
      */
@@ -1584,155 +1566,6 @@ public class BacktestEngine {
         if (dayAmount <= 0) return amount;
         double maxAmount = dayAmount * MAX_PARTICIPATION;
         return Math.min(amount, maxAmount);
-    }
-
-    /**
-     * 计算交易费用
-     * 买入：佣金（双向，最低5元）+ 过户费（沪深双向）
-     * 卖出：佣金（双向，最低5元）+ 印花税（单向，万5）+ 过户费（沪深双向）
-     *
-     * @param symbol          股票代码（含交易所后缀，如 600000.SH、000001.SZ）
-     * @param transferFeeRate 过户费率（沪深默认 0.00002 = 0.02‰，2022年起统一双向收取）
-     */
-    private double calcFee(double amount, boolean isSell, double commissionRate,
-                           double stampTaxRate, double minCommission,
-                           String symbol, double transferFeeRate) {
-        double commission = Math.max(amount * commissionRate, minCommission);
-        double stampTax = isSell ? amount * stampTaxRate : 0;
-        // 过户费：沪深股票（.SH/.SZ后缀）双向收取，北交所不收取
-        double transferFee = (symbol != null && (symbol.endsWith(".SH") || symbol.endsWith(".SZ")))
-                ? amount * transferFeeRate : 0;
-        return commission + stampTax + transferFee;
-    }
-
-    /**
-     * 处理分红除权事件，并同步更新复权因子。
-     * 在每个交易日开盘前处理，包括：
-     * 1. 送股/转增：增加持仓股数（positions map 直接修改）
-     * 2. 现金分红：以现金形式到账（暂时不计入，由外部通过返回值处理）
-     * <p>
-     * 注意：分红处理不产生交易费用，因为是公司行为而非主动交易。
-     *
-     * @param positions  当前持仓 (symbol -> shares)，会被直接修改
-     * @param cashRef    长度为1的数组，用于返回分红现金（供调用方加到 cash 上）
-     * @param barMap     当日行情快照
-     * @param today      当前日期
-     * @param tradeLog   交易日志（分红事件会记录为 DIVIDEND 类型）
-     * @param adjFactors 复权因子 map（会被直接修改）
-     */
-    private void processDividendEvents(Map<String, Double> positions, double[] cashRef,
-                                       Map<String, MarketDailyBar> barMap,
-                                       LocalDate today, List<Map<String, Object>> tradeLog,
-                                       Map<String, Double> adjFactors) {
-        double totalDividendCash = 0.0;
-
-        for (Map.Entry<String, Double> pos : positions.entrySet()) {
-            String symbol = pos.getKey();
-            double shares = pos.getValue();
-            if (shares <= 0) continue;
-
-            // 查询当日是否有除权除息事件
-            BigDecimal cashDiv = dividendService.getCashDividend(symbol, today);
-            BigDecimal stockConvert = dividendService.getStockConvertRatio(symbol, today);
-
-            boolean hasDividend = cashDiv != null && cashDiv.doubleValue() > 0;
-            boolean hasStockConvert = stockConvert != null && stockConvert.doubleValue() > 0;
-
-            if (!hasDividend && !hasStockConvert) continue;
-
-            MarketDailyBar bar = barMap.get(symbol);
-            String name = bar != null ? bar.getName() : symbol;
-
-            // 更新前复权因子
-            double curAdj = adjFactors.getOrDefault(symbol, 1.0);
-            if (hasStockConvert) {
-                // 送转：复权因子除以(1+比例)，使历史价格等比例下调
-                curAdj = curAdj / (1 + stockConvert.doubleValue());
-            }
-            if (hasDividend && bar != null && bar.getPreClose() != null && bar.getPreClose().doubleValue() > 0) {
-                // 现金分红：复权因子调整 = preClose-cashDiv / preClose
-                double preClose = bar.getPreClose().doubleValue();
-                curAdj = curAdj * (preClose - cashDiv.doubleValue()) / preClose;
-            }
-            adjFactors.put(symbol, curAdj);
-
-            // 1. 处理送股/转增：股数增加
-            if (hasStockConvert) {
-                double newShares = shares * (1 + stockConvert.doubleValue());
-                double addedShares = newShares - shares;
-                pos.setValue(newShares);
-                log.debug("[{}] {} 送转: {} → {} (增加 {} 股)", today, symbol, shares, newShares, addedShares);
-            }
-
-            // 2. 处理现金分红
-            if (hasDividend) {
-                double dividendAmount = shares * cashDiv.doubleValue();
-                totalDividendCash += dividendAmount;
-
-                // 记录分红事件
-                Map<String, Object> trade = new HashMap<>();
-                trade.put("date", today.toString());
-                trade.put("symbol", symbol);
-                trade.put("name", name);
-                trade.put("action", "DIVIDEND");
-                trade.put("price", round(cashDiv.doubleValue(), 4));  // 每股派息
-                trade.put("amount", round(shares, 2));               // 持仓股数
-                trade.put("total", round(dividendAmount, 2));         // 分红总额
-                trade.put("commission", 0.0);
-                trade.put("fee", 0.0);
-                tradeLog.add(trade);
-
-                log.debug("[{}] {} 分红: {} 股 × {} 元/股 = {} 元",
-                        today, symbol, shares, cashDiv.doubleValue(), dividendAmount);
-            }
-        }
-
-        // 对未持仓但有除权事件的股票也更新复权因子（避免因选股价格跳变影响评分）
-        for (Map.Entry<String, MarketDailyBar> entry : barMap.entrySet()) {
-            String symbol = entry.getKey();
-            if (positions.containsKey(symbol)) continue; // 持仓的已处理
-            MarketDailyBar bar = entry.getValue();
-            if (bar.getPreClose() == null || bar.getPreClose().doubleValue() <= 0) continue;
-            BigDecimal cashDiv = dividendService.getCashDividend(symbol, today);
-            BigDecimal stockConvert = dividendService.getStockConvertRatio(symbol, today);
-            boolean hasDividend = cashDiv != null && cashDiv.doubleValue() > 0;
-            boolean hasStockConvert = stockConvert != null && stockConvert.doubleValue() > 0;
-            if (!hasDividend && !hasStockConvert) continue;
-            double curAdj = adjFactors.getOrDefault(symbol, 1.0);
-            if (hasStockConvert) curAdj = curAdj / (1 + stockConvert.doubleValue());
-            if (hasDividend) {
-                double preClose = bar.getPreClose().doubleValue();
-                curAdj = curAdj * (preClose - cashDiv.doubleValue()) / preClose;
-            }
-            adjFactors.put(symbol, curAdj);
-        }
-
-        // 返回分红现金（调用方会加到 cash 上）
-        cashRef[0] = totalDividendCash;
-    }
-
-    /**
-     * 仅更新复权因子（不做持仓调整），用于 dividendReinvest=false 时保持价格连续性。
-     */
-    private void updateAdjFactors(Map<String, Double> adjFactors,
-                                  Map<String, MarketDailyBar> barMap, LocalDate today) {
-        for (Map.Entry<String, MarketDailyBar> entry : barMap.entrySet()) {
-            String symbol = entry.getKey();
-            MarketDailyBar bar = entry.getValue();
-            if (bar.getPreClose() == null || bar.getPreClose().doubleValue() <= 0) continue;
-            BigDecimal cashDiv = dividendService.getCashDividend(symbol, today);
-            BigDecimal stockConvert = dividendService.getStockConvertRatio(symbol, today);
-            boolean hasDividend = cashDiv != null && cashDiv.doubleValue() > 0;
-            boolean hasStockConvert = stockConvert != null && stockConvert.doubleValue() > 0;
-            if (!hasDividend && !hasStockConvert) continue;
-            double curAdj = adjFactors.getOrDefault(symbol, 1.0);
-            if (hasStockConvert) curAdj = curAdj / (1 + stockConvert.doubleValue());
-            if (hasDividend) {
-                double preClose = bar.getPreClose().doubleValue();
-                curAdj = curAdj * (preClose - cashDiv.doubleValue()) / preClose;
-            }
-            adjFactors.put(symbol, curAdj);
-        }
     }
 
     /**
@@ -1813,8 +1646,8 @@ public class BacktestEngine {
                 double shares = oldPositions.getOrDefault(symbol, 0.0);
                 double amount = shares * closePrice;
                 double dayAmount = bar.getAmount() != null ? bar.getAmount().doubleValue() * 1000 : 0;
-                double price = applySlippage(execPrice, false, slippage, amount, dayAmount, slippageModel);
-                double fee = calcFee(amount, true, commission, stampTaxRate, minCommission, symbol, transferFeeRate);
+                double price = BacktestUtils.applySlippage(execPrice, false, slippage, amount, dayAmount, slippageModel);
+                double fee = BacktestUtils.calcFee(amount, true, commission, stampTaxRate, minCommission, symbol, transferFeeRate);
 
                 Map<String, Object> trade = new HashMap<>();
                 trade.put("date", date.toString());
@@ -1852,8 +1685,8 @@ public class BacktestEngine {
                 double amount = portfolioValue * entry.getValue() * buyScale;
                 double dayAmount = bar.getAmount() != null ? bar.getAmount().doubleValue() * 1000 : 0;
                 amount = scaleAmountToCapacity(amount, bar); // 容量约束：买入不超日成交额8%
-                double price = applySlippage(execPrice, true, slippage, amount, dayAmount, slippageModel);
-                double fee = calcFee(amount, false, commission, stampTaxRate, minCommission, entry.getKey(), transferFeeRate);
+                double price = BacktestUtils.applySlippage(execPrice, true, slippage, amount, dayAmount, slippageModel);
+                double fee = BacktestUtils.calcFee(amount, false, commission, stampTaxRate, minCommission, entry.getKey(), transferFeeRate);
 
                 // 记录买入成本（用于止损止盈计算）
                 double totalCost = amount + fee;
@@ -1901,7 +1734,7 @@ public class BacktestEngine {
             if (limitFilter && isLimitUp(bar)) continue;
 
             double amount = portfolioValue * entry.getValue() * buyScale;
-            totalFee += calcFee(amount, false, commission, stampTaxRate, minCommission, entry.getKey(), transferFeeRate);
+            totalFee += BacktestUtils.calcFee(amount, false, commission, stampTaxRate, minCommission, entry.getKey(), transferFeeRate);
         }
 
         // 卖出费用
@@ -1913,7 +1746,7 @@ public class BacktestEngine {
             if (limitFilter && isLimitDown(bar)) continue;
 
             double amount = oldPositions.get(symbol) * bar.getClose().doubleValue();
-            totalFee += calcFee(amount, true, commission, stampTaxRate, minCommission, symbol, transferFeeRate);
+            totalFee += BacktestUtils.calcFee(amount, true, commission, stampTaxRate, minCommission, symbol, transferFeeRate);
         }
 
         // 实际投入金额（扣除被过滤掉的买入，应用缩放）
@@ -2271,9 +2104,9 @@ public class BacktestEngine {
         return BigDecimal.valueOf(v).setScale(6, RoundingMode.HALF_UP);
     }
 
+    /** 委托 {@link BacktestUtils#round}，保持全局舍入语义单一来源。 */
     private double round(double v, int scale) {
-        if (Double.isNaN(v) || Double.isInfinite(v)) return 0;
-        return BigDecimal.valueOf(v).setScale(scale, RoundingMode.HALF_UP).doubleValue();
+        return BacktestUtils.round(v, scale);
     }
 
     private List<FactorWeight> parseFactorConfig(String json) {
@@ -2293,14 +2126,6 @@ public class BacktestEngine {
         } catch (Exception e) {
             return List.of();
         }
-    }
-
-    /**
-     * 计算收益率百分比
-     */
-    private double returnPct(double currentValue, double cost) {
-        if (cost <= 0) return 0;
-        return (currentValue - cost) / cost;
     }
 
     /**
