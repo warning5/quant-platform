@@ -44,8 +44,11 @@ import com.quant.platform.common.enums.JobStatus;
 @RequiredArgsConstructor
 public class FactorComputeEngine {
 
+    // ===== 拆分出的专责协作者 =====
+    /** 进度推送 + 运行中因子状态 */
     private final FactorProgressService progressService;
-
+    /** 因子值批量落库（ClickHouse） */
+    private final FactorPersistenceService factorPersistenceService;
 
     private final MarketDataService marketDataService;
     private final FactorValueMapper factorValueMapper;
@@ -314,7 +317,7 @@ public class FactorComputeEngine {
 
                 if (writeBuffer.size() >= 5000) {
                     if (firstWriteMs == 0) firstWriteMs = System.currentTimeMillis();
-                    batchSaveWithRetry(new ArrayList<>(writeBuffer), factor.getFactorCode());
+                    factorPersistenceService.batchSaveWithRetry(new ArrayList<>(writeBuffer), factor.getFactorCode());
                     rowsWritten.addAndGet(writeBuffer.size());
                     writeBuffer.clear();
                 }
@@ -337,7 +340,7 @@ public class FactorComputeEngine {
 
             if (!writeBuffer.isEmpty()) {
                 if (firstWriteMs == 0) firstWriteMs = System.currentTimeMillis();
-                batchSaveWithRetry(new ArrayList<>(writeBuffer), factor.getFactorCode());
+                factorPersistenceService.batchSaveWithRetry(new ArrayList<>(writeBuffer), factor.getFactorCode());
                 rowsWritten.addAndGet(writeBuffer.size());
                 writeBuffer.clear();
             }
@@ -580,7 +583,7 @@ public class FactorComputeEngine {
                 // 缓冲区达阈值，立即写入（不等待全部收完）
                 if (writeBuffer.size() >= 5000) {
                     if (firstWriteMs == 0) firstWriteMs = System.currentTimeMillis();
-                    batchSaveWithRetry(new ArrayList<>(writeBuffer), code);
+                    factorPersistenceService.batchSaveWithRetry(new ArrayList<>(writeBuffer), code);
                     rowsWritten.addAndGet(writeBuffer.size());
                     writeBuffer.clear();
                 }
@@ -605,7 +608,7 @@ public class FactorComputeEngine {
             // ── 收尾：写入剩余缓冲 ──
             if (!writeBuffer.isEmpty()) {
                 if (firstWriteMs == 0) firstWriteMs = System.currentTimeMillis();
-                batchSaveWithRetry(new ArrayList<>(writeBuffer), code);
+                factorPersistenceService.batchSaveWithRetry(new ArrayList<>(writeBuffer), code);
                 rowsWritten.addAndGet(writeBuffer.size());
                 writeBuffer.clear();
             }
@@ -708,7 +711,7 @@ public class FactorComputeEngine {
 
             if (writeBuffer.size() >= BATCH_SIZE || i == newDates.size() - 1) {
                 if (!writeBuffer.isEmpty()) {
-                    batchSaveWithRetry(writeBuffer, factorCode);
+                    factorPersistenceService.batchSaveWithRetry(writeBuffer, factorCode);
                     writeBuffer.clear();
                 }
             }
@@ -865,7 +868,7 @@ public class FactorComputeEngine {
 
             if (writeBuffer.size() >= BATCH_SIZE || i == reportDates.size() - 1) {
                 if (!writeBuffer.isEmpty()) {
-                    batchSaveWithRetry(writeBuffer, factorCode);
+                    factorPersistenceService.batchSaveWithRetry(writeBuffer, factorCode);
                     writeBuffer.clear();
                 }
             }
@@ -1326,76 +1329,6 @@ public class FactorComputeEngine {
         if (seconds < 60) return seconds + "秒";
         if (seconds < 3600) return (seconds / 60) + "分" + (seconds % 60) + "秒";
         return (seconds / 3600) + "时" + (seconds % 3600 / 60) + "分";
-    }
-
-    /**
-     * 在独立事务中删除旧数据，避免长事务
-     */
-    public void deleteExistingValues(String factorCode, LocalDate startDate, LocalDate endDate) {
-        // 删 CH 旧数据（MySQL factor_value 已是空表，写入全走 CH）
-        clickHouseFactorValueService.deleteByFactorCodeAndDateRange(
-                factorCode, startDate.toString(), endDate.toString());
-    }
-
-    /**
-     * 批量保存，带死锁重试机制
-     */
-    private void batchSaveWithRetry(List<FactorValue> values, String factorCode) {
-        int maxRetries = 3;
-        for (int attempt = 1; attempt <= maxRetries; attempt++) {
-            try {
-                batchSave(values);
-                return;
-            } catch (org.springframework.dao.PessimisticLockingFailureException e) {
-                log.warn("Deadlock on batch insert for [{}], attempt {}/{}", factorCode, attempt, maxRetries);
-                if (attempt == maxRetries) {
-                    throw e;
-                }
-                try {
-                    Thread.sleep(500L * attempt);
-                } catch (InterruptedException ignored) {
-                }
-            }
-        }
-    }
-
-    private void batchSave(List<FactorValue> values) {
-        if (values == null || values.isEmpty()) return;
-        LocalDateTime now = LocalDateTime.now();
-        for (FactorValue value : values) {
-            if (value.getCreatedAt() == null) {
-                value.setCreatedAt(now);
-            }
-        }
-        // 统一走 HTTP 快速路径
-        clickHouseFactorValueService.httpBatchInsert(values);
-    }
-
-    /**
-     * 批量写入因子值（HTTP POST JSONEachRow，绕过 JDBC，速度更快）
-     */
-    private void batchSaveWithProgress(List<FactorValue> values, String factorCode) {
-        if (values == null || values.isEmpty()) return;
-        LocalDateTime now = LocalDateTime.now();
-        for (FactorValue value : values) {
-            if (value.getCreatedAt() == null) {
-                value.setCreatedAt(now);
-            }
-        }
-        progressService.sendProgress(factorCode, "COMPUTING", 65,
-                String.format("开始写入 ClickHouse（HTTP）%,d 行...", values.size()), null);
-        long start = System.currentTimeMillis();
-        try {
-            clickHouseFactorValueService.httpBatchInsert(values);
-        } catch (Exception e) {
-            log.error("[{}] HTTP写入失败，回退JDBC: {}", factorCode, e.getMessage());
-            // 回退到 JDBC 方式
-            batchSave(values);
-        }
-        long ms = System.currentTimeMillis() - start;
-        double speed = ms > 0 ? (double) values.size() / ms * 1000 : 0;
-        progressService.sendProgress(factorCode, "COMPUTING", 90,
-                String.format("写入完成，%,d 行，耗时 %.1f 秒，速度 %.0f 行/s", values.size(), ms / 1000.0, speed), null);
     }
 
     /**
