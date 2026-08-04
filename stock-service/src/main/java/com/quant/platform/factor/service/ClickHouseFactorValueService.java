@@ -484,7 +484,7 @@ public class ClickHouseFactorValueService {
 
     /**
      * 批量写入因子值到 ClickHouse（多行 VALUES INSERT，比 JDBC batch 快 3-5x）
-     * 每批 5000 行，单条 SQL 一次网络往返
+     * 按【真实字节数】兜底分批：单条 SQL 控制在安全阈值内，避免超过 CH max_query_size。
      */
     @CacheEvict(value = "factorValue", allEntries = true, cacheManager = "factorValueCacheManager")
     public void batchUpsertToCH(java.util.List<com.quant.platform.factor.domain.FactorValue> values) {
@@ -492,26 +492,37 @@ public class ClickHouseFactorValueService {
             return;
         }
 
-        final int BATCH_SIZE = 5000;
+        final String HEADER = "INSERT INTO stock.factor_value " +
+                "(factor_code, symbol, calc_date, factor_val, rank_value, z_score, announce_date, created_at, update_time) VALUES ";
+        // 单条 SQL 字节上限（远小于 CH 默认 max_query_size=256KB，留足余量）
+        final int MAX_SQL_BYTES = 200_000;
         try (Connection conn = getConnection()) {
-            for (int i = 0; i < values.size(); i += BATCH_SIZE) {
-                int end = Math.min(i + BATCH_SIZE, values.size());
-                StringBuilder sql = new StringBuilder(
-                        "INSERT INTO stock.factor_value " +
-                        "(factor_code, symbol, calc_date, factor_val, rank_value, z_score, announce_date, created_at, update_time) VALUES ");
-                for (int j = i; j < end; j++) {
-                    if (j > i) sql.append(',');
-                    com.quant.platform.factor.domain.FactorValue fv = values.get(j);
-                    sql.append("('")
-                       .append(escapeSql(fv.getFactorCode())).append("','")
-                       .append(escapeSql(fv.getSymbol())).append("','")
-                       .append(fv.getCalcDate()).append("',")
-                       .append(toSqlNullable(fv.getFactorVal())).append(',')
-                       .append(toSqlNullable(fv.getRankValue())).append(',')
-                       .append(toSqlNullable(fv.getZScore())).append(',')
-                       .append(toSqlNullableDate(fv.getAnnounceDate())).append(',')
-                       .append("now(),now())");
+            StringBuilder sql = new StringBuilder(HEADER);
+            int rows = 0;
+            for (int j = 0; j < values.size(); j++) {
+                com.quant.platform.factor.domain.FactorValue fv = values.get(j);
+                String row = "('"
+                       .concat(escapeSql(fv.getFactorCode())).concat("','")
+                       .concat(escapeSql(fv.getSymbol())).concat("','")
+                       .concat(String.valueOf(fv.getCalcDate())).concat("',")
+                       .concat(toSqlNullable(fv.getFactorVal())).concat(",")
+                       .concat(toSqlNullable(fv.getRankValue())).concat(",")
+                       .concat(toSqlNullable(fv.getZScore())).concat(",")
+                       .concat(toSqlNullableDate(fv.getAnnounceDate())).concat(",now(),now())");
+                // 当前批已非空，且加入本行会超过字节上限 -> 先 flush
+                if (rows > 0 && sql.length() + row.length() + 1 > MAX_SQL_BYTES) {
+                    try (java.sql.Statement stmt = conn.createStatement()) {
+                        stmt.executeUpdate(sql.toString());
+                    }
+                    sql.setLength(0);
+                    sql.append(HEADER);
+                    rows = 0;
                 }
+                if (rows > 0) sql.append(',');
+                sql.append(row);
+                rows++;
+            }
+            if (rows > 0) {
                 try (java.sql.Statement stmt = conn.createStatement()) {
                     stmt.executeUpdate(sql.toString());
                 }
@@ -1043,22 +1054,26 @@ public class ClickHouseFactorValueService {
     /**
      * 通过 HTTP POST JSONEachRow 批量写入因子值（绕过 JDBC，速度更快）
      * 147万条约 10-20 秒，比 JDBC VALUES INSERT 快 10x+
+     *
+     * 分块策略：按【真实字节数】兜底，而非行数。CH 默认 max_query_size=256KB，
+     * 若单块 body 超此值会报 "Max query size exceeded"。原 50万行/块（≈60MB）
+     * 在该限制下必失败，故改为每块 body 控制在安全阈值内。
      */
     @CacheEvict(value = "factorValue", allEntries = true, cacheManager = "factorValueCacheManager")
     public void httpBatchInsert(List<com.quant.platform.factor.domain.FactorValue> values) {
         if (!clickHouseConfig.isEnabled() || values == null || values.isEmpty()) return;
         java.time.LocalDateTime now = java.time.LocalDateTime.now();
         java.time.format.DateTimeFormatter chDtFmt = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-        // 分块：每块 50 万行，避免 HTTP body 过大
-        int chunkSize = 500_000;
-        for (int i = 0; i < values.size(); i += chunkSize) {
-            int end = Math.min(i + chunkSize, values.size());
-            List<com.quant.platform.factor.domain.FactorValue> chunk = values.subList(i, end);
-            StringBuilder body = new StringBuilder(chunk.size() * 120);
-            for (com.quant.platform.factor.domain.FactorValue fv : chunk) {
-                if (body.length() > 0) body.append('\n');
-                java.time.LocalDateTime created = fv.getCreatedAt() != null ? fv.getCreatedAt() : now;
-                body.append('{')
+        // 单块 body 字节上限。body 现在走 ?query= 之外的数据通道，不受 max_query_size 限制，
+        // 取 1MB 兼顾吞吐与内存（避免单请求过大）。
+        final int MAX_BODY_BYTES = 1_000_000;
+        StringBuilder body = new StringBuilder(MAX_BODY_BYTES + 256);
+        int chunkRows = 0;
+        int total = 0;
+        for (com.quant.platform.factor.domain.FactorValue fv : values) {
+            java.time.LocalDateTime created = fv.getCreatedAt() != null ? fv.getCreatedAt() : now;
+            String line = new StringBuilder(160)
+                    .append('{')
                     .append("\"factor_code\":\"").append(escapeJson(fv.getFactorCode())).append("\",")
                     .append("\"symbol\":\"").append(escapeJson(fv.getSymbol())).append("\",")
                     .append("\"calc_date\":\"").append(fv.getCalcDate()).append("\",")
@@ -1067,12 +1082,25 @@ public class ClickHouseFactorValueService {
                     .append("\"z_score\":").append(toJsonVal(fv.getZScore())).append(",")
                     .append("\"created_at\":\"").append(created.format(chDtFmt)).append("\",")
                     .append("\"update_time\":\"").append(now.format(chDtFmt)).append("\"")
-                    .append('}');
+                    .append('}').toString();
+            int lineLen = line.length() + 1; // +1 为换行分隔符
+            // 当前块已非空，且加入本行后会超过字节上限 -> 先 flush 当前块
+            if (body.length() > 0 && body.length() + lineLen > MAX_BODY_BYTES) {
+                httpPost("INSERT INTO stock.factor_value FORMAT JSONEachRow", body.toString());
+                total += chunkRows;
+                log.debug("[ClickHouse] HTTP批量写入 {} 条（累计 {}/{}）", chunkRows, total, values.size());
+                body.setLength(0);
+                chunkRows = 0;
             }
-            httpPost("INSERT INTO stock.factor_value FORMAT JSONEachRow", body.toString());
-            log.debug("[ClickHouse] HTTP批量写入 {} 条（{}/{}）", end - i, end, values.size());
+            if (body.length() > 0) body.append('\n');
+            body.append(line);
+            chunkRows++;
         }
-        log.info("[ClickHouse] HTTP批量写入完成，共 {} 条", values.size());
+        if (body.length() > 0) {
+            httpPost("INSERT INTO stock.factor_value FORMAT JSONEachRow", body.toString());
+            total += chunkRows;
+        }
+        log.info("[ClickHouse] HTTP批量写入完成，共 {} 条", total);
     }
 
     /**
@@ -1102,8 +1130,12 @@ public class ClickHouseFactorValueService {
         
         try {
             // 密码通过 HTTP Basic Auth header 传递，不出现在 URL 中
-            String url = String.format("http://%s:%d/",
-                    clickHouseConfig.getHost(), clickHouseConfig.getPort());
+            // 查询必须放到 URL 的 ?query= 参数里，POST body 才是 INSERT 的数据。
+            // 用 X-ClickHouse-Query 请求头传查询在本版本(v26.5.1)不生效，CH 会把 body
+            // 当成查询解析（报 "Syntax error ... ({)"）。密码走 Basic Auth，不进 URL。
+            String url = String.format("http://%s:%d/?query=%s",
+                    clickHouseConfig.getHost(), clickHouseConfig.getPort(),
+                    java.net.URLEncoder.encode(query, "UTF-8"));
             String auth = clickHouseConfig.getUsername() + ":" + clickHouseConfig.getPassword();
             String encodedAuth = java.util.Base64.getEncoder()
                     .encodeToString(auth.getBytes(java.nio.charset.StandardCharsets.UTF_8));
@@ -1114,9 +1146,8 @@ public class ClickHouseFactorValueService {
             
             java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
                     .uri(java.net.URI.create(url))
-                    .header("Content-Type", "application/x-www-form-urlencoded")
+                    .header("Content-Type", "text/plain; charset=UTF-8")
                     .header("Authorization", "Basic " + encodedAuth)
-                    .header("X-ClickHouse-Query", java.net.URLEncoder.encode(query, "UTF-8"))
                     .POST(java.net.http.HttpRequest.BodyPublishers.ofString(body))
                     .timeout(java.time.Duration.ofMinutes(5))
                     .build();

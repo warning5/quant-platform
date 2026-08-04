@@ -78,10 +78,10 @@ api.interceptors.response.use(
           return api(err.config);
         }
       }
-      // 刷新失败：清理内存态并跳登录页
+      // 刷新失败：清理内存态并跳登录页（token 与 user 一并清，避免旧 user 残留被误判为已登录）
       clearAuth();
       const { useAuthStore } = await import('../stores/authStore');
-      useAuthStore.getState().setToken('');
+      useAuthStore.setState({ token: '', userId: null, user: null, roles: [], permissions: [], menus: [] });
       if (window.location.pathname !== '/login') {
         // 保存当前路径，登录成功后回跳（兼容整页跳转无法携带 react-router state）
         try { sessionStorage.setItem('redirect_after_login', window.location.pathname + window.location.search); } catch (_) {}

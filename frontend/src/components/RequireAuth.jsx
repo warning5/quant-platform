@@ -41,7 +41,7 @@ function pathCandidates(pathname) {
 }
 
 export default function RequireAuth({ children }) {
-  const token = useAuthStore((s) => s.token);
+  const user = useAuthStore((s) => s.user);
   const permissions = useAuthStore((s) => s.permissions);
   const menus = useAuthStore((s) => s.menus);
   const hasPermission = useAuthStore((s) => s.hasPermission);
@@ -60,7 +60,8 @@ export default function RequireAuth({ children }) {
     );
   }
 
-  if (!token) {
+  // #6：登录态以 user 是否存在为准（token 现在恒为 null，仅存于 httpOnly cookie，JS 读不到）
+  if (!user) {
     return <Navigate to="/login" replace state={{ from: location }} />;
   }
 
