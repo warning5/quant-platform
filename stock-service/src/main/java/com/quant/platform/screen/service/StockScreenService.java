@@ -39,6 +39,8 @@ import com.quant.platform.factor.domain.FactorDefinition.FactorStatus;
 @RequiredArgsConstructor
 public class StockScreenService {
 
+    private final ScreenMathService mathService;
+
     private final ClickHouseFactorValueService clickHouseFactorValueService;
     private final FactorDefinitionMapper factorDefMapper;
     private final MarketDataService marketDataService;
@@ -350,7 +352,7 @@ public class StockScreenService {
             // factor_value.symbol 可能带后缀（如 000001.SZ），candidates 是纯代码（如 000001）
             // 需要做 symbol 归一化：去掉 .SH/.SZ/.BJ 后缀
             List<FactorValue> filtered = crossSection.stream()
-                    .filter(fv -> candidates.contains(normalizeFactorSymbol(fv.getSymbol())))
+                    .filter(fv -> candidates.contains(ScreenMathService.normalizeFactorSymbol(fv.getSymbol())))
                     .toList();
 
             // 诊断：symbol 格式不匹配时打印样本
@@ -367,7 +369,7 @@ public class StockScreenService {
             if (factorDef != null && factorDef.getOutlierMethod() != null) {
                 outlierMethod = factorDef.getOutlierMethod();
             }
-            List<Double> outlierProcessed = applyOutlierProcessing(
+            List<Double> outlierProcessed = mathService.applyOutlierProcessing(
                     filtered.stream()
                             .map(FactorValue::getFactorVal)
                             .map(bd -> bd != null ? bd.doubleValue() : 0.0)
@@ -387,11 +389,11 @@ public class StockScreenService {
             if (factorDef != null && factorDef.getNormalizeMethod() != null) {
                 normalizeMethod = factorDef.getNormalizeMethod();
             }
-            List<Double> normalized = applyNormalization(outlierProcessed, normalizeMethod);
+            List<Double> normalized = mathService.applyNormalization(outlierProcessed, normalizeMethod);
 
             // P1-6: 因子分布诊断（标准化后检查偏度）
             if (normalized.size() > 10) {
-                double skewness = calcSkewness(normalized);
+                double skewness = mathService.calcSkewness(normalized);
                 if (Math.abs(skewness) > 2.0) {
                     log.warn("[Screen] Factor {} 标准化后偏度={}，分布严重偏斜，建议检查因子值", code, skewness);
                 }
@@ -402,7 +404,7 @@ public class StockScreenService {
             Map<String, FactorValue> symbolMap = new LinkedHashMap<>();
             for (int i = 0; i < filtered.size(); i++) {
                 FactorValue orig = filtered.get(i);
-                String normSym = normalizeFactorSymbol(orig.getSymbol());
+                String normSym = ScreenMathService.normalizeFactorSymbol(orig.getSymbol());
                 FactorValue processed = new FactorValue();
                 processed.setSymbol(normSym);
                 processed.setFactorCode(orig.getFactorCode());
@@ -454,7 +456,7 @@ public class StockScreenService {
                 if (fv != null) {
                     double raw = fv.getFactorVal() != null ? fv.getFactorVal().doubleValue() : 0.0;
                     // 筛选条件过滤
-                    if (!passFilter(raw, fw.getFilterOp(), fw.getFilterValue())) {
+                    if (!mathService.passFilter(raw, fw.getFilterOp(), fw.getFilterValue())) {
                         passed = false;
                         break;
                     }
@@ -617,17 +619,17 @@ public class StockScreenService {
                 for (ScreenResult.StockScore stock : topStocks) {
                     Map<String, Object> advice = advices.get(stock.getSymbol());
                     if (advice != null) {
-                        stock.setCurrentPrice(toBD(advice.get("currentPrice")));
-                        stock.setSuggestPrice(toBD(advice.get("suggestPrice")));
-                        stock.setSuggestPriceLow(toBD(advice.get("suggestPriceLow")));
-                        stock.setSuggestPriceHigh(toBD(advice.get("suggestPriceHigh")));
-                        stock.setStopLoss(toBD(advice.get("stopLoss")));
-                        stock.setStopLossPercent(toBD(advice.get("stopLossPercent")));
-                        stock.setTakeProfit1(toBD(advice.get("takeProfit1")));
-                        stock.setTakeProfit1Percent(toBD(advice.get("takeProfit1Percent")));
-                        stock.setTakeProfit2(toBD(advice.get("takeProfit2")));
-                        stock.setTakeProfit2Percent(toBD(advice.get("takeProfit2Percent")));
-                        stock.setAtr(toBD(advice.get("atr")));
+                        stock.setCurrentPrice(mathService.toBD(advice.get("currentPrice")));
+                        stock.setSuggestPrice(mathService.toBD(advice.get("suggestPrice")));
+                        stock.setSuggestPriceLow(mathService.toBD(advice.get("suggestPriceLow")));
+                        stock.setSuggestPriceHigh(mathService.toBD(advice.get("suggestPriceHigh")));
+                        stock.setStopLoss(mathService.toBD(advice.get("stopLoss")));
+                        stock.setStopLossPercent(mathService.toBD(advice.get("stopLossPercent")));
+                        stock.setTakeProfit1(mathService.toBD(advice.get("takeProfit1")));
+                        stock.setTakeProfit1Percent(mathService.toBD(advice.get("takeProfit1Percent")));
+                        stock.setTakeProfit2(mathService.toBD(advice.get("takeProfit2")));
+                        stock.setTakeProfit2Percent(mathService.toBD(advice.get("takeProfit2Percent")));
+                        stock.setAtr(mathService.toBD(advice.get("atr")));
                         stock.setRiskLevel((String) advice.get("riskLevel"));
                         stock.setRisks((List<String>) advice.get("risks"));
                         stock.setBuyReason((String) advice.get("buyReason"));
@@ -654,40 +656,6 @@ public class StockScreenService {
     }
 
     /**
-     * 筛选条件判断
-     */
-    private boolean passFilter(double value, String op, Double threshold) {
-        if (op == null || "NONE".equals(op) || threshold == null) return true;
-        return switch (op.toUpperCase()) {
-            case "GT" -> value > threshold;
-            case "GTE" -> value >= threshold;
-            case "LT" -> value < threshold;
-            case "LTE" -> value <= threshold;
-            case "EQ" -> Math.abs(value - threshold) < 1e-10;
-            default -> true;
-        };
-    }
-
-    /**
-     * 多日平均模式：查询日期范围内的因子值，按 symbol 聚合取均值
-     * 返回的 FactorValue 列表中每个 symbol 只有一条记录，factor_val = 范围内均值
-     */
-    /**
-     * 多日模式：最新值优先 + 稳定性过滤 + 趋势动量
-     * 取每个 symbol 在范围内最新一天的因子值（保留灵敏度），
-     * 同时计算该范围内的变异系数 CV = std/|mean|，
-     * CV 过高说明因子值波动剧烈、不稳定，予以剔除。
-     * 另外计算趋势动量 trend = (latest - earliest) / |earliest|，存入 multiDayTrendCache。
-     *
-     * 阈值从 factor_definition.cv_threshold 读取（数据驱动）。
-     * 若该因子未设置 cv_threshold，则按 category 推导默认值：
-     * - MOMENTUM / 含 CORR/VPCORR 的技术因子：宽松(3.0)
-     * - VOLATILITY / LIQUIDITY / VOLUME_PRICE：中等(2.0)
-     * - 其他（TECHNICAL/FINANCIAL/VALUE/SENTIMENT/CHANTHEORY）：严格(0.5)
-     */
-    private static final double DEFAULT_CV_THRESHOLD = 0.5;
-
-    /**
      * 从 DB factor_definition.cv_threshold 查询 CV 阈值（数据驱动）。
      * 未设置时回退到 category 推导的默认值。
      */
@@ -701,38 +669,22 @@ public class StockScreenService {
         }
         // 回退：根据 category 推导
         if (def != null && def.getCategory() != null) {
-            return getCategoryBasedCV(def.getCategory());
+            return ScreenMathService.getCategoryBasedCV(def.getCategory());
         }
-        return DEFAULT_CV_THRESHOLD;
+        return ScreenMathService.DEFAULT_CV_THRESHOLD;
     }
 
     /**
-     * 根据 FactorCategory 推导 CV 阈值默认值
+     * 多日平均模式：查询日期范围内的因子值，按 symbol 聚合取均值
+     * 返回的 FactorValue 列表中每个 symbol 只有一条记录，factor_val = 范围内均值
      */
-    private static double getCategoryBasedCV(FactorCategory category) {
-        return switch (category) {
-            case MOMENTUM -> 3.0;
-            case VOLATILITY, LIQUIDITY, VOLUME_PRICE -> 2.0;
-            default -> DEFAULT_CV_THRESHOLD;
-        };
-    }
-
     /**
-     * 统一 symbol 格式：去掉 .SZ/.SH/.BJ 等交易所后缀
-     * 解决 CH factor_value 中 5月12日前后 symbol 格式不一致的问题
+     * 多日模式：最新值优先 + 稳定性过滤 + 趋势动量
+     * 取每个 symbol 在范围内最新一天的因子值（保留灵敏度），
+     * 同时计算该范围内的变异系数 CV = std/|mean|，
+     * CV 过高说明因子值波动剧烈、不稳定，予以剔除。
+     * 另外计算趋势动量 trend = (latest - earliest) / |earliest|，存入 multiDayTrendCache。
      */
-    private static String normalizeSymbol(String symbol) {
-        if (symbol == null || symbol.isEmpty()) return symbol;
-        int dot = symbol.lastIndexOf('.');
-        if (dot > 0) {
-            String suffix = symbol.substring(dot + 1).toUpperCase();
-            if (suffix.equals("SZ") || suffix.equals("SH") || suffix.equals("BJ")) {
-                return symbol.substring(0, dot);
-            }
-        }
-        return symbol;
-    }
-
     private List<FactorValue> loadFactorAverage(String factorCode, LocalDate startDate, LocalDate endDate, Set<String> candidates) {
         // 查询范围内所有因子值
         List<FactorValue> allValues = clickHouseFactorValueService.findByFactorCodeAndDateRange(factorCode, startDate, endDate);
@@ -757,7 +709,7 @@ public class StockScreenService {
         // CH 中 symbol 格式可能不一致（如 300905 vs 300905.SZ），统一 strip 后缀再分组
         Map<String, List<FactorValue>> grouped = allValues.stream()
                 .filter(fv -> fv.getFactorVal() != null)
-                .collect(Collectors.groupingBy(fv -> normalizeSymbol(fv.getSymbol())));
+                .collect(Collectors.groupingBy(fv -> ScreenMathService.normalizeSymbol(fv.getSymbol())));
 
         // 用结束日期作为 calc_date
         LocalDate refDate = endDate;
@@ -858,172 +810,6 @@ public class StockScreenService {
     }
 
     /**
-     * 归一化 symbol：去掉 .SH/.SZ/.BJ 等交易所后缀，返回纯代码。
-     * 用于统一 factor_value.symbol（可能带后缀）和 candidates（纯代码）的格式。
-     */
-    private static String normalizeFactorSymbol(String symbol) {
-        if (symbol == null) return null;
-        int dot = symbol.lastIndexOf('.');
-        return dot > 0 ? symbol.substring(0, dot) : symbol;
-    }
-
-    /**
-     * 极值处理
-     */
-    private List<Double> applyOutlierProcessing(List<Double> values, String method) {
-        if (values == null || values.isEmpty()) return values;
-        if (method == null || "NONE".equalsIgnoreCase(method)) return values;
-
-        List<Double> sorted = values.stream().sorted().toList();
-        return switch (method.toUpperCase()) {
-            case "MAD" -> applyMAD(values);
-            case "SIGMA3", "3SIGMA" -> applySigma3(values);
-            case "PERCENTILE" -> applyPercentileClip(values, 0.01, 0.99);
-            default -> values;
-        };
-    }
-
-    /**
-     * MAD（中位数去极值法）
-     * 中位数 ± 5*MAD 范围外的值截断
-     */
-    private List<Double> applyMAD(List<Double> values) {
-        List<Double> sorted = values.stream().sorted().toList();
-        int n = sorted.size();
-        double median = n % 2 == 0
-                ? (sorted.get(n / 2 - 1) + sorted.get(n / 2)) / 2.0
-                : sorted.get(n / 2);
-
-        List<Double> absDeviations = values.stream()
-                .map(v -> Math.abs(v - median))
-                .sorted()
-                .toList();
-        double mad = n % 2 == 0
-                ? (absDeviations.get(n / 2 - 1) + absDeviations.get(n / 2)) / 2.0
-                : absDeviations.get(n / 2);
-
-        double lower = median - 5 * mad;
-        double upper = median + 5 * mad;
-
-        return values.stream()
-                .map(v -> Math.max(lower, Math.min(upper, v)))
-                .collect(Collectors.toList());
-    }
-
-    /**
-     * 3σ 法
-     * 均值 ± 3*标准差 范围外的值截断
-     */
-    private List<Double> applySigma3(List<Double> values) {
-        double mean = values.stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
-        double variance = values.stream()
-                .mapToDouble(v -> (v - mean) * (v - mean))
-                .average()
-                .orElse(0.0);
-        double std = Math.sqrt(variance);
-
-        double lower = mean - 3 * std;
-        double upper = mean + 3 * std;
-
-        return values.stream()
-                .map(v -> Math.max(lower, Math.min(upper, v)))
-                .collect(Collectors.toList());
-    }
-
-    /**
-     * 百分位截断
-     */
-    private List<Double> applyPercentileClip(List<Double> values, double lowerP, double upperP) {
-        List<Double> sorted = values.stream().sorted().toList();
-        int n = sorted.size();
-        int lowerIdx = (int) (n * lowerP);
-        int upperIdx = (int) (n * upperP);
-        double lower = sorted.get(Math.max(0, lowerIdx));
-        double upper = sorted.get(Math.min(n - 1, upperIdx));
-
-        return values.stream()
-                .map(v -> Math.max(lower, Math.min(upper, v)))
-                .collect(Collectors.toList());
-    }
-
-    /**
-     * 计算偏度（P1-6 因子分布诊断）
-     */
-    private double calcSkewness(List<Double> values) {
-        if (values == null || values.size() < 3) return 0;
-        double mean = values.stream().mapToDouble(Double::doubleValue).average().orElse(0);
-        double variance = values.stream().mapToDouble(v -> Math.pow(v - mean, 2)).average().orElse(0);
-        double std = Math.sqrt(variance);
-        if (std == 0) return 0;
-        double n = values.size();
-        return values.stream().mapToDouble(v -> Math.pow((v - mean) / std, 3)).average().orElse(0) * n / (n - 1) / (n - 2);
-    }
-
-    /**
-     * 标准化处理
-     */
-    private List<Double> applyNormalization(List<Double> values, String method) {
-        if (values == null || values.isEmpty()) return values;
-        if (method == null || "NONE".equalsIgnoreCase(method)) return values;
-
-        return switch (method.toUpperCase()) {
-            case "ZSCORE" -> applyZScore(values);
-            case "MINMAX" -> applyMinMax(values);
-            case "RANK", "PERCENTRANK" -> applyPercentRank(values);
-            default -> values;
-        };
-    }
-
-    /**
-     * Z-Score 标准化
-     * (x - mean) / std
-     */
-    private List<Double> applyZScore(List<Double> values) {
-        double mean = values.stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
-        double variance = values.stream()
-                .mapToDouble(v -> (v - mean) * (v - mean))
-                .average()
-                .orElse(0.0);
-        double std = Math.sqrt(variance);
-        if (std < 1e-10) return values.stream().map(v -> 0.0).collect(Collectors.toList());
-
-        return values.stream()
-                .map(v -> (v - mean) / std)
-                .collect(Collectors.toList());
-    }
-
-    /**
-     * Min-Max 归一化到 [0, 1]
-     */
-    private List<Double> applyMinMax(List<Double> values) {
-        double min = values.stream().mapToDouble(Double::doubleValue).min().orElse(0.0);
-        double max = values.stream().mapToDouble(Double::doubleValue).max().orElse(1.0);
-        double range = max - min;
-        if (range < 1e-10) return values.stream().map(v -> 0.5).collect(Collectors.toList());
-
-        return values.stream()
-                .map(v -> (v - min) / range)
-                .collect(Collectors.toList());
-    }
-
-    /**
-     * 百分位排名（0-1）
-     */
-    private List<Double> applyPercentRank(List<Double> values) {
-        List<Double> sorted = values.stream().sorted().toList();
-        int n = sorted.size();
-        return values.stream()
-                .map(v -> {
-                    int rank = 0;
-                    for (int i = 0; i < n; i++) {
-                        if (sorted.get(i) < v) rank++;
-                    }
-                    return n <= 1 ? 0.5 : (double) rank / (n - 1);
-                })
-                .collect(Collectors.toList());
-    }
-
-    /**
      * 获取所有可用因子（已有因子值的因子代码 + 定义信息）
      */
     public List<Map<String, Object>> getAvailableFactors() {
@@ -1075,14 +861,6 @@ public class StockScreenService {
         return latest != null ? latest : LocalDate.now().minusDays(1);
     }
 
-    private BigDecimal toBD(Object val) {
-        return switch (val) {
-            case BigDecimal bigDecimal -> bigDecimal;
-            case Number number -> BigDecimal.valueOf(number.doubleValue()).setScale(2, RoundingMode.HALF_UP);
-            case null, default -> null;
-        };
-    }
-
     /**
      * 施密特正交化（Gram-Schmidt）
      * 对标准化后的因子值矩阵做正交化，消除因子间共线性
@@ -1131,18 +909,18 @@ public class StockScreenService {
 
             // 减去在之前所有正交向量上的投影
             for (int k = 0; k < f; k++) {
-                double proj = dotProduct(orthoVectors[f], orthoVectors[k])
-                        / dotProduct(orthoVectors[k], orthoVectors[k]);
+                double proj = mathService.dotProduct(orthoVectors[f], orthoVectors[k])
+                        / mathService.dotProduct(orthoVectors[k], orthoVectors[k]);
                 for (int s = 0; s < numSymbols; s++) {
                     orthoVectors[f][s] -= proj * orthoVectors[k][s];
                 }
             }
 
             // 归一化（保持方差，使正交化后的值分布与原始值相似）
-            double norm = Math.sqrt(dotProduct(orthoVectors[f], orthoVectors[f]) / numSymbols);
+            double norm = Math.sqrt(mathService.dotProduct(orthoVectors[f], orthoVectors[f]) / numSymbols);
             if (norm > 1e-10) {
                 // 用原始因子的标准差来缩放，保持量级
-                double origStd = standardDeviation(factorMatrix[f]);
+                double origStd = mathService.standardDeviation(factorMatrix[f]);
                 double scale = origStd / norm;
                 for (int s = 0; s < numSymbols; s++) {
                     orthoVectors[f][s] *= scale;
@@ -1162,54 +940,10 @@ public class StockScreenService {
         }
 
         // 计算正交化前后相关性变化（用于日志）
-        double avgCorrBefore = avgCorrelation(factorMatrix);
-        double avgCorrAfter = avgCorrelation(orthoVectors);
+        double avgCorrBefore = mathService.avgCorrelation(factorMatrix);
+        double avgCorrAfter = mathService.avgCorrelation(orthoVectors);
         log.info("Orthogonalization ({}): {} factors × {} stocks, avg correlation: {} → {}",
                 method, numFactors, numSymbols, avgCorrBefore, avgCorrAfter);
-    }
-
-    private double dotProduct(double[] a, double[] b) {
-        double sum = 0;
-        for (int i = 0; i < a.length; i++) sum += a[i] * b[i];
-        return sum;
-    }
-
-    private double standardDeviation(double[] values) {
-        double mean = 0;
-        for (double v : values) mean += v;
-        mean /= values.length;
-        double var = 0;
-        for (double v : values) var += (v - mean) * (v - mean);
-        return Math.sqrt(var / values.length);
-    }
-
-    private double avgCorrelation(double[][] matrix) {
-        int n = matrix.length;
-        if (n < 2) return 0;
-        double totalCorr = 0;
-        int pairs = 0;
-        for (int i = 0; i < n; i++) {
-            for (int j = i + 1; j < n; j++) {
-                totalCorr += Math.abs(pearsonCorrelation(matrix[i], matrix[j]));
-                pairs++;
-            }
-        }
-        return pairs > 0 ? totalCorr / pairs : 0;
-    }
-
-    private double pearsonCorrelation(double[] x, double[] y) {
-        int n = x.length;
-        double sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0, sumY2 = 0;
-        for (int i = 0; i < n; i++) {
-            sumX += x[i];
-            sumY += y[i];
-            sumXY += x[i] * y[i];
-            sumX2 += x[i] * x[i];
-            sumY2 += y[i] * y[i];
-        }
-        double num = n * sumXY - sumX * sumY;
-        double den = Math.sqrt((n * sumX2 - sumX * sumX) * (n * sumY2 - sumY * sumY));
-        return den == 0 ? 0 : num / den;
     }
 
     /**
@@ -1351,7 +1085,7 @@ public class StockScreenService {
                 result.removeIf(code -> {
                     Double fv = factorVals.get(code);
                     if (fv == null) return true; // 无因子值，剔除
-                    return !compareFactorValue(fv, op, value);
+                    return !mathService.compareFactorValue(fv, op, value);
                 });
                 log.info("[FilterConfig] customFilter: {} {} {}, removed {}, remaining={}",
                         factorCode, op, value, before - result.size(), result.size());
@@ -1359,20 +1093,6 @@ public class StockScreenService {
         }
 
         return result;
-    }
-
-    /**
-     * 因子值比较
-     */
-    private boolean compareFactorValue(double actual, String op, double threshold) {
-        return switch (op.toUpperCase()) {
-            case "GT" -> actual > threshold;
-            case "GTE" -> actual >= threshold;
-            case "LT" -> actual < threshold;
-            case "LTE" -> actual <= threshold;
-            case "EQ" -> Math.abs(actual - threshold) < 1e-8;
-            default -> true; // UNKNOWN op 不过滤
-        };
     }
 
     /**
@@ -1506,7 +1226,7 @@ public class StockScreenService {
         // 构建 symbol -> 索引映射
         Map<String, Integer> symbolIndex = new HashMap<>();
         for (int i = 0; i < filtered.size(); i++) {
-            symbolIndex.put(normalizeFactorSymbol(filtered.get(i).getSymbol()), i);
+            symbolIndex.put(ScreenMathService.normalizeFactorSymbol(filtered.get(i).getSymbol()), i);
         }
         
         List<Double> result = new ArrayList<>(values);
