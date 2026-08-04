@@ -3,7 +3,6 @@ package com.quant.platform.backtest.engine;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quant.platform.backtest.domain.BacktestReport;
 import com.quant.platform.backtest.domain.BacktestTask;
-import com.quant.platform.backtest.domain.EquityCurve;
 import com.quant.platform.backtest.domain.RebalanceRecord;
 import com.quant.platform.backtest.mapper.BacktestReportMapper;
 import com.quant.platform.backtest.mapper.BacktestTaskMapper;
@@ -21,26 +20,17 @@ import com.quant.platform.screen.dto.ScreenRequest;
 import com.quant.platform.screen.dto.ScreenResult;
 import com.quant.platform.screen.service.StockScreenService;
 import com.quant.platform.stock.analysis.engine.SellSignalEngine;
-import com.quant.platform.stock.entity.StockInfo;
-import com.quant.platform.stock.mapper.StockInfoMapper;
 import com.quant.platform.stock.service.DividendService;
 import com.quant.platform.strategy.domain.StrategyDefinition;
 import com.quant.platform.strategy.service.StrategyService;
 import groovy.lang.Binding;
-import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
-import javax.sql.DataSource;
 import java.math.BigDecimal;
-import java.math.RoundingMode;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
@@ -65,6 +55,12 @@ public class BacktestEngine {
     private final StrategyService strategyService;
     private final DividendService dividendService;
     private final ObjectMapper objectMapper;
+    /** 外部数据加载（行业/基本信息/历史因子/退市日期）—— God Class 拆分 Phase 2 */
+    private final BacktestDataLoader backtestDataLoader;
+    /** WebSocket 进度推送 —— God Class 拆分 Phase 2 */
+    private final BacktestProgressNotifier progressNotifier;
+    /** 绩效报告构建 + 逐日净值落库 —— God Class 拆分 Phase 2 */
+    private final BacktestReportBuilder backtestReportBuilder;
     @Autowired(required = false)
     private ClickHouseFactorValueService clickHouseFactorValueService;
     @Autowired(required = false)
@@ -78,20 +74,14 @@ public class BacktestEngine {
      * 调仓记录写入（统一后两种模式都写）
      */
     @Autowired(required = false)
-    private StockInfoMapper stockInfoMapper;
-    @Autowired(required = false)
     private RebalanceRecordMapper rebalanceRecordMapper;
     /**
-     * 逐日净值写入
+     * 逐日净值写入（SCREEN 模式可用性校验）
      */
     @Autowired(required = false)
     private EquityCurveMapper equityCurveMapper;
     @Autowired(required = false)
-    private SimpMessagingTemplate messagingTemplate;
-    @Autowired(required = false)
     private SellSignalEngine sellSignalEngine;
-    @Resource
-    private DataSource dataSource;
 
     /**
      * 异步运行回测
@@ -1224,37 +1214,10 @@ public class BacktestEngine {
 
     /**
      * 写入逐日净值到 equity_curve 表
+     * <p>实现已迁移至 {@link BacktestReportBuilder#writeEquityCurveToDB}。</p>
      */
     private void writeEquityCurveToDB(Long taskId, List<Map<String, Object>> equityCurve, double initialCapital) {
-        if (equityCurveMapper == null || equityCurve == null || equityCurve.isEmpty()) return;
-        try {
-            // 先清理旧数据
-            try {
-                equityCurveMapper.deleteByTaskId(taskId);
-            } catch (Exception ignored) {
-            }
-            double prevNav = 0;
-            for (Map<String, Object> point : equityCurve) {
-                LocalDate date = LocalDate.parse((String) point.get("date"));
-                double nav = ((Number) point.get("value")).doubleValue();
-                double portfolioValue = nav * initialCapital;
-                EquityCurve ec = EquityCurve.builder()
-                        .taskId(taskId)
-                        .tradeDate(date)
-                        .portfolioValue(BigDecimal.valueOf(portfolioValue))
-                        .nav(BigDecimal.valueOf(nav))
-                        .returnPct(BigDecimal.valueOf(prevNav > 0 ? (nav - prevNav) / prevNav : 0))
-                        .build();
-                prevNav = nav;
-                try {
-                    equityCurveMapper.insertOne(ec);
-                } catch (Exception e) {
-                    // 逐条插入容错
-                }
-            }
-        } catch (Exception e) {
-            log.warn("写入 equity_curve 失败: {}", e.getMessage());
-        }
+        backtestReportBuilder.writeEquityCurveToDB(taskId, equityCurve, initialCapital);
     }
 
     /**
@@ -1434,92 +1397,25 @@ public class BacktestEngine {
      * 从 stock_info 表批量查询
      */
     private Map<String, String> loadIndustryMap(List<MarketDailyBar> bars) {
-        List<String> codes = bars.stream().map(b -> {
-            String sym = b.getSymbol();
-            int dot = sym.lastIndexOf('.');
-            return dot > 0 ? sym.substring(0, dot) : sym;
-        }).distinct().toList();
-
-        if (codes.isEmpty()) return Map.of();
-
-        Map<String, String> result = new HashMap<>();
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(
-                     "SELECT code, industry FROM stock_info WHERE code IN (" +
-                             codes.stream().map(c -> "?").collect(Collectors.joining(",")) + ")")) {
-            for (int i = 0; i < codes.size(); i++) {
-                ps.setString(i + 1, codes.get(i));
-            }
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    result.put(rs.getString("code"), rs.getString("industry"));
-                }
-            }
-        } catch (Exception e) {
-            log.warn("Failed to load industry map: {}", e.getMessage());
-        }
-        return result;
+        return backtestDataLoader.loadIndustryMap(bars);
     }
 
     /**
      * 加载候选股票的基本信息映射（code → {listDate, totalShare, name}）
+     * <p>实现已迁移至 {@link BacktestDataLoader#loadStockInfoMap}。</p>
      */
     private Map<String, Map<String, Object>> loadStockInfoMap(List<MarketDailyBar> bars) {
-        List<String> codes = bars.stream().map(b -> {
-            String sym = b.getSymbol();
-            int dot = sym.lastIndexOf('.');
-            return dot > 0 ? sym.substring(0, dot) : sym;
-        }).distinct().toList();
-
-        if (codes.isEmpty()) return Map.of();
-
-        Map<String, Map<String, Object>> result = new HashMap<>();
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(
-                     "SELECT code, name, list_date, total_share, total_market_cap FROM stock_info WHERE code IN (" +
-                             codes.stream().map(c -> "?").collect(Collectors.joining(",")) + ")")) {
-            for (int i = 0; i < codes.size(); i++) {
-                ps.setString(i + 1, codes.get(i));
-            }
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    Map<String, Object> info = new HashMap<>();
-                    info.put("name", rs.getString("name"));
-                    info.put("listDate", rs.getDate("list_date") != null ? rs.getDate("list_date").toLocalDate() : null);
-                    info.put("totalShare", rs.getBigDecimal("total_share"));
-                    info.put("totalMarketCap", rs.getBigDecimal("total_market_cap"));
-                    result.put(rs.getString("code"), info);
-                }
-            }
-        } catch (Exception e) {
-            log.warn("Failed to load stock info map: {}", e.getMessage());
-        }
-        return result;
+        return backtestDataLoader.loadStockInfoMap(bars);
     }
 
     /**
      * 加载指定因子在最近 N 天内的历史值
      * 格式: { factorCode -> { symbol -> [FactorValue...] } }
+     * <p>实现已迁移至 {@link BacktestDataLoader#loadHistoricalFactors}。</p>
      */
     private Map<String, Map<String, List<FactorValue>>> loadHistoricalFactors(
             Set<String> factorCodes, LocalDate endDate, int lookbackDays) {
-        Map<String, Map<String, List<FactorValue>>> result = new HashMap<>();
-        LocalDate startDate = endDate.minusDays(lookbackDays);
-
-        for (String factorCode : factorCodes) {
-            try {
-                List<FactorValue> fvs = clickHouseFactorValueService.findByFactorCodeAndDateRange(
-                        factorCode, startDate, endDate);
-                if (fvs == null || fvs.isEmpty()) continue;
-
-                Map<String, List<FactorValue>> symbolMap = fvs.stream()
-                        .collect(Collectors.groupingBy(FactorValue::getSymbol));
-                result.put(factorCode, symbolMap);
-            } catch (Exception e) {
-                log.debug("Failed to load historical factors for {}: {}", factorCode, e.getMessage());
-            }
-        }
-        return result;
+        return backtestDataLoader.loadHistoricalFactors(factorCodes, endDate, lookbackDays);
     }
 
     /**
@@ -1831,277 +1727,21 @@ public class BacktestEngine {
      * 构建绩效报告
      */
     private BacktestReport buildReport(BacktestTask task, BacktestResult result) throws Exception {
-        int tradingDays = result.tradingDays();
-        double years = tradingDays > 0 ? tradingDays / 252.0 : 1.0;
-
-        double totalReturn = result.totalReturn();
-        double annualReturn = years > 0 ? Math.pow(1 + totalReturn, 1.0 / years) - 1 : 0;
-
-        // ── 基准收益 ──────────────────────────────────────────────────
-        double benchmarkTotalReturn = result.benchmarkTotalReturn();
-        double benchmarkAnnualReturn = years > 0 ? Math.pow(1 + benchmarkTotalReturn, 1.0 / years) - 1 : 0;
-        double excessAnnualReturn = annualReturn - benchmarkAnnualReturn;
-
-        // ── 从策略净值曲线计算日收益序列 ─────────────────────────────
-        List<Double> dailyReturns = new ArrayList<>();
-        List<Map<String, Object>> curve = result.equityCurve();
-        for (int i = 1; i < curve.size(); i++) {
-            double prev = ((Number) curve.get(i - 1).get("value")).doubleValue();
-            double curr = ((Number) curve.get(i).get("value")).doubleValue();
-            if (prev > 0) dailyReturns.add(curr / prev - 1);
-        }
-
-        double meanRet = dailyReturns.stream().mapToDouble(Double::doubleValue).average().orElse(0);
-        double variance = dailyReturns.stream().mapToDouble(r -> (r - meanRet) * (r - meanRet)).average().orElse(0);
-        double volatility = Math.sqrt(variance) * Math.sqrt(252);
-
-        double riskFreeRate = 0.03;
-        double sharpeRatio = volatility > 0 ? (annualReturn - riskFreeRate) / volatility : 0;
-        // 限制异常值（理论上夏普比率不太可能超过 100）
-        sharpeRatio = Math.max(-100, Math.min(100, sharpeRatio));
-
-        // Sortino（只考虑下行波动）
-        double downside = Math.sqrt(dailyReturns.stream()
-                .mapToDouble(r -> r < 0 ? r * r : 0)
-                .average().orElse(0)) * Math.sqrt(252);
-        double sortinoRatio = downside > 0 ? (annualReturn - riskFreeRate) / downside : 0;
-        sortinoRatio = Math.max(-100, Math.min(100, sortinoRatio));
-
-        double calmarRatio = result.maxDrawdown() > 0 ? annualReturn / result.maxDrawdown() : 0;
-        calmarRatio = Math.max(-100, Math.min(100, calmarRatio));
-
-        // ── 基准相关指标（Alpha、Beta、Tracking Error、Information Ratio）────────────────────
-        double informationRatio = 0.0, alpha = 0.0, beta = 0.0, trackingError = 0.0;
-        List<Map<String, Object>> bmCurve = result.benchmarkCurve();
-        List<Double> stratRets = new ArrayList<>();
-        List<Double> bmRets = new ArrayList<>();
-
-        // 超额收益序列（在 if 外定义，供后续 Alpha 分析使用）
-        List<Double> excessReturns = new ArrayList<>();
-
-        if (!bmCurve.isEmpty()) {
-            // 建立基准日期→净值 map
-            Map<String, Double> bmMap = new HashMap<>();
-            for (Map<String, Object> bm : bmCurve) {
-                bmMap.put((String) bm.get("date"), ((Number) bm.get("value")).doubleValue());
-            }
-            for (int i = 1; i < curve.size(); i++) {
-                String date = (String) curve.get(i).get("date");
-                String prevDate = (String) curve.get(i - 1).get("date");
-                Double bmCurr = bmMap.get(date);
-                Double bmPrev = bmMap.get(prevDate);
-                if (bmCurr != null && bmPrev != null && bmPrev > 0) {
-                    double stratRet = ((Number) curve.get(i).get("value")).doubleValue()
-                            / ((Number) curve.get(i - 1).get("value")).doubleValue() - 1;
-                    double bmRet = bmCurr / bmPrev - 1;
-                    stratRets.add(stratRet);
-                    bmRets.add(bmRet);
-                    excessReturns.add(stratRet - bmRet);
-                }
-            }
-
-            int n = excessReturns.size();
-            if (n > 1) {
-                // 信息比率
-                double exMean = excessReturns.stream().mapToDouble(Double::doubleValue).average().orElse(0);
-                double exVar = excessReturns.stream().mapToDouble(r -> (r - exMean) * (r - exMean)).average().orElse(0);
-                double exStd = Math.sqrt(exVar) * Math.sqrt(252);
-                informationRatio = exStd > 0 ? (exMean * 252) / exStd : 0;
-                trackingError = exStd;  // 年化跟踪误差
-
-                // Beta 和 Alpha（CAPM）
-                double stratMean = stratRets.stream().mapToDouble(Double::doubleValue).average().orElse(0);
-                double bmMean = bmRets.stream().mapToDouble(Double::doubleValue).average().orElse(0);
-
-                double cov = 0, bmVar = 0;
-                for (int i = 0; i < n; i++) {
-                    cov += (stratRets.get(i) - stratMean) * (bmRets.get(i) - bmMean);
-                    bmVar += (bmRets.get(i) - bmMean) * (bmRets.get(i) - bmMean);
-                }
-                cov /= n;
-                bmVar /= n;
-
-                beta = bmVar > 0 ? cov / bmVar : 1.0;
-                // Alpha = 策略平均收益 - Beta * 基准平均收益（日频，年化）
-                alpha = (stratMean - beta * bmMean) * 252;
-            }
-        }
-
-        // ── 胜率 & 盈亏比（从配对交易统计）─────────────────────────
-        double winRate = 0.5, avgWin = 0.01, avgLoss = -0.008, plRatio = 1.25;
-        List<Map<String, Object>> allTrades = result.tradeLog();
-        Map<String, Double> buyPrices = new HashMap<>();
-        List<Double> tradeRets = new ArrayList<>();
-        for (Map<String, Object> t : allTrades) {
-            String sym = (String) t.get("symbol");
-            String action = (String) t.get("action");
-            double price = ((Number) t.get("price")).doubleValue();
-            if ("BUY".equals(action)) {
-                buyPrices.put(sym, price);
-            } else if ("SELL".equals(action) && buyPrices.containsKey(sym)) {
-                double bp = buyPrices.remove(sym);
-                if (bp > 0) tradeRets.add((price - bp) / bp);
-            }
-        }
-        if (!tradeRets.isEmpty()) {
-            long wins = tradeRets.stream().filter(r -> r > 0).count();
-            long loses = tradeRets.stream().filter(r -> r < 0).count();
-            winRate = (double) wins / tradeRets.size();
-            avgWin = tradeRets.stream().filter(r -> r > 0).mapToDouble(Double::doubleValue).average().orElse(0.01);
-            avgLoss = tradeRets.stream().filter(r -> r < 0).mapToDouble(Double::doubleValue).average().orElse(-0.008);
-            plRatio = loses > 0 && avgLoss != 0 ? Math.abs(avgWin / avgLoss) : 1.25;
-        }
-
-        // ── 已实现收益曲线（按交易配对，逐日累计）────────────────────────────
-        // BUY 时记录成本；SELL/STOP_LOSS_SELL 时计算已实现PnL并按日期汇总
-        List<Map<String, Object>> realizedCurve = new ArrayList<>();
-        {
-            double initialCapitalLocal = result.initialCapital();
-            Map<String, Double> buyCostMap = new HashMap<>();   // symbol -> 买入成本（含手续费）
-            Map<String, Double> buySharesMap = new HashMap<>();  // symbol -> 持有股数
-            Map<String, Double> dailyRealizedPnl = new TreeMap<>();  // date -> 当日新增已实现PnL
-            for (Map<String, Object> t : allTrades) {
-                String sym = (String) t.get("symbol");
-                String action = (String) t.get("action");
-                double tTotal = t.get("total") != null ? ((Number) t.get("total")).doubleValue() : 0;
-                double tFee = t.get("fee") != null ? ((Number) t.get("fee")).doubleValue() : 0;
-                String tDate = (String) t.get("date");
-                if ("BUY".equals(action)) {
-                    // 买入成本 = 金额 + 手续费
-                    buyCostMap.merge(sym, tTotal + tFee, Double::sum);
-                    double shares = t.get("amount") != null ? ((Number) t.get("amount")).doubleValue() : 0;
-                    buySharesMap.merge(sym, shares, Double::sum);
-                } else if (("SELL".equals(action) || "STOP_LOSS_SELL".equals(action))
-                        && buyCostMap.containsKey(sym)) {
-                    // 已实现 = 卖出金额(扣费后) - 对应成本
-                    double proceeds = tTotal - tFee;
-                    double cost = buyCostMap.remove(sym);
-                    buySharesMap.remove(sym);
-                    double pnl = proceeds - cost;
-                    dailyRealizedPnl.merge(tDate, pnl, Double::sum);
-                }
-            }
-            // 对 equityCurve 的每个日期，前向填充已实现PnL累计值 → 净值
-            double cumPnl = 0;
-            for (Map<String, Object> ep : result.equityCurve()) {
-                String d = (String) ep.get("date");
-                if (dailyRealizedPnl.containsKey(d)) {
-                    cumPnl += dailyRealizedPnl.get(d);
-                }
-                Map<String, Object> rp = new HashMap<>();
-                rp.put("date", d);
-                // 已实现净值 = 1 + 累计已实现PnL / 初始资金
-                rp.put("value", round(1.0 + cumPnl / initialCapitalLocal, 6));
-                realizedCurve.add(rp);
-            }
-        }
-
-        // ── 超额收益分析（参考 baostock 用户案例的 Alpha 分析表）────────────────
-        double excessMean = 0, excessStd = 0, excessWinRate = 0.5, excessMaxDrawdown = 0, alphaContribution = 0;
-        if (!excessReturns.isEmpty()) {
-            // 超额收益均值（年化）
-            excessMean = excessReturns.stream().mapToDouble(Double::doubleValue).average().orElse(0) * 252;
-            // 超额收益标准差（年化）
-            double exVar2 = excessReturns.stream().mapToDouble(r -> r * r).average().orElse(0)
-                    - Math.pow(excessReturns.stream().mapToDouble(Double::doubleValue).average().orElse(0), 2);
-            excessStd = Math.sqrt(Math.max(exVar2, 0)) * Math.sqrt(252);
-            // 超额胜率：跑赢大盘的天数占比
-            long exWins = excessReturns.stream().filter(r -> r > 0).count();
-            excessWinRate = (double) exWins / excessReturns.size();
-            // 超额收益最大回撤（复利累计超额曲线，避免算术累加放大偏差）
-            double cumExcess = 1.0, peakExcess = 1.0;
-            for (double er : excessReturns) {
-                cumExcess *= (1 + er);
-                if (cumExcess > peakExcess) peakExcess = cumExcess;
-                double dd = 1 - cumExcess / peakExcess;
-                if (dd > excessMaxDrawdown) excessMaxDrawdown = dd;
-            }
-            // Alpha贡献占比 = |alpha| / (|alpha| + |beta * benchmark_return|)
-            // 这样与市场贡献之和为100%，避免CAPM残差导致>100%无意义值
-            double absAlpha = Math.abs(alpha);
-            double absMarket = Math.abs(beta * benchmarkAnnualReturn);
-            double denom = absAlpha + absMarket;
-            alphaContribution = denom > 1e-10 ? absAlpha / denom : 0;
-        }
-
-        return BacktestReport.builder()
-                .taskId(task.getId())
-                .strategyCode(task.getStrategyCode())
-                .totalReturn(bd(totalReturn))
-                .annualReturn(bd(annualReturn))
-                .benchmarkReturn(bd(benchmarkTotalReturn))
-                .benchmarkAnnualReturn(bd(benchmarkAnnualReturn))
-                .excessReturn(bd(excessAnnualReturn))
-                .volatility(bd(volatility))
-                .sharpeRatio(bd(sharpeRatio))
-                .sortinoRatio(bd(sortinoRatio))
-                .calmarRatio(bd(calmarRatio))
-                .maxDrawdown(bd(result.maxDrawdown()))
-                .maxDrawdownDuration(result.maxDrawdownDuration())
-                .informationRatio(bd(informationRatio))
-                .alpha(bd(alpha))
-                .beta(bd(beta))
-                .trackingError(bd(trackingError))
-                .downsideRisk(bd(downside))
-                .totalTrades(result.totalTrades())
-                .winRate(bd(winRate))
-                .avgWinReturn(bd(avgWin))
-                .avgLossReturn(bd(avgLoss))
-                .profitLossRatio(bd(plRatio))
-                .excessMean(bd(excessMean))
-                .excessStd(bd(excessStd))
-                .excessWinRate(bd(excessWinRate))
-                .excessMaxDrawdown(bd(excessMaxDrawdown))
-                .alphaContribution(bd(alphaContribution))
-                .equityCurveJson(objectMapper.writeValueAsString(result.equityCurve()))
-                .benchmarkCurveJson(objectMapper.writeValueAsString(result.benchmarkCurve()))
-                .drawdownSeriesJson(objectMapper.writeValueAsString(result.equityCurve().stream()
-                        .map(p -> Map.of("date", p.get("date"), "drawdown", p.get("drawdown")))
-                        .collect(Collectors.toList())))
-                .monthlyReturnsJson(objectMapper.writeValueAsString(result.monthlyReturns()))
-                .positionHistoryJson(objectMapper.writeValueAsString(result.positionHistory()))
-                .tradeLogJson(objectMapper.writeValueAsString(result.tradeLog().stream()
-                        .limit(500)
-                        .collect(Collectors.toList())))
-                .realizedCurveJson(objectMapper.writeValueAsString(realizedCurve))
-                .build();
+        return backtestReportBuilder.buildReport(task, result);
     }
 
     private void sendProgress(Long taskId, String stage, int pct, String message) {
-        try {
-            if (messagingTemplate != null) {
-                messagingTemplate.convertAndSend("/topic/backtest/" + taskId,
-                        Map.of("taskId", taskId, "stage", stage, "progress", pct, "message", message));
-            }
-        } catch (Exception ignored) {
-        }
+        progressNotifier.sendProgress(taskId, stage, pct, message);
     }
 
     /**
      * 回测进行中：携带当天净值数据点（用于前端实时绘图）
      * 消息格式：{ taskId, stage:"RUNNING", progress, date, stratValue, bmValue }
+     * <p>实现已迁移至 {@link BacktestProgressNotifier#sendProgressWithCurve}。</p>
      */
     private void sendProgressWithCurve(Long taskId, int pct, String date,
                                        double stratValue, double bmValue) {
-        try {
-            if (messagingTemplate != null) {
-                Map<String, Object> msg = new HashMap<>();
-                msg.put("taskId", taskId);
-                msg.put("stage", JobStatus.RUNNING.name());
-                msg.put("progress", pct);
-                msg.put("message", "回测进行中 " + date);
-                msg.put("date", date);
-                msg.put("stratValue", stratValue);
-                msg.put("bmValue", bmValue);
-                messagingTemplate.convertAndSend("/topic/backtest/" + taskId, msg);
-            }
-        } catch (Exception ignored) {
-        }
-    }
-
-    private BigDecimal bd(double v) {
-        if (Double.isNaN(v) || Double.isInfinite(v)) return BigDecimal.ZERO;
-        return BigDecimal.valueOf(v).setScale(6, RoundingMode.HALF_UP);
+        progressNotifier.sendProgressWithCurve(taskId, pct, date, stratValue, bmValue);
     }
 
     /** 委托 {@link BacktestUtils#round}，保持全局舍入语义单一来源。 */
@@ -2205,26 +1845,7 @@ public class BacktestEngine {
      * 如果 stock_info 中无退市日期数据，则返回空 map（不影响现有逻辑）。
      */
     private Map<String, LocalDate> loadDelistDateMap() {
-        if (stockInfoMapper == null) {
-            return Map.of();
-        }
-        try {
-            List<StockInfo> list = stockInfoMapper.selectList(
-                    new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<StockInfo>()
-                            .isNotNull("delist_date")
-                            .gt("delist_date", "1900-01-01")
-            );
-            Map<String, LocalDate> map = new HashMap<>();
-            for (StockInfo info : list) {
-                if (info.getCode() != null && info.getDelistDate() != null) {
-                    map.put(info.getCode(), info.getDelistDate());
-                }
-            }
-            return map;
-        } catch (Exception e) {
-            log.warn("加载退市日期映射失败: {}", e.getMessage());
-            return Map.of();
-        }
+        return backtestDataLoader.loadDelistDateMap();
     }
 
     record FactorWeight(String factorCode, double weight) {
