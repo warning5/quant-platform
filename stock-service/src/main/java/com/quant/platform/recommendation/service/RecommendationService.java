@@ -238,6 +238,8 @@ public class RecommendationService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private MarketRegimeCalendarService regimeCalendarService;
 
+    private final RecommendationQueryService queryService;
+
     @PostConstruct
     public void initRegimeCalendar() {
         if (regimeCalendarService != null) {
@@ -269,7 +271,8 @@ public class RecommendationService {
                                  com.quant.platform.factor.ic.mapper.FactorIcRecordMapper factorIcRecordMapper,
                                  com.quant.platform.factor.service.FactorMetaCacheService factorMetaCache,
                                  com.quant.platform.factor.mapper.FactorDefinitionMapper factorDefinitionMapper,
-                                 com.quant.platform.factor.dynamic.DynamicIndustryCorrelationService dynamicIndustryCorrService) {
+                                 com.quant.platform.factor.dynamic.DynamicIndustryCorrelationService dynamicIndustryCorrService,
+                                 RecommendationQueryService queryService) {
         this.stockScreenService = stockScreenService;
         this.analysisService = analysisService;
         this.marketDataService = marketDataService;
@@ -294,56 +297,7 @@ public class RecommendationService {
         this.factorMetaCache = factorMetaCache;
         this.factorDefinitionMapper = factorDefinitionMapper;
         this.dynamicIndustryCorrService = dynamicIndustryCorrService;
-    }
-
-    /**
-     * 去掉股票代码后缀: "600027.SH" → "600027"
-     */
-    private static String stripSuffix(String code) {
-        if (code == null) return null;
-        int dot = code.indexOf('.');
-        return dot > 0 ? code.substring(0, dot) : code;
-    }
-
-    /**
-     * 将 TradingSignalEngine 的 5 值 action 映射为前端 3 值 actionTag
-     * STRONG_BUY→BUY, BUY→BUY, HOLD→HOLD, REDUCE→HOLD, CLEAR→SELL
-     */
-    private static String mapActionTag(String action) {
-        if (action == null) return null;
-        return switch (action) {
-            case "STRONG_BUY" -> "BUY";
-            case "BUY" -> "BUY";
-            case "HOLD" -> "HOLD";
-            case "REDUCE" -> "HOLD";  // 减仓但仍在持有，前端归为 HOLD
-            case "CLEAR" -> "SELL";   // 清仓映射为卖出
-            default -> "HOLD";        // 未知归为持有
-        };
-    }
-
-    private static double safeDiv(Integer numerator, double denominator) {
-        if (numerator == null || denominator == 0) return 0.0;
-        return Math.min(1.0, numerator / denominator);
-    }
-
-    private static long toLong(Object obj) {
-        if (obj == null) return 0;
-        if (obj instanceof Number) return ((Number) obj).longValue();
-        try {
-            return Long.parseLong(obj.toString());
-        } catch (Exception e) {
-            return 0;
-        }
-    }
-
-    /**
-     * 计算数组标准差
-     */
-    private static double std(double[] values) {
-        if (values.length == 0) return 0;
-        double mean = Arrays.stream(values).average().orElse(0);
-        double variance = Arrays.stream(values).map(x -> (x - mean) * (x - mean)).average().orElse(0);
-        return Math.sqrt(variance);
+        this.queryService = queryService;
     }
 
     /**
@@ -482,7 +436,7 @@ public class RecommendationService {
         List<String> conceptNames = getConceptNames(strategyId);
         if (!includeIndustries.isEmpty() || !conceptNames.isEmpty()) {
             List<String> candidateCodes = candidates.stream()
-                    .map(s -> stripSuffix(s.getSymbol()))
+                    .map(s -> RecommendationMath.stripSuffix(s.getSymbol()))
                     .collect(Collectors.toList());
             List<StockInfo> infos = stockInfoMapper.selectList(
                     new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<StockInfo>()
@@ -508,7 +462,7 @@ public class RecommendationService {
             int before = candidates.size();
             candidates = candidates.stream()
                     .filter(s -> {
-                        String pureCode = stripSuffix(s.getSymbol());
+                        String pureCode = RecommendationMath.stripSuffix(s.getSymbol());
                         StockInfo info = codeInfoMap.get(pureCode);
                         String ind = info != null && info.getIndustry() != null ? info.getIndustry() : "";
 
@@ -538,7 +492,7 @@ public class RecommendationService {
         if (!excludeIndustries.isEmpty()) {
             Set<String> excludeSet = new HashSet<>(excludeIndustries);
             List<String> candidateCodes = candidates.stream()
-                    .map(s -> stripSuffix(s.getSymbol()))
+                    .map(s -> RecommendationMath.stripSuffix(s.getSymbol()))
                     .collect(Collectors.toList());
             List<StockInfo> infos = stockInfoMapper.selectList(
                     new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<StockInfo>()
@@ -553,7 +507,7 @@ public class RecommendationService {
             int before = candidates.size();
             candidates = candidates.stream()
                     .filter(s -> {
-                        String pureCode = stripSuffix(s.getSymbol());
+                        String pureCode = RecommendationMath.stripSuffix(s.getSymbol());
                         StockInfo info = codeInfoMap.get(pureCode);
                         String ind = info != null && info.getIndustry() != null ? info.getIndustry() : "";
                         String name = info != null && info.getName() != null ? info.getName() : s.getName();
@@ -584,7 +538,7 @@ public class RecommendationService {
             List<String> keptSamples = candidates.stream()
                     .limit(10)
                     .map(s -> {
-                        StockInfo info = codeInfoMap.get(stripSuffix(s.getSymbol()));
+                        StockInfo info = codeInfoMap.get(RecommendationMath.stripSuffix(s.getSymbol()));
                         String ind = info != null && info.getIndustry() != null ? info.getIndustry() : "无行业";
                         String name = info != null && info.getName() != null ? info.getName() : s.getName();
                         return name + "(" + ind + ")";
@@ -609,13 +563,13 @@ public class RecommendationService {
                 // 构建纯代码集合（去除.SZ/.SH/.BJ后缀），兼容历史数据
                 Set<String> pureBlacklistCodes = new HashSet<>();
                 for (String code : blacklistCodes) {
-                    pureBlacklistCodes.add(stripSuffix(code));
+                    pureBlacklistCodes.add(RecommendationMath.stripSuffix(code));
                 }
                 int beforeBl = candidates.size();
                 List<String> filteredStocks = new ArrayList<>();
                 candidates = candidates.stream()
                         .filter(s -> {
-                            String pureCode = stripSuffix(s.getSymbol());
+                            String pureCode = RecommendationMath.stripSuffix(s.getSymbol());
                             if (pureBlacklistCodes.contains(pureCode)) {
                                 filteredStocks.add(s.getName() + "(" + pureCode + ")");
                                 return false;
@@ -695,7 +649,7 @@ public class RecommendationService {
         List<java.util.concurrent.CompletableFuture<StockRecommendation>> futures = new ArrayList<>();
         for (int i = 0; i < analysisCount; i++) {
             ScreenResult.StockScore stock = candidates.get(i);
-            String industry = codeToIndustry.getOrDefault(stripSuffix(stock.getSymbol()), "UNKNOWN");
+            String industry = codeToIndustry.getOrDefault(RecommendationMath.stripSuffix(stock.getSymbol()), "UNKNOWN");
             IndustryMomentum im = industryMomentumMap.get(industry);
             final int idx = i;
 
@@ -813,20 +767,14 @@ public class RecommendationService {
      * 获取最新推荐列表
      */
     public List<StockRecommendation> getLatestRecommendations() {
-        StockRecommendation latest = recommendationMapper.findLatest();
-        if (latest == null) {
-            return List.of();
-        }
-        List<StockRecommendation> recs = recommendationMapper.findByStrategyAndDate(
-                latest.getStrategyId(), latest.getRecommendDate());
-        return enrichFromStockInfo(recs);
+        return queryService.getLatestRecommendations();
     }
 
     /**
      * 获取指定策略+日期的推荐列表（不过滤模式，合并所有模式快照）
      */
     public List<StockRecommendation> getRecommendationsByStrategyAndDate(Long strategyId, LocalDate recommendDate) {
-        return enrichFromStockInfo(recommendationMapper.findByStrategyAndDate(strategyId, recommendDate));
+        return queryService.getRecommendationsByStrategyAndDate(strategyId, recommendDate);
     }
 
     /**
@@ -834,10 +782,7 @@ public class RecommendationService {
      * @param weightMode 权重模式，null/空/ALL=不过滤
      */
     public List<StockRecommendation> getRecommendationsByStrategyAndDate(Long strategyId, LocalDate recommendDate, String weightMode) {
-        if (weightMode == null || weightMode.isEmpty() || "ALL".equalsIgnoreCase(weightMode)) {
-            return getRecommendationsByStrategyAndDate(strategyId, recommendDate);
-        }
-        return enrichFromStockInfo(recommendationMapper.findByStrategyAndDateAndMode(strategyId, recommendDate, weightMode));
+        return queryService.getRecommendationsByStrategyAndDate(strategyId, recommendDate, weightMode);
     }
 
     /**
@@ -847,53 +792,7 @@ public class RecommendationService {
      * 旧批次读出来后需要同样处理才能保证前端展示正确。
      */
     private List<StockRecommendation> enrichFromStockInfo(List<StockRecommendation> recs) {
-        if (recs == null || recs.isEmpty()) return recs;
-        fillIndustryAndMarketCap(recs);
-        for (StockRecommendation rec : recs) {
-            // 修复旧数据的 actionTag（5值→3值）
-            if (rec.getActionTag() != null) {
-                rec.setActionTag(mapActionTag(rec.getActionTag()));
-            }
-            // 修复旧数据的 buyReason: 替换 [null(code)] → [name(code)]
-            if (rec.getBuyReason() != null && rec.getBuyReason().contains("null(")) {
-                String name = rec.getStockName() != null ? rec.getStockName() : rec.getStockCode();
-                rec.setBuyReason(rec.getBuyReason().replace("null", name));
-            }
-            // 修复旧数据的 eventScore: 旧代码维度名写错未捕获 → 回算
-            // 分析总分 = technical + capital + event + fundamental，反推即可
-            if (rec.getEventScore() == null
-                    && rec.getTechnicalScore() != null
-                    && rec.getCapitalScore() != null
-                    && rec.getFundamentalScore() != null
-                    && rec.getAnalysisScore() != null) {
-                int eventScore = rec.getAnalysisScore()
-                        - rec.getTechnicalScore()
-                        - rec.getCapitalScore()
-                        - rec.getFundamentalScore();
-                rec.setEventScore(Math.max(0, eventScore));
-            }
-            // 修复旧数据的因子权重: 旧批次 Phase 2 动态权重未实现 → 根据 regime 回填
-            if (rec.getFactorWeight() == null && rec.getRegime() != null) {
-                double wFactor, wAnalysis;
-                switch (rec.getRegime()) {
-                    case "BULL" -> {
-                        wFactor = 0.6;
-                        wAnalysis = 0.4;
-                    }
-                    case "BEAR" -> {
-                        wFactor = 0.4;
-                        wAnalysis = 0.6;
-                    }
-                    default -> {
-                        wFactor = 0.5;
-                        wAnalysis = 0.5;
-                    }
-                }
-                rec.setFactorWeight(wFactor);
-                rec.setAnalysisWeight(wAnalysis);
-            }
-        }
-        return recs;
+        return queryService.enrichFromStockInfo(recs);
     }
 
     // ── 私有方法 ──
@@ -1038,78 +937,35 @@ public class RecommendationService {
      * @return { total, positive, hitRate, avgReturn }
      */
     public Map<String, Object> getHitRate(Long strategyId, LocalDate recommendDate) {
-        List<StockRecommendation> recs = recommendationMapper.findByStrategyAndDate(strategyId, recommendDate);
-        Map<String, Object> stats = new HashMap<>();
-        stats.put("strategyId", strategyId);
-        stats.put("recommendDate", recommendDate.toString());
-        stats.put("total", recs.size());
-
-        if (recs.isEmpty()) return stats;
-
-        // 用 nextDayReturn 计算命中率（至少有次日数据的）
-        long positive = 0;
-        long tracked = 0;
-        double sumReturn = 0;
-
-        for (StockRecommendation rec : recs) {
-            if (rec.getNextDayReturn() != null) {
-                tracked++;
-                if (rec.getNextDayReturn() > 0) positive++;
-                sumReturn += rec.getNextDayReturn();
-            }
-        }
-
-        stats.put("tracked", tracked);
-        stats.put("positive", positive);
-        stats.put("hitRate", tracked > 0 ? (double) positive / tracked : 0);
-        stats.put("avgReturn", tracked > 0 ? sumReturn / tracked : 0);
-
-        return stats;
+        return queryService.getHitRate(strategyId, recommendDate);
     }
 
     /**
      * 获取指定策略+日期的所有模式列表
      */
     public List<String> getModesByStrategyAndDate(Long strategyId, LocalDate recommendDate) {
-        return recommendationMapper.findModesByStrategyAndDate(strategyId, recommendDate);
+        return queryService.getModesByStrategyAndDate(strategyId, recommendDate);
     }
 
     /**
      * 获取最近的策略+日期组合列表（含权重模式）
      */
     public List<Map<String, Object>> getStrategyDateCombos(int limit) {
-        return recommendationMapper.findRecentStrategyDateModes(limit);
+        return queryService.getStrategyDateCombos(limit);
     }
 
     /**
      * 获取指定策略在最近 days 天内有推荐数据的日期列表（倒序）
      */
     public List<String> getDatesByStrategy(Long strategyId, int days) {
-        List<java.time.LocalDate> dates = recommendationMapper.findDatesByStrategyId(strategyId, days);
-        List<String> result = new java.util.ArrayList<>(dates.size());
-        for (java.time.LocalDate d : dates) {
-            // 只保留最近 days 天内的日期
-            if (!d.isBefore(java.time.LocalDate.now().minusDays(days))) {
-                result.add(d.toString());
-            }
-        }
-        return result;
+        return queryService.getDatesByStrategy(strategyId, days);
     }
 
     /**
      * 获取所有有推荐记录的策略列表（id + name）
      */
     public List<Map<String, Object>> strategiesWithData() {
-        List<Long> ids = recommendationMapper.findDistinctStrategyIds();
-        List<Map<String, Object>> result = new java.util.ArrayList<>(ids.size());
-        for (Long sid : ids) {
-            StrategyDefinition s = strategyDefinitionMapper.selectById(sid);
-            Map<String, Object> m = new java.util.LinkedHashMap<>();
-            m.put("id", sid);
-            m.put("strategyName", s != null ? s.getStrategyName() : "策略" + sid);
-            result.add(m);
-        }
-        return result;
+        return queryService.strategiesWithData();
     }
 
     /**
@@ -1121,105 +977,7 @@ public class RecommendationService {
      * @return [{ strategyId, recommendDate, total, hitRate, avgDayReturn, avgWeekReturn, avgMonthReturn, qualityTag, tracked }]
      */
     public List<Map<String, Object>> getBatchHistory(int limit, Long strategyId) {
-        List<Map<String, Object>> rawCombos;
-        if (strategyId != null) {
-            // 按策略筛选：获取该策略的日期列表
-            List<LocalDate> dates = recommendationMapper.findDatesByStrategyId(strategyId, limit);
-            rawCombos = new ArrayList<>();
-            for (LocalDate d : dates) {
-                Map<String, Object> m = new HashMap<>();
-                m.put("strategy_id", strategyId);
-                m.put("recommend_date", java.sql.Date.valueOf(d));
-                rawCombos.add(m);
-            }
-        } else {
-            rawCombos = recommendationMapper.findRecentStrategyDates(limit);
-        }
-
-        // 先收集所有组合的 hitRate，用于滚动5期均值计算
-        List<Double> hitRates = new ArrayList<>();
-        List<Long> trackedCounts = new ArrayList<>();
-        List<Map<String, Object>> rawEntries = new ArrayList<>();
-
-        for (Map<String, Object> combo : rawCombos) {
-            Object sidObj = combo.get("strategy_id");
-            if (sidObj == null) {
-                continue;
-            }
-            Long sid = ((Number) sidObj).longValue();
-            java.sql.Date sqlDate = (java.sql.Date) combo.get("recommend_date");
-            if (sqlDate == null) {
-                continue;
-            }
-            LocalDate recDate = sqlDate.toLocalDate();
-
-            Map<String, Object> stats = getHitRate(sid, recDate);
-            Map<String, Object> entry = new LinkedHashMap<>();
-            entry.put("strategyId", sid);
-            entry.put("recommendDate", recDate.toString());
-            entry.put("total", stats.get("total"));
-            entry.put("tracked", stats.get("tracked"));
-
-            Double hitRate = (Double) stats.get("hitRate");
-            Double avgDayReturn = (Double) stats.get("avgReturn");
-            entry.put("hitRate", hitRate);
-            entry.put("avgDayReturn", avgDayReturn);
-
-            // 计算一周/一月平均收益
-            List<StockRecommendation> recs = recommendationMapper.findByStrategyAndDate(sid, recDate);
-            double sumWeek = 0, sumMonth = 0;
-            long weekTracked = 0, monthTracked = 0;
-            for (StockRecommendation rec : recs) {
-                if (rec.getNextWeekReturn() != null) {
-                    sumWeek += rec.getNextWeekReturn();
-                    weekTracked++;
-                }
-                if (rec.getNextMonthReturn() != null) {
-                    sumMonth += rec.getNextMonthReturn();
-                    monthTracked++;
-                }
-            }
-            entry.put("avgWeekReturn", weekTracked > 0 ? sumWeek / weekTracked : null);
-            entry.put("avgMonthReturn", monthTracked > 0 ? sumMonth / monthTracked : null);
-
-            hitRates.add(hitRate);
-            trackedCounts.add((Long) stats.get("tracked"));
-            rawEntries.add(entry);
-        }
-
-        // 质量标签: 基于近5期滚动平均命中率判定
-        // rawEntries 按日期 DESC 排序（最新在前）
-        for (int i = 0; i < rawEntries.size(); i++) {
-            Map<String, Object> entry = rawEntries.get(i);
-            // 计算当前及之后4期（共5期）滚动均值
-            double rollingSum = 0;
-            long rollingTracked = 0;
-            for (int j = i; j < rawEntries.size() && j <= i + 4; j++) {
-                if (trackedCounts.get(j) > 0) {
-                    rollingSum += hitRates.get(j) != null ? hitRates.get(j) : 0;
-                    rollingTracked++;
-                }
-            }
-            double rollingAvg = rollingTracked > 0 ? rollingSum / rollingTracked : 0;
-
-            String qualityTag;
-            if (rollingTracked == 0) {
-                qualityTag = "UNTRAINED";
-            } else if (rollingAvg >= 0.6) {
-                qualityTag = "HIGH_QUALITY";
-            } else if (rollingAvg >= 0.4) {
-                qualityTag = "NORMAL";
-            } else {
-                qualityTag = "LOW_QUALITY";
-            }
-            entry.put("qualityTag", qualityTag);
-            entry.put("rollingAvgHitRate", rollingTracked > 0 ? rollingAvg : null);
-        }
-
-        // 按日期 ASC 排序返回（图表从左到右时间递增）
-        List<Map<String, Object>> result = new ArrayList<>(rawEntries);
-        result.sort((a, b) -> ((String) a.get("recommendDate")).compareTo((String) b.get("recommendDate")));
-        return result;
+        return queryService.getBatchHistory(limit, strategyId);
     }
 
     /**
@@ -1230,153 +988,7 @@ public class RecommendationService {
      * @return { best3: [...], worst3: [...], analysis: { industryDiff, marketCapDiff, scoreDiff, failurePatterns } }
      */
     public Map<String, Object> getBatchTopBottom(Long strategyId, LocalDate recommendDate) {
-        List<StockRecommendation> recs = recommendationMapper.findByStrategyAndDate(strategyId, recommendDate);
-        Map<String, Object> result = new HashMap<>();
-
-        // 只取有次日收益的
-        List<StockRecommendation> tracked = recs.stream()
-                .filter(r -> r.getNextDayReturn() != null)
-                .toList();
-
-        // 最佳3只（次日收益最高）
-        List<StockRecommendation> best3 = tracked.stream()
-                .sorted(java.util.Comparator.comparingDouble(StockRecommendation::getNextDayReturn).reversed())
-                .limit(3)
-                .collect(java.util.stream.Collectors.toList());
-
-        // 最差3只（次日收益最低）
-        List<StockRecommendation> worst3 = tracked.stream()
-                .sorted(java.util.Comparator.comparingDouble(StockRecommendation::getNextDayReturn))
-                .limit(3)
-                .collect(java.util.stream.Collectors.toList());
-
-        result.put("best3", best3);
-        result.put("worst3", worst3);
-
-        // ── 深度归因分析 ──
-        Map<String, Object> analysis = new LinkedHashMap<>();
-
-        // 1) 行业分布对比
-        Map<String, Object> industryDiff = new LinkedHashMap<>();
-        Map<String, Long> bestIndustries = best3.stream()
-                .filter(r -> r.getIndustry() != null)
-                .collect(java.util.stream.Collectors.groupingBy(StockRecommendation::getIndustry, java.util.stream.Collectors.counting()));
-        Map<String, Long> worstIndustries = worst3.stream()
-                .filter(r -> r.getIndustry() != null)
-                .collect(java.util.stream.Collectors.groupingBy(StockRecommendation::getIndustry, java.util.stream.Collectors.counting()));
-        industryDiff.put("bestIndustries", bestIndustries);
-        industryDiff.put("worstIndustries", worstIndustries);
-        // 找出仅在 worst 中出现的行业（可能为弱势行业）
-        Set<String> worstOnlyIndustries = new java.util.LinkedHashSet<>(worstIndustries.keySet());
-        worstOnlyIndustries.removeAll(bestIndustries.keySet());
-        industryDiff.put("worstOnlyIndustries", worstOnlyIndustries);
-        analysis.put("industryDiff", industryDiff);
-
-        // 2) 市值中位数对比
-        Map<String, Object> marketCapDiff = new LinkedHashMap<>();
-        Double bestMedianCap = median(best3.stream()
-                .map(StockRecommendation::getMarketCap)
-                .filter(Objects::nonNull)
-                .collect(java.util.stream.Collectors.toList()));
-        Double worstMedianCap = median(worst3.stream()
-                .map(StockRecommendation::getMarketCap)
-                .filter(Objects::nonNull)
-                .collect(java.util.stream.Collectors.toList()));
-        marketCapDiff.put("bestMedianCap", bestMedianCap);
-        marketCapDiff.put("worstMedianCap", worstMedianCap);
-        marketCapDiff.put("hint", bestMedianCap != null && worstMedianCap != null
-                ? (bestMedianCap > worstMedianCap ? "大盘股表现优于小盘股" : "小盘股表现优于大盘股")
-                : null);
-        analysis.put("marketCapDiff", marketCapDiff);
-
-        // 3) 因子得分 vs 分析得分对比
-        Map<String, Object> scoreDiff = new LinkedHashMap<>();
-        double bestAvgFactor = best3.stream()
-                .filter(r -> r.getFactorScore() != null)
-                .mapToDouble(StockRecommendation::getFactorScore).average().orElse(0);
-        double worstAvgFactor = worst3.stream()
-                .filter(r -> r.getFactorScore() != null)
-                .mapToDouble(StockRecommendation::getFactorScore).average().orElse(0);
-        double bestAvgAnalysis = best3.stream()
-                .filter(r -> r.getAnalysisScorePct() != null)
-                .mapToDouble(StockRecommendation::getAnalysisScorePct).average().orElse(0);
-        double worstAvgAnalysis = worst3.stream()
-                .filter(r -> r.getAnalysisScorePct() != null)
-                .mapToDouble(StockRecommendation::getAnalysisScorePct).average().orElse(0);
-        scoreDiff.put("bestAvgFactorScore", bestAvgFactor);
-        scoreDiff.put("worstAvgFactorScore", worstAvgFactor);
-        scoreDiff.put("bestAvgAnalysisPct", bestAvgAnalysis);
-        scoreDiff.put("worstAvgAnalysisPct", worstAvgAnalysis);
-        // 分析差距来源
-        double factorGap = bestAvgFactor - worstAvgFactor;
-        double analysisGap = bestAvgAnalysis - worstAvgAnalysis;
-        if (Math.abs(factorGap) > Math.abs(analysisGap)) {
-            scoreDiff.put("dominantGap", "FACTOR");
-            scoreDiff.put("hint", factorGap > 0
-                    ? "因子得分差距更大，因子筛选效果显著"
-                    : "因子得分差距更大，但方向反转，需检查因子有效性");
-        } else {
-            scoreDiff.put("dominantGap", "ANALYSIS");
-            scoreDiff.put("hint", analysisGap > 0
-                    ? "分析得分差距更大，深度分析筛选效果好"
-                    : "分析得分差距更大，但方向反转，需检查分析模型");
-        }
-        analysis.put("scoreDiff", scoreDiff);
-
-        // 4) 失败模式识别
-        List<String> failurePatterns = new java.util.ArrayList<>();
-        if (!worst3.isEmpty()) {
-            // 检查是否集中在弱势行业
-            long weakMomentumCount = worst3.stream()
-                    .filter(r -> r.getIndustryMomentum() != null && r.getIndustryMomentum() < -0.3)
-                    .count();
-            if (weakMomentumCount > 0) {
-                failurePatterns.add(String.format("弱势行业占比 %d/%d（行业动量 < -0.3），行业环境拖累明显", weakMomentumCount, worst3.size()));
-            }
-            // 检查是否风险评分偏高
-            double worstAvgRisk = worst3.stream()
-                    .filter(r -> r.getRiskScore() != null)
-                    .mapToInt(StockRecommendation::getRiskScore).average().orElse(0);
-            double bestAvgRisk = best3.stream()
-                    .filter(r -> r.getRiskScore() != null)
-                    .mapToInt(StockRecommendation::getRiskScore).average().orElse(0);
-            if (worstAvgRisk > bestAvgRisk + 2) {
-                failurePatterns.add(String.format("最差组平均风险评分 %.1f 显著高于最佳组 %.1f，风险控制不足", worstAvgRisk, bestAvgRisk));
-            }
-            // 检查是否流动性评分偏低
-            double worstAvgLiquidity = worst3.stream()
-                    .filter(r -> r.getLiquidityScore() != null)
-                    .mapToInt(StockRecommendation::getLiquidityScore).average().orElse(0);
-            double bestAvgLiquidity = best3.stream()
-                    .filter(r -> r.getLiquidityScore() != null)
-                    .mapToInt(StockRecommendation::getLiquidityScore).average().orElse(0);
-            if (worstAvgLiquidity < bestAvgLiquidity - 2) {
-                failurePatterns.add(String.format("最差组平均流动性评分 %.1f 低于最佳组 %.1f，流动性风险较高", worstAvgLiquidity, bestAvgLiquidity));
-            }
-            // 检查同行业集中度
-            if (worstIndustries.size() == 1 && worst3.size() >= 2) {
-                failurePatterns.add(String.format("最差组全部来自「%s」行业，行业集中风险极高", worstIndustries.keySet().iterator().next()));
-            }
-            if (failurePatterns.isEmpty()) {
-                failurePatterns.add("无明显共性失败模式，可能受个股特有事件或市场随机波动影响");
-            }
-        }
-        analysis.put("failurePatterns", failurePatterns);
-
-        result.put("analysis", analysis);
-        return result;
-    }
-
-    /**
-     * 计算中位数
-     */
-    private Double median(List<Double> values) {
-        if (values.isEmpty()) return null;
-        List<Double> sorted = new java.util.ArrayList<>(values);
-        java.util.Collections.sort(sorted);
-        int n = sorted.size();
-        if (n % 2 == 1) return sorted.get(n / 2);
-        return (sorted.get(n / 2 - 1) + sorted.get(n / 2)) / 2.0;
+        return queryService.getBatchTopBottom(strategyId, recommendDate);
     }
 
     /**
@@ -1409,8 +1021,8 @@ public class RecommendationService {
         MarketDailyBar latestBar = bars.getLast();
         info.indexClose = latestBar.getClose().doubleValue();
         info.indexChangePct = latestBar.getPctChg() != null ? latestBar.getPctChg().doubleValue() : null;
-        double ma20 = avg(closes, 20);
-        double ma60 = avg(closes, 60);
+        double ma20 = RecommendationMath.avg(closes, 20);
+        double ma60 = RecommendationMath.avg(closes, 60);
         info.indexMa20 = ma20;
         info.indexMa60 = ma60;
 
@@ -1447,9 +1059,9 @@ public class RecommendationService {
         try {
             Map<String, Object> overview = clickHouseStockService.getOverviewStats(date);
             if (overview != null) {
-                long riseCount = toLong(overview.get("riseCount"));
-                long fallCount = toLong(overview.get("fallCount"));
-                long totalCount = riseCount + fallCount + toLong(overview.get("flatCount"));
+                long riseCount = RecommendationMath.toLong(overview.get("riseCount"));
+                long fallCount = RecommendationMath.toLong(overview.get("fallCount"));
+                long totalCount = riseCount + fallCount + RecommendationMath.toLong(overview.get("flatCount"));
                 info.riseCount = riseCount;
                 info.fallCount = fallCount;
                 if (totalCount > 0) {
@@ -1697,14 +1309,14 @@ public class RecommendationService {
         factorPart = Math.max(0.0, Math.min(1.0, factorPart));
 
         // 分析得分各维度归一化后加权
-        double techPct = safeDiv(rec.getTechnicalScore(), 30.0);    // 技术面满分30
-        double moneyPct = safeDiv(rec.getCapitalScore(), 25.0);    // 资金面满分25
-        double eventPct = safeDiv(rec.getEventScore(), 25.0);      // 事件面满分25
-        double fundPct = safeDiv(rec.getFundamentalScore(), 29.0); // 基本面满分29
+        double techPct = RecommendationMath.safeDiv(rec.getTechnicalScore(), 30.0);    // 技术面满分30
+        double moneyPct = RecommendationMath.safeDiv(rec.getCapitalScore(), 25.0);    // 资金面满分25
+        double eventPct = RecommendationMath.safeDiv(rec.getEventScore(), 25.0);      // 事件面满分25
+        double fundPct = RecommendationMath.safeDiv(rec.getFundamentalScore(), 29.0); // 基本面满分29
 
         // P1-2: 风险和流动性评分归一化
-        double riskPct = safeDiv(rec.getRiskScore(), 15.0);       // 风险满分15
-        double liqPct = safeDiv(rec.getLiquidityScore(), 10.0);   // 流动性满分10
+        double riskPct = RecommendationMath.safeDiv(rec.getRiskScore(), 15.0);       // 风险满分15
+        double liqPct = RecommendationMath.safeDiv(rec.getLiquidityScore(), 10.0);   // 流动性满分10
 
         // Regime-Adaptive 总权重
         double wFactor, wAnalysis;
@@ -1778,30 +1390,7 @@ public class RecommendationService {
      * stockCode 格式: "600027.SH" → 去后缀查 stock_info.code = "600027"
      */
     private void fillIndustryAndMarketCap(List<StockRecommendation> recs) {
-        Set<String> pureCodes = recs.stream()
-                .map(r -> stripSuffix(r.getStockCode()))
-                .filter(Objects::nonNull)
-                .collect(Collectors.toSet());
-        if (pureCodes.isEmpty()) return;
-
-        // 批量查 stock_info（IN 查询，一次性）
-        List<StockInfo> infos = stockInfoMapper.selectList(
-                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<StockInfo>()
-                        .in(StockInfo::getCode, pureCodes));
-
-        Map<String, StockInfo> infoMap = infos.stream()
-                .collect(Collectors.toMap(StockInfo::getCode, i -> i, (a, b) -> a));
-
-        for (StockRecommendation rec : recs) {
-            String pureCode = stripSuffix(rec.getStockCode());
-            StockInfo info = pureCode != null ? infoMap.get(pureCode) : null;
-            if (info != null) {
-                rec.setIndustry(info.getIndustry());
-                if (info.getTotalMarketCap() != null) {
-                    rec.setMarketCap(info.getTotalMarketCap().doubleValue());
-                }
-            }
-        }
+        queryService.fillIndustryAndMarketCap(recs);
     }
 
     /**
@@ -2236,8 +1825,8 @@ public class RecommendationService {
 
             // ── 维度1: 趋势 ──
             double latestClose = closes.getLast();
-            double ma20 = avg(closes, 20);
-            double ma60 = avg(closes, 60);
+            double ma20 = RecommendationMath.avg(closes, 20);
+            double ma60 = RecommendationMath.avg(closes, 60);
             // 引入0.5%缓冲带，避免单日噪声导致Regime频繁切换
             double buffer = latestClose * 0.005;
             boolean bullishTrend = latestClose > ma20 + buffer && ma20 > ma60 + buffer;
@@ -2286,7 +1875,7 @@ public class RecommendationService {
      */
     private Map<String, String> buildCodeToIndustryMap(List<ScreenResult.StockScore> candidates) {
         Set<String> pureCodes = candidates.stream()
-                .map(s -> stripSuffix(s.getSymbol()))
+                .map(s -> RecommendationMath.stripSuffix(s.getSymbol()))
                 .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
         if (pureCodes.isEmpty()) return Map.of();
@@ -3149,7 +2738,7 @@ public class RecommendationService {
 
         // 个股深度分析：getOverview 内部用 selectStockInfo(code) 查 stock_info 取 name，
         // stock_info.code 是纯代码（无后缀），故必须去后缀传入
-        String pureCode = stripSuffix(stock.getSymbol());
+        String pureCode = RecommendationMath.stripSuffix(stock.getSymbol());
         AnalysisOverview overview = analysisService.getOverview(pureCode);
         if (overview != null) {
             // 回填 stock name（getOverview 内部可能查不到 name，用 stock 的 name 兜底）
@@ -3163,7 +2752,7 @@ public class RecommendationService {
             rec.setAnalysisScore(overview.getTotalScore());
             // actionTag 映射：TradingSignalEngine 输出 5 种 (STRONG_BUY/BUY/HOLD/REDUCE/CLEAR)
             // 前端只认 3 种 (BUY/HOLD/SELL)，需要做转换
-            rec.setActionTag(mapActionTag(overview.getAction()));
+            rec.setActionTag(RecommendationMath.mapActionTag(overview.getAction()));
             // buyReason: getOverview 内部 buildConclusion 已正确生成（含 name）
             rec.setBuyReason(overview.getConclusion());
 
@@ -3347,19 +2936,6 @@ public class RecommendationService {
     }
 
     /**
-     * 计算最近 N 天的均值
-     */
-    private double avg(List<Double> values, int n) {
-        int size = values.size();
-        if (size < n) return 0;
-        double sum = 0;
-        for (int i = size - n; i < size; i++) {
-            sum += values.get(i);
-        }
-        return sum / n;
-    }
-
-    /**
      * P2: 动态半衰期计算
      * 基于沪深300收益率波动率分位数，调用 FactorAnalysisService.adaptiveHalflife()
      */
@@ -3379,7 +2955,7 @@ public class RecommendationService {
                 double curr = hist.get(i).getClose().doubleValue();
                 returns[i - 1] = (prev > 0) ? (curr / prev - 1) : 0;
             }
-            double vol = std(returns);
+            double vol = RecommendationMath.std(returns);
             // 波动率分位数估算（假设市场波动率中值~12%，范围5%~25%）
             double volatilityPercentile = Math.max(0, Math.min(1, (vol - 0.05) / 0.20 + 0.375));
             int halflife = com.quant.platform.factor.service.FactorAnalysisService.adaptiveHalflife(volatilityPercentile);
