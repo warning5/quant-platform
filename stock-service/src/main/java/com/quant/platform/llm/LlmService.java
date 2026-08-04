@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
 import com.quant.platform.credential.service.CredentialService;
+import com.quant.platform.system.configcenter.ConfigService;
 
 import java.util.*;
 
@@ -44,13 +45,12 @@ public class LlmService {
     @Value("${llm.timeout-seconds:60}")
     private int timeoutSeconds;
 
-    @Value("${llm.enabled:false}")
-    private boolean enabled;
-
     private final CredentialService credentialService;
+    private final ConfigService configService;
 
-    public LlmService(CredentialService credentialService) {
+    public LlmService(CredentialService credentialService, ConfigService configService) {
         this.credentialService = credentialService;
+        this.configService = configService;
         this.objectMapper = new ObjectMapper();
     }
 
@@ -90,7 +90,7 @@ public class LlmService {
      */
     public String chat(String systemPrompt, String userPrompt, String model, boolean enableThinking) {
         String apiKey = resolveApiKey();
-        if (!enabled || apiKey == null || apiKey.isEmpty()) {
+        if (!isEnabled() || apiKey == null || apiKey.isEmpty()) {
             log.warn("[LlmService] LLM未启用或API Key未配置");
             return null;
         }
@@ -388,8 +388,10 @@ public class LlmService {
     }
 
     public boolean isEnabled() {
+        // 开关由参数配置中心(sys_config.llm.enabled)控制，默认关闭；开启还需配置 DEEPSEEK_API_KEY 凭证
+        boolean cfgEnabled = configService.getBoolean("llm.enabled", false);
         String key = resolveApiKey();
-        return enabled && key != null && !key.trim().isEmpty();
+        return cfgEnabled && key != null && !key.trim().isEmpty();
     }
 
     /** API Key 是否已配置（不暴露 key 内容，仅用于状态诊断） */

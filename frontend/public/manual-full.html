@@ -36,6 +36,8 @@
   .main ul, .main ol { margin: 8px 0 12px 20px; font-size: 14px; }
   .main li { margin-bottom: 4px; }
   .main code { background: #f5f5f5; padding: 2px 6px; border-radius: 3px; font-size: 13px; font-family: "SF Mono", Consolas, Menlo, monospace; color: #c41d7f; }
+  .main pre { background: #1f2430; color: #e6e6e6; border-radius: 6px; padding: 12px 16px; margin: 12px 0; overflow-x: auto; font-size: 13px; line-height: 1.6; }
+  .main pre code { background: transparent; color: #e6e6e6; padding: 0; font-size: 13px; }
   .main .formula { background: #f6f8fa; border: 1px solid #e1e4e8; border-radius: 6px; padding: 12px 16px; margin: 8px 0; font-family: monospace; font-size: 13px; overflow-x: auto; }
   .main .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; margin: 12px 0; }
   .main .card { background: #fff; border: 1px solid #e8e8e8; border-radius: 8px; padding: 16px; border-left: 4px solid #1677ff; margin-bottom: 12px; }
@@ -107,6 +109,8 @@
 <a class="nav-item" href="#s7-1">7.1 系统管理总览</a><a class="nav-item" href="#s7-2">7.2 用户管理</a><a class="nav-item" href="#s7-3">7.3 角色管理</a><a class="nav-item" href="#s7-4">7.4 菜单与权限管理</a><a class="nav-item" href="#s7-5">7.5 权限模型与排错</a><a class="nav-item" href="#s7-6">7.6 字典管理</a><a class="nav-item" href="#s7-7">7.7 配置中心</a><a class="nav-item" href="#s7-8">7.8 部门管理</a><a class="nav-item" href="#s7-9">7.9 数据权限管理</a><a class="nav-item" href="#s7-10">7.10 凭证管理</a></div>
 <div class="nav-group"><a class="nav-main" href="#part8">八、系统监控</a>
 <a class="nav-item" href="#s8-1">8.1 系统监控面板</a><a class="nav-item" href="#s8-2">8.2 在线用户</a><a class="nav-item" href="#s8-3">8.3 审计日志</a><a class="nav-item" href="#s8-4">8.4 登录日志</a></div>
+<div class="nav-group"><a class="nav-main" href="#part9">九、部署与运维</a>
+<a class="nav-item" href="#s9-1">9.1 部署架构</a><a class="nav-item" href="#s9-2">9.2 启动与停止</a><a class="nav-item" href="#s9-3">9.3 配置项清单</a><a class="nav-item" href="#s9-4">9.4 健康检查与探活</a><a class="nav-item" href="#s9-5">9.5 故障排查手册</a><a class="nav-item" href="#s9-6">9.6 数据层陷阱</a></div>
 </nav>
 <div class="main">
 <h1>量化因子平台 · 使用手册</h1>
@@ -1255,7 +1259,18 @@ R_portfolio = Σ (β_i × F_i) + ε
 <li><strong>除权→QFQ→因子</strong>：除权日触发 QFQ_REFRESH → 重新计算因子 → 刷新推荐，形成完整的依赖链</li>
 <li><strong>多策略并行</strong>：DAILY_RECOMMENDATION 为每个 ACTIVE 策略生成推荐，多策略时自动执行组合风控检查</li>
 <li><strong>推荐幂等</strong>：推荐写入前先 <code>deleteByStrategyAndDateAndMode</code> 删除旧记录再 insert，防止重复</li>
+<li><strong>并发守卫</strong>：任务启动前先查同类型是否有 <code>RUNNING</code> 记录，有则直接跳过本次，避免手动触发与定时触发撞车导致数据重复写入</li>
 </ul>
+
+<h4>常见排错清单</h4><table>
+<tr><th>现象</th><th>原因与处理</th></tr>
+<tr><td><strong>某个因子的数据停在某一天不再更新</strong>（其他因子正常）</td><td><strong>最常见原因：该因子状态被置为 <code>DEPRECATED</code>（已废弃）</strong>。日增计算只遍历 <code>factor_definition.status = 'ACTIVE'</code> 的因子，废弃因子会被静默跳过，历史值仍保留在库里，于是 UI 上表现为"只算到 X 月 X 日"。<br>处理：到因子管理确认状态；若确实还要用，改回 ACTIVE 后<strong>手动补算缺失区间</strong>（改状态本身不会回溯补数据）</td></tr>
+<tr><td>所有因子都没更新</td><td>看依赖链上游 DAILY 是否成功；DAILY 失败时后续任务按设计不执行</td></tr>
+<tr><td>任务一直显示"运行中"不结束</td><td>进程可能已异常退出但状态未回写。确认后端进程存活（见 9.4），必要时手动将该任务记录状态改为失败再重跑；<strong>状态卡在 RUNNING 会让并发守卫持续跳过后续调度</strong></td></tr>
+<tr><td>手动触发无反应</td><td>八成是并发守卫命中——已有同类型任务处于 RUNNING</td></tr>
+<tr><td>因子值算出来但明显失真（如全为 0 / 极端值）</td><td>先查当日行情是否完整（6.6 质量监控），再查是否处于除权日而 QFQ_REFRESH 未执行——未复权价格会让动量、波动类因子整体错位</td></tr>
+<tr><td>日期用错（算了昨天的）</td><td>确认任务的日期模式：<code>today</code> 用当天日期，<code>latest</code> 用最新已交易日；非交易日跑 today 会取不到数据</td></tr>
+</table>
 </div></div>
 
 <div class="section" id="s6-6"><h3>6.6 质量监控</h3><div class="module-box">
@@ -1417,7 +1432,34 @@ R_portfolio = Σ (β_i × F_i) + ε
 </div></div>
 
 <div class="section" id="s7-5"><h3>7.5 权限模型与常见问题</h3><div class="module-box">
-<h4>权限框架：Sa-Token</h4><p>登录时签发 token，后续请求携带；后端用 <code>@SaCheckPermission</code> 做方法级鉴权，前端用 <code>hasPermission</code> 控制按钮显隐，<strong>按钮级鉴权是双保险</strong>：无权限既看不到按钮（前端），调接口也会返回 403（后端）。</p>
+<h4>权限框架：Sa-Token</h4><p>登录时签发 token，后续请求自动携带；后端用 <code>@SaCheckPermission</code> 做方法级鉴权，前端用 <code>hasPermission</code> 控制按钮显隐，<strong>按钮级鉴权是双保险</strong>：无权限既看不到按钮（前端），调接口也会返回 403（后端）。</p>
+
+<h4>登录态机制：httpOnly Cookie + 静默刷新</h4>
+<div class="why-box"><h4>为什么 token 不再放在浏览器 localStorage？</h4>
+<p>早期实现把 token 存在 localStorage，由前端手动塞进请求头。问题是 <strong>localStorage 对页面上任意 JavaScript 都是可读的</strong>——一旦站内出现 XSS（哪怕是第三方依赖引入的），攻击者一行 <code>localStorage.getItem('token')</code> 就能把登录凭证发走，且窃取到的 token 在有效期内可任意冒用。</p>
+<p>改造后 token 只经 <strong>httpOnly Cookie</strong> 下发与携带：浏览器自动带上，但 JS <strong>读不到</strong>，XSS 窃取路径被直接掐断。同时登录、<code>/auth/me</code> 等接口的 <strong>响应体里 token 字段一律置 null</strong>，避免经日志、代理、埋点二次泄漏。</p></div>
+<table>
+<tr><th>机制</th><th>说明</th></tr>
+<tr><td>双 Cookie</td><td><code>satoken</code>（访问令牌，30 分钟）+ <code>satoken_refresh</code>（刷新令牌，7 天），均为 <code>httpOnly</code></td></tr>
+<tr><td>Cookie 安全属性</td><td><code>HttpOnly=true</code>、<code>SameSite=Lax</code>（挡多数跨站 CSRF）、<code>Secure</code> 由环境变量 <code>SA_TOKEN_COOKIE_SECURE</code> 控制——<strong>生产 HTTPS 环境必须设为 true</strong></td></tr>
+<tr><td>静默刷新</td><td>访问令牌过期时接口返回 401，前端拦截器自动调用匿名接口 <code>POST /auth/refresh</code> 换新令牌并<strong>重放原请求</strong>，用户无感知</td></tr>
+<tr><td>刷新令牌轮换</td><td>refresh token <strong>一次性消费</strong>，每次刷新即作废并下发新的，降低泄露后的可用窗口</td></tr>
+<tr><td>彻底失效</td><td>refresh 也过期/无效时，清空所有 cookie 与前端用户态，跳登录页；原访问路径记入 <code>sessionStorage</code>，登录后自动回跳</td></tr>
+<tr><td>小程序端</td><td><code>backend-mp</code> 仍走 <strong>请求头</strong>传 token（<code>satoken</code> 头，非 Bearer），与 Web 端 cookie 方案并存互不干扰</td></tr>
+</table>
+<div class="alert info"><strong>会不会很快就掉登录？</strong>不会。访问令牌虽然只有 30 分钟，但 <code>active-timeout</code> 同为 30 分钟且持续活动会自动续期，加上前端静默刷新，<strong>只要 7 天内有使用就不会被要求重新登录</strong>。缩短访问令牌有效期只是为了缩小万一泄露时的可用窗口。</div>
+<div class="alert warn"><strong>⚠ 开发注意</strong>：前端判断"是否已登录"必须以 <strong>用户信息对象（user）是否存在</strong>为准，<strong>不能再用 token 字段判空</strong>——响应体里 token 恒为 <code>null</code>，用它判断会导致"提示登录成功却仍停在登录页"。</div>
+
+<h4>登录安全加固</h4><p>登录接口（<code>/auth/login</code>）内置三层防爆破，参数在 <code>login-security</code> 配置段可调：</p>
+<table>
+<tr><th>机制</th><th>默认阈值</th><th>行为</th></tr>
+<tr><td>账号维度锁定</td><td>同一账号+IP 连续失败 <strong>5 次</strong></td><td>锁定 <strong>15 分钟</strong>，期间即使密码正确也拒绝登录</td></tr>
+<tr><td>IP 维度锁定</td><td>同一 IP 累计失败 <strong>20 次</strong></td><td>锁定 <strong>15 分钟</strong>，防止针对大量不存在账号的撞库扫描</td></tr>
+<tr><td>图形验证码</td><td>连续失败 <strong>3 次</strong></td><td>登录响应返回 <code>needCaptcha</code>，前端自动拉取 <code>/auth/captcha</code> 显示验证码框，有效期 <strong>5 分钟</strong></td></tr>
+<tr><td>密码复杂度</td><td>—</td><td>修改密码时强制校验长度与字符组合，弱口令直接拒绝</td></tr>
+</table>
+<p>失败计数落库到 <code>sys_login_fail</code>，登录成功后自动清零。校验顺序为：<strong>先查锁定 → 再验验证码 → 最后校验账号密码</strong>（验证码错误同样计入失败次数，避免绕过）。所有登录成败均记入登录日志（见 8.4）。</p>
+<div class="alert warn"><strong>⚠ 账号被锁怎么办？</strong>等待 15 分钟自动解锁；或由管理员在数据库 <code>sys_login_fail</code> 表删除对应记录立即解锁。<strong>连续失败次数达标却没弹验证码</strong>，通常是前端未读取响应中的 <code>needCaptcha</code> 标记，与后端无关。</div>
 <div class="alert warn"><strong>⚠ 关键坑：改完权限必须重新登录</strong><br>
 后端权限是从 <strong>Sa-Token 的 session 缓存</strong> 读取的，<strong>不是每次请求实时查库</strong>。因此：
 <ul>
@@ -1431,6 +1473,10 @@ R_portfolio = Σ (β_i × F_i) + ε
 <tr><td>页面上看不到某操作按钮</td><td>确认当前账号 <code>hasPermission</code> 是否包含该按钮标识（如 <code>system:user:add</code>）</td></tr>
 <tr><td>配置了权限但不生效</td><td>让用户<strong>重新登录</strong>（见上方说明），刷新 session 缓存</td></tr>
 <tr><td>角色分配菜单弹框显示异常</td><td>确认菜单树数据完整（目录/菜单/按钮节点齐全），必要时到菜单管理检查节点</td></tr>
+<tr><td>提示"登录成功"但仍停在登录页</td><td>前端登录态判断误用了 token 字段（恒为 null），应改判用户信息对象；见上方开发注意</td></tr>
+<tr><td>频繁掉登录 / 刷新页面就要重登</td><td>检查浏览器是否拦截了 Cookie（隐私模式、跨站限制）；生产 HTTPS 下确认 <code>SA_TOKEN_COOKIE_SECURE=true</code>，HTTP 下必须为 false，否则 cookie 根本种不上</td></tr>
+<tr><td>登录时提示账号被锁定</td><td>连续失败触发保护，等 15 分钟或清 <code>sys_login_fail</code> 记录</td></tr>
+<tr><td>换浏览器登录后原会话失效</td><td>正常现象：<code>is-concurrent: false</code>，同账号互斥登录，新会话踢掉旧会话</td></tr>
 </table>
 <h4>默认账号</h4><p>系统初始化时内置 <code>admin</code> 账号（角色 ADMIN，拥有全部权限）。其他账号需由 admin 在用户管理页创建并赋角色。</p>
 </div></div>
@@ -1517,6 +1563,7 @@ R_portfolio = Σ (β_i × F_i) + ε
 <tr><td>操作</td><td>下线（<code>system:online:kick</code>），每 8s 自动刷新</td></tr>
 </table>
 <h4>实现思路</h4><p>后端读 Sa-Token 会话列表；kick 调 <code>/system/online/kick?loginId=...</code> 使该 token 失效。权限 <code>system:online:list</code> / <code>system:online:kick</code>。</p>
+<div class="alert info"><strong>与登录态改造的关系</strong>：token 改存 httpOnly Cookie 后，本页展示逻辑不变（仍读服务端会话）。但需注意两点：① <strong>静默刷新会轮换访问令牌，但沿用同一会话（loginId 不变），因此不会在列表中产生新条目、也不会重复计入在线数</strong>；② 执行"下线"后该用户浏览器里的 cookie 仍在，但服务端会话已失效，其下一次请求会 401 → 静默刷新也会失败 → 自动跳登录页，<strong>踢人是即时生效的</strong>。</div>
 </div></div>
 
 <div class="section" id="s8-3"><h3>8.3 审计日志</h3><div class="module-box">
@@ -1529,12 +1576,190 @@ R_portfolio = Σ (β_i × F_i) + ε
 <h4>作用与价值</h4><p>审计日志的"登录视角"筛选——专看登录成功 / 失败、来源 IP、User-Agent、失败原因，用于安全审计（如暴力破解、异地登录）。</p>
 <h4>页面字段</h4><p>登录时间、账号、IP、User-Agent、结果（登录成功 / 登录失败）、失败原因；支持按账号 / 结果 / 时间范围筛选；详情同审计日志。</p>
 <h4>说明</h4><p>复用审计日志接口（<code>/system/audit</code>，模块固定为 <code>auth</code>），权限同为 <code>system:audit:list</code> / <code>system:audit:delete</code>。</p>
+<div class="alert info"><strong>结合登录安全一起看</strong>：登录失败原因除了"密码错误"，还可能是 <strong>"账号已锁定"</strong>（失败 5 次触发）、<strong>"IP 已锁定"</strong>（同 IP 失败 20 次触发）、<strong>"验证码错误"</strong>（失败 3 次后要求）。<br>
+安全排查建议：<strong>同一账号短时间大量失败</strong> → 针对性撞库，建议改强密码；<strong>同一 IP 失败但账号名五花八门</strong> → 扫描器爆破，建议在网关层封禁该 IP；<strong>成功记录出现陌生 IP/UA</strong> → 立即到 8.2 在线用户强制下线并改密。<br>
+另注意：<strong>静默刷新（<code>/auth/refresh</code>）不会产生登录日志</strong>——它只是续期，不是新登录；所以看到"用户在线一整天却只有早上一条登录记录"是正常的。</div>
+</div></div>
+
+<h2 id="part9">九、部署与运维</h2>
+<p>前八章讲的是"平台能做什么"，本章讲的是"<strong>怎么把它跑起来、跑稳定、出问题怎么救</strong>"。面向部署人员与日常运维，内容全部来自实际踩过的坑，按<strong>部署 → 启动 → 配置 → 探活 → 排错 → 数据陷阱</strong>的顺序展开。</p>
+
+<div class="section" id="s9-1"><h3>9.1 部署架构</h3><div class="module-box">
+<h4>整体分层</h4><table>
+<tr><th>层</th><th>组件</th><th>说明</th></tr>
+<tr><td>接入层</td><td>Nginx</td><td>托管前端静态产物，反代 <code>/api</code> 到后端；配置见 <code>deployment/nginx.conf</code></td></tr>
+<tr><td>前端</td><td>React 18 + Vite + Ant Design 5</td><td>构建产物输出到 <code>frontend/build</code>；状态管理 zustand，图表 ECharts</td></tr>
+<tr><td>后端</td><td>Spring Boot 3 + MyBatis-Plus（单 jar）</td><td>端口 <strong>8080</strong>，<strong>context-path = <code>/api</code></strong>（所有接口都带这个前缀，容易漏）</td></tr>
+<tr><td>计算</td><td>Python 脚本</td><td>数据采集、因子计算、前复权刷新等由后端拉起子进程执行</td></tr>
+<tr><td>数据层</td><td>MySQL 8 + ClickHouse</td><td>MySQL 存元数据/配置/权限；ClickHouse 存海量行情与因子值。Docker Compose 编排还预置了 Redis，便于后续扩展 Sa-Token 分布式会话等场景</td></tr>
+</table>
+
+<div class="why-box"><h4>为什么要 MySQL 和 ClickHouse 两套库？</h4>
+<p>两类数据的读写特征完全相反：<strong>元数据</strong>（用户、角色、因子定义、策略配置）量小但要求事务与强一致，是典型 OLTP，MySQL 最合适；<strong>行情与因子值</strong>动辄数千万行、按列聚合扫描、几乎只追加不更新，是典型 OLAP——用 MySQL 存会让一次因子回测扫表扫到超时，而 ClickHouse 的列存 + 向量化执行能把同样的查询压到秒级。<strong>硬塞进一套库，必然在某一侧付出数量级的性能代价。</strong></p></div>
+
+<h4>后端模块划分</h4><ul>
+<li><code>common</code> → <code>platform-core</code> → <code>stock-service</code>：<strong>依赖严格单向</strong>，反向依赖会直接导致构建循环</li>
+<li><code>platform-core</code>：认证、权限、字典、配置中心、监控等平台通用能力</li>
+<li><code>stock-service</code>：股票业务（因子/策略/回测/推荐），也是<strong>最终打包启动的模块</strong></li>
+<li><code>backend-mp</code>：小程序端，独立部署，与 Web 端认证方式不同（走请求头 token）</li>
+</ul>
+
+<h4>两种部署方式</h4><table>
+<tr><th>方式</th><th>命令</th><th>适用</th></tr>
+<tr><td><strong>Docker Compose（推荐）</strong></td><td><code>docker compose up -d</code></td><td>一键拉起 app + mysql + clickhouse + redis，依赖服务带 healthcheck 且 app 会等它们就绪；<code>restart: unless-stopped</code> 自动重启</td></tr>
+<tr><td>裸机 / 手工</td><td>见 9.2</td><td>本地开发、或已有现成数据库实例</td></tr>
+</table>
+<p>Dockerfile 采用<strong>多阶段构建</strong>：第一阶段用 <code>maven:3.9-eclipse-temurin-21</code> 编译（先复制 pom 再复制源码，利用层缓存加速依赖下载），第二阶段用 <code>eclipse-temurin:21-jre</code> 仅装运行时并<strong>以非 root 用户运行</strong>，缩小镜像体积与容器逃逸影响面。</p>
+</div></div>
+
+<div class="section" id="s9-2"><h3>9.2 启动与停止</h3><div class="module-box">
+<h4>后端构建</h4>
+<div class="alert warn"><strong>⚠ 必须整体构建，不要只构建 stock-service</strong><br>
+正确：<code>mvn -pl common,platform-core,stock-service -am clean package -DskipTests</code><br>
+错误：<code>mvn -pl stock-service clean package</code> —— 这样会去本地仓库读 <strong>旧版本的 common / platform-core jar</strong>，你刚改的公共模块代码根本没进包，表现为"改了代码却完全没生效"，极难察觉。</div>
+<div class="alert warn"><strong>⚠ 改了 Controller 端点必须 <code>clean</code> 全量重建</strong><br>
+只跑增量 <code>package</code> 时旧 class 可能残留，新增的 <code>@GetMapping</code>/<code>@PostMapping</code> 不会注册，请求会落到静态资源处理器并报 <code>No static resource xxx</code>。看到这个错误<strong>先怀疑构建，而不是怀疑路径写错</strong>。</div>
+
+<h4>启动</h4>
+<pre><code>java -jar stock-service/target/stock-service-1.0.0.jar --spring.profiles.active=prod</code></pre>
+<ul>
+<li>开发环境默认 profile 为 <code>dev</code>（<code>SPRING_PROFILES_ACTIVE</code> 未设时）</li>
+<li>若运行环境注入了 <code>SERVER__PORT</code> 之类的环境变量，需显式 <code>--server.port=8080</code> 覆盖，否则会监听到意外端口</li>
+<li>Windows 本地可用根目录的 <code>start-stock-service.bat</code> / <code>start-frontend.bat</code></li>
+</ul>
+
+<h4>停止与重启</h4>
+<div class="alert warn"><strong>⚠ 重启前务必确认旧进程已退出</strong><br>
+端口被旧进程占着时，新进程启动会失败或悄悄换端口，结果是"<strong>部署了新包但行为还是旧的</strong>"——这是最浪费时间的一类假象。<br>
+<code>netstat -ano | findstr :8080</code> 查占用 PID → <code>taskkill /F /PID &lt;pid&gt;</code>（Linux：<code>lsof -i:8080</code> → <code>kill -9</code>）。构建前同样建议先停掉 java 进程，否则 jar 文件被占用导致打包失败。</div>
+
+<h4>前端</h4><table>
+<tr><th>场景</th><th>操作</th></tr>
+<tr><td>开发</td><td><code>npm start</code>（Vite dev server），已配置 proxy 把 <code>/api</code> 与 WebSocket 转发到 <code>localhost:8080</code>，无需处理跨域</td></tr>
+<tr><td>构建</td><td><code>npm run build</code>，产物输出到 <code>frontend/build</code></td></tr>
+<tr><td>发布</td><td>将 <code>build</code> 目录交给 Nginx 托管；<strong>SPA 必须配置 history fallback</strong>（未匹配路径回退 <code>index.html</code>），否则刷新子路由页面会 404</td></tr>
+</table>
+</div></div>
+
+<div class="section" id="s9-3"><h3>9.3 配置项清单</h3><div class="module-box">
+<h4>Profile 策略</h4><p><code>application.yml</code> 放公共参数，<code>application-dev.yml</code> 提供本地默认值，<code>application-prod.yml</code> <strong>不带任何默认值，敏感项全部要求环境变量注入</strong>——缺失即启动失败（fail-fast），避免生产误用开发口令。</p>
+
+<h4>生产必须注入的环境变量</h4><table>
+<tr><th>变量</th><th>用途</th><th>不设的后果</th></tr>
+<tr><td><code>MYSQL_HOST</code> / <code>MYSQL_PORT</code> / <code>MYSQL_DATABASE</code> / <code>MYSQL_USER</code> / <code>MYSQL_PASSWORD</code></td><td>MySQL 连接</td><td>启动失败</td></tr>
+<tr><td><code>CLICKHOUSE_HOST</code> / <code>CLICKHOUSE_PASSWORD</code>（端口默认 8123，库默认 stock）</td><td>ClickHouse 连接</td><td>启动失败 / 行情与因子查询不可用</td></tr>
+<tr><td><code>CORS_ALLOWED_ORIGINS</code></td><td>允许的前端域名（逗号分隔）</td><td>生产强制要求；dev 未配置时放开所有来源</td></tr>
+<tr><td><code>SA_TOKEN_COOKIE_SECURE</code></td><td>登录 Cookie 是否仅 HTTPS 传输</td><td><strong>HTTPS 环境必须 true</strong>；但在纯 HTTP 环境设 true 会导致 cookie 种不上、永远登不进去</td></tr>
+<tr><td><code>CREDENTIAL_AES_KEY</code></td><td>凭证管理 AES-256 主密钥（建议 32 字节随机串）</td><td>prod 下未设直接 fail-fast；dev 用内置开发密钥（不安全）</td></tr>
+<tr><td><code>SPRING_PROFILES_ACTIVE</code></td><td>激活的 profile</td><td>默认 dev，生产忘记设会连到开发库</td></tr>
+</table>
+
+<h4>关键可调参数</h4><table>
+<tr><th>配置段</th><th>项</th><th>默认值与含义</th></tr>
+<tr><td rowspan="4"><code>sa-token</code></td><td><code>timeout</code></td><td>1800（访问令牌 30 分钟）</td></tr>
+<tr><td><code>active-timeout</code></td><td>1800（30 分钟无活动则失效，有活动自动续期）</td></tr>
+<tr><td><code>is-concurrent</code></td><td>false（<strong>同账号互斥登录</strong>，新登录踢旧会话）</td></tr>
+<tr><td><code>cookie.same-site</code></td><td>Lax（挡多数跨站 CSRF）</td></tr>
+<tr><td><code>auth</code></td><td><code>refresh-token-ttl-seconds</code></td><td>604800（刷新令牌 7 天）</td></tr>
+<tr><td rowspan="3"><code>login-security</code></td><td><code>account-lock-threshold / minutes</code></td><td>5 次 / 15 分钟</td></tr>
+<tr><td><code>ip-lock-threshold / minutes</code></td><td>20 次 / 15 分钟</td></tr>
+<tr><td><code>captcha-threshold</code></td><td>3 次后要求图形验证码</td></tr>
+<tr><td><code>slow-sql</code></td><td><code>threshold-ms</code></td><td>1000（超过 1 秒的 SQL 记入 <code>slow-sql.log</code>）</td></tr>
+<tr><td><code>spring.datasource.hikari</code></td><td><code>maximum-pool-size</code></td><td>dev 30 / prod 50</td></tr>
+<tr><td><code>mybatis-plus</code></td><td><code>logic-delete-field</code></td><td><code>deleted</code>（<strong>全局逻辑删除，影响面很大，见 9.6</strong>）</td></tr>
+</table>
+<div class="alert info"><strong>业务级参数不在这里改</strong>：能在运行时调整的业务参数（阈值、开关、文案）请走 <strong>7.7 配置中心</strong>，改完即时生效无需重启；yml 只放基础设施级配置。</div>
+</div></div>
+
+<div class="section" id="s9-4"><h3>9.4 健康检查与探活</h3><div class="module-box">
+<h4>健康检查端点</h4>
+<pre><code>GET /api/actuator/health   →   {"status":"UP"}</code></pre>
+<p>注意路径带 <code>/api</code> 前缀（context-path 所致）；仅暴露 <code>health</code> 与 <code>info</code>，且 <code>show-details: never</code>，不泄漏内部组件细节。Docker HEALTHCHECK 与负载均衡探针都用它。</p>
+
+<h4>三级判活</h4><table>
+<tr><th>层次</th><th>方法</th><th>结论</th></tr>
+<tr><td>端口</td><td><code>netstat -ano | findstr :8080</code> 是否 LISTENING</td><td>没有 → 进程没起来或端口被换</td></tr>
+<tr><td>进程</td><td><code>tasklist | findstr java</code>（Linux：<code>ps -ef | grep java</code>）</td><td>有进程无端口 → 启动过程中报错，看日志</td></tr>
+<tr><td>业务</td><td>调 <code>POST /api/auth/login</code> 或健康端点</td><td>端口通但接口 500 → 多半是数据库连不上</td></tr>
+</table>
+<div class="alert warn"><strong>⚠ 后台任务显示 "failed" ≠ 服务宕机</strong><br>
+重新部署时杀掉旧 jar，会让原来的后台任务被标记为失败，这是正常现象。<strong>判断服务死活一律以上表三级探活为准</strong>，不要看任务状态色块。</div>
+
+<h4>日常巡检去哪看</h4><ul>
+<li><strong>运行时健康</strong>（JVM 堆、GC、QPS、P95 耗时、ClickHouse 延迟、调度任务成功率）→ <strong>8.1 系统监控面板</strong>，5 秒轮询</li>
+<li><strong>缓存是否正常加载</strong>（字典/配置命中率，重启后清零）→ 8.1 的"本地缓存状态"</li>
+<li><strong>谁在线、有无异常会话</strong> → 8.2 在线用户</li>
+<li><strong>谁改了什么</strong> → 8.3 审计日志；<strong>有无爆破迹象</strong> → 8.4 登录日志</li>
+<li><strong>数据是否完整</strong> → 6.6 质量监控；<strong>任务是否跑齐</strong> → 6.5 定时任务</li>
+<li><strong>慢 SQL</strong> → <code>logs/slow-sql.log</code></li>
+</ul>
+</div></div>
+
+<div class="section" id="s9-5"><h3>9.5 故障排查手册</h3><div class="module-box">
+<h4>启动与部署类</h4><table>
+<tr><th>现象</th><th>根因与处理</th></tr>
+<tr><td>部署了新包但行为还是旧的</td><td>① 旧进程仍占 8080（新进程没起来）；② 只构建了 stock-service 而没带上 common/platform-core。按 9.2 两条警告逐一排除</td></tr>
+<tr><td>接口报 <code>No static resource xxx</code></td><td>新增的 Controller 端点未注册 → <strong>做一次 <code>clean package</code> 全量重建</strong></td></tr>
+<tr><td>启动即退出，日志报数据源错误</td><td>prod profile 下环境变量缺失（fail-fast 设计）；对照 9.3 补齐</td></tr>
+<tr><td>构建时报 <code>Failed to delete target\...</code> 或 <code>Source must refer to an existing file</code></td><td>target 目录文件被占用：先 <code>taskkill</code> 掉残留的 java / python 进程（因子计算脚本可能持有 <code>target/classes/scripts</code> 句柄）；Windows 上若系统回收站异常也会阻断删除，清空回收站可恢复</td></tr>
+<tr><td>访问任意子路由刷新后 404</td><td>Nginx 未配 SPA history fallback</td></tr>
+</table>
+
+<h4>认证与权限类</h4><table>
+<tr><th>现象</th><th>根因与处理</th></tr>
+<tr><td>提示登录成功但停在登录页</td><td>前端用 token 字段判登录态（恒 null），应改判用户对象。见 7.5</td></tr>
+<tr><td>一直登不进去 / cookie 种不上</td><td>HTTP 环境却把 <code>SA_TOKEN_COOKIE_SECURE</code> 设成了 true</td></tr>
+<tr><td>改了权限不生效</td><td>权限取自会话缓存，<strong>需重新登录</strong>。见 7.5</td></tr>
+<tr><td>接口 403 但角色明明有权限</td><td><code>@SaCheckPermission</code> 的<strong>类级与方法级注解是 AND 关系</strong>，只放宽方法级无效，须同时处理类级</td></tr>
+<tr><td>登录本该 401 却返回 500</td><td>通用异常处理器抢先吞掉了未登录异常——认证异常处理器需要更高优先级</td></tr>
+<tr><td>非管理员账号列表分页报 SQL 错误</td><td>数据权限拦截器注入的 SQL 括号不平衡（管理员跳过拦截器所以不复现）</td></tr>
+<tr><td>用户能改本不该改的资源</td><td>部门路径前缀匹配未带 <code>/</code> 分隔符，导致 <code>/1/30</code> 被误判属于 <code>/1/3</code>。读写两侧都必须带分隔符</td></tr>
+</table>
+
+<h4>数据与任务类</h4><table>
+<tr><th>现象</th><th>根因与处理</th></tr>
+<tr><td>某因子数据停更</td><td>因子状态为 DEPRECATED，日增只算 ACTIVE。见 6.5 排错清单</td></tr>
+<tr><td>删除操作报 500</td><td><strong>优先怀疑唯一键冲突</strong>：全局逻辑删除下软删记录仍占用唯一索引，同名重建会撞 <code>DuplicateKeyException</code>。见 9.6</td></tr>
+<tr><td>ClickHouse 写入报 <code>Max query size exceeded</code></td><td>批量写入分块过大，需按<strong>实际字节数</strong>而非行数切分</td></tr>
+<tr><td>ClickHouse 写入报 <code>Syntax error at position 1 ({)</code></td><td>SQL 传递方式错误——必须放在 URL 的 <code>?query=</code> 参数里，请求体只放数据。见 9.6</td></tr>
+<tr><td>任务卡在"运行中"</td><td>状态未回写，会让并发守卫持续跳过后续调度；确认进程状态后手工改为失败再重跑</td></tr>
+</table>
+</div></div>
+
+<div class="section" id="s9-6"><h3>9.6 数据层陷阱</h3><div class="module-box">
+<p>以下几条是<strong>会导致结果错得"看起来很合理"</strong>的坑，比直接报错更危险，新接手的人务必先看。</p>
+
+<h4>① 全局逻辑删除</h4>
+<div class="alert warn"><strong>MyBatis-Plus 全局逻辑删除已开启（<code>deleted</code> 字段），意味着所有 <code>deleteById</code> 都是软删，即使实体没写 <code>@TableLogic</code> 注解也一样生效。</strong><br>
+两个后果：① 以为记录删掉了，其实只是被置了标记；② <strong>数据库唯一索引不认软删</strong>——软删一个用户名/角色编码后再建同名的，会直接抛 <code>DuplicateKeyException</code>。所以删除接口报 500 时，第一反应应该是查唯一键冲突而不是查代码逻辑。<br>
+另注意 <code>sys_department</code> 表<strong>没有</strong> <code>deleted</code> 列，是真删。</div>
+
+<h4>② 最后管理员保护</h4><p>系统禁止删除 ADMIN 角色、禁止删除用户的最后一个角色、禁止删除自己、禁止删除最后一个管理员账号——避免把自己锁在系统外。前端对 ADMIN 相关操作有红色标记与二次确认。</p>
+
+<h4>③ ClickHouse 字段单位（最容易算错的地方）</h4><table>
+<tr><th>字段</th><th>单位</th><th>注意</th></tr>
+<tr><td><code>volume</code></td><td><strong>股</strong>（不是手）</td><td>科创板 688/689 来自腾讯源的数据不做 ×100 换算</td></tr>
+<tr><td><code>amount</code></td><td><strong>千元</strong></td><td>回测引擎内部会 ×1000 转成元，自己写查询时别忘了</td></tr>
+<tr><td><code>turnover_rate</code></td><td><strong>百分比数值</strong>（如 3.5 表示 3.5%）</td><td>当成小数用会差 100 倍</td></tr>
+<tr><td><code>code</code></td><td>纯数字字符串</td><td>不带 <code>sh</code>/<code>sz</code> 前缀，跨库 join 时注意统一</td></tr>
+</table>
+
+<h4>④ ReplacingMergeTree 的"最终一致"</h4><p>行情表用 <code>ReplacingMergeTree</code>，重复写入靠后台合并去重，<strong>合并不是实时的</strong>。刚写完立刻查可能看到重复行——查询时加 <code>FINAL</code> 或按主键聚合，不要假设写入即去重。</p>
+
+<h4>⑤ ClickHouse HTTP 写入的正确姿势</h4>
+<div class="alert warn">SQL <strong>必须放在 URL 的 <code>?query=</code> 参数</strong>里（做 URL 编码），POST 请求体只放 <code>FORMAT JSONEachRow</code> 的数据行，<code>Content-Type</code> 用 <code>text/plain</code>。<br>
+用 <code>X-ClickHouse-Query</code> 请求头传 SQL 在新版本 ClickHouse 上<strong>会被忽略</strong>，服务端转而把请求体当 SQL 解析，报出令人费解的 <code>Syntax error: failed at position 1 ({)</code>。<br>
+另外分块要<strong>按真实字节数</strong>（约 1MB）切，不能按行数——宽表几十万行轻松突破 <code>max_query_size</code>（默认 256KB）。</div>
+
+<h4>⑥ 前复权与除权日</h4><p>除权日必须先跑前复权刷新再算因子，否则价格序列在除权点断裂，动量、波动、均线类因子会集体失真——<strong>数值仍然算得出来，只是全错</strong>，不会有任何报错提示。依赖链已内置这个顺序，手工补算时要自己保证。</p>
+
+<h4>⑦ 建表不会自动执行</h4><p>系统<strong>不做自动 DDL</strong>，新增功能涉及的建表脚本在 <code>stock-service/sql/</code> 下，升级时需手工执行。建表语句必须用 <code>utf8mb4</code> 字符集，否则中文与 emoji 会乱码或截断。</p>
 </div></div>
 
 <div class="alert info">
 <strong>手册到此结束</strong>。总结本手册的核心逻辑链：<br><br>
-<strong>因子</strong>（选股能力的量化表达）→ <strong>策略</strong>（因子组合+风控规则）→ <strong>回测</strong>（策略在历史中的验证）→ <strong>选股/推荐</strong>（策略在当下生成具体股票）→ <strong>评估</strong>（验证收益的真实来源和持续性）→ <strong>数据管理</strong>（支撑以上所有模块的底层数据质量）→ <strong>系统管理</strong>（用户 / 角色 / 菜单 / 字典 / 配置中心 / 部门 / 数据权限 / 凭证，访问治理层）→ <strong>系统监控</strong>（运行时健康、在线用户、审计与登录日志，安全与可观测层）<br><br>
-每一步都不是孤立的——因子质量决定策略上限，回测质量决定策略可信度，推荐管线质量决定策略执行效果，评估质量决定策略迭代方向，数据质量决定以上一切的根基，而系统管理决定了"谁能使用这一切"。<strong>量化投资不是"找到一个好因子"那么简单，而是一个需要全链路质量保障的系统工程。</strong>
+<strong>因子</strong>（选股能力的量化表达）→ <strong>策略</strong>（因子组合+风控规则）→ <strong>回测</strong>（策略在历史中的验证）→ <strong>选股/推荐</strong>（策略在当下生成具体股票）→ <strong>评估</strong>（验证收益的真实来源和持续性）→ <strong>数据管理</strong>（支撑以上所有模块的底层数据质量）→ <strong>系统管理</strong>（用户 / 角色 / 菜单 / 字典 / 配置中心 / 部门 / 数据权限 / 凭证，访问治理层）→ <strong>系统监控</strong>（运行时健康、在线用户、审计与登录日志，安全与可观测层）→ <strong>部署与运维</strong>（部署架构、配置、探活、排错与数据陷阱，工程支撑层）<br><br>
+每一步都不是孤立的——因子质量决定策略上限，回测质量决定策略可信度，推荐管线质量决定策略执行效果，评估质量决定策略迭代方向，数据质量决定以上一切的根基，系统管理决定了"谁能使用这一切"，而部署与运维决定了"这一切能不能稳定地跑下去"。<strong>量化投资不是"找到一个好因子"那么简单，而是一个需要全链路质量保障的系统工程。</strong>
 </div>
 </div>
 

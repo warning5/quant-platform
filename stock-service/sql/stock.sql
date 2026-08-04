@@ -1201,6 +1201,7 @@ CREATE TABLE `stock_news`  (
   `event_tag` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '事件标签（印度高温/Q1业绩/建厂等）',
   `url` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL COMMENT '原文链接',
   `fetched_at` datetime NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后更新时间（LLM解析成功后写入）',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `uk_code_title_date`(`code` ASC, `title`(200) ASC, `publish_date` ASC) USING BTREE,
   INDEX `idx_code`(`code` ASC) USING BTREE,

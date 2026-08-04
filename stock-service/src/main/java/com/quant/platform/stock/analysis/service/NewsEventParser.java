@@ -85,8 +85,9 @@ public class NewsEventParser {
                     updateNewsEvent(id, event);
                     parsed++;
                 } else {
-                    // LLM返回null，标记为OTHER避免重复处理
-                    updateNewsEvent(id, new ParsedEvent("OTHER", 0.0, "neutral"));
+                    // LLM调用失败或返回无法解析：跳过本条，保留 event_tag IS NULL 以便后续调度重试。
+                    // 不写 OTHER，避免把"解析失败"误标为"无事件"而永久污染数据。
+                    log.warn("[NewsEventParser] 解析失败(LLM不可用或返回无法解析)，跳过 id={}，将在下次调度重试", id);
                     errors++;
                 }
 
@@ -245,7 +246,7 @@ public class NewsEventParser {
             default -> "neutral";
         };
         jdbcTemplate.update(
-                "UPDATE stock_news SET event_tag = ?, sentiment_score = ?, news_type = ? WHERE id = ?",
+                "UPDATE stock_news SET event_tag = ?, sentiment_score = ?, news_type = ?, updated_at = NOW() WHERE id = ?",
                 event.eventType, event.sentiment, newsType, id
         );
     }
