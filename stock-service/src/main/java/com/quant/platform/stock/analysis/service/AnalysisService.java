@@ -35,6 +35,9 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 @ConditionalOnBean(AnalysisChMapper.class)
 public class AnalysisService {
+
+    private final AnalysisCommonService analysisCommon;
+
     
     private final AnalysisChMapper analysisChMapper;
 
@@ -382,7 +385,7 @@ public class AnalysisService {
         overview.setScoreDetails(signal.getScoreDetails());
         // 资金面数据日期更新到 money detail 的 dataRange
         try {
-            java.util.Map<String, Object> mfForDate = analysisChMapper.selectLatestMoneyFlow(code, getLatestTradeDate());
+            java.util.Map<String, Object> mfForDate = analysisChMapper.selectLatestMoneyFlow(code, analysisCommon.getLatestTradeDate());
             if (mfForDate != null && mfForDate.get("tradeDate") != null) {
                 String mfDate = mfForDate.get("tradeDate").toString();
                 for (ScoreDetail detail : overview.getScoreDetails()) {
@@ -641,7 +644,7 @@ public class AnalysisService {
         
         // 从 CH stock_sentiment_moneyflow 获取主力资金流向
         try {
-            java.util.Map<String, Object> mf = analysisChMapper.selectLatestMoneyFlow(code, getLatestTradeDate());
+            java.util.Map<String, Object> mf = analysisChMapper.selectLatestMoneyFlow(code, analysisCommon.getLatestTradeDate());
             if (mf != null) {
                 if (mf.get("net_main") != null) {
                     signal.setNetMain((BigDecimal) mf.get("net_main"));
@@ -1117,7 +1120,7 @@ public class AnalysisService {
 
         // 从 CH 查近5日主力净流入累计值
         double netMain5d = 0;
-        List<Map<String, Object>> mfList = analysisChMapper.selectMoneyFlowHistory(code, 5, getLatestTradeDate());
+        List<Map<String, Object>> mfList = analysisChMapper.selectMoneyFlowHistory(code, 5, analysisCommon.getLatestTradeDate());
         if (mfList != null && !mfList.isEmpty()) {
             for (Map<String, Object> mf : mfList) {
                 if (mf.get("netMain") != null) {
@@ -1428,7 +1431,7 @@ public class AnalysisService {
      */
     public Map<String, Object> getValuationPercentile(String code, int years) {
         Map<String, Object> result = new LinkedHashMap<>();
-        String normalized = normalizeCodeForDailyCH(code);
+        String normalized = analysisCommon.normalizeCodeForDailyCH(code);
 
         try {
             // 从 CH 查询历史 PE/PB 序列（排除0值和null）
@@ -1486,12 +1489,6 @@ public class AnalysisService {
     }
 
     /** 将前端短代码转为 CH stock_daily 无后缀格式 */
-    private String normalizeCodeForDailyCH(String code) {
-        if (code == null) return null;
-        String c = code.trim();
-        if (c.contains(".")) return c.split("\\.")[0];
-        return c;
-    }
 
     private double calcPercentile(List<BigDecimal> history, BigDecimal current) {
         if (history == null || history.isEmpty() || current == null) return 0;
@@ -1542,8 +1539,8 @@ public class AnalysisService {
                         si.industry,
                         COUNT(*) as stockCount,
                         AVG(sd.change_percent) as avgChangePct,
-                        median(sd.pe_ttm) as medianPe,
-                        median(sd.pb) as medianPb
+                        analysisCommon.median(sd.pe_ttm) as medianPe,
+                        analysisCommon.median(sd.pb) as medianPb
                     FROM stock.stock_info si
                       INNER JOIN (
                         SELECT code, change_percent, pe_ttm, pb FROM stock.stock_daily FINAL
@@ -1669,8 +1666,8 @@ public class AnalysisService {
                         // 简易中位数（Java排序取中间值）
                         List<Double> pes = conceptPes.getOrDefault(cname, Collections.emptyList());
                         List<Double> pbs = conceptPbs.getOrDefault(cname, Collections.emptyList());
-                        row.put("medianPe", pes.isEmpty() ? null : BigDecimal.valueOf(median(pes)).setScale(1, RoundingMode.HALF_UP));
-                        row.put("medianPb", pbs.isEmpty() ? null : BigDecimal.valueOf(median(pbs)).setScale(2, RoundingMode.HALF_UP));
+                        row.put("medianPe", pes.isEmpty() ? null : BigDecimal.valueOf(analysisCommon.median(pes)).setScale(1, RoundingMode.HALF_UP));
+                        row.put("medianPb", pbs.isEmpty() ? null : BigDecimal.valueOf(analysisCommon.median(pbs)).setScale(2, RoundingMode.HALF_UP));
                         conceptList.add(row);
                     }
                     conceptList.sort((a, b) -> {
@@ -1751,7 +1748,7 @@ public class AnalysisService {
      */
     public Map<String, Object> getIndustryCorrelation(String code) {
         Map<String, Object> result = new LinkedHashMap<>();
-        String normalized = normalizeCodeForDailyCH(code);
+        String normalized = analysisCommon.normalizeCodeForDailyCH(code);
 
         // 1. 获取该股票所属行业
         Map<String, Object> myInfo = stockAnalysisMapper.selectStockInfo(code);
@@ -1933,7 +1930,7 @@ public class AnalysisService {
      */
     public Map<String, Object> getLimitUpAnalysis(String code) {
         Map<String, Object> result = new LinkedHashMap<>();
-        String normalized = normalizeCodeForDailyCH(code);
+        String normalized = analysisCommon.normalizeCodeForDailyCH(code);
 
         // 1. 近期涨跌停记录（CH stock_sentiment_zt）
         try {
@@ -2001,7 +1998,7 @@ public class AnalysisService {
      */
     public Map<String, Object> getBlockTradeAnalysis(String code) {
         Map<String, Object> result = new LinkedHashMap<>();
-        String normalized = normalizeCodeForDailyCH(code);
+        String normalized = analysisCommon.normalizeCodeForDailyCH(code);
 
         // 1. 近期大宗交易逐笔记录
         try {
@@ -2186,7 +2183,7 @@ public class AnalysisService {
         }
 
         // 最新交易日期
-        String latestDate = getLatestTradeDate();
+        String latestDate = analysisCommon.getLatestTradeDate();
 
         for (String conceptName : HOT_CONCEPTS) {
             Set<String> codes = conceptCodes.get(conceptName);
@@ -2208,8 +2205,8 @@ public class AnalysisService {
                     SELECT
                         COUNT(*) as stockCount,
                         AVG(sd.change_percent) as avgChange,
-                        median(sd.pe_ttm) as medianPe,
-                        median(sd.pb) as medianPb,
+                        analysisCommon.median(sd.pe_ttm) as medianPe,
+                        analysisCommon.median(sd.pb) as medianPb,
                         SUM(si.total_market_cap) as totalCap
                     FROM stock.stock_daily sd FINAL
                     JOIN stock.stock_info si ON sd.code = si.code
@@ -2285,7 +2282,7 @@ public class AnalysisService {
             return result;
         }
 
-        String latestDate = getLatestTradeDate();
+        String latestDate = analysisCommon.getLatestTradeDate();
         String inClause = String.join("','", codes);
 
         // 成分股列表（按涨跌幅排序）
@@ -2356,21 +2353,7 @@ public class AnalysisService {
     }
 
     /** 获取最新交易日期 */
-    private String getLatestTradeDate() {
-        List<String> dates = clickHouseJdbcTemplate.query(
-            "SELECT MAX(trade_date) FROM stock.stock_daily FINAL",
-            (rs, rowNum) -> rs.getString(1));
-        return dates.isEmpty() ? "2026-01-01" : dates.getFirst();
-    }
 
-    private double median(List<Double> values) {
-        if (values == null || values.isEmpty()) return 0;
-        List<Double> sorted = new ArrayList<>(values);
-        Collections.sort(sorted);
-        int n = sorted.size();
-        if (n % 2 == 1) return sorted.get(n / 2);
-        return (sorted.get(n / 2 - 1) + sorted.get(n / 2)) / 2.0;
-    }
 
     // ══════════════════════════════════════════════════════════════
     // P0 新增：缠论K线可视化、资金流向趋势、相对强弱
@@ -2483,7 +2466,7 @@ public class AnalysisService {
                 if (bar.getOpenPrice() == null || bar.getClosePrice() == null
                         || bar.getHighPrice() == null || bar.getLowPrice() == null) continue;
                 marketBars.add(MarketDailyBar.builder()
-                        .symbol(normalizeCodeForDailyCH(code))
+                        .symbol(analysisCommon.normalizeCodeForDailyCH(code))
                         .tradeDate(bar.getTradeDate())
                         .open(bar.getOpenPrice())
                         .high(bar.getHighPrice())
@@ -2591,7 +2574,7 @@ public class AnalysisService {
 
         try {
             // 1. 获取历史资金流向
-            List<Map<String, Object>> mfHistory = analysisChMapper.selectMoneyFlowHistory(code, days, getLatestTradeDate());
+            List<Map<String, Object>> mfHistory = analysisChMapper.selectMoneyFlowHistory(code, days, analysisCommon.getLatestTradeDate());
             if (mfHistory == null || mfHistory.isEmpty()) {
                 result.put("error", "无资金流向数据");
                 return result;
@@ -2715,7 +2698,7 @@ public class AnalysisService {
             }
 
             // 3. 获取行业等权日收益率序列
-            String normalized = normalizeCodeForDailyCH(code);
+            String normalized = analysisCommon.normalizeCodeForDailyCH(code);
             String indReturnSql = """
                 SELECT sd.trade_date, AVG(sd.change_percent) / 100 as avg_ret
                 FROM stock.stock_daily sd FINAL
@@ -2961,7 +2944,7 @@ public class AnalysisService {
      * 使用子查询获取首日/末日价格，避免 maxBy/minBy（ClickHouse 26.5 不支持）
      */
     private double calcStockYtd(String code, String yearStartDate) {
-        String normalized = normalizeCodeForDailyCH(code);
+        String normalized = analysisCommon.normalizeCodeForDailyCH(code);
         try {
             // 先查首日、末日两个日期
             String dateSql = String.format("""
@@ -3010,7 +2993,7 @@ public class AnalysisService {
      * 样本：全市场有≥160日数据的沪深股票
      */
     private int calcRsRating(String code) {
-        String normalized = normalizeCodeForDailyCH(code);
+        String normalized = analysisCommon.normalizeCodeForDailyCH(code);
         try {
             // 近250日个股收益率（用 argMax/argMin 取首日/末日价格，已验证有效）
             String stockSql = String.format("""
@@ -3056,7 +3039,7 @@ public class AnalysisService {
      * 计算该股在行业内的20日涨幅排名
      */
     private int calcIndustryRank(String code, String industry) {
-        String normalized = normalizeCodeForDailyCH(code);
+        String normalized = analysisCommon.normalizeCodeForDailyCH(code);
         try {
             // 先获取该股20日收益率
             String targetSql = String.format("""
@@ -3253,10 +3236,10 @@ public class AnalysisService {
                 double rsi = tech.getRsi().doubleValue();
                 if (rsi < 30) {
                     bullArgs.add(new BullBearArgument("RSI超卖", "技术",
-                            "RSI=" + formatD(rsi) + "，超卖区间存在反弹可能", 3));
+                            "RSI=" + analysisCommon.formatD(rsi) + "，超卖区间存在反弹可能", 3));
                 } else if (rsi > 70) {
                     bearArgs.add(new BullBearArgument("RSI超买", "技术",
-                            "RSI=" + formatD(rsi) + "，超买区间注意回调", 3));
+                            "RSI=" + analysisCommon.formatD(rsi) + "，超买区间注意回调", 3));
                 }
             }
         }
@@ -3267,60 +3250,60 @@ public class AnalysisService {
                 double pe = fundamental.getPeTtm().doubleValue();
                 if (pe > 0 && pe < 15) {
                     bullArgs.add(new BullBearArgument("低PE估值", "基本面",
-                            "PE(TTM)=" + formatD(pe) + "，估值偏低", 4));
+                            "PE(TTM)=" + analysisCommon.formatD(pe) + "，估值偏低", 4));
                 } else if (pe > 50) {
                     bearArgs.add(new BullBearArgument("高PE估值", "基本面",
-                            "PE(TTM)=" + formatD(pe) + "，估值偏高", 4));
+                            "PE(TTM)=" + analysisCommon.formatD(pe) + "，估值偏高", 4));
                 }
             }
             if (fundamental.getPb() != null) {
                 double pb = fundamental.getPb().doubleValue();
                 if (pb > 0 && pb < 1.5) {
                     bullArgs.add(new BullBearArgument("低PB估值", "基本面",
-                            "PB=" + formatD(pb) + "，破净风险低", 3));
+                            "PB=" + analysisCommon.formatD(pb) + "，破净风险低", 3));
                 } else if (pb > 8) {
                     bearArgs.add(new BullBearArgument("高PB估值", "基本面",
-                            "PB=" + formatD(pb) + "，市净率偏高", 3));
+                            "PB=" + analysisCommon.formatD(pb) + "，市净率偏高", 3));
                 }
             }
             if (fundamental.getRoe() != null) {
                 double roe = fundamental.getRoe().doubleValue();
                 if (roe > 15) {
                     bullArgs.add(new BullBearArgument("高ROE", "基本面",
-                            "ROE=" + formatD(roe) + "%，盈利能力优秀", 4));
+                            "ROE=" + analysisCommon.formatD(roe) + "%，盈利能力优秀", 4));
                 } else if (roe < 5) {
                     bearArgs.add(new BullBearArgument("低ROE", "基本面",
-                            "ROE=" + formatD(roe) + "%，盈利能力偏弱", 3));
+                            "ROE=" + analysisCommon.formatD(roe) + "%，盈利能力偏弱", 3));
                 }
             }
             if (fundamental.getRevenueYoy() != null) {
                 double rev = fundamental.getRevenueYoy().doubleValue();
                 if (rev > 20) {
                     bullArgs.add(new BullBearArgument("营收高增", "基本面",
-                            "营收同比+" + formatD(rev) + "%，成长性突出", 4));
+                            "营收同比+" + analysisCommon.formatD(rev) + "%，成长性突出", 4));
                 } else if (rev < -10) {
                     bearArgs.add(new BullBearArgument("营收下滑", "基本面",
-                            "营收同比" + formatD(rev) + "%，增长承压", 3));
+                            "营收同比" + analysisCommon.formatD(rev) + "%，增长承压", 3));
                 }
             }
             if (fundamental.getNetProfitYoy() != null) {
                 double profit = fundamental.getNetProfitYoy().doubleValue();
                 if (profit > 30) {
                     bullArgs.add(new BullBearArgument("利润高增", "基本面",
-                            "净利润同比+" + formatD(profit) + "%，盈利爆发", 4));
+                            "净利润同比+" + analysisCommon.formatD(profit) + "%，盈利爆发", 4));
                 } else if (profit < -20) {
                     bearArgs.add(new BullBearArgument("利润下滑", "基本面",
-                            "净利润同比" + formatD(profit) + "%，盈利恶化", 3));
+                            "净利润同比" + analysisCommon.formatD(profit) + "%，盈利恶化", 3));
                 }
             }
             if (fundamental.getDebtRatio() != null) {
                 double debt = fundamental.getDebtRatio().doubleValue();
                 if (debt > 80) {
                     bearArgs.add(new BullBearArgument("高负债率", "基本面",
-                            "资产负债率" + formatD(debt) + "%，杠杆过高", 3));
+                            "资产负债率" + analysisCommon.formatD(debt) + "%，杠杆过高", 3));
                 } else if (debt < 30) {
                     bullArgs.add(new BullBearArgument("低负债率", "基本面",
-                            "资产负债率" + formatD(debt) + "%，财务稳健", 2));
+                            "资产负债率" + analysisCommon.formatD(debt) + "%，财务稳健", 2));
                 }
             }
         }
@@ -3331,20 +3314,20 @@ public class AnalysisService {
                 double netMain = money.getNetMain().doubleValue();
                 if (netMain > 0) {
                     bullArgs.add(new BullBearArgument("主力流入", "资金",
-                            "主力净流入" + formatMoney(netMain) + "，资金积极介入", 4));
+                            "主力净流入" + analysisCommon.formatMoney(netMain) + "，资金积极介入", 4));
                 } else if (netMain < 0) {
                     bearArgs.add(new BullBearArgument("主力流出", "资金",
-                            "主力净流出" + formatMoney(Math.abs(netMain)) + "，资金撤退", 4));
+                            "主力净流出" + analysisCommon.formatMoney(Math.abs(netMain)) + "，资金撤退", 4));
                 }
             }
             if (money.getVolumeRatio() != null) {
                 double vr = money.getVolumeRatio().doubleValue();
                 if (vr >= 2.0) {
                     bullArgs.add(new BullBearArgument("量能放大", "资金",
-                            "量比=" + formatD(vr) + "，成交活跃", 3));
+                            "量比=" + analysisCommon.formatD(vr) + "，成交活跃", 3));
                 } else if (vr < 0.5) {
                     bearArgs.add(new BullBearArgument("量能萎缩", "资金",
-                            "量比=" + formatD(vr) + "，成交清淡", 2));
+                            "量比=" + analysisCommon.formatD(vr) + "，成交清淡", 2));
                 }
             }
         }
@@ -3442,18 +3425,7 @@ public class AnalysisService {
         return sb.toString();
     }
 
-    private String formatD(double value) {
-        return BigDecimal.valueOf(value).setScale(2, RoundingMode.HALF_UP).toString();
-    }
 
-    private String formatMoney(double value) {
-        if (Math.abs(value) >= 1_0000_0000) {
-            return BigDecimal.valueOf(value / 1_0000_0000).setScale(2, RoundingMode.HALF_UP) + "亿";
-        } else if (Math.abs(value) >= 10000) {
-            return BigDecimal.valueOf(value / 10000).setScale(2, RoundingMode.HALF_UP) + "万";
-        }
-        return BigDecimal.valueOf(value).setScale(2, RoundingMode.HALF_UP).toString();
-    }
     private String calcSuggestedPositionPct(TradingSignal signal, String confidenceLevel,
                                             FundamentalSignal fundamental, boolean isBlueChip) {
         if (signal == null) return null;
