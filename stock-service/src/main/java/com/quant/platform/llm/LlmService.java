@@ -248,7 +248,9 @@ public class LlmService {
         try {
             objectMapper.readTree(json);
             return json;
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+            log.error("[LlmService] 捕获到未处理异常", ignored);
+        }
 
         // 计算未闭合的引号和大括号
         // 策略：从后向前找到最后一个完整的 value，然后截断补齐

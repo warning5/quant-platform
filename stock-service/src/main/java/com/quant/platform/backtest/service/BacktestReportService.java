@@ -69,6 +69,7 @@ public class BacktestReportService {
                     result.put("stratCurve", stratCurve);
                     result.put("bmCurve", bmCurve);
                 } catch (Exception e) {
+                    log.error("[BacktestReportService] 捕获到未处理异常", e);
                     // 报告可能还没生成，忽略错误
                 }
             }

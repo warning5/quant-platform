@@ -29,6 +29,7 @@ public class BacktestProgressNotifier {
                         Map.of("taskId", taskId, "stage", stage, "progress", pct, "message", message));
             }
         } catch (Exception ignored) {
+            log.error("[BacktestProgressNotifier] 捕获到未处理异常", ignored);
         }
     }
 
@@ -51,6 +52,7 @@ public class BacktestProgressNotifier {
                 messagingTemplate.convertAndSend("/topic/backtest/" + taskId, msg);
             }
         } catch (Exception ignored) {
+            log.error("[BacktestProgressNotifier] 捕获到未处理异常", ignored);
         }
     }
 }

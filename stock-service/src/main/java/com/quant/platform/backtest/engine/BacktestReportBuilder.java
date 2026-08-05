@@ -289,6 +289,7 @@ public class BacktestReportBuilder {
             try {
                 equityCurveMapper.deleteByTaskId(taskId);
             } catch (Exception ignored) {
+                log.error("[BacktestReportBuilder] 捕获到未处理异常", ignored);
             }
             double prevNav = 0;
             for (Map<String, Object> point : equityCurve) {
@@ -306,6 +307,7 @@ public class BacktestReportBuilder {
                 try {
                     equityCurveMapper.insertOne(ec);
                 } catch (Exception e) {
+                    log.error("[BacktestReportBuilder] 捕获到未处理异常", e);
                     // 逐条插入容错
                 }
             }

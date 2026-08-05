@@ -99,7 +99,9 @@ public class StrategyProfiler {
                 double rebalanceInterval = (double) days / (periodCount - 1);
                 avgHoldingDays = rebalanceInterval / Math.max(avgTurnover, 0.01);
                 avgHoldingDays = Math.min(avgHoldingDays, days);
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+                log.error("[StrategyProfiler] 捕获到未处理异常", ignored);
+            }
         }
 
         // 决策逻辑

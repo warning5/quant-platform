@@ -239,7 +239,9 @@ public class ScheduleConfigService {
                         jdbcTemplate.update(
                             "UPDATE data_schedule_config SET last_run_time = ?, last_run_status = 'FAILED' WHERE task_key = ?",
                             LocalDateTime.now(), upper);
-                    } catch (Exception ignored) {}
+                    } catch (Exception ignored) {
+                        log.error("[ScheduleConfigService] 捕获到未处理异常", ignored);
+                    }
                 }
             });
 

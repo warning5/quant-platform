@@ -175,6 +175,7 @@ public class FinancialDataQueryService {
                 item.put("rate", Math.round(nonNull * 100.0 / totalRecords * 10) / 10.0);
                 fieldNullRates.add(item);
             } catch (Exception e) {
+                log.error("[FinancialDataQueryService] 捕获到未处理异常", e);
                 // 字段不存在则跳过
             }
         }

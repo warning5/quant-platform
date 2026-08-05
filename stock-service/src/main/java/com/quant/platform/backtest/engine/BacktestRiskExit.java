@@ -190,6 +190,7 @@ public class BacktestRiskExit {
                         toSellBySignal.add(symbol);
                     }
                 } catch (Exception e) {
+                    log.error("[BacktestRiskExit] 捕获到未处理异常", e);
                     // 卖点检测失败不影响回测主流程
                 }
             }

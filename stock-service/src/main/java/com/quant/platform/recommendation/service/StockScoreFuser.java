@@ -159,6 +159,7 @@ public class StockScoreFuser {
                 rec.setFactorRanksJson(objectMapper.writeValueAsString(stock.getFactorRanks()));
             }
         } catch (Exception ignored) {
+            log.error("[StockScoreFuser] 捕获到未处理异常", ignored);
         }
 
         // 个股深度分析：getOverview 内部用 selectStockInfo(code) 查 stock_info 取 name，

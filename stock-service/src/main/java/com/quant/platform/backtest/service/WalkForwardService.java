@@ -313,6 +313,7 @@ public class WalkForwardService {
                     }
                 }
             } catch (Exception e) {
+                log.error("[WalkForwardService] 捕获到未处理异常", e);
                 // 跳过无法获取数据的股票
             }
         }

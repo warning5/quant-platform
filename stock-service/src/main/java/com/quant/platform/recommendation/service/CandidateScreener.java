@@ -162,6 +162,7 @@ public class CandidateScreener {
                             .build();
                     results.add(ss);
             } catch (Exception e) {
+                log.error("[CandidateScreener] 捕获到未处理异常", e);
                 // 单只股票失败跳过
             }
         }

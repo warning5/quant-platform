@@ -406,7 +406,9 @@ public class LlmAnalysisService {
                     // 经营现金流/净利润：表中有现成的 operating_cf_to_np 字段
                     result.put("ocfRatio", rs.getObject("operating_cf_to_np"));
                 }, pureCode);
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+            log.error("[LlmAnalysisService] 捕获到未处理异常", ignored);
+        }
         return result;
     }
 

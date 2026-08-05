@@ -256,7 +256,7 @@ public class FactorContextBuilder {
                 if (code == null || s == null) continue;
                 try {
                     map.put(code, Double.parseDouble(s.toString()));
-                } catch (Exception e) { /* skip */ }
+                } catch (Exception e) { log.error("[FactorContextBuilder] 捕获到未处理异常", e); /* skip */ }
             }
             Map<String, Object> ctx = new HashMap<>();
             ctx.put("lhbInstNetMap", map);
@@ -281,7 +281,7 @@ public class FactorContextBuilder {
                 if (code == null || c == null) continue;
                 try {
                     map.put(code, Double.parseDouble(c.toString()));
-                } catch (Exception e) { /* skip */ }
+                } catch (Exception e) { log.error("[FactorContextBuilder] 捕获到未处理异常", e); /* skip */ }
             }
             Map<String, Object> ctx = new HashMap<>();
             ctx.put("instResearchMap", map);

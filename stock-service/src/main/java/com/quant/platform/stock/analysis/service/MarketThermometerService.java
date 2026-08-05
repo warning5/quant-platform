@@ -586,7 +586,9 @@ except Exception as e:
                 tradeDate = chJdbc.queryForObject(
                     "SELECT MAX(trade_date) FROM stock.index_daily FINAL WHERE code = '000300' AND trade_date <= ?",
                     String.class, date.toString());
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+                log.error("[MarketThermometerService] 捕获到未处理异常", ignored);
+            }
             if (tradeDate == null) return result;
 
             // 大小盘：沪深300 vs 中证1000

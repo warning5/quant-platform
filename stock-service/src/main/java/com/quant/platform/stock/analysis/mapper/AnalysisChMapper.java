@@ -84,7 +84,9 @@ public class AnalysisChMapper {
                 Object td = rs.getObject("trade_date");
                 if (td != null) {
                     try { t.setTradeDate(java.time.LocalDate.parse(td.toString())); }
-                    catch (Exception ignored) {}
+                    catch (Exception ignored) {
+                        log.error("[AnalysisChMapper] 捕获到未处理异常", ignored);
+                    }
                 }
                 return t;
             }, withSuffix, noSuffix);

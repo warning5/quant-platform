@@ -136,7 +136,7 @@ public class ClickHouseSentimentService {
             }
             sb.append(dateCol).append(" <= '").append(endDate).append("'");
         }
-        return !sb.isEmpty() ? " WHERE " + sb.toString() : "";
+        return !sb.isEmpty() ? " WHERE " + sb : "";
     }
 
     /**
@@ -587,6 +587,7 @@ public class ClickHouseSentimentService {
                     }
                 }
             } catch (Exception e) {
+                log.error("[ClickHouseSentimentService] 捕获到未处理异常", e);
                 // 忽略字段不存在错误
             }
             validation.put("nullChecks", nullChecks);

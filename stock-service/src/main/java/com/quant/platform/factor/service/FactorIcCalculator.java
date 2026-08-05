@@ -551,6 +551,7 @@ public class FactorIcCalculator {
                 TDistribution tDist = new TDistribution(n - 1);
                 pValue = 2.0 * (1.0 - tDist.cumulativeProbability(Math.abs(tStat)));
             } catch (Exception ignored) {
+                log.error("[FactorIcCalculator] 捕获到未处理异常", ignored);
             }
         }
         result.put("pValue", Math.round(pValue * 10000.0) / 10000.0);
@@ -1249,6 +1250,7 @@ public class FactorIcCalculator {
                         filtered.add(v);
                     }
                 } catch (Exception ignore) {
+                    log.error("[FactorIcCalculator] 捕获到未处理异常", ignore);
                     // 日期解析失败，保守剔除
                 }
             }
@@ -1280,6 +1282,7 @@ public class FactorIcCalculator {
             try {
                 targetRegime = regimeCalendarService.getRegime(LocalDate.parse(endDate));
             } catch (Exception ignore) {
+                log.error("[FactorIcCalculator] 捕获到未处理异常", ignore);
                 // 解析失败则不做 regime 过滤
             }
         }

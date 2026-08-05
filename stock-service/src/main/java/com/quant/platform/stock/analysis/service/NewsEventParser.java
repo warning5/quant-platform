@@ -160,7 +160,9 @@ public class NewsEventParser {
                 try {
                     LocalDateTime dt = LocalDateTime.parse(pubDate.toString().replace(" ", "T"));
                     if (!dt.isAfter(cutoff)) continue;
-                } catch (Exception ignored) {}
+                } catch (Exception ignored) {
+                    log.error("[NewsEventParser] 捕获到未处理异常", ignored);
+                }
             }
 
             if (bullishCodes.contains(tag)) {

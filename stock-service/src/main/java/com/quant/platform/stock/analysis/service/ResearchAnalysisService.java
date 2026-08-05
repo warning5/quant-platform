@@ -136,7 +136,9 @@ public class ResearchAnalysisService {
                         }
                     }
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+                log.error("[ResearchAnalysisService] 捕获到未处理异常", ignored);
+            }
         }
 
         // 取各年份平均

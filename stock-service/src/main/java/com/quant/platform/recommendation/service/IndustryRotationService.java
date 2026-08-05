@@ -191,7 +191,9 @@ public class IndustryRotationService {
                 String repIndustry = grp;
                 // P2-8: 优先查动态分组，回退到静态
                 List<List<String>> allGroups = null;
-                try { allGroups = dynamicIndustryCorrService.getDynamicCorrGroups(); } catch (Exception ignored) {}
+                try { allGroups = dynamicIndustryCorrService.getDynamicCorrGroups(); } catch (Exception ignored) {
+                    log.error("[IndustryRotationService] 捕获到未处理异常", ignored);
+                }
                 if (allGroups == null) allGroups = INDUSTRY_CORR_GROUPS;
                 for (List<String> g : allGroups) {
                     if (g.getFirst().equals(grp)) {
@@ -286,6 +288,7 @@ public class IndustryRotationService {
                         industryRecentChanges.computeIfAbsent(industry, k -> new ArrayList<>()).add(chg);
                     }
                 } catch (Exception ignored) {
+                    log.error("[IndustryRotationService] 捕获到未处理异常", ignored);
                 }
 
                 // 仅目标日期用于精确当日数据

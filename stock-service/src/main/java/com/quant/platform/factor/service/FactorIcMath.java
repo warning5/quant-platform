@@ -1,24 +1,15 @@
 package com.quant.platform.factor.service;
 
-import com.quant.platform.factor.regime.MarketRegimeCalendarService;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.math3.distribution.TDistribution;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.stereotype.Service;
 
-import java.math.BigDecimal;
-import java.time.LocalDate;
 import java.util.*;
-import java.util.stream.Collectors;
 
 /**
  * 因子 IC/IR 计算的纯函数与工具方法（无状态、无注入依赖）。
  * 由 FactorAnalysisService 拆分而来，方法体逐字搬运，行为零变化。
  */
+@Slf4j
 public final class FactorIcMath {
 
     private FactorIcMath() {}
@@ -181,6 +172,7 @@ public final class FactorIcMath {
                 TDistribution tDist = new TDistribution(n - 1);
                 pValue = 2.0 * (1.0 - tDist.cumulativeProbability(Math.abs(tStat)));
             } catch (Exception ignored) {
+                log.error("[FactorIcMath] 捕获到未处理异常", ignored);
             }
         }
 

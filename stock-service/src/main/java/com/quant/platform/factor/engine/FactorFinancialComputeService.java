@@ -355,6 +355,7 @@ public class FactorFinancialComputeService {
                     results.add(fv);
                 }
             } catch (Exception ignored) {
+                log.error("[FactorFinancialComputeService] 捕获到未处理异常", ignored);
             }
         }
         return results;

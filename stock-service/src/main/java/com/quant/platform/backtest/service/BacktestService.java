@@ -163,8 +163,8 @@ public class BacktestService {
         if (report != null) {
             reportMapper.deleteById(report.getId());
         }
-        try { equityCurveMapper.deleteByTaskId(taskId); } catch (Exception ignored) {}
-        try { rebalanceRecordMapper.deleteByTaskId(taskId); } catch (Exception ignored) {}
+        equityCurveMapper.deleteByTaskId(taskId);
+        rebalanceRecordMapper.deleteByTaskId(taskId);
         taskMapper.deleteById(taskId);
         dataPermissionService.deleteResourceMeta(ResourceType.BACKTEST.getCode(), taskId);
     }
@@ -183,8 +183,8 @@ public class BacktestService {
             reportMapper.deleteById(oldReport.getId());
         }
         // 1a. 清空 SCREEN 模式下的曲线/调仓记录
-        try { equityCurveMapper.deleteByTaskId(taskId); } catch (Exception ignored) {}
-        try { rebalanceRecordMapper.deleteByTaskId(taskId); } catch (Exception ignored) {}
+        equityCurveMapper.deleteByTaskId(taskId);
+        rebalanceRecordMapper.deleteByTaskId(taskId);
         // 2. 重置任务状态
         task.setStatus(JobStatus.PENDING);
         task.setProgress(0);
@@ -223,7 +223,7 @@ public class BacktestService {
         // ---- 基本参数：从回测任务取，兜底默认值 ----
         BigDecimal stopLoss = task.getStopLossPct() != null ? task.getStopLossPct() : new BigDecimal("0.05");
         BigDecimal takeProfit = task.getStopProfitPct() != null ? task.getStopProfitPct() : new BigDecimal("0.10");
-        Integer maxPositions = task.getMaxPositionCount() != null ? task.getMaxPositionCount() : 8;
+        int maxPositions = task.getMaxPositionCount() != null ? task.getMaxPositionCount() : 8;
         String rebalanceFreq = task.getRebalanceFreq() != null ? task.getRebalanceFreq() : "MONTHLY";
         BigDecimal commissionRate = task.getCommissionRate() != null ? task.getCommissionRate() : new BigDecimal("0.0003");
         BigDecimal slippageRate = task.getSlippageRate() != null ? task.getSlippageRate() : new BigDecimal("0.001");
@@ -233,8 +233,7 @@ public class BacktestService {
         if (report.getMaxDrawdown() != null) {
             BigDecimal maxDD = report.getMaxDrawdown().abs();
             if (maxDD.compareTo(new BigDecimal("0.15")) > 0) {
-                BigDecimal tightened = maxDD.multiply(new BigDecimal("0.8")).min(new BigDecimal("0.12"));
-                stopLoss = tightened;
+                stopLoss = maxDD.multiply(new BigDecimal("0.8")).min(new BigDecimal("0.12"));
                 reasons.add(String.format("回测最大回撤 %.1f%%，止损收紧至 %.1f%%",
                         maxDD.multiply(BigDecimal.valueOf(100)).doubleValue(),
                         stopLoss.multiply(BigDecimal.valueOf(100)).doubleValue()));

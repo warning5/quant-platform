@@ -654,6 +654,7 @@ public class FactorComputeEngine {
                     results.add(fv);
                 }
             } catch (Exception ignored) {
+                log.error("[FactorComputeEngine] 捕获到未处理异常", ignored);
             }
         }
         return results;
@@ -750,6 +751,7 @@ public class FactorComputeEngine {
                     results.add(fv);
                 }
             } catch (Exception ignored) {
+                log.error("[FactorComputeEngine] 捕获到未处理异常", ignored);
             }
         }
         if (results.isEmpty() && emptyCount == symbols.size()) {

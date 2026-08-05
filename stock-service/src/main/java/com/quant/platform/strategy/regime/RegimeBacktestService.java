@@ -109,7 +109,9 @@ public class RegimeBacktestService {
                     "SELECT COUNT(DISTINCT recommend_date) FROM stock_recommendation " +
                     "WHERE recommend_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)", Integer.class, days);
                 if (distinctDates != null) reportDates = distinctDates;
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+                log.error("[RegimeBacktestService] 捕获到未处理异常", ignored);
+            }
 
         } catch (Exception e) {
             log.error("[RegimeBacktest] 统计Regime分布失败", e);

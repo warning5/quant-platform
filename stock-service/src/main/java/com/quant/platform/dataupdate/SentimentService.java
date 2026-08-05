@@ -307,6 +307,7 @@ public class SentimentService {
                         }
                     }
                 } catch (Exception e) {
+                    log.error("[SentimentService] 捕获到未处理异常", e);
                     // 忽略字段不存在错误
                 }
                 validation.put("nullChecks", nullChecks);

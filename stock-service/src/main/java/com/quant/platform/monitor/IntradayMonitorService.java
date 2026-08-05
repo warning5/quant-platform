@@ -209,6 +209,7 @@ public class IntradayMonitorService {
         try {
             refreshIndexQuotes();
         } catch (Exception e) {
+            log.error("[IntradayMonitorService] 捕获到未处理异常", e);
             // 静默失败，下次再重试
         }
     }
@@ -250,6 +251,7 @@ public class IntradayMonitorService {
             try {
                 emitter.complete();
             } catch (Exception ignored) {
+                log.error("[IntradayMonitorService] 捕获到未处理异常", ignored);
             }
         }
         signalPublisher.sseEmittersRef().clear();
@@ -682,6 +684,7 @@ public class IntradayMonitorService {
                     }
                 }
             } catch (Exception ignored) {
+                log.error("[IntradayMonitorService] 捕获到未处理异常", ignored);
             }
         }
 

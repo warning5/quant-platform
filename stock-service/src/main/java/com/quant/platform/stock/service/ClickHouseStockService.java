@@ -60,7 +60,7 @@ public class ClickHouseStockService {
                     """;
             return executeQuery(sql, code, startDate, endDate);
         } catch (Exception e) {
-            log.warn("[ClickHouse] 指数查询失败(index_daily)，回退到 MySQL: {}", e.getMessage());
+            log.warn("[ClickHouse] 指数查询失败(index_daily)，回退到 MySQL: {}", e.getMessage(), e);
             return getIndexDailyFromMySQL(code, startDate, endDate);
         }
     }
@@ -123,7 +123,7 @@ public class ClickHouseStockService {
                 }
             }
         } catch (Exception e) {
-            log.warn("[ClickHouse] 批量指数查询失败: {}", e.getMessage());
+            log.warn("[ClickHouse] 批量指数查询失败: {}", e.getMessage(), e);
             // 不回退 MySQL，静默返回空
         }
         return result;
@@ -146,7 +146,7 @@ public class ClickHouseStockService {
                 return result;
             }
         } catch (Exception e) {
-            log.warn("[ClickHouse] 查询失败，回退到 MySQL: {}", e.getMessage());
+            log.warn("[ClickHouse] 查询失败，回退到 MySQL: {}", e.getMessage(), e);
         }
 
         return getFromMySQL(code, startDate, endDate);
@@ -176,7 +176,7 @@ public class ClickHouseStockService {
             }
             log.warn("[ClickHouse] 批量查询返回 0 行: {} 只股票 {}~{}, 回退 MySQL", codes.size(), startDate, endDate);
         } catch (Exception e) {
-            log.warn("[ClickHouse] 批量查询失败，回退到 MySQL: {}", e.getMessage());
+            log.warn("[ClickHouse] 批量查询失败，回退到 MySQL: {}", e.getMessage(), e);
         }
 
         return getBatchFromMySQL(codes, startDate, endDate);
@@ -202,7 +202,7 @@ public class ClickHouseStockService {
                 return result;
             }
         } catch (Exception e) {
-            log.warn("[ClickHouse] 截面查询失败，回退到 MySQL: {}", e.getMessage());
+            log.warn("[ClickHouse] 截面查询失败，回退到 MySQL: {}", e.getMessage(), e);
         }
 
         return getDailyByDateFromMySQL(date, excludeNames);
@@ -220,7 +220,7 @@ public class ClickHouseStockService {
         try {
             return getCrossSectionPagedFromClickHouse(date, page, size, keyword, sortField, sortOrder);
         } catch (Exception e) {
-            log.warn("[ClickHouse] 截面分页查询失败，回退到 MySQL: {}", e.getMessage());
+            log.warn("[ClickHouse] 截面分页查询失败，回退到 MySQL: {}", e.getMessage(), e);
         }
 
         return getCrossSectionPagedFromMySQL(date, page, size, keyword, sortField, sortOrder);
@@ -240,7 +240,7 @@ public class ClickHouseStockService {
         try {
             return getOverviewStatsFromClickHouse(tradeDate);
         } catch (Exception e) {
-            log.warn("[ClickHouse] 概览统计失败，回退到 MySQL: {}", e.getMessage());
+            log.warn("[ClickHouse] 概览统计失败，回退到 MySQL: {}", e.getMessage(), e);
         }
 
         return getOverviewStatsFromMySQL(tradeDate);
@@ -258,7 +258,7 @@ public class ClickHouseStockService {
         try {
             return getTopByPctChgFromClickHouse(tradeDate, limit, order);
         } catch (Exception e) {
-            log.warn("[ClickHouse] Top N 查询失败，回退到 MySQL: {}", e.getMessage());
+            log.warn("[ClickHouse] Top N 查询失败，回退到 MySQL: {}", e.getMessage(), e);
         }
 
         return getTopByPctChgFromMySQL(tradeDate, limit, order);
@@ -277,7 +277,7 @@ public class ClickHouseStockService {
         try {
             return getLatestTradingDateFromClickHouse(start, end);
         } catch (Exception e) {
-            log.warn("[ClickHouse] 最新交易日查询失败，回退到 MySQL: {}", e.getMessage());
+            log.warn("[ClickHouse] 最新交易日查询失败，回退到 MySQL: {}", e.getMessage(), e);
         }
 
         return getLatestTradingDateFromMySQL(start, end);
@@ -294,7 +294,7 @@ public class ClickHouseStockService {
         try {
             return getTradingDatesFromClickHouse(start, end);
         } catch (Exception e) {
-            log.warn("[ClickHouse] 交易日列表查询失败，回退到 MySQL: {}", e.getMessage());
+            log.warn("[ClickHouse] 交易日列表查询失败，回退到 MySQL: {}", e.getMessage(), e);
         }
 
         return getTradingDatesFromMySQL(start, end);
@@ -311,7 +311,7 @@ public class ClickHouseStockService {
         try {
             return getRecentTradingDatesFromClickHouse(limit);
         } catch (Exception e) {
-            log.warn("[ClickHouse] 最近交易日查询失败，回退到 MySQL: {}", e.getMessage());
+            log.warn("[ClickHouse] 最近交易日查询失败，回退到 MySQL: {}", e.getMessage(), e);
         }
 
         return getRecentTradingDatesFromMySQL(limit);
@@ -335,7 +335,7 @@ public class ClickHouseStockService {
                 if (rs.next()) return rs.getLong(1);
             }
         } catch (Exception e) {
-            log.warn("[ClickHouse] 总记录数查询失败，回退到 MySQL: {}", e.getMessage());
+            log.warn("[ClickHouse] 总记录数查询失败，回退到 MySQL: {}", e.getMessage(), e);
         }
 
         return stockDailyMapper.selectCount(null);
@@ -363,7 +363,7 @@ public class ClickHouseStockService {
                 }
             }
         } catch (Exception e) {
-            log.warn("[ClickHouse] 按前缀统计失败，回退到 MySQL: {}", e.getMessage());
+            log.warn("[ClickHouse] 按前缀统计失败，回退到 MySQL: {}", e.getMessage(), e);
         }
 
         LambdaQueryWrapper<StockDaily> wrapper = new LambdaQueryWrapper<>();
@@ -381,7 +381,7 @@ public class ClickHouseStockService {
         try {
             return getExtremeDateFromClickHouse(true);
         } catch (Exception e) {
-            log.warn("[ClickHouse] 获取最新交易日失败，回退到 MySQL: {}", e.getMessage());
+            log.warn("[ClickHouse] 获取最新交易日失败，回退到 MySQL: {}", e.getMessage(), e);
         }
         return getExtremeDateFromMySQL(true);
     }
@@ -393,7 +393,7 @@ public class ClickHouseStockService {
         try {
             return getExtremeDateFromClickHouse(false);
         } catch (Exception e) {
-            log.warn("[ClickHouse] 获取最早交易日失败，回退到 MySQL: {}", e.getMessage());
+            log.warn("[ClickHouse] 获取最早交易日失败，回退到 MySQL: {}", e.getMessage(), e);
         }
         return getExtremeDateFromMySQL(false);
     }
@@ -438,7 +438,7 @@ public class ClickHouseStockService {
                 }
             }
         } catch (Exception e) {
-            log.warn("[ClickHouse] distinct count 查询失败，回退到 MySQL: {}", e.getMessage());
+            log.warn("[ClickHouse] distinct count 查询失败，回退到 MySQL: {}", e.getMessage(), e);
         }
 
         // MySQL 回退
@@ -460,7 +460,7 @@ public class ClickHouseStockService {
         try {
             return getExistingCodesFromClickHouse(date, codes);
         } catch (Exception e) {
-            log.warn("[ClickHouse] existing codes 查询失败，回退到 MySQL: {}", e.getMessage());
+            log.warn("[ClickHouse] existing codes 查询失败，回退到 MySQL: {}", e.getMessage(), e);
         }
 
         return getExistingCodesFromMySQL(date, codes);
@@ -479,7 +479,7 @@ public class ClickHouseStockService {
             return queryForListFromClickHouse(sql, params);
         } catch (Exception e) {
             String rootCause = e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
-            log.warn("[ClickHouse] 通用查询失败，回退到 MySQL: {} | SQL: {}", rootCause, sql);
+            log.warn("[ClickHouse] 通用查询失败，回退到 MySQL: {} | SQL: {}", rootCause, sql, e);
         }
 
         return queryForListFromMySQL(sql, params);
@@ -497,7 +497,7 @@ public class ClickHouseStockService {
             return queryForObjectFromClickHouse(sql, params);
         } catch (Exception e) {
             String rootCause = e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
-            log.warn("[ClickHouse] 通用单值查询失败，回退到 MySQL: {} | SQL: {}", rootCause, sql);
+            log.warn("[ClickHouse] 通用单值查询失败，回退到 MySQL: {} | SQL: {}", rootCause, sql, e);
         }
 
         return queryForObjectFromMySQL(sql, params);
@@ -697,7 +697,7 @@ public class ClickHouseStockService {
                 }
             }
         } catch (Exception e) {
-            log.warn("[ClickHouse] 波动率计算失败({}): {}", code, e.getMessage());
+            log.warn("[ClickHouse] 波动率计算失败({}): {}", code, e.getMessage(), e);
         }
         return null;
     }

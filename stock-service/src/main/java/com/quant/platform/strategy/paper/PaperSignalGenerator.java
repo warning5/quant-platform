@@ -148,7 +148,9 @@ public class PaperSignalGenerator {
                 if (!dates.isEmpty() && dates.getFirst() != null) {
                     maxDailyDate = LocalDate.parse(dates.getFirst());
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+                log.error("[PaperSignalGenerator] 捕获到未处理异常", ignored);
+            }
         }
         signalDate = maxDailyDate != null ? maxDailyDate.toString() : LocalDate.now().toString();
         log.info("generateSignals: paperId={}, signalDate={}（日频因子最新，排除FIN_）, strategies={}, factorCount={}",

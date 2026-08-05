@@ -123,6 +123,7 @@ public class MonitorQuoteClient {
                     }
                 }
             } catch (Exception ignored) {
+                log.error("[MonitorQuoteClient] 捕获到未处理异常", ignored);
             }
         }
     }
@@ -163,6 +164,7 @@ public class MonitorQuoteClient {
                 parseIndexQuotes(response.body());
             }
         } catch (Exception e) {
+            log.error("[MonitorQuoteClient] 捕获到未处理异常", e);
             // 静默失败，下次再重试
         }
     }
@@ -197,6 +199,7 @@ public class MonitorQuoteClient {
 
                 indexQuoteCache.put(code, info);
             } catch (Exception ignored) {
+                log.error("[MonitorQuoteClient] 捕获到未处理异常", ignored);
             }
         }
     }

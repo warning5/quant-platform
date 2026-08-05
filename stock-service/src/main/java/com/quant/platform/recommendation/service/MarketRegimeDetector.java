@@ -214,6 +214,7 @@ public class MarketRegimeDetector {
             try {
                 regimeCalendarService.upsert(date, info.regime);
             } catch (Exception ignore) {
+                log.error("[MarketRegimeDetector] 捕获到未处理异常", ignore);
                 // 落库失败不影响主流程
             }
         }

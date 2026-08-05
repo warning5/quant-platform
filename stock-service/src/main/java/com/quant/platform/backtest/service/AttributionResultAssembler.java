@@ -209,7 +209,9 @@ public final class AttributionResultAssembler {
                 LocalDate d = LocalDate.parse((String) point.get("date"));
                 double v = ((Number) point.get("value")).doubleValue();
                 result.put(d, v);
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+                log.error("[AttributionResultAssembler] 捕获到未处理异常", ignored);
+            }
         }
         return result;
     }

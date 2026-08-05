@@ -280,7 +280,9 @@ public class DataUpdateExecutionService {
                     taskName = jdbcTemplate.queryForObject(
                         "SELECT task_name FROM data_schedule_config WHERE task_key = ?",
                         String.class, request.getTaskKey() != null ? request.getTaskKey() : request.getUpdateType());
-                } catch (Exception ignored) {}
+                } catch (Exception ignored) {
+                    log.error("[DataUpdateExecutionService] 捕获到未处理异常", ignored);
+                }
                 long hid = taskRunHistoryService.insertRunning(
                     request.getTaskKey() != null ? request.getTaskKey() : request.getUpdateType(),
                     taskName, request.getTriggerType(), request.getUpdateType(), null);

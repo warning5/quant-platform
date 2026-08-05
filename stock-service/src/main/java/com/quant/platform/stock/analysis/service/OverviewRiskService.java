@@ -41,7 +41,9 @@ public class OverviewRiskService {
         BigDecimal totalMarketCap = (stockInfo != null && stockInfo.get("totalMarketCap") != null)
                 ? new BigDecimal(stockInfo.get("totalMarketCap").toString()) : null;
         Double annualVol = null;
-        try { annualVol = clickHouseStockService.getHistoricalVolatility(code); } catch (Exception ignore) {}
+        try { annualVol = clickHouseStockService.getHistoricalVolatility(code); } catch (Exception ignore) {
+            log.error("[OverviewRiskService] 捕获到未处理异常", ignore);
+        }
         String impactLevel  = calcImpactLevel(totalMarketCap);
         String drawdown    = calcPotentialDrawdown(annualVol, totalMarketCap);
 

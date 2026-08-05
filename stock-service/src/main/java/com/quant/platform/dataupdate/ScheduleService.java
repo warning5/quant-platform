@@ -117,7 +117,9 @@ public class ScheduleService implements SchedulingConfigurer {
                         getNotificationService().sendAlert(String.format(
                             "## 定时任务孤儿告警\n\n检测到 %d 个执行记录超过3小时仍处于 RUNNING（疑似进程中断/后端重启未清理），已自动标记为 TIMEOUT。\n请检查相关任务是否需手动重跑。",
                             orphanCount));
-                    } catch (Exception ignored) {}
+                    } catch (Exception ignored) {
+                        log.error("[ScheduleService] 捕获到未处理异常", ignored);
+                    }
                 }
             }
             // 清理 data_schedule_config 中长时间 RUNNING 的孤儿（>180分钟仍 RUNNING 视为中断）
@@ -162,7 +164,9 @@ public class ScheduleService implements SchedulingConfigurer {
         try {
             globalCron = jdbcTemplate.queryForObject(
                 "SELECT cron_expression FROM data_schedule_config WHERE task_key = 'GLOBAL'", String.class);
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+            log.error("[ScheduleService] 捕获到未处理异常", ignored);
+        }
 
         List<Map<String, Object>> configs = jdbcTemplate.queryForList(
             "SELECT task_key, cron_expression, use_global_cron FROM data_schedule_config " +
@@ -386,7 +390,9 @@ public class ScheduleService implements SchedulingConfigurer {
         for (Map.Entry<String, ScheduledFuture<?>> entry : scheduledTasks.entrySet()) {
             try {
                 entry.getValue().cancel(false);
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+                log.error("[ScheduleService] 捕获到未处理异常", ignored);
+            }
         }
         scheduledTasks.clear();
         log.info("[ScheduleService] 已取消所有调度任务");
@@ -511,7 +517,9 @@ public class ScheduleService implements SchedulingConfigurer {
             try {
                 configRow = jdbcTemplate.queryForMap(
                     "SELECT extra_config FROM data_schedule_config WHERE task_key = ?", taskKey);
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+                log.error("[ScheduleService] 捕获到未处理异常", ignored);
+            }
 
             String extraConfigJson = configRow != null ? (String) configRow.get("extra_config") : null;
             DataUpdateRequest request = buildRequestFromKey(taskKey, extraConfigJson);
@@ -699,7 +707,9 @@ public class ScheduleService implements SchedulingConfigurer {
                     log.info("[ScheduleService] 依赖任务 {} 已禁用，跳过触发", depKey);
                     continue;
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+                log.error("[ScheduleService] 捕获到未处理异常", ignored);
+            }
 
             // 多上游依赖：require_all_upstreams=1 时，检查所有上游是否都已完成
             if (requireAll == 1) {
@@ -750,10 +760,14 @@ public class ScheduleService implements SchedulingConfigurer {
             try {
                 sendFailureAlert(event.getTaskKey(),
                     new RuntimeException("数据更新任务执行失败(耗时" + event.getDurationSeconds() + "s)"));
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+                log.error("[ScheduleService] 捕获到未处理异常", ignored);
+            }
             try {
                 scheduleRetry(event.getTaskKey());
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+                log.error("[ScheduleService] 捕获到未处理异常", ignored);
+            }
             return;
         }
         log.info("[ScheduleService] 收到任务完成事件: {}, 耗时{}s", event.getTaskKey(), event.getDurationSeconds());
@@ -918,7 +932,9 @@ public class ScheduleService implements SchedulingConfigurer {
             try {
                 configRow = jdbcTemplate.queryForMap(
                     "SELECT extra_config FROM data_schedule_config WHERE task_key = 'DAILY_RECOMMENDATION'");
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+                log.error("[ScheduleService] 捕获到未处理异常", ignored);
+            }
 
             if (configRow != null && configRow.get("extra_config") != null) {
                 String extraConfigJson = (String) configRow.get("extra_config");
