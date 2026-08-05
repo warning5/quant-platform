@@ -17,6 +17,7 @@ import java.util.List;
 public class BacktestResourceOptionProvider implements ResourceOptionProvider {
 
     private final BacktestTaskMapper backtestMapper;
+    private static final int MAX_OPTION_ROWS = 200;
 
     @Override
     public ResourceType supports() {
@@ -27,7 +28,7 @@ public class BacktestResourceOptionProvider implements ResourceOptionProvider {
     public List<ResourceOptionVO> listOptions() {
         return backtestMapper.selectList(new QueryWrapper<BacktestTask>()
                         .select("id", "task_name", "strategy_code")
-                        .last("ORDER BY id DESC LIMIT 200"))
+                        .last("ORDER BY id DESC LIMIT " + MAX_OPTION_ROWS))
                 .stream().map(r -> new ResourceOptionVO(r.getId(),
                         (r.getTaskName() == null ? "回测#" + r.getId() : r.getTaskName())
                                 + (r.getStrategyCode() != null ? "（策略:" + r.getStrategyCode() + "）" : "")))

@@ -14,6 +14,7 @@
 说明：只统计 next_day_excess_return 非空的真实 track 记录（重放数据该字段为空，
       因此本脚本天然只看"试点期后真实生成"的数据，不会混入回放）。
 """
+import os
 import pymysql
 import sys
 
@@ -43,8 +44,11 @@ def stat(subset):
 
 
 def main():
-    conn = pymysql.connect(host="127.0.0.1", user="root",
-                           password="123456", database="stock", charset="utf8mb4")
+    conn = pymysql.connect(host=os.environ.get("MYSQL_HOST", "127.0.0.1"),
+                           user=os.environ.get("MYSQL_USER", "root"),
+                           password=os.environ.get("MYSQL_PASSWORD", "123456"),
+                           database=os.environ.get("MYSQL_DATABASE", "stock"),
+                           charset="utf8mb4")
     try:
         cur = conn.cursor()
         cur.execute(

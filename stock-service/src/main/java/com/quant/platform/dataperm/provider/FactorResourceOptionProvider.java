@@ -17,6 +17,7 @@ import java.util.List;
 public class FactorResourceOptionProvider implements ResourceOptionProvider {
 
     private final FactorDefinitionMapper factorMapper;
+    private static final int MAX_OPTION_ROWS = 200;
 
     @Override
     public ResourceType supports() {
@@ -27,7 +28,7 @@ public class FactorResourceOptionProvider implements ResourceOptionProvider {
     public List<ResourceOptionVO> listOptions() {
         return factorMapper.selectList(new QueryWrapper<FactorDefinition>()
                         .select("id", "factor_code", "factor_name")
-                        .last("ORDER BY id DESC LIMIT 200"))
+                        .last("ORDER BY id DESC LIMIT " + MAX_OPTION_ROWS))
                 .stream().map(r -> new ResourceOptionVO(r.getId(),
                         r.getFactorCode() + " - " + (r.getFactorName() == null ? "" : r.getFactorName())))
                 .toList();

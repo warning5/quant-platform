@@ -17,6 +17,7 @@ import java.util.List;
 public class PaperTradingResourceOptionProvider implements ResourceOptionProvider {
 
     private final PaperTradingMapper paperMapper;
+    private static final int MAX_OPTION_ROWS = 200;
 
     @Override
     public ResourceType supports() {
@@ -27,7 +28,7 @@ public class PaperTradingResourceOptionProvider implements ResourceOptionProvide
     public List<ResourceOptionVO> listOptions() {
         return paperMapper.selectList(new QueryWrapper<PaperTrading>()
                         .select("id", "strategy_code")
-                        .last("ORDER BY id DESC LIMIT 200"))
+                        .last("ORDER BY id DESC LIMIT " + MAX_OPTION_ROWS))
                 .stream().map(r -> new ResourceOptionVO(r.getId(),
                         "模拟盘 #" + r.getId()
                                 + (r.getStrategyCode() != null ? "（策略:" + r.getStrategyCode() + "）" : "")))

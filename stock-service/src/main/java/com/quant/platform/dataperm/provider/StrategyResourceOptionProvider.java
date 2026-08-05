@@ -17,6 +17,7 @@ import java.util.List;
 public class StrategyResourceOptionProvider implements ResourceOptionProvider {
 
     private final StrategyDefinitionMapper strategyMapper;
+    private static final int MAX_OPTION_ROWS = 200;
 
     @Override
     public ResourceType supports() {
@@ -27,7 +28,7 @@ public class StrategyResourceOptionProvider implements ResourceOptionProvider {
     public List<ResourceOptionVO> listOptions() {
         return strategyMapper.selectList(new QueryWrapper<StrategyDefinition>()
                         .select("id", "strategy_code", "strategy_name")
-                        .last("ORDER BY id DESC LIMIT 200"))
+                        .last("ORDER BY id DESC LIMIT " + MAX_OPTION_ROWS))
                 .stream().map(r -> new ResourceOptionVO(r.getId(),
                         r.getStrategyCode() + " - " + (r.getStrategyName() == null ? "" : r.getStrategyName())))
                 .toList();

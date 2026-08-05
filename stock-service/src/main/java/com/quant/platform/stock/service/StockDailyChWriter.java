@@ -9,6 +9,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.sql.*;
 import java.util.*;
 
@@ -28,10 +29,48 @@ public class StockDailyChWriter {
     }
 
     /**
+     * OHLCV 写入前自洽性校验（T-DATA-1）。
+     * 校验不通过返回 false，调用方跳过该条并告警，避免异常值污染 stock_daily。
+     */
+    private boolean isValidStockDaily(StockDaily d) {
+        if (d == null || d.getCode() == null || d.getTradeDate() == null) return false;
+        BigDecimal open = d.getOpenPrice();
+        BigDecimal close = d.getClosePrice();
+        BigDecimal high = d.getHighPrice();
+        BigDecimal low = d.getLowPrice();
+        BigDecimal preClose = d.getPreClose();
+        Long volume = d.getVolume();
+        if (anyNull(open, close, high, low)
+                || open.signum() <= 0 || close.signum() <= 0
+                || high.signum() <= 0 || low.signum() <= 0) {
+            return false;
+        }
+        if (low.compareTo(high) > 0) return false;                                  // low <= high
+        if (close.compareTo(low) < 0 || close.compareTo(high) > 0) return false;   // close ∈ [low, high]
+        if (open.compareTo(low) < 0 || open.compareTo(high) > 0) return false;     // open  ∈ [low, high]
+        if (preClose != null && preClose.signum() <= 0) return false;
+        if (volume == null || volume < 0) return false;                            // 成交量非负
+        if (d.getAmount() != null && d.getAmount().signum() < 0) return false;
+        return true;
+    }
+
+    private boolean anyNull(BigDecimal... vals) {
+        for (BigDecimal v : vals) {
+            if (v == null) return true;
+        }
+        return false;
+    }
+
+    /**
      * 写入单条日线数据到 ClickHouse
      */
     public void writeStockDaily(StockDaily daily) {
         if (!clickHouseConfig.isEnabled()) return;
+        if (!isValidStockDaily(daily)) {
+            log.warn("[ClickHouse] 跳过校验失败记录 code={} date={} (OHLCV 自洽性不通过)",
+                    daily.getCode(), daily.getTradeDate());
+            return;
+        }
 
         String sql = """
                 INSERT INTO stock_daily
@@ -62,7 +101,7 @@ public class StockDailyChWriter {
 
             stmt.executeUpdate();
         } catch (Exception e) {
-            log.warn("[ClickHouse] 写入失败: {}", e.getMessage());
+            log.warn("[ClickHouse] 写入失败: {}", e.getMessage(), e);
         }
     }
 
@@ -80,10 +119,17 @@ public class StockDailyChWriter {
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """;
 
+        int skipped = 0;
         try (Connection conn = getConnection();
              PreparedStatement stmt = conn.prepareStatement(sql)) {
 
             for (StockDaily daily : dailies) {
+                if (!isValidStockDaily(daily)) {
+                    skipped++;
+                    log.warn("[ClickHouse] 跳过校验失败记录 code={} date={} (OHLCV 自洽性不通过)",
+                            daily.getCode(), daily.getTradeDate());
+                    continue;
+                }
                 stmt.setString(1, daily.getCode());
                 stmt.setString(2, daily.getTradeDate().toString());
                 stmt.setString(3, daily.getName());
@@ -103,9 +149,13 @@ public class StockDailyChWriter {
             }
 
             stmt.executeBatch();
-            log.debug("[ClickHouse] 批量写入 {} 条记录", dailies.size());
+            int written = dailies.size() - skipped;
+            if (skipped > 0) {
+                log.warn("[ClickHouse] 批量写入 {} 条，跳过 {} 条校验失败记录", written, skipped);
+            }
+            log.debug("[ClickHouse] 批量写入 {} 条记录", written);
         } catch (Exception e) {
-            log.warn("[ClickHouse] 批量写入失败: {}", e.getMessage());
+            log.warn("[ClickHouse] 批量写入失败: {}", e.getMessage(), e);
         }
     }
 }

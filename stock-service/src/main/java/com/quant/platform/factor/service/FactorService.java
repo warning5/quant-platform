@@ -37,6 +37,8 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class FactorService {
 
+    private static final int MAX_DROPDOWN_ITEMS = 200;
+
     /**
      * factorCode 白名单正则（防御 SQL 注入）
      */
@@ -557,7 +559,7 @@ public class FactorService {
 
         // 无关键词：限制 200 条防止下拉框过大；有关键词：不限条数
         if (!hasKeyword) {
-            resultStream = resultStream.limit(200);
+            resultStream = resultStream.limit(MAX_DROPDOWN_ITEMS);
         }
 
         return resultStream.toList();

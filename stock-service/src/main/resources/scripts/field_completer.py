@@ -503,7 +503,7 @@ def fix_valuation_by_qq(db, codes=None, batch_size=200, delay=0.1, max_workers=3
 
 
 
-def cross_validate_ohlcv(db, sample_size=50, tolerance=0.02):
+def cross_validate_ohlcv(db, sample_size=200, tolerance=0.02):
     """
     P1-4.1: 日线数据源交叉验证
     随机抽取沪深股票，对比 Baostock 和腾讯接口同日的 OHLCV 数据。
@@ -600,6 +600,68 @@ def cross_validate_ohlcv(db, sample_size=50, tolerance=0.02):
 
     print(f"  交叉验证完成: {len(codes)} 只股票, {matched} 次比较, {diverged} 次偏差>{tolerance*100:.0f}%")
     return matched, diverged
+
+
+
+# ── T-DATA-2: OHLCV 时序跳变检测（close / volume）─────────────
+# 阈值抽为模块级常量，可配；告警日志不入库，供数据质量监控复核。
+CLOSE_JUMP_THRESHOLD = 0.25    # 日收盘涨跌幅绝对值 > 25% 视为离谱跳变（高于创业板 20% 涨跌停，避免噪音）
+VOLUME_JUMP_RATIO = 10.0       # 成交量较前一日突增 > 10 倍视为异常放量
+
+def detect_ohlcv_jumps(db, sample_size=200, lookback=260):
+    """
+    T-DATA-2: OHLCV 时序跳变检测（close 日涨跌幅 / volume 环比倍数）。
+    对抽样股票的日线序列做环比跳变检测，超阈值写入告警日志（不修改数据），
+    供数据质量监控复核。返回 (checked, flagged) 检查样本数与告警数。
+    """
+    print(f"\n[OHLCV跳变检测] 抽样 {sample_size} 只，检测 close 涨跌幅 / volume 突增...")
+    latest_date = db.get_latest_date()
+    if not latest_date:
+        print("[OHLCV跳变检测] 无法获取最新交易日")
+        return 0, 0
+    codes = db.query(
+        f"SELECT DISTINCT code FROM {db.CH_TABLE} "
+        f"WHERE trade_date = %(date)s AND code REGEXP '^[0-9]{{6}}$' "
+        f"AND code NOT LIKE '8%' AND code NOT LIKE '4%' ORDER BY rand() LIMIT %(n)s",
+        {"date": latest_date, "n": sample_size}
+    )
+    codes = [r[0] for r in codes] if codes else []
+    if not codes:
+        print("[OHLCV跳变检测] 无可用抽样股票")
+        return 0, 0
+
+    checked, flagged = 0, 0
+    for code in codes:
+        rows = db.query(
+            f"SELECT trade_date, close, volume FROM {db.CH_TABLE} "
+            f"WHERE code = %(code)s ORDER BY trade_date DESC LIMIT %(n)s",
+            {"code": code, "n": lookback}
+        )
+        if not rows or len(rows) < 2:
+            continue
+        checked += 1
+        prev_close, prev_vol = None, None
+        for trade_date, close, volume in reversed(rows):
+            c = float(close) if close else None
+            v = float(volume) if volume else None
+            if c is not None and prev_close and prev_close > 0:
+                chg = abs(c - prev_close) / prev_close
+                if chg > CLOSE_JUMP_THRESHOLD:
+                    flagged += 1
+                    _dlog(f"  [JUMP] {code} {trade_date} close跳变 {chg*100:.0f}%: "
+                          f"{prev_close:.2f}→{c:.2f}")
+            if v is not None and prev_vol and prev_vol > 0:
+                ratio = v / prev_vol
+                if ratio > VOLUME_JUMP_RATIO:
+                    flagged += 1
+                    _dlog(f"  [JUMP] {code} {trade_date} volume突增 {ratio:.1f}x: "
+                          f"{prev_vol:.0f}→{v:.0f}")
+            if c is not None:
+                prev_close = c
+            if v is not None:
+                prev_vol = v
+    print(f"[OHLCV跳变检测] DONE | checked={checked} flagged={flagged}")
+    return checked, flagged
 
 
 
