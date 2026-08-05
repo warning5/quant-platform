@@ -57,219 +57,16 @@ public class StockScreenService {
      * 执行多因子选股
      */
     public ScreenResult screen(ScreenRequest req) {
-        // ── 0. 加载策略定义因子配置 + 过滤条件 ──────────────────────────
-        Long sid = req.getStrategyId();
-        Map<String, Object> filterConfig = null;
-        if (sid != null && (req.getFactors() == null || req.getFactors().isEmpty())) {
-            StrategyDefinition strategy = strategyDefMapper.selectById(sid);
-            if (strategy != null) {
-                if (strategy.getFactorConfigJson() != null) {
-                    try {
-                        List<ScreenRequest.FactorWeight> factors = factorProcessor.parseStrategyFactorConfig(strategy.getFactorConfigJson());
-                        req.setFactors(factors);
-                        log.info("Loaded strategy [{}] with {} factors", strategy.getStrategyName(), factors.size());
-                    } catch (Exception e) {
-                        log.warn("Failed to load strategy {}: {}", sid, e.getMessage());
-                    }
-                }
-                // 解析 filterConfigJson（行业排除、最少上市天数、自定义因子过滤）
-                if (strategy.getFilterConfigJson() != null && !strategy.getFilterConfigJson().isBlank()) {
-                    try {
-                        filterConfig = objectMapper.readValue(strategy.getFilterConfigJson(),
-                                new TypeReference<>() {
-                                });
-                        log.info("Loaded filter config for strategy [{}]: {}", strategy.getStrategyName(), filterConfig.keySet());
-                    } catch (Exception e) {
-                        log.warn("Failed to parse filterConfigJson for strategy {}: {}", sid, e.getMessage());
-                    }
-                }
-            }
-        }
-
-        // ── 1. 确定选股日期（支持单日 / 多日平均模式）────────────────
-        LocalDate screenDate = req.getScreenDate();
-        LocalDate screenStartDate = req.getScreenStartDate();
-        LocalDate screenEndDate = req.getScreenEndDate();
-        boolean useMultiDayMode = (screenStartDate != null && screenEndDate != null);
-
-        // 清空多日趋势缓存 + CV 过滤缓存
-        dataLoader.multiDayTrendCache.clear();
-        dataLoader.multiDayUnstableCache.clear();
-
-        // 多日平均模式下，screenDate = endDate（用于行情加载、MA计算等）
-        if (useMultiDayMode) {
-            screenDate = screenEndDate;
-            log.info("Running stock screen in MULTI-DAY mode: range={} ~ {}, factors={}, topN={}",
-                    screenStartDate, screenEndDate, req.getFactors().size(), req.getTopN());
-        } else {
-            if (screenDate == null) {
-                screenDate = dataLoader.resolveLatestDate(req.getFactors());
-            }
-            log.info("Running stock screen on SINGLE date={}, factors={}, topN={}",
-                    screenDate, req.getFactors().size(), req.getTopN());
-        }
-
-        // ── 2. 加载当日行情（用于股票名称、过滤ST）─────────────────
-        List<MarketDailyBar> bars = marketDataService.getBarsAtDate(screenDate);
-        log.info("[Screen] screenDate={}, bars count={}", screenDate, bars.size());
-        if (bars.isEmpty()) {
-            // 往前找最近5个交易日
-            for (int i = 1; i <= 5; i++) {
-                screenDate = screenDate.minusDays(1);
-                bars = marketDataService.getBarsAtDate(screenDate);
-                if (!bars.isEmpty()) break;
-            }
-        }
-
-        // 建立 symbol -> bar 映射
-        Map<String, MarketDailyBar> barMap = bars.stream()
-                .collect(Collectors.toMap(MarketDailyBar::getSymbol, b -> b, (a, b) -> a));
-
-        // factor_value.symbol 无后缀，MarketDailyBar.symbol 有后缀（如 600519.SH）
-        // 构建纯净代码到完整 symbol 的映射，以及按纯净代码索引的 barMap
-        Map<String, String> codeToSymbol = new HashMap<>();
-        Map<String, MarketDailyBar> barMapByCode = new HashMap<>();
-        for (Map.Entry<String, MarketDailyBar> entry : barMap.entrySet()) {
-            String fullSym = entry.getKey();
-            int dot = fullSym.lastIndexOf('.');
-            String code = dot > 0 ? fullSym.substring(0, dot) : fullSym;
-            codeToSymbol.put(code, fullSym);
-            if (!barMapByCode.containsKey(code)) {
-                barMapByCode.put(code, entry.getValue());
-            }
-        }
-
-        // 候选股票池（若 excludeSt，则剔除名称含"ST"的）
-        Set<String> candidatesRaw = barMapByCode.keySet().stream()
-                .filter(sym -> {
-                    if (Boolean.TRUE.equals(req.getExcludeSt())) {
-                        MarketDailyBar b = barMapByCode.get(sym);
-                        String name = b.getName() != null ? b.getName().toUpperCase() : "";
-                        return !name.contains("ST");
-                    }
-                    return true;
-                })
-                .collect(Collectors.toSet());
-
-        log.info("Candidate stocks after ST filter: {}", candidatesRaw.size());
-
-        // ── 2.0b 黑名单过滤（研究/回测场景套用当前黑名单，默认关闭）──
-        if (Boolean.TRUE.equals(req.getBlacklistFilter()) && req.getStrategyId() != null) {
-            Set<String> blacklist = stockBlacklistService.getActiveBlacklistCodes(req.getStrategyId());
-            if (!blacklist.isEmpty()) {
-                int before = candidatesRaw.size();
-                candidatesRaw = candidatesRaw.stream()
-                        .filter(code -> !blacklist.contains(code))
-                        .collect(Collectors.toSet());
-                log.info("[Screen] blacklist filter applied: {} -> {} (filtered {} blacklisted stocks)",
-                        before, candidatesRaw.size(), before - candidatesRaw.size());
-            }
-        }
-
-        // ── 2.0c 市场环境覆盖（仅日志记录，不影响选股逻辑）──
-        if (req.getRegimeOverride() != null && !req.getRegimeOverride().isBlank()) {
-            log.info("[Screen] regimeOverride={} (note: screen stage does not use regime, override is for downstream recommendation pipeline)",
-                    req.getRegimeOverride());
-        }
-
-        // ── 2.1 filterConfigJson 过滤（行业排除、上市天数、自定义因子条件）──
-        Set<String> candidates;
-        if (filterConfig != null) {
-            candidates = factorProcessor.applyFilterConfig(candidatesRaw, barMapByCode, filterConfig, screenDate);
-            log.info("After filterConfig: {} stocks remain", candidates.size());
-        } else {
-            candidates = candidatesRaw;
-        }
-
-        // ── 2.5 自定义 SQL WHERE 条件过滤（高级模式）──────────────────
-        // 安全说明：req.getCustomSqlWhere() 来自前端用户输入，存在 SQL 注入风险。
-        // 修复方式：使用参数化查询，禁止拼接；白名单校验字段名，拒绝危险关键字。
-        if (req.getCustomSqlWhere() != null && !req.getCustomSqlWhere().isBlank()) {
-            String rawSql = req.getCustomSqlWhere().trim();
-            // 安全校验1：禁止危险关键字（含注释符、多语句分隔符）
-            String upper = rawSql.toUpperCase(Locale.US);
-            for (String keyword : new String[]{"UNION", "DELETE", "DROP", "INSERT", "UPDATE", "OR 1=", "--", ";", "/*", "*/", "@@", "CHAR(", "EXEC", "XP_", "SLEEP(", "BENCHMARK("}) {
-                if (upper.contains(keyword)) {
-                    log.warn("Blocked custom SQL containing forbidden keyword: {}", keyword);
-                    throw new IllegalArgumentException("自定义SQL条件包含不安全的关键字: " + keyword);
-                }
-            }
-            // 安全校验2：只允许常见的 WHERE 条件语法（字段名 运算符 值），拒绝子查询、JOIN 等
-            if (rawSql.toUpperCase(Locale.US).contains("SELECT ") ||
-                rawSql.toUpperCase(Locale.US).contains("JOIN ") ||
-                rawSql.toUpperCase(Locale.US).contains("SUBQUERY") ||
-                rawSql.contains("(") && rawSql.contains(")")) {
-                // 允许简单括号（优先级），但拒绝看起来像子查询的结构
-                if (rawSql.toUpperCase(Locale.US).contains("SELECT ") ||
-                    rawSql.toUpperCase(Locale.US).contains("FROM ")) {
-                    log.warn("Blocked custom SQL possibly containing subquery: {}", rawSql);
-                    throw new IllegalArgumentException("自定义SQL条件不支持子查询语法");
-                }
-            }
-            try {
-                // 用 stock_daily 表 + 选股日期做安全查询，只返回符合条件的 symbol 列表
-                // 修复：不再拼接 rawSql，而是要求其使用 ? 占位符，通过参数传入
-                // 前端必须按 "field OP ?" 格式传参，参数值在 customSqlParams 中
-                List<Object> sqlParams = req.getCustomSqlParams() != null
-                        ? req.getCustomSqlParams() : Collections.emptyList();
-                String safeSql = ScreenDataLoader.buildSafeCustomSql(rawSql, sqlParams.size());
-                Set<String> sqlFiltered = new HashSet<>();
-                try (Connection conn = dataSource.getConnection();
-                     PreparedStatement ps = conn.prepareStatement(
-                             "SELECT DISTINCT code FROM stock_daily WHERE trade_date = ? AND " + safeSql)) {
-                    int paramIdx = 1;
-                    ps.setString(paramIdx++, screenDate.toString());
-                    for (Object p : sqlParams) {
-                        switch (p) {
-                            case String s -> ps.setString(paramIdx++, s);
-                            case Number number ->
-                                    ps.setBigDecimal(paramIdx++, BigDecimal.valueOf(number.doubleValue()));
-                            case LocalDate ignored -> ps.setString(paramIdx++, p.toString());
-                            case null, default -> ps.setObject(paramIdx++, p);
-                        }
-                    }
-                    try (ResultSet rs = ps.executeQuery()) {
-                        while (rs.next()) {
-                            sqlFiltered.add(rs.getString("code"));
-                        }
-                    }
-                }
-                candidates.retainAll(sqlFiltered);
-                log.info("After custom SQL filter: {} stocks remain (filtered from SQL: {})", candidates.size(), rawSql.substring(0, Math.min(rawSql.length(), 80)));
-            } catch (Exception e) {
-                log.warn("Custom SQL filter failed: {}, error: {}", rawSql, e.getMessage());
-                // SQL 执行失败时不过滤（降级为不使用自定义条件），避免阻断整个选股流程
-            }
-        }
-
-        // ── 2.6 MA 均线位置过滤（价格在 MA30/60/100 上方）──────────────
-        if (req.getMaPositionFilter() != null) {
-            ScreenRequest.MaPositionFilter mpf = req.getMaPositionFilter();
-            boolean needMaFilter = Boolean.TRUE.equals(mpf.getAboveMA30())
-                    || Boolean.TRUE.equals(mpf.getAboveMA60())
-                    || Boolean.TRUE.equals(mpf.getAboveMA100());
-            if (needMaFilter) {
-                long maStart = System.currentTimeMillis();
-                // 将候选 symbol 转为带后缀格式（barMap key），批量计算均线位置
-                // MA过滤器需要完整symbol（带后缀）
-                List<String> candidateList = candidates.stream()
-                        .map(code -> codeToSymbol.getOrDefault(code, code))
-                        .collect(Collectors.toList());
-                Map<String, Map<String, Object>> maPositions =
-                        priceAdvisorService.batchCalcMaPositions(candidateList, screenDate);
-                candidates.removeIf(sym -> {
-                    Map<String, Object> pos = maPositions.get(codeToSymbol.getOrDefault(sym, sym));
-                    if (pos == null) return true; // 无数据，剔除
-                    if (Boolean.TRUE.equals(mpf.getAboveMA30())
-                            && !Boolean.TRUE.equals(pos.get("aboveMA30"))) return true;
-                    if (Boolean.TRUE.equals(mpf.getAboveMA60())
-                            && !Boolean.TRUE.equals(pos.get("aboveMA60"))) return true;
-                    return Boolean.TRUE.equals(mpf.getAboveMA100())
-                            && !Boolean.TRUE.equals(pos.get("aboveMA100"));
-                });
-                log.info("[Screen] After MA position filter: {} stocks remain (took {} ms)", candidates.size(), System.currentTimeMillis() - maStart);
-            }
-        }
+        Map<String, Object> filterConfig = loadStrategyConfig(req);
+        ScreenDatePlan plan = resolveScreenDate(req);
+        LocalDate screenDate = plan.screenDate();
+        boolean useMultiDayMode = plan.useMultiDayMode();
+        LocalDate screenStartDate = plan.screenStartDate();
+        LocalDate screenEndDate = plan.screenEndDate();
+        CandidateBundle cb = buildCandidates(req, screenDate, useMultiDayMode, filterConfig);
+        Map<String, String> codeToSymbol = cb.codeToSymbol();
+        Map<String, MarketDailyBar> barMapByCode = cb.barMapByCode();
+        Set<String> candidates = cb.candidates();
 
         // ── 3. 加载各因子的截面数据，并进行极值处理、标准化 ────────────
         Map<String, Map<String, FactorValue>> factorData = new LinkedHashMap<>();
@@ -649,5 +446,236 @@ public class StockScreenService {
     public String getLatestAvailableDate() {
         return dataLoader.getLatestAvailableDate();
     }
+
+    // ── 私有编排方法：section 0/1/2 抽取（零行为变化）──
+    private Map<String, Object> loadStrategyConfig(ScreenRequest req) {
+        // ── 0. 加载策略定义因子配置 + 过滤条件 ──────────────────────────
+        Long sid = req.getStrategyId();
+        Map<String, Object> filterConfig = null;
+        if (sid != null && (req.getFactors() == null || req.getFactors().isEmpty())) {
+            StrategyDefinition strategy = strategyDefMapper.selectById(sid);
+            if (strategy != null) {
+                if (strategy.getFactorConfigJson() != null) {
+                    try {
+                        List<ScreenRequest.FactorWeight> factors = factorProcessor.parseStrategyFactorConfig(strategy.getFactorConfigJson());
+                        req.setFactors(factors);
+                        log.info("Loaded strategy [{}] with {} factors", strategy.getStrategyName(), factors.size());
+                    } catch (Exception e) {
+                        log.warn("Failed to load strategy {}: {}", sid, e.getMessage());
+                    }
+                }
+                // 解析 filterConfigJson（行业排除、最少上市天数、自定义因子过滤）
+                if (strategy.getFilterConfigJson() != null && !strategy.getFilterConfigJson().isBlank()) {
+                    try {
+                        filterConfig = objectMapper.readValue(strategy.getFilterConfigJson(),
+                                new TypeReference<>() {
+                                });
+                        log.info("Loaded filter config for strategy [{}]: {}", strategy.getStrategyName(), filterConfig.keySet());
+                    } catch (Exception e) {
+                        log.warn("Failed to parse filterConfigJson for strategy {}: {}", sid, e.getMessage());
+                    }
+                }
+            }
+        }
+
+        return filterConfig;
+    }
+    private ScreenDatePlan resolveScreenDate(ScreenRequest req) {
+        // ── 1. 确定选股日期（支持单日 / 多日平均模式）────────────────
+        LocalDate screenDate = req.getScreenDate();
+        LocalDate screenStartDate = req.getScreenStartDate();
+        LocalDate screenEndDate = req.getScreenEndDate();
+        boolean useMultiDayMode = (screenStartDate != null && screenEndDate != null);
+
+        // 清空多日趋势缓存 + CV 过滤缓存
+        dataLoader.multiDayTrendCache.clear();
+        dataLoader.multiDayUnstableCache.clear();
+
+        // 多日平均模式下，screenDate = endDate（用于行情加载、MA计算等）
+        if (useMultiDayMode) {
+            screenDate = screenEndDate;
+            log.info("Running stock screen in MULTI-DAY mode: range={} ~ {}, factors={}, topN={}",
+                    screenStartDate, screenEndDate, req.getFactors().size(), req.getTopN());
+        } else {
+            if (screenDate == null) {
+                screenDate = dataLoader.resolveLatestDate(req.getFactors());
+            }
+            log.info("Running stock screen on SINGLE date={}, factors={}, topN={}",
+                    screenDate, req.getFactors().size(), req.getTopN());
+        }
+
+        return new ScreenDatePlan(screenDate, useMultiDayMode, screenStartDate, screenEndDate);
+    }
+    private CandidateBundle buildCandidates(ScreenRequest req, LocalDate screenDate, boolean useMultiDayMode, Map<String, Object> filterConfig) {
+        // ── 2. 加载当日行情（用于股票名称、过滤ST）─────────────────
+        List<MarketDailyBar> bars = marketDataService.getBarsAtDate(screenDate);
+        log.info("[Screen] screenDate={}, bars count={}", screenDate, bars.size());
+        if (bars.isEmpty()) {
+            // 往前找最近5个交易日
+            for (int i = 1; i <= 5; i++) {
+                screenDate = screenDate.minusDays(1);
+                bars = marketDataService.getBarsAtDate(screenDate);
+                if (!bars.isEmpty()) break;
+            }
+        }
+
+        // 建立 symbol -> bar 映射
+        Map<String, MarketDailyBar> barMap = bars.stream()
+                .collect(Collectors.toMap(MarketDailyBar::getSymbol, b -> b, (a, b) -> a));
+
+        // factor_value.symbol 无后缀，MarketDailyBar.symbol 有后缀（如 600519.SH）
+        // 构建纯净代码到完整 symbol 的映射，以及按纯净代码索引的 barMap
+        Map<String, String> codeToSymbol = new HashMap<>();
+        Map<String, MarketDailyBar> barMapByCode = new HashMap<>();
+        for (Map.Entry<String, MarketDailyBar> entry : barMap.entrySet()) {
+            String fullSym = entry.getKey();
+            int dot = fullSym.lastIndexOf('.');
+            String code = dot > 0 ? fullSym.substring(0, dot) : fullSym;
+            codeToSymbol.put(code, fullSym);
+            if (!barMapByCode.containsKey(code)) {
+                barMapByCode.put(code, entry.getValue());
+            }
+        }
+
+        // 候选股票池（若 excludeSt，则剔除名称含"ST"的）
+        Set<String> candidatesRaw = barMapByCode.keySet().stream()
+                .filter(sym -> {
+                    if (Boolean.TRUE.equals(req.getExcludeSt())) {
+                        MarketDailyBar b = barMapByCode.get(sym);
+                        String name = b.getName() != null ? b.getName().toUpperCase() : "";
+                        return !name.contains("ST");
+                    }
+                    return true;
+                })
+                .collect(Collectors.toSet());
+
+        log.info("Candidate stocks after ST filter: {}", candidatesRaw.size());
+
+        // ── 2.0b 黑名单过滤（研究/回测场景套用当前黑名单，默认关闭）──
+        if (Boolean.TRUE.equals(req.getBlacklistFilter()) && req.getStrategyId() != null) {
+            Set<String> blacklist = stockBlacklistService.getActiveBlacklistCodes(req.getStrategyId());
+            if (!blacklist.isEmpty()) {
+                int before = candidatesRaw.size();
+                candidatesRaw = candidatesRaw.stream()
+                        .filter(code -> !blacklist.contains(code))
+                        .collect(Collectors.toSet());
+                log.info("[Screen] blacklist filter applied: {} -> {} (filtered {} blacklisted stocks)",
+                        before, candidatesRaw.size(), before - candidatesRaw.size());
+            }
+        }
+
+        // ── 2.0c 市场环境覆盖（仅日志记录，不影响选股逻辑）──
+        if (req.getRegimeOverride() != null && !req.getRegimeOverride().isBlank()) {
+            log.info("[Screen] regimeOverride={} (note: screen stage does not use regime, override is for downstream recommendation pipeline)",
+                    req.getRegimeOverride());
+        }
+
+        // ── 2.1 filterConfigJson 过滤（行业排除、上市天数、自定义因子条件）──
+        Set<String> candidates;
+        if (filterConfig != null) {
+            candidates = factorProcessor.applyFilterConfig(candidatesRaw, barMapByCode, filterConfig, screenDate);
+            log.info("After filterConfig: {} stocks remain", candidates.size());
+        } else {
+            candidates = candidatesRaw;
+        }
+
+        // ── 2.5 自定义 SQL WHERE 条件过滤（高级模式）──────────────────
+        // 安全说明：req.getCustomSqlWhere() 来自前端用户输入，存在 SQL 注入风险。
+        // 修复方式：使用参数化查询，禁止拼接；白名单校验字段名，拒绝危险关键字。
+        if (req.getCustomSqlWhere() != null && !req.getCustomSqlWhere().isBlank()) {
+            String rawSql = req.getCustomSqlWhere().trim();
+            // 安全校验1：禁止危险关键字（含注释符、多语句分隔符）
+            String upper = rawSql.toUpperCase(Locale.US);
+            for (String keyword : new String[]{"UNION", "DELETE", "DROP", "INSERT", "UPDATE", "OR 1=", "--", ";", "/*", "*/", "@@", "CHAR(", "EXEC", "XP_", "SLEEP(", "BENCHMARK("}) {
+                if (upper.contains(keyword)) {
+                    log.warn("Blocked custom SQL containing forbidden keyword: {}", keyword);
+                    throw new IllegalArgumentException("自定义SQL条件包含不安全的关键字: " + keyword);
+                }
+            }
+            // 安全校验2：只允许常见的 WHERE 条件语法（字段名 运算符 值），拒绝子查询、JOIN 等
+            if (rawSql.toUpperCase(Locale.US).contains("SELECT ") ||
+                rawSql.toUpperCase(Locale.US).contains("JOIN ") ||
+                rawSql.toUpperCase(Locale.US).contains("SUBQUERY") ||
+                rawSql.contains("(") && rawSql.contains(")")) {
+                // 允许简单括号（优先级），但拒绝看起来像子查询的结构
+                if (rawSql.toUpperCase(Locale.US).contains("SELECT ") ||
+                    rawSql.toUpperCase(Locale.US).contains("FROM ")) {
+                    log.warn("Blocked custom SQL possibly containing subquery: {}", rawSql);
+                    throw new IllegalArgumentException("自定义SQL条件不支持子查询语法");
+                }
+            }
+            try {
+                // 用 stock_daily 表 + 选股日期做安全查询，只返回符合条件的 symbol 列表
+                // 修复：不再拼接 rawSql，而是要求其使用 ? 占位符，通过参数传入
+                // 前端必须按 "field OP ?" 格式传参，参数值在 customSqlParams 中
+                List<Object> sqlParams = req.getCustomSqlParams() != null
+                        ? req.getCustomSqlParams() : Collections.emptyList();
+                String safeSql = ScreenDataLoader.buildSafeCustomSql(rawSql, sqlParams.size());
+                Set<String> sqlFiltered = new HashSet<>();
+                try (Connection conn = dataSource.getConnection();
+                     PreparedStatement ps = conn.prepareStatement(
+                             "SELECT DISTINCT code FROM stock_daily WHERE trade_date = ? AND " + safeSql)) {
+                    int paramIdx = 1;
+                    ps.setString(paramIdx++, screenDate.toString());
+                    for (Object p : sqlParams) {
+                        switch (p) {
+                            case String s -> ps.setString(paramIdx++, s);
+                            case Number number ->
+                                    ps.setBigDecimal(paramIdx++, BigDecimal.valueOf(number.doubleValue()));
+                            case LocalDate ignored -> ps.setString(paramIdx++, p.toString());
+                            case null, default -> ps.setObject(paramIdx++, p);
+                        }
+                    }
+                    try (ResultSet rs = ps.executeQuery()) {
+                        while (rs.next()) {
+                            sqlFiltered.add(rs.getString("code"));
+                        }
+                    }
+                }
+                candidates.retainAll(sqlFiltered);
+                log.info("After custom SQL filter: {} stocks remain (filtered from SQL: {})", candidates.size(), rawSql.substring(0, Math.min(rawSql.length(), 80)));
+            } catch (Exception e) {
+                log.warn("Custom SQL filter failed: {}, error: {}", rawSql, e.getMessage());
+                // SQL 执行失败时不过滤（降级为不使用自定义条件），避免阻断整个选股流程
+            }
+        }
+
+        // ── 2.6 MA 均线位置过滤（价格在 MA30/60/100 上方）──────────────
+        if (req.getMaPositionFilter() != null) {
+            ScreenRequest.MaPositionFilter mpf = req.getMaPositionFilter();
+            boolean needMaFilter = Boolean.TRUE.equals(mpf.getAboveMA30())
+                    || Boolean.TRUE.equals(mpf.getAboveMA60())
+                    || Boolean.TRUE.equals(mpf.getAboveMA100());
+            if (needMaFilter) {
+                long maStart = System.currentTimeMillis();
+                // 将候选 symbol 转为带后缀格式（barMap key），批量计算均线位置
+                // MA过滤器需要完整symbol（带后缀）
+                List<String> candidateList = candidates.stream()
+                        .map(code -> codeToSymbol.getOrDefault(code, code))
+                        .collect(Collectors.toList());
+                Map<String, Map<String, Object>> maPositions =
+                        priceAdvisorService.batchCalcMaPositions(candidateList, screenDate);
+                candidates.removeIf(sym -> {
+                    Map<String, Object> pos = maPositions.get(codeToSymbol.getOrDefault(sym, sym));
+                    if (pos == null) return true; // 无数据，剔除
+                    if (Boolean.TRUE.equals(mpf.getAboveMA30())
+                            && !Boolean.TRUE.equals(pos.get("aboveMA30"))) return true;
+                    if (Boolean.TRUE.equals(mpf.getAboveMA60())
+                            && !Boolean.TRUE.equals(pos.get("aboveMA60"))) return true;
+                    return Boolean.TRUE.equals(mpf.getAboveMA100())
+                            && !Boolean.TRUE.equals(pos.get("aboveMA100"));
+                });
+                log.info("[Screen] After MA position filter: {} stocks remain (took {} ms)", candidates.size(), System.currentTimeMillis() - maStart);
+            }
+        }
+
+        return new CandidateBundle(codeToSymbol, barMapByCode, candidates);
+    }
+
+    private record ScreenDatePlan(
+            LocalDate screenDate, boolean useMultiDayMode, LocalDate screenStartDate, LocalDate screenEndDate) {}
+
+    private record CandidateBundle(
+            Map<String, String> codeToSymbol, Map<String, MarketDailyBar> barMapByCode, Set<String> candidates) {}
 
 }
