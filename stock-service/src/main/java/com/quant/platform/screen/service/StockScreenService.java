@@ -76,56 +76,8 @@ public class StockScreenService {
         List<ScreenResult.StockScore> scores = sr.scores();
         Map<String, Integer> filterPassCount = sr.filterPassCount();
 
-        // ── 5. 排序 & 取 TopN ────────────────────────────────────────
-        boolean isLong = !"SHORT".equalsIgnoreCase(req.getDirection());
-        scores.sort((a, b) -> isLong
-                ? Double.compare(b.getCompositeScore(), a.getCompositeScore())
-                : Double.compare(a.getCompositeScore(), b.getCompositeScore()));
-
-        int topN = req.getTopN() != null ? req.getTopN() : 30;
-        List<ScreenResult.StockScore> topStocks = scores.stream().limit(topN).collect(Collectors.toList());
-        log.info("[Screen] Scores total: {}, topStocks: {}", scores.size(), topStocks.size());
-
-        // 填充排名
-        for (int i = 0; i < topStocks.size(); i++) {
-            topStocks.get(i).setRank(i + 1);
-        }
-
-        log.info("Screen done: {} stocks scored, top {} selected", scores.size(), topStocks.size());
-
-        // ── 6. 为 TopN 股票计算买入价建议 ──────────────────────────
-        double valuationWeight = req.getValuationWeight() != null ? req.getValuationWeight() : 0.4;
-        List<String> topSymbols = topStocks.stream().map(ScreenResult.StockScore::getSymbol).toList();
-        if (!topSymbols.isEmpty()) {
-            try {
-                Map<String, Map<String, Object>> advices = priceAdvisorService.batchAdvise(
-                        topSymbols, screenDate, valuationWeight);
-                for (ScreenResult.StockScore stock : topStocks) {
-                    Map<String, Object> advice = advices.get(stock.getSymbol());
-                    if (advice != null) {
-                        stock.setCurrentPrice(mathService.toBD(advice.get("currentPrice")));
-                        stock.setSuggestPrice(mathService.toBD(advice.get("suggestPrice")));
-                        stock.setSuggestPriceLow(mathService.toBD(advice.get("suggestPriceLow")));
-                        stock.setSuggestPriceHigh(mathService.toBD(advice.get("suggestPriceHigh")));
-                        stock.setStopLoss(mathService.toBD(advice.get("stopLoss")));
-                        stock.setStopLossPercent(mathService.toBD(advice.get("stopLossPercent")));
-                        stock.setTakeProfit1(mathService.toBD(advice.get("takeProfit1")));
-                        stock.setTakeProfit1Percent(mathService.toBD(advice.get("takeProfit1Percent")));
-                        stock.setTakeProfit2(mathService.toBD(advice.get("takeProfit2")));
-                        stock.setTakeProfit2Percent(mathService.toBD(advice.get("takeProfit2Percent")));
-                        stock.setAtr(mathService.toBD(advice.get("atr")));
-                        stock.setRiskLevel((String) advice.get("riskLevel"));
-                        stock.setRisks((List<String>) advice.get("risks"));
-                        stock.setBuyReason((String) advice.get("buyReason"));
-                        stock.setTechLevels((Map<String, Object>) advice.get("techLevels"));
-                        stock.setValuationLevels((Map<String, Object>) advice.get("valuationLevels"));
-                    }
-                }
-                log.info("Price advice computed for {} stocks", advices.size());
-            } catch (Exception e) {
-                log.warn("Failed to compute price advice: {}", e.getMessage());
-            }
-        }
+        List<ScreenResult.StockScore> topStocks = selectTopN(scores, req);
+        attachPriceAdvice(topStocks, screenDate, req);
 
         return ScreenResult.builder()
                 .screenDate(screenDate)
@@ -702,4 +654,60 @@ public class StockScreenService {
     private record ScoreResult(
             List<ScreenResult.StockScore> scores, Map<String, Integer> filterPassCount) {}
 
+    private List<ScreenResult.StockScore> selectTopN(List<ScreenResult.StockScore> scores, ScreenRequest req) {
+        // ── 5. 排序 & 取 TopN ────────────────────────────────────────
+        boolean isLong = !"SHORT".equalsIgnoreCase(req.getDirection());
+        scores.sort((a, b) -> isLong
+                ? Double.compare(b.getCompositeScore(), a.getCompositeScore())
+                : Double.compare(a.getCompositeScore(), b.getCompositeScore()));
+
+        int topN = req.getTopN() != null ? req.getTopN() : 30;
+        List<ScreenResult.StockScore> topStocks = scores.stream().limit(topN).collect(Collectors.toList());
+        log.info("[Screen] Scores total: {}, topStocks: {}", scores.size(), topStocks.size());
+
+        // 填充排名
+        for (int i = 0; i < topStocks.size(); i++) {
+            topStocks.get(i).setRank(i + 1);
+        }
+
+        log.info("Screen done: {} stocks scored, top {} selected", scores.size(), topStocks.size());
+
+        return topStocks;
+    }
+    private void attachPriceAdvice(List<ScreenResult.StockScore> topStocks, LocalDate screenDate, ScreenRequest req) {
+        // ── 6. 为 TopN 股票计算买入价建议 ──────────────────────────
+        double valuationWeight = req.getValuationWeight() != null ? req.getValuationWeight() : 0.4;
+        List<String> topSymbols = topStocks.stream().map(ScreenResult.StockScore::getSymbol).toList();
+        if (!topSymbols.isEmpty()) {
+            try {
+                Map<String, Map<String, Object>> advices = priceAdvisorService.batchAdvise(
+                        topSymbols, screenDate, valuationWeight);
+                for (ScreenResult.StockScore stock : topStocks) {
+                    Map<String, Object> advice = advices.get(stock.getSymbol());
+                    if (advice != null) {
+                        stock.setCurrentPrice(mathService.toBD(advice.get("currentPrice")));
+                        stock.setSuggestPrice(mathService.toBD(advice.get("suggestPrice")));
+                        stock.setSuggestPriceLow(mathService.toBD(advice.get("suggestPriceLow")));
+                        stock.setSuggestPriceHigh(mathService.toBD(advice.get("suggestPriceHigh")));
+                        stock.setStopLoss(mathService.toBD(advice.get("stopLoss")));
+                        stock.setStopLossPercent(mathService.toBD(advice.get("stopLossPercent")));
+                        stock.setTakeProfit1(mathService.toBD(advice.get("takeProfit1")));
+                        stock.setTakeProfit1Percent(mathService.toBD(advice.get("takeProfit1Percent")));
+                        stock.setTakeProfit2(mathService.toBD(advice.get("takeProfit2")));
+                        stock.setTakeProfit2Percent(mathService.toBD(advice.get("takeProfit2Percent")));
+                        stock.setAtr(mathService.toBD(advice.get("atr")));
+                        stock.setRiskLevel((String) advice.get("riskLevel"));
+                        stock.setRisks((List<String>) advice.get("risks"));
+                        stock.setBuyReason((String) advice.get("buyReason"));
+                        stock.setTechLevels((Map<String, Object>) advice.get("techLevels"));
+                        stock.setValuationLevels((Map<String, Object>) advice.get("valuationLevels"));
+                    }
+                }
+                log.info("Price advice computed for {} stocks", advices.size());
+            } catch (Exception e) {
+                log.warn("Failed to compute price advice: {}", e.getMessage());
+            }
+        }
+
+    }
 }
