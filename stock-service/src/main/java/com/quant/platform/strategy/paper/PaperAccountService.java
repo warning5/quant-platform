@@ -218,6 +218,98 @@ public class PaperAccountService {
     }
 
     /**
+     * 聚合组合根净值（Route B 子账户聚合核心）。
+     *  1) 汇总各子账户当前总资产/现金/持仓数 → 更新组合根快照
+     *  2) 收集各子账户 paper_nav，按日期并集对齐（缺失日向前填充）→ 计算组合每日总资产/日收益/累计收益
+     *     → upsert 进 paper_nav(paper_id=组合根)，供组合净值曲线与 IR 复用
+     */
+    public void aggregateCombo(Long comboId) {
+        List<PaperTrading> children = paperTradingMapper.selectList(
+            new LambdaQueryWrapper<PaperTrading>().eq(PaperTrading::getParentId, comboId));
+        PaperTrading root = paperTradingMapper.selectById(comboId);
+        if (root == null) return;
+
+        // ── 1) 当前快照汇总 ──
+        BigDecimal totalAssets = BigDecimal.ZERO;
+        BigDecimal currentCapital = BigDecimal.ZERO;
+        int positionCount = 0;
+        for (PaperTrading c : children) {
+            totalAssets = totalAssets.add(c.getTotalAssets() != null ? c.getTotalAssets() : BigDecimal.ZERO);
+            currentCapital = currentCapital.add(c.getCurrentCapital() != null ? c.getCurrentCapital() : BigDecimal.ZERO);
+            positionCount += (c.getPositionCount() != null ? c.getPositionCount() : 0);
+        }
+        root.setTotalAssets(totalAssets);
+        root.setCurrentCapital(currentCapital);
+        root.setPositionCount(positionCount);
+        paperTradingMapper.updateById(root);
+
+        if (children.isEmpty()) return;
+
+        // ── 2) 净值对齐聚合 ──
+        List<Long> childIds = children.stream().map(PaperTrading::getId).collect(Collectors.toList());
+        List<PaperNav> allNavs = paperNavMapper.selectList(
+            new LambdaQueryWrapper<PaperNav>().in(PaperNav::getPaperId, childIds));
+
+        // 每个子账户：按日期升序的 nav 列表
+        Map<Long, List<PaperNav>> byChild = allNavs.stream()
+            .sorted(Comparator.comparing(PaperNav::getNavDate))
+            .collect(Collectors.groupingBy(PaperNav::getPaperId));
+
+        // 子账户初始资本（首日前用初始资本向前填充），以及运行时向前填充值
+        Map<Long, BigDecimal> fwd = children.stream()
+            .collect(Collectors.toMap(PaperTrading::getId,
+                c -> c.getInitialCapital() != null ? c.getInitialCapital() : BigDecimal.ZERO));
+
+        // 所有子账户 nav 日期并集（升序）
+        TreeSet<LocalDate> dates = new TreeSet<>();
+        byChild.values().forEach(list -> list.forEach(n -> dates.add(n.getNavDate())));
+
+        BigDecimal initialCapital = root.getInitialCapital() != null ? root.getInitialCapital() : BigDecimal.ZERO;
+        BigDecimal prevCombo = null;
+        List<PaperNav> comboNavs = new ArrayList<>();
+        for (LocalDate d : dates) {
+            BigDecimal comboVal = BigDecimal.ZERO;
+            for (Map.Entry<Long, List<PaperNav>> en : byChild.entrySet()) {
+                Long cid = en.getKey();
+                BigDecimal v = en.getValue().stream()
+                    .filter(n -> n.getNavDate().equals(d))
+                    .map(PaperNav::getTotalAssets)
+                    .findFirst()
+                    .orElse(fwd.get(cid));
+                if (v != null) fwd.put(cid, v);
+                comboVal = comboVal.add(v != null ? v : BigDecimal.ZERO);
+            }
+            BigDecimal dailyReturn = (prevCombo != null && prevCombo.compareTo(BigDecimal.ZERO) > 0)
+                ? comboVal.subtract(prevCombo).divide(prevCombo, 6, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO;
+            BigDecimal cumulativeReturn = initialCapital.compareTo(BigDecimal.ZERO) > 0
+                ? comboVal.subtract(initialCapital).divide(initialCapital, 6, RoundingMode.HALF_UP)
+                : BigDecimal.ZERO;
+            comboNavs.add(PaperNav.builder()
+                .paperId(comboId).navDate(d).totalAssets(comboVal)
+                .dailyReturn(dailyReturn).cumulativeReturn(cumulativeReturn).build());
+            prevCombo = comboVal;
+        }
+
+        // upsert 组合净值（按 paper_id + nav_date 唯一）
+        for (PaperNav nav : comboNavs) {
+            PaperNav existing = paperNavMapper.selectOne(new LambdaQueryWrapper<PaperNav>()
+                .eq(PaperNav::getPaperId, comboId)
+                .eq(PaperNav::getNavDate, nav.getNavDate())
+                .last("LIMIT 1"));
+            if (existing != null) {
+                existing.setTotalAssets(nav.getTotalAssets());
+                existing.setDailyReturn(nav.getDailyReturn());
+                existing.setCumulativeReturn(nav.getCumulativeReturn());
+                paperNavMapper.updateById(existing);
+            } else {
+                paperNavMapper.insert(nav);
+            }
+        }
+        log.info("组合根 [{}] 聚合完成：子账户数={}, 组合总资产={}", comboId, children.size(), totalAssets);
+    }
+
+    /**
      * 计算信息比率（Information Ratio）
      * IR = 超额收益均值 / 超额收益标准差，滚动N日窗口
      * 超额收益 = 模拟盘累计收益率 - 基准累计收益率（归一化：基准净值/基准起点净值 - 1）

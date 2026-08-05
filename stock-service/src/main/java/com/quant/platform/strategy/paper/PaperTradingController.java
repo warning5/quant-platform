@@ -24,6 +24,7 @@ public class PaperTradingController {
     private final PaperTradingService paperTradingService;
     private final PositionAlertService positionAlertService;
     private final ExecutionQualityService executionQualityService;
+    private final PaperRebalanceService paperRebalanceService;
 
     @cn.dev33.satoken.annotation.SaCheckPermission(value = {"strategy:view", "strategy:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/create")
@@ -269,5 +270,82 @@ public class PaperTradingController {
     @Operation(summary = "获取执行质量分析")
     public ApiResponse<Map<String, Object>> getExecutionQuality(@PathVariable Long paperId) {
         return ApiResponse.success(executionQualityService.getQualityReport(paperId));
+    }
+
+    // ─── 多策略组合（Route B）────────────────────────────────────────────
+
+    @GetMapping("/combo/{comboId}/detail")
+    @Operation(summary = "组合详情：总览/子策略贡献/相关性矩阵/分散化比率")
+    public ApiResponse<Map<String, Object>> getComboDetail(@PathVariable Long comboId) {
+        return ApiResponse.success(paperTradingService.getComboDetail(comboId));
+    }
+
+    @GetMapping("/combo/{comboId}/sub-strategies")
+    @Operation(summary = "组合子策略列表（各自P&L/持仓/状态/权重/贡献）")
+    public ApiResponse<List<Map<String, Object>>> getComboSubStrategies(@PathVariable Long comboId) {
+        return ApiResponse.success(paperTradingService.getComboSubStrategies(comboId));
+    }
+
+    @GetMapping("/combo/{comboId}/nav")
+    @Operation(summary = "组合与每子账户净值曲线（前端多线对比）")
+    public ApiResponse<Map<String, Object>> getComboNav(@PathVariable Long comboId) {
+        return ApiResponse.success(paperTradingService.getComboNav(comboId));
+    }
+
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"strategy:view", "strategy:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
+    @PostMapping("/combo/{comboId}/sub/{strategyId}/pause")
+    @Operation(summary = "暂停某子策略（资金留在该子账户，不再交易）")
+    public ApiResponse<PaperTrading> pauseSubStrategy(
+            @PathVariable Long comboId, @PathVariable Long strategyId) {
+        return ApiResponse.success("子策略已暂停",
+            paperTradingService.pauseSubStrategy(comboId, strategyId));
+    }
+
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"strategy:view", "strategy:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
+    @PostMapping("/combo/{comboId}/sub/{strategyId}/resume")
+    @Operation(summary = "恢复某子策略")
+    public ApiResponse<PaperTrading> resumeSubStrategy(
+            @PathVariable Long comboId, @PathVariable Long strategyId) {
+        return ApiResponse.success("子策略已恢复",
+            paperTradingService.resumeSubStrategy(comboId, strategyId));
+    }
+
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"strategy:view", "strategy:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
+    @PostMapping("/combo/{comboId}/rebalance")
+    @Operation(summary = "手动触发组合再平衡（遍历子账户，强制旋转并记录日志）")
+    public ApiResponse<Integer> manualRebalanceCombo(@PathVariable Long comboId) {
+        return ApiResponse.success("再平衡完成",
+            paperRebalanceService.manualRebalanceCombo(comboId));
+    }
+
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"strategy:view", "strategy:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
+    @PostMapping("/combo/{comboId}/sub/{strategyId}/adjust-weight")
+    @Operation(summary = "调整某子策略权重（重归一化组合配置并触发该子账户再平衡）")
+    public ApiResponse<Object> adjustSubStrategyWeight(
+            @PathVariable Long comboId,
+            @PathVariable Long strategyId,
+            @RequestParam BigDecimal newWeight) {
+        return ApiResponse.success("权重已调整并触发再平衡",
+            paperRebalanceService.adjustSubStrategyWeight(comboId, strategyId, newWeight));
+    }
+
+    @cn.dev33.satoken.annotation.SaCheckPermission(value = {"strategy:view", "strategy:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
+    @PostMapping("/combo/{comboId}/aggregate")
+    @Operation(summary = "手动触发组合净值聚合（运维/调试用，重算组合根净值）")
+    public ApiResponse<String> aggregateCombo(@PathVariable Long comboId) {
+        paperTradingService.aggregateCombo(comboId);
+        return ApiResponse.success("组合净值已聚合");
+    }
+
+    @GetMapping("/combo/{comboId}/rebalance-log")
+    @Operation(summary = "组合再平衡历史（含所有子账户日志）")
+    public ApiResponse<List<Map<String, Object>>> getComboRebalanceLog(@PathVariable Long comboId) {
+        return ApiResponse.success(paperTradingService.getComboRebalanceLogs(comboId));
+    }
+
+    @GetMapping("/combo/{comboId}/signals")
+    @Operation(summary = "组合信号流水（聚合所有子账户信号，按日期倒序）")
+    public ApiResponse<List<Map<String, Object>>> getComboSignals(@PathVariable Long comboId) {
+        return ApiResponse.success(paperTradingService.getComboSignals(comboId));
     }
 }

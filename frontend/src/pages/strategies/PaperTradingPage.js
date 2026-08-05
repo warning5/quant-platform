@@ -11,6 +11,7 @@ import {
 } from '@ant-design/icons';
 import ReactECharts from '../../components/LazyECharts';
 import { paperTradingApi, strategyApi, backtestApi } from '../../api';
+import ComboDetail from './ComboTradingPage';
 import { useMarketThermometer } from '../../hooks/useMarketThermometer';
 import { useAuthStore } from '../../stores/authStore';
 import { useDict } from '../../utils/useDict';
@@ -31,7 +32,7 @@ const LabelWithTip = ({ text, tip }) => (
 );
 
 // ─── 模拟盘列表 ───────────────────────────────────────────────────────────────
-function PaperList({ onSelect }) {
+function PaperList({ onSelect, onSelectCombo }) {
   const [list, setList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
@@ -40,7 +41,8 @@ function PaperList({ onSelect }) {
 
   const load = () => {
     setLoading(true);
-    paperTradingApi.list().then(d => setList(d || [])).catch(() => setList([])).finally(() => setLoading(false));
+    // 只显示组合根 + 单策略盘，过滤掉组合派生的子账户（parentId 非空）
+    paperTradingApi.list().then(d => setList((d || []).filter(r => r.parentId == null))).catch(() => setList([])).finally(() => setLoading(false));
   };
 
   const handleDelete = async (id) => {
@@ -58,7 +60,10 @@ function PaperList({ onSelect }) {
 
   const columns = [
     { title: 'ID', dataIndex: 'id', width: 60 },
-    { title: '策略', dataIndex: 'strategyCode', width: 120 },
+    {
+      title: '策略', dataIndex: 'strategyCode', width: 120,
+      render: (v, r) => r.strategyConfigJson ? <Tag color="purple">多策略组合</Tag> : v,
+    },
     {
       title: '状态', dataIndex: 'status', width: 90,
       render: v => {
@@ -81,7 +86,7 @@ function PaperList({ onSelect }) {
       title: '操作', width: 150,
       render: (_, r) => (
         <Space size={4}>
-          <Button size="small" type="link" onClick={() => onSelect(r.id)}>详情</Button>
+          <Button size="small" type="link" onClick={() => r.strategyConfigJson ? onSelectCombo(r.id) : onSelect(r.id)}>详情</Button>
           {r.status === 'RUNNING' && (
             <Button size="small" type="link" onClick={() => paperTradingApi.updateStatus(r.id, 'PAUSED').then(load)} disabled={!canEdit}>
               暂停
@@ -151,6 +156,9 @@ function CreateModal({ visible, onClose, onCreated }) {
   const [recommendedConfig, setRecommendedConfig] = useState(null);
   const [configLoading, setConfigLoading] = useState(false);
   const canEdit = useAuthStore((s) => s.hasPermission('strategy:edit'));
+  // 组合模式
+  const [isCombo, setIsCombo] = useState(false);
+  const [comboStrategies, setComboStrategies] = useState([]);
 
   useEffect(() => {
     strategyApi.list({ page: 0, size: 100 }).then(res => {
@@ -187,6 +195,21 @@ function CreateModal({ visible, onClose, onCreated }) {
 
   const handleCreate = async () => {
     if (!canEdit) return;
+    if (isCombo) {
+      if (comboStrategies.length < 2) { message.warning('组合模式至少选择 2 个策略'); return; }
+      const sum = comboStrategies.reduce((a, s) => a + (s.weight || 0), 0);
+      if (Math.abs(sum - 1) > 0.05) { message.warning('权重合计需≈100%'); return; }
+      setCreating(true);
+      try {
+        const cfg = JSON.stringify(comboStrategies.map(s => ({ strategyId: s.id, weight: s.weight })));
+        await paperTradingApi.create(null, null, capital, null, cfg);
+        message.success('多策略组合创建成功');
+        setIsCombo(false); setComboStrategies([]);
+        onCreated(); onClose();
+      } catch (e) { message.error('创建失败，请稍后重试'); }
+      finally { setCreating(false); }
+      return;
+    }
     if (!selectedStrategy) { message.warning('请选择策略'); return; }
     setCreating(true);
     try {
@@ -212,17 +235,62 @@ function CreateModal({ visible, onClose, onCreated }) {
   return (
     <Modal title="新建模拟盘" open={visible} onOk={handleCreate} onCancel={onClose} confirmLoading={creating} okText="创建" width={560}>
       <div style={{ marginBottom: 16 }}>
-        <Text>选择策略</Text>
-        <Select
-          style={{ width: '100%', marginTop: 4 }}
-          placeholder="选择已创建的策略"
-          value={selectedStrategy}
-          onChange={setSelectedStrategy}
-          options={strategies.map(s => ({ label: `${s.strategyCode} - ${s.strategyName}`, value: s.id }))}
-          showSearch
-          filterOption={(input, option) => (option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
-        />
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Text strong>组合模式</Text>
+          <Switch checked={isCombo} onChange={(v) => { setIsCombo(v); setSelectedStrategy(v ? null : selectedStrategy); if (v) setComboStrategies([]); }} />
+        </div>
+        <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>开启后可将多个策略按权重组合成一个多策略模拟盘</div>
       </div>
+      {isCombo ? (
+        <div style={{ marginBottom: 16 }}>
+          <Text>选择子策略与权重</Text>
+          <Select
+            style={{ width: '100%', marginTop: 4 }}
+            mode="multiple"
+            placeholder="选择 2~N 个策略"
+            value={comboStrategies.map(s => s.id)}
+            onChange={(ids) => {
+              const w = ids.length ? 1 / ids.length : 0;
+              setComboStrategies(ids.map(id => {
+                const exist = comboStrategies.find(s => s.id === id);
+                const st = strategies.find(s => s.id === id);
+                return exist || { id, code: st?.strategyCode, name: st?.strategyName, weight: w };
+              }));
+            }}
+            options={strategies.map(s => ({ label: `${s.strategyCode} - ${s.strategyName}`, value: s.id }))}
+            showSearch
+            filterOption={(input, option) => (option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
+          />
+          {comboStrategies.length > 0 && (
+            <div style={{ marginTop: 8 }}>
+              {comboStrategies.map(s => (
+                <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                  <span style={{ width: 120 }}>{s.code}</span>
+                  <InputNumber min={0} max={1} step={0.05} value={s.weight}
+                    onChange={(v) => setComboStrategies(cs => cs.map(x => x.id === s.id ? { ...x, weight: v } : x))}
+                    style={{ flex: 1 }} />
+                </div>
+              ))}
+              <Text type={Math.abs(comboStrategies.reduce((a, s) => a + s.weight, 0) - 1) > 0.05 ? 'danger' : 'secondary'} style={{ fontSize: 12 }}>
+                权重合计：{(comboStrategies.reduce((a, s) => a + s.weight, 0) * 100).toFixed(0)}%（应≈100%）
+              </Text>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div style={{ marginBottom: 16 }}>
+          <Text>选择策略</Text>
+          <Select
+            style={{ width: '100%', marginTop: 4 }}
+            placeholder="选择已创建的策略"
+            value={selectedStrategy}
+            onChange={setSelectedStrategy}
+            options={strategies.map(s => ({ label: `${s.strategyCode} - ${s.strategyName}`, value: s.id }))}
+            showSearch
+            filterOption={(input, option) => (option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
+          />
+        </div>
+      )}
       <div style={{ marginBottom: 16 }}>
         <Text>初始资金（元）</Text>
         <InputNumber style={{ width: '100%', marginTop: 4 }} value={capital} onChange={setCapital} min={100000} max={100000000} step={100000} />
@@ -1131,19 +1199,26 @@ export default function PaperTradingPage() {
     const id = searchParams.get('id');
     return id ? Number(id) : null;
   });
+  const [selectedComboId, setSelectedComboId] = useState(null);
 
   const handleSelect = (id) => {
     setSelectedId(id);
     setSearchParams({ id });
   };
-
+  const handleSelectCombo = (id) => {
+    setSelectedComboId(id);
+  };
   const handleBack = () => {
     setSelectedId(null);
+    setSelectedComboId(null);
     setSearchParams({});
   };
 
+  if (selectedComboId) {
+    return <ComboDetail comboId={selectedComboId} onBack={handleBack} />;
+  }
   if (selectedId) {
     return <PaperDetail paperId={selectedId} onBack={handleBack} />;
   }
-  return <PaperList onSelect={handleSelect} />;
+  return <PaperList onSelect={handleSelect} onSelectCombo={handleSelectCombo} />;
 }

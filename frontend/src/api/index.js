@@ -220,8 +220,9 @@ export const strategyApi = {
 
 // ===== 模拟盘 API =====
 export const paperTradingApi = {
-  create: (strategyId, strategyCode, initialCapital, backtestId) =>
-    api.post('/paper-trading/create', null, { params: { strategyId, strategyCode, initialCapital, backtestId } }),
+  // 单策略：传 strategyId/strategyCode/initialCapital/backtestId；多策略组合：strategyId 传 null，strategyConfigJson 传组合配置 JSON 字符串
+  create: (strategyId, strategyCode, initialCapital, backtestId, strategyConfigJson) =>
+    api.post('/paper-trading/create', null, { params: { strategyId, strategyCode, initialCapital, backtestId, strategyConfigJson } }),
   list: () => api.get('/paper-trading/list'),
   getDetail: (paperId) => api.get(`/paper-trading/${paperId}`),
   generateSignals: (paperId) => api.post(`/paper-trading/${paperId}/generate-signals`),
@@ -253,6 +254,17 @@ export const paperTradingApi = {
   // 一键买入
   quickBuy: (paperId, code, name, price) =>
     api.post(`/paper-trading/${paperId}/quick-buy`, null, { params: { code, name, price } }),
+  // 多策略组合 (Route B)
+  comboDetail: (comboId) => api.get(`/paper-trading/combo/${comboId}/detail`),
+  comboSubStrategies: (comboId) => api.get(`/paper-trading/combo/${comboId}/sub-strategies`),
+  comboNav: (comboId) => api.get(`/paper-trading/combo/${comboId}/nav`),
+  comboRebalanceLog: (comboId) => api.get(`/paper-trading/combo/${comboId}/rebalance-log`),
+  pauseSubStrategy: (comboId, strategyId) => api.post(`/paper-trading/combo/${comboId}/sub/${strategyId}/pause`),
+  resumeSubStrategy: (comboId, strategyId) => api.post(`/paper-trading/combo/${comboId}/sub/${strategyId}/resume`),
+  comboRebalance: (comboId) => api.post(`/paper-trading/combo/${comboId}/rebalance`),
+  adjustSubWeight: (comboId, strategyId, newWeight) => api.post(`/paper-trading/combo/${comboId}/sub/${strategyId}/adjust-weight`, null, { params: { newWeight } }),
+  comboAggregate: (comboId) => api.post(`/paper-trading/combo/${comboId}/aggregate`),
+  comboSignals: (comboId) => api.get(`/paper-trading/combo/${comboId}/signals`),
 };
 
 // ===== 回测 API =====

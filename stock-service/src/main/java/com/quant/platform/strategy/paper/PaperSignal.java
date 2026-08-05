@@ -26,6 +26,10 @@ public class PaperSignal {
     @TableField("paper_id")
     private Long paperId;
 
+    /** 子策略ID（组合盘因子融合模式下为组合盘策略ID，子策略级归因见Phase4） */
+    @TableField("strategy_id")
+    private Long strategyId;
+
     /** 信号生成日期 */
     @TableField("signal_date")
     private LocalDate signalDate;

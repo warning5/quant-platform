@@ -290,6 +290,7 @@ public class PaperSignalGenerator {
                     .factorScore(pos.getProfitLossPct())
                     .reason(reason)
                     .status(PaperSignalStatus.PENDING)
+                    .strategyId(pt.getStrategyId())
                     .build();
                 paperSignalMapper.insert(sellSignal);
                 signals.add(sellSignal);
@@ -357,6 +358,7 @@ public class PaperSignalGenerator {
                 .factorScore(BigDecimal.valueOf(e.getValue()).setScale(4, RoundingMode.HALF_UP))
                 .reason(String.format("因子得分%.2f，排名靠前%s", e.getValue(), marketBearish ? "（大盘多头）" : ""))
                 .status(PaperSignalStatus.PENDING)
+                .strategyId(pt.getStrategyId())
                 .build();
             paperSignalMapper.insert(buySignal);
             signals.add(buySignal);

@@ -23,6 +23,10 @@ public class PaperTrading {
     @TableId(type = IdType.AUTO)
     private Long id;
 
+    /** 组合父盘ID；NULL = 单策略盘或组合根，非NULL = 组合根下的子账户 */
+    @TableField("parent_id")
+    private Long parentId;
+
     @TableField("strategy_id")
     private Long strategyId;
 

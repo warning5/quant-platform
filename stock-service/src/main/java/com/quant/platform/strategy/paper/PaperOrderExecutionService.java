@@ -243,6 +243,7 @@ public class PaperOrderExecutionService {
             // 新增持仓
             PaperPosition pos = PaperPosition.builder()
                 .paperId(pt.getId())
+                .strategyId(signal.getStrategyId())
                 .code(signal.getCode())
                 .name(signal.getName())
                 .shares(shares)
@@ -578,6 +579,7 @@ public class PaperOrderExecutionService {
 
         PaperSignal signal = PaperSignal.builder()
             .paperId(paperId)
+            .strategyId(pt.getStrategyId())
             .signalDate(LocalDate.now())
             .factorDate(LocalDate.now())
             .code(code)
@@ -633,6 +635,7 @@ public class PaperOrderExecutionService {
         // 创建 PENDING MARKET BUY 信号
         PaperSignal signal = PaperSignal.builder()
                 .paperId(paperId)
+                .strategyId(pt.getStrategyId())
                 .signalDate(LocalDate.now())
                 .factorDate(LocalDate.now())
                 .code(code)
@@ -660,6 +663,9 @@ public class PaperOrderExecutionService {
     public PaperSignal createConditionalOrder(Long paperId, String code, String direction,
             String orderType, BigDecimal triggerPrice, BigDecimal limitPrice,
             BigDecimal trailPct, BigDecimal trailAmount, BigDecimal signalPrice, String reason) {
+        // 取组合盘策略ID，标识该条件单归属（因子融合模式下为组合盘自身策略ID）
+        PaperTrading pt = paperTradingMapper.selectById(paperId);
+        Long strategyId = pt != null ? pt.getStrategyId() : null;
         // 参数校验
         if (!"LIMIT".equals(orderType) && !"STOP".equals(orderType)
                 && !"STOP_LIMIT".equals(orderType) && !"TRAILING_STOP".equals(orderType)) {
@@ -713,6 +719,7 @@ public class PaperOrderExecutionService {
 
         PaperSignal signal = PaperSignal.builder()
             .paperId(paperId)
+            .strategyId(strategyId)
             .signalDate(LocalDate.now())
             .factorDate(LocalDate.now())
             .code(code)

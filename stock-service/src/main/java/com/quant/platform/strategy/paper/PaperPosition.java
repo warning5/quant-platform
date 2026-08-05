@@ -26,6 +26,10 @@ public class PaperPosition {
     @TableField("paper_id")
     private Long paperId;
 
+    /** 子策略ID（持仓归属策略，继承自买入信号） */
+    @TableField("strategy_id")
+    private Long strategyId;
+
     /** 股票代码 */
     private String code;
 
