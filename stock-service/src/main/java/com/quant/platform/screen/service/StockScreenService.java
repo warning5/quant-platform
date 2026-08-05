@@ -72,166 +72,9 @@ public class StockScreenService {
         Map<String, Map<String, FactorValue>> factorData = flr.factorData();
         Map<String, Integer> coverage = flr.coverage();
 
-        // ── 4. 筛选 + 计算综合得分 ───────────────────────────────────
-        // 权重归一化（绝对值之和 = 1）
-        double totalAbsWeight = req.getFactors().stream()
-                .mapToDouble(fw -> Math.abs(fw.getWeight())).sum();
-        if (totalAbsWeight == 0) totalAbsWeight = 1.0;
-
-        // 统计每个因子的筛选通过数
-        Map<String, Integer> filterPassCount = new LinkedHashMap<>();
-        for (ScreenRequest.FactorWeight fw : req.getFactors()) {
-            filterPassCount.put(fw.getFactorCode(), 0);
-        }
-
-        // 第一遍：收集通过筛选的股票及其原始因子值
-        List<String> passedSymbols = new ArrayList<>();
-        Map<String, Map<String, Double>> passedRawValues = new LinkedHashMap<>(); // symbol -> {factorCode: rawValue}
-
-        for (String sym : candidates) {
-            Map<String, Double> valueMap = new LinkedHashMap<>();
-            boolean passed = true;
-
-            for (ScreenRequest.FactorWeight fw : req.getFactors()) {
-                FactorValue fv = factorData.get(fw.getFactorCode()).get(sym);
-                if (fv != null) {
-                    double raw = fv.getFactorVal() != null ? fv.getFactorVal().doubleValue() : 0.0;
-                    // 筛选条件过滤
-                    if (!mathService.passFilter(raw, fw.getFilterOp(), fw.getFilterValue())) {
-                        passed = false;
-                        break;
-                    }
-                    filterPassCount.merge(fw.getFactorCode(), 1, Integer::sum);
-                    valueMap.put(fw.getFactorCode(), raw);
-                }
-            }
-
-            if (passed && !valueMap.isEmpty()) {
-                passedSymbols.add(sym);
-                passedRawValues.put(sym, valueMap);
-            }
-        }
-
-        log.info("[Screen] Filter passed: {} stocks (from {} candidates)", passedSymbols.size(), candidates.size());
-
-        // 第二遍：在通过池内对每个因子重新做 rank 归一化（0~1），使排名有区分度
-        for (ScreenRequest.FactorWeight fw : req.getFactors()) {
-            final String fc = fw.getFactorCode();
-            // 收集该因子所有通过股票的原始值
-            List<Map.Entry<String, Double>> vals = new ArrayList<>();
-            for (String s : passedSymbols) {
-                Map<String, Double> vm = passedRawValues.get(s);
-                if (vm == null) continue;
-                Double v = vm.get(fc);
-                if (v != null) vals.add(new AbstractMap.SimpleEntry<>(s, v));
-            }
-
-            if (vals.isEmpty()) continue;
-
-            // 按 raw 值排序，分配 rank（0~1）
-            List<Map.Entry<String, Double>> sorted = vals.stream()
-                    .sorted(Comparator.comparingDouble(Map.Entry::getValue))
-                    .toList();
-
-            int n = sorted.size();
-            for (int i = 0; i < n; i++) {
-                // rank = (i + 0.5) / n，均匀分布在 (0, 1)
-                double rank = (i + 0.5) / n;
-                String sym = sorted.get(i).getKey();
-                passedRawValues.get(sym).put("__rank_" + fc, rank);
-            }
-        }
-
-        // 第三遍：计算综合得分 + 构建 result
-        // 根据 weightMode 获取动态权重
-        Map<String, Double> dynamicWeights = null;
-        if (!"EQUAL".equalsIgnoreCase(req.getWeightMode())) {
-            dynamicWeights = factorProcessor.getDynamicWeights(req.getFactors(), req.getWeightMode(), screenDate);
-            // 动态权重调整后，重新计算 totalAbsWeight
-            totalAbsWeight = 0;
-            for (ScreenRequest.FactorWeight fw : req.getFactors()) {
-                String fc = fw.getFactorCode();
-                double baseWeight = fw.getWeight();
-                if (dynamicWeights != null && dynamicWeights.containsKey(fc)) {
-                    baseWeight = baseWeight * dynamicWeights.get(fc);
-                }
-                totalAbsWeight += Math.abs(baseWeight);
-            }
-            if (totalAbsWeight == 0) totalAbsWeight = 1.0;
-            log.info("[Screen] Dynamic weight adjusted, new totalAbsWeight={}", totalAbsWeight);
-        }
-
-        List<ScreenResult.StockScore> scores = new ArrayList<>();
-        for (String sym : passedSymbols) {
-            Map<String, Double> rankMap = new LinkedHashMap<>();
-            Map<String, Double> valueMap = passedRawValues.get(sym);
-            double compositeScore = 0.0;
-
-            for (ScreenRequest.FactorWeight fw : req.getFactors()) {
-                String fc = fw.getFactorCode();
-                Double raw = valueMap.get(fc);
-                if (raw == null) continue;
-
-                // 使用池内 rank 归一化值
-                Double normalized = valueMap.get("__rank_" + fc);
-                if (normalized == null) normalized = 0.5;
-
-                rankMap.put(fc, normalized);
-
-                // 根据 weightMode 计算动态权重
-                double baseWeight = fw.getWeight();
-                if (dynamicWeights != null && dynamicWeights.containsKey(fc)) {
-                    baseWeight = baseWeight * dynamicWeights.get(fc);
-                }
-                double normalizedWeight = baseWeight / totalAbsWeight;
-                // direction: 1=正向（越高越好），-1=反向（越低越好）
-                double factorScore = fw.getDirection() >= 0 ? normalized : (1.0 - normalized);
-                compositeScore += normalizedWeight * factorScore;
-            }
-
-            // 从 valueMap 中剥离 __rank_ 前缀的临时数据
-            Map<String, Double> cleanValueMap = valueMap.entrySet().stream()
-                    .filter(e -> !e.getKey().startsWith("__rank_"))
-                    .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue, (a,b) -> a, LinkedHashMap::new));
-
-            // 多日模式：补回被 CV 过滤掉但仍有原始值的因子（不参与排名，仅用于展示）
-            if (useMultiDayMode && !dataLoader.multiDayUnstableCache.isEmpty()) {
-                for (ScreenRequest.FactorWeight fw : req.getFactors()) {
-                    String fc = fw.getFactorCode();
-                    if (cleanValueMap.containsKey(fc)) continue; // 已有排名值的跳过
-                    Map<String, Double> unstableMap = dataLoader.multiDayUnstableCache.get(fc);
-                    if (unstableMap != null) {
-                        Double unstableVal = unstableMap.get(sym);
-                        if (unstableVal != null) {
-                            cleanValueMap.put(fc, unstableVal);
-                        }
-                    }
-                }
-            }
-
-            // 多日模式：提取因子趋势动量
-            Map<String, Double> factorTrends = null;
-            if (useMultiDayMode && !dataLoader.multiDayTrendCache.isEmpty()) {
-                factorTrends = new LinkedHashMap<>();
-                for (ScreenRequest.FactorWeight fw : req.getFactors()) {
-                    Map<String, Double> tMap = dataLoader.multiDayTrendCache.get(fw.getFactorCode());
-                    if (tMap != null && tMap.containsKey(sym)) {
-                        factorTrends.put(fw.getFactorCode(), tMap.get(sym));
-                    }
-                }
-                if (factorTrends.isEmpty()) factorTrends = null;
-            }
-
-            MarketDailyBar bar = barMapByCode.get(sym);
-            scores.add(ScreenResult.StockScore.builder()
-                    .symbol(codeToSymbol.getOrDefault(sym, sym))
-                    .name(bar != null ? bar.getName() : sym)
-                    .compositeScore(compositeScore)
-                    .factorRanks(rankMap)
-                    .factorValues(cleanValueMap)
-                    .factorTrends(factorTrends)
-                    .build());
-        }
+        ScoreResult sr = computeScores(req, candidates, factorData, codeToSymbol, barMapByCode, useMultiDayMode, screenDate);
+        List<ScreenResult.StockScore> scores = sr.scores();
+        Map<String, Integer> filterPassCount = sr.filterPassCount();
 
         // ── 5. 排序 & 取 TopN ────────────────────────────────────────
         boolean isLong = !"SHORT".equalsIgnoreCase(req.getDirection());
@@ -688,5 +531,175 @@ public class StockScreenService {
 
     private record FactorLoadResult(
             Map<String, Map<String, FactorValue>> factorData, Map<String, Integer> coverage) {}
+
+    private ScoreResult computeScores(ScreenRequest req, Set<String> candidates,
+            Map<String, Map<String, FactorValue>> factorData, Map<String, String> codeToSymbol,
+            Map<String, MarketDailyBar> barMapByCode, boolean useMultiDayMode, LocalDate screenDate) {
+        // ── 4. 筛选 + 计算综合得分 ───────────────────────────────────
+        // 权重归一化（绝对值之和 = 1）
+        double totalAbsWeight = req.getFactors().stream()
+                .mapToDouble(fw -> Math.abs(fw.getWeight())).sum();
+        if (totalAbsWeight == 0) totalAbsWeight = 1.0;
+
+        // 统计每个因子的筛选通过数
+        Map<String, Integer> filterPassCount = new LinkedHashMap<>();
+        for (ScreenRequest.FactorWeight fw : req.getFactors()) {
+            filterPassCount.put(fw.getFactorCode(), 0);
+        }
+
+        // 第一遍：收集通过筛选的股票及其原始因子值
+        List<String> passedSymbols = new ArrayList<>();
+        Map<String, Map<String, Double>> passedRawValues = new LinkedHashMap<>(); // symbol -> {factorCode: rawValue}
+
+        for (String sym : candidates) {
+            Map<String, Double> valueMap = new LinkedHashMap<>();
+            boolean passed = true;
+
+            for (ScreenRequest.FactorWeight fw : req.getFactors()) {
+                FactorValue fv = factorData.get(fw.getFactorCode()).get(sym);
+                if (fv != null) {
+                    double raw = fv.getFactorVal() != null ? fv.getFactorVal().doubleValue() : 0.0;
+                    // 筛选条件过滤
+                    if (!mathService.passFilter(raw, fw.getFilterOp(), fw.getFilterValue())) {
+                        passed = false;
+                        break;
+                    }
+                    filterPassCount.merge(fw.getFactorCode(), 1, Integer::sum);
+                    valueMap.put(fw.getFactorCode(), raw);
+                }
+            }
+
+            if (passed && !valueMap.isEmpty()) {
+                passedSymbols.add(sym);
+                passedRawValues.put(sym, valueMap);
+            }
+        }
+
+        log.info("[Screen] Filter passed: {} stocks (from {} candidates)", passedSymbols.size(), candidates.size());
+
+        // 第二遍：在通过池内对每个因子重新做 rank 归一化（0~1），使排名有区分度
+        for (ScreenRequest.FactorWeight fw : req.getFactors()) {
+            final String fc = fw.getFactorCode();
+            // 收集该因子所有通过股票的原始值
+            List<Map.Entry<String, Double>> vals = new ArrayList<>();
+            for (String s : passedSymbols) {
+                Map<String, Double> vm = passedRawValues.get(s);
+                if (vm == null) continue;
+                Double v = vm.get(fc);
+                if (v != null) vals.add(new AbstractMap.SimpleEntry<>(s, v));
+            }
+
+            if (vals.isEmpty()) continue;
+
+            // 按 raw 值排序，分配 rank（0~1）
+            List<Map.Entry<String, Double>> sorted = vals.stream()
+                    .sorted(Comparator.comparingDouble(Map.Entry::getValue))
+                    .toList();
+
+            int n = sorted.size();
+            for (int i = 0; i < n; i++) {
+                // rank = (i + 0.5) / n，均匀分布在 (0, 1)
+                double rank = (i + 0.5) / n;
+                String sym = sorted.get(i).getKey();
+                passedRawValues.get(sym).put("__rank_" + fc, rank);
+            }
+        }
+
+        // 第三遍：计算综合得分 + 构建 result
+        // 根据 weightMode 获取动态权重
+        Map<String, Double> dynamicWeights = null;
+        if (!"EQUAL".equalsIgnoreCase(req.getWeightMode())) {
+            dynamicWeights = factorProcessor.getDynamicWeights(req.getFactors(), req.getWeightMode(), screenDate);
+            // 动态权重调整后，重新计算 totalAbsWeight
+            totalAbsWeight = 0;
+            for (ScreenRequest.FactorWeight fw : req.getFactors()) {
+                String fc = fw.getFactorCode();
+                double baseWeight = fw.getWeight();
+                if (dynamicWeights != null && dynamicWeights.containsKey(fc)) {
+                    baseWeight = baseWeight * dynamicWeights.get(fc);
+                }
+                totalAbsWeight += Math.abs(baseWeight);
+            }
+            if (totalAbsWeight == 0) totalAbsWeight = 1.0;
+            log.info("[Screen] Dynamic weight adjusted, new totalAbsWeight={}", totalAbsWeight);
+        }
+
+        List<ScreenResult.StockScore> scores = new ArrayList<>();
+        for (String sym : passedSymbols) {
+            Map<String, Double> rankMap = new LinkedHashMap<>();
+            Map<String, Double> valueMap = passedRawValues.get(sym);
+            double compositeScore = 0.0;
+
+            for (ScreenRequest.FactorWeight fw : req.getFactors()) {
+                String fc = fw.getFactorCode();
+                Double raw = valueMap.get(fc);
+                if (raw == null) continue;
+
+                // 使用池内 rank 归一化值
+                Double normalized = valueMap.get("__rank_" + fc);
+                if (normalized == null) normalized = 0.5;
+
+                rankMap.put(fc, normalized);
+
+                // 根据 weightMode 计算动态权重
+                double baseWeight = fw.getWeight();
+                if (dynamicWeights != null && dynamicWeights.containsKey(fc)) {
+                    baseWeight = baseWeight * dynamicWeights.get(fc);
+                }
+                double normalizedWeight = baseWeight / totalAbsWeight;
+                // direction: 1=正向（越高越好），-1=反向（越低越好）
+                double factorScore = fw.getDirection() >= 0 ? normalized : (1.0 - normalized);
+                compositeScore += normalizedWeight * factorScore;
+            }
+
+            // 从 valueMap 中剥离 __rank_ 前缀的临时数据
+            Map<String, Double> cleanValueMap = valueMap.entrySet().stream()
+                    .filter(e -> !e.getKey().startsWith("__rank_"))
+                    .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue, (a,b) -> a, LinkedHashMap::new));
+
+            // 多日模式：补回被 CV 过滤掉但仍有原始值的因子（不参与排名，仅用于展示）
+            if (useMultiDayMode && !dataLoader.multiDayUnstableCache.isEmpty()) {
+                for (ScreenRequest.FactorWeight fw : req.getFactors()) {
+                    String fc = fw.getFactorCode();
+                    if (cleanValueMap.containsKey(fc)) continue; // 已有排名值的跳过
+                    Map<String, Double> unstableMap = dataLoader.multiDayUnstableCache.get(fc);
+                    if (unstableMap != null) {
+                        Double unstableVal = unstableMap.get(sym);
+                        if (unstableVal != null) {
+                            cleanValueMap.put(fc, unstableVal);
+                        }
+                    }
+                }
+            }
+
+            // 多日模式：提取因子趋势动量
+            Map<String, Double> factorTrends = null;
+            if (useMultiDayMode && !dataLoader.multiDayTrendCache.isEmpty()) {
+                factorTrends = new LinkedHashMap<>();
+                for (ScreenRequest.FactorWeight fw : req.getFactors()) {
+                    Map<String, Double> tMap = dataLoader.multiDayTrendCache.get(fw.getFactorCode());
+                    if (tMap != null && tMap.containsKey(sym)) {
+                        factorTrends.put(fw.getFactorCode(), tMap.get(sym));
+                    }
+                }
+                if (factorTrends.isEmpty()) factorTrends = null;
+            }
+
+            MarketDailyBar bar = barMapByCode.get(sym);
+            scores.add(ScreenResult.StockScore.builder()
+                    .symbol(codeToSymbol.getOrDefault(sym, sym))
+                    .name(bar != null ? bar.getName() : sym)
+                    .compositeScore(compositeScore)
+                    .factorRanks(rankMap)
+                    .factorValues(cleanValueMap)
+                    .factorTrends(factorTrends)
+                    .build());
+        }
+
+        return new ScoreResult(scores, filterPassCount);
+    }
+
+    private record ScoreResult(
+            List<ScreenResult.StockScore> scores, Map<String, Integer> filterPassCount) {}
 
 }
