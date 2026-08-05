@@ -1,40 +1,21 @@
 package com.quant.platform.factor.engine;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.quant.platform.config.ClickHouseConfig;
-import com.quant.platform.factor.domain.FactorDefinition;
-import com.quant.platform.factor.domain.FactorTestReport;
-import com.quant.platform.factor.domain.FactorValue;
-import com.quant.platform.factor.mapper.FactorTestReportMapper;
-import com.quant.platform.factor.mapper.FactorValueMapper;
-import com.quant.platform.factor.service.ClickHouseFactorValueService;
-import com.quant.platform.financial.entity.StockFinancialIndicator;
-import com.quant.platform.financial.mapper.StockFinancialIndicatorMapper;
 import com.quant.platform.market.domain.MarketDailyBar;
 import com.quant.platform.market.service.MarketDataService;
-import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.context.annotation.Lazy;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.util.*;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
-import com.quant.platform.common.enums.JobStatus;
 
 /**
  * 因子计算 context 构建器

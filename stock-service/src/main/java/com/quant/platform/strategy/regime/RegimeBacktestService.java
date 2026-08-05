@@ -1,23 +1,23 @@
 package com.quant.platform.strategy.regime;
 
 import lombok.Data;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
-import lombok.RequiredArgsConstructor;
 
-import java.time.LocalDate;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
  * Regime权重回验服务（P2-7）
- *
  * 核心功能：
  * 1. 历史Regime分布统计 — 扫描过去N个交易日，统计BULL/BEAR/SIDEWAYS分布
  * 2. Regime条件收益分析 — 按Regime分组，计算推荐的实际平均收益
  * 3. 权重最优性验证 — 对比当前权重 vs 候选权重组合在各Regime下的表现
  * 4. 权重调整建议 — 输出是否需要调整权重
- *
  * 当前权重配置：
  * - BULL:   因子0.6 + 分析0.4
  * - BEAR:   因子0.4 + 分析0.6

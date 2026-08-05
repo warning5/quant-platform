@@ -2,17 +2,17 @@ package com.quant.platform.recommendation.service;
 
 import com.quant.platform.recommendation.domain.StockRecommendation;
 import com.quant.platform.screen.dto.ScreenResult;
-import com.quant.platform.stock.analysis.service.AnalysisService;
 import com.quant.platform.stock.entity.StockDaily;
 import com.quant.platform.stock.entity.StockInfo;
 import com.quant.platform.stock.mapper.StockInfoMapper;
 import com.quant.platform.stock.service.ClickHouseStockService;
-import java.time.LocalDate;
-import java.util.*;
-import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+
+import java.time.LocalDate;
+import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * 行业轮动：行业动量计算、分行业 Regime 识别、行业相关分组与分散化。

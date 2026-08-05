@@ -18,7 +18,7 @@ import java.util.*;
  * 统一 LLM 接入服务
  * 支持 DeepSeek V4 Flash/Pro（OpenAI 兼容接口），也支持 Ollama / Qwen 等
  * 配置项: llm.base-url / llm.api-key / llm.model 等
- * API文档: https://platform.deepseek.com/api-docs/chat
+ * API文档: <a href="https://platform.deepseek.com/api-docs/chat">...</a>
  */
 @Slf4j
 @Service

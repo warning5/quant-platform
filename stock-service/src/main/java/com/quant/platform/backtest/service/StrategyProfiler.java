@@ -1,16 +1,19 @@
 package com.quant.platform.backtest.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.quant.platform.backtest.domain.BacktestTask;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import static com.quant.platform.backtest.service.OlsRegressionCalculator.*;
-import static com.quant.platform.backtest.service.FactorStyleAttributionService.*;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.quant.platform.backtest.domain.BacktestTask;
-import java.util.*;
-import java.util.stream.Collectors;
+
 import java.time.LocalDate;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import static com.quant.platform.backtest.service.FactorStyleAttributionService.StrategyCharacteristics;
+import static com.quant.platform.backtest.service.OlsRegressionCalculator.round4;
 
 @Slf4j
 @Service

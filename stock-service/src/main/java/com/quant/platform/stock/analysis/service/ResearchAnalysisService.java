@@ -2,29 +2,15 @@ package com.quant.platform.stock.analysis.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.quant.platform.factor.engine.chan.ChanTheoryCalculator;
-import com.quant.platform.factor.engine.chan.ChanTheoryResult;
-import com.quant.platform.market.domain.MarketDailyBar;
-import com.quant.platform.stock.analysis.domain.*;
-import com.quant.platform.stock.analysis.engine.TradingSignalEngine;
-import com.quant.platform.stock.analysis.mapper.AnalysisChMapper;
-import com.quant.platform.stock.analysis.mapper.BidAskMapper;
-import com.quant.platform.stock.analysis.mapper.NewsMapper;
+import com.quant.platform.stock.analysis.domain.ResearchSignal;
 import com.quant.platform.stock.analysis.mapper.StockAnalysisMapper;
-import com.quant.platform.stock.service.ClickHouseStockService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.time.LocalDate;
 import java.util.*;
-import java.util.stream.Collectors;
 @Slf4j
 @Service
 @RequiredArgsConstructor

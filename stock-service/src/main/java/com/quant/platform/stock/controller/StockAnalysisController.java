@@ -31,10 +31,6 @@ import java.util.Map;
 import com.quant.platform.common.dto.ApiResponse;
 
 /**
- * 统一包装响应体，与前端 api.interceptors.response 约定格式一致
- */
-
-/**
  * 个股分析 Controller
  * 提供四维度评分、操作建议、规则说明接口
  */

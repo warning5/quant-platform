@@ -1,24 +1,20 @@
 package com.quant.platform.stock.service;
 
-import static com.quant.platform.stock.service.StockDailySqlSupport.*;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.quant.platform.config.ClickHouseConfig;
 import com.quant.platform.stock.entity.StockDaily;
 import com.quant.platform.stock.mapper.StockDailyMapper;
-import com.quant.platform.stock.service.ClickHouseJdbcClient;
-import com.quant.platform.stock.service.StockDailyChWriter;
-import com.quant.platform.stock.service.StockDailyChQuery;
-import com.quant.platform.stock.service.StockDailyMysqlFallback;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import java.math.BigDecimal;
 import java.sql.*;
 import java.sql.Date;
 import java.time.LocalDate;
 import java.util.*;
 import java.util.stream.Collectors;
+
+import static com.quant.platform.stock.service.StockDailySqlSupport.*;
 
 /**
  * ClickHouse 股票数据服务

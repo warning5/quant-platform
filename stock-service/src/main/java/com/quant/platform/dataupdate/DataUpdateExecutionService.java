@@ -54,8 +54,6 @@ public class DataUpdateExecutionService {
             "(?:成功记录|成功[^0-9]{0,3}|已处理|写入|新增|更新)[^0-9]*(\\d[\\d,]*)");
     private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("HH:mm:ss");
     private final SimpMessagingTemplate messagingTemplate;
-    private final StockInfoMapper stockInfoMapper;
-    private final ClickHouseStockService clickHouseStockService;
     private final JdbcTemplate jdbcTemplate;
     private final FactorService factorService;
 
