@@ -860,7 +860,46 @@ public class BacktestEngine {
                         slippageModel, stampTaxRate, minCommission, limitFilter, suspendFilter,
                         transferFeeRate, scale);
 
-                // ── 写入 rebalance_record ──
+                // ── 更新持仓 ──
+                Set<String> soldSymbols = new HashSet<>();
+                for (String sym : new HashSet<>(oldPositions.keySet())) {
+                    if (targetWeights.containsKey(sym)) continue;
+                    MarketDailyBar bar = barMap.get(sym);
+                    if (bar == null) {
+                        soldSymbols.add(sym);
+                        continue;
+                    }
+                    if (suspendFilter && BacktestUtils.isSuspended(bar)) continue;
+                    if (limitFilter && BacktestUtils.isLimitDown(bar)) continue;
+                    soldSymbols.add(sym);
+                }
+                positions = new HashMap<>();
+                for (String sym : oldPositions.keySet()) {
+                    if (!soldSymbols.contains(sym) && barMap.containsKey(sym)) {
+                        positions.put(sym, oldPositions.get(sym));
+                    }
+                }
+                for (Map.Entry<String, Double> entry : targetWeights.entrySet()) {
+                    String sym = entry.getKey();
+                    if (barMap.containsKey(sym) && !positions.containsKey(sym)) {
+                        positions.put(sym,
+                                (portfolioValue * entry.getValue() * scale) / barMap.get(sym).getClose().doubleValue());
+                    }
+                }
+
+                // 调仓后重新计算 portfolioValue（持仓和现金已按当日价格更新），
+                // 确保 rebalance_record 的 NAV 与 equity_curve 一致
+                double newHoldingValue = 0;
+                for (Map.Entry<String, Double> pos : positions.entrySet()) {
+                    MarketDailyBar bar = barMap.get(pos.getKey());
+                    if (bar != null) {
+                        double adj = adjFactors.getOrDefault(pos.getKey(), 1.0);
+                        newHoldingValue += pos.getValue() * bar.getClose().doubleValue() * adj;
+                    }
+                }
+                portfolioValue = cash + newHoldingValue;
+
+                // 写入 rebalance_record（调仓执行后 portfolioValue 已是 post-trade 值，与 equity_curve 当日净值一致）
                 try {
                     Map<String, Map<String, Object>> oldSnap = new HashMap<>();
                     for (Map.Entry<String, Double> pos : oldPositions.entrySet()) {
@@ -906,43 +945,6 @@ public class BacktestEngine {
                     log.warn("写入 rebalance_record 失败: {}", e.getMessage());
                 }
 
-                // ── 更新持仓 ──
-                Set<String> soldSymbols = new HashSet<>();
-                for (String sym : new HashSet<>(oldPositions.keySet())) {
-                    if (targetWeights.containsKey(sym)) continue;
-                    MarketDailyBar bar = barMap.get(sym);
-                    if (bar == null) {
-                        soldSymbols.add(sym);
-                        continue;
-                    }
-                    if (suspendFilter && BacktestUtils.isSuspended(bar)) continue;
-                    if (limitFilter && BacktestUtils.isLimitDown(bar)) continue;
-                    soldSymbols.add(sym);
-                }
-                positions = new HashMap<>();
-                for (String sym : oldPositions.keySet()) {
-                    if (!soldSymbols.contains(sym) && barMap.containsKey(sym)) {
-                        positions.put(sym, oldPositions.get(sym));
-                    }
-                }
-                for (Map.Entry<String, Double> entry : targetWeights.entrySet()) {
-                    String sym = entry.getKey();
-                    if (barMap.containsKey(sym) && !positions.containsKey(sym)) {
-                        positions.put(sym,
-                                (portfolioValue * entry.getValue() * scale) / barMap.get(sym).getClose().doubleValue());
-                    }
-                }
-
-                // 调仓后重新计算 portfolioValue（持仓和现金已按当日价格更新），
-                // 确保 rebalance_record 的 NAV 与 equity_curve 一致
-                double newHoldingValue = 0;
-                for (Map.Entry<String, Double> pos : positions.entrySet()) {
-                    MarketDailyBar bar = barMap.get(pos.getKey());
-                    if (bar != null) {
-                        newHoldingValue += pos.getValue() * bar.getClose().doubleValue();
-                    }
-                }
-                portfolioValue = cash + newHoldingValue;
 
                 lastRebalanceDate = today;
                 Map<String, Object> posSnapshot = new HashMap<>();
