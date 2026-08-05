@@ -1,6 +1,7 @@
 package com.quant.platform.research.controller;
 
 import com.quant.platform.common.dto.ApiResponse;
+import com.quant.platform.common.dto.PageResult;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -52,7 +53,7 @@ public class ResearchController {
 
     @GetMapping("/list")
     @Operation(summary = "分页查询研报列表", description = "支持按股票代码、名称、标题关键字搜索，支持日期范围和评级过滤")
-    public ApiResponse<Map<String, Object>> getList(
+    public ApiResponse<PageResult<Map<String, Object>>> getList(
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(required = false) String keyword,
@@ -100,12 +101,7 @@ public class ResearchController {
 
             List<Map<String, Object>> list = jdbcTemplate.queryForList(dataSql, dataParams.toArray());
 
-            Map<String, Object> result = new LinkedHashMap<>();
-            result.put("list", list);
-            result.put("total", totalInt);
-            result.put("page", page);
-            result.put("size", size);
-            return ApiResponse.success(result);
+            return ApiResponse.success(PageResult.of(list, totalInt, page, size));
         } catch (Exception e) {
             log.error("查询研报列表失败", e);
             return ApiResponse.error("查询研报列表失败: " + e.getMessage());

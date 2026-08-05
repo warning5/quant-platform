@@ -13,6 +13,7 @@ import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerCo
 
 import java.util.Arrays;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ThreadPoolExecutor;
 
 /**
  * WebSocket 配置（用于回测实时进度推送）
@@ -63,6 +64,8 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
         executor.setMaxPoolSize(20);    // 繁忙时最多20个线程
         executor.setQueueCapacity(100);  // 超出线程数时进入队列排队，而非直接拒绝
         executor.setThreadNamePrefix("backtest-");
+        // 队列满且线程达 max 时由调用方线程兜底执行，避免 AbortPolicy 直接抛异常导致回测任务静默丢失
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
         executor.initialize();
         return executor;               // Spring 会在 destroy 时正确关闭
     }

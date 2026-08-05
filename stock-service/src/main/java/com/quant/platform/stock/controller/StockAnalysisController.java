@@ -76,17 +76,17 @@ public class StockAnalysisController {
      * GET /api/analysis/overview?code=000001
      */
     @GetMapping("/overview")
-    public ResponseEntity<?> getOverview(@RequestParam String code) {
+    public ApiResponse<?> getOverview(@RequestParam String code) {
         if (analysisService == null) {
-            return ResponseEntity.status(503).body(errorBody("分析服务不可用，ClickHouse未启用"));
+            return ApiResponse.error(503, "分析服务不可用，ClickHouse未启用");
         }
         
         if (code == null || code.trim().isEmpty()) {
-            return ResponseEntity.badRequest().body(errorBody("股票代码不能为空"));
+            return ApiResponse.error(400, "股票代码不能为空");
         }
         
         AnalysisOverview overview = analysisService.getOverview(code.trim());
-        return ResponseEntity.ok(ApiResponse.success(overview));
+        return ApiResponse.success(overview);
     }
     
     /**
@@ -94,13 +94,13 @@ public class StockAnalysisController {
      * GET /api/analysis/score-rules
      */
     @GetMapping("/score-rules")
-    public ResponseEntity<?> getScoreRules() {
+    public ApiResponse<?> getScoreRules() {
         if (tradingSignalEngine == null) {
-            return ResponseEntity.status(503).body(errorBody("规则引擎不可用，ClickHouse未启用"));
+            return ApiResponse.error(503, "规则引擎不可用，ClickHouse未启用");
         }
 
         List<TradingSignalEngine.ScoreRule> rules = tradingSignalEngine.getScoreRules();
-        return ResponseEntity.ok(ApiResponse.success(rules));
+        return ApiResponse.success(rules);
     }
 
     /**
@@ -109,17 +109,17 @@ public class StockAnalysisController {
      * 返回：评级趋势、EPS一致预期、覆盖强度、近期研报列表
      */
     @GetMapping("/research")
-    public ResponseEntity<?> getResearchAnalysis(@RequestParam String code) {
+    public ApiResponse<?> getResearchAnalysis(@RequestParam String code) {
         if (analysisService == null) {
-            return ResponseEntity.status(503).body(errorBody("分析服务不可用，ClickHouse未启用"));
+            return ApiResponse.error(503, "分析服务不可用，ClickHouse未启用");
         }
 
         if (code == null || code.trim().isEmpty()) {
-            return ResponseEntity.badRequest().body(errorBody("股票代码不能为空"));
+            return ApiResponse.error(400, "股票代码不能为空");
         }
 
         Map<String, Object> data = analysisService.getResearchAnalysis(code.trim());
-        return ResponseEntity.ok(ApiResponse.success(data));
+        return ApiResponse.success(data);
     }
     
     /**
@@ -128,15 +128,15 @@ public class StockAnalysisController {
      * 返回：code, name, market
      */
     @GetMapping("/search")
-    public ResponseEntity<?> searchStocks(@RequestParam String keyword) {
+    public ApiResponse<?> searchStocks(@RequestParam String keyword) {
         if (analysisService == null) {
-            return ResponseEntity.status(503).body(errorBody("分析服务不可用，ClickHouse未启用"));
+            return ApiResponse.error(503, "分析服务不可用，ClickHouse未启用");
         }
         if (keyword == null || keyword.trim().isEmpty()) {
-            return ResponseEntity.ok(ApiResponse.success(Collections.emptyList()));
+            return ApiResponse.success(Collections.emptyList());
         }
         List<Map<String, Object>> results = analysisService.searchStocks(keyword.trim());
-        return ResponseEntity.ok(ApiResponse.success(results));
+        return ApiResponse.success(results);
     }
 
     /**
@@ -145,15 +145,15 @@ public class StockAnalysisController {
      * 返回：行业名称 + 同业列表（PE/PB/市值/涨跌幅）
      */
     @GetMapping("/peers")
-    public ResponseEntity<?> getPeerComparison(@RequestParam String code) {
+    public ApiResponse<?> getPeerComparison(@RequestParam String code) {
         if (analysisService == null) {
-            return ResponseEntity.status(503).body(errorBody("分析服务不可用，ClickHouse未启用"));
+            return ApiResponse.error(503, "分析服务不可用，ClickHouse未启用");
         }
         if (code == null || code.trim().isEmpty()) {
-            return ResponseEntity.badRequest().body(errorBody("股票代码不能为空"));
+            return ApiResponse.error(400, "股票代码不能为空");
         }
         Map<String, Object> data = analysisService.getPeerComparison(code.trim());
-        return ResponseEntity.ok(ApiResponse.success(data));
+        return ApiResponse.success(data);
     }
 
     /**
@@ -162,16 +162,16 @@ public class StockAnalysisController {
      * 返回：pePercentile/pbPercentile/peCurrent/pbCurrent + 分位描述
      */
     @GetMapping("/valuation-percentile")
-    public ResponseEntity<?> getValuationPercentile(@RequestParam String code,
+    public ApiResponse<?> getValuationPercentile(@RequestParam String code,
                                                      @RequestParam(defaultValue = "3") int years) {
         if (analysisService == null) {
-            return ResponseEntity.status(503).body(errorBody("分析服务不可用，ClickHouse未启用"));
+            return ApiResponse.error(503, "分析服务不可用，ClickHouse未启用");
         }
         if (code == null || code.trim().isEmpty()) {
-            return ResponseEntity.badRequest().body(errorBody("股票代码不能为空"));
+            return ApiResponse.error(400, "股票代码不能为空");
         }
         Map<String, Object> data = analysisService.getValuationPercentile(code.trim(), years);
-        return ResponseEntity.ok(ApiResponse.success(data));
+        return ApiResponse.success(data);
     }
 
     /**
@@ -179,12 +179,12 @@ public class StockAnalysisController {
      * GET /api/analysis/sector-ranking
      */
     @GetMapping("/sector-ranking")
-    public ResponseEntity<?> getSectorRanking() {
+    public ApiResponse<?> getSectorRanking() {
         if (analysisService == null) {
-            return ResponseEntity.status(503).body(errorBody("分析服务不可用，ClickHouse未启用"));
+            return ApiResponse.error(503, "分析服务不可用，ClickHouse未启用");
         }
         Map<String, Object> data = analysisService.getSectorRanking();
-        return ResponseEntity.ok(ApiResponse.success(data));
+        return ApiResponse.success(data);
     }
 
     /**
@@ -192,15 +192,15 @@ public class StockAnalysisController {
      * GET /api/analysis/industry-stocks?industry=白酒&sortBy=changePercent&sortOrder=desc
      */
     @GetMapping("/industry-stocks")
-    public ResponseEntity<?> getIndustryStocks(
+    public ApiResponse<?> getIndustryStocks(
             @RequestParam String industry,
             @RequestParam(defaultValue = "changePercent") String sortBy,
             @RequestParam(defaultValue = "desc") String sortOrder) {
         if (analysisService == null) {
-            return ResponseEntity.status(503).body(errorBody("分析服务不可用，ClickHouse未启用"));
+            return ApiResponse.error(503, "分析服务不可用，ClickHouse未启用");
         }
         List<Map<String, Object>> data = analysisService.getIndustryStocks(industry, sortBy, sortOrder);
-        return ResponseEntity.ok(ApiResponse.success(data));
+        return ApiResponse.success(data);
     }
 
     /**
@@ -208,15 +208,15 @@ public class StockAnalysisController {
      * GET /api/analysis/concept-stocks?conceptName=算力/AI&sortBy=changePercent&sortOrder=desc
      */
     @GetMapping("/concept-stocks")
-    public ResponseEntity<?> getConceptStocks(
+    public ApiResponse<?> getConceptStocks(
             @RequestParam String conceptName,
             @RequestParam(defaultValue = "changePercent") String sortBy,
             @RequestParam(defaultValue = "desc") String sortOrder) {
         if (analysisService == null) {
-            return ResponseEntity.status(503).body(errorBody("分析服务不可用，ClickHouse未启用"));
+            return ApiResponse.error(503, "分析服务不可用，ClickHouse未启用");
         }
         List<Map<String, Object>> data = analysisService.getConceptStocks(conceptName, sortBy, sortOrder);
-        return ResponseEntity.ok(ApiResponse.success(data));
+        return ApiResponse.success(data);
     }
 
     /**
@@ -224,12 +224,12 @@ public class StockAnalysisController {
      * GET /api/analysis/industry-correlation?code=600519
      */
     @GetMapping("/industry-correlation")
-    public ResponseEntity<?> getIndustryCorrelation(@RequestParam String code) {
+    public ApiResponse<?> getIndustryCorrelation(@RequestParam String code) {
         if (analysisService == null) {
-            return ResponseEntity.status(503).body(errorBody("分析服务不可用，ClickHouse未启用"));
+            return ApiResponse.error(503, "分析服务不可用，ClickHouse未启用");
         }
         Map<String, Object> data = analysisService.getIndustryCorrelation(code.trim());
-        return ResponseEntity.ok(ApiResponse.success(data));
+        return ApiResponse.success(data);
     }
 
     /**
@@ -237,12 +237,12 @@ public class StockAnalysisController {
      * GET /api/analysis/limit-up?code=600519
      */
     @GetMapping("/limit-up")
-    public ResponseEntity<?> getLimitUpAnalysis(@RequestParam String code) {
+    public ApiResponse<?> getLimitUpAnalysis(@RequestParam String code) {
         if (analysisService == null) {
-            return ResponseEntity.status(503).body(errorBody("分析服务不可用，ClickHouse未启用"));
+            return ApiResponse.error(503, "分析服务不可用，ClickHouse未启用");
         }
         Map<String, Object> data = analysisService.getLimitUpAnalysis(code.trim());
-        return ResponseEntity.ok(ApiResponse.success(data));
+        return ApiResponse.success(data);
     }
 
     /**
@@ -250,12 +250,12 @@ public class StockAnalysisController {
      * GET /api/analysis/block-trade?code=600519
      */
     @GetMapping("/block-trade")
-    public ResponseEntity<?> getBlockTradeAnalysis(@RequestParam String code) {
+    public ApiResponse<?> getBlockTradeAnalysis(@RequestParam String code) {
         if (analysisService == null) {
-            return ResponseEntity.status(503).body(errorBody("分析服务不可用，ClickHouse未启用"));
+            return ApiResponse.error(503, "分析服务不可用，ClickHouse未启用");
         }
         Map<String, Object> data = analysisService.getBlockTradeAnalysis(code.trim());
-        return ResponseEntity.ok(ApiResponse.success(data));
+        return ApiResponse.success(data);
     }
 
     /**
@@ -264,15 +264,15 @@ public class StockAnalysisController {
      * 返回：利好/风险/中性新闻列表 + 情感偏向 + 事件标签统计 + 新闻评分
      */
     @GetMapping("/news")
-    public ResponseEntity<?> getNewsAnalysis(@RequestParam String code) {
+    public ApiResponse<?> getNewsAnalysis(@RequestParam String code) {
         if (newsService == null) {
-            return ResponseEntity.status(503).body(errorBody("新闻服务不可用"));
+            return ApiResponse.error(503, "新闻服务不可用");
         }
         if (code == null || code.trim().isEmpty()) {
-            return ResponseEntity.badRequest().body(errorBody("股票代码不能为空"));
+            return ApiResponse.error(400, "股票代码不能为空");
         }
         Map<String, Object> data = newsService.getNewsAnalysis(code.trim());
-        return ResponseEntity.ok(ApiResponse.success(data));
+        return ApiResponse.success(data);
     }
 
     /**
@@ -280,13 +280,13 @@ public class StockAnalysisController {
      * GET /api/analysis/news/tag?code=600619&tag=PERFORMANCE
      */
     @GetMapping("/news/tag")
-    public ResponseEntity<?> getNewsByTag(@RequestParam String code,
+    public ApiResponse<?> getNewsByTag(@RequestParam String code,
                                           @RequestParam String tag) {
         if (newsService == null) {
-            return ResponseEntity.status(503).body(errorBody("新闻服务不可用"));
+            return ApiResponse.error(503, "新闻服务不可用");
         }
         List<Map<String, Object>> data = newsService.getNewsByTag(code.trim(), tag);
-        return ResponseEntity.ok(ApiResponse.success(data));
+        return ApiResponse.success(data);
     }
 
     /**
@@ -294,12 +294,12 @@ public class StockAnalysisController {
      * GET /api/analysis/news-signal?code=600619
      */
     @GetMapping("/news-signal")
-    public ResponseEntity<?> getNewsSignal(@RequestParam String code) {
+    public ApiResponse<?> getNewsSignal(@RequestParam String code) {
         if (newsService == null) {
-            return ResponseEntity.status(503).body(errorBody("新闻服务不可用"));
+            return ApiResponse.error(503, "新闻服务不可用");
         }
         Map<String, Object> data = newsService.getNewsSignal(code.trim());
-        return ResponseEntity.ok(ApiResponse.success(data));
+        return ApiResponse.success(data);
     }
 
     /**
@@ -307,12 +307,12 @@ public class StockAnalysisController {
      * GET /api/analysis/bid-ask
      */
     @GetMapping("/bid-ask")
-    public ResponseEntity<?> getBidAskAnalysis(@RequestParam String code) {
+    public ApiResponse<?> getBidAskAnalysis(@RequestParam String code) {
         if (bidAskService == null) {
-            return ResponseEntity.status(503).body(errorBody("内外盘比服务不可用"));
+            return ApiResponse.error(503, "内外盘比服务不可用");
         }
         Map<String, Object> data = bidAskService.getBidAskAnalysis(code.trim());
-        return ResponseEntity.ok(ApiResponse.success(data));
+        return ApiResponse.success(data);
     }
 
     /**
@@ -320,12 +320,12 @@ public class StockAnalysisController {
      * GET /api/analysis/bid-ask-signal
      */
     @GetMapping("/bid-ask-signal")
-    public ResponseEntity<?> getBidAskSignal(@RequestParam String code) {
+    public ApiResponse<?> getBidAskSignal(@RequestParam String code) {
         if (bidAskService == null) {
-            return ResponseEntity.status(503).body(errorBody("内外盘比服务不可用"));
+            return ApiResponse.error(503, "内外盘比服务不可用");
         }
         Map<String, Object> data = bidAskService.getBidAskSignal(code.trim());
-        return ResponseEntity.ok(ApiResponse.success(data));
+        return ApiResponse.success(data);
     }
 
     /**
@@ -333,12 +333,12 @@ public class StockAnalysisController {
      * GET /api/analysis/institution-coverage
      */
     @GetMapping("/institution-coverage")
-    public ResponseEntity<?> getInstitutionCoverage(@RequestParam String code) {
+    public ApiResponse<?> getInstitutionCoverage(@RequestParam String code) {
         if (institutionCoverageService == null) {
-            return ResponseEntity.status(503).body(errorBody("机构覆盖度服务不可用"));
+            return ApiResponse.error(503, "机构覆盖度服务不可用");
         }
         Map<String, Object> data = institutionCoverageService.getInstitutionCoverage(code.trim());
-        return ResponseEntity.ok(ApiResponse.success(data));
+        return ApiResponse.success(data);
     }
 
     /**
@@ -347,12 +347,12 @@ public class StockAnalysisController {
      * 返回：恐慌贪婪指数 + 各维度指标（PE分位/PB分位/均线温度/股债收益比/融资余额）
      */
     @GetMapping("/market-thermometer")
-    public ResponseEntity<?> getMarketThermometer() {
+    public ApiResponse<?> getMarketThermometer() {
         if (marketThermometerService == null) {
-            return ResponseEntity.status(503).body(errorBody("大盘温度计服务不可用"));
+            return ApiResponse.error(503, "大盘温度计服务不可用");
         }
         Map<String, Object> data = marketThermometerService.getThermometer();
-        return ResponseEntity.ok(ApiResponse.success(data));
+        return ApiResponse.success(data);
     }
 
     /**
@@ -361,15 +361,15 @@ public class StockAnalysisController {
      * 返回：K线数据 + 笔 + 中枢 + 买卖点
      */
     @GetMapping("/chan-chart")
-    public ResponseEntity<?> getChanChart(@RequestParam String code) {
+    public ApiResponse<?> getChanChart(@RequestParam String code) {
         if (analysisService == null) {
-            return ResponseEntity.status(503).body(errorBody("分析服务不可用，ClickHouse未启用"));
+            return ApiResponse.error(503, "分析服务不可用，ClickHouse未启用");
         }
         if (code == null || code.trim().isEmpty()) {
-            return ResponseEntity.badRequest().body(errorBody("股票代码不能为空"));
+            return ApiResponse.error(400, "股票代码不能为空");
         }
         Map<String, Object> data = analysisService.getChanChart(code.trim());
-        return ResponseEntity.ok(ApiResponse.success(data));
+        return ApiResponse.success(data);
     }
 
     /**
@@ -378,16 +378,16 @@ public class StockAnalysisController {
      * 返回：5大起涨形态检测结果
      */
     @GetMapping("/pattern-detect")
-    public ResponseEntity<?> detectPatterns(@RequestParam String code) {
+    public ApiResponse<?> detectPatterns(@RequestParam String code) {
         if (analysisService == null) {
-            return ResponseEntity.status(503).body(errorBody("分析服务不可用，ClickHouse未启用"));
+            return ApiResponse.error(503, "分析服务不可用，ClickHouse未启用");
         }
         if (code == null || code.trim().isEmpty()) {
-            return ResponseEntity.badRequest().body(errorBody("股票代码不能为空"));
+            return ApiResponse.error(400, "股票代码不能为空");
         }
         double[][] ohlcv = analysisService.fetchKlineData(code.trim(), 120);
         if (ohlcv == null || ohlcv[3].length < 30) {
-            return ResponseEntity.ok(ApiResponse.success(Map.of("detected", List.of(), "message", "K线数据不足")));
+            return ApiResponse.success(Map.of("detected", List.of(), "message", "K线数据不足"));
         }
         List<PatternDetector.PatternResult> results = PatternDetector.detectAll(
                 ohlcv[1], ohlcv[2], ohlcv[0], ohlcv[3], ohlcv[4]);
@@ -397,7 +397,7 @@ public class StockAnalysisController {
         data.put("detected", results);
         data.put("strongest", strongest);
         data.put("code", code.trim());
-        return ResponseEntity.ok(ApiResponse.success(data));
+        return ApiResponse.success(data);
     }
 
     /**
@@ -406,21 +406,21 @@ public class StockAnalysisController {
      * 返回：7种卖点信号检测结果 + 建议
      */
     @GetMapping("/sell-signals")
-    public ResponseEntity<?> detectSellSignals(@RequestParam String code) {
+    public ApiResponse<?> detectSellSignals(@RequestParam String code) {
         if (sellSignalEngine == null) {
-            return ResponseEntity.status(503).body(errorBody("卖点引擎未启用"));
+            return ApiResponse.error(503, "卖点引擎未启用");
         }
         if (code == null || code.trim().isEmpty()) {
-            return ResponseEntity.badRequest().body(errorBody("股票代码不能为空"));
+            return ApiResponse.error(400, "股票代码不能为空");
         }
         double[][] ohlcv = analysisService.fetchKlineData(code.trim(), 120);
         if (ohlcv == null || ohlcv[3].length < 30) {
-            return ResponseEntity.ok(ApiResponse.success(
-                    Map.of("action", "HOLD", "score", 0, "message", "K线数据不足")));
+            return ApiResponse.success(
+                    Map.of("action", "HOLD", "score", 0, "message", "K线数据不足"));
         }
         SellSignalEngine.SellSignalResult result = sellSignalEngine.checkSellSignals(
                 ohlcv[3], ohlcv[1], ohlcv[2], ohlcv[0], ohlcv[4]);
-        return ResponseEntity.ok(ApiResponse.success(result));
+        return ApiResponse.success(result);
     }
 
     /**
@@ -429,16 +429,16 @@ public class StockAnalysisController {
      * 返回：逐日资金流向 + 评分
      */
     @GetMapping("/money-flow-history")
-    public ResponseEntity<?> getMoneyFlowHistory(@RequestParam String code,
+    public ApiResponse<?> getMoneyFlowHistory(@RequestParam String code,
                                                    @RequestParam(defaultValue = "120") int days) {
         if (analysisService == null) {
-            return ResponseEntity.status(503).body(errorBody("分析服务不可用，ClickHouse未启用"));
+            return ApiResponse.error(503, "分析服务不可用，ClickHouse未启用");
         }
         if (code == null || code.trim().isEmpty()) {
-            return ResponseEntity.badRequest().body(errorBody("股票代码不能为空"));
+            return ApiResponse.error(400, "股票代码不能为空");
         }
         Map<String, Object> data = analysisService.getMoneyFlowHistory(code.trim(), days);
-        return ResponseEntity.ok(ApiResponse.success(data));
+        return ApiResponse.success(data);
     }
 
     /**
@@ -447,15 +447,15 @@ public class StockAnalysisController {
      * 返回：累计收益对比 + RS Ratio
      */
     @GetMapping("/relative-strength")
-    public ResponseEntity<?> getRelativeStrength(@RequestParam String code) {
+    public ApiResponse<?> getRelativeStrength(@RequestParam String code) {
         if (analysisService == null) {
-            return ResponseEntity.status(503).body(errorBody("分析服务不可用，ClickHouse未启用"));
+            return ApiResponse.error(503, "分析服务不可用，ClickHouse未启用");
         }
         if (code == null || code.trim().isEmpty()) {
-            return ResponseEntity.badRequest().body(errorBody("股票代码不能为空"));
+            return ApiResponse.error(400, "股票代码不能为空");
         }
         Map<String, Object> data = analysisService.getRelativeStrength(code.trim());
-        return ResponseEntity.ok(ApiResponse.success(data));
+        return ApiResponse.success(data);
     }
 
     /**
@@ -463,15 +463,15 @@ public class StockAnalysisController {
      * GET /api/analysis/stock-performance
      */
     @GetMapping("/stock-performance")
-    public ResponseEntity<?> getStockPerformance(@RequestParam String code) {
+    public ApiResponse<?> getStockPerformance(@RequestParam String code) {
         if (analysisService == null) {
-            return ResponseEntity.status(503).body(errorBody("分析服务不可用，ClickHouse未启用"));
+            return ApiResponse.error(503, "分析服务不可用，ClickHouse未启用");
         }
         if (code == null || code.trim().isEmpty()) {
-            return ResponseEntity.badRequest().body(errorBody("股票代码不能为空"));
+            return ApiResponse.error(400, "股票代码不能为空");
         }
         Map<String, Object> data = analysisService.getStockPerformance(code.trim());
-        return ResponseEntity.ok(ApiResponse.success(data));
+        return ApiResponse.success(data);
     }
 
     /**
@@ -480,12 +480,12 @@ public class StockAnalysisController {
      * 返回：各热门板块聚合数据（涨跌/资金/龙头/估值）
      */
     @GetMapping("/hot-sectors")
-    public ResponseEntity<?> getHotSectors() {
+    public ApiResponse<?> getHotSectors() {
         if (analysisService == null) {
-            return ResponseEntity.status(503).body(errorBody("分析服务不可用，ClickHouse未启用"));
+            return ApiResponse.error(503, "分析服务不可用，ClickHouse未启用");
         }
         Map<String, Object> data = analysisService.getHotSectors();
-        return ResponseEntity.ok(ApiResponse.success(data));
+        return ApiResponse.success(data);
     }
 
     /**
@@ -494,12 +494,12 @@ public class StockAnalysisController {
      * 返回：板块成分股 + 龙头 + 资金流向 + 近5日涨跌
      */
     @GetMapping("/hot-sectors/detail")
-    public ResponseEntity<?> getHotSectorDetail(@RequestParam String conceptName) {
+    public ApiResponse<?> getHotSectorDetail(@RequestParam String conceptName) {
         if (analysisService == null) {
-            return ResponseEntity.status(503).body(errorBody("分析服务不可用，ClickHouse未启用"));
+            return ApiResponse.error(503, "分析服务不可用，ClickHouse未启用");
         }
         Map<String, Object> data = analysisService.getHotSectorDetail(conceptName);
-        return ResponseEntity.ok(ApiResponse.success(data));
+        return ApiResponse.success(data);
     }
 
     /**
@@ -507,12 +507,12 @@ public class StockAnalysisController {
      * GET /api/analysis/bull-bear?code=000001
      */
     @GetMapping("/bull-bear")
-    public ResponseEntity<?> getBullBear(@RequestParam String code) {
+    public ApiResponse<?> getBullBear(@RequestParam String code) {
         if (workflowReportService == null) {
-            return ResponseEntity.status(503).body(errorBody("报告服务不可用"));
+            return ApiResponse.error(503, "报告服务不可用");
         }
         if (code == null || code.trim().isEmpty()) {
-            return ResponseEntity.badRequest().body(errorBody("股票代码不能为空"));
+            return ApiResponse.error(400, "股票代码不能为空");
         }
         com.quant.platform.stock.analysis.domain.WorkflowReport report = workflowReportService.generateReport(code.trim());
         Map<String, Object> data = new HashMap<>();
@@ -521,7 +521,7 @@ public class StockAnalysisController {
         data.put("conclusion", report.getConclusion());
         data.put("totalScore", report.getTotalScore());
         data.put("bias", report.getBias());
-        return ResponseEntity.ok(ApiResponse.success(data));
+        return ApiResponse.success(data);
     }
 
     /**
@@ -533,10 +533,10 @@ public class StockAnalysisController {
     public ResponseEntity<?> getHtmlReport(@RequestParam String code,
                                            @RequestParam(defaultValue = "preview") String mode) {
         if (workflowReportService == null) {
-            return ResponseEntity.status(503).body(errorBody("报告服务不可用"));
+            return ResponseEntity.status(503).body(ApiResponse.error(503, "报告服务不可用"));
         }
         if (code == null || code.trim().isEmpty()) {
-            return ResponseEntity.badRequest().body(errorBody("股票代码不能为空"));
+            return ResponseEntity.badRequest().body(ApiResponse.error(400, "股票代码不能为空"));
         }
         try {
             String html = workflowReportService.generateHtml(code.trim());
@@ -562,15 +562,15 @@ public class StockAnalysisController {
      * GET /api/analysis/shareholder-structure?code=600519
      */
     @GetMapping("/shareholder-structure")
-    public ResponseEntity<?> getShareholderStructure(@RequestParam String code) {
+    public ApiResponse<?> getShareholderStructure(@RequestParam String code) {
         if (analysisService == null) {
-            return ResponseEntity.status(503).body(errorBody("分析服务不可用，ClickHouse未启用"));
+            return ApiResponse.error(503, "分析服务不可用，ClickHouse未启用");
         }
         if (code == null || code.trim().isEmpty()) {
-            return ResponseEntity.badRequest().body(errorBody("股票代码不能为空"));
+            return ApiResponse.error(400, "股票代码不能为空");
         }
         Map<String, Object> data = analysisService.getShareholderStructure(code.trim());
-        return ResponseEntity.ok(ApiResponse.success(data));
+        return ApiResponse.success(data);
     }
 
     private String escapeHtml(String text) {
@@ -581,22 +581,18 @@ public class StockAnalysisController {
                 .replace("\"", "&quot;");
     }
 
-    private ApiResponse<Object> errorBody(String message) {
-        return ApiResponse.error(500, message);
-    }
-
     /**
      * K线数据（近N交易日）
      * GET /api/analysis/kline?code=000001&days=60
      */
     @GetMapping("/kline")
-    public ResponseEntity<?> getKLine(@RequestParam String code,
+    public ApiResponse<?> getKLine(@RequestParam String code,
                                        @RequestParam(defaultValue = "60") int days) {
         if (code == null || code.trim().isEmpty()) {
-            return ResponseEntity.badRequest().body(errorBody("股票代码不能为空"));
+            return ApiResponse.error(400, "股票代码不能为空");
         }
         List<Map<String, Object>> kline = analysisService.getKLine(code.trim(), days);
-        return ResponseEntity.ok(ApiResponse.success(kline));
+        return ApiResponse.success(kline);
     }
 
     /**
@@ -605,15 +601,15 @@ public class StockAnalysisController {
      */
     @GetMapping("/news-event/parse")
     @cn.dev33.satoken.annotation.SaCheckPermission(value = {"stock:view", "stock:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
-    public ResponseEntity<?> parseNewsEvents() {
+    public ApiResponse<?> parseNewsEvents() {
         if (newsEventParser == null) {
-            return ResponseEntity.status(503).body(errorBody("新闻事件解析服务不可用"));
+            return ApiResponse.error(503, "新闻事件解析服务不可用");
         }
         int count = newsEventParser.parseUnprocessedNews();
         Map<String, Object> data = new HashMap<>();
         data.put("parsedCount", count);
         data.put("message", "成功解析 " + count + " 条新闻");
-        return ResponseEntity.ok(ApiResponse.success(data));
+        return ApiResponse.success(data);
     }
 
     /**
@@ -621,11 +617,11 @@ public class StockAnalysisController {
      * GET /api/analysis/event-signal?code=000001
      */
     @GetMapping("/event-signal")
-    public ResponseEntity<?> getEventSignal(@RequestParam String code) {
+    public ApiResponse<?> getEventSignal(@RequestParam String code) {
         if (eventSignalService == null) {
-            return ResponseEntity.status(503).body(errorBody("事件信号服务不可用"));
+            return ApiResponse.error(503, "事件信号服务不可用");
         }
         EventSignalService.EventSignal signal = eventSignalService.getEventSignal(code.trim());
-        return ResponseEntity.ok(ApiResponse.success(signal));
+        return ApiResponse.success(signal);
     }
 }

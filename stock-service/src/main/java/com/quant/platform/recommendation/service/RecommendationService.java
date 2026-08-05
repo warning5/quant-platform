@@ -115,6 +115,11 @@ public class RecommendationService {
     private final FactorWeightResolver factorWeightResolver;
     private final StockScoreFuser stockScoreFuser;
 
+    /** 共享个股深度分析线程池（单例 bean，替代每次调用 newFixedThreadPool） */
+    @org.springframework.beans.factory.annotation.Autowired
+    @org.springframework.beans.factory.annotation.Qualifier("recommendationAnalysisExecutor")
+    private java.util.concurrent.ExecutorService analysisExecutor;
+
     @PostConstruct
     public void initRegimeCalendar() {
         if (regimeCalendarService != null) {
@@ -524,10 +529,7 @@ public class RecommendationService {
         int analysisCount = Math.min(topN, candidates.size());
         List<StockRecommendation> recommendations = new ArrayList<>();
 
-        // P1-6: 并行执行个股深度分析，限制并发线程数避免CH连接池耗尽
-        java.util.concurrent.ExecutorService analysisExecutor =
-                java.util.concurrent.Executors.newFixedThreadPool(
-                        Math.min(ANALYSIS_PARALLELISM, analysisCount));
+        // P1-6: 并行执行个股深度分析，使用共享单例线程池 analysisExecutor，限制并发避免CH连接池耗尽
 
         List<java.util.concurrent.CompletableFuture<StockRecommendation>> futures = new ArrayList<>();
         for (int i = 0; i < analysisCount; i++) {
@@ -567,7 +569,6 @@ public class RecommendationService {
                 log.warn("[Recommendation] 并行分析获取结果失败: {}", e.getMessage());
             }
         }
-        analysisExecutor.shutdown();
 
         // Step 3.5: 批量填充 industry 和 marketCap（从 stock_info）
         fillIndustryAndMarketCap(recommendations);

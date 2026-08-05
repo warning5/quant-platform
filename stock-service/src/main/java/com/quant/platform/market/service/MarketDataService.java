@@ -36,12 +36,12 @@ public class MarketDataService {
     /**
      * code → market (SH/SZ/BJ)
      */
-    private Map<String, String> codeMarketMap;
+    private volatile Map<String, String> codeMarketMap = new ConcurrentHashMap<>();
 
     /**
      * code → totalMarketCap (来自 stock_info 的最新市值，万元)
      */
-    private Map<String, BigDecimal> codeMarketCapMap;
+    private volatile Map<String, BigDecimal> codeMarketCapMap = new ConcurrentHashMap<>();
 
     /**
      * code → 近12月每股派息合计（元），用于 VAL_DIVIDEND_YIELD 日频计算
