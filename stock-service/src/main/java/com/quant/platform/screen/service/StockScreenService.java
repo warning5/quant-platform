@@ -68,152 +68,9 @@ public class StockScreenService {
         Map<String, MarketDailyBar> barMapByCode = cb.barMapByCode();
         Set<String> candidates = cb.candidates();
 
-        // ── 3. 加载各因子的截面数据，并进行极值处理、标准化 ────────────
-        Map<String, Map<String, FactorValue>> factorData = new LinkedHashMap<>();
-        Map<String, Integer> coverage = new LinkedHashMap<>();
-        long factorLoadStart = System.currentTimeMillis();
-
-        // 3.0 预加载行业信息和市值信息（用于中性化）
-        Map<String, String> industryMap = new HashMap<>();
-        Map<String, Double> marketCapMap = new HashMap<>();
-        String neutralizationMethod = req.getNeutralizationMethod();
-        boolean needIndustry = neutralizationMethod != null && 
-            (neutralizationMethod.contains("INDUSTRY") || "BOTH".equalsIgnoreCase(neutralizationMethod));
-        boolean needMarketCap = neutralizationMethod != null && 
-            (neutralizationMethod.contains("MARKET_CAP") || "BOTH".equalsIgnoreCase(neutralizationMethod));
-        
-        if (needIndustry || needMarketCap) {
-            long neutStart = System.currentTimeMillis();
-            List<String> candidateList = new ArrayList<>(candidates);
-            if (needIndustry) {
-                industryMap = dataLoader.batchLoadIndustryInfo(candidateList);
-            }
-            if (needMarketCap) {
-                marketCapMap = dataLoader.batchLoadMarketCap(candidateList, screenDate);
-            }
-            log.info("[Screen] Neutralization pre-load: industry={}, marketCap={}, took {} ms", 
-                industryMap.size(), marketCapMap.size(), System.currentTimeMillis() - neutStart);
-        }
-
-        for (ScreenRequest.FactorWeight fw : req.getFactors()) {
-            String code = fw.getFactorCode();
-            long fStart = System.currentTimeMillis();
-
-            List<FactorValue> crossSection;
-
-            // P1-5: 提前查询因子定义，供后续 P1-5/P1-6 使用
-            FactorDefinition factorDef = factorDefMapper.selectOne(
-                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<FactorDefinition>()
-                    .eq(FactorDefinition::getFactorCode, code)
-                    .last("LIMIT 1"));
-
-            if (useMultiDayMode) {
-                // ── 多日平均模式：查询日期范围，按 symbol 聚合取均值 ──
-                crossSection = dataLoader.loadFactorAverage(code, screenStartDate, screenEndDate, candidates);
-                log.info("[Screen] Multi-day factor {} avg: {} stocks, range={} ~ {}",
-                        code, crossSection.size(), screenStartDate, screenEndDate);
-            } else {
-                // ── 单日模式 ──
-                // P1-5: 季度因子按 announce_date 过滤，只用已发布的财报数据（DB元数据驱动）
-                if (factorMetaCache.isQuarterly(code)) {
-                    // 季度财务因子：用 announce_date 过滤，只取已发布数据
-                    crossSection = clickHouseFactorValueService.findQuarterlyByScreenDate(code, screenDate);
-                    log.info("[Screen] 季度因子 {} screenDate={}: {} 条 (announce_date <= {})",
-                            code, screenDate, crossSection.size(), screenDate);
-                } else {
-                    // 日频因子：回退 5 日
-                    crossSection = Collections.emptyList();
-                    LocalDate searchDate = screenDate;
-                    for (int i = 0; i <= 5; i++) {
-                        crossSection = clickHouseFactorValueService.findByFactorCodeAndDate(code, searchDate);
-                        if (!crossSection.isEmpty()) break;
-                        searchDate = searchDate.minusDays(1);
-                    }
-                }
-            }
-
-            // 过滤候选股票，并提取原始值
-            // factor_value.symbol 可能带后缀（如 000001.SZ），candidates 是纯代码（如 000001）
-            // 需要做 symbol 归一化：去掉 .SH/.SZ/.BJ 后缀
-            List<FactorValue> filtered = crossSection.stream()
-                    .filter(fv -> candidates.contains(ScreenMathService.normalizeFactorSymbol(fv.getSymbol())))
-                    .toList();
-
-            // 诊断：symbol 格式不匹配时打印样本
-            if (filtered.isEmpty() && !crossSection.isEmpty()) {
-                log.warn("[Screen] symbol mismatch! crossSection size={}, first 5 symbols={}, candidates size={}, first 5 candidates={}",
-                        crossSection.size(),
-                        crossSection.stream().limit(5).map(FactorValue::getSymbol).collect(Collectors.toList()),
-                        candidates.size(),
-                        candidates.stream().limit(5).collect(Collectors.toList()));
-            }
-
-            // 极值处理（P1-6: 优先使用因子配置的方法，回退到全局配置）
-            String outlierMethod = req.getGlobalOutlierMethod() != null ? req.getGlobalOutlierMethod() : "MAD";
-            if (factorDef != null && factorDef.getOutlierMethod() != null) {
-                outlierMethod = factorDef.getOutlierMethod();
-            }
-            List<Double> outlierProcessed = mathService.applyOutlierProcessing(
-                    filtered.stream()
-                            .map(FactorValue::getFactorVal)
-                            .map(bd -> bd != null ? bd.doubleValue() : 0.0)
-                            .collect(Collectors.toList()),
-                    outlierMethod
-            );
-
-            // 中性化处理（在标准化之前）
-            if (neutralizationMethod != null && !"NONE".equalsIgnoreCase(neutralizationMethod)) {
-                outlierProcessed = factorProcessor.applyNeutralization(
-                    filtered, outlierProcessed, industryMap, marketCapMap, neutralizationMethod
-                );
-            }
-
-            // 标准化处理（P1-6: 优先使用因子配置的方法，回退到全局配置）
-            String normalizeMethod = req.getGlobalNormalizeMethod() != null ? req.getGlobalNormalizeMethod() : "ZSCORE";
-            if (factorDef != null && factorDef.getNormalizeMethod() != null) {
-                normalizeMethod = factorDef.getNormalizeMethod();
-            }
-            List<Double> normalized = mathService.applyNormalization(outlierProcessed, normalizeMethod);
-
-            // P1-6: 因子分布诊断（标准化后检查偏度）
-            if (normalized.size() > 10) {
-                double skewness = mathService.calcSkewness(normalized);
-                if (Math.abs(skewness) > 2.0) {
-                    log.warn("[Screen] Factor {} 标准化后偏度={}，分布严重偏斜，建议检查因子值", code, skewness);
-                }
-            }
-
-            // 重新组装 FactorValue（用标准化后的值替换 rankValue）
-            // key 使用归一化后的纯代码 symbol（与 candidates 格式一致）
-            Map<String, FactorValue> symbolMap = new LinkedHashMap<>();
-            for (int i = 0; i < filtered.size(); i++) {
-                FactorValue orig = filtered.get(i);
-                String normSym = ScreenMathService.normalizeFactorSymbol(orig.getSymbol());
-                FactorValue processed = new FactorValue();
-                processed.setSymbol(normSym);
-                processed.setFactorCode(orig.getFactorCode());
-                processed.setCalcDate(orig.getCalcDate());
-                processed.setFactorVal(orig.getFactorVal());
-                // 用标准化后的值作为 rankValue 参与后续计算
-                processed.setRankValue(BigDecimal.valueOf(normalized.get(i)));
-                symbolMap.put(normSym, processed);
-            }
-
-            factorData.put(code, symbolMap);
-        coverage.put(code, symbolMap.size());
-        log.info("[Screen] Factor {} coverage: {} stocks on {}, outlier={}, normalize={} (took {} ms)",
-                code, symbolMap.size(), useMultiDayMode ? (screenStartDate + " ~ " + screenEndDate) : screenDate, outlierMethod, normalizeMethod, System.currentTimeMillis() - fStart);
-        }
-        log.info("[Screen] All factors loaded: total took {} ms", System.currentTimeMillis() - factorLoadStart);
-
-        // 调试：打印候选股票数和各因子覆盖情况
-        log.info("[Screen] Candidates: {}, FactorData keys: {}", candidates.size(), factorData.keySet());
-
-        // ── 3.5 因子正交化（可选，消除多因子间共线性）───────────────
-        String orthoMethod = req.getOrthogonalizationMethod();
-        if (orthoMethod != null && !"NONE".equalsIgnoreCase(orthoMethod) && factorData.size() > 1) {
-            factorProcessor.applyOrthogonalization(factorData, orthoMethod);
-        }
+        FactorLoadResult flr = loadFactorData(req, screenDate, screenStartDate, screenEndDate, useMultiDayMode, candidates);
+        Map<String, Map<String, FactorValue>> factorData = flr.factorData();
+        Map<String, Integer> coverage = flr.coverage();
 
         // ── 4. 筛选 + 计算综合得分 ───────────────────────────────────
         // 权重归一化（绝对值之和 = 1）
@@ -677,5 +534,159 @@ public class StockScreenService {
 
     private record CandidateBundle(
             Map<String, String> codeToSymbol, Map<String, MarketDailyBar> barMapByCode, Set<String> candidates) {}
+
+    private FactorLoadResult loadFactorData(ScreenRequest req, LocalDate screenDate, LocalDate screenStartDate, LocalDate screenEndDate, boolean useMultiDayMode, Set<String> candidates) {
+        // ── 3. 加载各因子的截面数据，并进行极值处理、标准化 ────────────
+        Map<String, Map<String, FactorValue>> factorData = new LinkedHashMap<>();
+        Map<String, Integer> coverage = new LinkedHashMap<>();
+        long factorLoadStart = System.currentTimeMillis();
+
+        // 3.0 预加载行业信息和市值信息（用于中性化）
+        Map<String, String> industryMap = new HashMap<>();
+        Map<String, Double> marketCapMap = new HashMap<>();
+        String neutralizationMethod = req.getNeutralizationMethod();
+        boolean needIndustry = neutralizationMethod != null && 
+            (neutralizationMethod.contains("INDUSTRY") || "BOTH".equalsIgnoreCase(neutralizationMethod));
+        boolean needMarketCap = neutralizationMethod != null && 
+            (neutralizationMethod.contains("MARKET_CAP") || "BOTH".equalsIgnoreCase(neutralizationMethod));
+        
+        if (needIndustry || needMarketCap) {
+            long neutStart = System.currentTimeMillis();
+            List<String> candidateList = new ArrayList<>(candidates);
+            if (needIndustry) {
+                industryMap = dataLoader.batchLoadIndustryInfo(candidateList);
+            }
+            if (needMarketCap) {
+                marketCapMap = dataLoader.batchLoadMarketCap(candidateList, screenDate);
+            }
+            log.info("[Screen] Neutralization pre-load: industry={}, marketCap={}, took {} ms", 
+                industryMap.size(), marketCapMap.size(), System.currentTimeMillis() - neutStart);
+        }
+
+        for (ScreenRequest.FactorWeight fw : req.getFactors()) {
+            String code = fw.getFactorCode();
+            long fStart = System.currentTimeMillis();
+
+            List<FactorValue> crossSection;
+
+            // P1-5: 提前查询因子定义，供后续 P1-5/P1-6 使用
+            FactorDefinition factorDef = factorDefMapper.selectOne(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<FactorDefinition>()
+                    .eq(FactorDefinition::getFactorCode, code)
+                    .last("LIMIT 1"));
+
+            if (useMultiDayMode) {
+                // ── 多日平均模式：查询日期范围，按 symbol 聚合取均值 ──
+                crossSection = dataLoader.loadFactorAverage(code, screenStartDate, screenEndDate, candidates);
+                log.info("[Screen] Multi-day factor {} avg: {} stocks, range={} ~ {}",
+                        code, crossSection.size(), screenStartDate, screenEndDate);
+            } else {
+                // ── 单日模式 ──
+                // P1-5: 季度因子按 announce_date 过滤，只用已发布的财报数据（DB元数据驱动）
+                if (factorMetaCache.isQuarterly(code)) {
+                    // 季度财务因子：用 announce_date 过滤，只取已发布数据
+                    crossSection = clickHouseFactorValueService.findQuarterlyByScreenDate(code, screenDate);
+                    log.info("[Screen] 季度因子 {} screenDate={}: {} 条 (announce_date <= {})",
+                            code, screenDate, crossSection.size(), screenDate);
+                } else {
+                    // 日频因子：回退 5 日
+                    crossSection = Collections.emptyList();
+                    LocalDate searchDate = screenDate;
+                    for (int i = 0; i <= 5; i++) {
+                        crossSection = clickHouseFactorValueService.findByFactorCodeAndDate(code, searchDate);
+                        if (!crossSection.isEmpty()) break;
+                        searchDate = searchDate.minusDays(1);
+                    }
+                }
+            }
+
+            // 过滤候选股票，并提取原始值
+            // factor_value.symbol 可能带后缀（如 000001.SZ），candidates 是纯代码（如 000001）
+            // 需要做 symbol 归一化：去掉 .SH/.SZ/.BJ 后缀
+            List<FactorValue> filtered = crossSection.stream()
+                    .filter(fv -> candidates.contains(ScreenMathService.normalizeFactorSymbol(fv.getSymbol())))
+                    .toList();
+
+            // 诊断：symbol 格式不匹配时打印样本
+            if (filtered.isEmpty() && !crossSection.isEmpty()) {
+                log.warn("[Screen] symbol mismatch! crossSection size={}, first 5 symbols={}, candidates size={}, first 5 candidates={}",
+                        crossSection.size(),
+                        crossSection.stream().limit(5).map(FactorValue::getSymbol).collect(Collectors.toList()),
+                        candidates.size(),
+                        candidates.stream().limit(5).collect(Collectors.toList()));
+            }
+
+            // 极值处理（P1-6: 优先使用因子配置的方法，回退到全局配置）
+            String outlierMethod = req.getGlobalOutlierMethod() != null ? req.getGlobalOutlierMethod() : "MAD";
+            if (factorDef != null && factorDef.getOutlierMethod() != null) {
+                outlierMethod = factorDef.getOutlierMethod();
+            }
+            List<Double> outlierProcessed = mathService.applyOutlierProcessing(
+                    filtered.stream()
+                            .map(FactorValue::getFactorVal)
+                            .map(bd -> bd != null ? bd.doubleValue() : 0.0)
+                            .collect(Collectors.toList()),
+                    outlierMethod
+            );
+
+            // 中性化处理（在标准化之前）
+            if (neutralizationMethod != null && !"NONE".equalsIgnoreCase(neutralizationMethod)) {
+                outlierProcessed = factorProcessor.applyNeutralization(
+                    filtered, outlierProcessed, industryMap, marketCapMap, neutralizationMethod
+                );
+            }
+
+            // 标准化处理（P1-6: 优先使用因子配置的方法，回退到全局配置）
+            String normalizeMethod = req.getGlobalNormalizeMethod() != null ? req.getGlobalNormalizeMethod() : "ZSCORE";
+            if (factorDef != null && factorDef.getNormalizeMethod() != null) {
+                normalizeMethod = factorDef.getNormalizeMethod();
+            }
+            List<Double> normalized = mathService.applyNormalization(outlierProcessed, normalizeMethod);
+
+            // P1-6: 因子分布诊断（标准化后检查偏度）
+            if (normalized.size() > 10) {
+                double skewness = mathService.calcSkewness(normalized);
+                if (Math.abs(skewness) > 2.0) {
+                    log.warn("[Screen] Factor {} 标准化后偏度={}，分布严重偏斜，建议检查因子值", code, skewness);
+                }
+            }
+
+            // 重新组装 FactorValue（用标准化后的值替换 rankValue）
+            // key 使用归一化后的纯代码 symbol（与 candidates 格式一致）
+            Map<String, FactorValue> symbolMap = new LinkedHashMap<>();
+            for (int i = 0; i < filtered.size(); i++) {
+                FactorValue orig = filtered.get(i);
+                String normSym = ScreenMathService.normalizeFactorSymbol(orig.getSymbol());
+                FactorValue processed = new FactorValue();
+                processed.setSymbol(normSym);
+                processed.setFactorCode(orig.getFactorCode());
+                processed.setCalcDate(orig.getCalcDate());
+                processed.setFactorVal(orig.getFactorVal());
+                // 用标准化后的值作为 rankValue 参与后续计算
+                processed.setRankValue(BigDecimal.valueOf(normalized.get(i)));
+                symbolMap.put(normSym, processed);
+            }
+
+            factorData.put(code, symbolMap);
+        coverage.put(code, symbolMap.size());
+        log.info("[Screen] Factor {} coverage: {} stocks on {}, outlier={}, normalize={} (took {} ms)",
+                code, symbolMap.size(), useMultiDayMode ? (screenStartDate + " ~ " + screenEndDate) : screenDate, outlierMethod, normalizeMethod, System.currentTimeMillis() - fStart);
+        }
+        log.info("[Screen] All factors loaded: total took {} ms", System.currentTimeMillis() - factorLoadStart);
+
+        // 调试：打印候选股票数和各因子覆盖情况
+        log.info("[Screen] Candidates: {}, FactorData keys: {}", candidates.size(), factorData.keySet());
+
+        // ── 3.5 因子正交化（可选，消除多因子间共线性）───────────────
+        String orthoMethod = req.getOrthogonalizationMethod();
+        if (orthoMethod != null && !"NONE".equalsIgnoreCase(orthoMethod) && factorData.size() > 1) {
+            factorProcessor.applyOrthogonalization(factorData, orthoMethod);
+        }
+
+        return new FactorLoadResult(factorData, coverage);
+    }
+
+    private record FactorLoadResult(
+            Map<String, Map<String, FactorValue>> factorData, Map<String, Integer> coverage) {}
 
 }
