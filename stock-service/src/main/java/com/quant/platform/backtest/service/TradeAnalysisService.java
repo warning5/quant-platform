@@ -139,6 +139,7 @@ public class TradeAnalysisService {
             try {
                 date = LocalDate.parse(dateStr);
             } catch (Exception e) {
+                log.warn("[TradeAnalysisService] 解析交易日期失败，跳过: {}", dateStr);
                 continue;
             }
 

@@ -238,6 +238,7 @@ public class SentimentService {
                 List<Map<String, Object>> dateDist = jdbcTemplate.queryForList(dateDistSql);
                 result.put("dateDistribution", dateDist);
             } catch (Exception e) {
+                log.warn("[SentimentService] 加载日期分布失败，返回空列表", e);
                 result.put("dateDistribution", Collections.emptyList());
             }
 

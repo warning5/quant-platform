@@ -19,7 +19,7 @@ services:
       - CLICKHOUSE_PORT=8123
       - CLICKHOUSE_DATABASE=stock
       - CLICKHOUSE_USERNAME=default
-      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-quant123}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=${REDIS_PASSWORD:-quantRedis123}
@@ -58,6 +58,10 @@ services:
   clickhouse:
     image: clickhouse/clickhouse-server:24.3
     container_name: quant-clickhouse
+    environment:
+      # 为 default 用户设置密码，避免 ClickHouse 默认无密码暴露
+      # 注意：仅对全新初始化的数据卷生效（已初始化的卷需 docker volume rm 后重建）
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-quant123}
     ports:
       - "8123:8123"
       - "9000:9000"

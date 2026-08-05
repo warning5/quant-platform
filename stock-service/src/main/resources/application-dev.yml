@@ -15,7 +15,8 @@ clickhouse:
   port: ${CLICKHOUSE_PORT:8123}
   database: ${CLICKHOUSE_DATABASE:stock}
   username: ${CLICKHOUSE_USER:default}
-  password: ${CLICKHOUSE_PASSWORD:123456}
+  # 建议通过环境变量 CLICKHOUSE_PASSWORD 注入，避免弱密码落库；默认值仅用于本地 docker-compose 的 ClickHouse
+  password: ${CLICKHOUSE_PASSWORD:quant123}
 
 # CORS 开发环境允许所有来源
 cors:

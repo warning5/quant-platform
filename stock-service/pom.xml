@@ -200,6 +200,9 @@
                 <configuration>
                     <mainClass>com.quant.platform.QuantPlatformApplication</mainClass>
                     <jvmArguments>-Dfile.encoding=UTF-8</jvmArguments>
+                    <layers>
+                        <enabled>true</enabled>
+                    </layers>
                     <excludes>
                         <exclude>
                             <groupId>org.projectlombok</groupId>

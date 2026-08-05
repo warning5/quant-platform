@@ -1,8 +1,6 @@
 package com.quant.platform.monitor;
 
-import com.quant.platform.notification.NotificationService;
 import com.quant.platform.calendar.service.TradeCalendarService;
-import com.quant.platform.strategy.paper.PaperTradingService;
 import com.quant.platform.stock.analysis.engine.SellSignalEngine;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
@@ -17,9 +15,12 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.*;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 盘中实时监控服务
@@ -35,54 +36,51 @@ import java.util.concurrent.ConcurrentHashMap;
 @Service
 public class IntradayMonitorService {
 
-    private final JdbcTemplate jdbcTemplate;
-    private final NotificationService notificationService;
-    private final PaperTradingService paperTradingService;
     private final EntrySignalAnalyzer signalAnalyzer;
     private final TradeCalendarService tradeCalendarService;
     private final SellSignalEngine sellSignalEngine;
     private final MonitorTargetPriceLoader targetPriceLoader;
     private final MonitorSignalPublisher signalPublisher;
     private final MonitorQuoteClient quoteClient;
-
+    /**
+     * K线并行拉取线程池
+     */
+    private final ExecutorService klinePool;
+    /**
+     * 独立调度器（不受 Spring TaskScheduler 休眠损坏影响）
+     */
+    private final ScheduledExecutorService monitorScheduler;
+    /**
+     * 今日已推送记录: key -> 推送时间
+     */
+    private final Map<String, LocalDateTime> pushedWithTime = new ConcurrentHashMap<>();
+    /**
+     * 轮询计数器（用于控制日志输出频率）
+     */
+    private final AtomicInteger pollCount = new AtomicInteger(0);
+    private final int pollIntervalSeconds;
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     @org.springframework.beans.factory.annotation.Qualifier("clickHouseJdbcTemplate")
     private JdbcTemplate clickHouseJdbcTemplate;
-
-    /** K线并行拉取线程池 */
-    private final ExecutorService klinePool;
-    /** 独立调度器（不受 Spring TaskScheduler 休眠损坏影响） */
-    private final ScheduledExecutorService monitorScheduler;
-
-    /** 今日已推送记录: key -> 推送时间 */
-    private final Map<String, LocalDateTime> pushedWithTime = new ConcurrentHashMap<>();
-
     private volatile boolean monitoring = false;
-    /** 今日是否已发送收盘事件（防止重复） */
+    /**
+     * 今日是否已发送收盘事件（防止重复）
+     */
     private volatile boolean marketClosedSent = false;
-    /** 轮询计数器（用于控制日志输出频率） */
-    private int pollCount = 0;
-
     @Value("${quant.monitor.cooldown.buy-minutes:30}")
     private int buyCooldownMinutes;
     @Value("${quant.monitor.cooldown.stop-minutes:60}")
     private int stopCooldownMinutes;
     @Value("${quant.monitor.signal.proximity-pct:0.02}")
     private double proximityPct;
-    private final int pollIntervalSeconds;
 
-    public IntradayMonitorService(JdbcTemplate jdbcTemplate, NotificationService notificationService,
-                                  PaperTradingService paperTradingService,
-                                  EntrySignalAnalyzer signalAnalyzer, TradeCalendarService tradeCalendarService,
+    public IntradayMonitorService(EntrySignalAnalyzer signalAnalyzer, TradeCalendarService tradeCalendarService,
                                   SellSignalEngine sellSignalEngine,
                                   MonitorTargetPriceLoader targetPriceLoader,
                                   MonitorSignalPublisher signalPublisher,
                                   MonitorQuoteClient quoteClient,
                                   @Value("${quant.monitor.kline-thread-pool-size:4}") int klinePoolSize,
                                   @Value("${quant.monitor.poll-interval-seconds:10}") int pollIntervalSeconds) {
-        this.jdbcTemplate = jdbcTemplate;
-        this.notificationService = notificationService;
-        this.paperTradingService = paperTradingService;
         this.signalAnalyzer = signalAnalyzer;
         this.tradeCalendarService = tradeCalendarService;
         this.sellSignalEngine = sellSignalEngine;
@@ -114,7 +112,9 @@ public class IntradayMonitorService {
         log.info("[IntradayMonitor] 独立调度器已启动, pollInterval={}s", pollIntervalSeconds);
     }
 
-    /** 数据日期（零行为变化拆分：状态已迁至 {@link MonitorTargetPriceLoader}） */
+    /**
+     * 数据日期（零行为变化拆分：状态已迁至 {@link MonitorTargetPriceLoader}）
+     */
     public LocalDate getDataDate() {
         return targetPriceLoader.getDataDate();
     }
@@ -181,11 +181,11 @@ public class IntradayMonitorService {
 
         if (targetPriceLoader.targetPriceCacheRef().isEmpty()) return;
 
-        pollCount++;
+        pollCount.incrementAndGet();
         // 每60秒（6次轮询）输出一次日志
-        if (pollCount % 6 == 1) {
+        if (pollCount.get() % 6 == 1) {
             log.info("[IntradayMonitor] 轮询 #{}, 监控{}只股票, SSE连接数: {}",
-                    pollCount, targetPriceLoader.targetPriceCacheRef().size(), signalPublisher.sseEmittersRef().size());
+                    pollCount.get(), targetPriceLoader.targetPriceCacheRef().size(), signalPublisher.sseEmittersRef().size());
         }
 
         // 批量获取实时价格
@@ -218,7 +218,9 @@ public class IntradayMonitorService {
         quoteClient.refreshIndexQuotes();
     }
 
-    /** 获取所有指数实时行情（提供给前端和Controller） */
+    /**
+     * 获取所有指数实时行情（提供给前端和Controller）
+     */
     public List<Map<String, Object>> getIndexQuotes() {
         return quoteClient.getIndexQuotes();
     }
@@ -400,6 +402,7 @@ public class IntradayMonitorService {
 
     /**
      * 从ClickHouse拉取K线数据
+     *
      * @return [open[], high[], low[], close[], volume[]]
      */
     private double[][] fetchKlineData(String code) {
@@ -407,9 +410,9 @@ public class IntradayMonitorService {
         try {
             String pureCode = code.split("\\.")[0];
             List<Map<String, Object>> rows = clickHouseJdbcTemplate.queryForList(
-                "SELECT open_price, high_price, low_price, close_price, volume FROM stock.stock_daily FINAL " +
-                "WHERE code = ? ORDER BY trade_date DESC LIMIT 120",
-                pureCode);
+                    "SELECT open_price, high_price, low_price, close_price, volume FROM stock.stock_daily FINAL " +
+                            "WHERE code = ? ORDER BY trade_date DESC LIMIT 120",
+                    pureCode);
             if (rows.isEmpty()) return null;
             int n = rows.size();
             double[] open = new double[n], high = new double[n], low = new double[n], close = new double[n], volume = new double[n];
@@ -421,7 +424,7 @@ public class IntradayMonitorService {
                 close[i] = ((Number) row.get("close_price")).doubleValue();
                 volume[i] = ((Number) row.get("volume")).doubleValue();
             }
-            return new double[][] { open, high, low, close, volume };
+            return new double[][]{open, high, low, close, volume};
         } catch (Exception e) {
             log.warn("[IntradayMonitor] 拉取K线失败: {} - {}", code, e.getMessage());
             return null;
@@ -447,6 +450,7 @@ public class IntradayMonitorService {
 
     /**
      * 添加用户自定义监控股票（同时持久化到数据库）
+     *
      * @param info 目标价信息（source自动设为"客户定义"）
      */
     public void addCustomStock(TargetPriceInfo info) {
@@ -471,12 +475,16 @@ public class IntradayMonitorService {
         return quoteClient.fetchRealtimePrices(stockCodes);
     }
 
-    /** 获取信号历史记录（供/status接口返回） */
+    /**
+     * 获取信号历史记录（供/status接口返回）
+     */
     public List<Map<String, Object>> getSignalHistory() {
         return signalPublisher.getSignalHistory();
     }
 
-    /** 清除信号历史（内存 + 前端状态） */
+    /**
+     * 清除信号历史（内存 + 前端状态）
+     */
     public void clearSignalHistory() {
         signalPublisher.clearSignalHistory();
     }
@@ -510,6 +518,7 @@ public class IntradayMonitorService {
             statusEvent.put("dataDate", targetPriceLoader.getDataDate() != null ? targetPriceLoader.getDataDate().toString() : null);
             emitter.send(SseEmitter.event().name("monitor").data(statusEvent));
         } catch (IOException ignored) {
+            log.debug("[IntradayMonitor] 发送监控状态事件失败（客户端可能已断开）");
         }
 
         return emitter;
@@ -555,12 +564,16 @@ public class IntradayMonitorService {
         klinePool.shutdownNow();
     }
 
-    /** 获取最新实时价格缓存（供Controller查询） */
+    /**
+     * 获取最新实时价格缓存（供Controller查询）
+     */
     public Map<String, Double> getLatestPrices() {
         return quoteClient.getLatestPrices();
     }
 
-    /** 获取最新涨跌幅缓存（供Controller查询） */
+    /**
+     * 获取最新涨跌幅缓存（供Controller查询）
+     */
     public Map<String, Double> getLatestChangePct() {
         return quoteClient.getLatestChangePct();
     }
@@ -729,12 +742,29 @@ public class IntradayMonitorService {
         private List<StockScanInfo> watches = new ArrayList<>();
         private List<StockScanInfo> skipped = new ArrayList<>();
 
-        public void addSignal(StockScanInfo info) { signals.add(info); }
-        public void addWatch(StockScanInfo info) { watches.add(info); }
-        public void addSkipped(StockScanInfo info) { skipped.add(info); }
-        public int getSignalCount() { return signals.size(); }
-        public int getWatchCount() { return watches.size(); }
-        public int getSkippedCount() { return skipped.size(); }
+        public void addSignal(StockScanInfo info) {
+            signals.add(info);
+        }
+
+        public void addWatch(StockScanInfo info) {
+            watches.add(info);
+        }
+
+        public void addSkipped(StockScanInfo info) {
+            skipped.add(info);
+        }
+
+        public int getSignalCount() {
+            return signals.size();
+        }
+
+        public int getWatchCount() {
+            return watches.size();
+        }
+
+        public int getSkippedCount() {
+            return skipped.size();
+        }
 
         @Data
         public static class StockScanInfo {

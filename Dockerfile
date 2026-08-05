@@ -23,18 +23,22 @@ COPY backend-mp/src backend-mp/src
 RUN mvn clean package -DskipTests -B
 
 # ==================== Stage 2: Runtime ====================
-FROM eclipse-temurin:21-jre
+# 使用 Alpine 基础镜像，显著减小镜像体积（Ubuntu 版 ~300MB+ → Alpine ~120MB 左右）
+FROM eclipse-temurin:21-jre-alpine
 
 LABEL maintainer="quant-platform"
 LABEL description="Quantitative Factor and Strategy Backtesting Platform"
 
 WORKDIR /app
 
-# 从 builder 阶段复制构建产物
+# 从 builder 阶段复制构建产物（已启用 Spring Boot layered jar）
 COPY --from=builder /build/stock-service/target/*.jar app.jar
 
-# 以非 root 用户运行，降低容器逃逸影响面
-RUN groupadd -r appuser && useradd -r -g appuser appuser && chown -R appuser:appuser /app
+# 以非 root 用户运行，降低容器逃逸影响面（Alpine 使用 addgroup/adduser）
+RUN addgroup -S appuser && adduser -S -G appuser appuser \
+    # 解压分层 jar，利于 Docker 层缓存与增量更新
+    && java -Djarmode=layertools -jar app.jar extract \
+    && chown -R appuser:appuser /app
 USER appuser
 
 # 时区设置
@@ -54,5 +58,5 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:8080/api/actuator/health || exit 1
 
-# 启动
-ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
+# 启动（使用分层 jar 的 Launcher，Spring Boot 3.2+）
+ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS org.springframework.boot.loader.launch.JarLauncher"]

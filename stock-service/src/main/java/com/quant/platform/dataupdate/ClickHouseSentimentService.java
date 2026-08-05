@@ -439,6 +439,7 @@ public class ClickHouseSentimentService {
                 result.put("dateDistribution", dateDist);
             }
         } catch (Exception e) {
+            log.warn("[ClickHouseSentimentService] 加载日期分布失败，返回空列表", e);
             result.put("dateDistribution", Collections.emptyList());
         }
 

@@ -119,7 +119,9 @@ public class MonitorQuoteClient {
                     if (fields.length > 32 && !fields[32].isEmpty()) {
                         try {
                             latestChangePct.put(stockCode, Double.parseDouble(fields[32]));
-                        } catch (NumberFormatException ignored) {}
+                        } catch (NumberFormatException ignored) {
+                            log.debug("[MonitorQuoteClient] 解析涨跌幅失败: {}", stockCode);
+                        }
                     }
                 }
             } catch (Exception ignored) {
@@ -192,7 +194,7 @@ public class MonitorQuoteClient {
                 Map<String, Object> info = new LinkedHashMap<>();
                 info.put("code", code);
                 info.put("name", INDEX_NAME_MAP.getOrDefault(code, fields[1]));
-                try { info.put("price", Double.parseDouble(fields[3])); } catch (Exception e) { continue; }
+                try { info.put("price", Double.parseDouble(fields[3])); } catch (Exception e) { log.warn("[MonitorQuoteClient] 解析指数价格失败，跳过: {}", code); continue; }
                 try { info.put("changePct", Double.parseDouble(fields[32])); } catch (Exception e) { info.put("changePct", 0.0); }
                 try { info.put("changeAmount", Double.parseDouble(fields[31])); } catch (Exception e) { info.put("changeAmount", 0.0); }
                 info.put("time", LocalDateTime.now().toString());

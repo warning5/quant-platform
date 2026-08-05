@@ -6,6 +6,7 @@ import com.quant.platform.audit.entity.SysOperationLog;
 import com.quant.platform.audit.service.OperationLogService;
 import com.quant.platform.common.dto.ApiResponse;
 import com.quant.platform.common.dto.PageRequest;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -19,7 +20,7 @@ public class AuditController {
 
     @GetMapping("/page")
     @SaCheckPermission("system:audit:list")
-    public ApiResponse<IPage<SysOperationLog>> page(PageRequest req,
+    public ApiResponse<IPage<SysOperationLog>> page(@Valid PageRequest req,
             @RequestParam(required = false) String username,
             @RequestParam(required = false) String module,
             @RequestParam(required = false) String action,

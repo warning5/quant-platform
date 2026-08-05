@@ -23,7 +23,7 @@ public class CredentialController {
 
     @GetMapping("/page")
     @SaCheckPermission("system:credential:list")
-    public ApiResponse<IPage<SysCredential>> page(PageRequest req,
+    public ApiResponse<IPage<SysCredential>> page(@Valid PageRequest req,
             @RequestParam(required = false) String category,
             @RequestParam(required = false) String keyword) {
         return ApiResponse.success(credentialService.page(req, category, keyword));

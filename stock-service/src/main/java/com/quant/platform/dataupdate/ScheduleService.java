@@ -295,8 +295,11 @@ public class ScheduleService implements SchedulingConfigurer {
                     try {
                         Integer enabled = jdbcTemplate.queryForObject(
                             "SELECT enabled FROM data_schedule_config WHERE task_key = ?", Integer.class, depKey);
-                        if (enabled == null || enabled == 0) continue;
-                    } catch (Exception ignored) { continue; }
+                        if (enabled == 0) continue;
+                    } catch (Exception ignored) {
+                        log.warn("[ScheduleService] 查询任务启用状态失败: {}", depKey);
+                        continue;
+                    }
 
                     // 多上游依赖：require_all_upstreams=1 时，检查所有上游是否都已完成
                     if (requireAll == 1) {
@@ -428,7 +431,9 @@ public class ScheduleService implements SchedulingConfigurer {
                             taskKey, triggerType);
                         return;
                     }
-                } catch (Exception ignored) { /* 表无记录时放行 */ }
+                } catch (Exception ignored) {
+                    log.debug("[ScheduleService] 查询任务状态失败（表无记录时放行）: {}", taskKey);
+                }
             }
 
             // 质量检查任务：数据新鲜度
@@ -806,7 +811,9 @@ public class ScheduleService implements SchedulingConfigurer {
                     // QFQ_REFRESH: limit 用作 --days 参数（查最近N天除权股票）
                     if (ec.get("limit") != null) {
                         try { req.setLimit(Integer.parseInt(ec.get("limit").toString())); }
-                        catch (NumberFormatException ignored) {}
+                        catch (NumberFormatException ignored) {
+                            log.warn("[ScheduleService] 解析 limit 失败: {}", ec.get("limit"));
+                        }
                     }
                 }
             } catch (Exception e) {

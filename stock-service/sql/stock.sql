@@ -2112,7 +2112,7 @@ INSERT IGNORE INTO `sys_dict_data` (`id`, `dict_type`, `dict_value`, `dict_label
 -- notification_channel
 (19, 'notification_channel', 'WECHAT', '微信', 1, 'green', 1),
 (20, 'notification_channel', 'EMAIL', '邮件', 2, 'blue', 1),
-(21, 'notification_channel', 'WEBHOOK', 'Webhook', 3, 'purple', 1);
+(21, 'notification_channel', 'WEBHOOK', 'Webhook', 3, 'purple', 1),
 (22, 'FACTOR_CATEGORY', 'VALUE', '价值', 1, 'blue', 1),
 (23, 'FACTOR_CATEGORY', 'GROWTH', '成长', 2, 'cyan', 1),
 (24, 'FACTOR_CATEGORY', 'QUALITY', '质量', 3, 'green', 1),

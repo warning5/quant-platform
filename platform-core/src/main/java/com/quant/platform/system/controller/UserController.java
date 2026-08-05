@@ -28,7 +28,7 @@ public class UserController {
 
     @GetMapping("/page")
     @SaCheckPermission("system:user:list")
-    public ApiResponse<IPage<SysUser>> page(PageRequest req,
+    public ApiResponse<IPage<SysUser>> page(@Valid PageRequest req,
                                             @RequestParam(required = false) String username,
                                             @RequestParam(required = false) String nickname,
                                             @RequestParam(required = false) Integer status) {

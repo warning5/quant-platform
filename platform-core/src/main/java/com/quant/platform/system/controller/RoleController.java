@@ -26,7 +26,7 @@ public class RoleController {
 
     @GetMapping("/page")
     @SaCheckPermission("system:role:list")
-    public ApiResponse<IPage<SysRole>> page(PageRequest req,
+    public ApiResponse<IPage<SysRole>> page(@Valid PageRequest req,
                                             @RequestParam(required = false) String roleName,
                                             @RequestParam(required = false) String roleCode) {
         return ApiResponse.success(roleService.pageRoles(req, roleName, roleCode));

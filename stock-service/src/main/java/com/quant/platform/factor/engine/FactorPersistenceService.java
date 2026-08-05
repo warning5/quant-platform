@@ -75,6 +75,8 @@ public class FactorPersistenceService {
                 try {
                     Thread.sleep(500L * attempt);
                 } catch (InterruptedException ignored) {
+                    Thread.currentThread().interrupt();
+                    log.warn("[FactorPersistenceService] 死锁重试等待被中断");
                 }
             }
         }

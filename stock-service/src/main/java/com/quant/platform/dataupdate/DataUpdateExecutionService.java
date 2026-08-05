@@ -395,12 +395,15 @@ public class DataUpdateExecutionService {
                 } else {
                     Runtime.getRuntime().exec(new String[]{"kill", "-TERM", "-" + targetPid});
                 }
-            } catch (IOException ignored) {
+            } catch (IOException e) {
+                log.warn("[DataUpdateExecutionService] 终止子进程失败: {}", e.getMessage(), e);
             }
             // 等待进程真正退出（最多 3 秒）
             try {
                 targetProcess.waitFor(3, java.util.concurrent.TimeUnit.SECONDS);
-            } catch (InterruptedException ignored) {
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.warn("[DataUpdateExecutionService] 等待子进程退出被中断: {}", e.getMessage());
             }
         }
 
@@ -1209,6 +1212,7 @@ public class DataUpdateExecutionService {
                 if (dotIdx > 0) mPrefix = stepCur.substring(0, dotIdx + 3);
                 task.setCurrentStep(mPrefix + "处理股票 " + current + "/" + total);
             } catch (NumberFormatException ignored) {
+                log.warn("[DataUpdateExecutionService] 解析进度文本失败", ignored);
             }
         }
 
@@ -1219,6 +1223,7 @@ public class DataUpdateExecutionService {
                 String numStr = rm.group(1).replace(",", "");
                 task.setProcessedRecords(Long.parseLong(numStr));
             } catch (NumberFormatException ignored) {
+                log.warn("[DataUpdateExecutionService] 解析记录数失败", ignored);
             }
         }
 

@@ -162,7 +162,9 @@ public class BidAskService {
                 try {
                     sum += new BigDecimal(r.toString()).doubleValue();
                     count++;
-                } catch (NumberFormatException ignored) {}
+                } catch (NumberFormatException ignored) {
+                    log.warn("[BidAskService] 解析 ratio 失败: {}", r);
+                }
             }
         }
         return count > 0 ? sum / count : 1.0;

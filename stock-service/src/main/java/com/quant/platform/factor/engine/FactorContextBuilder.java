@@ -205,6 +205,7 @@ public class FactorContextBuilder {
                 try {
                     val = Double.parseDouble(np.toString());
                 } catch (Exception e) {
+                    log.warn("[FactorContextBuilder] 解析因子值失败，跳过: {}", np);
                     continue;
                 }
                 String prev = latestDate.get(code);
