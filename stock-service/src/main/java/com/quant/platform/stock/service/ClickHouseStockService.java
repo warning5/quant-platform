@@ -1,5 +1,6 @@
 package com.quant.platform.stock.service;
 
+import static com.quant.platform.stock.service.StockDailySqlSupport.*;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.quant.platform.config.ClickHouseConfig;
 import com.quant.platform.stock.entity.StockDaily;
@@ -438,20 +439,6 @@ public class ClickHouseStockService {
         applyPrefixesToWrapper(wrapper, prefixes);
         List<StockDaily> list = stockDailyMapper.selectList(wrapper);
         return list.stream().map(StockDaily::getCode).distinct().count();
-    }
-
-    /**
-     * 将前缀数组应用到 QueryWrapper
-     */
-    private void applyPrefixesToWrapper(LambdaQueryWrapper<StockDaily> wrapper, String... prefixes) {
-        if (prefixes == null || prefixes.length == 0) return;
-        
-        wrapper.and(w -> {
-            w.likeRight(StockDaily::getCode, prefixes[0]);
-            for (int i = 1; i < prefixes.length; i++) {
-                w.or().likeRight(StockDaily::getCode, prefixes[i]);
-            }
-        });
     }
 
     /**
@@ -1018,23 +1005,6 @@ public class ClickHouseStockService {
 
     // ==================== 通用辅助方法 ====================
 
-    private String buildOrderByClause(String sortField, String sortOrder) {
-        if (sortField == null || sortField.isEmpty()) {
-            return "ORDER BY change_percent DESC";
-        }
-        boolean asc = !"desc".equalsIgnoreCase(sortOrder);
-        String col = switch (sortField) {
-            case "pctChg" -> "change_percent";
-            case "amount" -> "amount";
-            case "vol" -> "volume";
-            case "close" -> "close_price";
-            case "turnoverRate" -> "turnover_rate";
-            default -> "code";
-        };
-        return "ORDER BY " + col + (asc ? " ASC" : " DESC");
-    }
-
-
     /**
      * 执行 ClickHouse 查询
      */
@@ -1088,47 +1058,6 @@ public class ClickHouseStockService {
         }
 
         return result;
-    }
-
-    /**
-     * 转换 ResultSet 为 StockDaily
-     */
-    private StockDaily convertResultSet(ResultSet rs) throws SQLException {
-        StockDaily daily = new StockDaily();
-        daily.setCode(rs.getString("code"));
-        daily.setTradeDate(rs.getDate("trade_date").toLocalDate());
-
-        String name = rs.getString("name");
-        daily.setName(name);
-
-        setDouble(rs, "open_price", daily::setOpenPrice);
-        setDouble(rs, "close_price", daily::setClosePrice);
-        setDouble(rs, "high_price", daily::setHighPrice);
-        setDouble(rs, "low_price", daily::setLowPrice);
-        setDouble(rs, "pre_close", daily::setPreClose);
-        setLong(rs, "volume", daily::setVolume);
-        setDouble(rs, "amount", daily::setAmount);
-        setDouble(rs, "change_percent", daily::setChangePercent);
-        setDouble(rs, "change_amount", daily::setChangeAmount);
-        setDouble(rs, "turnover_rate", daily::setTurnoverRate);
-        setDouble(rs, "pe_ttm", daily::setPeTtm);
-        setDouble(rs, "pb", daily::setPb);
-
-        return daily;
-    }
-
-    private void setDouble(ResultSet rs, String col, java.util.function.Consumer<BigDecimal> setter) throws SQLException {
-        double val = rs.getDouble(col);
-        if (!rs.wasNull()) {
-            setter.accept(BigDecimal.valueOf(val));
-        }
-    }
-
-    private void setLong(ResultSet rs, String col, java.util.function.Consumer<Long> setter) throws SQLException {
-        long val = rs.getLong(col);
-        if (!rs.wasNull()) {
-            setter.accept(val);
-        }
     }
 
     /**
@@ -1286,22 +1215,6 @@ public class ClickHouseStockService {
         }
     }
 
-    private void setParam(PreparedStatement stmt, int index, BigDecimal value) throws SQLException {
-        if (value != null) {
-            stmt.setDouble(index, value.doubleValue());
-        } else {
-            stmt.setNull(index, Types.DOUBLE);
-        }
-    }
-
-    private void setLongParam(PreparedStatement stmt, int index, Long value) throws SQLException {
-        if (value != null) {
-            stmt.setLong(index, value);
-        } else {
-            stmt.setNull(index, Types.BIGINT);
-        }
-    }
-
     // ============================================================
     // 历史波动率（用于尾部风险动态计算）
     // ============================================================
@@ -1347,22 +1260,5 @@ public class ClickHouseStockService {
             log.warn("[ClickHouse] 波动率计算失败({}): {}", code, e.getMessage());
         }
         return null;
-    }
-
-    /**
-     * 将 A 股代码转为 CH 存储格式（无前缀无后缀，如 600519）
-     */
-    private String normalizeCodeForCH(String code) {
-        if (code == null) return null;
-        String c = code.trim().toLowerCase();
-        // 去掉 sh/sz/bj 前缀
-        if (c.matches("^(sh|sz|bj)\\d+")) {
-            return c.substring(2);
-        }
-        // 去掉 .SH/.SZ/.BJ 后缀
-        if (c.matches("^\\d+\\.(sh|sz|bj)$")) {
-            return c.substring(0, c.indexOf('.'));
-        }
-        return c;
     }
 }
