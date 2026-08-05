@@ -70,6 +70,8 @@ export default function RecommendationList() {
   const canPaperBuy = hasPermission('strategy:edit');
   const { dictMap: corrGroupMap } = useDict('RECOMMEND_CORR_GROUP');
   const { dictMap: reasonMap } = useDict('RECOMMEND_REASON');
+  const { dictList: neutralList } = useDict('SCREEN_NEUTRAL');
+  const { dictList: orthogonalList } = useDict('SCREEN_ORTHOGONAL');
   useEffect(() => { loadFactorMeta(); }, [loadFactorMeta]);
   const [recommendations, setRecommendations] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -1182,9 +1184,9 @@ export default function RecommendationList() {
                   allowClear
                 >
                   <Select.Option value="__none__">默认(NONE)</Select.Option>
-                  <Select.Option value="INDUSTRY">行业中性化</Select.Option>
-                  <Select.Option value="MARKET_CAP">市值中性化</Select.Option>
-                  <Select.Option value="BOTH">行业+市值</Select.Option>
+                  {neutralList.filter(d => d.dictValue !== 'NONE').map(d => (
+                    <Select.Option key={d.dictValue} value={d.dictValue}>{d.dictLabel}</Select.Option>
+                  ))}
                 </Select>
               </span>
               <span>
@@ -1195,7 +1197,9 @@ export default function RecommendationList() {
                   allowClear
                 >
                   <Select.Option value="__none__">默认(NONE)</Select.Option>
-                  <Select.Option value="SCHMIDT">Schmidt</Select.Option>
+                  {orthogonalList.filter(d => d.dictValue !== 'NONE').map(d => (
+                    <Select.Option key={d.dictValue} value={d.dictValue}>{d.dictLabel}</Select.Option>
+                  ))}
                 </Select>
               </span>
               <span>

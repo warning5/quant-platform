@@ -347,6 +347,7 @@ function PaperDetail({ paperId, onBack }) {
   const [loading, setLoading] = useState(true);
   const { dictMap: alertDictMap } = useDict('ALERT_TYPE');
   const { dictMap: eventDictMap } = useDict('EVENT_TYPE');
+  const { dictMap: orderTypeMap } = useDict('ROLLING_ORDER_TYPE');
   const [data, setData] = useState(null);
   const [signals, setSignals] = useState([]);
   const [genLoading, setGenLoading] = useState(false);
@@ -687,10 +688,9 @@ function PaperDetail({ paperId, onBack }) {
     {
       title: '订单类型', dataIndex: 'orderType', width: 100,
       render: v => {
-        if (!v || v === 'MARKET') return <Tag>市价单</Tag>;
-        const map = { LIMIT: { color: 'orange', text: '限价单' }, STOP: { color: 'red', text: '止损单' }, STOP_LIMIT: { color: 'volcano', text: '止损限价' }, TRAILING_STOP: { color: 'purple', text: '追踪止损' } };
-        const cfg = map[v] || { color: 'default', text: v };
-        return <Tag color={cfg.color}>{cfg.text}</Tag>;
+        if (!v) return <Tag>市价单</Tag>;
+        const item = orderTypeMap[v];
+        return <Tag color={item ? item.color : 'default'}>{item ? item.dictLabel : v}</Tag>;
       },
     },
     {
