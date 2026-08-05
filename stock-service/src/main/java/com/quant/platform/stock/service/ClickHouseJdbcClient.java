@@ -53,7 +53,7 @@ public class ClickHouseJdbcClient {
             }
         } catch (Exception e) {
             log.warn("[ClickHouse] 查询失败: {}", e.getMessage());
-            throw new RuntimeException("ClickHouse 查询失败", e);
+            throw new ClickHouseQueryException("ClickHouse 查询失败", e);
         }
 
         return result;
@@ -79,7 +79,7 @@ public class ClickHouseJdbcClient {
             }
         } catch (Exception e) {
             log.warn("[ClickHouse] 查询失败: {}", e.getMessage());
-            throw new RuntimeException("ClickHouse 查询失败", e);
+            throw new ClickHouseQueryException("ClickHouse 查询失败", e);
         }
 
         return result;

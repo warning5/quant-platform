@@ -64,17 +64,12 @@ public class StrategyConfidenceController {
     @cn.dev33.satoken.annotation.SaCheckPermission(value = {"recommendation:view", "recommendation:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/recalculate")
     public ApiResponse<StrategyConfidence> recalculate(@RequestParam Long strategyId) {
-        try {
-            StrategyConfidence sc = strategyConfidenceService.calculateAndSave(strategyId);
-            if (sc != null) {
-                log.info("[Confidence] [手动计算] strategyId={}, score={}", strategyId, sc.getScore());
-                return ApiResponse.success(sc);
-            }
-            return ApiResponse.error("该策略暂无足够的追踪数据，无法计算置信度");
-        } catch (Exception e) {
-            log.error("[Confidence] 计算异常: strategyId={}, error={}", strategyId, e.getMessage(), e);
-            return ApiResponse.error("计算失败: " + e.getMessage());
+        StrategyConfidence sc = strategyConfidenceService.calculateAndSave(strategyId);
+        if (sc != null) {
+            log.info("[Confidence] [手动计算] strategyId={}, score={}", strategyId, sc.getScore());
+            return ApiResponse.success(sc);
         }
+        return ApiResponse.error("该策略暂无足够的追踪数据，无法计算置信度");
     }
 
     /**

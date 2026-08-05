@@ -31,24 +31,19 @@ public class ResearchController {
     @Operation(summary = "研报数据概览", description = "获取研报总数、覆盖股票数、最新日期")
     public ApiResponse<Map<String, Object>> getOverview() {
         Map<String, Object> result = new LinkedHashMap<>();
-        try {
-            Integer totalCount = jdbcTemplate.queryForObject(
-                    "SELECT COUNT(*) FROM stock_research_report", Integer.class);
-            result.put("totalCount", totalCount != null ? totalCount : 0);
+        Integer totalCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM stock_research_report", Integer.class);
+        result.put("totalCount", totalCount != null ? totalCount : 0);
 
-            Integer stockCount = jdbcTemplate.queryForObject(
-                    "SELECT COUNT(DISTINCT code) FROM stock_research_report", Integer.class);
-            result.put("stockCount", stockCount != null ? stockCount : 0);
+        Integer stockCount = jdbcTemplate.queryForObject(
+                "SELECT COUNT(DISTINCT code) FROM stock_research_report", Integer.class);
+        result.put("stockCount", stockCount != null ? stockCount : 0);
 
-            String latestDate = jdbcTemplate.queryForObject(
-                    "SELECT MAX(report_date) FROM stock_research_report", String.class);
-            result.put("latestDate", latestDate != null ? latestDate : "");
+        String latestDate = jdbcTemplate.queryForObject(
+                "SELECT MAX(report_date) FROM stock_research_report", String.class);
+        result.put("latestDate", latestDate != null ? latestDate : "");
 
-            return ApiResponse.success(result);
-        } catch (Exception e) {
-            log.error("获取研报概览失败", e);
-            return ApiResponse.error("获取研报概览失败: " + e.getMessage());
-        }
+        return ApiResponse.success(result);
     }
 
     @GetMapping("/list")
@@ -60,52 +55,47 @@ public class ResearchController {
             @RequestParam(required = false) String startDate,
             @RequestParam(required = false) String endDate,
             @RequestParam(required = false) String rating) {
-        try {
-            List<String> whereClauses = new ArrayList<>();
-            List<Object> params = new ArrayList<>();
+        List<String> whereClauses = new ArrayList<>();
+        List<Object> params = new ArrayList<>();
 
-            if (keyword != null && !keyword.trim().isEmpty()) {
-                whereClauses.add("(code LIKE ? OR name LIKE ? OR report_title LIKE ?)");
-                String kw = "%" + keyword.trim() + "%";
-                params.add(kw);
-                params.add(kw);
-                params.add(kw);
-            }
-            if (startDate != null && !startDate.trim().isEmpty()) {
-                whereClauses.add("report_date >= ?");
-                params.add(startDate.trim());
-            }
-            if (endDate != null && !endDate.trim().isEmpty()) {
-                whereClauses.add("report_date <= ?");
-                params.add(endDate.trim());
-            }
-            if (rating != null && !rating.trim().isEmpty()) {
-                whereClauses.add("rating = ?");
-                params.add(rating.trim());
-            }
-
-            String where = whereClauses.isEmpty() ? "" : " WHERE " + String.join(" AND ", whereClauses);
-            String countSql = "SELECT COUNT(*) FROM stock_research_report" + where;
-            Integer total = jdbcTemplate.queryForObject(countSql, Integer.class, params.toArray());
-            int totalInt = total != null ? total : 0;
-
-            int offset = (page - 1) * size;
-            String dataSql = "SELECT id, code, name, report_title AS reportTitle, rating AS rating, institution AS institution, " +
-                    "eps_forecast AS epsForecast, " +
-                    "industry AS industry, report_date AS reportDate, pdf_url AS pdfUrl " +
-                    "FROM stock_research_report" + where +
-                    " ORDER BY report_date DESC LIMIT ? OFFSET ?";
-            List<Object> dataParams = new ArrayList<>(params);
-            dataParams.add(size);
-            dataParams.add(offset);
-
-            List<Map<String, Object>> list = jdbcTemplate.queryForList(dataSql, dataParams.toArray());
-
-            return ApiResponse.success(PageResult.of(list, totalInt, page, size));
-        } catch (Exception e) {
-            log.error("查询研报列表失败", e);
-            return ApiResponse.error("查询研报列表失败: " + e.getMessage());
+        if (keyword != null && !keyword.trim().isEmpty()) {
+            whereClauses.add("(code LIKE ? OR name LIKE ? OR report_title LIKE ?)");
+            String kw = "%" + keyword.trim() + "%";
+            params.add(kw);
+            params.add(kw);
+            params.add(kw);
         }
+        if (startDate != null && !startDate.trim().isEmpty()) {
+            whereClauses.add("report_date >= ?");
+            params.add(startDate.trim());
+        }
+        if (endDate != null && !endDate.trim().isEmpty()) {
+            whereClauses.add("report_date <= ?");
+            params.add(endDate.trim());
+        }
+        if (rating != null && !rating.trim().isEmpty()) {
+            whereClauses.add("rating = ?");
+            params.add(rating.trim());
+        }
+
+        String where = whereClauses.isEmpty() ? "" : " WHERE " + String.join(" AND ", whereClauses);
+        String countSql = "SELECT COUNT(*) FROM stock_research_report" + where;
+        Integer total = jdbcTemplate.queryForObject(countSql, Integer.class, params.toArray());
+        int totalInt = total != null ? total : 0;
+
+        int offset = (page - 1) * size;
+        String dataSql = "SELECT id, code, name, report_title AS reportTitle, rating AS rating, institution AS institution, " +
+                "eps_forecast AS epsForecast, " +
+                "industry AS industry, report_date AS reportDate, pdf_url AS pdfUrl " +
+                "FROM stock_research_report" + where +
+                " ORDER BY report_date DESC LIMIT ? OFFSET ?";
+        List<Object> dataParams = new ArrayList<>(params);
+        dataParams.add(size);
+        dataParams.add(offset);
+
+        List<Map<String, Object>> list = jdbcTemplate.queryForList(dataSql, dataParams.toArray());
+
+        return ApiResponse.success(PageResult.of(list, totalInt, page, size));
     }
 
     @cn.dev33.satoken.annotation.SaCheckPermission(value = {"research:view", "research:delete"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
@@ -119,19 +109,14 @@ public class ResearchController {
         if (ids == null || ids.isEmpty()) {
             return ApiResponse.error("请选择要删除的记录");
         }
-        try {
-            List<Object> idParams = new ArrayList<>(ids);
-            String ph = ids.stream().map(i -> "?").collect(java.util.stream.Collectors.joining(","));
+        List<Object> idParams = new ArrayList<>(ids);
+        String ph = ids.stream().map(i -> "?").collect(java.util.stream.Collectors.joining(","));
 
-            int deleted = jdbcTemplate.update(
-                    "DELETE FROM stock_research_report WHERE id IN (" + ph + ")",
-                    idParams.toArray());
-            result.put("deleted", deleted);
+        int deleted = jdbcTemplate.update(
+                "DELETE FROM stock_research_report WHERE id IN (" + ph + ")",
+                idParams.toArray());
+        result.put("deleted", deleted);
 
-            return ApiResponse.success(result);
-        } catch (Exception e) {
-            log.error("批量删除研报失败: ids={}", ids, e);
-            return ApiResponse.error("删除失败: " + e.getMessage());
-        }
+        return ApiResponse.success(result);
     }
 }

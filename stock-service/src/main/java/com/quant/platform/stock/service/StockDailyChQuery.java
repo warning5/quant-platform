@@ -1,9 +1,6 @@
 package com.quant.platform.stock.service;
 
-import static com.quant.platform.stock.service.StockDailySqlSupport.*;
-
 import com.quant.platform.stock.entity.StockDaily;
-import com.quant.platform.stock.service.ClickHouseJdbcClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -13,6 +10,9 @@ import java.sql.*;
 import java.sql.Date;
 import java.time.LocalDate;
 import java.util.*;
+
+import static com.quant.platform.stock.service.StockDailySqlSupport.buildOrderByClause;
+import static com.quant.platform.stock.service.StockDailySqlSupport.convertResultSet;
 
 /**
  * ClickHouse 日线查询实现层（从 ClickHouseStockService 逐字搬出，no-behavior-change）。
@@ -87,7 +87,7 @@ public class StockDailyChQuery {
             }
         } catch (Exception e) {
             log.warn("[ClickHouse] 批量查询失败: {}", e.getMessage());
-            throw new RuntimeException("ClickHouse 批量查询失败", e);
+            throw new ClickHouseQueryException("ClickHouse 批量查询失败", e);
         }
     }
 
@@ -122,7 +122,7 @@ public class StockDailyChQuery {
             }
         } catch (Exception e) {
             log.warn("[ClickHouse] 截面查询失败: {}", e.getMessage());
-            throw new RuntimeException("ClickHouse 截面查询失败", e);
+            throw new ClickHouseQueryException("ClickHouse 截面查询失败", e);
         }
     }
 
@@ -152,7 +152,7 @@ public class StockDailyChQuery {
             }
         } catch (Exception e) {
             log.warn("[ClickHouse] 截面分页count查询失败: {}", e.getMessage());
-            throw new RuntimeException("ClickHouse 截面分页查询失败", e);
+            throw new ClickHouseQueryException("ClickHouse 截面分页查询失败", e);
         }
 
         // 排序
@@ -181,7 +181,7 @@ public class StockDailyChQuery {
             }
         } catch (Exception e) {
             log.warn("[ClickHouse] 截面分页查询失败: {}", e.getMessage());
-            throw new RuntimeException("ClickHouse 截面分页查询失败", e);
+            throw new ClickHouseQueryException("ClickHouse 截面分页查询失败", e);
         }
 
         Map<String, Object> result = new HashMap<>();
@@ -226,7 +226,7 @@ public class StockDailyChQuery {
             }
         } catch (Exception e) {
             log.warn("[ClickHouse] 概览统计查询失败: {}", e.getMessage());
-            throw new RuntimeException("ClickHouse 概览统计失败", e);
+            throw new ClickHouseQueryException("ClickHouse 概览统计失败", e);
         }
         return Map.of("count", 0L, "riseCount", 0L, "fallCount", 0L, "flatCount", 0L,
                 "avgPctChg", 0.0, "totalAmount", BigDecimal.ZERO);
@@ -264,7 +264,7 @@ public class StockDailyChQuery {
             }
         } catch (Exception e) {
             log.warn("[ClickHouse] Top N 查询失败: {}", e.getMessage());
-            throw new RuntimeException("ClickHouse Top N 查询失败", e);
+            throw new ClickHouseQueryException("ClickHouse Top N 查询失败", e);
         }
     }
 
@@ -281,7 +281,7 @@ public class StockDailyChQuery {
                 }
             }
         } catch (Exception e) {
-            throw new RuntimeException("ClickHouse 最新交易日查询失败", e);
+            throw new ClickHouseQueryException("ClickHouse 最新交易日查询失败", e);
         }
         return null;
     }
@@ -298,7 +298,7 @@ public class StockDailyChQuery {
                 return result;
             }
         } catch (Exception e) {
-            throw new RuntimeException("ClickHouse 交易日列表查询失败", e);
+            throw new ClickHouseQueryException("ClickHouse 交易日列表查询失败", e);
         }
     }
 
@@ -313,7 +313,7 @@ public class StockDailyChQuery {
                 return result;
             }
         } catch (Exception e) {
-            throw new RuntimeException("ClickHouse 最近交易日查询失败", e);
+            throw new ClickHouseQueryException("ClickHouse 最近交易日查询失败", e);
         }
     }
 
@@ -330,7 +330,7 @@ public class StockDailyChQuery {
                 return d != null ? d.toLocalDate() : null;
             }
         } catch (Exception e) {
-            throw new RuntimeException("ClickHouse 极端日期查询失败", e);
+            throw new ClickHouseQueryException("ClickHouse 极端日期查询失败", e);
         }
         return null;
     }
@@ -356,7 +356,7 @@ public class StockDailyChQuery {
                     while (rs.next()) result.add(rs.getString("code"));
                 }
             } catch (Exception e) {
-                throw new RuntimeException("ClickHouse existing codes 查询失败", e);
+                throw new ClickHouseQueryException("ClickHouse existing codes 查询失败", e);
             }
         }
         return result;
@@ -382,7 +382,7 @@ public class StockDailyChQuery {
                 return result;
             }
         } catch (Exception e) {
-            throw new RuntimeException("ClickHouse 通用查询失败", e);
+            throw new ClickHouseQueryException("ClickHouse 通用查询失败", e);
         }
     }
 
@@ -396,7 +396,7 @@ public class StockDailyChQuery {
                 if (rs.next()) return rs.getObject(1);
             }
         } catch (Exception e) {
-            throw new RuntimeException("ClickHouse 通用单值查询失败", e);
+            throw new ClickHouseQueryException("ClickHouse 通用单值查询失败", e);
         }
         return null;
     }

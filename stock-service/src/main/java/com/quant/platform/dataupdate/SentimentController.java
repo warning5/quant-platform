@@ -31,26 +31,18 @@ public class SentimentController {
     @GetMapping("/coverage")
     @Operation(summary = "获取情绪数据概览", description = "从 ClickHouse 获取各情绪数据表的记录数和时间范围，失败回退 MySQL")
     public ApiResponse<Map<String, Object>> getCoverage() {
-        try {
-            Map<String, Object> coverage = clickHouseSentimentService.getCoverage();
-            return ApiResponse.success(coverage);
-        } catch (Exception e) {
-            return ApiResponse.error("获取概览失败: " + e.getMessage());
-        }
+        Map<String, Object> coverage = clickHouseSentimentService.getCoverage();
+        return ApiResponse.success(coverage);
     }
 
     @GetMapping("/table-stats/{table}")
     @Operation(summary = "获取指定表统计", description = "获取指定情绪数据表的详细统计")
     public ApiResponse<Map<String, Object>> getTableStats(@PathVariable String table) {
-        try {
-            Map<String, Object> stats = clickHouseSentimentService.getTableStats(table);
-            if (stats.containsKey("error")) {
-                return ApiResponse.error((String) stats.get("error"));
-            }
-            return ApiResponse.success(stats);
-        } catch (Exception e) {
-            return ApiResponse.error("获取表统计失败: " + e.getMessage());
+        Map<String, Object> stats = clickHouseSentimentService.getTableStats(table);
+        if (stats.containsKey("error")) {
+            return ApiResponse.error((String) stats.get("error"));
         }
+        return ApiResponse.success(stats);
     }
 
     @GetMapping("/validate")
@@ -59,18 +51,14 @@ public class SentimentController {
             @RequestParam(required = false) String startDate,
             @RequestParam(required = false) String endDate,
             @RequestParam(required = false) String tables) {
-        try {
-            List<String> tableList = (tables == null || tables.isBlank())
-                    ? Collections.emptyList()
-                    : Arrays.stream(tables.split(","))
-                            .map(String::trim)
-                            .filter(s -> !s.isEmpty())
-                            .collect(Collectors.toList());
-            Map<String, Object> validation = clickHouseSentimentService.validate(startDate, endDate, tableList);
-            return ApiResponse.success(validation);
-        } catch (Exception e) {
-            return ApiResponse.error("校验失败: " + e.getMessage());
-        }
+        List<String> tableList = (tables == null || tables.isBlank())
+                ? Collections.emptyList()
+                : Arrays.stream(tables.split(","))
+                        .map(String::trim)
+                        .filter(s -> !s.isEmpty())
+                        .collect(Collectors.toList());
+        Map<String, Object> validation = clickHouseSentimentService.validate(startDate, endDate, tableList);
+        return ApiResponse.success(validation);
     }
 
     @GetMapping("/validate-daily")
@@ -79,17 +67,13 @@ public class SentimentController {
             @RequestParam(required = false) String startDate,
             @RequestParam(required = false) String endDate,
             @RequestParam(required = false) String tables) {
-        try {
-            List<String> tableList = (tables == null || tables.isBlank())
-                    ? Collections.emptyList()
-                    : Arrays.stream(tables.split(","))
-                            .map(String::trim)
-                            .filter(s -> !s.isEmpty())
-                            .collect(Collectors.toList());
-            Map<String, Object> validation = clickHouseSentimentService.validateDaily(startDate, endDate, tableList);
-            return ApiResponse.success(validation);
-        } catch (Exception e) {
-            return ApiResponse.error("按日校验失败: " + e.getMessage());
-        }
+        List<String> tableList = (tables == null || tables.isBlank())
+                ? Collections.emptyList()
+                : Arrays.stream(tables.split(","))
+                        .map(String::trim)
+                        .filter(s -> !s.isEmpty())
+                        .collect(Collectors.toList());
+        Map<String, Object> validation = clickHouseSentimentService.validateDaily(startDate, endDate, tableList);
+        return ApiResponse.success(validation);
     }
 }

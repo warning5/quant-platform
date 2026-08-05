@@ -52,7 +52,6 @@ public class RecommendationController {
     @PostMapping("/generate")
     @RateLimit(capacity = 10, duration = 1)
     public ApiResponse<Map<String, Object>> generate(@RequestBody(required = false) GenerateRequest req) {
-        try {
             LocalDate date = req != null ? req.getDate() : null;
             Integer topN = req != null ? req.getTopN() : null;
             Long strategyId = req != null ? req.getStrategyId() : null;
@@ -119,10 +118,6 @@ public class RecommendationController {
             }
 
             return ApiResponse.success("推荐列表生成成功", result);
-        } catch (Exception e) {
-            log.error("[Recommendation] 生成推荐失败", e);
-            return ApiResponse.error("生成推荐失败: " + e.getMessage());
-        }
     }
 
     /**
@@ -189,20 +184,15 @@ public class RecommendationController {
     @cn.dev33.satoken.annotation.SaCheckPermission(value = {"recommendation:view", "recommendation:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/ic/compute")
     public ApiResponse<Map<String, FactorIcRecord>> computeIc(@RequestBody(required = false) Map<String, Object> params) {
-        try {
-            @SuppressWarnings("unchecked")
-            List<String> factorCodes = params != null ? (List<String>) params.get("factorCodes") : null;
-            if (factorCodes == null || factorCodes.isEmpty()) {
-                return ApiResponse.error("请指定要计算IC的因子代码（factorCodes）");
-            }
-            LocalDate date = params.get("date") != null
-                    ? LocalDate.parse(params.get("date").toString()) : null;
-            Map<String, FactorIcRecord> results = factorIcService.computeAndSaveIc(date, factorCodes);
-            return ApiResponse.success("IC计算完成", results);
-        } catch (Exception e) {
-            log.error("[Recommendation] IC计算失败", e);
-            return ApiResponse.error("IC计算失败: " + e.getMessage());
+        @SuppressWarnings("unchecked")
+        List<String> factorCodes = params != null ? (List<String>) params.get("factorCodes") : null;
+        if (factorCodes == null || factorCodes.isEmpty()) {
+            return ApiResponse.error("请指定要计算IC的因子代码（factorCodes）");
         }
+        LocalDate date = params.get("date") != null
+                ? LocalDate.parse(params.get("date").toString()) : null;
+        Map<String, FactorIcRecord> results = factorIcService.computeAndSaveIc(date, factorCodes);
+        return ApiResponse.success("IC计算完成", results);
     }
 
     /**
@@ -212,40 +202,35 @@ public class RecommendationController {
     @PostMapping("/ic/compute-batch")
     @RateLimit(capacity = 3, duration = 1)
     public ApiResponse<Map<String, Object>> computeIcBatch(@RequestBody Map<String, Object> params) {
-        try {
-            LocalDate startDate = LocalDate.parse(params.get("startDate").toString());
-            LocalDate endDate = LocalDate.parse(params.get("endDate").toString());
+        LocalDate startDate = LocalDate.parse(params.get("startDate").toString());
+        LocalDate endDate = LocalDate.parse(params.get("endDate").toString());
 
-            @SuppressWarnings("unchecked")
-            List<String> factorCodes = (List<String>) params.get("factorCodes");
-            if (factorCodes == null || factorCodes.isEmpty()) {
-                return ApiResponse.error("请指定要计算IC的因子代码（factorCodes）");
-            }
-
-            Map<LocalDate, Map<String, FactorIcRecord>> results = factorIcService.computeAndSaveIcBatch(startDate, endDate, factorCodes);
-
-            int totalDays = results.size();
-            int totalRecords = results.values().stream().mapToInt(Map::size).sum();
-
-            // 将 LocalDate key 转为 String，确保前端 JSON 解析正确
-            Map<String, Map<String, FactorIcRecord>> stringKeyResults = new LinkedHashMap<>();
-            for (java.util.Map.Entry<LocalDate, Map<String, FactorIcRecord>> entry : results.entrySet()) {
-                stringKeyResults.put(entry.getKey().toString(), entry.getValue());
-            }
-
-            Map<String, Object> summary = new HashMap<>();
-            summary.put("startDate", startDate.toString());
-            summary.put("endDate", endDate.toString());
-            summary.put("totalDays", totalDays);
-            summary.put("totalRecords", totalRecords);
-            summary.put("factorCount", factorCodes.size());
-            summary.put("results", stringKeyResults);
-
-            return ApiResponse.success(String.format("批量IC计算完成: %d因子 × %d天 = %d条记录", factorCodes.size(), totalDays, totalRecords), summary);
-        } catch (Exception e) {
-            log.error("[Recommendation] 批量IC计算失败", e);
-            return ApiResponse.error("批量IC计算失败: " + e.getMessage());
+        @SuppressWarnings("unchecked")
+        List<String> factorCodes = (List<String>) params.get("factorCodes");
+        if (factorCodes == null || factorCodes.isEmpty()) {
+            return ApiResponse.error("请指定要计算IC的因子代码（factorCodes）");
         }
+
+        Map<LocalDate, Map<String, FactorIcRecord>> results = factorIcService.computeAndSaveIcBatch(startDate, endDate, factorCodes);
+
+        int totalDays = results.size();
+        int totalRecords = results.values().stream().mapToInt(Map::size).sum();
+
+        // 将 LocalDate key 转为 String，确保前端 JSON 解析正确
+        Map<String, Map<String, FactorIcRecord>> stringKeyResults = new LinkedHashMap<>();
+        for (java.util.Map.Entry<LocalDate, Map<String, FactorIcRecord>> entry : results.entrySet()) {
+            stringKeyResults.put(entry.getKey().toString(), entry.getValue());
+        }
+
+        Map<String, Object> summary = new HashMap<>();
+        summary.put("startDate", startDate.toString());
+        summary.put("endDate", endDate.toString());
+        summary.put("totalDays", totalDays);
+        summary.put("totalRecords", totalRecords);
+        summary.put("factorCount", factorCodes.size());
+        summary.put("results", stringKeyResults);
+
+        return ApiResponse.success(String.format("批量IC计算完成: %d因子 × %d天 = %d条记录", factorCodes.size(), totalDays, totalRecords), summary);
     }
 
     /**
@@ -273,7 +258,6 @@ public class RecommendationController {
     @cn.dev33.satoken.annotation.SaCheckPermission(value = {"recommendation:view", "recommendation:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
     @PostMapping("/track")
     public ApiResponse<Map<String, Object>> trackPerformance() {
-        try {
             LocalDateTime submittedAt = LocalDateTime.now();
             CompletableFuture.runAsync(() -> {
                 try {
@@ -288,10 +272,6 @@ public class RecommendationController {
             result.put("submittedAt", submittedAt.toString());
             result.put("message", "追踪任务已提交到后台执行");
             return ApiResponse.success("表现追踪已提交", result);
-        } catch (Exception e) {
-            log.error("[Recommendation] 表现追踪提交失败", e);
-            return ApiResponse.error("表现追踪提交失败: " + e.getMessage());
-        }
     }
 
     /**

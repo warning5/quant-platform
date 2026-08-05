@@ -37,91 +37,71 @@ public class TaskRunHistoryController {
             @RequestParam(required = false) String endDate,
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int pageSize) {
-        try {
-            Map<String, Object> result = taskRunHistoryService.list(
-                taskKey, status, triggerType, startDate, endDate, page, pageSize);
-            return ApiResponse.success(result);
-        } catch (Exception e) {
-            log.error("查询执行历史失败", e);
-            return ApiResponse.error("查询失败: " + e.getMessage());
-        }
+        Map<String, Object> result = taskRunHistoryService.list(
+            taskKey, status, triggerType, startDate, endDate, page, pageSize);
+        return ApiResponse.success(result);
     }
 
     @GetMapping("/stats")
     @Operation(summary = "按任务聚合统计（成功率/失败次数/连续失败）")
     public ApiResponse<List<Map<String, Object>>> stats(
             @RequestParam(defaultValue = "30") int days) {
-        try {
-            return ApiResponse.success(taskRunHistoryService.stats(days));
-        } catch (Exception e) {
-            log.error("统计失败", e);
-            return ApiResponse.error("统计失败: " + e.getMessage());
-        }
+        return ApiResponse.success(taskRunHistoryService.stats(days));
     }
 
     @GetMapping("/recent-failures")
     @Operation(summary = "最近失败列表")
     public ApiResponse<List<TaskRunHistory>> recentFailures(
             @RequestParam(defaultValue = "20") int limit) {
-        try {
-            return ApiResponse.success(taskRunHistoryService.recentFailures(limit));
-        } catch (Exception e) {
-            log.error("查询最近失败失败", e);
-            return ApiResponse.error("查询失败: " + e.getMessage());
-        }
+        return ApiResponse.success(taskRunHistoryService.recentFailures(limit));
     }
 
     @GetMapping("/sla")
     @Operation(summary = "SLA 监控看板：全量任务今日执行状态 vs SLA 期望")
     public ApiResponse<List<Map<String, Object>>> slaDashboard() {
-        try {
-            // 以 data_schedule_config 为基准（全量任务），左连接 sla_config 获取 SLA 配置。
-            // 未配置 SLA 的任务也展示（slaConfigured=0），避免看板只显示部分任务。
-            // 用 AS 别名统一输出 camelCase，与前端字段命名一致。
-            List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-                "SELECT c.task_key AS taskKey, " +
-                "COALESCE(c.task_name, c.task_key) AS taskName, " +
-                "s.expected_finish_hour AS expectedFinishHour, " +
-                "s.max_duration_min AS maxDurationMin, " +
-                "COALESCE(s.severity, 'LOW') AS severity, " +
-                "CASE WHEN s.task_key IS NULL THEN 0 ELSE 1 END AS slaConfigured, " +
-                "sev.sort AS severitySort, sev.color AS severityColor " +
-                "FROM data_schedule_config c " +
-                "LEFT JOIN sla_config s ON s.task_key = c.task_key AND s.enabled = 1 " +
-                "LEFT JOIN sys_dict_data sev ON sev.dict_type = 'SLA_SEVERITY' " +
-                "   AND sev.dict_value = COALESCE(s.severity, 'LOW') AND sev.deleted = 0 AND sev.status = 1 " +
-                "WHERE c.task_key <> 'GLOBAL' " +
-                "ORDER BY slaConfigured DESC, COALESCE(sev.sort, 999) ASC, taskKey");
-            for (Map<String, Object> r : rows) {
-                String tk = (String) r.get("taskKey");
-                // 今日最近一次执行（queryForList 在无线程时不抛异常，返回空列表）
-                List<Map<String, Object>> lastRuns = jdbcTemplate.queryForList(
-                    "SELECT status, start_time, end_time, duration_sec, error_msg " +
-                    "FROM task_run_history WHERE task_key = ? AND start_time >= CURDATE() " +
-                    "ORDER BY start_time DESC LIMIT 1", tk);
-                if (lastRuns.isEmpty()) {
-                    r.put("lastStatus", null);
-                    r.put("lastStartTime", null);
-                    r.put("lastEndTime", null);
-                    r.put("lastDurationSec", null);
-                    r.put("errorMsg", null);
-                } else {
-                    Map<String, Object> last = lastRuns.get(0);
-                    r.put("lastStatus", last.get("status"));
-                    r.put("lastStartTime", last.get("start_time"));
-                    r.put("lastEndTime", last.get("end_time"));
-                    r.put("lastDurationSec", last.get("duration_sec"));
-                    r.put("errorMsg", last.get("error_msg"));
-                }
-                // 计算 SLA：未配置 SLA 的任务不参与达标判定（slaMet=null，前端显示"未设SLA"）
-                int configured = ((Number) r.get("slaConfigured")).intValue();
-                r.put("slaMet", configured == 1 ? evaluateSla(r) : null);
+        // 以 data_schedule_config 为基准（全量任务），左连接 sla_config 获取 SLA 配置。
+        // 未配置 SLA 的任务也展示（slaConfigured=0），避免看板只显示部分任务。
+        // 用 AS 别名统一输出 camelCase，与前端字段命名一致。
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+            "SELECT c.task_key AS taskKey, " +
+            "COALESCE(c.task_name, c.task_key) AS taskName, " +
+            "s.expected_finish_hour AS expectedFinishHour, " +
+            "s.max_duration_min AS maxDurationMin, " +
+            "COALESCE(s.severity, 'LOW') AS severity, " +
+            "CASE WHEN s.task_key IS NULL THEN 0 ELSE 1 END AS slaConfigured, " +
+            "sev.sort AS severitySort, sev.color AS severityColor " +
+            "FROM data_schedule_config c " +
+            "LEFT JOIN sla_config s ON s.task_key = c.task_key AND s.enabled = 1 " +
+            "LEFT JOIN sys_dict_data sev ON sev.dict_type = 'SLA_SEVERITY' " +
+            "   AND sev.dict_value = COALESCE(s.severity, 'LOW') AND sev.deleted = 0 AND sev.status = 1 " +
+            "WHERE c.task_key <> 'GLOBAL' " +
+            "ORDER BY slaConfigured DESC, COALESCE(sev.sort, 999) ASC, taskKey");
+        for (Map<String, Object> r : rows) {
+            String tk = (String) r.get("taskKey");
+            // 今日最近一次执行（queryForList 在无线程时不抛异常，返回空列表）
+            List<Map<String, Object>> lastRuns = jdbcTemplate.queryForList(
+                "SELECT status, start_time, end_time, duration_sec, error_msg " +
+                "FROM task_run_history WHERE task_key = ? AND start_time >= CURDATE() " +
+                "ORDER BY start_time DESC LIMIT 1", tk);
+            if (lastRuns.isEmpty()) {
+                r.put("lastStatus", null);
+                r.put("lastStartTime", null);
+                r.put("lastEndTime", null);
+                r.put("lastDurationSec", null);
+                r.put("errorMsg", null);
+            } else {
+                Map<String, Object> last = lastRuns.get(0);
+                r.put("lastStatus", last.get("status"));
+                r.put("lastStartTime", last.get("start_time"));
+                r.put("lastEndTime", last.get("end_time"));
+                r.put("lastDurationSec", last.get("duration_sec"));
+                r.put("errorMsg", last.get("error_msg"));
             }
-            return ApiResponse.success(rows);
-        } catch (Exception e) {
-            log.error("SLA看板查询失败", e);
-            return ApiResponse.error("查询失败: " + e.getMessage());
+            // 计算 SLA：未配置 SLA 的任务不参与达标判定（slaMet=null，前端显示"未设SLA"）
+            int configured = ((Number) r.get("slaConfigured")).intValue();
+            r.put("slaMet", configured == 1 ? evaluateSla(r) : null);
         }
+        return ApiResponse.success(rows);
     }
 
     /** 评估单个任务今日 SLA 是否达标 */
@@ -170,13 +150,8 @@ public class TaskRunHistoryController {
     @Operation(summary = "保存通知(告警)配置")
     public ApiResponse<String> saveNotificationConfig(
             @RequestBody com.quant.platform.notification.NotificationConfig config) {
-        try {
-            notificationConfigService.save(config);
-            return ApiResponse.success("已保存通知配置");
-        } catch (Exception e) {
-            log.error("保存通知配置失败", e);
-            return ApiResponse.error("保存失败: " + e.getMessage());
-        }
+        notificationConfigService.save(config);
+        return ApiResponse.success("已保存通知配置");
     }
 
     @cn.dev33.satoken.annotation.SaCheckPermission(value = {"data:view", "data:edit"}, mode = cn.dev33.satoken.annotation.SaMode.AND)
