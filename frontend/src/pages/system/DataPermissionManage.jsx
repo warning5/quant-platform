@@ -5,6 +5,7 @@ import {
 import { ReloadOutlined, PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import { dataPermissionApi } from '../../api/dataPermission';
 import { message as msg } from '../../utils/messageUtil';
+import { useDict } from '../../utils/useDict';
 
 const RESOURCE_TYPES = [
   { value: 'STRATEGY', label: '策略' },
@@ -13,22 +14,8 @@ const RESOURCE_TYPES = [
   { value: 'PAPER_TRADING', label: '模拟盘' },
 ];
 
-const VISIBILITY_OPTIONS = [
-  { value: 'PRIVATE', label: '私有（仅自己）' },
-  { value: 'DEPT', label: '部门可见（含子部门）' },
-  { value: 'PUBLIC', label: '公开（所有人）' },
-];
-
-const GRANTEE_TYPES = [
-  { value: 'USER', label: '用户' },
-  { value: 'DEPT', label: '部门' },
-  { value: 'ROLE', label: '角色' },
-];
-
-const PERM_LEVELS = [
-  { value: 'VIEW', label: '查看' },
-  { value: 'EDIT', label: '编辑' },
-];
+// 字典驱动的可见性/授权对象类型/权限级别，已从硬编码迁移到 sys_dict_data
+const toOptions = (list) => (list || []).map((d) => ({ value: d.dictValue, label: d.dictLabel }));
 
 export default function DataPermissionManage() {
   const [type, setType] = useState('STRATEGY');
@@ -38,6 +25,11 @@ export default function DataPermissionManage() {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState(null);
   const [shareForm] = Form.useForm();
+
+  // 字典驱动的可见性 / 授权对象类型 / 权限级别
+  const { dictList: visibilityOptions } = useDict('resource_visibility');
+  const { dictList: granteeTypeOptions } = useDict('GRANTEE_TYPE');
+  const { dictList: permLevelOptions } = useDict('resource_perm_level');
 
   // 授权对象下拉/树数据
   const [granteeOptions, setGranteeOptions] = useState([]);   // USER / ROLE 扁平列表 [{value,label}]
@@ -159,9 +151,9 @@ export default function DataPermissionManage() {
   };
 
   const shareColumns = [
-    { title: '授权对象类型', dataIndex: 'granteeType', render: (t) => <Tag>{GRANTEE_TYPES.find((x) => x.value === t)?.label || t}</Tag> },
+    { title: '授权对象类型', dataIndex: 'granteeType', render: (t) => <Tag>{granteeTypeOptions.find((x) => x.value === t)?.label || t}</Tag> },
     { title: '对象 ID', dataIndex: 'granteeId' },
-    { title: '权限', dataIndex: 'permLevel', render: (t) => <Tag color={t === 'EDIT' ? 'blue' : 'default'}>{PERM_LEVELS.find((x) => x.value === t)?.label || t}</Tag> },
+    { title: '权限', dataIndex: 'permLevel', render: (t) => <Tag color={t === 'EDIT' ? 'blue' : 'default'}>{permLevelOptions.find((x) => x.value === t)?.label || t}</Tag> },
     { title: '授权人', dataIndex: 'grantedBy' },
     {
       title: '操作',
@@ -220,7 +212,7 @@ export default function DataPermissionManage() {
               onChange={(e) => saveVisibility(e.target.value)}
               optionType="button"
               buttonStyle="solid"
-              options={VISIBILITY_OPTIONS}
+              options={toOptions(visibilityOptions)}
             />
             <div style={{ marginTop: 8, color: '#888' }}>
               拥有者 user_id：{data.ownerId ?? '-'}
@@ -238,7 +230,7 @@ export default function DataPermissionManage() {
             />
             <Form form={shareForm} layout="inline" style={{ marginTop: 16 }} initialValues={{ granteeType: 'USER', permLevel: 'VIEW' }}>
               <Form.Item name="granteeType" label="对象类型">
-                <Select style={{ width: 120 }} options={GRANTEE_TYPES} onChange={onGranteeTypeChange} />
+                <Select style={{ width: 120 }} options={toOptions(granteeTypeOptions)} onChange={onGranteeTypeChange} />
               </Form.Item>
               <Form.Item name="granteeId" label="对象" rules={[{ required: true, message: '请选择对象' }]}>
                 {currentGranteeType === 'DEPT' ? (
@@ -258,7 +250,7 @@ export default function DataPermissionManage() {
                     style={{ width: 280 }}
                     options={granteeOptions}
                     loading={granteeLoading}
-                    placeholder={`选择${GRANTEE_TYPES.find((x) => x.value === currentGranteeType)?.label || ''}`}
+                    placeholder={`选择${granteeTypeOptions.find((x) => x.value === currentGranteeType)?.label || ''}`}
                     showSearch
                     optionFilterProp="label"
                     allowClear
@@ -267,7 +259,7 @@ export default function DataPermissionManage() {
                 )}
               </Form.Item>
               <Form.Item name="permLevel" label="权限">
-                <Select style={{ width: 100 }} options={PERM_LEVELS} />
+                <Select style={{ width: 100 }} options={toOptions(permLevelOptions)} />
               </Form.Item>
               <Form.Item>
                 <Button type="primary" icon={<PlusOutlined />} onClick={addShare}>添加授权</Button>

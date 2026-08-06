@@ -2079,7 +2079,8 @@ INSERT IGNORE INTO `sys_dict_type` (`id`, `dict_type`, `type_name`, `description
 (33, 'ROLLING_FREQ', '滚动频率', '滚动回测频率', 1, 33),
 (34, 'ROLLING_WEIGHT_MODE', '滚动权重方式', '滚动权重', 1, 34),
 (35, 'ROLLING_ORDER_TYPE', '滚动订单类型', '滚动订单类型', 1, 35),
-(36, 'STRATEGY_FREQ', '策略频率', '策略调仓频率', 1, 36);
+(36, 'STRATEGY_FREQ', '策略频率', '策略调仓频率', 1, 36),
+(37, 'GRANTEE_TYPE', '授权对象类型', '数据权限授权对象类型', 1, 37);
 
 -- ----------------------------
 -- 8. Dict Data
@@ -2235,7 +2236,13 @@ INSERT IGNORE INTO `sys_dict_data` (`id`, `dict_type`, `dict_value`, `dict_label
 (141, 'STRATEGY_FREQ', 'DAILY', '日频', 1, 'blue', 1),
 (142, 'STRATEGY_FREQ', 'WEEKLY', '周频', 2, 'cyan', 1),
 (143, 'STRATEGY_FREQ', 'MONTHLY', '月频', 3, 'green', 1),
-(144, 'STRATEGY_FREQ', 'QUARTERLY', '季频', 4, 'purple', 1);
+(144, 'STRATEGY_FREQ', 'QUARTERLY', '季频', 4, 'purple', 1),
+-- SLA_SEVERITY
+(145, 'SLA_SEVERITY', 'HIGH', '高', 1, 'red', 1),
+(146, 'SLA_SEVERITY', 'MEDIUM', '中', 2, 'orange', 1),
+(145, 'GRANTEE_TYPE', 'USER', '用户', 1, 'blue', 1),
+(146, 'GRANTEE_TYPE', 'DEPT', '部门', 2, 'cyan', 1),
+(147, 'GRANTEE_TYPE', 'ROLE', '角色', 3, 'purple', 1);
 
 -- ----------------------------
 -- 9. Default system configs
