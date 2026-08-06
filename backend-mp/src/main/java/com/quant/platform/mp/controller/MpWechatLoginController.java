@@ -29,10 +29,6 @@ public class MpWechatLoginController {
         if (code == null || code.isBlank()) {
             return ApiResponse.error(400, "缺少 code 参数");
         }
-        try {
-            return ApiResponse.success(wechatAuthService.miniLogin(code));
-        } catch (Exception e) {
-            return ApiResponse.error(500, e.getMessage());
-        }
+        return ApiResponse.success(wechatAuthService.miniLogin(code));
     }
 }

@@ -1,17 +1,21 @@
 package com.quant.platform.mp;
 
+import com.quant.platform.common.exception.GlobalExceptionHandler;
+import com.quant.platform.common.exception.GlobalResponseMaskAdvice;
 import com.quant.platform.mp.config.DataSourceConfig;
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.web.client.RestTemplate;
 
 @SpringBootApplication
 @MapperScan({"com.quant.platform.**.mapper", "com.quant.platform.mp.mapper"})
 @EnableScheduling
+@Import({GlobalExceptionHandler.class, GlobalResponseMaskAdvice.class})
 public class MpApplication {
 
     public static void main(String[] args) {

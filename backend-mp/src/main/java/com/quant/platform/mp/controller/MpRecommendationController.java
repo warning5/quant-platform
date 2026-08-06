@@ -6,7 +6,6 @@ import com.quant.platform.recommendation.mapper.RecommendationMapper;
 import com.quant.platform.strategy.domain.StrategyDefinition;
 import com.quant.platform.strategy.mapper.StrategyDefinitionMapper;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
@@ -19,7 +18,6 @@ import java.util.stream.Collectors;
 @RestController
 @RequestMapping("/mp/recommendations")
 @RequiredArgsConstructor
-@Slf4j
 public class MpRecommendationController {
 
     private final RecommendationMapper recommendationMapper;
@@ -31,13 +29,8 @@ public class MpRecommendationController {
     @GetMapping("/strategies")
     public ApiResponse<List<Map<String, Object>>> getStrategies(
             @RequestParam(required = false) String keyword) {
-        try {
-            List<Map<String, Object>> list = strategyDefinitionMapper.findStrategiesWithData(keyword);
-            return ApiResponse.success(list);
-        } catch (Exception e) {
-            log.error("获取策略列表失败", e);
-            return ApiResponse.error("获取策略列表失败: " + e.getMessage());
-        }
+        List<Map<String, Object>> list = strategyDefinitionMapper.findStrategiesWithData(keyword);
+        return ApiResponse.success(list);
     }
 
     /**
@@ -47,13 +40,8 @@ public class MpRecommendationController {
     public ApiResponse<List<LocalDate>> getDates(
             @RequestParam Long strategyId,
             @RequestParam(defaultValue = "30") int days) {
-        try {
-            List<LocalDate> dates = recommendationMapper.findDatesByStrategyId(strategyId, days);
-            return ApiResponse.success(dates);
-        } catch (Exception e) {
-            log.error("获取日期列表失败", e);
-            return ApiResponse.error("获取日期列表失败: " + e.getMessage());
-        }
+        List<LocalDate> dates = recommendationMapper.findDatesByStrategyId(strategyId, days);
+        return ApiResponse.success(dates);
     }
 
     /**
@@ -63,17 +51,12 @@ public class MpRecommendationController {
     public ApiResponse<List<Map<String, Object>>> getByStrategyAndDate(
             @PathVariable Long strategyId,
             @PathVariable String date) {
-        try {
-            List<StockRecommendation> recs = recommendationMapper.findByStrategyAndDate(
-                    strategyId, LocalDate.parse(date));
-            List<Map<String, Object>> result = recs.stream()
-                    .map(this::toSimplified)
-                    .collect(Collectors.toList());
-            return ApiResponse.success(result);
-        } catch (Exception e) {
-            log.error("按策略日期获取推荐失败", e);
-            return ApiResponse.error("获取推荐失败: " + e.getMessage());
-        }
+        List<StockRecommendation> recs = recommendationMapper.findByStrategyAndDate(
+                strategyId, LocalDate.parse(date));
+        List<Map<String, Object>> result = recs.stream()
+                .map(this::toSimplified)
+                .collect(Collectors.toList());
+        return ApiResponse.success(result);
     }
 
     /**
@@ -82,22 +65,17 @@ public class MpRecommendationController {
     @GetMapping("/latest")
     public ApiResponse<List<Map<String, Object>>> getLatest(
             @RequestParam Long strategyId) {
-        try {
-            // 取该策略最新日期
-            List<LocalDate> dates = recommendationMapper.findDatesByStrategyId(strategyId, 1);
-            if (dates == null || dates.isEmpty()) {
-                return ApiResponse.success(Collections.emptyList());
-            }
-            LocalDate latestDate = dates.get(0);
-            List<StockRecommendation> recs = recommendationMapper.findByStrategyAndDate(strategyId, latestDate);
-            List<Map<String, Object>> result = recs.stream()
-                    .map(this::toSimplified)
-                    .collect(Collectors.toList());
-            return ApiResponse.success(result);
-        } catch (Exception e) {
-            log.error("获取最新推荐失败", e);
-            return ApiResponse.error("获取推荐失败: " + e.getMessage());
+        // 取该策略最新日期
+        List<LocalDate> dates = recommendationMapper.findDatesByStrategyId(strategyId, 1);
+        if (dates == null || dates.isEmpty()) {
+            return ApiResponse.success(Collections.emptyList());
         }
+        LocalDate latestDate = dates.get(0);
+        List<StockRecommendation> recs = recommendationMapper.findByStrategyAndDate(strategyId, latestDate);
+        List<Map<String, Object>> result = recs.stream()
+                .map(this::toSimplified)
+                .collect(Collectors.toList());
+        return ApiResponse.success(result);
     }
 
     /**
@@ -107,13 +85,8 @@ public class MpRecommendationController {
     public ApiResponse<List<Map<String, Object>>> getBatchHistory(
             @RequestParam(defaultValue = "20") int limit,
             @RequestParam(required = false) Long strategyId) {
-        try {
-            List<Map<String, Object>> list = recommendationMapper.findBatchHistory(limit, strategyId);
-            return ApiResponse.success(list);
-        } catch (Exception e) {
-            log.error("获取批次历史失败", e);
-            return ApiResponse.error("获取批次历史失败: " + e.getMessage());
-        }
+        List<Map<String, Object>> list = recommendationMapper.findBatchHistory(limit, strategyId);
+        return ApiResponse.success(list);
     }
 
     /**
@@ -123,13 +96,8 @@ public class MpRecommendationController {
     public ApiResponse<Map<String, Object>> getHitRate(
             @PathVariable Long strategyId,
             @PathVariable String date) {
-        try {
-            Map<String, Object> result = recommendationMapper.calcHitRate(strategyId, LocalDate.parse(date));
-            return ApiResponse.success(result);
-        } catch (Exception e) {
-            log.error("获取命中率失败", e);
-            return ApiResponse.error("获取命中率失败: " + e.getMessage());
-        }
+        Map<String, Object> result = recommendationMapper.calcHitRate(strategyId, LocalDate.parse(date));
+        return ApiResponse.success(result);
     }
 
     /**
