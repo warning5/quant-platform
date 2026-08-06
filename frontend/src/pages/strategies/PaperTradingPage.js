@@ -251,10 +251,10 @@ function CreateModal({ visible, onClose, onCreated }) {
             value={comboStrategies.map(s => s.id)}
             onChange={(ids) => {
               const w = ids.length ? 1 / ids.length : 0;
+              // 集合变化时所有已选策略重新均分为 1/N，保证权重和始终=100%
               setComboStrategies(ids.map(id => {
-                const exist = comboStrategies.find(s => s.id === id);
                 const st = strategies.find(s => s.id === id);
-                return exist || { id, code: st?.strategyCode, name: st?.strategyName, weight: w };
+                return { id, code: st?.strategyCode, name: st?.strategyName, weight: w };
               }));
             }}
             options={strategies.map(s => ({ label: `${s.strategyName || s.strategyCode}`, value: s.id }))}
@@ -267,6 +267,8 @@ function CreateModal({ visible, onClose, onCreated }) {
                 <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                   <span style={{ width: 200, flexShrink: 0 }}>{s.name || s.code}</span>
                   <InputNumber min={0} max={1} step={0.05} value={s.weight}
+                    formatter={(v) => (v != null ? Number(v).toFixed(2) : '')}
+                    parser={(v) => (v != null && v !== '' ? parseFloat(v) : 0)}
                     onChange={(v) => setComboStrategies(cs => cs.map(x => x.id === s.id ? { ...x, weight: v } : x))}
                     style={{ flex: 1 }} />
                 </div>
