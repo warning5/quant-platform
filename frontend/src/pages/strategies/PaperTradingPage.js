@@ -257,7 +257,7 @@ function CreateModal({ visible, onClose, onCreated }) {
                 return exist || { id, code: st?.strategyCode, name: st?.strategyName, weight: w };
               }));
             }}
-            options={strategies.map(s => ({ label: `${s.strategyCode} - ${s.strategyName}`, value: s.id }))}
+            options={strategies.map(s => ({ label: `${s.strategyName || s.strategyCode}`, value: s.id }))}
             showSearch
             filterOption={(input, option) => (option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
           />
@@ -265,7 +265,7 @@ function CreateModal({ visible, onClose, onCreated }) {
             <div style={{ marginTop: 8 }}>
               {comboStrategies.map(s => (
                 <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                  <span style={{ width: 120 }}>{s.code}</span>
+                  <span style={{ width: 200, flexShrink: 0 }}>{s.name || s.code}</span>
                   <InputNumber min={0} max={1} step={0.05} value={s.weight}
                     onChange={(v) => setComboStrategies(cs => cs.map(x => x.id === s.id ? { ...x, weight: v } : x))}
                     style={{ flex: 1 }} />
