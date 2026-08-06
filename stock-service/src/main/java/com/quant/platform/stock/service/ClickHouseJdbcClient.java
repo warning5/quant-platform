@@ -113,7 +113,8 @@ public class ClickHouseJdbcClient {
     /**
      * 通用查询（Statement 模式，避免 PreparedStatement 空结果问题）
      * 返回每行为 Map<String, Object> 的列表，key 为列名小写
-     * 异常时静默返回空列表，与 Spring JdbcTemplate 行为一致
+     * 异常时抛出 ClickHouseQueryException（带 cause），由公开层统一捕获并回退 MySQL，
+     * 不再静默吞异常返回空列表 —— 否则调用方无法区分"无数据"与"查询失败"
      */
     public List<Map<String, Object>> queryForList(String sql) {
         List<Map<String, Object>> result = new ArrayList<>();
@@ -130,13 +131,14 @@ public class ClickHouseJdbcClient {
                 result.add(row);
             }
         } catch (Exception e) {
-            log.warn("[ClickHouse] queryForList 失败: {}", e.getMessage());
+            log.warn("[ClickHouse] queryForList 失败: {}", e.getMessage(), e);
+            throw new ClickHouseQueryException("ClickHouse 通用查询失败: " + sql, e);
         }
         return result;
     }
 
     /**
-     * 通用标量查询（Statement 模式），返回单行单列，异常时返回 null
+     * 通用标量查询（Statement 模式），返回单行单列，异常时抛出 ClickHouseQueryException（带 cause）
      */
     public String queryForString(String sql) {
         try (Connection conn = getConnection();
@@ -144,7 +146,8 @@ public class ClickHouseJdbcClient {
              ResultSet rs = stmt.executeQuery(sql)) {
             if (rs.next()) return rs.getString(1);
         } catch (Exception e) {
-            log.warn("[ClickHouse] queryForString 失败: {}", e.getMessage());
+            log.warn("[ClickHouse] queryForString 失败: {}", e.getMessage(), e);
+            throw new ClickHouseQueryException("ClickHouse 通用单值查询失败: " + sql, e);
         }
         return null;
     }

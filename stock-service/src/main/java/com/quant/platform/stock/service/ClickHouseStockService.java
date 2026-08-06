@@ -634,11 +634,14 @@ public class ClickHouseStockService {
     }
 
     public List<Map<String, Object>> queryForList(String sql) {
-        return chJdbcClient.queryForList(sql);
+        // 复用带 CH→MySQL 软降级与堆栈日志的 varargs 实现（不再直接透传底层静默吞异常的方法）
+        return queryForList(sql, new Object[0]);
     }
 
     public String queryForString(String sql) {
-        return chJdbcClient.queryForString(sql);
+        // 经 queryForObject 走完整 CH→MySQL 软降级与堆栈日志；标量查询返回 Object，转 String
+        Object v = queryForObject(sql);
+        return v == null ? null : v.toString();
     }
 
     // ==================== 写入方法 ====================
