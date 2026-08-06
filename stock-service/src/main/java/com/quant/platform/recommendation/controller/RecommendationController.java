@@ -114,7 +114,8 @@ public class RecommendationController {
                 intradayMonitorService.loadTargetPrices();
                 log.info("[Recommendation] 已自动刷新监控目标价");
             } catch (Exception ex) {
-                log.warn("[Recommendation] 刷新监控目标价失败: {}", ex.getMessage());
+                // 旁路缓存刷新失败不影响推荐结果返回，但需保留堆栈便于诊断
+                log.error("[Recommendation] 刷新监控目标价失败", ex);
             }
 
             return ApiResponse.success("推荐列表生成成功", result);
