@@ -40,21 +40,15 @@ public class ClickHouseConfig {
     /** HikariCP 连接池配置 */
     private int poolMaximumSize = 10;
     private int poolMinimumIdle = 2;
-    private long poolConnectionTimeout = 30_000L;
+    // 仅控制"从池获取连接"的等待超时（非查询超时，查询超时由 JDBC URL 的 socket_timeout 控制）。
+    // 设短：CH 不可达时首次失败即快速返回；正常可达时建连 < 1s，3s 充裕。
+    private long poolConnectionTimeout = 3_000L;
     private long poolIdleTimeout = 600_000L;
     private long poolMaxLifetime = 1_800_000L;
 
-    /** 池化 DataSource（由 Spring 注入，clickHouseDataSource Bean 创建后赋值） */
+    /** 池化 DataSource（由 Spring 注入，clickHouseDataSource Bean 创建后赋值）。
+     *  实际为 ClickHouseDataSourceWrapper，内部已叠加 CH 不可达负缓存。 */
     private DataSource pooledDataSource;
-
-    /**
-     * CH 不可达负缓存窗口（毫秒）。
-     * 一旦探测到 CH 不可达，在窗口内 getConnection() 直接快速失败（抛 SQLException），
-     * 由上层 ClickHouseStockService 捕获并回退 MySQL，避免每次请求都阻塞到 connectionTimeout。
-     */
-    private static final long CH_UNAVAILABLE_CACHE_MS = 30_000L;
-    private volatile boolean chAvailable = true;
-    private volatile long chUnavailableSince = 0L;
 
     /**
      * 获取 JDBC URL（不含 user/password，避免日志泄露）
@@ -62,7 +56,7 @@ public class ClickHouseConfig {
      * connection_timeout=30000 / socket_timeout=300000 防止长查询被中断
      */
     public String getJdbcUrl() {
-        return String.format("jdbc:clickhouse://%s:%d/%s?compress=0&connection_timeout=30000&socket_timeout=300000",
+        return String.format("jdbc:clickhouse://%s:%d/%s?compress=0&connection_timeout=3000&socket_timeout=300000",
                 host, port, database);
     }
 
@@ -99,36 +93,27 @@ public class ClickHouseConfig {
         hkConfig.setInitializationFailTimeout(-1);
 
         HikariDataSource poolingDs = new HikariDataSource(hkConfig);
-        this.pooledDataSource = poolingDs;
-        log.info("ClickHouse HikariCP 连接池已初始化: poolSize={}, minIdle={}, jdbcUrl={}",
+        // 包一层负缓存代理：把所有 getConnection()（含 JdbcTemplate 直连）统一纳入不可达负缓存，
+        // 避免 CH 不可达时 JdbcTemplate 查询绕过 ClickHouseConfig.getConnection() 的负缓存而干等连接超时。
+        ClickHouseDataSourceWrapper wrappedDs = new ClickHouseDataSourceWrapper(poolingDs);
+        this.pooledDataSource = wrappedDs;
+        log.info("ClickHouse HikariCP 连接池已初始化（含负缓存代理）: poolSize={}, minIdle={}, jdbcUrl={}",
                 poolMaximumSize, poolMinimumIdle, getJdbcUrl());
-        return poolingDs;
+        return wrappedDs;
     }
 
     /**
-     * 从连接池获取连接（供各 Service 调用）
+     * 从连接池获取连接（供各 Service 调用）。
      * <p>
-     * 带 CH 可达性负缓存：最近探测不可达且在 {@link #CH_UNAVAILABLE_CACHE_MS} 窗口内直接快速失败，
-     * 让上层统一捕获并回退 MySQL，避免每次请求都阻塞到 connectionTimeout（约 30s）才降级。
+     * 负缓存逻辑已下沉到 pooledDataSource（{@link ClickHouseDataSourceWrapper}）：不论调用方是
+     * ClickHouseConfig 自身还是 Spring JdbcTemplate，所有 getConnection() 统一经过不可达负缓存，
+     * 窗口内已知 CH 不可达时直接快速失败（抛 SQLException），由上层统一捕获并回退 MySQL。
      */
     public Connection getConnection() throws SQLException {
         if (pooledDataSource == null) {
             throw new SQLException("ClickHouse DataSource 未初始化（clickhouse.enabled=false 或 Bean 未创建）");
         }
-        // 负缓存：窗口内已知不可达，直接快速失败触发降级
-        if (!chAvailable && (System.currentTimeMillis() - chUnavailableSince) < CH_UNAVAILABLE_CACHE_MS) {
-            throw new SQLException("ClickHouse 当前不可达（负缓存未过期），快速失败以触发 MySQL 降级");
-        }
-        try {
-            Connection conn = pooledDataSource.getConnection();
-            chAvailable = true;
-            return conn;
-        } catch (SQLException e) {
-            chAvailable = false;
-            chUnavailableSince = System.currentTimeMillis();
-            log.warn("[ClickHouse] 获取连接失败，标记为不可用并走降级: {}", e.getMessage());
-            throw e;
-        }
+        return pooledDataSource.getConnection();
     }
 
     @Bean
