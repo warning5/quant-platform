@@ -250,10 +250,14 @@ function CreateModal({ visible, onClose, onCreated }) {
             placeholder="选择 2~N 个策略"
             value={comboStrategies.map(s => s.id)}
             onChange={(ids) => {
-              const w = ids.length ? 1 / ids.length : 0;
-              // 集合变化时所有已选策略重新均分为 1/N，保证权重和始终=100%
-              setComboStrategies(ids.map(id => {
+              const n = ids.length;
+              // 集合变化时所有已选策略重新均分：前 N-1 个取两位小数基值，最后一项补余数，
+              // 保证每个权重都是两位小数且总和精确=1.00（如 3 项时为 0.33/0.33/0.34）
+              const base = n ? +(1 / n).toFixed(2) : 0;
+              const remainder = n ? +(1 - base * (n - 1)).toFixed(2) : 0;
+              setComboStrategies(ids.map((id, i) => {
                 const st = strategies.find(s => s.id === id);
+                const w = i === n - 1 ? remainder : base;
                 return { id, code: st?.strategyCode, name: st?.strategyName, weight: w };
               }));
             }}
@@ -268,7 +272,7 @@ function CreateModal({ visible, onClose, onCreated }) {
                   <span style={{ width: 200, flexShrink: 0 }}>{s.name || s.code}</span>
                   <InputNumber min={0} max={1} step={0.05} value={s.weight}
                     formatter={(v) => (v != null ? Number(v).toFixed(2) : '')}
-                    parser={(v) => (v != null && v !== '' ? parseFloat(v) : 0)}
+                    parser={(v) => (v != null && v !== '' ? Math.round(parseFloat(v) * 100) / 100 : 0)}
                     onChange={(v) => setComboStrategies(cs => cs.map(x => x.id === s.id ? { ...x, weight: v } : x))}
                     style={{ flex: 1 }} />
                 </div>
