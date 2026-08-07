@@ -503,21 +503,34 @@ def main():
 
         # 快速预检：无论是否 --resume，都先查已有数据，避免空跑
         # --resume 跳过已有 → 减少 Baostock 请求；不 resume 也做预检，全量已有直接进补全
+        # 缺口检测所需映射（默认空，保证 --code 模式下引用安全）
+        code_latest_map = {}
+        count_map = {}
+        expected_days = 0
         if not args.code:
             print("\n[2/4] 检查已有数据...")
             all_codes = [s[0] for s in stocks]
             code_latest_map = db.get_latest_dates_in_range_batch(all_codes, start_date, end_date)
+            # 真实交易日历（从 stock_daily DISTINCT 反推，自动排除假期）+ 各股票区间内已有天数：
+            # 用于「中段缺口」检测——末端已有数据、但中间某天缺失的股票不能再整只跳过
+            trading_days = db.get_trading_days_in_range(start_date, actual_end_date)
+            expected_days = len(trading_days)
+            count_map = db.get_existing_date_count_in_range_batch(all_codes, start_date, actual_end_date)
 
             pending = []
             skipped = 0
             for code, name, market in stocks:
                 latest_date = code_latest_map.get(code)
-                if latest_date and latest_date >= actual_end_date:
+                existing_cnt = count_map.get(code, 0)
+                # 完整判定：最新日期到达区间末端 且 区间内已有交易日数 == 真实交易日历天数
+                # （数量不足说明中段有缺失日，必须纳入更新填补，否则缺失日永远补不上）
+                if latest_date and latest_date >= actual_end_date and existing_cnt == expected_days:
                     skipped += 1
                     continue
                 pending.append((code, name, market))
-            print(f"        跳过: {skipped} 只(已有数据至实际期末 >= {actual_end_date})")
-            print(f"        待更新: {len(pending)} 只")
+            print(f"        交易日历天数: {expected_days} (范围 {start_date}~{actual_end_date})")
+            print(f"        跳过: {skipped} 只(已完整覆盖区间)")
+            print(f"        待更新: {len(pending)} 只(含中段缺口/末端缺口)")
 
             if args.force:
                 # --force 强制全量重刷，不跳过任何股票
@@ -688,16 +701,26 @@ def main():
                             print(f"[WARN] 重登异常: {e}")
 
                     # 断点续传：根据已有数据调整实际起始日期
+                    # 注意：若 latest 已到末端但中段有缺口（existing_cnt < expected_days），
+                    # 必须从区间起点重跑覆盖，否则中间缺失交易日永远补不上
                     actual_start = start_date
                     if args.resume:
                         latest_date = code_latest_map.get(code)
+                        existing_cnt = count_map.get(code, 0)
                         if latest_date is not None and latest_date < actual_end_date:
                             actual_start = latest_date + timedelta(days=1)
                             print(f"  [resume] {code} 已有数据至 {latest_date}，从 {actual_start} 开始补全")
                         elif latest_date is not None and latest_date >= actual_end_date:
-                            # 该股票已完整，理论上不应进入此循环，防御性 continue
-                            print(f"  [resume] {code} 数据已完整({latest_date} >= {actual_end_date})，跳过")
-                            continue
+                            if existing_cnt == expected_days:
+                                # 已完整（无中段缺口），理论上不应进入此循环，防御性跳过
+                                print(f"  [resume] {code} 数据已完整({latest_date} >= {actual_end_date})，跳过")
+                                continue
+                            else:
+                                # 中段缺口：从区间起点重跑覆盖，填补中间缺失交易日
+                                # （范围查询幂等，不会重复写入已有数据）
+                                gap_days = max(0, expected_days - existing_cnt)
+                                actual_start = start_date
+                                print(f"  [resume] {code} 末端已到 {latest_date} 但中段缺失约 {gap_days} 天，从头补全")
 
                     df = fetch_stock_history(code, name, market, actual_start, end_date)
 

@@ -303,17 +303,28 @@ def main():
         if args.resume and not args.code:
             all_codes = [s[0] for s in stocks]
             latest_in_range_map = db.get_latest_dates_in_range_batch(all_codes, start_date, end_date)
+            actual_end_date = db.get_last_trading_day_before(end_date)
+            # 真实交易日历 + 各股票区间内已有天数，用于中段缺口检测
+            trading_days = db.get_trading_days_in_range(start_date, actual_end_date)
+            expected_days = len(trading_days)
+            count_map = db.get_existing_date_count_in_range_batch(all_codes, start_date, actual_end_date)
             # end_date 可能是未来（如今天或周末），容忍 3 天误差
             resume_cutoff = end_date - timedelta(days=3)
             for code, name, market in stocks:
                 latest_in_range = latest_in_range_map.get(code)
-                if latest_in_range and latest_in_range >= resume_cutoff:
+                existing_cnt = count_map.get(code, 0)
+                # 仅当 latest 到达末端且区间内天数无缺口时才整只跳过；
+                # 中段有缺口（existing_cnt < expected_days）必须纳入更新填补
+                if latest_in_range and latest_in_range >= resume_cutoff and existing_cnt == expected_days:
                     continue
                 if latest_in_range:
-                    actual_start = max(start_date, latest_in_range + timedelta(days=1))
+                    if latest_in_range >= actual_end_date and existing_cnt < expected_days:
+                        # 末端已到但中段缺失：从头覆盖填补缺口（范围查询幂等）
+                        stock_start_dates[code] = start_date
+                    else:
+                        stock_start_dates[code] = max(start_date, latest_in_range + timedelta(days=1))
                 else:
-                    actual_start = start_date
-                stock_start_dates[code] = actual_start
+                    stock_start_dates[code] = start_date
 
             print(f"断点续传: {len(stock_start_dates)} 只需更新, {len(stocks)-len(stock_start_dates)} 只已跳过")
             stocks = [(c, n, m) for c, n, m in stocks if c in stock_start_dates]

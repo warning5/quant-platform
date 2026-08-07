@@ -533,6 +533,97 @@ class StockDailyDB:
                     result[row["code"]] = row["max_date"]
         return result
 
+    def get_trading_days_in_range(self, start_date, end_date):
+        """
+        反推 [start, end] 范围内的「真实交易日历」。
+
+        数据源没有独立的交易日历表，直接从 stock_daily 取 DISTINCT trade_date：
+        假期没有任何股票交易，自然不会出现在结果里，因此反推出的集合 = 实际交易日。
+        用于「中段缺口」检测——避免某股票区间末端已有数据、但中间某天缺失时被误判为已完整而跳过。
+
+        返回: 排序后的 date 列表（已统一为 datetime.date 类型）。
+        """
+        if isinstance(start_date, datetime):
+            start_date = start_date.date()
+        if isinstance(end_date, datetime):
+            end_date = end_date.date()
+
+        if self.backend == "clickhouse":
+            # 不加 FINAL：DISTINCT trade_date 不受 ReplacingMergeTree 未合并重复行影响
+            r = self.ch_client.query(
+                f"SELECT DISTINCT trade_date FROM {self.CH_TABLE} "
+                f"WHERE trade_date BETWEEN %(sd)s AND %(ed)s ORDER BY trade_date",
+                parameters={"sd": start_date, "ed": end_date},
+            )
+            rows = [row[0] for row in r.result_rows]
+        else:
+            with self.mysql_conn.cursor() as cur:
+                cur.execute(
+                    "SELECT DISTINCT trade_date FROM stock_daily "
+                    "WHERE trade_date BETWEEN %s AND %s ORDER BY trade_date",
+                    (start_date, end_date),
+                )
+                rows = [row["trade_date"] for row in cur.fetchall()]
+
+        result = []
+        for d in rows:
+            if isinstance(d, str):
+                from datetime import datetime as _dt
+                d = _dt.strptime(d, "%Y-%m-%d").date()
+            elif isinstance(d, datetime):
+                d = d.date()
+            result.append(d)
+        return result
+
+    def get_existing_date_count_in_range_batch(self, codes, start_date, end_date):
+        """
+        批量返回每只股票在 [start, end] 范围内「已有交易日的数量」（COUNT DISTINCT trade_date）。
+        用于缺口检测：若某股票 latest 已到达区间末端，但已有天数 < 真实交易日历天数，
+        说明区间中段存在缺失日，需要纳入更新（而非整只跳过）。
+
+        返回: dict { code: int }
+        """
+        if not codes:
+            return {}
+        result = {code: 0 for code in codes}
+
+        if isinstance(start_date, datetime):
+            start_date = start_date.date()
+        if isinstance(end_date, datetime):
+            end_date = end_date.date()
+
+        if self.backend == "clickhouse":
+            code_map = {}  # normalized_code -> original_code
+            normalized_codes = []
+            for c in codes:
+                nc = c[2:] if len(c) > 2 and c[:2] in ("SH", "SZ", "BJ") else c
+                code_map[nc] = c
+                normalized_codes.append(nc)
+
+            placeholders = ", ".join([f"'{c}'" for c in normalized_codes])
+            r = self.ch_client.query(
+                f"SELECT code, COUNT(DISTINCT trade_date) AS cnt "
+                f"FROM {self.CH_TABLE} "
+                f"WHERE code IN ({placeholders}) AND trade_date BETWEEN '{start_date}' AND '{end_date}' "
+                f"GROUP BY code"
+            )
+            for row in r.result_rows:
+                original_code = code_map.get(row[0], row[0])
+                result[original_code] = row[1]
+        else:
+            placeholders = ", ".join(["%s"] * len(codes))
+            with self.mysql_conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT code, COUNT(DISTINCT trade_date) AS cnt "
+                    f"FROM stock_daily "
+                    f"WHERE code IN ({placeholders}) AND trade_date BETWEEN %s AND %s "
+                    f"GROUP BY code",
+                    tuple(codes) + (start_date, end_date),
+                )
+                for row in cur.fetchall():
+                    result[row["code"]] = row["cnt"]
+        return result
+
     def get_last_trading_day_before(self, end_date):
         """
         返回 end_date 之前（含）的最后一个交易日。
