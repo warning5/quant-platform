@@ -1,5 +1,5 @@
 export default {
-  navigationBarTitleText: '行情',
+  navigationBarTitleText: '全部推荐',
   enablePullDownRefresh: true,
   backgroundTextStyle: 'dark'
 };

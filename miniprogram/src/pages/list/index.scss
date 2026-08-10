@@ -88,32 +88,76 @@
 .text-red { color: #F6465D !important; }
 .text-green { color: #16C784 !important; }
 
-/* ========== 2. 快照条（原型 .rec-snap） ========== */
-.snapshot {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12rpx;
-  margin: 0 0 20rpx;
+/* ========== 2. 智能推荐区块头（原型 rec-header） ========== */
+.rec-header {
+  background: #FFFFFF;
+  border: 1rpx solid #E8EBF0;
+  border-radius: 32rpx;
+  padding: 28rpx 32rpx;
+  margin-bottom: 20rpx;
 }
 
-.snap-pill {
+/* 标题行：智能推荐 + 查看全部 */
+.rh-row {
+  display: flex;
+  align-items: center;
+}
+
+.rh-title-row {
+  justify-content: space-between;
+  margin-bottom: 20rpx;
+}
+
+.rh-title {
+  font-size: 32rpx;
+  font-weight: 700;
+  color: #161B22;
+}
+
+.rh-more {
+  font-size: 24rpx;
+  color: #2D7FF9;
+  font-weight: 500;
+}
+
+/* 元数据行：日期 | 策略名(蓝) | 权重 | regime —— 强制一行 */
+.rh-meta-row {
+  gap: 12rpx;
+  margin-bottom: 10rpx;
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+.rh-pill {
   font-size: 22rpx;
   color: #9AA1AC;
   background: #F4F6FA;
-  padding: 6rpx 18rpx;
+  padding: 6rpx 16rpx;
   border-radius: 20rpx;
-  line-height: 1.5;
+  line-height: 1.4;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
-.snap-bold {
+.rh-date .rh-date-txt {
   color: #161B22;
   font-weight: 600;
 }
 
-.snap-pill.strat {
-  color: #2D7FF9;
-  font-weight: 600;
-  background: #EAF2FF;
+.rh-strat {
+  color: #2D7FF9 !important;
+  font-weight: 600 !important;
+  background: #EAF2FF !important;
+}
+
+/* 质量标签行 —— 紧贴 meta 下方 */
+.rh-quality-row {
+  margin-top: 2rpx;
+}
+
+.rh-quality {
+  font-size: 22rpx;
+  color: #9AA1AC;
 }
 
 /* ========== 3. 策略横滑 chips（原型 .strat-strip） ========== */

@@ -2,6 +2,7 @@ export default {
   pages: [
     'pages/list/index',
     'pages/detail/index',
+    'pages/recommend-all/index',
     'pages/strategy/index',
     'pages/strategy/detail',
     'pages/factor/index',

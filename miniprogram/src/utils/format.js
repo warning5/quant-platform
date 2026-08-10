@@ -105,6 +105,15 @@ export function actionTagClass(tag) {
 }
 
 /**
+ * 权重模式中文
+ * 后端 StockRecommendation.weightMode 取值：ICW(动态IC权重) / FIXED(固定权重)
+ */
+export function weightModeText(mode) {
+  const map = { ICW: 'ICW动态权重', FIXED: '固定权重' };
+  return map[mode] || mode || '--';
+}
+
+/**
  * Regime 中文
  */
 export function regimeText(regime) {
@@ -116,7 +125,7 @@ export function regimeText(regime) {
  * 置信度等级中文
  */
 export function confidenceText(level) {
-  const map = { HIGH: '高置信', NORMAL: '中等', LOW: '偏低', SUSPENDED: '建议暂停', UNTRAINED: '待训练' };
+  const map = { HIGH: '高置信', NORMAL: '一般', LOW: '偏低', SUSPENDED: '建议暂停', UNTRAINED: '待训练' };
   return map[level] || level || '--';
 }
 

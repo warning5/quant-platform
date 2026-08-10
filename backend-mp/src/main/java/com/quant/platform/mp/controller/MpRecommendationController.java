@@ -109,6 +109,15 @@ public class MpRecommendationController {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("id", r.getId());
         m.put("strategyId", r.getStrategyId());
+        // 策略名称：通过 strategyId 查 strategy_definition 表
+        String strategyName = null;
+        if (r.getStrategyId() != null) {
+            try {
+                StrategyDefinition sd = strategyDefinitionMapper.selectById(r.getStrategyId());
+                strategyName = sd != null ? sd.getStrategyName() : null;
+            } catch (Exception ignored) { }
+        }
+        m.put("strategyName", strategyName);
         m.put("stockCode", r.getStockCode());
         m.put("stockName", r.getStockName());
         m.put("recommendDate", r.getRecommendDate() != null ? r.getRecommendDate().toString() : null);
@@ -121,6 +130,11 @@ public class MpRecommendationController {
         m.put("actionTag", r.getActionTag());
         m.put("buyReason", r.getBuyReason());
         m.put("regime", r.getRegime());
+        m.put("weightMode", r.getWeightMode());
+        // 驱动类型：根据因子/分析权重谁大推导
+        double fw = r.getFactorWeight() != null ? r.getFactorWeight() : 0.0;
+        double aw = r.getAnalysisWeight() != null ? r.getAnalysisWeight() : 0.0;
+        m.put("driver", fw >= aw ? "FACTOR" : "ANALYSIS");
         m.put("suggestedBuyPrice", r.getSuggestedBuyPrice());
         m.put("suggestedStopLoss", r.getSuggestedStopLoss());
         m.put("suggestedTakeProfit", r.getSuggestedTakeProfit());

@@ -28,8 +28,12 @@ export default function StockCard({ item, liveQuote, onClick }) {
   const subText = item.driver || item.industry || '--';
 
   // 实时价优先，fallback 到批次收盘数据
-  const price = liveQuote != null ? liveQuote.price : (item.closePrice ?? null);
-  const pct = liveQuote != null ? liveQuote.changePct : (item.changePercent ?? null);
+  const hasLive = liveQuote != null && typeof liveQuote === 'object';
+  const price = hasLive ? liveQuote.price : (item.closePrice ?? null);
+  // 涨跌幅：实时优先 → 实时有价但无涨跌时 fallback 快照 changePercent
+  const pct = hasLive
+    ? (liveQuote.changePct != null ? liveQuote.changePct : (item.changePercent ?? null))
+    : (item.changePercent ?? null);
   const pcolor = pct != null
     ? (pct > 0 ? '#E53935' : pct < 0 ? '#2E9E5B' : '#9AA1AC')
     : '#9AA1AC';

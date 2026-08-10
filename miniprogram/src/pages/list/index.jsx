@@ -6,7 +6,8 @@ import StockCard from '../../components/StockCard';
 import {
   formatDate,
   regimeText,
-  confidenceText
+  confidenceText,
+  weightModeText
 } from '../../utils/format';
 import './index.scss';
 
@@ -63,12 +64,19 @@ export default function ListPage() {
     }
   }, []);
 
-  // 加载推荐列表（默认取最新批次）
+  // 加载推荐列表（默认取最新批次）—— 按 finalScore 降序排列 + 重编号
   const loadRecommendations = useCallback(async (strategyId) => {
     setLoading(true);
     try {
       const data = await recommendationApi.getLatest(strategyId);
-      setRecommendations(data || []);
+      let list = Array.isArray(data) ? data : [];
+      // 按 finalScore 降序排列（高分在前）
+      list.sort((a, b) => Number(b.finalScore || 0) - Number(a.finalScore || 0));
+      // 首页最多展示 10 只
+      list = list.slice(0, 10);
+      // 重编号：消除后端返回的重复 rankNum
+      list = list.map((item, idx) => ({ ...item, rankNum: idx + 1 }));
+      setRecommendations(list);
     } catch (e) {
       console.error('加载推荐失败', e);
       setRecommendations([]);
@@ -196,24 +204,37 @@ function pureCode(code) {
     Taro.stopPullDownRefresh();
   });
 
-  // 跳转详情页
+  // 跳转详情页（携带推荐数据 + 当前实时行情快照）
   const goDetail = (item) => {
-    const params = {
-      data: JSON.stringify(item),
-    };
+    const q = quotes[pureCode(item.stockCode)];
+    const params = { data: JSON.stringify(item) };
+    if (q && typeof q === 'object' && Object.keys(q).length > 0) {
+      params.quote = JSON.stringify(q);
+    }
     const query = Object.entries(params)
       .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
       .join('&');
-    Taro.navigateTo({
-      url: `/pages/detail/index?${query}`
-    });
+    Taro.navigateTo({ url: `/pages/detail/index?${query}` });
   };
 
-  // 快照条数据（原型 rec-snap）
+  // 快照条数据（原型 rec-header）
   const firstRec = recommendations[0];
-  const snapDate = firstRec?.recommendDate ? formatDate(firstRec.recommendDate) : '最新';
+  const rawDate = firstRec?.recommendDate;
+  // 格式化为 "MM-DD 周X"（如 08-07 周四）
+  let snapDate = '最新';
+  if (rawDate) {
+    try {
+      const d = new Date(rawDate);
+      if (!isNaN(d.getTime())) {
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        const weekdays = ['日', '一', '二', '三', '四', '五', '六'];
+        snapDate = `${m}-${day} 周${weekdays[d.getDay()]}`;
+      }
+    } catch (_) { /* fallback */ }
+  }
   const snapStrategy = currentStrategy?.name || '--';
-  const snapWeightMode = 'ICW动态权重'; // 平台实际权重方法，准确常量
+  const snapWeightMode = weightModeText(firstRec?.weightMode);
   const snapRegime = firstRec?.regime ? regimeText(firstRec.regime) : '—';
   const snapQuality = confidence ? confidenceText(confidence.level) : '--';
 
@@ -243,16 +264,24 @@ function pureCode(code) {
         </ScrollView>
       </View>
 
-      {/* ===== 2. 快照条（原型 rec-snap） ===== */}
-      <View className='snapshot'>
-        <Text className='snap-pill'><Text className='snap-bold'>{snapDate}</Text></Text>
-        <Text className='snap-pill strat'>{snapStrategy}</Text>
-        <Text className='snap-pill'>{snapWeightMode}</Text>
-        <Text className='snap-pill'>{snapRegime}</Text>
-        <Text className='snap-pill'>{snapQuality}</Text>
+      {/* ===== 2. 智能推荐区块头（原型 rec-header） ===== */}
+      <View className='rec-header'>
+        <View className='rh-row rh-title-row'>
+          <Text className='rh-title'>智能推荐</Text>
+          <Text className='rh-more' onClick={() => Taro.navigateTo({ url: '/pages/recommend-all/index' })}>查看全部 ›</Text>
+        </View>
+        <View className='rh-row rh-meta-row'>
+          <Text className='rh-pill rh-date'><Text className='rh-date-txt'>{snapDate}</Text></Text>
+          <Text className='rh-pill rh-strat'>{snapStrategy}</Text>
+          <Text className='rh-pill'>{snapWeightMode}</Text>
+          <Text className='rh-pill'>{snapRegime}</Text>
+        </View>
+        <View className='rh-quality-row'>
+          <Text className='rh-quality'>置信度：{snapQuality}</Text>
+        </View>
       </View>
 
-      {/* ===== 3. 策略横滑 chips（原型 strat-strip） ===== */}
+      {/* ===== 3. 策略横滑 chips（切换策略） ===== */}
       {strategies.length > 0 && (
         <ScrollView
           scrollX

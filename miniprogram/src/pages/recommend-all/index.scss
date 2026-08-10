@@ -1,0 +1,78 @@
+/* ===== 全部推荐页 ===== */
+.ra-page {
+  min-height: 100vh;
+  background: #f5f5f5;
+  padding: 24rpx 24rpx 40rpx;
+  box-sizing: border-box;
+}
+
+/* 头部 */
+.ra-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 8rpx 4rpx 24rpx;
+}
+
+.ra-title {
+  font-size: 36rpx;
+  font-weight: 700;
+  color: #161B22;
+}
+
+.ra-sub {
+  font-size: 26rpx;
+  color: #9AA1AC;
+}
+
+/* ===== 策略横滑 chips（与首页一致） ===== */
+.strat-scroll {
+  width: 100%;
+  white-space: nowrap;
+  margin-bottom: 20rpx;
+}
+
+.strat-strip {
+  display: inline-flex;
+  gap: 12rpx;
+}
+
+.strat-chip {
+  flex: 0 0 auto;
+  padding: 14rpx 28rpx;
+  border-radius: 36rpx;
+  font-size: 26rpx;
+  background: #FFFFFF;
+  border: 1rpx solid #E8EBF0;
+  color: #6B7280;
+  line-height: 1.4;
+}
+
+.strat-chip.on {
+  background: #EAF2FF;
+  color: #2D7FF9;
+  border-color: transparent;
+  font-weight: 600;
+}
+
+/* ===== 推荐列表卡片容器 ===== */
+.rec-card {
+  background: #FFFFFF;
+  border: 1rpx solid #E8EBF0;
+  border-radius: 32rpx;
+  padding: 8rpx 24rpx;
+  overflow: hidden;
+}
+
+/* ===== 空状态 ===== */
+.empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 120rpx 0;
+}
+
+.empty-text {
+  font-size: 28rpx;
+  color: #9AA1AC;
+}
