@@ -1,0 +1,24 @@
+.factor-list-page { padding: 20px 24px; }
+
+.cat-picker {
+  display: flex; align-items: center;
+  background: #fff; border-radius: 12px; padding: 20px 24px; margin-bottom: 20px;
+}
+.cat-label { font-size: 26px; color: #999; margin-right: 16px; }
+.cat-value { flex: 1; font-size: 28px; color: #333; font-weight: 500; }
+.cat-arrow { color: #999; font-size: 24px; }
+
+.factor-card { margin-bottom: 20px; padding: 24px; }
+.factor-top { display: flex; align-items: center; justify-content: space-between; }
+.factor-name { font-size: 32px; font-weight: 600; color: #222; }
+.factor-status { font-size: 22px; padding: 2px 12px; border-radius: 16px; background: #f0f0f0; color: #888; }
+.f-active { background: #eafaf0; color: #16a34a; }
+.f-testing { background: #eaf3ff; color: #2b7de9; }
+.f-draft { background: #f3f3f3; color: #999; }
+.f-deprecated { background: #f0f0f0; color: #bbb; }
+.f-degraded { background: #fff4e5; color: #e08a00; }
+
+.factor-meta { display: flex; justify-content: space-between; margin-top: 12px; font-size: 24px; color: #999; }
+
+.empty-state { padding-top: 120px; text-align: center; }
+.empty-text { color: #999; font-size: 28px; }

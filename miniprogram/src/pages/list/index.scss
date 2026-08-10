@@ -1,143 +1,161 @@
+/* ===== 首页（推荐 tab）—— 严格对齐原型 index.html home 屏 ===== */
+/* 设计 token 与原型 :root 保持一致 */
+
 .list-page {
-  padding: 16rpx;
+  padding: 20rpx 24rpx;
   min-height: 100vh;
+  background: #F4F6FA;
+  padding-bottom: 180rpx; /* 给底部原生 Tab 栏留空间 */
 }
 
-/* 大盘指数 */
-.index-bar {
+/* ========== 1. 市场概览卡片（原型 .mkt-card） ========== */
+.mkt-card {
+  background: #FFFFFF;
+  border: 1rpx solid #E8EBF0;
+  border-radius: 32rpx;
+  padding: 28rpx 32rpx;
+  margin-bottom: 20rpx;
+}
+
+.mkt-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24rpx;
+}
+
+.mkt-title {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #161B22;
+}
+
+.mkt-live {
+  font-size: 22rpx;
+  color: #16C784;
+  font-weight: 500;
+}
+
+.mkt-body {
   white-space: nowrap;
-  margin-bottom: 16rpx;
-  padding: 16rpx 0;
-  background: #fff;
-  border-radius: 16rpx;
 }
 
-.index-item {
+/* 指数单项 —— 原型 .idx3 > .idx-c */
+.idx-c {
   display: inline-flex;
   flex-direction: column;
   align-items: center;
+  gap: 6rpx;
   padding: 0 24rpx;
-  border-right: 1rpx solid #f0f0f0;
+  position: relative;
 }
 
-.index-item:last-child {
-  border-right: none;
+.idx-c + .idx-c::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8rpx;
+  bottom: 8rpx;
+  width: 1rpx;
+  background: #EDEFF3;
 }
 
-.index-name {
-  font-size: 20rpx;
-  color: #999;
-  margin-bottom: 4rpx;
+.idx-c:first-child::before {
+  display: none;
 }
 
-.index-price {
-  font-size: 26rpx;
-  font-weight: 500;
-  color: #333;
-}
-
-.index-change {
+.idx-n {
   font-size: 22rpx;
-  color: #999;
-}
-
-.index-bar .text-red {
-  color: #c0392b;
-}
-
-.index-bar .text-green {
-  color: #27ae60;
-}
-
-/* 选择栏 */
-.selector-bar {
-  display: flex;
-  gap: 16rpx;
-  margin-bottom: 16rpx;
-}
-
-.picker-item {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  background: #fff;
-  border-radius: 16rpx;
-  padding: 20rpx 24rpx;
-}
-
-.picker-label {
-  font-size: 24rpx;
-  color: #999;
-  margin-right: 12rpx;
-}
-
-.picker-value {
-  flex: 1;
-  font-size: 28rpx;
-  font-weight: 500;
-  color: #333;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  color: #6B7280;
   white-space: nowrap;
 }
 
-.picker-arrow {
-  font-size: 24rpx;
-  color: #ccc;
+.idx-v {
+  font-size: 34rpx;
+  font-weight: 700;
+  color: #161B22;
+  line-height: 1.2;
 }
 
-/* 概览栏 */
-.overview-bar {
-  display: flex;
-  background: #fff;
-  border-radius: 16rpx;
-  padding: 24rpx 0;
-  margin-bottom: 16rpx;
-}
-
-.overview-item {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  border-right: 1rpx solid #f0f0f0;
-}
-
-.overview-item:last-child {
-  border-right: none;
-}
-
-.overview-label {
+.idx-ch {
   font-size: 22rpx;
-  color: #999;
-  margin-bottom: 8rpx;
+  font-weight: 600;
+  color: #6B7280;
+  white-space: nowrap;
 }
 
-.overview-value {
-  font-size: 36rpx;
-  font-weight: 500;
-  color: #333;
+/* 涨跌颜色：红涨绿跌（中国股市） */
+.text-red { color: #F6465D !important; }
+.text-green { color: #16C784 !important; }
+
+/* ========== 2. 快照条（原型 .rec-snap） ========== */
+.snapshot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+  margin: 0 0 20rpx;
 }
 
-.overview-value.text-red {
-  color: #c0392b;
+.snap-pill {
+  font-size: 22rpx;
+  color: #9AA1AC;
+  background: #F4F6FA;
+  padding: 6rpx 18rpx;
+  border-radius: 20rpx;
+  line-height: 1.5;
 }
 
-.overview-value.text-orange {
-  color: #e67e22;
+.snap-bold {
+  color: #161B22;
+  font-weight: 600;
 }
 
-.overview-value.text-muted {
-  color: #bbb;
-  font-size: 28rpx;
+.snap-pill.strat {
+  color: #2D7FF9;
+  font-weight: 600;
+  background: #EAF2FF;
 }
 
-/* 推荐列表 */
-.recommend-list {
-  padding-bottom: 32rpx;
+/* ========== 3. 策略横滑 chips（原型 .strat-strip） ========== */
+.strat-scroll {
+  width: 100%;
+  white-space: nowrap;
+  margin-bottom: 20rpx;
 }
 
-/* 空状态 */
+.strat-strip {
+  display: inline-flex;
+  gap: 12rpx;
+}
+
+.strat-chip {
+  flex: 0 0 auto;
+  padding: 14rpx 28rpx;
+  border-radius: 36rpx;
+  font-size: 26rpx;
+  background: #FFFFFF;
+  border: 1rpx solid #E8EBF0;
+  color: #6B7280;
+  line-height: 1.4;
+}
+
+.strat-chip.on {
+  background: #EAF2FF;
+  color: #2D7FF9;
+  border-color: transparent;
+  font-weight: 600;
+}
+
+/* ========== 4. 推荐列表卡片容器（原型 .card 包裹 #home-recs） ========== */
+.rec-card {
+  background: #FFFFFF;
+  border: 1rpx solid #E8EBF0;
+  border-radius: 32rpx;
+  padding: 8rpx 24rpx;
+  overflow: hidden;
+}
+
+/* ========== 5. 空状态 ========== */
 .empty-state {
   display: flex;
   align-items: center;
@@ -147,5 +165,5 @@
 
 .empty-text {
   font-size: 28rpx;
-  color: #999;
+  color: #9AA1AC;
 }

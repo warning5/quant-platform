@@ -13,7 +13,7 @@ const TOKEN_KEY = 'mp_user_token';
 const FALLBACK_BASE =
   process.env.NODE_ENV === 'production'
     ? 'https://stock.hwtx.site/api'
-    : 'https://stock.hwtx.site/api';
+    : 'http://127.0.0.1:8082/api';
 
 const API_BASE =
   typeof BASE_URL !== 'undefined' && BASE_URL ? BASE_URL : FALLBACK_BASE;
@@ -64,7 +64,7 @@ function loginWithCode(code) {
           reject(new Error((res.data && res.data.message) || '登录失败'));
         }
       },
-      fail(reject),
+      fail: reject,
     });
   });
 }

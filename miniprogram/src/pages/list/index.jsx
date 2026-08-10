@@ -1,31 +1,48 @@
-import { useState, useEffect, useCallback } from 'react';
-import { View, Text, ScrollView, Picker } from '@tarojs/components';
-import Taro, { useDidShow, usePullDownRefresh } from '@tarojs/taro';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { View, Text, ScrollView } from '@tarojs/components';
+import Taro, { useDidShow, useDidHide, usePullDownRefresh } from '@tarojs/taro';
 import { recommendationApi, confidenceApi, indexApi, stockQuoteApi } from '../../api';
 import StockCard from '../../components/StockCard';
 import {
-  formatPrice,
-  formatPercent,
-  priceColor,
-  confidenceText,
-  formatDate
+  formatDate,
+  regimeText,
+  confidenceText
 } from '../../utils/format';
 import './index.scss';
 
+/**
+ * 首页（推荐 tab）—— 严格对齐原型 index.html 的「home」屏设计：
+ *
+ *   ┌─────────────────────────────┐
+ *   │ 市场概览          ● 实时行情 │  ← 卡片包裹的指数栏（交易时段每3秒自动刷新）
+ *   │ 上证指 深证成 创业板 科创50 上证50 │
+ *   │ 3940   14311  3563   1744  2960  │
+ *   ├─────────────────────────────┤
+ *   │ 07-24  B_价值反转 ICW动态权重 熊市 偏低 │  ← 快照条 pills
+ *   ├─────────────────────────────┤
+ *   │ [E_风险] [B_价值反转] [D_多因子]  │  ← 策略横滑 chips
+ *   ├─────────────────────────────┤
+ *   │ ┌─────────────────────────┐ │
+ *   │ │ 1  交通银行        83   │ │  ← rec-item 卡片列表（含实时现价+涨跌）
+ *   │ │    601328·银行     持有  │ │
+ *   │ └─────────────────────────┘ │
+ *   └─────────────────────────────┘
+ */
 export default function ListPage() {
   const [loading, setLoading] = useState(true);
   const [strategies, setStrategies] = useState([]);
   const [currentStrategyIdx, setCurrentStrategyIdx] = useState(0);
-  const [dates, setDates] = useState([]);
-  const [currentDateIdx, setCurrentDateIdx] = useState(0);
   const [recommendations, setRecommendations] = useState([]);
   const [confidence, setConfidence] = useState(null);
   const [indices, setIndices] = useState([]);
-  const [hitRate, setHitRate] = useState(null);
-  const [quotes, setQuotes] = useState({}); // { stockCode: {price, change, changePct} }
+  const [quotes, setQuotes] = useState({}); // 个股实时行情：code -> {price,change,changePct}
 
   const currentStrategy = strategies[currentStrategyIdx];
-  const currentDate = dates[currentDateIdx];
+
+  // 轮询相关引用
+  const pollingRef = useRef(null);
+  const recommendationsRef = useRef(recommendations);
+  useEffect(() => { recommendationsRef.current = recommendations; }, [recommendations]);
 
   // 加载策略列表
   const loadStrategies = useCallback(async () => {
@@ -37,42 +54,21 @@ export default function ListPage() {
           name: s.strategyName || s.name || `策略${s.strategyId || s.id}`
         }));
         setStrategies(formatted);
-        return formatted[0];
+      } else {
+        setLoading(false);
       }
     } catch (e) {
       console.error('加载策略失败', e);
+      setLoading(false);
     }
-    return null;
   }, []);
 
-  // 加载策略可用日期
-  const loadDates = useCallback(async (strategyId) => {
-    try {
-      const data = await recommendationApi.getDatesByStrategy(strategyId, 30);
-      if (data && data.length > 0) {
-        setDates(data);
-        setCurrentDateIdx(0);
-        return data[0];
-      } else {
-        setDates([]);
-        setRecommendations([]);
-      }
-    } catch (e) {
-      console.error('加载日期失败', e);
-    }
-    return null;
-  }, []);
-
-  // 加载推荐列表
-  const loadRecommendations = useCallback(async (strategyId, date) => {
+  // 加载推荐列表（默认取最新批次）
+  const loadRecommendations = useCallback(async (strategyId) => {
     setLoading(true);
     try {
-      const data = await recommendationApi.getByStrategyAndDate(strategyId, date);
+      const data = await recommendationApi.getLatest(strategyId);
       setRecommendations(data || []);
-      // 加载推荐后批量拉取实时行情
-      if (data && data.length > 0) {
-        loadQuotes(data);
-      }
     } catch (e) {
       console.error('加载推荐失败', e);
       setRecommendations([]);
@@ -81,29 +77,18 @@ export default function ListPage() {
     }
   }, []);
 
-  // 批量加载实时行情
-  const loadQuotes = useCallback(async (recs) => {
-    try {
-      // 把 000975.SZ 这种带后缀的代码转成纯代码，因为腾讯 API 返回的 key 是纯代码
-      const pureCodes = recs.map(r => r.stockCode?.split('.')[0]).filter(Boolean).join(',');
-      console.log('[DEBUG] loadQuotes called, pure codes:', pureCodes);
-      const data = await stockQuoteApi.getQuotes(pureCodes);
-      console.log('[DEBUG] loadQuotes response:', data);
-      if (data) {
-        // 把返回的 key (纯代码) 映射回带后缀的 code，方便后续按 stockCode 查
-        const codeMap = {};
-        recs.forEach(r => {
-          const pure = r.stockCode?.split('.')[0];
-          if (pure && data[pure]) {
-            codeMap[r.stockCode] = data[pure];
-          }
-        });
-        setQuotes(codeMap);
+  // 推荐列表变化时立即拉取实时行情（解耦时序，确保一定触发）
+  useEffect(() => {
+    if (recommendations.length > 0) {
+      const codes = recommendations.map(r => pureCode(r.stockCode)).filter(Boolean).join(',');
+      if (codes) {
+        stockQuoteApi.getQuotes(codes).then(q => {
+          const map = q && q.data ? q.data : (q || {});
+          setQuotes(map);
+        }).catch(() => {});
       }
-    } catch (e) {
-      console.error('[DEBUG] loadQuotes failed:', e);
     }
-  }, []);
+  }, [recommendations]);
 
   // 加载置信度
   const loadConfidence = useCallback(async (strategyId) => {
@@ -112,16 +97,6 @@ export default function ListPage() {
       setConfidence(data);
     } catch (e) {
       setConfidence(null);
-    }
-  }, []);
-
-  // 加载命中率
-  const loadHitRate = useCallback(async (strategyId, date) => {
-    try {
-      const data = await recommendationApi.getHitRate(strategyId, date);
-      setHitRate(data);
-    } catch (e) {
-      setHitRate(null);
     }
   }, []);
 
@@ -135,65 +110,96 @@ export default function ListPage() {
     }
   }, []);
 
+  /** 从 stockCode 提取纯6位数字代码（"000975.SZ" → "000975"） */
+function pureCode(code) {
+  if (!code) return '';
+  return code.replace(/\.\w+$/, '');
+}
+
+// 是否交易时段（周一~周五 09:30-11:30 / 13:00-15:00）
+  const isTradingTime = () => {
+    const now = new Date();
+    const day = now.getDay();
+    if (day === 0 || day === 6) return false; // 周末
+    const t = now.getHours() * 60 + now.getMinutes();
+    const morning = t >= 9 * 60 + 30 && t <= 11 * 60 + 30;
+    const afternoon = t >= 13 * 60 && t <= 15 * 60;
+    return morning || afternoon;
+  };
+
+  // 停止轮询
+  const stopPolling = useCallback(() => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+  }, []);
+
+  // 交易时段内每 3 秒刷新指数 + 个股实时价
+  const startPolling = useCallback(() => {
+    stopPolling();
+    if (!isTradingTime()) return; // 非交易时段不轮询，省流量
+    const tick = async () => {
+      loadIndices();
+      const recs = recommendationsRef.current;
+      if (recs && recs.length > 0) {
+        // 提取纯6位代码（后端 monitor/stocks 的 key 是 "000975" 格式）
+        const codes = recs.map(r => pureCode(r.stockCode)).filter(Boolean).join(',');
+        if (!codes) return;
+        try {
+          const q = await stockQuoteApi.getQuotes(codes);
+          const map = q && q.data ? q.data : (q || {});
+          setQuotes(map);
+        } catch (e) {
+          // 实时行情失败不影响主流程
+        }
+      }
+    };
+    tick(); // 立即刷一次
+    pollingRef.current = setInterval(tick, 3000);
+  }, [loadIndices, stopPolling]);
+
   // 初始化
   useEffect(() => {
     (async () => {
-      const strategy = await loadStrategies();
-      if (strategy) {
-        const [,] = await Promise.all([
-          loadDates(strategy.id),
-          loadConfidence(strategy.id),
-          loadIndices()
-        ]);
-      }
+      await loadStrategies();
+      await loadIndices();
+      startPolling();
     })();
+    return () => stopPolling();
   }, []);
 
-  // 策略或日期变化时重新加载
+  // 策略变化时重新加载推荐 + 置信度
   useEffect(() => {
-    if (currentStrategy && currentDate) {
-      loadRecommendations(currentStrategy.id, currentDate);
-      loadHitRate(currentStrategy.id, currentDate);
+    if (currentStrategy) {
+      loadRecommendations(currentStrategy.id);
+      loadConfidence(currentStrategy.id);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentStrategyIdx, currentDateIdx, currentDate]);
+  }, [currentStrategy]);
 
-  // 页面显示时刷新指数
+  // 页面显示时启动轮询（交易时段内每3秒刷新）
   useDidShow(() => {
-    if (indices.length > 0) loadIndices();
+    startPolling();
+  });
+
+  // 页面隐藏时停止轮询，省流量
+  useDidHide(() => {
+    stopPolling();
   });
 
   // 下拉刷新
   usePullDownRefresh(async () => {
-    if (currentStrategy && currentDate) {
-      await loadRecommendations(currentStrategy.id, currentDate);
+    if (currentStrategy) {
+      await loadRecommendations(currentStrategy.id);
       await loadIndices();
     }
     Taro.stopPullDownRefresh();
   });
 
-  // 策略切换
-  const onStrategyChange = async (e) => {
-    const idx = Number(e.detail.value);
-    setCurrentStrategyIdx(idx);
-    const strategy = strategies[idx];
-    if (strategy) {
-      await loadDates(strategy.id);
-      await loadConfidence(strategy.id);
-    }
-  };
-
-  // 日期切换
-  const onDateChange = (e) => {
-    setCurrentDateIdx(Number(e.detail.value));
-  };
-
   // 跳转详情页
   const goDetail = (item) => {
-    const quote = quotes[item.stockCode];
     const params = {
       data: JSON.stringify(item),
-      ...(quote ? { quote: JSON.stringify(quote) } : {})
     };
     const query = Object.entries(params)
       .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
@@ -203,84 +209,75 @@ export default function ListPage() {
     });
   };
 
+  // 快照条数据（原型 rec-snap）
+  const firstRec = recommendations[0];
+  const snapDate = firstRec?.recommendDate ? formatDate(firstRec.recommendDate) : '最新';
+  const snapStrategy = currentStrategy?.name || '--';
+  const snapWeightMode = 'ICW动态权重'; // 平台实际权重方法，准确常量
+  const snapRegime = firstRec?.regime ? regimeText(firstRec.regime) : '—';
+  const snapQuality = confidence ? confidenceText(confidence.level) : '--';
+
+  const activeChipId = `chip${currentStrategyIdx}`;
+
   return (
     <View className='list-page'>
-      {/* 大盘指数 */}
-      {indices.length > 0 && (
-        <ScrollView scrollX className='index-bar' enhanced showScrollbar={false}>
+      {/* ===== 1. 市场概览卡片（原型 mkt-card） ===== */}
+      <View className='mkt-card'>
+        <View className='mkt-head'>
+          <Text className='mkt-title'>市场概览</Text>
+          <Text className='mkt-live'>● 实时行情</Text>
+        </View>
+        <ScrollView scrollX className='mkt-body' enhanced showScrollbar={false}>
           {indices.map((idx) => {
             const cls = priceColor(idx.changePct);
             return (
-              <View key={idx.code} className='index-item'>
-                <Text className='index-name'>{idx.name}</Text>
-                <Text className={`index-price ${cls}`}>{formatPrice(idx.price)}</Text>
-                <Text className={`index-change ${cls}`}>
-                  {formatPercent(idx.changePct)}
+              <View key={idx.code} className='idx-c'>
+                <Text className='idx-n'>{idx.name}</Text>
+                <Text className={`idx-v ${cls}`}>{formatIdxPrice(idx.price)}</Text>
+                <Text className={`idx-ch ${cls}`}>
+                  {idx.changePct > 0 ? '+' : ''}{idx.changePct.toFixed(2)}%
                 </Text>
               </View>
             );
           })}
         </ScrollView>
+      </View>
+
+      {/* ===== 2. 快照条（原型 rec-snap） ===== */}
+      <View className='snapshot'>
+        <Text className='snap-pill'><Text className='snap-bold'>{snapDate}</Text></Text>
+        <Text className='snap-pill strat'>{snapStrategy}</Text>
+        <Text className='snap-pill'>{snapWeightMode}</Text>
+        <Text className='snap-pill'>{snapRegime}</Text>
+        <Text className='snap-pill'>{snapQuality}</Text>
+      </View>
+
+      {/* ===== 3. 策略横滑 chips（原型 strat-strip） ===== */}
+      {strategies.length > 0 && (
+        <ScrollView
+          scrollX
+          className='strat-scroll'
+          enhanced
+          showScrollbar={false}
+          scrollIntoView={activeChipId}
+        >
+          <View className='strat-strip'>
+            {strategies.map((s, idx) => (
+              <View
+                key={s.id}
+                id={`chip${idx}`}
+                className={`strat-chip ${idx === currentStrategyIdx ? 'on' : ''}`}
+                onClick={() => setCurrentStrategyIdx(idx)}
+              >
+                {s.name}
+              </View>
+            ))}
+          </View>
+        </ScrollView>
       )}
 
-      {/* 策略+日期选择 */}
-      <View className='selector-bar'>
-        {strategies.length > 0 && (
-          <Picker
-            mode='selector'
-            range={strategies.map(s => s.name)}
-            value={currentStrategyIdx}
-            onChange={onStrategyChange}
-          >
-            <View className='picker-item'>
-              <Text className='picker-label'>策略</Text>
-              <Text className='picker-value'>{currentStrategy?.name}</Text>
-              <Text className='picker-arrow'>▾</Text>
-            </View>
-          </Picker>
-        )}
-        {dates.length > 0 && (
-          <Picker
-            mode='selector'
-            range={dates.map(d => formatDate(d))}
-            value={currentDateIdx}
-            onChange={onDateChange}
-          >
-            <View className='picker-item'>
-              <Text className='picker-label'>推荐日</Text>
-              <Text className='picker-value'>{formatDate(currentDate)}</Text>
-              <Text className='picker-arrow'>▾</Text>
-            </View>
-          </Picker>
-        )}
-      </View>
-
-      {/* 概览卡片 */}
-      <View className='overview-bar'>
-        <View className='overview-item'>
-          <Text className='overview-label'>推荐数</Text>
-          <Text className='overview-value'>{recommendations.length}</Text>
-        </View>
-        <View className='overview-item'>
-          <Text className='overview-label'>命中率</Text>
-          {hitRate && hitRate.tracked > 0 ? (
-            <Text className='overview-value text-red'>
-              {(hitRate.hitRate * 100).toFixed(0)}%
-            </Text>
-          ) : (
-            <Text className='overview-value text-muted'>待追踪</Text>
-          )}
-        </View>
-        <View className='overview-item'>
-          <Text className='overview-label'>置信度</Text>
-          <Text className={`overview-value ${confidence && confidence.level !== 'UNTRAINED' ? 'text-orange' : 'text-muted'}`}>
-            {confidence ? confidenceText(confidence.level) : '--'}
-          </Text>
-        </View>
-      </View>
-
-      {/* 推荐列表 */}
-      <View className='recommend-list'>
+      {/* ===== 4. 推荐卡片列表（原型 home-recs 包裹在 .card 里） ===== */}
+      <View className='rec-card'>
         {loading ? (
           <View className='empty-state'>
             <Text className='empty-text'>加载中...</Text>
@@ -290,7 +287,7 @@ export default function ListPage() {
             <StockCard
               key={item.id || item.stockCode}
               item={item}
-              quote={quotes[item.stockCode]}
+              liveQuote={quotes[pureCode(item.stockCode)]}
               onClick={() => goDetail(item)}
             />
           ))
@@ -302,4 +299,19 @@ export default function ListPage() {
       </View>
     </View>
   );
+}
+
+/** 指数价格格式化 —— 去掉小数点后多余的0 */
+function formatIdxPrice(val) {
+  if (val == null) return '--';
+  return Number(val).toFixed(2);
+}
+
+/** 涨跌颜色 —— 中国股市红涨绿跌 */
+function priceColor(val) {
+  if (val == null || isNaN(val)) return '';
+  const num = Number(val);
+  if (num > 0) return 'text-red';
+  if (num < 0) return 'text-green';
+  return '';
 }

@@ -39,3 +39,4 @@ nul*
 /common/target/
 /opc-doc/
 /platform-core/target/
+/backend-mp/logs/

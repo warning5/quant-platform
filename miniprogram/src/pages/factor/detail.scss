@@ -1,0 +1,31 @@
+.factor-detail-page { padding: 20px 24px 40px; }
+
+.section { margin-bottom: 20px; padding: 24px; }
+.section-title { font-size: 28px; font-weight: 600; color: #333; margin-bottom: 16px; }
+
+.fd-top { display: flex; align-items: center; justify-content: space-between; }
+.fd-name { font-size: 34px; font-weight: 600; color: #222; }
+.fd-status { font-size: 22px; color: #16a34a; }
+.fd-meta { display: flex; align-items: center; margin-top: 10px; }
+.fd-code { font-size: 24px; color: #999; margin-right: 16px; }
+.fd-cat { font-size: 22px; color: #2b7de9; background: #eaf3ff; padding: 2px 12px; border-radius: 14px; }
+.fd-desc { display: block; margin-top: 14px; font-size: 24px; color: #666; line-height: 1.6; }
+.fd-row { display: flex; justify-content: space-between; margin-top: 12px; font-size: 26px; }
+.fd-label { color: #999; }
+.fd-value { color: #333; }
+
+.ic-grid { display: flex; flex-wrap: wrap; }
+.ic-item { width: 50%; padding: 10px 0; }
+.ic-label { display: block; font-size: 22px; color: #999; }
+.ic-value { display: block; font-size: 30px; font-weight: 600; color: #333; margin-top: 4px; }
+.ic-empty { display: block; font-size: 24px; color: #999; padding: 16px 0; }
+
+.trend-list { }
+.trend-row { display: flex; align-items: center; padding: 12px 0; border-bottom: 1px solid #f0f0f0; }
+.trend-row:last-child { border-bottom: none; }
+.trend-date { flex: 2; font-size: 24px; color: #666; }
+.trend-ic { flex: 1; font-size: 26px; font-weight: 600; text-align: right; }
+.trend-ir { flex: 1; font-size: 24px; color: #999; text-align: right; }
+
+.empty-state { padding-top: 120px; text-align: center; }
+.empty-text { color: #999; font-size: 28px; }

@@ -8,6 +8,8 @@ import com.quant.platform.mp.domain.SysUser;
 import com.quant.platform.mp.mapper.MpUserMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
@@ -25,6 +27,7 @@ public class MpWechatAuthService {
 
     private final MpUserMapper userMapper;
     private final RestTemplate restTemplate;
+    private final Environment environment;
 
     @Value("${WECHAT_MINI_APPID:}")
     private String appId;
@@ -32,12 +35,17 @@ public class MpWechatAuthService {
     @Value("${WECHAT_MINI_SECRET:}")
     private String appSecret;
 
+    /** 开发兜底登录使用的用户 id（仅 dev profile 且未配置微信时生效） */
+    @Value("${mp.dev.user-id:1}")
+    private Long devUserId;
+
     private static final String CODE2SESSION_URL = "https://api.weixin.qq.com/sns/jscode2session";
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
-    public MpWechatAuthService(MpUserMapper userMapper, RestTemplate restTemplate) {
+    public MpWechatAuthService(MpUserMapper userMapper, RestTemplate restTemplate, Environment environment) {
         this.userMapper = userMapper;
         this.restTemplate = restTemplate;
+        this.environment = environment;
     }
 
     /**
@@ -45,7 +53,14 @@ public class MpWechatAuthService {
      * @return 含 token / userId / 基础用户信息的 Map
      */
     public Map<String, Object> miniLogin(String code) {
-        checkConfigured();
+        if (!isConfigured()) {
+            // dev 环境未配置微信凭据：直接以默认开发用户签发 token，便于本机联调
+            if (isDev()) {
+                log.warn("[MpWechat] 未配置微信凭据，dev 环境走开发兜底登录 userId={}", devUserId);
+                return devLogin();
+            }
+            throw new BusinessException("微信登录未配置：请在 .env 中设置 WECHAT_MINI_APPID / WECHAT_MINI_SECRET");
+        }
         JsonNode node = code2Session(code);
         if (node.has("errcode") && node.get("errcode").asInt(0) != 0) {
             throw new BusinessException("微信小程序登录失败：" + node.path("errmsg").asText());
@@ -130,9 +145,21 @@ public class MpWechatAuthService {
         }
     }
 
-    private void checkConfigured() {
-        if (appId == null || appId.isBlank() || appSecret == null || appSecret.isBlank()) {
-            throw new BusinessException("微信登录未配置：请在 .env 中设置 WECHAT_MINI_APPID / WECHAT_MINI_SECRET");
-        }
+    private boolean isConfigured() {
+        return appId != null && !appId.isBlank() && appSecret != null && !appSecret.isBlank();
+    }
+
+    private boolean isDev() {
+        return environment.acceptsProfiles(Profiles.of("dev"));
+    }
+
+    /** dev 兜底登录：不依赖微信，直接以默认开发用户签发 token */
+    private Map<String, Object> devLogin() {
+        StpUtil.login(devUserId);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("token", StpUtil.getTokenValue());
+        result.put("tokenName", StpUtil.getTokenName());
+        result.put("userId", devUserId);
+        return result;
     }
 }

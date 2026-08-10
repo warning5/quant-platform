@@ -28,6 +28,10 @@ export const recommendationApi = {
   getHitRate: (strategyId, date) =>
     request({ url: `/mp/recommendations/hit-rate/strategy/${strategyId}/date/${date}` }),
 
+  /** 个股推荐详情（R1）：评分明细/因子归因/买卖信号/表现 */
+  getStockDetail: (stockCode, params = {}) =>
+    request({ url: `/mp/recommendations/stock/${stockCode}/detail`, method: 'GET', data: params }),
+
 };
 
 /**
@@ -59,4 +63,46 @@ export const stockQuoteApi = {
   /** 批量获取个股实时行情，codes 为逗号分隔的股票代码 */
   getQuotes: (codes) =>
     request({ url: '/mp/monitor/stocks', data: { codes } }),
+};
+
+/**
+ * 策略 API（只读，backend-mp 直连 MySQL）
+ */
+export const strategyApi = {
+  /** 策略列表 */
+  list: (params) =>
+    request({ url: '/mp/strategies', method: 'GET', data: params }),
+  /** 策略详情 */
+  get: (id) =>
+    request({ url: `/mp/strategies/${id}`, method: 'GET' }),
+  /** 策略回测表现（最新 COMPLETED 任务 + 报告） */
+  backtest: (id) =>
+    request({ url: `/mp/strategies/${id}/backtest`, method: 'GET' }),
+};
+
+/**
+ * 因子 API（只读，backend-mp 直连 MySQL）
+ */
+export const factorApi = {
+  /** 因子列表（支持 keyword/category/status 筛选） */
+  list: (params) =>
+    request({ url: '/mp/factors', method: 'GET', data: params }),
+  /** 因子详情 */
+  get: (id) =>
+    request({ url: `/mp/factors/${id}`, method: 'GET' }),
+  /** 因子 IC 趋势 */
+  icTrend: (id, params = {}) =>
+    request({ url: `/mp/factors/${id}/ic-trend`, method: 'GET', data: params }),
+};
+
+/**
+ * 我的资料 API（M1，backend-mp 复用 sys_user 表）
+ */
+export const profileApi = {
+  /** 获取当前登录用户资料 */
+  get: () =>
+    request({ url: '/mp/me', method: 'GET' }),
+  /** 更新资料（昵称/头像/邮箱/手机号） */
+  update: (data) =>
+    request({ url: '/mp/me', method: 'PUT', data }),
 };

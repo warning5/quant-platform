@@ -1,0 +1,47 @@
+.strategy-list-page {
+  padding: 20px 24px;
+}
+
+.strategy-card {
+  margin-bottom: 20px;
+  padding: 24px;
+}
+
+.strategy-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.strategy-name {
+  font-size: 32px;
+  font-weight: 600;
+  color: #222;
+}
+
+.strategy-status {
+  font-size: 22px;
+  padding: 2px 12px;
+  border-radius: 16px;
+  background: #f0f0f0;
+  color: #888;
+}
+
+.st-active { background: #fdecea; color: #c0392b; }
+.st-testing { background: #eaf3ff; color: #2b7de9; }
+.st-draft { background: #f3f3f3; color: #999; }
+.st-deprecated { background: #f0f0f0; color: #bbb; }
+
+.strategy-meta {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 12px;
+  font-size: 24px;
+  color: #999;
+}
+
+.empty-state {
+  padding-top: 120px;
+  text-align: center;
+}
+.empty-text { color: #999; font-size: 28px; }

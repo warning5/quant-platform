@@ -1,0 +1,42 @@
+.strategy-detail-page {
+  padding: 20px 24px 40px;
+}
+
+.section { margin-bottom: 20px; padding: 24px; }
+.section-title { font-size: 28px; font-weight: 600; color: #333; margin-bottom: 16px; }
+
+.sd-top { display: flex; align-items: center; justify-content: space-between; }
+.sd-name { font-size: 34px; font-weight: 600; color: #222; }
+.sd-status { font-size: 22px; color: #c0392b; }
+.sd-meta { display: flex; align-items: center; margin-top: 10px; }
+.sd-code { font-size: 24px; color: #999; margin-right: 16px; }
+.sd-type { font-size: 22px; color: #2b7de9; background: #eaf3ff; padding: 2px 12px; border-radius: 14px; }
+.sd-desc { display: block; margin-top: 14px; font-size: 24px; color: #666; line-height: 1.6; }
+.sd-row { display: flex; justify-content: space-between; margin-top: 12px; font-size: 26px; }
+.sd-label { color: #999; }
+.sd-value { color: #333; }
+
+.bt-task { margin-bottom: 16px; }
+.bt-task-name { font-size: 26px; color: #333; font-weight: 500; }
+.bt-task-meta { display: block; font-size: 22px; color: #999; margin-top: 6px; }
+
+.bt-grid { display: flex; flex-wrap: wrap; }
+.bt-item { width: 50%; padding: 10px 0; }
+.bt-label { display: block; font-size: 22px; color: #999; }
+.bt-value { display: block; font-size: 30px; font-weight: 600; color: #333; margin-top: 4px; }
+.bt-empty { display: block; font-size: 24px; color: #999; padding: 16px 0; }
+
+.batch-card { padding: 16px 0; border-bottom: 1px solid #f0f0f0; }
+.batch-card:last-child { border-bottom: none; }
+.batch-header { margin-bottom: 10px; }
+.batch-date { font-size: 26px; color: #333; font-weight: 500; }
+.batch-stats { display: flex; }
+.stat-item { flex: 1; }
+.stat-label { display: block; font-size: 22px; color: #999; }
+.stat-value { display: block; font-size: 28px; color: #333; margin-top: 4px; }
+
+.empty-state { padding-top: 120px; text-align: center; }
+.empty-text { color: #999; font-size: 28px; }
+.text-red { color: #c0392b; }
+.text-green { color: #16a34a; }
+.text-muted { color: #bbb; }

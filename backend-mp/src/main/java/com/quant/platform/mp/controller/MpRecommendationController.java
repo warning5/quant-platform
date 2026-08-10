@@ -5,6 +5,8 @@ import com.quant.platform.recommendation.domain.StockRecommendation;
 import com.quant.platform.recommendation.mapper.RecommendationMapper;
 import com.quant.platform.strategy.domain.StrategyDefinition;
 import com.quant.platform.strategy.mapper.StrategyDefinitionMapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -142,4 +144,122 @@ public class MpRecommendationController {
         m.put("trackingUpdatedAt", r.getTrackingUpdatedAt() != null ? r.getTrackingUpdatedAt().toString() : null);
         return m;
     }
+
+    /**
+     * 个股推荐详情：评分明细 / 因子归因 / 买卖信号 / 风险 / 表现。
+     * GET /mp/recommendations/stock/{stockCode}/detail?strategyId=&date=
+     *
+     * 定位逻辑：若给定 strategyId + date，取该策略当日推荐中的该股票；
+     * 否则取该股票最新一条推荐记录。
+     * 实时行情由前端并行调用 /mp/monitor/stocks?codes={stockCode} 获取，本接口不内嵌。
+     */
+    @GetMapping("/stock/{stockCode}/detail")
+    public ApiResponse<Map<String, Object>> getStockDetail(
+            @PathVariable String stockCode,
+            @RequestParam(required = false) Long strategyId,
+            @RequestParam(required = false) String date) {
+        StockRecommendation rec = resolveRecommendation(stockCode, strategyId, date);
+        if (rec == null) {
+            return ApiResponse.success(Collections.emptyMap());
+        }
+        return ApiResponse.success(toDetailMap(rec));
+    }
+
+    private StockRecommendation resolveRecommendation(String stockCode, Long strategyId, String date) {
+        if (strategyId != null && date != null) {
+            List<StockRecommendation> list = recommendationMapper.findByStrategyAndDate(
+                    strategyId, LocalDate.parse(date));
+            return list.stream()
+                    .filter(r -> stockCode.equals(r.getStockCode()))
+                    .findFirst().orElse(null);
+        }
+        QueryWrapper<StockRecommendation> qw = new QueryWrapper<>();
+        qw.eq("stock_code", stockCode)
+                .orderByDesc("recommend_date").orderByDesc("id")
+                .last("LIMIT 1");
+        return recommendationMapper.selectOne(qw);
+    }
+
+    /**
+     * 将 StockRecommendation 聚合为详情 Map（按原型 stock_detail 的分区组织）
+     */
+    private Map<String, Object> toDetailMap(StockRecommendation r) {
+        Map<String, Object> detail = new LinkedHashMap<>();
+
+        Map<String, Object> base = new LinkedHashMap<>();
+        base.put("stockCode", r.getStockCode());
+        base.put("stockName", r.getStockName());
+        base.put("recommendDate", r.getRecommendDate() != null ? r.getRecommendDate().toString() : null);
+        base.put("rankNum", r.getRankNum());
+        base.put("regime", r.getRegime());
+        base.put("industry", r.getIndustry());
+        base.put("industryRegime", r.getIndustryRegime());
+        base.put("industryMomentum", r.getIndustryMomentum());
+        base.put("marketCap", r.getMarketCap());
+        base.put("closePrice", r.getClosePrice());
+        base.put("changePercent", r.getChangePercent());
+        detail.put("base", base);
+
+        Map<String, Object> scores = new LinkedHashMap<>();
+        scores.put("finalScore", r.getFinalScore());
+        scores.put("factorScore", r.getFactorScore());
+        scores.put("analysisScore", r.getAnalysisScore());
+        scores.put("factorWeight", r.getFactorWeight());
+        scores.put("analysisWeight", r.getAnalysisWeight());
+        scores.put("technicalScore", r.getTechnicalScore());
+        scores.put("capitalScore", r.getCapitalScore());
+        scores.put("fundamentalScore", r.getFundamentalScore());
+        scores.put("eventScore", r.getEventScore());
+        scores.put("riskScore", r.getRiskScore());
+        scores.put("liquidityScore", r.getLiquidityScore());
+        detail.put("scores", scores);
+
+        Map<String, Object> factor = new LinkedHashMap<>();
+        factor.put("factorRanks", parseFactorRanks(r.getFactorRanksJson()));
+        factor.put("industryMomentum", r.getIndustryMomentum());
+        factor.put("industryRegime", r.getIndustryRegime());
+        detail.put("factorAttribution", factor);
+
+        Map<String, Object> signal = new LinkedHashMap<>();
+        signal.put("actionTag", r.getActionTag());
+        signal.put("buyReason", r.getBuyReason());
+        signal.put("suggestedBuyPrice", r.getSuggestedBuyPrice());
+        signal.put("suggestedStopLoss", r.getSuggestedStopLoss());
+        signal.put("suggestedTakeProfit", r.getSuggestedTakeProfit());
+        signal.put("suggestedTargetPrice", r.getSuggestedTargetPrice());
+        signal.put("suggestedPositionPct", r.getSuggestedPositionPct());
+        detail.put("signal", signal);
+
+        Map<String, Object> perf = new LinkedHashMap<>();
+        perf.put("nextDayReturn", r.getNextDayReturn());
+        perf.put("nextDayExcessReturn", r.getNextDayExcessReturn());
+        perf.put("nextWeekReturn", r.getNextWeekReturn());
+        perf.put("nextWeekExcessReturn", r.getNextWeekExcessReturn());
+        perf.put("nextMonthReturn", r.getNextMonthReturn());
+        perf.put("nextMonthExcessReturn", r.getNextMonthExcessReturn());
+        perf.put("trackingUpdatedAt", r.getTrackingUpdatedAt() != null ? r.getTrackingUpdatedAt().toString() : null);
+        detail.put("performance", perf);
+
+        Map<String, Object> env = new LinkedHashMap<>();
+        env.put("regime", r.getRegime());
+        env.put("indexMa20", r.getIndexMa20());
+        env.put("indexMa60", r.getIndexMa60());
+        env.put("indexClose", r.getIndexClose());
+        detail.put("marketEnv", env);
+
+        detail.put("weightMode", r.getWeightMode());
+        detail.put("realtimeNote", "实时行情请并行调用 /mp/monitor/stocks?codes=" + r.getStockCode());
+        return detail;
+    }
+
+    private static Object parseFactorRanks(String json) {
+        if (json == null || json.isEmpty()) return Collections.emptyList();
+        try {
+            return OBJECT_MAPPER.readValue(json, Object.class);
+        } catch (Exception e) {
+            return json;
+        }
+    }
+
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 }

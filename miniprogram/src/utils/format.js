@@ -19,6 +19,18 @@ export function formatPercent(val, withSign = true) {
 }
 
 /**
+ * 比率 -> 百分比格式化（适用于后端以小数存储的收益率/回撤/胜率等）
+ * @param {number} val - 比率值 (如 0.0235 表示 +2.35%)
+ * @param {boolean} withSign - 是否带正负号
+ */
+export function formatRatio(val, withSign = true) {
+  if (val == null || isNaN(val)) return '--';
+  const num = Number(val) * 100;
+  const sign = withSign && num > 0 ? '+' : '';
+  return sign + num.toFixed(2) + '%';
+}
+
+/**
  * 日期格式化 YYYY-MM-DD
  */
 export function formatDate(dateStr) {
@@ -74,20 +86,22 @@ export function priceColor(val) {
  * Action 标签中文
  */
 export function actionTagText(tag) {
-  const map = { BUY: '买入', HOLD: '持有', SELL: '卖出' };
+  const map = { BUY: '买入', BUY_ADD: '增持', ADD: '增持', HOLD: '持有', SELL: '卖出' };
   return map[tag] || tag || '--';
 }
 
 /**
- * Action 标签样式
+ * Action 标签样式 —— 返回 BEM 修饰符（配合 .rtag.{mod} 使用）
  */
 export function actionTagClass(tag) {
   const map = {
-    BUY: 'tag-buy',
-    HOLD: 'tag-hold',
-    SELL: 'tag-sell'
+    BUY: 'buy',
+    ADD: 'add',
+    BUY_ADD: 'add',
+    HOLD: 'hold',
+    SELL: 'sell'
   };
-  return map[tag] || 'tag-hold';
+  return map[tag] || 'hold';
 }
 
 /**

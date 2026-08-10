@@ -1,0 +1,36 @@
+.mine-page { padding: 20px 24px 40px; }
+
+.section { margin-bottom: 20px; padding: 24px; }
+.section-title { font-size: 28px; font-weight: 600; color: #333; margin-bottom: 16px; }
+
+.avatar {
+  width: 96px; height: 96px; border-radius: 48px;
+  background: #c0392b; color: #fff; font-size: 40px;
+  display: flex; align-items: center; justify-content: center;
+  margin: 0 auto 16px;
+}
+.profile-name { font-size: 34px; font-weight: 600; color: #222; text-align: center; }
+.profile-sub { display: block; text-align: center; font-size: 24px; color: #999; margin-top: 8px; }
+
+.edit-row { display: flex; align-items: center; margin-top: 24px; padding: 16px 0; border-top: 1px solid #f0f0f0; }
+.edit-label { font-size: 26px; color: #999; width: 120px; }
+.edit-input { flex: 1; font-size: 28px; color: #333; text-align: right; }
+
+.profile-row { display: flex; justify-content: space-between; padding: 14px 0; font-size: 26px; }
+.profile-label { color: #999; }
+.profile-value { color: #333; }
+
+.save-btn {
+  margin-top: 24px; background: #c0392b; border-radius: 12px; padding: 20px; text-align: center;
+}
+.save-text { color: #fff; font-size: 30px; font-weight: 600; }
+
+.disclaimer-text { display: block; font-size: 24px; color: #888; line-height: 1.7; }
+
+.logout-btn {
+  background: #fff; border-radius: 12px; padding: 24px; text-align: center; border: 1px solid #f0f0f0;
+}
+.logout-text { color: #c0392b; font-size: 30px; font-weight: 500; }
+
+.empty-state { padding-top: 120px; text-align: center; }
+.empty-text { color: #999; font-size: 28px; }

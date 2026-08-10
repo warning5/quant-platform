@@ -1,122 +1,163 @@
-.stock-card {
+/* ===== 股票推荐卡片 —— 对齐设计稿截图布局 ===== */
+
+.rec-item {
   display: flex;
   align-items: center;
-  padding: 24rpx;
-  background: #fff;
-  border-radius: 16rpx;
-  margin-bottom: 12rpx;
+  justify-content: space-between;
+  padding: 20rpx 8rpx;
 }
 
-.card-left {
-  margin-right: 20rpx;
+.rec-item + .rec-item {
+  border-top: 1rpx solid #EDEFF3;
 }
 
-.rank-badge {
-  width: 48rpx;
-  height: 48rpx;
+/* ========== 排名圆形徽章 ========== */
+.rnum-badge {
+  width: 52rpx;
+  height: 52rpx;
   border-radius: 50%;
-  background: #f0f0f0;
-  color: #999;
+  background: #F0F2F5;
   display: flex;
   align-items: center;
   justify-content: center;
+  flex: 0 0 52rpx;
+  margin-right: 16rpx;
+}
+
+.rnum-badge.top {
+  background: #FAD7DD; /* 前三名粉红底 */
+}
+
+.rnum-txt {
   font-size: 24rpx;
-  font-weight: 500;
+  color: #9AA1AC;
+  font-weight: 700;
 }
 
-.rank-badge.rank-top {
-  background: #fcebeb;
-  color: #c0392b;
+.rnum-txt.top {
+  color: #E53935; /* 前三名红色字 */
 }
 
-.card-center {
+/* ========== 中间区域 ========== */
+.rcenter {
   flex: 1;
   min-width: 0;
+  margin-right: 12rpx;
 }
 
-.stock-name {
+/* 股票名称：粗体 */
+.rnm {
   font-size: 30rpx;
-  font-weight: 500;
-  color: #333;
-  margin-bottom: 4rpx;
+  font-weight: 600;
+  color: #161B22;
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: 1.3;
 }
 
-.stock-code {
+/* 代码 · 驱动类型（灰色小字） */
+.rcode {
   font-size: 22rpx;
-  color: #999;
+  color: #9AA1AC;
+  display: block;
+  margin-top: 4rpx;
+  line-height: 1.3;
 }
 
-.card-right {
+/* ========== 右侧区域（两行） ========== */
+.rright {
+  flex: 0 0 auto;
   text-align: right;
-  margin-right: 16rpx;
-  min-width: 140rpx;
-}
-
-.price-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: flex-end;
-  margin-bottom: 4rpx;
-}
-
-.price-tag {
-  font-size: 18rpx;
-  color: #bbb;
-  margin-right: 6rpx;
-}
-
-.price {
-  font-size: 32rpx;
-  font-weight: 500;
-  color: #333;
-}
-
-.change {
-  font-size: 24rpx;
-  color: #999;
-}
-
-.card-right .text-red {
-  color: #c0392b;
-}
-
-.card-right .text-green {
-  color: #27ae60;
-}
-
-.card-tag {
   display: flex;
   flex-direction: column;
+  align-items: flex-end;
+  gap: 6rpx;
+  min-width: 200rpx;
+}
+
+/* 上行：现价 + 操作标签 */
+.rrow-top {
+  display: flex;
   align-items: center;
-  gap: 8rpx;
+  gap: 12rpx;
+  justify-content: flex-end;
 }
 
-.tag {
+/* 现价块：标签+数字 */
+.rprice-block {
+  display: flex;
+  align-items: baseline;
+  gap: 4rpx;
+}
+
+.rprice-lbl {
   font-size: 20rpx;
-  padding: 4rpx 12rpx;
-  border-radius: 8rpx;
+  color: #9AA1AC;
 }
 
-.tag-buy {
-  background: #fcebeb;
-  color: #c0392b;
+.rprice-val {
+  font-size: 32rpx;
+  font-weight: 700;
+  line-height: 1.2;
 }
 
-.tag-hold {
-  background: #fff3e0;
-  color: #e67e22;
+/* 下行：涨跌幅 + 评分 */
+.rrow-btm {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  justify-content: flex-end;
 }
 
-.tag-sell {
-  background: #e8f5e9;
-  color: #27ae60;
-}
-
-.score {
+/* 涨跌幅：红涨绿跌，颜色由内联 style 指定 */
+.rpct {
   font-size: 24rpx;
-  font-weight: 500;
-  color: #666;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+/* 评分：深色数字，右下角（比正文略淡但清晰可见） */
+.rscore-num {
+  font-size: 26rpx;
+  color: #5A6270;
+  font-weight: 600;
+  line-height: 1.2;
+  min-width: 40rpx;
+  text-align: right;
+}
+
+/* ========== 操作标签 pill ========== */
+.rtag {
+  font-size: 20rpx;
+  font-weight: 700;
+  padding: 4rpx 14rpx;
+  border-radius: 6px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+/* 买入 = 绿底绿字（中国股市买入=绿=安全） */
+.rtag.buy {
+  background: #FCE8E8;
+  color: #E53935;
+}
+
+/* 增持/加仓 = 蓝底蓝字 */
+.rtag.add {
+  background: #E6F2FF;
+  color: #3B9EFF;
+}
+
+/* 持有 = 灰底灰字 */
+.rtag.hold {
+  background: #FFF8E1;
+  color: #B8860B;
+}
+
+/* 卖出 = 红底红字 */
+.rtag.sell {
+  background: #E8F8EE;
+  color: #0FBE7C;
 }

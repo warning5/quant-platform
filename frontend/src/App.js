@@ -128,7 +128,9 @@ function AppLayout({ isDark, setIsDark }) {
   // 侧边栏菜单完全由后端 menus 渲染（已按当前用户角色权限过滤）
   const systemMenuItems = buildSystemMenuItems(menus);
   // 兜底：若后端未返回菜单（如角色尚未分配），至少保留「总览」可访问
-  const fallbackItems = [{ key: '/', icon: <DashboardOutlined />, label: <Link to="/">总览</Link> }];
+  const fallbackItems = [
+    { key: '/', icon: <DashboardOutlined />, label: <Link to="/">总览</Link> },
+  ];
   const fullMenuItems = menus && menus.length ? systemMenuItems : fallbackItems;
 
   const selectedKeys = [location.pathname];

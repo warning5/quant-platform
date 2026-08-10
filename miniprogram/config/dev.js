@@ -3,6 +3,6 @@ module.exports = {
     NODE_ENV: '"development"'
   },
   defineConstants: {
-    BASE_URL: '"http://localhost:8082/api"'
+    BASE_URL: '"http://127.0.0.1:8082/api"'
   }
 };

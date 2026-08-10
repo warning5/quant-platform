@@ -22,7 +22,7 @@ public class MpAuthFilter implements Filter {
         HttpServletResponse httpResp = (HttpServletResponse) response;
 
         String uri = httpReq.getRequestURI();
-        if (uri.endsWith("/mp/health") || uri.endsWith("/mp/login")) {
+        if (uri.endsWith("/mp/health") || uri.endsWith("/mp/login") || uri.contains("/mp/dev/")) {
             chain.doFilter(request, response);
             return;
         }
@@ -43,6 +43,8 @@ public class MpAuthFilter implements Filter {
         }
 
         if (valid) {
+            // 将 token 绑定到当前 Sa-Token 上下文，后续控制器可用 StpUtil.getLoginId() 取用户
+            StpUtil.setTokenValue(token);
             chain.doFilter(request, response);
         } else {
             httpResp.setStatus(401);
