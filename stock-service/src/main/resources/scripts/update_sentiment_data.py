@@ -1477,8 +1477,27 @@ def _fetch_batch_moneyflow(stocks: list, date_label: str):
 
 
 def run_westock_moneyflow(args):
-    """通过 westock-data 补全资金流向，支持双写 CH + MySQL（批量优化版）"""
-    # westock-data 无需 token
+    """补全 A 股资金流向，支持双写 CH + MySQL（批量优化版）
+
+    取数策略（见 westock_moneyflow.query_westock）：
+    - 优先 westock-data CLI（零鉴权，直连腾讯自选股），本机有 Node.js >= v18 即可跑；
+    - CLI 不可用或区间过大时降级 westock-mcp data_fund_flow（需 token）。
+    纯 westock 源，不走东财。
+    """
+    from westock_moneyflow import _load_token, WestockMcpError, westock_cli_supported
+    CLI_MODE = westock_cli_supported()
+    # CLI 可用时（本机有 node + westock-data 包）跳过 MCP token 硬拦截，零鉴权直接跑；
+    # CLI 不可用时仍需 MCP token（连 westock-mcp 连接器 / 方式B OAuth）。
+    if not CLI_MODE:
+        try:
+            _load_token()
+        except WestockMcpError as e:
+            print("  [ERROR] westock 鉴权失败，无法获取资金流向：")
+            print("  " + str(e).replace("\n", "\n  "))
+            print("  [ERROR] 已停止。可二选一：(1) 安装 Node.js >= v18 后用 westock-data CLI 零鉴权；"
+                  "或 (2) 在 WorkBuddy 连接 westock-mcp 连接器后重试。")
+            sys.exit(1)
+
     # 确定日期范围
     start_str = args.start_date or "2026-05-07"
     end_str = args.end_date or _latest_trading_day().isoformat()
@@ -1601,7 +1620,9 @@ def run_westock_moneyflow(args):
     # CH 客户端用于回填 close/pct_change
     ch_client = clickhouse_connect.get_client(**CLICKHOUSE_CONFIG)
 
-    BATCH_SIZE = 10  # 每批 10 只（westock 单次最多 10 只）
+    # CLI 模式单次 asfund 支持批量多股，放大批次以减少 CLI 进程冷启动次数；
+    # MCP 模式仍按 westock 单次上限 10 只分批。
+    BATCH_SIZE = 30 if CLI_MODE else 10
     PARALLEL = 2     # 降并发：westock 底层 API 并发限流，5 路同时请求会返回空结果
     batches = [target[i:i + BATCH_SIZE] for i in range(0, len(target), BATCH_SIZE)]
     total_batches = len(batches)
@@ -1790,12 +1811,24 @@ def _fetch_stock_moneyflow(args, ts_code: str, code: str, name: str, months: lis
                 md_text = query_westock([wcode], start_str, end_str)
                 if not md_text:
                     continue
-                rows = extract_westock_moneyflow(md_text)
-                for row in rows:
-                    td = row[1]
-                    if td not in seen_dates:
-                        seen_dates.add(td)
-                        all_rows.append(row)
+                data = extract_westock_moneyflow(md_text)  # dict 透传
+                for ws_ts, date_dict in data.items():
+                    for trade_date_str, vals in date_dict.items():
+                        try:
+                            td = datetime.datetime.strptime(trade_date_str, "%Y%m%d").date()
+                        except Exception:
+                            continue
+                        row = [
+                            ts_code, td, code,
+                            vals.get("close"), 0.0,
+                            vals.get("net_main", 0.0), vals.get("net_main_pct", 0.0),
+                            vals.get("net_huge", 0.0), vals.get("net_big", 0.0),
+                            vals.get("net_medium", 0.0), vals.get("net_small", 0.0),
+                            datetime.datetime.now(),
+                        ]
+                        if td not in seen_dates:
+                            seen_dates.add(td)
+                            all_rows.append(row)
             except Exception as e:
                 print(f"  [WARN] {code} [{start_str}->{end_str}] 抓取失败: {e}")
         all_rows.sort(key=lambda r: r[1])
@@ -1812,7 +1845,7 @@ def run_westock_refresh(args):
       python update_sentiment_data.py --moneyflow-refresh --refresh-codes 600519,000001  # westock-data 指定股票
       python update_sentiment_data.py --moneyflow-refresh --refresh-start 2026-01-01   # westock-data 指定起始月
     """
-    # westock-data 无需 token
+    # 纯 westock 路径：需先在 WorkBuddy 连接 westock-mcp 连接器（腾讯授权）后 token 才落盘
     # ── 确定日期范围 ─────────────────────────────────────────────
     start_str = args.refresh_start  # e.g. "2025-11-01"
     end_str = _latest_trading_day().isoformat()
