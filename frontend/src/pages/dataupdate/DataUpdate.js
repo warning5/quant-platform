@@ -3082,16 +3082,12 @@ function DataUpdate() {
               { title: '日期', dataIndex: 'date', width: 120, fixed: 'left' },
               { title: '沪市(SH)', dataIndex: 'SH', width: 100, align: 'right',
                 render: (v) => v > 0 ? <span style={{ color: '#ff4d4f' }}>{v}</span> : <span style={{ color: '#52c41a' }}>{v}</span> },
-              },
               { title: '深市(SZ)', dataIndex: 'SZ', width: 100, align: 'right',
                 render: (v) => v > 0 ? <span style={{ color: '#ff4d4f' }}>{v}</span> : <span style={{ color: '#52c41a' }}>{v}</span> },
-              },
               { title: '北交所(BJ)', dataIndex: 'BJ', width: 110, align: 'right',
                 render: (v) => v > 0 ? <span style={{ color: '#ff4d4f' }}>{v}</span> : <span style={{ color: '#52c41a' }}>{v}</span> },
-              },
               { title: '合计', dataIndex: 'total', width: 90, align: 'right',
-                render: (v) => v > 0 ? <strong style={{ color: '#ff4d4f' }}>{v}</strong> : <span style={{ color: '#52c41a' }}>{v}</span>,
-              },
+                render: (v) => v > 0 ? <strong style={{ color: '#ff4d4f' }}>{v}</strong> : <span style={{ color: '#52c41a' }}>{v}</span> },
             ]}
             summary={() => {
               const data = missingRangeResult.dailyBreakdown || [];

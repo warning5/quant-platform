@@ -11,6 +11,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 
 /**
@@ -291,11 +292,13 @@ public class DataCoverageService {
                 row.put("date", td.toString());
                 // 各市场当日缺失数
                 if (clickHouseConfig.isEnabled()) {
+                    // CH 的 stock_info 无 delist_date 列，不加该条件（退市股不同步到 CH）
+                    // 注意：CH 的 LEFT JOIN 对 String 列不匹配行返回空串 '' 而非 NULL，须用 = '' 判断
                     String sql = "SELECT si.market, COUNT(*) AS missing " +
                             "FROM stock.stock_info si FINAL " +
                             "LEFT JOIN stock.stock_daily sd ON sd.code = si.code AND sd.trade_date = ? " +
-                            "WHERE si.list_date <= ? AND si.delist_date IS NULL AND si.market IN ('SH','SZ','BJ') " +
-                            "AND sd.code IS NULL GROUP BY si.market";
+                            "WHERE si.list_date <= ? AND si.market IN ('SH','SZ','BJ') " +
+                            "AND sd.code = '' GROUP BY si.market";
                     Map<String, Integer> dayMissing = new HashMap<>();
                     for (Map<String, Object> r : clickHouseStockService.queryForList(sql, td.toString(), endDate.toString())) {
                         String mk = r.get("market") != null ? r.get("market").toString() : null;
@@ -391,6 +394,77 @@ public class DataCoverageService {
         Integer recentCount = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM stock_research_report WHERE report_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)", Integer.class);
         result.put("recentReports", recentCount != null ? recentCount : 0);
+
+        result.put("warnings", warnings);
+        result.put("status", warnings.isEmpty() ? "OK" : "WARNING");
+        return result;
+    }
+
+    /**
+     * 研报数据按日期区间校验：统计区间内每天的研报数量。
+     *
+     * @param startDate 区间开始日期 (yyyy-MM-dd)
+     * @param endDate   区间结束日期 (yyyy-MM-dd)
+     * @return 每天研报数量列表 + 汇总（总研报数、有数据天数、零研报天数、空字段警告）
+     */
+    public Map<String, Object> validateResearchRange(String startDate, String endDate) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("startDate", startDate);
+        result.put("endDate", endDate);
+
+        // 区间日历天数
+        long calendarDays = 0;
+        try {
+            LocalDate sd = LocalDate.parse(startDate);
+            LocalDate ed = LocalDate.parse(endDate);
+            calendarDays = ChronoUnit.DAYS.between(sd, ed) + 1;
+        } catch (Exception e) {
+            log.warn("[研报校验] 日期解析失败 start={} end={}", startDate, endDate);
+        }
+        result.put("calendarDays", calendarDays);
+
+        // 区间内每天研报数量（仅返回有数据的日期）
+        List<Map<String, Object>> dailyCounts = jdbcTemplate.query(
+                "SELECT DATE_FORMAT(report_date, '%Y-%m-%d') AS reportDate, COUNT(*) AS cnt "
+                        + "FROM stock_research_report "
+                        + "WHERE report_date >= ? AND report_date <= ? "
+                        + "GROUP BY report_date ORDER BY report_date",
+                (rs, i) -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("reportDate", rs.getString("reportDate"));
+                    m.put("count", rs.getInt("cnt"));
+                    return m;
+                },
+                startDate, endDate);
+        result.put("dailyCounts", dailyCounts);
+
+        int totalReports = dailyCounts.stream()
+                .mapToInt(m -> ((Number) m.get("count")).intValue())
+                .sum();
+        result.put("totalReports", totalReports);
+        result.put("daysWithData", dailyCounts.size());
+        int zeroDays = (int) Math.max(0, calendarDays - dailyCounts.size());
+        result.put("zeroDays", zeroDays);
+
+        // 空字段警告（限定区间内）
+        List<String> warnings = new ArrayList<>();
+        Integer nullRating = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM stock_research_report "
+                        + "WHERE report_date >= ? AND report_date <= ? AND (rating IS NULL OR rating = '')",
+                Integer.class, startDate, endDate);
+        if (nullRating != null && nullRating > 0) {
+            warnings.add("rating 为空: " + nullRating + " 条");
+        }
+        Integer nullTitle = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM stock_research_report "
+                        + "WHERE report_date >= ? AND report_date <= ? AND (report_title IS NULL OR report_title = '')",
+                Integer.class, startDate, endDate);
+        if (nullTitle != null && nullTitle > 0) {
+            warnings.add("report_title 为空: " + nullTitle + " 条");
+        }
+        if (zeroDays > 0) {
+            warnings.add("区间内 " + zeroDays + " 天无研报数据");
+        }
 
         result.put("warnings", warnings);
         result.put("status", warnings.isEmpty() ? "OK" : "WARNING");

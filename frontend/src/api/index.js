@@ -82,6 +82,10 @@ api.interceptors.response.use(
       clearAuth();
       const { useAuthStore } = await import('../stores/authStore');
       useAuthStore.setState({ token: '', userId: null, user: null, roles: [], permissions: [], menus: [] });
+      // 调用方自行处理 401 跳转/提示的场景（如 ProfilePage 传 _noAuthRedirect），不再重复跳转
+      if (err.config?._noAuthRedirect) {
+        return Promise.reject(err);
+      }
       if (window.location.pathname !== '/login') {
         // 保存当前路径，登录成功后回跳（兼容整页跳转无法携带 react-router state）
         try { sessionStorage.setItem('redirect_after_login', window.location.pathname + window.location.search); } catch (_) {}
@@ -348,6 +352,7 @@ export const dataUpdateApi = {
   getMissingDividendStocks: (market = 'ALL', page = 1, pageSize = 50) => api.get('/data-update/missing-dividend-stocks', { params: { market, page, pageSize } }),
   getMissingStocks: (date, market = 'ALL') => api.get('/data-update/missing-stocks', { params: { date, market } }),
   getMissingStats: (date) => api.get('/data-update/missing-stats', { params: { date } }),
+  getMissingStocksRange: (startDate, endDate, market = 'ALL') => api.get('/data-update/missing-stocks-range', { params: { startDate, endDate, market } }),
   getTradingDates: (limit = 30) => api.get('/data-update/trading-dates', { params: { limit } }),
   getDefaultDates: () => api.get('/data-update/default-dates'),
   getRecentTasks: () => api.get('/data-update/recent-tasks'),

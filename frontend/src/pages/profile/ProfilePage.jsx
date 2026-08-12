@@ -17,8 +17,9 @@ export default function ProfilePage() {
   const loadProfile = async () => {
     setLoading(true);
     try {
-      const res = await authApi.profile();
-      const data = res?.data?.data || res?.data;
+      const res = await authApi.profile({ _noAuthRedirect: true });
+      // 拦截器已统一返回 res.data.data（即 ProfileVO 本身），此处直接用 res
+      const data = res ?? {};
       profileForm.setFieldsValue({
         nickname: data.nickname || '',
         email: data.email || '',
@@ -27,6 +28,21 @@ export default function ProfilePage() {
       });
       setAvatar(data.avatar);
     } catch (e) {
+      const status = e?.response?.status;
+      if (status === 401) {
+        // 登录态已失效：此处直接提示并跳登录页。全局拦截器已清登录态；
+        // 静默刷新重试失败的最终 401 也统一在此处理，避免误导性的「加载个人资料失败」
+        msg.error('登录已过期，请重新登录');
+        if (window.location.pathname !== '/login') {
+          try {
+            sessionStorage.setItem('redirect_after_login', window.location.pathname + window.location.search);
+          } catch (_) {
+            /* ignore */
+          }
+          window.location.href = '/login';
+        }
+        return;
+      }
       msg.error('加载个人资料失败');
     } finally {
       setLoading(false);

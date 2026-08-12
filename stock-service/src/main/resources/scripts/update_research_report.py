@@ -92,15 +92,81 @@ def parse_float(val):
         return None
 
 
-def fetch_stock_reports(code):
+# ── 东财接口限流自愈 ──────────────────────────────────────────────
+# stock_research_report_em 底层请求东方财富 datacenter API，高频访问会被临时风控，
+# 返回空 body，导致 akshare 内部 json.loads 抛
+#   "Expecting value: line 1 column 1 (char 0)"
+# 这里用「连续异常计数 + 阈值暂停」实现熔断：一旦疑似被限流，整批暂停一段时间自愈。
+import threading
+
+_throttle_lock = threading.Lock()
+_throttle_strikes = [0]
+_abort = [False]            # 连续限流型失败达阈值 → 判定 IP 被封，终止整轮
+
+THROTTLE_LIMIT = 5          # 连续限流型失败达到此数 → 判定 IP 被东财反爬风控
+_THROTTLE_HINTS = (
+    "expecting value", "json", "remotedisconnected", "connection",
+    "timeout", "403", "429", "567", "empty", "reset by peer",
+)
+
+
+def _is_throttle_err(err):
+    """判断是否为限流/风控型错误（空响应或连接异常）"""
+    e = str(err).lower()
+    return any(h in e for h in _THROTTLE_HINTS)
+
+
+def _register_throttle():
+    """
+    累计限流型失败；达到阈值则判定 IP 被东财反爬风控（HTTP 567 返回挑战页），
+    置 _abort 让整轮优雅终止，避免持续请求延长封禁。
+    返回 True 表示应终止整轮。
+    """
+    with _throttle_lock:
+        _throttle_strikes[0] += 1
+        n = _throttle_strikes[0]
+        if n == THROTTLE_LIMIT:
+            _abort[0] = True
+    if n >= THROTTLE_LIMIT:
+        print(f"\n  [熔断] 连续 {n} 次接口异常（东财反爬风控/空响应），"
+              f"判定本地出口 IP 已被封禁，终止本轮采集。\n"
+              f"  解决路径：\n"
+              f"    ① 换出口 IP（如手机热点）后重跑；\n"
+              f"    ② 等待东财解封（建议 ≥30min）后重跑；\n"
+              f"    ③ 低速率重跑：python update_research_report.py "
+              f"... --max-workers 1 --slow\n")
+    return _abort[0]
+
+
+def _note_success():
+    """成功一次即清零连续异常计数。"""
+    with _throttle_lock:
+        if _throttle_strikes[0] > 0:
+            _throttle_strikes[0] = 0
+
+
+def fetch_stock_reports(code, retries=3, retry_base=2.0):
     """
     调用 akshare 获取单只股票研报列表。
     返回 list of dict（已解析字段）。
+
+    东财接口偶发限流会返回空响应，导致 akshare 内部 json.loads 抛
+    "Expecting value: line 1 column 1 (char 0)"。这里对 akshare 调用做
+    指数退避重试（默认 3 次，间隔 2/4/6s），吸收单次瞬时空响应。
     """
-    try:
-        df = ak.stock_research_report_em(symbol=code)
-    except Exception as e:
-        return [], str(e)
+    df = None
+    last_err = None
+    for attempt in range(1, retries + 1):
+        try:
+            df = ak.stock_research_report_em(symbol=code)
+            last_err = None
+            break
+        except Exception as e:
+            last_err = str(e)
+            if attempt < retries:
+                time.sleep(retry_base * attempt)
+    if last_err:
+        return [], last_err
 
     if df is None or df.empty:
         return [], None
@@ -280,9 +346,9 @@ def get_stocks_with_null_eps(mysql_conn):
     return rows
 
 
-def run_update(mysql_conn, stocks, batch_size=20, sleep_sec=1.0,
+def run_update(mysql_conn, stocks, batch_size=20, sleep_sec=0.5,
               start_date=None, end_date=None, force_all=False,
-              max_workers=10, skip_recent_days=7):
+              max_workers=4, skip_recent_days=7):
     """
     主更新循环（多线程版）
     - max_workers: 并发线程数（默认10，避免被封）
@@ -336,9 +402,15 @@ def run_update(mysql_conn, stocks, batch_size=20, sleep_sec=1.0,
     def worker(item):
         code, name = item
         try:
+            if _abort[0]:
+                return (code, name, 0, "已终止(风控)")
+            time.sleep(sleep_sec)  # 基础请求间隔，降低东财限流概率
             results, err = fetch_stock_reports(code)
             if err:
+                if _is_throttle_err(err):
+                    _register_throttle()
                 return (code, name, 0, err[:60])
+            _note_success()
             if not results:
                 return (code, name, 0, "无研报")
 
@@ -371,6 +443,12 @@ def run_update(mysql_conn, stocks, batch_size=20, sleep_sec=1.0,
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(worker, item): item for item in stocks}
         for future in as_completed(futures):
+            # IP 被封 → 取消剩余任务，避免持续请求延长封禁
+            if _abort[0]:
+                for f in futures:
+                    f.cancel()
+                executor.shutdown(wait=False, cancel_futures=True)
+                break
             code, name, n, err = future.result()
             completed += 1
 
@@ -404,7 +482,9 @@ def main():
     parser.add_argument("--all", "-a", action="store_true", help="强制重刷全部股票（删除旧数据后重写）")
     parser.add_argument("--start-date", default=None, help="开始日期 YYYY-MM-DD（仅用于过滤研报日期）")
     parser.add_argument("--end-date", default=None, help="结束日期 YYYY-MM-DD")
-    parser.add_argument("--max-workers", type=int, default=10, help="并发线程数（默认10）")
+    parser.add_argument("--max-workers", type=int, default=4, help="并发线程数（默认4，东财接口限流敏感）")
+    parser.add_argument("--slow", action="store_true",
+                        help="低速模式：并发1 + 请求间隔2s，规避东财反爬风控")
     parser.add_argument("--skip-recent-days", type=int, default=7, help="跳过最近N天已更新的股票（默认7天，0=不跳过）")
     parser.add_argument("--fix-null-eps", action="store_true", help="仅补采 eps_forecast 为空的股票（修复老数据）")
     args = parser.parse_args()
@@ -449,11 +529,15 @@ def main():
             return
 
     try:
+        # 低速模式：并发 1 + 间隔 2s，规避东财反爬风控
+        slow_workers = 1 if args.slow else args.max_workers
+        slow_sleep = 2.0 if args.slow else 0.5
         run_update(
             mysql_conn, stocks,
             start_date=args.start_date, end_date=args.end_date,
             force_all=force_all,
-            max_workers=args.max_workers,
+            max_workers=slow_workers,
+            sleep_sec=slow_sleep,
             skip_recent_days=skip_days,
         )
     except KeyboardInterrupt:

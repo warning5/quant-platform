@@ -168,6 +168,18 @@ public class DataUpdateController {
         return ApiResponse.success(dataCoverageService.getMissingStocks(date, market));
     }
 
+    @GetMapping("/missing-stocks-range")
+    @Operation(summary = "股票日线完整性校验(日期跨度) — 按市场分组列出区间内未完整更新的股票")
+    public ApiResponse<Map<String, Object>> getMissingStocksRange(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @RequestParam(defaultValue = "ALL") String market) {
+        if (startDate.isAfter(endDate)) {
+            return ApiResponse.error("startDate 不能晚于 endDate");
+        }
+        return ApiResponse.success(dataCoverageService.getMissingStocksRange(startDate, endDate, market));
+    }
+
     @GetMapping("/missing-stats")
     @Operation(summary = "各市场数据缺失统计")
     public ApiResponse<Map<String, Object>> getMissingStats(

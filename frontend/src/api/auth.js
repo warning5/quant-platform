@@ -13,8 +13,8 @@ export const authApi = {
   miniLogin: (code) => api.post('/auth/wechat/mini/login', { code }),
   // 当前登录用户信息（刷新）
   me: () => api.get('/auth/me'),
-  // 获取个人资料（不含密码）
-  profile: () => api.get('/auth/profile'),
+  // 获取个人资料（不含密码）；可传 { _noAuthRedirect: true } 由调用方自行处理 401 跳转
+  profile: (config) => api.get('/auth/profile', config),
   // 更新个人资料（昵称/邮箱/手机/头像）
   updateProfile: (data) => api.put('/auth/profile', data),
   // 自助修改密码
