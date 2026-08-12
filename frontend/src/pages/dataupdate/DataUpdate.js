@@ -3068,34 +3068,49 @@ function DataUpdate() {
             </Col>
             <Col span={12}>
               <Text type="secondary" style={{ fontSize: 12 }}>
-                区间 {missingRangeResult.startDate} ~ {missingRangeResult.endDate}，列出各市场在区间内覆盖天数不足的个股
+                区间 {missingRangeResult.startDate} ~ {missingRangeResult.endDate}，各交易日按市场统计缺失股票数
               </Text>
             </Col>
           </Row>
 
-          <Collapse accordion defaultActiveKey={['SH']} size="small">
-            {Object.entries(missingRangeResult.markets || {}).map(([mkt, info]) => (
-              <Collapse.Panel
-                key={mkt}
-                header={`${marketMap[mkt] || mkt}（${info.missingCount || 0} 只缺失 / 共 ${info.totalStocks || 0} 只）`}>
-                {info.missingStocks && info.missingStocks.length > 0 ? (
-                  <Table dataSource={info.missingStocks.map((r, i) => ({ ...r, key: r.code + '_' + i }))}
-                    size="small" pagination={{ pageSize: 50, showSizeChanger: true, pageSizeOptions: ['20', '50', '100', '200'], showTotal: (t) => `共 ${t} 条` }}
-                    scroll={{ y: 320 }} columns={[
-                      { title: '代码', dataIndex: 'code', width: 100 },
-                      { title: '名称', dataIndex: 'name', width: 140 },
-                      { title: '上市日', dataIndex: 'listDate', width: 110 },
-                      { title: '应更新', dataIndex: 'expectedDays', width: 80, align: 'right' },
-                      { title: '已覆盖', dataIndex: 'coveredDays', width: 80, align: 'right' },
-                      { title: '缺失', dataIndex: 'missingDays', width: 80, align: 'right',
-                        render: (v) => <span style={{ color: '#ff4d4f' }}>{v}</span> },
-                    ]} />
-                ) : (
-                  <Alert message="该市场区间内数据完整" type="success" showIcon />
-                )}
-              </Collapse.Panel>
-            ))}
-          </Collapse>
+          <Table
+            dataSource={(missingRangeResult.dailyBreakdown || []).map((r, i) => ({ ...r, key: r.date || i }))}
+            size="small"
+            pagination={false}
+            scroll={{ x: 560, y: 360 }}
+            columns={[
+              { title: '日期', dataIndex: 'date', width: 120, fixed: 'left' },
+              { title: '沪市(SH)', dataIndex: 'SH', width: 100, align: 'right',
+                render: (v) => v > 0 ? <span style={{ color: '#ff4d4f' }}>{v}</span> : <span style={{ color: '#52c41a' }}>{v}</span> },
+              },
+              { title: '深市(SZ)', dataIndex: 'SZ', width: 100, align: 'right',
+                render: (v) => v > 0 ? <span style={{ color: '#ff4d4f' }}>{v}</span> : <span style={{ color: '#52c41a' }}>{v}</span> },
+              },
+              { title: '北交所(BJ)', dataIndex: 'BJ', width: 110, align: 'right',
+                render: (v) => v > 0 ? <span style={{ color: '#ff4d4f' }}>{v}</span> : <span style={{ color: '#52c41a' }}>{v}</span> },
+              },
+              { title: '合计', dataIndex: 'total', width: 90, align: 'right',
+                render: (v) => v > 0 ? <strong style={{ color: '#ff4d4f' }}>{v}</strong> : <span style={{ color: '#52c41a' }}>{v}</span>,
+              },
+            ]}
+            summary={() => {
+              const data = missingRangeResult.dailyBreakdown || [];
+              const sumSH = data.reduce((s, r) => s + (r.SH || 0), 0);
+              const sumSZ = data.reduce((s, r) => s + (r.SZ || 0), 0);
+              const sumBJ = data.reduce((s, r) => s + (r.BJ || 0), 0);
+              return (
+                <Table.Summary fixed>
+                  <Table.Summary.Row>
+                    <Table.Summary.Cell index={0}><Text strong>合计</Text></Table.Summary.Cell>
+                    <Table.Summary.Cell index={1} align="right"><Text strong style={{ color: sumSH > 0 ? '#ff4d4f' : '#52c41a' }}>{sumSH}</Text></Table.Summary.Cell>
+                    <Table.Summary.Cell index={2} align="right"><Text strong style={{ color: sumSZ > 0 ? '#ff4d4f' : '#52c41a' }}>{sumSZ}</Text></Table.Summary.Cell>
+                    <Table.Summary.Cell index={3} align="right"><Text strong style={{ color: sumBJ > 0 ? '#ff4d4f' : '#52c41a' }}>{sumBJ}</Text></Table.Summary.Cell>
+                    <Table.Summary.Cell index={4} align="right"><Text strong style={{ color: (sumSH+sumSZ+sumBJ) > 0 ? '#ff4d4f' : '#52c41a' }}>{sumSH + sumSZ + sumBJ}</Text></Table.Summary.Cell>
+                  </Table.Summary.Row>
+                </Table.Summary>
+              );
+            }}
+          />
         </>
       )}
     </Card>
