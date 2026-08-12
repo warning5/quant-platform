@@ -383,6 +383,8 @@ public class MarketDataService {
         String kw = (keyword != null) ? keyword.trim() : "";
         com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<StockInfo> wrapper =
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
+        // 排除已退市股票
+        wrapper.isNull(StockInfo::getDelistDate);
         // 空关键词时返回前 N 只股票（按代码排序），有关键词时模糊搜索
         if (!kw.isEmpty()) {
             wrapper.and(w -> w.like(StockInfo::getCode, kw).or().like(StockInfo::getName, kw));

@@ -1,47 +1,164 @@
+// 涨跌色（中国股市：红涨绿跌）—— 供 priceColor() 返回的 class 使用
+// !important 确保不会被父级 .metric-value 等同级选择器覆盖
+.text-red {
+  color: #f04f55 !important;
+}
+.text-green {
+  color: #2ba471 !important;
+}
+
 .strategy-list-page {
   padding: 20px 24px;
+  background: #f5f6f8;
+  min-height: 100vh;
 }
 
 .strategy-card {
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 28px 24px;
   margin-bottom: 20px;
-  padding: 24px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
 }
 
-.strategy-top {
+.strategy-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
+  margin-bottom: 22px;
+}
+
+.strategy-title-wrap {
+  flex: 1;
+  min-width: 0;
 }
 
 .strategy-name {
-  font-size: 32px;
-  font-weight: 600;
-  color: #222;
+  font-size: 36px;
+  font-weight: 800;
+  color: #1a1a1a;
+  line-height: 1.3;
+}
+
+.strategy-subtitle {
+  display: block;
+  margin-top: 8px;
+  font-size: 24px;
+  color: #aaaaaa;
 }
 
 .strategy-status {
-  font-size: 22px;
-  padding: 2px 12px;
-  border-radius: 16px;
-  background: #f0f0f0;
-  color: #888;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 16px;
+  font-size: 24px;
+  flex-shrink: 0;
+
+  &.active {
+    color: #52c41a;
+  }
+
+  &.inactive {
+    color: #999999;
+  }
+
+  .status-dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: currentColor;
+  }
 }
 
-.st-active { background: #fdecea; color: #c0392b; }
-.st-testing { background: #eaf3ff; color: #2b7de9; }
-.st-draft { background: #f3f3f3; color: #999; }
-.st-deprecated { background: #f0f0f0; color: #bbb; }
-
-.strategy-meta {
+.strategy-metrics {
   display: flex;
-  justify-content: space-between;
-  margin-top: 12px;
+  align-items: baseline;
+  margin-bottom: 22px;
+}
+
+.metric {
+  display: flex;
+  align-items: baseline;
+  flex: none;
+
+  &:not(:last-child) {
+    margin-right: 36px;
+  }
+
+  // 累计：标签与数值同色（随涨跌着色）
+  &.metric-return {
+    .metric-label,
+    .metric-value {
+      color: #f04f55;
+    }
+  }
+
+  // 年化：标签灰、数值深色
+  &.metric-annual {
+    .metric-label {
+      color: #999999;
+    }
+    .metric-value {
+      color: #1a1a1a;
+    }
+  }
+
+  // 夏普：标签与数值均灰
+  &.metric-sharpe {
+    .metric-label,
+    .metric-value {
+      color: #999999;
+    }
+  }
+}
+
+.metric-label {
+  font-size: 26px;
+  margin-right: 8px;
+}
+
+.metric-value {
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.strategy-footer {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.footer-item {
+  display: flex;
+  align-items: baseline;
+  white-space: nowrap;
+}
+
+.footer-label {
   font-size: 24px;
-  color: #999;
+  color: #999999;
+}
+
+.footer-value {
+  margin-left: 6px;
+  font-size: 26px;
+  color: #1a1a1a;
+  font-weight: 700;
+}
+
+.footer-divider {
+  margin: 0 12px;
+  color: #cccccc;
 }
 
 .empty-state {
   padding-top: 120px;
   text-align: center;
 }
-.empty-text { color: #999; font-size: 28px; }
+
+.empty-text {
+  color: #999999;
+  font-size: 28px;
+}

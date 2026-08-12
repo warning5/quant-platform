@@ -11,7 +11,10 @@ import com.quant.platform.strategy.mapper.StrategyDefinitionMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.Collections;
+import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -34,7 +37,54 @@ public class MpStrategyController {
      */
     @GetMapping
     public ApiResponse<List<Map<String, Object>>> list(@RequestParam(required = false) String keyword) {
-        return ApiResponse.success(strategyDefinitionMapper.findStrategiesWithData(keyword));
+        List<Map<String, Object>> list = strategyDefinitionMapper.findStrategiesWithData(keyword);
+        for (Map<String, Object> item : list) {
+            Object latestDateObj = item.get("latestDate");
+            Object freqObj = item.get("rebalanceFrequency");
+            LocalDate latestDate = parseLocalDate(latestDateObj);
+            if (latestDate != null && freqObj instanceof String freq) {
+                LocalDate nextDate = nextRebalanceDate(latestDate, freq);
+                if (nextDate != null) {
+                    item.put("nextRebalanceDate", nextDate);
+                }
+            }
+        }
+        return ApiResponse.success(list);
+    }
+
+    private LocalDate parseLocalDate(Object obj) {
+        if (obj == null) {
+            return null;
+        }
+        if (obj instanceof LocalDate d) {
+            return d;
+        }
+        if (obj instanceof java.sql.Date d) {
+            return d.toLocalDate();
+        }
+        if (obj instanceof Date d) {
+            return d.toInstant().atZone(ZoneId.systemDefault()).toLocalDate();
+        }
+        if (obj instanceof String s) {
+            try {
+                return LocalDate.parse(s);
+            } catch (Exception ignored) {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private LocalDate nextRebalanceDate(LocalDate latestDate, String rebalanceFrequency) {
+        if (latestDate == null || rebalanceFrequency == null) {
+            return null;
+        }
+        return switch (rebalanceFrequency.toUpperCase()) {
+            case "DAILY" -> latestDate.plusDays(1);
+            case "WEEKLY" -> latestDate.plusDays(7);
+            case "MONTHLY" -> latestDate.plusMonths(1);
+            default -> null;
+        };
     }
 
     /**

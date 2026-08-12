@@ -90,50 +90,60 @@ export function request(options) {
     Taro.showLoading({ title: '加载中...', mask: true });
   }
 
-  return new Promise((resolve, reject) => {
-    Taro.request({
-      url: API_BASE + url,
-      method,
-      data,
-      header: {
-        'Content-Type': 'application/json',
-        'X-MP-Token': getToken(),
-        ...header,
-      },
-      success(res) {
-        if (loading) Taro.hideLoading();
-        if (res.statusCode === 200 && res.data && res.data.code === 200) {
-          resolve(res.data.data);
-        } else if (res.statusCode === 401) {
-          // 未登录或 token 失效：清掉本地 token，重新微信登录后重试一次
-          clearToken();
-          if (_retry) {
-            Taro.showToast({ title: '认证失败', icon: 'none' });
-            reject(new Error('Unauthorized'));
-            return;
+  // 首请求前的登录预热：冷启动时 app.jsx 已触发 ensureLogin 写入 token，
+  // 若此刻 token 尚未就绪，先等预热登录（复用 loggingIn 去重）完成再发请求，
+  // 避免首屏先打一个无效 401。
+  const preheat = getToken()
+    ? Promise.resolve()
+    : (loggingIn || ensureLogin()).catch(() => {});
+
+  const send = () =>
+    new Promise((resolve, reject) => {
+      Taro.request({
+        url: API_BASE + url,
+        method,
+        data,
+        header: {
+          'Content-Type': 'application/json',
+          'X-MP-Token': getToken(),
+          ...header,
+        },
+        success(res) {
+          if (loading) Taro.hideLoading();
+          if (res.statusCode === 200 && res.data && res.data.code === 200) {
+            resolve(res.data.data);
+          } else if (res.statusCode === 401) {
+            // 未登录或 token 失效：清掉本地 token，重新微信登录后重试一次
+            clearToken();
+            if (_retry) {
+              Taro.showToast({ title: '认证失败', icon: 'none' });
+              reject(new Error('Unauthorized'));
+              return;
+            }
+            wxLogin()
+              .then(() => {
+                request({ ...options, _retry: true }).then(resolve, reject);
+              })
+              .catch((e) => {
+                Taro.showToast({ title: '登录失败', icon: 'none' });
+                reject(e);
+              });
+          } else {
+            const msg = (res.data && res.data.message) || '请求失败';
+            Taro.showToast({ title: msg, icon: 'none' });
+            reject(new Error(msg));
           }
-          wxLogin()
-            .then(() => {
-              request({ ...options, _retry: true }).then(resolve, reject);
-            })
-            .catch((e) => {
-              Taro.showToast({ title: '登录失败', icon: 'none' });
-              reject(e);
-            });
-        } else {
-          const msg = (res.data && res.data.message) || '请求失败';
-          Taro.showToast({ title: msg, icon: 'none' });
-          reject(new Error(msg));
-        }
-      },
-      fail(err) {
-        if (loading) Taro.hideLoading();
-        console.error('[request] fail', url, err);
-        Taro.showToast({ title: '网络异常', icon: 'none' });
-        reject(err);
-      },
+        },
+        fail(err) {
+          if (loading) Taro.hideLoading();
+          console.error('[request] fail', url, err);
+          Taro.showToast({ title: '网络异常', icon: 'none' });
+          reject(err);
+        },
+      });
     });
-  });
+
+  return preheat.then(send);
 }
 
 export { API_BASE };

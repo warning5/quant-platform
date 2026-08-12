@@ -11,6 +11,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -99,6 +100,46 @@ public class MpRecommendationController {
             @PathVariable Long strategyId,
             @PathVariable String date) {
         Map<String, Object> result = recommendationMapper.calcHitRate(strategyId, LocalDate.parse(date));
+        return ApiResponse.success(result);
+    }
+
+    /**
+     * 命中率月度序列（近 months 个月），用于实盘命中率曲线。
+     * 返回连续月份列表，无跟踪数据的月份 hitRate 为 null。
+     */
+    @GetMapping("/hit-rate/monthly/strategy/{strategyId}")
+    public ApiResponse<Map<String, Object>> getHitRateMonthly(
+            @PathVariable Long strategyId,
+            @RequestParam(defaultValue = "12") int months) {
+        List<Map<String, Object>> rows = recommendationMapper.calcHitRateMonthly(strategyId, months);
+        Map<String, Map<String, Object>> byMonth = new LinkedHashMap<>();
+        for (Map<String, Object> r : rows) {
+            byMonth.put(String.valueOf(r.get("month")), r);
+        }
+        List<Map<String, Object>> series = new ArrayList<>();
+        YearMonth now = YearMonth.now();
+        for (int i = months - 1; i >= 0; i--) {
+            String label = now.minusMonths(i).toString(); // yyyy-MM
+            Map<String, Object> src = byMonth.get(label);
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("month", label);
+            if (src != null) {
+                entry.put("total", src.get("total"));
+                entry.put("tracked", src.get("tracked"));
+                entry.put("hitCount", src.get("hitCount"));
+                entry.put("hitRate", src.get("hitRate"));
+            } else {
+                entry.put("total", 0);
+                entry.put("tracked", 0);
+                entry.put("hitCount", 0);
+                entry.put("hitRate", null);
+            }
+            series.add(entry);
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("strategyId", strategyId);
+        result.put("months", months);
+        result.put("series", series);
         return ApiResponse.success(result);
     }
 

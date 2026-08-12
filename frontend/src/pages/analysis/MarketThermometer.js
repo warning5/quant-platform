@@ -12,7 +12,28 @@ import { stockAnalysisApi } from '../../api';
 
 const { Title, Text, Paragraph } = Typography;
 
-// 恐慌贪婪配色
+// ── 暗色模式检测（与 App.js data-theme 同步）─────────────────
+function useIsDark() {
+  const [isDark, setIsDark] = useState(() =>
+    document.documentElement.getAttribute('data-theme') === 'dark' ||
+    document.body.getAttribute('data-theme') === 'dark'
+  );
+  useEffect(() => {
+    const observer = new MutationObserver(() => {
+      setIsDark(
+        document.documentElement.getAttribute('data-theme') === 'dark' ||
+        document.body.getAttribute('data-theme') === 'dark'
+      );
+    });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    // fallback: also watch body (some versions set it there)
+    observer.observe(document.body, { attributes: true, attributeFilter: ['data-theme'] });
+    return () => observer.disconnect();
+  }, []);
+  return isDark;
+}
+
+// 恐慌贪婪配色（亮暗通用，仅文字/图标颜色）
 const FEAR_GREED_COLOR = (score) => {
   if (score >= 70) return '#52c41a';
   if (score >= 55) return '#73d13d';
@@ -21,7 +42,15 @@ const FEAR_GREED_COLOR = (score) => {
   return '#ff4d4f';
 };
 
-const FEAR_GREED_BG = (score) => {
+// 恐慌贪婪背景：亮色模式用暖色渐变，暗色模式用深色半透明渐变
+const FEAR_GREED_BG = (score, isDark) => {
+  if (isDark) {
+    if (score >= 70) return 'linear-gradient(135deg, #162312 0%, #1a2e16 100%)';
+    if (score >= 55) return 'linear-gradient(135deg, #232b10 0%, #2e3a12 100%)';
+    if (score >= 45) return 'linear-gradient(135deg, #2b240e 0%, #3a2f0f 100%)';
+    if (score >= 30) return 'linear-gradient(135deg, #2b1a12 0%, #3a2218 100%)';
+    return 'linear-gradient(135deg, #2a1214 0%, #381618 100%)';
+  }
   if (score >= 70) return 'linear-gradient(135deg, #f6ffed 0%, #d9f7be 100%)';
   if (score >= 55) return 'linear-gradient(135deg, #fcffe6 0%, #f0ffb8 100%)';
   if (score >= 45) return 'linear-gradient(135deg, #fffbe6 0%, #fff1b8 100%)';
@@ -29,10 +58,29 @@ const FEAR_GREED_BG = (score) => {
   return 'linear-gradient(135deg, #fff1f0 0%, #ffccc7 100%)';
 };
 
+// 子卡片背景
+const SUB_CARD_BG = (isDark) => isDark ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.9)';
+// 风格卡片背景
+const STYLE_CARD_BG = (regime, isDark) => {
+  if (!isDark) {
+    if (regime === 'GROWTH') return '#f9f0ff';
+    if (regime === 'VALUE') return '#e6f4ff';
+    if (regime === 'SMALL') return '#fff7e6';
+    if (regime === 'LARGE') return '#fff2f0';
+    return '#fafafa';
+  }
+  if (regime === 'GROWTH') return 'rgba(114,46,209,0.12)';
+  if (regime === 'VALUE') return 'rgba(22,119,255,0.12)';
+  if (regime === 'SMALL') return 'rgba(250,140,22,0.12)';
+  if (regime === 'LARGE') return 'rgba(207,19,34,0.12)';
+  return 'rgba(255,255,255,0.04)';
+};
+
 export default function MarketThermometer() {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
+  const isDark = useIsDark();
 
   const load = () => {
     setLoading(true);
@@ -168,7 +216,7 @@ export default function MarketThermometer() {
       <Card
         style={{
           marginBottom: 16,
-          background: FEAR_GREED_BG(fg),
+          background: FEAR_GREED_BG(fg, isDark),
           border: 'none',
         }}
         styles={{ body: { padding: '32px 32px 24px' } }}
@@ -182,7 +230,7 @@ export default function MarketThermometer() {
               {data?.fearGreedLabel}
             </div>
             <Space size={4}>
-              <Text style={{ color: '#666', fontSize: 12 }}>
+              <Text style={{ color: isDark ? '#aaa' : '#666', fontSize: 12 }}>
                 恐慌贪婪指数（0极度恐慌 ~ 100极度贪婪）
               </Text>
               <Tooltip
@@ -228,7 +276,7 @@ export default function MarketThermometer() {
             {/* 第一行：PE + PB + 均线温度 */}
             <Row gutter={[12, 12]}>
               <Col span={8}>
-                <Card size="small" style={{ background: 'rgba(255,255,255,0.9)' }}>
+                <Card size="small" style={{ background: SUB_CARD_BG(isDark) }}>
                   <Statistic
                     title={
                       <Space size={4}>
@@ -263,7 +311,7 @@ export default function MarketThermometer() {
                 </Card>
               </Col>
               <Col span={8}>
-                <Card size="small" style={{ background: 'rgba(255,255,255,0.9)' }}>
+                <Card size="small" style={{ background: SUB_CARD_BG(isDark) }}>
                   <Statistic
                     title={
                       <Space size={4}>
@@ -298,7 +346,7 @@ export default function MarketThermometer() {
                 </Card>
               </Col>
               <Col span={8}>
-                <Card size="small" style={{ background: 'rgba(255,255,255,0.9)' }}>
+                <Card size="small" style={{ background: SUB_CARD_BG(isDark) }}>
                   <Statistic
                     title={
                       <Space size={4}>
@@ -341,7 +389,7 @@ export default function MarketThermometer() {
             {/* 第二行：股债收益比 + QVIX 波动率指数 */}
             <Row gutter={[12, 12]} style={{ marginTop: 16 }}>
               <Col span={8}>
-                <Card size="small" style={{ background: 'rgba(255,255,255,0.9)' }}>
+                <Card size="small" style={{ background: SUB_CARD_BG(isDark) }}>
                   <Statistic
                     title={
                       <Space size={4}>
@@ -377,7 +425,7 @@ export default function MarketThermometer() {
                 </Card>
               </Col>
               <Col span={8}>
-                <Card size="small" style={{ background: 'rgba(255,255,255,0.9)' }}>
+                <Card size="small" style={{ background: SUB_CARD_BG(isDark) }}>
                   <Statistic
                     title={
                       <Space size={4}>
@@ -455,11 +503,11 @@ export default function MarketThermometer() {
 
         const styleLabel = styleRegime === 'GROWTH' ? '成长占优' : styleRegime === 'VALUE' ? '价值占优' : '风格均衡';
         const styleColor = styleRegime === 'GROWTH' ? '#722ed1' : styleRegime === 'VALUE' ? '#1677ff' : '#999';
-        const styleBg = styleRegime === 'GROWTH' ? '#f9f0ff' : styleRegime === 'VALUE' ? '#e6f4ff' : '#fafafa';
+        const styleBg = STYLE_CARD_BG(styleRegime, isDark);
 
         const sizeLabel = sizeRegime === 'SMALL' ? '小盘强势' : sizeRegime === 'LARGE' ? '大盘强势' : '大小均衡';
         const sizeColor = sizeRegime === 'SMALL' ? '#fa8c16' : sizeRegime === 'LARGE' ? '#cf1322' : '#999';
-        const sizeBg = sizeRegime === 'SMALL' ? '#fff7e6' : sizeRegime === 'LARGE' ? '#fff2f0' : '#fafafa';
+        const sizeBg = STYLE_CARD_BG(sizeRegime, isDark);
 
         return (
           <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>

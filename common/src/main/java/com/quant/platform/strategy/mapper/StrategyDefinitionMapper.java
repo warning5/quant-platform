@@ -20,18 +20,41 @@ public interface StrategyDefinitionMapper extends BaseMapper<StrategyDefinition>
 
     /**
      * 查询有推荐数据的策略列表（用于小程序）
+     * 附带最新回测报告指标与置信度，减少前端 N+1 请求。
      */
     @Select("<script>" +
             "SELECT s.id, s.strategy_name AS strategyName, s.strategy_code AS strategyCode, " +
-            "       s.strategy_type AS strategyType, s.status, " +
-            "       MAX(r.recommend_date) AS latestDate " +
+            "       s.strategy_type AS strategyType, s.status, s.rebalance_frequency AS rebalanceFrequency, " +
+            "       MAX(r.recommend_date) AS latestDate, " +
+            "       (SELECT br.total_return FROM backtest_report br " +
+            "        JOIN backtest_task bt ON bt.id = br.task_id " +
+            "        WHERE bt.strategy_id = s.id AND bt.status = 'COMPLETED' " +
+            "        ORDER BY bt.completed_at DESC LIMIT 1) AS totalReturn, " +
+            "       (SELECT br.annual_return FROM backtest_report br " +
+            "        JOIN backtest_task bt ON bt.id = br.task_id " +
+            "        WHERE bt.strategy_id = s.id AND bt.status = 'COMPLETED' " +
+            "        ORDER BY bt.completed_at DESC LIMIT 1) AS annualReturn, " +
+            "       (SELECT br.sharpe_ratio FROM backtest_report br " +
+            "        JOIN backtest_task bt ON bt.id = br.task_id " +
+            "        WHERE bt.strategy_id = s.id AND bt.status = 'COMPLETED' " +
+            "        ORDER BY bt.completed_at DESC LIMIT 1) AS sharpeRatio, " +
+            "       (SELECT br.win_rate FROM backtest_report br " +
+            "        JOIN backtest_task bt ON bt.id = br.task_id " +
+            "        WHERE bt.strategy_id = s.id AND bt.status = 'COMPLETED' " +
+            "        ORDER BY bt.completed_at DESC LIMIT 1) AS winRate, " +
+            "       (SELECT sc.score FROM strategy_confidence sc " +
+            "        WHERE sc.strategy_id = s.id " +
+            "        ORDER BY sc.data_as_of_date DESC, sc.id DESC LIMIT 1) AS confidenceScore, " +
+            "       (SELECT sc.hit_rate_value FROM strategy_confidence sc " +
+            "        WHERE sc.strategy_id = s.id " +
+            "        ORDER BY sc.data_as_of_date DESC, sc.id DESC LIMIT 1) AS hitRateValue " +
             "FROM strategy_definition s " +
             "JOIN stock_recommendation r ON r.strategy_id = s.id " +
             "<if test='keyword != null and keyword != \"\"'>" +
             "  WHERE s.strategy_name LIKE CONCAT('%', #{keyword}, '%') " +
             "     OR s.strategy_code LIKE CONCAT('%', #{keyword}, '%')" +
             "</if>" +
-            "GROUP BY s.id, s.strategy_name, s.strategy_code, s.strategy_type, s.status " +
+            "GROUP BY s.id, s.strategy_name, s.strategy_code, s.strategy_type, s.status, s.rebalance_frequency " +
             "ORDER BY latestDate DESC" +
             "</script>")
     List<java.util.Map<String, Object>> findStrategiesWithData(@Param("keyword") String keyword);

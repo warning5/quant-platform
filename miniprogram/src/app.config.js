@@ -3,6 +3,7 @@ export default {
     'pages/list/index',
     'pages/detail/index',
     'pages/recommend-all/index',
+    'pages/recommend/detail',
     'pages/strategy/index',
     'pages/strategy/detail',
     'pages/factor/index',

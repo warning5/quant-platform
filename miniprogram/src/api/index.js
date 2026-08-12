@@ -28,6 +28,10 @@ export const recommendationApi = {
   getHitRate: (strategyId, date) =>
     request({ url: `/mp/recommendations/hit-rate/strategy/${strategyId}/date/${date}` }),
 
+  /** 获取命中率月度序列（近 months 个月，用于曲线） */
+  getHitRateMonthly: (strategyId, months = 12) =>
+    request({ url: `/mp/recommendations/hit-rate/monthly/strategy/${strategyId}`, data: { months } }),
+
   /** 个股推荐详情（R1）：评分明细/因子归因/买卖信号/表现 */
   getStockDetail: (stockCode, params = {}) =>
     request({ url: `/mp/recommendations/stock/${stockCode}/detail`, method: 'GET', data: params }),

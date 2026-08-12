@@ -161,4 +161,23 @@ public interface RecommendationMapper extends BaseMapper<StockRecommendation> {
             "FROM stock_recommendation " +
             "WHERE strategy_id = #{strategyId} AND recommend_date = #{date}")
     Map<String, Object> calcHitRate(@Param("strategyId") Long strategyId, @Param("date") LocalDate date);
+
+    /**
+     * 命中率月度序列（用于小程序实盘命中率曲线）。
+     * 返回最近 months 个月内有跟踪数据的月份统计，按月份升序。
+     */
+    @Select("SELECT DATE_FORMAT(recommend_date, '%Y-%m') AS month, " +
+            "  COUNT(*) AS total, " +
+            "  SUM(CASE WHEN next_day_return IS NOT NULL THEN 1 ELSE 0 END) AS tracked, " +
+            "  SUM(CASE WHEN next_day_return IS NOT NULL AND next_day_return > 0 THEN 1 ELSE 0 END) AS hitCount, " +
+            "  CASE WHEN SUM(CASE WHEN next_day_return IS NOT NULL THEN 1 ELSE 0 END) > 0 " +
+            "    THEN SUM(CASE WHEN next_day_return IS NOT NULL AND next_day_return > 0 THEN 1 ELSE 0 END) * 1.0 / " +
+            "         SUM(CASE WHEN next_day_return IS NOT NULL THEN 1 ELSE 0 END) " +
+            "    ELSE 0 END AS hitRate " +
+            "FROM stock_recommendation " +
+            "WHERE strategy_id = #{strategyId} " +
+            "  AND recommend_date >= DATE_SUB(CURDATE(), INTERVAL #{months} MONTH) " +
+            "GROUP BY DATE_FORMAT(recommend_date, '%Y-%m') " +
+            "ORDER BY month")
+    List<Map<String, Object>> calcHitRateMonthly(@Param("strategyId") Long strategyId, @Param("months") int months);
 }

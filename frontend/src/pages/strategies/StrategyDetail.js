@@ -8,6 +8,7 @@ import {
   CheckCircleOutlined
 } from '@ant-design/icons';
 import { strategyApi, backtestApi } from '../../api';
+import { useAuthStore } from '../../stores/authStore';
 import { useDict } from '../../utils/useDict';
 
 const { Title, Text } = Typography;
@@ -149,8 +150,7 @@ export default function StrategyDetail() {
           children: (
             <Card>
               <Descriptions bordered column={2} size="middle"
-                labelStyle={{ whiteSpace: 'nowrap', width: 100 }}
-                contentStyle={{ minWidth: 200 }}>
+                styles={{ label: { whiteSpace: 'nowrap', width: 100 }, content: { minWidth: 200 } }}>
                 <Descriptions.Item label="策略代码">{strategy.strategyCode}</Descriptions.Item>
                 <Descriptions.Item label="策略名称">{strategy.strategyName}</Descriptions.Item>
                 <Descriptions.Item label="策略类型">{dictMapType[strategy.strategyType]?.dictLabel ?? strategy.strategyType}</Descriptions.Item>
@@ -170,7 +170,7 @@ export default function StrategyDetail() {
                   </Tag>
                 </Descriptions.Item>
                 <Descriptions.Item label="版本">v{strategy.version}</Descriptions.Item>
-                <Descriptions.Item label="创建人">{strategy.author || '-'}</Descriptions.Item>
+                <Descriptions.Item label="创建人" span={2}>{strategy.author || '-'}</Descriptions.Item>
                 <Descriptions.Item label="描述" span={2}>{strategy.description || '-'}</Descriptions.Item>
                 {strategy.factorConfigJson && (
                   <Descriptions.Item label="因子配置" span={2}>
