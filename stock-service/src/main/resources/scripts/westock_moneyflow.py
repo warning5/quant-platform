@@ -488,8 +488,39 @@ class _CliError(Exception):
 _CLI_CACHE = None  # (node_exe, npx_js) 或 None
 
 
+def _resolve_cli_bin(pkg_name):
+    """一次性解析 westock-data CLI 的直连入口 scripts/index.js。
+
+    命中后调用方即可用 `node <bin> asfund ...` 直跑，省去每次 `npx -y <pkg>` 的
+    包元数据解析 + `cmd /c` 重 spawn 开销（单次 asfund 约 0.5~1s，全量大批量时
+    累积可观）。解析顺序：npm _npx 缓存 → 全局 npm node_modules。找不到返回 None，
+    调用方回退 `npx -y`。
+    """
+    import glob as _glob
+    localapp = os.environ.get("LOCALAPPDATA")
+    appdata = os.environ.get("APPDATA")
+    patterns = []
+    if localapp:
+        # npm _npx 缓存：<LOCALAPPDATA>/npm-cache/_npx/<hash>/node_modules/<pkg>/scripts/index.js
+        patterns.append(os.path.join(localapp, "npm-cache", "_npx", "*",
+                                     "node_modules", pkg_name, "scripts", "index.js"))
+    if appdata:
+        patterns.append(os.path.join(appdata, "npm", "node_modules", pkg_name,
+                                     "scripts", "index.js"))
+    for pat in patterns:
+        for hit in _glob.glob(pat):
+            if os.path.isfile(hit):
+                return hit
+    return None
+
+
 def _detect_cli_impl():
-    """探测可用的 node + npx-cli.js，返回 (node_exe, npx_js) 或 None。"""
+    """探测可用的 node + CLI 入口，返回 (node_exe, npx_js, direct_bin) 或 None。
+
+    direct_bin 为 westock-data CLI 的直连入口（scripts/index.js），命中则优先使用，
+    未命中(None)时调用方回退 `npx -y`。
+    """
+    pkg_name = WESTOCK_CLI_PKG.split("@")[0]
     candidates = []
     nb = os.environ.get("WESTOCK_NODE_BIN")
     if nb:
@@ -506,11 +537,12 @@ def _detect_cli_impl():
         node_exe = os.path.join(d, "node.exe") if os.name == "nt" else os.path.join(d, "node")
         npx_js = os.path.join(d, "node_modules", "npm", "bin", "npx-cli.js")
         if os.path.isfile(node_exe) and os.path.isfile(npx_js):
-            return (node_exe, npx_js)
+            direct_bin = _resolve_cli_bin(pkg_name)
+            return (node_exe, npx_js, direct_bin)
     # fallback：PATH 中的 npx 命令（Windows 下多为 npx.cmd，shell 方式更稳）
     npx_which = shutil.which("npx")
     if node_which and npx_which:
-        return (node_which, npx_which)
+        return (node_which, npx_which, None)
     return None
 
 
@@ -611,10 +643,15 @@ def _cli_fetch_day(codes, day, cli) -> dict:
     另：用 Popen + 手动超时终止整棵进程树，防止孙子进程孤儿化后霸占 stdout
     管道导致 subprocess 永久挂死（曾导致全量任务卡在第一批 8 分钟零进度）。
     """
-    node_exe, npx_js = cli
+    node_exe, npx_js, direct_bin = cli
     csv = ",".join(sorted(set(codes)))
     date_str = day.strftime("%Y-%m-%d")
-    cmd = [node_exe, npx_js, "-y", WESTOCK_CLI_PKG, "asfund", csv, "--date", date_str]
+    # 优先用直连 bin（跳过每次 `npx -y` 解析 + cmd /c 重 spawn 开销）；
+    # 缓存被清导致 bin 不存在时回退 npx -y。
+    if direct_bin and os.path.isfile(direct_bin):
+        cmd = [node_exe, direct_bin, "asfund", csv, "--date", date_str]
+    else:
+        cmd = [node_exe, npx_js, "-y", WESTOCK_CLI_PKG, "asfund", csv, "--date", date_str]
     env = dict(os.environ)
     node_dir = os.path.dirname(node_exe)
     env["PATH"] = node_dir + os.pathsep + env.get("PATH", "")
