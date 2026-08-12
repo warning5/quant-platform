@@ -367,6 +367,7 @@ export const dataUpdateApi = {
   // 研报数据
   getResearchCoverage: () => api.get('/data-update/research/coverage'),
   validateResearch: () => api.get('/data-update/research/validate'),
+  validateResearchRange: (startDate, endDate) => api.get('/data-update/research/validate-range', { params: { startDate, endDate } }),
   // 退市清理
   getDelistedStocks: (inactiveDays = 30) => api.get('/data-update/delisted/list', { params: { inactiveDays } }),
   markDelistedStocks: () => api.post('/data-update/delisted/mark'),

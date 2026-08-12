@@ -206,6 +206,13 @@ public class DataUpdateController {
         return ApiResponse.success(dataCoverageService.validateResearch());
     }
 
+    @GetMapping("/research/validate-range")
+    @Operation(summary = "研报数据按日期区间校验（统计区间内每天研报数量）")
+    public ApiResponse<Map<String, Object>> validateResearchRange(
+            @RequestParam String startDate, @RequestParam String endDate) {
+        return ApiResponse.success(dataCoverageService.validateResearchRange(startDate, endDate));
+    }
+
     @GetMapping("/delisted/list")
     @Operation(summary = "查询退市股票列表（ClickHouse 检测最近无交易数据）")
     public ApiResponse<List<Map<String, Object>>> listDelistedStocks(

@@ -307,8 +307,9 @@ function DataUpdate() {
   const [researchCoverage, setResearchCoverage] = useState(null);
   const [researchCoverageLoading, setResearchCoverageLoading] = useState(true);
   const researchCoverageFetchedRef = useRef(false);
-  const [researchValidateResult, setResearchValidateResult] = useState(null);
   const [researchValidateLoading, setResearchValidateLoading] = useState(false);
+  const [researchRange, setResearchRange] = useState(null);
+  const [researchRangeResult, setResearchRangeResult] = useState(null);
 
   // 前复权因子刷新
   const [qfqTask, setQfqTask] = useState(null);
@@ -868,14 +869,20 @@ function DataUpdate() {
     if (isFirst) setResearchCoverageLoading(false);
   }, []);
 
-  // 研报数据校验
+  // 研报数据按日期区间校验（统计每天研报数量）
   const handleResearchValidate = async () => {
+    if (!researchRange || researchRange.length < 2) {
+      message.warning('请选择日期区间');
+      return;
+    }
+    const startDate = researchRange[0].format('YYYY-MM-DD');
+    const endDate = researchRange[1].format('YYYY-MM-DD');
     setResearchValidateLoading(true);
-    setResearchValidateResult(null);
+    setResearchRangeResult(null);
     try {
-      const res = await dataUpdateApi.validateResearch();
+      const res = await dataUpdateApi.validateResearchRange(startDate, endDate);
       if (res && Object.keys(res).length > 0) {
-        setResearchValidateResult(res);
+        setResearchRangeResult(res);
       } else {
         message.warning('校验结果为空');
       }
@@ -2785,9 +2792,11 @@ function DataUpdate() {
                     onClick={() => handleCancel('RESEARCH')} disabled={!isRunning}>
                     取消任务
                   </Button>
+                  <RangePicker value={researchRange} onChange={d => setResearchRange(d)}
+                    disabledDate={(current) => current && current.isAfter(dayjs().endOf('day'))} />
                   <Button icon={<SearchOutlined />}
                     onClick={handleResearchValidate} loading={researchValidateLoading}>
-                    数据校验
+                    按日期统计校验
                   </Button>
                   {isRunning && <Tag color="processing">采集中...</Tag>}
                   {researchTask && researchTask.status === 'SUCCESS' && <Tag color="success">采集完成</Tag>}
@@ -2807,35 +2816,70 @@ function DataUpdate() {
           {renderLogs(researchLogs, researchLogRef)}
         </Card>
 
-        {/* 研报数据校验报告 */}
-        {researchValidateResult && renderResearchValidateCard()}
+        {/* 研报数据校验报告（按日期区间） */}
+        {researchRangeResult && renderResearchValidateCard()}
       </>
     );
   };
 
-  // ========== 研报数据校验报告 ==========
+  // ========== 研报数据校验报告（按日期区间每天研报数） ==========
   const renderResearchValidateCard = () => {
-    const { totalReports, status, warnings } = researchValidateResult || {};
+    const { startDate, endDate, totalReports, daysWithData, zeroDays, calendarDays, status, warnings } = researchRangeResult || {};
+    const daily = researchRangeResult?.dailyCounts || [];
     return (
-      <Card title={<span><SearchOutlined /> 研报数据校验报告</span>} size="small" style={{ marginTop: 16 }}
-        extra={<Button size="small" type="text" onClick={() => setResearchValidateResult(null)}>关闭</Button>}>
-        <Row gutter={16} style={{ marginBottom: 16 }}>
-          <Col span={4}>
-            <Statistic title="研报数" value={totalReports || 0}
-              valueStyle={{ fontSize: 14, color: '#1677ff' }} />
+      <Card title={<span><SearchOutlined /> 研报数据校验报告（按日期）</span>} size="small" style={{ marginTop: 16 }}
+        extra={<Button size="small" type="text" onClick={() => setResearchRangeResult(null)}>关闭</Button>}>
+        <Row gutter={16} style={{ marginBottom: 12 }}>
+          <Col span={6}>
+            <Statistic title="区间研报总数" value={totalReports || 0}
+              valueStyle={{ fontSize: 14, color: '#1677ff' }} suffix="条" />
           </Col>
-          <Col span={4}>
-            <Statistic title="警告数" value={(warnings || []).length || 0}
-              valueStyle={{ fontSize: 14, color: (warnings || []).length > 0 ? '#fa8c16' : '#52c41a' }} />
+          <Col span={6}>
+            <Statistic title="有数据天数" value={daysWithData || 0}
+              valueStyle={{ fontSize: 14 }} suffix={`/ ${calendarDays || 0} 天`} />
           </Col>
-          <Col span={4}>
+          <Col span={6}>
+            <Statistic title="无研报天数" value={zeroDays || 0}
+              valueStyle={{ fontSize: 14, color: (zeroDays || 0) > 0 ? '#fa8c16' : '#52c41a' }} suffix="天" />
+          </Col>
+          <Col span={6}>
             <Statistic title="状态" value={status === 'OK' ? '正常' : '有警告'}
               valueStyle={{ fontSize: 14, color: status === 'OK' ? '#52c41a' : '#fa8c16' }} />
           </Col>
         </Row>
+        <div style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 8 }}>
+          区间 {startDate} ~ {endDate}，统计每天研报数量（仅显示有数据的日期）
+        </div>
+
+        <Table
+          dataSource={daily.map((r, i) => ({ ...r, key: r.reportDate || i }))}
+          size="small"
+          pagination={false}
+          tableLayout="fixed"
+          scroll={{ y: 360 }}
+          columns={[
+            { title: '日期', dataIndex: 'reportDate', width: 180 },
+            { title: '研报数量', dataIndex: 'count', align: 'left',
+              render: (v) => v > 0
+                ? <span style={{ color: '#1677ff' }}>{v}</span>
+                : <span style={{ color: '#fa8c16' }}>{v}</span> },
+          ]}
+          summary={() => {
+            const sum = daily.reduce((s, r) => s + (r.count || 0), 0);
+            return (
+              <Table.Summary fixed>
+                <Table.Summary.Row>
+                  <Table.Summary.Cell index={0}><Text strong>合计</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell index={1} align="left"><Text strong style={{ color: '#1677ff' }}>{sum}</Text></Table.Summary.Cell>
+                </Table.Summary.Row>
+              </Table.Summary>
+            );
+          }}
+        />
+
         {(warnings || []).length > 0 && (
-          <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12 }}>
-            {warnings.map((w, i) => <li key={i}>{w}</li>)}
+          <ul style={{ margin: '12px 0 0', paddingLeft: 16, fontSize: 12 }}>
+            {warnings.map((w, i) => <li key={i} style={{ color: '#fa8c16' }}>{w}</li>)}
           </ul>
         )}
       </Card>
