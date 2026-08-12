@@ -20,6 +20,9 @@ import { useStompWebSocket } from '../../hooks/useStompWebSocket';
 const { Text, Title } = Typography;
 const { RangePicker } = DatePicker;
 
+// 市场代码映射（模块级，供 renderTaskConfig / renderStockIntegrity 等共用）
+const marketMap = { ALL: '全市场', SH: '沪市', SZ: '深市', BJ: '北交所' };
+
 // 情绪数据校验表选项
 const SENTIMENT_TABLE_OPTIONS = [
   { value: 'stock_sentiment_zt', label: '涨跌停池' },
@@ -125,7 +128,6 @@ const renderTaskConfig = (task, updateType) => {
 
   // 市场/数据源
   if (updateType === 'DAILY') {
-    const marketMap = { ALL: '全市场', SH: '沪市', SZ: '深市', BJ: '北交所' };
     const sourceMap = { ALL: '自动', BAOSTOCK: 'Baostock', TENCENT: '腾讯(BJ)', TENCENT_ALL: '腾讯(全市场)' };
     if (task.configMarket) tags.push(<Tag key="mkt" color="blue">{marketMap[task.configMarket] || task.configMarket}</Tag>);
     if (task.configSource && task.configSource !== 'ALL') tags.push(<Tag key="src" color="cyan">{sourceMap[task.configSource] || task.configSource}</Tag>);
@@ -557,6 +559,30 @@ function DataUpdate() {
       message.error('缺失数据查询失败，请稍后重试');
     } finally {
       setMissingLoading(false);
+    }
+  };
+
+  // 区间完整性校验（日期跨度 + 市场可选，按市场分组）
+  const [missingRange, setMissingRange] = useState(null);
+  const [missingRangeMarket, setMissingRangeMarket] = useState('ALL');
+  const [missingRangeLoading, setMissingRangeLoading] = useState(false);
+  const [missingRangeResult, setMissingRangeResult] = useState(null);
+
+  const handleCheckMissingRange = async () => {
+    if (!missingRange || missingRange.length < 2) {
+      message.warning('请选择日期跨度');
+      return;
+    }
+    setMissingRangeLoading(true);
+    try {
+      const startDate = missingRange[0].format('YYYY-MM-DD');
+      const endDate = missingRange[1].format('YYYY-MM-DD');
+      const res = await dataUpdateApi.getMissingStocksRange(startDate, endDate, missingRangeMarket);
+      setMissingRangeResult(res || null);
+    } catch (e) {
+      message.error('区间完整性查询失败，请稍后重试');
+    } finally {
+      setMissingRangeLoading(false);
     }
   };
 
@@ -3004,6 +3030,73 @@ function DataUpdate() {
 
       {missingStocks.length === 0 && missingLoading === false && missingStats && missingStats.total === 0 && (
         <Alert message="该日期数据完整，无缺失股票" type="success" showIcon />
+      )}
+
+      <Divider orientation="left" style={{ margin: '16px 0 12px' }}>区间校验（日期跨度）</Divider>
+
+      <Row gutter={16} align="middle" style={{ marginBottom: 16 }}>
+        <Col>
+          <Text>日期跨度:</Text>
+          <RangePicker value={missingRange} onChange={d => setMissingRange(d)}
+            disabledDate={(current) => current && current.isAfter(dayjs().endOf('day'))}
+            style={{ marginLeft: 8 }} />
+        </Col>
+        <Col>
+          <Text>市场:</Text>
+          <Select value={missingRangeMarket} onChange={setMissingRangeMarket}
+            options={marketOptions} style={{ marginLeft: 8, width: 130 }} />
+        </Col>
+        <Col>
+          <Button type="primary" icon={<SearchOutlined />}
+            onClick={handleCheckMissingRange} loading={missingRangeLoading}>
+            查询区间缺失
+          </Button>
+        </Col>
+      </Row>
+
+      {missingRangeResult && (
+        <>
+          <Row gutter={16} style={{ marginBottom: 12 }}>
+            <Col span={6}>
+              <Statistic title="区间交易日" value={missingRangeResult.tradingDays || 0}
+                valueStyle={{ fontSize: 14 }} suffix="天" />
+            </Col>
+            <Col span={6}>
+              <Statistic title="未完整更新股票" value={missingRangeResult.totalMissingStocks || 0}
+                valueStyle={{ fontSize: 14, color: (missingRangeResult.totalMissingStocks || 0) > 0 ? '#ff4d4f' : '#52c41a' }}
+                suffix="只" />
+            </Col>
+            <Col span={12}>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                区间 {missingRangeResult.startDate} ~ {missingRangeResult.endDate}，列出各市场在区间内覆盖天数不足的个股
+              </Text>
+            </Col>
+          </Row>
+
+          <Collapse accordion defaultActiveKey={['SH']} size="small">
+            {Object.entries(missingRangeResult.markets || {}).map(([mkt, info]) => (
+              <Collapse.Panel
+                key={mkt}
+                header={`${marketMap[mkt] || mkt}（${info.missingCount || 0} 只缺失 / 共 ${info.totalStocks || 0} 只）`}>
+                {info.missingStocks && info.missingStocks.length > 0 ? (
+                  <Table dataSource={info.missingStocks.map((r, i) => ({ ...r, key: r.code + '_' + i }))}
+                    size="small" pagination={{ pageSize: 50, showSizeChanger: true, pageSizeOptions: ['20', '50', '100', '200'], showTotal: (t) => `共 ${t} 条` }}
+                    scroll={{ y: 320 }} columns={[
+                      { title: '代码', dataIndex: 'code', width: 100 },
+                      { title: '名称', dataIndex: 'name', width: 140 },
+                      { title: '上市日', dataIndex: 'listDate', width: 110 },
+                      { title: '应更新', dataIndex: 'expectedDays', width: 80, align: 'right' },
+                      { title: '已覆盖', dataIndex: 'coveredDays', width: 80, align: 'right' },
+                      { title: '缺失', dataIndex: 'missingDays', width: 80, align: 'right',
+                        render: (v) => <span style={{ color: '#ff4d4f' }}>{v}</span> },
+                    ]} />
+                ) : (
+                  <Alert message="该市场区间内数据完整" type="success" showIcon />
+                )}
+              </Collapse.Panel>
+            ))}
+          </Collapse>
+        </>
       )}
     </Card>
   );
