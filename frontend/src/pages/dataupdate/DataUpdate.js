@@ -2877,11 +2877,6 @@ function DataUpdate() {
           }}
         />
 
-        {(warnings || []).length > 0 && (
-          <ul style={{ margin: '12px 0 0', paddingLeft: 16, fontSize: 12 }}>
-            {warnings.map((w, i) => <li key={i} style={{ color: '#fa8c16' }}>{w}</li>)}
-          </ul>
-        )}
       </Card>
     );
   };

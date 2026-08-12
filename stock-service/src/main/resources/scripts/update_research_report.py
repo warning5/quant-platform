@@ -22,6 +22,8 @@ import time
 import json
 import pymysql
 import warnings
+# 禁用 akshare 内部 tqdm 进度条（如 stock_research_report_em 分页时的 "0%| | 0/1" 噪声），保持日志干净
+os.environ["TQDM_DISABLE"] = "1"
 import akshare as ak
 from datetime import datetime, date, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -107,7 +109,24 @@ THROTTLE_LIMIT = 5          # 连续限流型失败达到此数 → 判定 IP �
 _THROTTLE_HINTS = (
     "expecting value", "json", "remotedisconnected", "connection",
     "timeout", "403", "429", "567", "empty", "reset by peer",
+    # 东财返回异常页（akshare 解析时 KeyError: 'infoCode'，字段缺失）→ 同样视为反爬/限流
+    "infoCode", "keyerror",
 )
+
+# akshare 内部异常的友好翻译（用于日志，避免 "✗ 'infoCode'" 这类天书）
+_AK_ERR_TRANSLATE = (
+    ("infoCode", "东财返回异常页(缺 infoCode 字段，疑似反爬/限流)"),
+    ("keyerror", "东财返回异常页(字段缺失，疑似反爬/限流)"),
+    ("expecting value", "东财返回空响应(疑似限流)"),
+)
+
+
+def _translate_ak_err(err):
+    e = str(err).lower()
+    for k, v in _AK_ERR_TRANSLATE:
+        if k in e:
+            return v
+    return str(err)
 
 
 def _is_throttle_err(err):
@@ -166,7 +185,7 @@ def fetch_stock_reports(code, retries=3, retry_base=2.0):
             if attempt < retries:
                 time.sleep(retry_base * attempt)
     if last_err:
-        return [], last_err
+        return [], _translate_ak_err(last_err)
 
     if df is None or df.empty:
         return [], None
