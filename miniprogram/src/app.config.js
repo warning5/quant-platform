@@ -9,6 +9,7 @@ export default {
     'pages/factor/index',
     'pages/factor/detail',
     'pages/backtest/index',
+    'pages/backtest/detail',
     'pages/mine/index'
   ],
   window: {
@@ -50,7 +51,7 @@ export default {
       },
       {
         pagePath: 'pages/mine/index',
-        text: '我的',
+        text: '关于',
         iconPath: 'assets/tabbar/mine.png',
         selectedIconPath: 'assets/tabbar/mine-active.png'
       }

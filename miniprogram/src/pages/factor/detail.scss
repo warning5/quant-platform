@@ -1,31 +1,79 @@
-.factor-detail-page { padding: 20px 24px 40px; }
+.factor-detail-page { padding: 20px 24px; }
 
-.section { margin-bottom: 20px; padding: 24px; }
-.section-title { font-size: 28px; font-weight: 600; color: #333; margin-bottom: 16px; }
-
-.fd-top { display: flex; align-items: center; justify-content: space-between; }
-.fd-name { font-size: 34px; font-weight: 600; color: #222; }
-.fd-status { font-size: 22px; color: #16a34a; }
-.fd-meta { display: flex; align-items: center; margin-top: 10px; }
-.fd-code { font-size: 24px; color: #999; margin-right: 16px; }
-.fd-cat { font-size: 22px; color: #2b7de9; background: #eaf3ff; padding: 2px 12px; border-radius: 14px; }
-.fd-desc { display: block; margin-top: 14px; font-size: 24px; color: #666; line-height: 1.6; }
-.fd-row { display: flex; justify-content: space-between; margin-top: 12px; font-size: 26px; }
+.fd-head { }
+.fd-head-top { display: flex; justify-content: space-between; align-items: flex-start; }
+.fd-head-left { flex: 1; min-width: 0; }
+.fd-name { font-size: 32px; font-weight: 700; color: #222; }
+.fd-meta { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.fd-desc { display: block; margin-top: 14px; font-size: 26px; color: #666; line-height: 1.6; }
+.fd-row { display: flex; justify-content: space-between; margin-top: 14px; font-size: 26px; }
 .fd-label { color: #999; }
 .fd-value { color: #333; }
 
-.ic-grid { display: flex; flex-wrap: wrap; }
-.ic-item { width: 50%; padding: 10px 0; }
-.ic-label { display: block; font-size: 22px; color: #999; }
-.ic-value { display: block; font-size: 30px; font-weight: 600; color: #333; margin-top: 4px; }
-.ic-empty { display: block; font-size: 24px; color: #999; padding: 16px 0; }
+.weak { font-size: 22px; color: #999; }
+.freq { font-size: 22px; color: #999; }
+.cat-tag { font-size: 22px; padding: 2px 12px; border-radius: 16px; background: #eef2f7; color: #5b6b7b; }
 
-.trend-list { }
-.trend-row { display: flex; align-items: center; padding: 12px 0; border-bottom: 1px solid #f0f0f0; }
-.trend-row:last-child { border-bottom: none; }
-.trend-date { flex: 2; font-size: 24px; color: #666; }
-.trend-ic { flex: 1; font-size: 26px; font-weight: 600; text-align: right; }
-.trend-ir { flex: 1; font-size: 24px; color: #999; text-align: right; }
+.st-pill { display: inline-block; padding: 4px 16px; border-radius: 20px; font-size: 22px; font-weight: 600; }
+.st-active { background: #eafaf0; color: #16a34a; }
+.st-degraded { background: #fff4e5; color: #e08a00; }
+.st-deprecated { background: #f0f0f0; color: #bbb; }
+.st-testing { background: #eaf3ff; color: #2b7de9; }
+.st-draft { background: #f3f3f3; color: #999; }
+
+.fd-eff-row { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
+.badge { font-size: 22px; font-weight: 700; padding: 4px 14px; border-radius: 16px; }
+.badge-valid { background: #eafaf0; color: #16a34a; }
+.badge-weak { background: #fff4e5; color: #e08a00; }
+.badge-invalid { background: #f0f0f0; color: #bbb; }
+.b { font-weight: 700; color: #333; }
+
+.fd-statuscard { background: #fff7ed; }
+.warn { font-size: 24px; color: #c2410c; line-height: 1.6; }
+
+.section-t { font-size: 28px; font-weight: 600; color: #333; margin-bottom: 14px; }
+.sparkline { width: 100%; height: 180px; display: block; }
+.fd-eval { display: block; margin-top: 10px; font-size: 22px; color: #999; line-height: 1.5; }
+
+.plan-grid { display: flex; flex-wrap: wrap; }
+.plan-item { width: 33.33%; box-sizing: border-box; padding: 10px 8px; }
+.plbl { display: block; font-size: 22px; color: #999; margin-bottom: 4px; }
+.pval { display: block; font-size: 28px; font-weight: 600; color: #333; }
+
+.placeholder { display: block; font-size: 24px; color: #bbb; line-height: 1.6; }
+.muted { font-size: 22px; color: #999; }
 
 .empty-state { padding-top: 120px; text-align: center; }
 .empty-text { color: #999; font-size: 28px; }
+
+/* ── 分组回测 ── */
+.gb-summary { display: flex; justify-content: space-around; padding: 16px 0; border-bottom: 1rpx solid #f0f0f0; margin-bottom: 12px; }
+.gb-metric { text-align: center; }
+.gb-label { display: block; font-size: 22px; color: #999; margin-bottom: 4px; }
+.gb-val { font-size: 32px; font-weight: 700; }
+.gb-val.pos { color: #16a34a; }
+.gb-val.neg { color: #dc2626; }
+
+.gb-groups { margin-top: 16px; }
+.gb-subtitle { display: block; font-size: 24px; font-weight: 600; color: #555; margin-bottom: 10px; }
+.gb-group-row { display: flex; align-items: center; padding: 8px 0; border-bottom: 1rpx solid #f5f5f5; }
+.gb-gname { width: 120px; font-size: 24px; color: #666; font-weight: 600; }
+.gb-gret { width: 100px; font-size: 26px; font-weight: 700; color: #333; }
+.gb-gsub { flex: 1; font-size: 20px; color: #999; text-align: right; }
+
+.gb-chart-area { margin-top: 16px; }
+
+/* ── 因子衰减表格 ── */
+.dc-table-wrap { margin-top: 12px; overflow-x: auto; }
+.dc-table { min-width: 400px; }
+.dc-row { display: flex; border-bottom: 1rpx solid #f5f5f5; }
+.dc-row.dc-hd { background: #fafafa; }
+.dc-cell { flex: 1; text-align: center; font-size: 24px; padding: 8px 12px; color: #666; }
+.dc-row.dc-hd .dc-cell { font-weight: 600; color: #444; }
+
+/* ── 指标浮动说明（触摸指标名自动展示）── */
+.plan-item { position: relative; }
+.lbl-row { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.q-mark { display: inline-flex; align-items: center; justify-content: center; width: 30rpx; height: 30rpx; border-radius: 50%; background: #c4d0de; color: #fff; font-size: 20rpx; font-style: normal; font-weight: 700; line-height: 1; }
+.float-tip { position: absolute; left: 0; top: 44rpx; z-index: 10; padding: 10rpx 16rpx; border-radius: 8rpx; background: rgba(31,41,55,.92); white-space: nowrap; box-shadow: 0 4rpx 16rpx rgba(0,0,0,.18); }
+.ft-text { font-size: 22rpx; color: #e5e7eb; line-height: 1.5; }

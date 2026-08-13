@@ -97,6 +97,9 @@ export const factorApi = {
   /** 因子 IC 趋势 */
   icTrend: (id, params = {}) =>
     request({ url: `/mp/factors/${id}/ic-trend`, method: 'GET', data: params }),
+  /** 因子测试报告（分组回测 / 衰减 / 拥挤度） */
+  testReport: (id) =>
+    request({ url: `/mp/factors/${id}/test-report`, method: 'GET' }),
 };
 
 /**
