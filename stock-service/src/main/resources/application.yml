@@ -165,7 +165,10 @@ quant:
     base-url: http://127.0.0.1:9090/api/public/
   data-update:
     # python-path: 默认 python（@Value 注解兜底，无需配置）
-    # script-dir: 默认 scripts，优先从外部目录加载；不存在时从 classpath:scripts/ 提取到 ~/.quant-platform/scripts/
+    # script-dir: 脚本实际读取路径（文件系统，非 classpath）。此前被写死成已失效的
+    #   C:/Users/warning5/WorkBuddy/Claw/quant-platform/scripts（项目迁址后该路径消失，
+    #   导致债券脚本永远找不到、温度计长期走 Java 兜底值）。统一指向当前真实项目位置。
+    script-dir: C:/Users/warning5/WorkBuddy/quant-platform/stock-service/scripts
     default-start-days: 3       # 默认从几天前开始更新
   # 通知推送配置
   notification:

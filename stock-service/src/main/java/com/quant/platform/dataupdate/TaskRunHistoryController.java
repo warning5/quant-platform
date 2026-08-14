@@ -131,7 +131,14 @@ public class TaskRunHistoryController {
         Object endTime = r.get("lastEndTime");
         if (efh != null && endTime != null) {
             int hour = ((Number) efh).intValue();
-            java.time.LocalDateTime et = ((java.sql.Timestamp) endTime).toLocalDateTime();
+            java.time.LocalDateTime et;
+            if (endTime instanceof java.sql.Timestamp ts) {
+                et = ts.toLocalDateTime();
+            } else if (endTime instanceof java.time.LocalDateTime ldt) {
+                et = ldt;
+            } else {
+                return true;
+            }
             if (et.getHour() > hour) return false;
         }
         return true;

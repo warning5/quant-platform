@@ -56,7 +56,7 @@ def fetch_stock_history(code, name, market, start_date, end_date, max_retries=2,
     
     参数:
         timeout: 单次请求超时秒数（默认30s，增量更新足够；历史回填可通过命令行 --timeout 调大）
-                 超时时抛出 TimeoutError，上层捕获后 sys.exit(1)，外层 run_baostock 会重试
+                 超时时返回 None（跳过该股票），上层循环继续处理剩余股票
     """
     import pandas as pd
 
@@ -99,8 +99,9 @@ def fetch_stock_history(code, name, market, start_date, end_date, max_retries=2,
             t.join(timeout=timeout)
 
             if t.is_alive():
-                print(f"[TIMEOUT] {code} 超时({timeout}s), 终止脚本")
-                raise TimeoutError(f"{code} 请求超时({timeout}s)")
+                # 超时不抛异常，返回 None 让上层跳过该股票继续处理剩余股票
+                print(f"[TIMEOUT] {code} 请求超时({timeout}s)，跳过该股票", flush=True)
+                return None
 
             if error_holder[0]:
                 raise error_holder[0]
@@ -116,7 +117,7 @@ def fetch_stock_history(code, name, market, start_date, end_date, max_retries=2,
             return df
 
         except TimeoutError:
-            raise  # 向上传播，由 main() 的 except TimeoutError 捕获后 sys.exit(1)
+            return None  # 超时返回 None，上层跳过该股票
         except Exception as e:
             err_msg = str(e)
             # 编码/压缩错误直接跳过不重试
@@ -230,7 +231,7 @@ def build_daily_rows(db, code, name, market, df):
 
 # ─── 串行处理（主进程内，用于失败重分配）───────────────────────────
 def _run_sequential(stocks, start_date, end_date, force, inter_stock_delay,
-                    progress_queue=None, worker_id=-1):
+                    progress_queue=None, worker_id=-1, timeout=30):
     """
     在当前进程内串行处理一批股票。用于并行 worker 失败后的 fallback。
     返回 stats dict，与 worker 返回格式一致。
@@ -246,6 +247,7 @@ def _run_sequential(stocks, start_date, end_date, force, inter_stock_delay,
     db = StockDailyDB()
     stats = {"success": 0, "skipped": 0, "failed": 0, "no_data": 0, "processed": []}
     consecutive_no_data = 0
+    consecutive_timeout = 0
 
     try:
         for i, (code, name, market) in enumerate(stocks):
@@ -259,7 +261,7 @@ def _run_sequential(stocks, start_date, end_date, force, inter_stock_delay,
                         stats["failed"] += len(stocks) - i
                         break
 
-                df = fetch_stock_history(code, name, market, start_date, end_date)
+                df = fetch_stock_history(code, name, market, start_date, end_date, timeout=timeout)
 
                 if df is not None and len(df) > 0:
                     rows = build_daily_rows(db, code, name, market, df)
@@ -268,6 +270,7 @@ def _run_sequential(stocks, start_date, end_date, force, inter_stock_delay,
                     stats["skipped"] += len(df) - n
                     stats["processed"].append((code, market))
                     consecutive_no_data = 0
+                    consecutive_timeout = 0
                 else:
                     stats["no_data"] += 1
                     consecutive_no_data += 1
@@ -299,9 +302,10 @@ def _mp_worker_process_chunk(args, progress_queue=None):
     多进程 worker：在子进程中处理一批股票，每个 worker 独立登录 Baostock。
     绕过 Baostock 单 socket 串行限制，实现真正的并行。
 
-    args: (chunk, start_date_str, end_date_str, force, inter_stock_delay, worker_id)
+    args: (chunk, start_date_str, end_date_str, force, inter_stock_delay, worker_id, timeout)
         chunk: [(code, name, market), ...]
         worker_id: worker编号（用于日志标识）
+        timeout: 单只股票请求超时秒数
     progress_queue: multiprocessing.Queue，定期向主进程推送进度
     """
     import datetime as _dt
@@ -322,7 +326,7 @@ def _mp_worker_process_chunk(args, progress_queue=None):
             _sys.stdout.close()
             _sys.stdout = orig
 
-    chunk, start_date_str, end_date_str, force, inter_stock_delay, worker_id = args
+    chunk, start_date_str, end_date_str, force, inter_stock_delay, worker_id, timeout = args
     start_date = _dt.datetime.strptime(start_date_str, "%Y-%m-%d").date()
     end_date = _dt.datetime.strptime(end_date_str, "%Y-%m-%d").date()
 
@@ -353,6 +357,7 @@ def _mp_worker_process_chunk(args, progress_queue=None):
     db = StockDailyDB()
     stats = {"success": 0, "skipped": 0, "failed": 0, "no_data": 0, "processed": []}
     _consecutive_no_data = 0
+    _consecutive_timeout = 0
     _progress_interval = 5  # 每5只股票汇报一次进度
 
     try:
@@ -375,7 +380,7 @@ def _mp_worker_process_chunk(args, progress_queue=None):
                         stats["failed"] += len(chunk) - i
                         break
 
-                df = fetch_stock_history(code, name, market, start_date, end_date)
+                df = fetch_stock_history(code, name, market, start_date, end_date, timeout=timeout)
 
                 if df is not None and len(df) > 0:
                     rows = build_daily_rows(db, code, name, market, df)
@@ -384,6 +389,7 @@ def _mp_worker_process_chunk(args, progress_queue=None):
                     stats["skipped"] += len(df) - n
                     stats["processed"].append((code, market))
                     _consecutive_no_data = 0  # 重置
+                    _consecutive_timeout = 0  # 重置超时计数
                 else:
                     stats["no_data"] += 1
                     _consecutive_no_data += 1
@@ -404,10 +410,18 @@ def _mp_worker_process_chunk(args, progress_queue=None):
                     _time.sleep(inter_stock_delay)
 
             except TimeoutError:
-                stats["failed"] += len(chunk) - i
+                # 超时：跳过该股票继续，不中断 worker
+                stats["failed"] += 1
+                _consecutive_timeout += 1
                 if progress_queue:
                     progress_queue.put((worker_id, i+1, len(chunk), dict(stats), "TIMEOUT"))
-                break
+                # 连续 10 只超时 → Baostock 服务可能不可用，终止该 worker
+                if _consecutive_timeout >= 10:
+                    if progress_queue:
+                        progress_queue.put(f"[W{worker_id}] 连续10只超时，终止该worker")
+                    stats["failed"] += len(chunk) - i - 1
+                    break
+                continue
             except Exception:
                 stats["failed"] += 1
                 continue
@@ -436,6 +450,8 @@ def main():
                        help="股票池筛选 (SH300/SZ50/ZZ500/ZZ1000/STAR50)")
     parser.add_argument("--workers", type=int, default=1,
                        help="并行进程数 (default:1 串行; Baostock并发限制低, 多worker易失败)")
+    parser.add_argument("--timeout", type=int, default=30,
+                       help="单只股票请求超时秒数 (默认:30, 历史回填建议设60-120)")
     args = parser.parse_args()
 
     if args.end_date:
@@ -551,6 +567,7 @@ def main():
         total_failed = 0
         total_no_data = 0
         consecutive_no_data = 0        # 连续无数据计数器
+        consecutive_timeout = 0        # 连续超时计数器
         CONSECUTIVE_WARN = 10          # 连续N只无数据→警告
         CONSECUTIVE_ABORT = 50         # 连续N只无数据→终止
         processed_codes = []
@@ -607,7 +624,7 @@ def main():
                     f = executor.submit(
                         _mp_worker_process_chunk,
                         (chunk, start_date.strftime("%Y-%m-%d"),
-                         end_date.strftime("%Y-%m-%d"), args.force, 0.05, j),
+                         end_date.strftime("%Y-%m-%d"), args.force, 0.05, j, args.timeout),
                         progress_queue
                     )
                     futures[f] = j
@@ -658,7 +675,8 @@ def main():
                         print(f"\n[重分配] 共 {len(remaining)} 只失败股票，用串行模式补跑...", flush=True)
                         # 用串行模式逐只处理（避免再次并发冲突）
                         _retry_stats = _run_sequential(remaining, start_date, end_date,
-                                                       args.force, 0.05, progress_queue, -1)
+                                                       args.force, 0.05, progress_queue, -1,
+                                                       timeout=args.timeout)
                         total_success += _retry_stats["success"]
                         total_skipped += _retry_stats["skipped"]
                         total_failed += _retry_stats["failed"]
@@ -722,7 +740,7 @@ def main():
                                 actual_start = start_date
                                 print(f"  [resume] {code} 末端已到 {latest_date} 但中段缺失约 {gap_days} 天，从头补全")
 
-                    df = fetch_stock_history(code, name, market, actual_start, end_date)
+                    df = fetch_stock_history(code, name, market, actual_start, end_date, timeout=args.timeout)
 
                     if df is not None and len(df) > 0:
                         rows = build_daily_rows(db, code, name, market, df)
@@ -732,6 +750,7 @@ def main():
                         processed_codes.append((code, market))
                         print(f"[{i}/{len(stocks)}] {code} {name}: 写入 {n} 条")
                         consecutive_no_data = 0  # 重置
+                        consecutive_timeout = 0  # 重置超时计数
                     else:
                         # df is None 或 df 为空（如所有行 tradestatus=0 被过滤）
                         total_no_data += 1
@@ -751,8 +770,15 @@ def main():
                         time.sleep(args.delay)
 
                 except TimeoutError:
-                    print(f"[FATAL] 发生超时，脚本终止")
-                    sys.exit(1)
+                    # 超时：跳过该股票继续处理，不终止脚本
+                    print(f"[TIMEOUT] {code} 请求超时，跳过", flush=True)
+                    total_failed += 1
+                    consecutive_timeout += 1
+                    if consecutive_timeout >= 10:
+                        print(f"[ABORT] 连续 {consecutive_timeout} 只股票超时，"
+                              f"Baostock 服务可能不可用，终止脚本。", flush=True)
+                        break
+                    continue
                 except Exception as e:
                     print(f"[ERROR] {code} 处理异常: {e}")
                     total_failed += 1

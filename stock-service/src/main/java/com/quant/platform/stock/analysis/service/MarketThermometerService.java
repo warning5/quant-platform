@@ -327,12 +327,12 @@ public class MarketThermometerService {
             stockEarningYield = 4.0;  // 默认4%
         }
 
-        // 用 akshare 获取10年国债收益率（爬取东方财富）
+        // 用 akshare 获取10年国债收益率（新浪财经·中债国债收益率曲线）
         Double bondYield = getChinaBondYield10Y();
 
         if (bondYield == null || bondYield <= 0) {
-            // 回退：用固定值（历史均值约2.8%）
-            bondYield = 2.8;
+            // 回退：近期10Y国债收益率中枢约1.8%（2024下半年起持续下行，旧值2.8%已失真）
+            bondYield = 1.8;
         }
 
         double ratio = stockEarningYield / bondYield;

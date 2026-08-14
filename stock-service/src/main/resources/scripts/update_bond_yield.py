@@ -1,9 +1,12 @@
 """获取10年国债收益率历史数据并存入MySQL（P2-2）
 
 数据源：
-  akshare bond_china_yield（中债国债收益率曲线，支持 start_date/end_date 参数）
-  接口目标地址: http://yield.chinabond.com.cn/cbweb-pbc-web/pbc/historyQuery
-  注意：start_date 到 end_date 需要小于一年，所以需要分段获取
+  akshare bond_gb_zh_sina（新浪财经·中债国债收益率曲线，每日序列）
+  说明：原 bond_china_yield() 自某 akshare 版本起返回数据卡在 2020 年且
+        不再支持 start_date/end_date 参数，已失效，故切换至此接口。
+        bond_gb_zh_sina() 返回字段 date/open/high/low/close/volume，
+        其中 close 即 10 年期国债收益率(%)。本脚本按日期区间过滤写入。
+  注：该接口仅提供 10Y 序列（约最近 4 年交易日），2Y 与利差暂置空。
 """
 import sys
 import argparse
@@ -51,45 +54,35 @@ if row and row[0]:
 def fetch_bond_yield_by_period(start_date, end_date):
     """获取指定日期范围的国债收益率数据
 
-    注意：akshare bond_china_yield 接口限制 start_date 到 end_date 必须小于一年
-    接口期望 YYYYMMDD 格式（8位无分隔符）
+    数据源 ak.bond_gb_zh_sina() 返回完整每日序列（约最近 4 年交易日），
+    按日期区间 [start_date, end_date] 过滤后取 close 作为 10Y 收益率(%)。
+    2Y 与利差暂无法从该接口获取，置空。
     """
     print(f"  获取 {start_date} ~ {end_date} 的数据...")
     try:
-        # akshare 接口要求 YYYYMMDD 格式
-        start_fmt = start_date.replace('-', '')
-        end_fmt = end_date.replace('-', '')
-        df = ak.bond_china_yield(start_date=start_fmt, end_date=end_fmt)
-        gov = df[df.iloc[:, 0] == '中债国债收益率曲线']
-        if len(gov) == 0:
-            print(f"    未找到中债国债收益率曲线数据")
+        df = ak.bond_gb_zh_sina()
+        if df is None or len(df) == 0:
+            print(f"    未获取到国债收益率数据")
+            return []
+
+        df = df.copy()
+        df['date'] = df['date'].astype(str)
+        seg = df[(df['date'] >= start_date) & (df['date'] <= end_date)]
+        if len(seg) == 0:
+            print(f"    区间内无数据")
             return []
 
         records = []
-        for _, row in gov.iterrows():
-            date_str = str(row.iloc[1])
-            yield_10y = row.get('10年')
-            yield_2y = row.get('2年') if '2年' in row.index else None
-
-            if yield_10y is None:
-                continue
+        for _, row in seg.iterrows():
+            date_str = str(row['date'])
             try:
-                yield_10y = float(yield_10y)
+                yield_10y = float(row['close'])
             except (ValueError, TypeError):
                 continue
-
-            yield_2y_val = None
-            if yield_2y is not None:
-                try:
-                    yield_2y_val = float(yield_2y)
-                except (ValueError, TypeError):
-                    pass
-
-            spread = None
-            if yield_10y is not None and yield_2y_val is not None:
-                spread = round(yield_10y - yield_2y_val, 4)
-
-            records.append((date_str, yield_10y, yield_2y_val, spread))
+            # 合理性校验：10Y 国债收益率通常落在 0.5%~5% 区间
+            if not (0.5 <= yield_10y <= 5.0):
+                continue
+            records.append((date_str, yield_10y, None, None))
 
         print(f"    获取 {len(records)} 条记录")
         return records

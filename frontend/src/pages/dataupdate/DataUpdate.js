@@ -188,7 +188,7 @@ const renderProgressBar = (task) => {
     <div style={{ marginBottom: 8 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
         <Text style={{ fontSize: 12 }}>{task.currentStep || '暂无任务'}</Text>
-        <Text style={{ fontSize: 12, color: '#8c8c8c' }}>{task.processedStocks || 0}/{task.totalStocks || 0} · {getDuration(task)}</Text>
+        <Text style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{task.processedStocks || 0}/{task.totalStocks || 0} · {getDuration(task)}</Text>
       </div>
       <Progress percent={pct} size="small" strokeColor={isRunning ? '#1677ff' : '#52c41a'} showInfo={false} />
       {task.error && <Text type="danger" style={{ fontSize: 12 }}>{task.error}</Text>}
@@ -208,10 +208,10 @@ const renderLogs = (logs, logRef, taskStatus) => (
       taskStatus === 'RUNNING' ? (
         <Text type="secondary" style={{ color: '#888' }}>
           <span style={{ animation: 'pulse 1.5s infinite' }}>●</span> 任务运行中，等待脚本输出日志...
-          <br /><span style={{ color: '#555', fontSize: 11 }}>（财务数据采集可能需要较长时间才有输出）</span>
+          <br /><span style={{ color: 'var(--text-secondary)', fontSize: 11 }}>（财务数据采集可能需要较长时间才有输出）</span>
         </Text>
       ) : (
-        <Text type="secondary" style={{ color: '#555' }}>等待任务启动...</Text>
+        <Text type="secondary" style={{ color: 'var(--text-secondary)' }}>等待任务启动...</Text>
       )
     ) : (
       logs.map(l => (
@@ -1538,7 +1538,7 @@ function DataUpdate() {
                 </Form.Item>
               </Col>
               <Col>
-                <span style={{ lineHeight: '32px', color: '#8c8c8c', fontSize: 13 }}>
+                <span style={{ lineHeight: '32px', color: 'var(--text-secondary)', fontSize: 13 }}>
                   <PieChartOutlined style={{ marginRight: 4 }} />
                   更新沪深300、上证50、中证500等 10 个主要指数日线数据
                 </span>
@@ -1659,12 +1659,12 @@ function DataUpdate() {
                 { key: 'indicator', label: '财务指标', icon: '📈', color: '#722ed1' },
               ].map(table => (
                 <Col span={6} key={table.key}>
-                  <Card size="small" style={{ backgroundColor: '#fafafa', borderLeft: `3px solid ${table.color}` }}>
+                  <Card size="small" style={{ backgroundColor: 'var(--bg-card-inner)', borderLeft: `3px solid ${table.color}` }}>
                     <Statistic
                       title={table.label}
                       value={financialCoverage[table.key]?.count || 0}
                       suffix={
-                        <span style={{ fontSize: 11, color: '#8c8c8c', fontWeight: 400, marginLeft: 4 }}>
+                        <span style={{ fontSize: 11, color: 'var(--text-secondary)', fontWeight: 400, marginLeft: 4 }}>
                           条 · {financialCoverage[table.key]?.stocks || 0} 只股票
                         </span>
                       }
@@ -1691,7 +1691,7 @@ function DataUpdate() {
                 </Form.Item>
               </Col>
               <Col>
-                <span style={{ lineHeight: '32px', color: '#8c8c8c', margin: '0 4px' }}>至</span>
+                <span style={{ lineHeight: '32px', color: 'var(--text-secondary)', margin: '0 4px' }}>至</span>
               </Col>
               <Col>
                 <Form.Item name="yearEnd" label="结束年份" style={{ marginBottom: 0 }}>
@@ -1886,7 +1886,7 @@ function DataUpdate() {
           <Form form={dividendForm} layout="inline" initialValues={{ resume: false }}>
             <Row gutter={[16, 12]} style={{ width: '100%' }}>
               <Col>
-                <span style={{ lineHeight: '32px', color: '#8c8c8c', fontSize: 13 }}>
+                <span style={{ lineHeight: '32px', color: 'var(--text-secondary)', fontSize: 13 }}>
                   <DollarOutlined style={{ marginRight: 4 }} />
                   采集沪深两市分红除权数据（Baostock），写入 stock_dividend 表
                 </span>
@@ -2061,34 +2061,34 @@ function DataUpdate() {
               style={{ marginTop: 12 }}
               items={[{
                 key: 'detail',
-                label: <span style={{ color: '#8c8c8c' }}>各表详细统计 ({sentimentCoverage.tables.length} 张表)</span>,
+                label: <span style={{ color: 'var(--text-secondary)' }}>各表详细统计 ({sentimentCoverage.tables.length} 张表)</span>,
                 children: (
                   <Row gutter={[12, 12]}>
                     {sentimentCoverage.tables.map(table => (
                       <Col style={{ flex: '0 0 19.8%', maxWidth: '19.8%' }} key={table.table}>
-                        <Card size="small" style={{ backgroundColor: '#fafafa', borderLeft: '3px solid #722ed1', marginBottom: 4 }}>
+                        <Card size="small" style={{ backgroundColor: 'var(--bg-card-inner)', borderLeft: '3px solid #722ed1', marginBottom: 4 }}>
                           <Statistic
                             title={table.name === '一致预期'
                               ? (<span>一致预期{' '}
-                                <Tooltip title="同花顺一致预期数据（预测净利润），用于事件驱动策略对比实际业绩vs预期，生成超预期/不及预期信号">
-                                  <QuestionCircleOutlined style={{ color: '#999', fontSize: 12 }} />
+                                  <Tooltip title="同花顺一致预期数据（预测净利润），用于事件驱动策略对比实际业绩vs预期，生成超预期/不及预期信号">
+                                    <QuestionCircleOutlined style={{ color: 'var(--text-secondary)', fontSize: 12 }} />
                                 </Tooltip></span>)
                               : table.name === '业绩快报'
                                 ? (<span>业绩快报{' '}
-                                  <Tooltip title="东方财富业绩快报数据（EPS/营收/净利/ROE等），用于事件驱动策略判断业绩超预期或不及预期，触发买入/卖出信号">
-                                    <QuestionCircleOutlined style={{ color: '#999', fontSize: 12 }} />
+                                    <Tooltip title="东方财富业绩快报数据（EPS/营收/净利/ROE等），用于事件驱动策略判断业绩超预期或不及预期，触发买入/卖出信号">
+                                      <QuestionCircleOutlined style={{ color: 'var(--text-secondary)', fontSize: 12 }} />
                                   </Tooltip></span>
                                 )
                                 : table.name === 'QVIX恐慌指数'
                                   ? (<span>QVIX恐慌指数{' '}
-                                    <Tooltip title="中国VIX指数（50ETF/300ETF/500ETF/创业板指），用于市场情绪策略判断市场恐慌程度，调整推荐权重">
-                                      <QuestionCircleOutlined style={{ color: '#999', fontSize: 12 }} />
+                                      <Tooltip title="中国VIX指数（50ETF/300ETF/500ETF/创业板指），用于市场情绪策略判断市场恐慌程度，调整推荐权重">
+                                        <QuestionCircleOutlined style={{ color: 'var(--text-secondary)', fontSize: 12 }} />
                                     </Tooltip></span>)
                                   : table.name
                             }
                             value={table.recordCount || 0}
                             suffix={
-                              <span style={{ fontSize: 11, color: '#8c8c8c', fontWeight: 400, marginLeft: 4 }}>
+                              <span style={{ fontSize: 11, color: 'var(--text-secondary)', fontWeight: 400, marginLeft: 4 }}>
                                 条 · {
                                   table.minDate && table.maxDate
                                     ? (() => {
@@ -2297,7 +2297,7 @@ function DataUpdate() {
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
                           国债收益率
                           <Tooltip title="国债收益率曲线数据（中债/交易所），用于宏观择时、风险溢价模型和无风险利率基准">
-                            <QuestionCircleOutlined style={{ color: '#999', fontSize: 12 }} />
+                            <QuestionCircleOutlined style={{ color: 'var(--text-secondary)', fontSize: 12 }} />
                           </Tooltip>
                         </span>
                       </Checkbox>
@@ -2307,7 +2307,7 @@ function DataUpdate() {
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
                           申万行业指数
                           <Tooltip title="申万一级/二级行业指数行情，用于行业轮动、行业相对强弱和因子风格归因">
-                            <QuestionCircleOutlined style={{ color: '#999', fontSize: 12 }} />
+                            <QuestionCircleOutlined style={{ color: 'var(--text-secondary)', fontSize: 12 }} />
                           </Tooltip>
                         </span>
                       </Checkbox>
@@ -2317,7 +2317,7 @@ function DataUpdate() {
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
                           一致预期
                           <Tooltip title="同花顺/东方财富一致预期数据（预测净利润、EPS），用于事件驱动策略对比实际业绩 vs 预期">
-                            <QuestionCircleOutlined style={{ color: '#999', fontSize: 12 }} />
+                            <QuestionCircleOutlined style={{ color: 'var(--text-secondary)', fontSize: 12 }} />
                           </Tooltip>
                         </span>
                       </Checkbox>
@@ -2327,7 +2327,7 @@ function DataUpdate() {
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
                           业绩快报
                           <Tooltip title="东方财富业绩快报数据（EPS/营收/净利/ROE等），用于事件驱动策略判断业绩超预期或不及预期">
-                            <QuestionCircleOutlined style={{ color: '#999', fontSize: 12 }} />
+                            <QuestionCircleOutlined style={{ color: 'var(--text-secondary)', fontSize: 12 }} />
                           </Tooltip>
                         </span>
                       </Checkbox>
@@ -2337,7 +2337,7 @@ function DataUpdate() {
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
                           QVIX恐慌指数
                           <Tooltip title="中国VIX指数（50ETF/300ETF/500ETF/创业板指），用于市场情绪策略判断市场恐慌程度">
-                            <QuestionCircleOutlined style={{ color: '#999', fontSize: 12 }} />
+                            <QuestionCircleOutlined style={{ color: 'var(--text-secondary)', fontSize: 12 }} />
                           </Tooltip>
                         </span>
                       </Checkbox>
@@ -2460,7 +2460,7 @@ function DataUpdate() {
           <span>
             空值检查
             <Tooltip title="空值检查：检查选中日期范围内，各表 code 字段是否存在 NULL 或空字符串。">
-              <QuestionCircleOutlined style={{ marginLeft: 4, color: '#8c8c8c' }} />
+              <QuestionCircleOutlined style={{ marginLeft: 4, color: 'var(--text-secondary)' }} />
             </Tooltip>
           </span>
         ),
@@ -2570,14 +2570,14 @@ function DataUpdate() {
               <Statistic
                 title="最早日期"
                 value={bidaskCoverage?.minDate ? String(bidaskCoverage.minDate).slice(0, 10) : '--'}
-                valueStyle={{ fontSize: 14, color: '#8c8c8c' }}
+                valueStyle={{ fontSize: 14, color: 'var(--text-secondary)' }}
               />
             </Col>
             <Col span={5}>
               <Statistic
                 title="最新日期"
                 value={bidaskCoverage?.maxDate ? String(bidaskCoverage.maxDate).slice(0, 10) : '--'}
-                valueStyle={{ fontSize: 14, color: '#8c8c8c' }}
+                valueStyle={{ fontSize: 14, color: 'var(--text-secondary)' }}
               />
             </Col>
           </Row>
@@ -2586,7 +2586,7 @@ function DataUpdate() {
             <Row gutter={[12, 8]}>
               {bidaskCoverage.marketStats.map((s) => (
                 <Col style={{ flex: '0 0 19.8%', maxWidth: '19.8%' }} key={s.market}>
-                  <Card size="small" style={{ backgroundColor: '#fafafa', borderLeft: `3px solid ${mktColors[s.market] || '#999'}`, marginBottom: 4 }}>
+                  <Card size="small" style={{ backgroundColor: 'var(--bg-card-inner)', borderLeft: `3px solid ${mktColors[s.market] || 'var(--text-secondary)'}`, marginBottom: 4 }}>
                     <Statistic
                       title={s.market === 'SH' ? '沪市' : s.market === 'SZ' ? '深市' : '北交所'}
                       value={s.record_count || 0}
@@ -2595,11 +2595,11 @@ function DataUpdate() {
                         return n >= 10000 ? (n / 10000).toFixed(1) + ' 万' : n.toLocaleString();
                       }}
                       suffix={
-                        <span style={{ fontSize: 11, color: '#8c8c8c', fontWeight: 400 }}>
+                        <span style={{ fontSize: 11, color: 'var(--text-secondary)', fontWeight: 400 }}>
                           条 · {s.stock_count || 0} 只
                         </span>
                       }
-                      valueStyle={{ fontSize: 14, fontWeight: 600, color: mktColors[s.market] || '#999' }}
+                      valueStyle={{ fontSize: 14, fontWeight: 600, color: mktColors[s.market] || 'var(--text-secondary)' }}
                     />
                   </Card>
                 </Col>
@@ -2689,7 +2689,7 @@ function DataUpdate() {
               }))}
               columns={[
                 { title: '日期', dataIndex: 'date', width: 100,
-                  render: (v, r) => r.holiday ? <span style={{ color: '#999' }}>{v} <Tag color="default" style={{ fontSize: 10 }}>{r.label}</Tag></span> : v },
+                  render: (v, r) => r.holiday ? <span style={{ color: 'var(--text-secondary)' }}>{v} <Tag color="default" style={{ fontSize: 10 }}>{r.label}</Tag></span> : v },
                 { title: '目标', dataIndex: 'total', align: 'right', width: 80,
                   render: (v, r) => r.holiday ? '-' : v },
                 { title: '成功', dataIndex: 'success', align: 'right', width: 80,
@@ -2775,7 +2775,7 @@ function DataUpdate() {
                 </Form.Item>
               </Col>
               <Col>
-                <span style={{ lineHeight: '32px', color: '#8c8c8c', fontSize: 13 }}>
+                <span style={{ lineHeight: '32px', color: 'var(--text-secondary)', fontSize: 13 }}>
                   <FileTextOutlined style={{ marginRight: 4 }} />
                   采集东方财富个股研报数据，包含评级、盈利预测、PDF链接
                 </span>
@@ -2847,7 +2847,7 @@ function DataUpdate() {
               valueStyle={{ fontSize: 14, color: status === 'OK' ? '#52c41a' : '#fa8c16' }} />
           </Col>
         </Row>
-        <div style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 8 }}>
+        <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>
           区间 {startDate} ~ {endDate}，统计每天研报数量（仅显示有数据的日期）
         </div>
 
@@ -2895,7 +2895,7 @@ function DataUpdate() {
                 <p style={{ margin: '4px 0' }}>
                   除权除息后，Baostock 会 retroactive 更新所有历史前复权因子。本任务查询近 N 天除权股票，重新拉取完整历史 qfq 数据并写入 ClickHouse（以 update_time=now() 确保覆盖旧快照）。
                 </p>
-                <p style={{ margin: '4px 0', color: '#8c8c8c' }}>
+                <p style={{ margin: '4px 0', color: 'var(--text-secondary)' }}>
                   <SyncOutlined style={{ marginRight: 4 }} />
                   依赖链：分红除权(DIVIDEND) → 前复权刷新(QFQ_REFRESH) → 因子计算(FACTOR_COMPUTE)
                 </p>
@@ -2910,7 +2910,7 @@ function DataUpdate() {
           <Form form={qfqForm} layout="inline" initialValues={{ limit: 7 }}>
             <Row gutter={[16, 12]} style={{ width: '100%' }}>
               <Col>
-                <span style={{ lineHeight: '32px', color: '#8c8c8c', fontSize: 13 }}>
+                <span style={{ lineHeight: '32px', color: 'var(--text-secondary)', fontSize: 13 }}>
                   <SyncOutlined style={{ marginRight: 4 }} />
                   查询近 N 天除权股票并重刷历史 qfq 数据（Baostock adjustflag=2）
                 </span>
@@ -3231,7 +3231,7 @@ function DataUpdate() {
                     </Row>
                     <Row style={{ marginTop: 12 }}>
                       <Col>
-                        <span style={{ fontSize: 13, color: '#8c8c8c', marginRight: 8 }}>最新日覆盖</span>
+                        <span style={{ fontSize: 13, color: 'var(--text-secondary)', marginRight: 8 }}>最新日覆盖</span>
                         {markets.map(m => (
                           <Tooltip key={m.market} title={`${dictMap[m.market]?.dictLabel ?? m.market}：${m.infoCount}只中 ${m.latestDayCount}只有数据 (${m.latestDate})`}>
                             <Tag color={dictMap[m.market]?.color ?? 'default'} style={{ fontSize: 12, marginRight: 4 }}>

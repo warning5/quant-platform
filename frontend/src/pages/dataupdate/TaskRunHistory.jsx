@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Card, Table, Tag, Select, Button, Input, Form, Row, Col, Statistic, Space, Tabs,
-  Alert, message, DatePicker, Switch, InputNumber, Descriptions, Progress,
+  Alert, message, DatePicker, Switch, InputNumber, Descriptions, Progress, Badge,
 } from 'antd';
 import { ReloadOutlined, BellOutlined, SendOutlined, WarningOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
@@ -230,6 +230,7 @@ export default function TaskRunHistory() {
     {
       key: 'config',
       label: '告警配置',
+      forceRender: true,
       children: (
         <Card title="失败告警通知" extra={<Tag color={notif.enabled ? 'success' : 'default'}>{notif.enabled ? '已启用' : '未启用'}</Tag>}>
           <Form form={notifForm} layout="vertical" style={{ maxWidth: 520 }}>

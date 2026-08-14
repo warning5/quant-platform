@@ -102,7 +102,7 @@
 <div class="nav-group"><a class="nav-main" href="#part4">四、选股/推荐</a>
 <a class="nav-item" href="#s4-1">4.1 智能推荐管线</a><a class="nav-item" href="#s4-2">4.2 权重模式</a><a class="nav-item" href="#s4-3">4.3 表现追踪</a><a class="nav-item" href="#s4-4">4.4 因子选股</a></div>
 <div class="nav-group"><a class="nav-main" href="#part5">五、评估</a>
-<a class="nav-item" href="#s5-1">5.1 Brinson归因</a><a class="nav-item" href="#s5-2">5.2 因子风格归因</a><a class="nav-item" href="#s5-3">5.3 FF3归因</a><a class="nav-item" href="#s5-4">5.4 Alpha滚动监控</a><a class="nav-item" href="#s5-5">5.5 蒙特卡洛</a><a class="nav-item" href="#s5-6">5.6 Walk-Forward</a><a class="nav-item" href="#s5-7">5.7 Regime回验</a><a class="nav-item" href="#s5-8">5.8 模拟盘</a><a class="nav-item" href="#s5-9">5.9 组合风控</a></div>
+<a class="nav-item" href="#s5-1">5.1 Brinson归因</a><a class="nav-item" href="#s5-2">5.2 因子风格归因</a><a class="nav-item" href="#s5-3">5.3 FF3归因</a><a class="nav-item" href="#s5-4">5.4 Alpha滚动监控</a><a class="nav-item" href="#s5-5">5.5 蒙特卡洛</a><a class="nav-item" href="#s5-6">5.6 Walk-Forward</a><a class="nav-item" href="#s5-7">5.7 Regime回验</a><a class="nav-item" href="#s5-8">5.8 模拟盘</a><a class="nav-item" href="#s5-9">5.9 组合风控</a><a class="nav-item" href="#s5-10">5.10 多策略组合模式</a></div>
 <div class="nav-group"><a class="nav-main" href="#part6">六、数据管理</a>
 <a class="nav-item" href="#s6-1">6.1 数据更新</a><a class="nav-item" href="#s6-2">6.2 财务数据</a><a class="nav-item" href="#s6-3">6.3 研报数据</a><a class="nav-item" href="#s6-4">6.4 行业排行</a><a class="nav-item" href="#s6-5">6.5 定时任务</a><a class="nav-item" href="#s6-6">6.6 质量监控</a><a class="nav-item" href="#s6-7">6.7 缠论筛选</a><a class="nav-item" href="#s6-8">6.8 黑名单</a></div>
 <div class="nav-group"><a class="nav-main" href="#part7">七、系统管理</a>
@@ -1079,6 +1079,57 @@ R_portfolio = Σ (β_i × F_i) + ε
 <p>更关键的是行业之间的相关性会因市场结构性变化而改变——比如某条新政策让新能源和消费的相关性突然升高。静态分组无法捕捉这种变化，动态滚动相关性可以。</p>
 <p>平台用 Union-Find 聚类算法把高相关性行业自动归并为"等效行业组"——比如银行+地产+非银金融经常聚为一组，在集中度检查时把它们的总权重合并计算。如果分散投资但实际都是"金融系"，等于没分散。</p></div>
 </div></div>
+
+<div class="section" id="s5-10"><h3>5.10 多策略组合模式</h3><div class="module-box">
+<h4>作用</h4><p>把多个独立策略按权重合并成一个「多策略模拟盘」（Combo），用<strong>一份资金、一条净值曲线</strong>统一管理，享受子策略低相关带来的波动平滑——而不是在三个模拟盘里各看各的盈亏。</p>
+
+<div class="why-box"><h4>为什么要用多策略组合？单个策略不够吗？</h4>
+<ul>
+<li><strong>单策略有环境局限性</strong>：任何单一策略都有适应/失效的市场环境（比如动量策略在震荡市亏钱、价值策略在成长牛跑输）。多策略组合的核心是「分散」——只要子策略相关性低，组合波动会显著小于单策略，回撤更可控。</li>
+<li><strong>对比「分别建 3 个模拟盘」</strong>：分别建盘等于手管 3 份资金，无法统一看净值、无法做组合层面的再平衡和风控。多策略组合把它们合并为一份——资金、风控、再平衡统一管理。</li>
+<li><strong>效果可量化</strong>：组合详情用「平均相关性」和「分散化比率」两个指标客观衡量分散是否真的生效，而不是凭感觉。</li>
+</ul></div>
+
+<h4>入口与创建</h4>
+<p>多策略组合在「模拟盘交易」页创建：</p>
+<div class="steps">
+<div class="step"><span class="step-num">1</span><div class="step-title">进入模拟盘交易</div><div class="step-desc">策略 → 模拟盘交易 → 新建模拟盘</div></div>
+<div class="step"><span class="step-num">2</span><div class="step-title">开启组合模式</div><div class="step-desc">弹窗顶部「组合模式」开关</div></div>
+<div class="step"><span class="step-num">3</span><div class="step-title">选策略设权重</div><div class="step-desc">勾选 2~N 个策略</div></div>
+<div class="step"><span class="step-num">4</span><div class="step-title">设资金与模式</div><div class="step-desc">初始资金/分配模式</div></div>
+<div class="step"><span class="step-num">5</span><div class="step-title">创建并进入组合</div><div class="step-desc">详情进组合视图</div></div>
+</div>
+<div class="alert info"><strong>约束</strong>：组合模式至少需要 <strong>2 个策略</strong>；各子策略权重合计需 ≈100%（允许 5% 误差），保存时系统会归一化。配置形如 <code>[{strategyId, weight}]</code>。创建后界面不提供增删子策略，需新建组合。</div>
+
+<h4>组合详情（4 个 Tab）</h4>
+<div class="card-grid">
+<div class="card cyan"><h4>组合总览</h4><p>子策略权重条 + 策略间相关性矩阵 + 组合净值曲线（组合 vs 各子策略），一眼看出谁在贡献收益、谁在拖后腿。</p></div>
+<div class="card cyan"><h4>子策略明细</h4><p>每个子策略的权重 / 初始资金 / 当前资产 / 收益率 / 贡献 / 状态，可单独「暂停」「恢复」「调权重」。</p></div>
+<div class="card cyan"><h4>再平衡历史</h4><p>记录每次再平衡的触发类型（手动 / 周期 / 阈值）、最大偏离、调仓标的与备注。</p></div>
+<div class="card cyan"><h4>信号流水</h4><p>各子策略产生的买卖信号明细，含信号价、因子得分、命中原因与执行状态。</p></div>
+</div>
+
+<h4>分散化监控（关键指标）</h4>
+<table><tr><th>指标</th><th>含义</th><th>告警阈值</th></tr>
+<tr><td>平均相关性</td><td>子策略两两相关性均值（基于各自净值）</td><td>ρ&gt;0.7 → 组合分散失效</td></tr>
+<tr><td>分散化比率</td><td>组合波动率 ÷ 子策略加权波动率，越&gt;1 越好</td><td>&lt;1.15 → 策略同质化风险</td></tr></table>
+<div class="alert warn">相关性越高，多策略组合的平滑效果越弱。平均相关性 &gt;0.7 或分散化比率 &lt;1.15 时，系统给出「组合分散化告警」，建议替换高相关子策略（而非盲目加更多策略）。</div>
+
+<h4>权重调整与再平衡</h4>
+<ul>
+<li><strong>调权重</strong>：在「子策略明细」点「调权重」，修改某子策略权重后保存 → 系统重新归一化组合配置，并触发该子策略再平衡。</li>
+<li><strong>手动再平衡</strong>：顶部「手动再平衡」按钮立即按当前配置对所有子策略做一次再平衡（触发类型 <code>MANUAL</code>）。</li>
+<li><strong>触发类型</strong>：<span class="tag blue">MANUAL</span> 手动 / <span class="tag green">SCHEDULE</span> 周期 / <span class="tag orange">THRESHOLD</span> 阈值（某子策略实际权重偏离目标权重超阈时自动触发）。</li>
+</ul>
+
+<h4>子策略生命周期</h4>
+<table><tr><th>状态</th><th>标签</th><th>说明</th></tr>
+<tr><td>RUNNING</td><td><span class="tag green">运行中</span></td><td>该子策略正常参与信号生成与执行</td></tr>
+<tr><td>PAUSED</td><td><span class="tag orange">已暂停</span></td><td>该子账户暂停，不再生成新信号，不影响其它子策略</td></tr>
+<tr><td>STOPPED</td><td><span class="tag red">已停止</span></td><td>子账户归档，不再接受任何操作</td></tr></table>
+<div class="alert info">多策略组合与单策略模拟盘共用同一套状态机与风控规则（止损 / 止盈 / 行业暴露 / 仓位集中度 / 回撤阈值见的 5.8 节），区别仅在「资金与信号来源是多个策略的合并」。</div>
+</div></div>
+
 <h2 id="part6">六、数据管理</h2>
 <p>数据是量化平台的"原料"——因子计算、策略回测、推荐生成全部依赖底层数据质量。本模块管理行情数据、财务数据、研报数据、行业数据的采集、更新和质量监控，以及定时任务调度。核心原则：<strong>数据不可靠，以上所有模块的分析结果都不可信。</strong></p>
 

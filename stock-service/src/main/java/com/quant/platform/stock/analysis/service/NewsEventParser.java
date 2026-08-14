@@ -11,8 +11,12 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.*;
+import java.time.format.DateTimeParseException;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -26,15 +30,18 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class NewsEventParser {
 
+    /**
+     * 每次批量处理的最大新闻条数
+     */
+    private static final int BATCH_SIZE = 30;
+    /**
+     * LLM解析的最大内容长度（字符），超长截断
+     */
+    private static final int MAX_CONTENT_LEN = 800;
     private final LlmService llmService;
     private final NewsMapper newsMapper;
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
-
-    /** 每次批量处理的最大新闻条数 */
-    private static final int BATCH_SIZE = 30;
-    /** LLM解析的最大内容长度（字符），超长截断 */
-    private static final int MAX_CONTENT_LEN = 800;
 
     /**
      * 定时任务：每10分钟扫描并解析未标记的新闻
@@ -54,6 +61,7 @@ public class NewsEventParser {
 
     /**
      * 手动触发解析（供前端/调试使用）
+     *
      * @return 解析的新闻条数
      */
     public int parseUnprocessedNews() {
@@ -108,6 +116,7 @@ public class NewsEventParser {
 
     /**
      * 获取指定股票近N天的利好事件标签（供估值修复策略使用）
+     *
      * @param code 股票代码（纯代码）
      * @param days 近N天
      * @return 利好事件标签列表，如 ["BUYBACK","INCREASE"]
@@ -125,12 +134,8 @@ public class NewsEventParser {
                 .filter(n -> {
                     Object pubDate = n.get("publish_date");
                     if (pubDate == null) return true; // 无日期的保留
-                    try {
-                        LocalDateTime dt = LocalDateTime.parse(pubDate.toString().replace(" ", "T"));
-                        return dt.isAfter(cutoff);
-                    } catch (Exception e) {
-                        return true;
-                    }
+                    LocalDateTime dt = parsePublishDate(pubDate.toString());
+                    return dt == null || dt.isAfter(cutoff);
                 })
                 .map(n -> (String) n.get("event_tag"))
                 .distinct()
@@ -139,6 +144,7 @@ public class NewsEventParser {
 
     /**
      * 获取指定股票近N天的事件评分（供策略评分使用）
+     *
      * @param code 股票代码
      * @param days 近N天
      * @return -1.0(利空) ~ 1.0(利好)
@@ -157,12 +163,8 @@ public class NewsEventParser {
 
             Object pubDate = n.get("publish_date");
             if (pubDate != null) {
-                try {
-                    LocalDateTime dt = LocalDateTime.parse(pubDate.toString().replace(" ", "T"));
-                    if (!dt.isAfter(cutoff)) continue;
-                } catch (Exception ignored) {
-                    log.error("[NewsEventParser] 捕获到未处理异常", ignored);
-                }
+                LocalDateTime dt = parsePublishDate(pubDate.toString());
+                if (dt != null && !dt.isAfter(cutoff)) continue;
             }
 
             if (bullishCodes.contains(tag)) {
@@ -178,6 +180,27 @@ public class NewsEventParser {
         return Math.max(-1.0, Math.min(1.0, totalScore / Math.max(1, count / 2.0)));
     }
 
+    /**
+     * 解析新闻发布时间，兼容两种格式：
+     * - 日期时间："2026-07-23 10:15:30" / "2026-07-23T10:15:30"
+     * - 纯日期："2026-07-23"（按当日 00:00 处理）
+     * 解析失败返回 null（调用方按"保留"处理）。
+     */
+    private LocalDateTime parsePublishDate(String raw) {
+        if (raw == null || raw.isBlank()) return null;
+        String text = raw.trim().replace(" ", "T");
+        try {
+            return LocalDateTime.parse(text);
+        } catch (DateTimeParseException e) {
+            try {
+                return LocalDate.parse(raw.trim()).atStartOfDay();
+            } catch (DateTimeParseException ex) {
+                log.warn("[NewsEventParser] 发布时间格式无法解析，已忽略: {}", raw);
+                return null;
+            }
+        }
+    }
+
     // ── 私有方法 ──────────────────────────────────────────────
 
     /**
@@ -186,8 +209,8 @@ public class NewsEventParser {
     private List<Map<String, Object>> findUnprocessedNews() {
         return jdbcTemplate.queryForList(
                 "SELECT id, title, content FROM stock_news " +
-                "WHERE event_tag IS NULL AND title IS NOT NULL " +
-                "ORDER BY publish_date DESC LIMIT ?",
+                        "WHERE event_tag IS NULL AND title IS NOT NULL " +
+                        "ORDER BY publish_date DESC LIMIT ?",
                 BATCH_SIZE
         );
     }
@@ -198,10 +221,10 @@ public class NewsEventParser {
     private ParsedEvent parseSingleNews(String title, String content) {
         String systemPrompt = """
                 你是一个A股新闻事件分析专家。请根据新闻标题和内容，提取结构化事件信息。
-
+                
                 事件类型必须是以下之一：
                 %s
-
+                
                 请输出JSON格式：
                 {"event_type":"BUYBACK","sentiment":0.8,"direction":"positive"}
                 sentiment范围-1到1，1=极利好，-1=极利空，0=中性
@@ -256,5 +279,6 @@ public class NewsEventParser {
     /**
      * 解析结果内部DTO
      */
-    private record ParsedEvent(String eventType, double sentiment, String direction) {}
+    private record ParsedEvent(String eventType, double sentiment, String direction) {
+    }
 }
