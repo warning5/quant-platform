@@ -285,6 +285,18 @@ public class DataCoverageService {
         }
 
         // 6. 按日期×市场统计缺失量（用于前端汇总表格，不含个股明细）
+        // 说明：CH 的 stock_info 无 delist_date 列，无法直接过滤退市股；
+        // 故在循环外先取 MySQL 退市名单，在 Java 层对 CH 结果做减法（方案3：退市名单减法）。
+        Set<String> delistedCodes = new HashSet<>();
+        if (clickHouseConfig.isEnabled()) {
+            LambdaQueryWrapper<StockInfo> dlw = new LambdaQueryWrapper<>();
+            dlw.isNotNull(StockInfo::getDelistDate);
+            dlw.select(StockInfo::getCode);
+            for (StockInfo s : stockInfoMapper.selectList(dlw)) {
+                if (s.getCode() != null) delistedCodes.add(s.getCode());
+            }
+        }
+
         List<Map<String, Object>> dailyBreakdown = new ArrayList<>();
         if (!tradingDates.isEmpty()) {
             for (LocalDate td : tradingDates) {
@@ -292,22 +304,27 @@ public class DataCoverageService {
                 row.put("date", td.toString());
                 // 各市场当日缺失数
                 if (clickHouseConfig.isEnabled()) {
-                    // CH 的 stock_info 无 delist_date 列，不加该条件（退市股不同步到 CH）
-                    // 注意：CH 的 LEFT JOIN 对 String 列不匹配行返回空串 '' 而非 NULL，须用 = '' 判断
-                    String sql = "SELECT si.market, COUNT(*) AS missing " +
+                    // CH 的 LEFT JOIN 对 String 列不匹配行返回空串 '' 而非 NULL，须用 = '' 判断
+                    // 返回当日缺失的 (code, market)，在 Java 层排除退市股后按市场计数
+                    String sql = "SELECT si.code, si.market " +
                             "FROM stock.stock_info si FINAL " +
                             "LEFT JOIN stock.stock_daily sd ON sd.code = si.code AND sd.trade_date = ? " +
                             "WHERE si.list_date <= ? AND si.market IN ('SH','SZ','BJ') " +
-                            "AND sd.code = '' GROUP BY si.market";
+                            "AND sd.code = ''";
                     Map<String, Integer> dayMissing = new HashMap<>();
+                    dayMissing.put("SH", 0);
+                    dayMissing.put("SZ", 0);
+                    dayMissing.put("BJ", 0);
                     for (Map<String, Object> r : clickHouseStockService.queryForList(sql, td.toString(), endDate.toString())) {
+                        String code = r.get("code") != null ? r.get("code").toString() : null;
                         String mk = r.get("market") != null ? r.get("market").toString() : null;
-                        Integer cnt = r.get("missing") != null ? ((Number) r.get("missing")).intValue() : 0;
-                        if (mk != null) dayMissing.put(mk, cnt);
+                        if (code != null && mk != null && dayMissing.containsKey(mk) && !delistedCodes.contains(code)) {
+                            dayMissing.put(mk, dayMissing.get(mk) + 1);
+                        }
                     }
-                    row.put("SH", dayMissing.getOrDefault("SH", 0));
-                    row.put("SZ", dayMissing.getOrDefault("SZ", 0));
-                    row.put("BJ", dayMissing.getOrDefault("BJ", 0));
+                    row.put("SH", dayMissing.get("SH"));
+                    row.put("SZ", dayMissing.get("SZ"));
+                    row.put("BJ", dayMissing.get("BJ"));
                 } else {
                     String sql = "SELECT si.market, COUNT(*) AS missing " +
                             "FROM stock_info si " +

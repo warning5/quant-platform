@@ -40,3 +40,7 @@ nul*
 /opc-doc/
 /platform-core/target/
 /backend-mp/logs/
+
+# 含生产敏感信息（DB 密码 / 微信 Secret），禁止入库
+/backend-mp/src/main/resources/application-prod.yml
+/backend-mp/start-prod.sh

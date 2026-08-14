@@ -7,6 +7,7 @@ import com.quant.platform.factor.domain.FactorDefinition;
 import com.quant.platform.factor.domain.FactorTestReport;
 import com.quant.platform.factor.domain.FactorValue;
 import com.quant.platform.factor.engine.FactorComputeEngine;
+import com.quant.platform.factor.service.ClickHouseFactorValueService;
 import com.quant.platform.factor.service.FactorAnalysisService;
 import com.quant.platform.factor.service.FactorCorrelationService;
 import com.quant.platform.factor.service.FactorService;
@@ -59,6 +60,7 @@ public class FactorController {
     private final FactorWeightOptimizeService factorWeightOptimizeService;
     private final FactorAnalysisService factorAnalysisService;
     private final QuarterlyFactorAnalysisService quarterlyFactorAnalysisService;
+    private final ClickHouseFactorValueService clickHouseFactorValueService;
     private final SimpMessagingTemplate messagingTemplate;
     private final FactorComputeEngine computeEngine;
 
@@ -492,5 +494,28 @@ public class FactorController {
         List<LocalDate> dates = quarterlyFactorAnalysisService.getQuarterEndDates(startDate, endDate);
         List<String> result = dates.stream().map(LocalDate::toString).collect(Collectors.toList());
         return ApiResponse.success(result);
+    }
+
+    // ─── 因子值每日统计 ─────────────────────────────────────────────
+
+    /**
+     * 按日期段统计每天的全量因子值数量
+     * GET /factors/value-daily-stats?startDate=2025-01-01&endDate=2025-08-13
+     */
+    @GetMapping("/value-daily-stats")
+    @Operation(summary = "因子值每日统计：按日期段罗列每天的因子值总数/因子数/股票数")
+    public ApiResponse<List<Map<String, Object>>> valueDailyStats(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+        // 限制查询范围不超过 3 年，防止误操作拉全量数据
+        long daysBetween = java.time.temporal.ChronoUnit.DAYS.between(startDate, endDate) + 1;
+        if (daysBetween > 1100) {
+            throw new IllegalArgumentException("日期范围不能超过 3 年（当前 " + daysBetween + " 天）");
+        }
+        if (daysBetween < 1) {
+            throw new IllegalArgumentException("结束日期必须大于等于开始日期");
+        }
+        List<Map<String, Object>> stats = clickHouseFactorValueService.getDailyFactorValueStats(startDate, endDate);
+        return ApiResponse.success(stats);
     }
 }

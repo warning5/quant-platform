@@ -163,6 +163,8 @@ export const factorApi = {
   running: () => api.get('/factors/running'),
   batchCompute: (factorCodes, startDate, endDate, incremental = true, force = false) =>
     api.post('/factors/batch-compute', null, { params: { factorCodes: factorCodes.join(','), startDate, endDate, incremental, force } }),
+  // 因子值每日统计
+  dailyStats: (startDate, endDate) => api.get('/factors/value-daily-stats', { params: { startDate, endDate } }),
   // P1: 因子组合权重优化
   weightOptimize: (factorCodes, startDate, endDate, method = 'MARKOWITZ') =>
     api.post('/factors/weight-optimize', null, {

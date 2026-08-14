@@ -59,7 +59,7 @@ public class MpWechatAuthService {
                 log.warn("[MpWechat] 未配置微信凭据，dev 环境走开发兜底登录 userId={}", devUserId);
                 return devLogin();
             }
-            throw new BusinessException("微信登录未配置：请在 .env 中设置 WECHAT_MINI_APPID / WECHAT_MINI_SECRET");
+            throw new BusinessException("微信登录未配置：请在 application-prod.yml 的 mp.wechat.appid/secret 中设置，或用环境变量 WECHAT_MINI_APPID / WECHAT_MINI_SECRET 注入");
         }
         JsonNode node = code2Session(code);
         if (node.has("errcode") && node.get("errcode").asInt(0) != 0) {

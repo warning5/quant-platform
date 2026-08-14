@@ -4,7 +4,8 @@ import { message } from '../../utils/messageUtil';
 import {
   ReloadOutlined, PlayCircleOutlined, CheckCircleOutlined,
   ClockCircleOutlined, ThunderboltOutlined, RiseOutlined,
-  SyncOutlined, WarningOutlined, ClearOutlined, CodeOutlined, DownloadOutlined
+  SyncOutlined, WarningOutlined, ClearOutlined, CodeOutlined, DownloadOutlined,
+  BarChartOutlined
 } from '@ant-design/icons';
 import ReactECharts from '../../components/LazyECharts';
 import dayjs from 'dayjs';
@@ -34,6 +35,11 @@ function FactorMonitor() {
   const [speedSamples, setSpeedSamples] = useState([]);
   const [computeModal, setComputeModal] = useState(false);
   const [computeLoading, setComputeLoading] = useState(false);
+  // 因子值每日统计 Modal
+  const [statsModal, setStatsModal] = useState(false);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [statsData, setStatsData] = useState([]);
+  const [statsDateRange, setStatsDateRange] = useState(null);
   const [form] = Form.useForm();
   const [pageSize, setPageSize] = useState(20);
   // 通过 WebSocket 消息跟踪正在计算的因子（解决 cnt=0 时无法判断 isRunning 的问题）
@@ -347,6 +353,26 @@ function FactorMonitor() {
     }
   };
 
+  // 查询因子值每日统计
+  const handleFetchStats = async () => {
+    if (!statsDateRange || !statsDateRange[0] || !statsDateRange[1]) {
+      message.warning('请选择日期范围');
+      return;
+    }
+    try {
+      setStatsLoading(true);
+      const res = await factorApi.dailyStats(
+        statsDateRange[0].format('YYYY-MM-DD'),
+        statsDateRange[1].format('YYYY-MM-DD')
+      );
+      setStatsData(res || []);
+    } catch (e) {
+      message.error('查询因子值统计失败');
+    } finally {
+      setStatsLoading(false);
+    }
+  };
+
   // 表格列定义
   const columns = [
     {
@@ -530,6 +556,13 @@ function FactorMonitor() {
               style={{ width: 80 }}
             />
             <Button size="small" icon={<ReloadOutlined />} onClick={fetchData} loading={loading}>刷新</Button>
+            <Button
+              size="small"
+              icon={<BarChartOutlined />}
+              onClick={() => setStatsModal(true)}
+            >
+              因子值统计
+            </Button>
             <Button
               size="small"
               type="primary"
@@ -890,6 +923,88 @@ function FactorMonitor() {
             <Switch checkedChildren="强制" unCheckedChildren="正常" />
           </Form.Item>
         </Form>
+      </Modal>
+
+      {/* 因子值每日统计 Modal */}
+      <Modal
+        title={<Space><BarChartOutlined />因子值每日统计</Space>}
+        open={statsModal}
+        onCancel={() => { setStatsModal(false); setStatsData([]); }}
+        footer={null}
+        width={720}
+        destroyOnClose
+      >
+        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+          <Space>
+            <RangePicker
+              value={statsDateRange}
+              onChange={(dates) => setStatsDateRange(dates)}
+              disabledDate={(current) => current && current.isAfter(dayjs())}
+            />
+            <Button type="primary" icon={<ReloadOutlined />} onClick={handleFetchStats} loading={statsLoading}>
+              查询
+            </Button>
+          </Space>
+          {statsData.length > 0 && (
+            <Table
+              size="small"
+              dataSource={statsData}
+              rowKey="calc_date"
+              pagination={{ pageSize: 15, size: 'small', showTotal: (t) => `共 ${t} 天` }}
+              scroll={{ y: 400 }}
+              columns={[
+                {
+                  title: '日期',
+                  dataIndex: 'calc_date',
+                  width: 120,
+                  render: (d) => <span style={{ fontFamily: 'monospace' }}>{d}</span>,
+                },
+                {
+                  title: '因子值总数',
+                  dataIndex: 'totalCount',
+                  width: 120,
+                  sorter: (a, b) => a.totalCount - b.totalCount,
+                  render: (v) => <span style={{ fontFamily: 'monospace' }}>{v >= 10000 ? (v / 10000).toFixed(1) + '万' : v.toLocaleString()}</span>,
+                },
+                {
+                  title: '因子数',
+                  dataIndex: 'factorCount',
+                  width: 90,
+                  sorter: (a, b) => a.factorCount - b.factorCount,
+                  render: (v) => <span style={{ fontFamily: 'monospace' }}>{v}</span>,
+                },
+                {
+                  title: '股票数',
+                  dataIndex: 'stockCount',
+                  width: 100,
+                  sorter: (a, b) => a.stockCount - b.stockCount,
+                  render: (v) => <span style={{ fontFamily: 'monospace' }}>{v >= 10000 ? (v / 10000).toFixed(1) + '万' : v.toLocaleString()}</span>,
+                },
+              ]}
+              summary={() => {
+                const total = statsData.reduce((s, r) => s + r.totalCount, 0);
+                const avgFactors = statsData.length > 0 ? (statsData.reduce((s, r) => s + r.factorCount, 0) / statsData.length).toFixed(1) : 0;
+                const avgStocks = statsData.length > 0 ? (statsData.reduce((s, r) => s + r.stockCount, 0) / statsData.length).toFixed(0) : 0;
+                return (
+                  <Table.Summary fixed>
+                    <Table.Summary.Row>
+                      <Table.Summary.Cell index={0}><Text strong>汇总（{statsData.length} 天）</Text></Table.Summary.Cell>
+                      <Table.Summary.Cell index={1}><Text strong>{total >= 10000 ? (total / 10000).toFixed(1) + '万' : total.toLocaleString()}</Text></Table.Summary.Cell>
+                      <Table.Summary.Cell index={2}><Text strong>均 {avgFactors}</Text></Table.Summary.Cell>
+                      <Table.Summary.Cell index={3}><Text strong>均 {avgStocks >= 10000 ? (avgStocks / 10000).toFixed(1) + '万' : Number(avgStocks).toLocaleString()}</Text></Table.Summary.Cell>
+                    </Table.Summary.Row>
+                  </Table.Summary>
+                );
+              }}
+            />
+          )}
+          {!statsLoading && statsModal && statsData.length === 0 && (
+            <div style={{ textAlign: 'center', padding: '40px 0', color: '#bfbfbf' }}>
+              <BarChartOutlined style={{ fontSize: 24, marginBottom: 8, display: 'block', opacity: 0.3 }} />
+              选择日期范围后点击查询
+            </div>
+          )}
+        </Space>
       </Modal>
     </div>
   );

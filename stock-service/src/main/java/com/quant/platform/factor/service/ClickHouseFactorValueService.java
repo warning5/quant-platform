@@ -1335,6 +1335,49 @@ public class ClickHouseFactorValueService {
         return symbols;
     }
 
+    /**
+     * 按日期段统计每天的全量因子值数量（所有因子的汇总）
+     * @return List<Map> 每项包含 calc_date, total_count, factor_count, stock_count
+     */
+    public List<Map<String, Object>> getDailyFactorValueStats(
+            java.time.LocalDate startDate, java.time.LocalDate endDate) {
+        if (!clickHouseConfig.isEnabled()) {
+            return List.of();
+        }
+        String sql = """
+                SELECT calc_date,
+                       count() AS total_count,
+                       uniq(factor_code) AS factor_count,
+                       uniq(symbol) AS stock_count
+                FROM stock.factor_value FINAL
+                WHERE calc_date >= ? AND calc_date <= ?
+                GROUP BY calc_date
+                ORDER BY calc_date
+                """;
+        List<Map<String, Object>> result = new ArrayList<>();
+        try (Connection conn = getConnection();
+             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, startDate.toString());
+            stmt.setString(2, endDate.toString());
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    Map<String, Object> row = new LinkedHashMap<>();
+                    row.put("calc_date", rs.getDate("calc_date").toLocalDate());
+                    row.put("totalCount", rs.getLong("total_count"));
+                    row.put("factorCount", rs.getLong("factor_count"));
+                    row.put("stockCount", rs.getLong("stock_count"));
+                    result.add(row);
+                }
+            }
+            log.info("[ClickHouse] getDailyFactorValueStats: {} ~ {} → {} days",
+                    startDate, endDate, result.size());
+        } catch (Exception e) {
+            log.error("[ClickHouse] getDailyFactorValueStats 查询失败: {}", e.getMessage(), e);
+            throw new RuntimeException("ClickHouse 每日因子值统计查询失败: " + e.getMessage(), e);
+        }
+        return result;
+    }
+
     /** BigDecimal -> JSON 数值（null -> null） */
     private String toJsonVal(java.math.BigDecimal v) {
         return v == null ? "null" : v.toPlainString();
