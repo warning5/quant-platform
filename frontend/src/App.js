@@ -167,7 +167,7 @@ function AppLayout({ isDark, setIsDark }) {
           onCollapse={setCollapsed}
           trigger={null}
           style={{
-            background: '#fff',
+            background: isDark ? '#1f1f1f' : '#fff',
             transition: 'width 0.2s',
             overflow: 'hidden',
           }}
@@ -198,7 +198,7 @@ function AppLayout({ isDark, setIsDark }) {
         </div>
 
         <Menu
-          theme="light"
+          theme={isDark ? 'dark' : 'light'}
           mode="inline"
           selectedKeys={selectedKeys}
           openKeys={openKeys}
@@ -343,11 +343,11 @@ function AppLayout({ isDark, setIsDark }) {
         {/* ── 顶部模式：横向菜单条（桌面端，替代侧边栏，与侧边栏同色系） ── */}
         {!isMobile && menuLayout === 'top' && (
           <Menu
-            theme="light"
+            theme={isDark ? 'dark' : 'light'}
             mode="horizontal"
             selectedKeys={selectedKeys}
             items={fullMenuItems}
-            style={{ lineHeight: '46px', borderBottom: 0, background: '#fff' }}
+            style={{ lineHeight: '46px', borderBottom: 0, background: isDark ? '#141414' : '#fff' }}
           />
         )}
 
