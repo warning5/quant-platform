@@ -8,6 +8,8 @@ import com.quant.platform.stock.service.ClickHouseStockService;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.context.event.ContextRefreshedEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -54,20 +56,10 @@ public class MarketDataService {
     private volatile Map<String, BigDecimal> codeFcfMap = new ConcurrentHashMap<>();
 
     /**
-     * 指数代码 → 指数名称（用于区分指数和同代码个股，如 000001=上证指数 vs 平安银行）
+     * 指数代码 → 指数名称（用于区分指数和同代码个股，如 000001=上证指数 vs 平安银行）。
+     * 数据源：启动时从 index_daily 加载（DB 为唯一真相源），新增指数无需改代码。
      */
-    private static final Map<String, String> INDEX_NAME_MAP = Map.ofEntries(
-            Map.entry("000001", "上证指数"),
-            Map.entry("000016", "上证50"),
-            Map.entry("000022", "中证红利"),
-            Map.entry("000300", "沪深300"),
-            Map.entry("000688", "科创50"),
-            Map.entry("000852", "中证1000"),
-            Map.entry("000905", "中证500"),
-            Map.entry("399001", "深证成指"),
-            Map.entry("399006", "创业板指"),
-            Map.entry("399303", "国证2000")
-    );
+    private volatile Map<String, String> indexNameMap = new ConcurrentHashMap<>();
 
     public MarketDataService(ClickHouseStockService clickHouseStockService,
                              StockInfoMapper stockInfoMapper,
@@ -100,6 +92,21 @@ public class MarketDataService {
 
         // 预加载近12月派息数据（VAL_DIVIDEND_YIELD 因子使用）
         loadDividendAndFcf();
+    }
+
+    /**
+     * 容器完全刷新后（所有 Bean，含 ClickHouse DataSource，均已完成初始化）再加载指数映射。
+     * 避免在 @PostConstruct init() 阶段因 Bean 初始化顺序竞态导致 ClickHouse DataSource 尚未就绪，
+     * 使 indexNameMap 加载失败并永久空置（典型表现：000300 等指数被误判为股票查 stock_daily 报“无K线数据” WARN）。
+     */
+    @EventListener(ContextRefreshedEvent.class)
+    public void onContextRefreshed() {
+        try {
+            this.indexNameMap = clickHouseStockService.loadIndexCodeNameMap();
+            log.info("[MarketDataService] 已从 index_daily 加载 {} 个指数映射（ContextRefreshed）", indexNameMap.size());
+        } catch (Exception e) {
+            log.warn("[MarketDataService] 加载指数映射失败（不影响启动，仅指数识别回退为空）: {}", e.getMessage());
+        }
     }
 
     /**
@@ -321,14 +328,14 @@ public class MarketDataService {
 
     /**
      * 获取单个标的在指定日期区间的K线（供回测引擎加载基准使用）
-     * 自动识别指数代码：若 code 在 INDEX_NAME_MAP 中，则从 index_daily 表查询，
+     * 自动识别指数代码：若 code 在 indexNameMap（启动时从 index_daily 加载）中，则从 index_daily 表查询，
      * 避免与同代码个股混淆（如 000001 上证指数 vs 000001 平安银行）。
      * 分表后不再需要 name 过滤 workaround。
      */
     public List<MarketDailyBar> getBarsInRange(String symbol, LocalDate startDate, LocalDate endDate) {
         String code = parseCode(symbol);
         String market = parseMarket(symbol);
-        String indexName = INDEX_NAME_MAP.get(code);
+        String indexName = indexNameMap.get(code);
 
         if (indexName != null) {
             // 指数：直接查 index_daily 表（纯股票数据，无 code 冲突）
@@ -353,7 +360,7 @@ public class MarketDataService {
      * 获取某日所有股票数据（截面数据，排除指数）
      */
     public List<MarketDailyBar> getBarsAtDate(LocalDate date) {
-        List<StockDaily> dailies = clickHouseStockService.getStockDailyByDate(date, INDEX_NAME_MAP.values());
+        List<StockDaily> dailies = clickHouseStockService.getStockDailyByDate(date, indexNameMap.values());
         return dailies.stream()
                 .map(sd -> toMarketBar(sd, codeMarketMap.get(sd.getCode())))
                 .collect(Collectors.toList());

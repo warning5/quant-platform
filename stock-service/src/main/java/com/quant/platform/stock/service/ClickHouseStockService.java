@@ -61,6 +61,32 @@ public class ClickHouseStockService {
         }
     }
 
+    /**
+     * 从 index_daily 加载全量 指数代码→名称 映射。
+     * DB 为唯一真相源，取代硬编码 INDEX_NAME_MAP：新增指数（如国证价值399371/国证成长399370）无需改代码。
+     */
+    public Map<String, String> loadIndexCodeNameMap() {
+        Map<String, String> map = new HashMap<>();
+        if (!clickHouseConfig.isEnabled()) {
+            // MySQL 回退：index_daily 若存在则查之，否则返回空（沿用调用方容错）
+            return map;
+        }
+        try {
+            List<Map<String, Object>> rows = chJdbcClient.queryForList(
+                    "SELECT DISTINCT code, name FROM index_daily FINAL WHERE name IS NOT NULL");
+            for (Map<String, Object> r : rows) {
+                Object code = r.get("code");
+                Object name = r.get("name");
+                if (code != null && name != null) {
+                    map.put(String.valueOf(code), String.valueOf(name));
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[ClickHouse] 加载指数映射失败: {}", e.getMessage(), e);
+        }
+        return map;
+    }
+
     private List<StockDaily> getIndexDailyFromMySQL(String code, LocalDate startDate, LocalDate endDate) {
         LambdaQueryWrapper<StockDaily> wrapper = new LambdaQueryWrapper<>();
         // MySQL 回退时也尝试查 index_daily（如果存在的话），否则查 stock_daily + name 过滤

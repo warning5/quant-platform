@@ -62,6 +62,7 @@ export default function MonitorPage() {
   const [notificationsPaused, setNotificationsPaused] = useState(false);
   const notificationsPausedRef = useRef(false);  // ref 避免 SSE 闭包问题
   const { token } = theme.useToken();
+
   const canEdit = useAuthStore((s) => s.hasPermission('monitor:edit'));
   const canDelete = useAuthStore((s) => s.hasPermission('monitor:delete'));
 
@@ -564,6 +565,35 @@ export default function MonitorPage() {
       },
     },
     {
+      title: '主力资金',
+      key: 'moneyFlow',
+      width: 130,
+      render: (_, r) => {
+        const mf = r.moneyFlow;
+        if (!mf || mf.netMain == null) return <Text type="secondary">-</Text>;
+        const nm = Number(mf.netMain);
+        const color = nm > 0 ? '#cf1322' : nm < 0 ? '#3f8600' : '#8c8c8c';
+        const sign = nm > 0 ? '+' : '';
+        const pct = mf.netMainPct != null ? Number(mf.netMainPct).toFixed(2) + '%' : '';
+        return (
+          <div>
+            <div style={{ color, fontWeight: 600, fontSize: 13 }}>{sign}{(nm / 1e8).toFixed(2)}亿</div>
+            <div style={{ color: 'var(--text-secondary)', fontSize: 11 }}>{pct}</div>
+          </div>
+        );
+      },
+    },
+    {
+      title: '成交额',
+      key: 'amount',
+      width: 95,
+      render: (_, r) => {
+        const v = r.amount;
+        if (v == null) return <Text type="secondary">-</Text>;
+        return <Text strong style={{ fontSize: 13 }}>{Number(v).toFixed(2)}亿</Text>;
+      },
+    },
+    {
       title: '信号状态',
       key: 'signalStatus',
       width: 140,
@@ -773,7 +803,7 @@ export default function MonitorPage() {
       <Card styles={{ body: {padding: 0} }}>
         {targetPrices.length === 0
           ? <Alert message="暂无监控股票，请先通过「智能推荐」生成BUY推荐" type="info" showIcon style={{ margin: 16 }} />
-          : <Table columns={stockColumns} dataSource={targetPrices} rowKey="stockCode" size="small"
+          :           <Table columns={stockColumns} dataSource={targetPrices} rowKey="stockCode" size="small"
               pagination={false} scroll={{ x: 1000 }}
               summary={() => scanResult && (
                 <tr style={{ background: 'var(--mp-bg-secondary)' }}>

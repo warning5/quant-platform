@@ -12,6 +12,7 @@ import org.springframework.scheduling.config.ScheduledTaskRegistrar;
 import org.springframework.scheduling.support.CronTrigger;
 import org.springframework.stereotype.Service;
 
+import com.quant.platform.calendar.service.TradeCalendarService;
 import com.quant.platform.notification.NotificationService;
 import com.quant.platform.recommendation.service.RecommendationService;
 
@@ -42,6 +43,7 @@ public class ScheduleService implements SchedulingConfigurer {
     private NotificationService notificationService;
     private DataQualityService dataQualityService;
     private TaskRunHistoryService taskRunHistoryService;
+    private TradeCalendarService tradeCalendarService;
 
     // taskKey → ScheduledFuture（用于动态取消）
     private final Map<String, ScheduledFuture<?>> scheduledTasks = new ConcurrentHashMap<>();
@@ -81,6 +83,22 @@ public class ScheduleService implements SchedulingConfigurer {
             taskRunHistoryService = applicationContext.getBean(TaskRunHistoryService.class);
         }
         return taskRunHistoryService;
+    }
+
+    private TradeCalendarService getTradeCalendarService() {
+        if (tradeCalendarService == null) {
+            tradeCalendarService = applicationContext.getBean(TradeCalendarService.class);
+        }
+        return tradeCalendarService;
+    }
+
+    /** 交易日判定：优先用交易日历（周末+节假日），获取失败兜底只看周末 */
+    private boolean isTradingDaySafe(LocalDate date) {
+        try {
+            return getTradeCalendarService().isTradingDay(date);
+        } catch (Exception e) {
+            return !isWeekend(date);
+        }
     }
 
     /**
@@ -1014,6 +1032,25 @@ public class ScheduleService implements SchedulingConfigurer {
         } catch (Exception e) {
             log.warn("[ScheduleService] 解析日期失败，使用当天: {}", e.getMessage());
             runDates.add(LocalDate.now());
+        }
+
+        // 统一交易日守卫：过滤掉所有非交易日（周末/节假日），避免手动"立即执行"在非交易日生成伪推荐
+        java.util.List<LocalDate> tradingDates = new java.util.ArrayList<>();
+        for (LocalDate d : runDates) {
+            if (isTradingDaySafe(d)) {
+                tradingDates.add(d);
+            } else {
+                log.warn("[ScheduleService] 日期[{}] 非交易日，跳过推荐生成", d);
+            }
+        }
+        runDates = tradingDates;
+
+        if (runDates.isEmpty()) {
+            log.warn("[ScheduleService] 所有待执行日期均非交易日，跳过每日自动推荐执行");
+            jdbcTemplate.update(
+                "UPDATE data_schedule_config SET last_run_time = ?, last_run_status = 'SKIPPED' " +
+                "WHERE task_key = 'DAILY_RECOMMENDATION'", LocalDateTime.now());
+            return;
         }
 
         log.info("[ScheduleService] 推荐参数: runDates={}, dateMode={}, topN={}, strategyIds={}, weightModes={}",

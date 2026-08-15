@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -62,6 +63,19 @@ public class IntradayMonitorService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     @org.springframework.beans.factory.annotation.Qualifier("clickHouseJdbcTemplate")
     private JdbcTemplate clickHouseJdbcTemplate;
+
+    /**
+     * 盘中主力资金流缓存：platformCode -> 当日快照。由低频刷新填充，不写 CH。
+     */
+    private final Map<String, IntradayMoneyFlowService.MoneyFlowSnapshot> intradayMoneyFlowCache = new ConcurrentHashMap<>();
+    /**
+     * 盘中资金流刷新线程池（独立，避免阻塞价格轮询）
+     */
+    private final ExecutorService moneyFlowPool;
+    /**
+     * 盘中主力资金流采集服务（注入在构造器）
+     */
+    private final IntradayMoneyFlowService intradayMoneyFlowService;
     private volatile boolean monitoring = false;
     /**
      * 今日是否已发送收盘事件（防止重复）
@@ -79,6 +93,7 @@ public class IntradayMonitorService {
                                   MonitorTargetPriceLoader targetPriceLoader,
                                   MonitorSignalPublisher signalPublisher,
                                   MonitorQuoteClient quoteClient,
+                                  IntradayMoneyFlowService intradayMoneyFlowService,
                                   @Value("${quant.monitor.kline-thread-pool-size:4}") int klinePoolSize,
                                   @Value("${quant.monitor.poll-interval-seconds:10}") int pollIntervalSeconds) {
         this.signalAnalyzer = signalAnalyzer;
@@ -87,10 +102,17 @@ public class IntradayMonitorService {
         this.targetPriceLoader = targetPriceLoader;
         this.signalPublisher = signalPublisher;
         this.quoteClient = quoteClient;
+        this.intradayMoneyFlowService = intradayMoneyFlowService;
         this.pollIntervalSeconds = pollIntervalSeconds;
         this.klinePool = Executors.newFixedThreadPool(klinePoolSize,
                 r -> {
                     Thread t = new Thread(r, "kline-analyze");
+                    t.setDaemon(true);
+                    return t;
+                });
+        this.moneyFlowPool = Executors.newSingleThreadExecutor(
+                r -> {
+                    Thread t = new Thread(r, "moneyflow-refresh");
                     t.setDaemon(true);
                     return t;
                 });
@@ -171,12 +193,15 @@ public class IntradayMonitorService {
         if (hour == 9 && minute == 30 && now.getSecond() < 10) {
             pushedWithTime.clear();
             marketClosedSent = false;
+            intradayMoneyFlowCache.clear();
         }
 
         if (!monitoring) {
             monitoring = true;
             log.info("[IntradayMonitor] ===== 监控启动 ===== 当前时间: {}", now);
             loadTargetPrices();
+            // 启动即异步拉一次盘中主力资金流（不阻塞价格轮询）
+            CompletableFuture.runAsync(this::refreshIntradayMoneyFlow, moneyFlowPool);
         }
 
         if (targetPriceLoader.targetPriceCacheRef().isEmpty()) return;
@@ -186,6 +211,10 @@ public class IntradayMonitorService {
         if (pollCount.get() % 6 == 1) {
             log.info("[IntradayMonitor] 轮询 #{}, 监控{}只股票, SSE连接数: {}",
                     pollCount.get(), targetPriceLoader.targetPriceCacheRef().size(), signalPublisher.sseEmittersRef().size());
+        }
+        // 每5分钟（30次轮询）顺带刷新盘中主力资金流（异步，不阻塞价格轮询）
+        if (pollCount.get() % 30 == 1) {
+            CompletableFuture.runAsync(this::refreshIntradayMoneyFlow, moneyFlowPool);
         }
 
         // 批量获取实时价格
@@ -449,6 +478,30 @@ public class IntradayMonitorService {
     }
 
     /**
+     * 刷新盘中主力资金流缓存（只对当前 watching 列表）。异常已内部吞掉，不影响主循环。
+     */
+    public void refreshIntradayMoneyFlow() {
+        try {
+            Set<String> codes = targetPriceLoader.targetPriceCacheRef().keySet();
+            if (codes == null || codes.isEmpty()) return;
+            Map<String, IntradayMoneyFlowService.MoneyFlowSnapshot> fresh =
+                    intradayMoneyFlowService.fetchToday(codes);
+            if (!fresh.isEmpty()) {
+                intradayMoneyFlowCache.putAll(fresh);
+            }
+        } catch (Exception e) {
+            log.warn("[IntradayMonitor] 盘中主力资金流刷新失败: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 获取盘中主力资金流缓存（供 MonitorController 暴露给前端）
+     */
+    public Map<String, IntradayMoneyFlowService.MoneyFlowSnapshot> getIntradayMoneyFlowCache() {
+        return intradayMoneyFlowCache;
+    }
+
+    /**
      * 添加用户自定义监控股票（同时持久化到数据库）
      *
      * @param info 目标价信息（source自动设为"客户定义"）
@@ -576,6 +629,13 @@ public class IntradayMonitorService {
      */
     public Map<String, Double> getLatestChangePct() {
         return quoteClient.getLatestChangePct();
+    }
+
+    /**
+     * 获取最新成交额缓存（亿元，供Controller查询）
+     */
+    public Map<String, Double> getLatestAmount() {
+        return quoteClient.getLatestAmount();
     }
 
     // ── 手动扫描 ──

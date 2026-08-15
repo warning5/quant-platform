@@ -712,3 +712,32 @@ def _query_cli(codes, start, end, cli) -> dict:
     if total > 0 and err_days == total:
         raise WestockMcpError("westock-data CLI 在 %d 个交易日内全部取数失败" % total)
     return merged
+
+
+def main():
+    """CLI 入口：盘中拉取指定股票当日主力资金流，输出 JSON。
+
+    用法: python westock_moneyflow.py --codes sh600519,sz000001 --date 2026-08-15
+    输出: { WS_CODE_UPPER: { "YYYYMMDD": {close,net_main,net_main_pct,net_huge,net_big,net_medium,net_small} } }
+    失败: {"error": "..."}
+    """
+    import sys
+    import argparse
+    ap = argparse.ArgumentParser(description="盘中主力资金流拉取（westock 源）")
+    ap.add_argument("--codes", required=True, help="逗号分隔 westock 代码, 如 sh600519,sz000001")
+    ap.add_argument("--date", required=True, help="YYYY-MM-DD")
+    args = ap.parse_args()
+    codes = [c.strip().upper() for c in args.codes.split(",") if c.strip()]
+    if not codes:
+        print(json.dumps({"error": "empty codes"}, ensure_ascii=False))
+        sys.exit(1)
+    try:
+        data = query_westock(codes, args.date, args.date)
+    except Exception as e:
+        print(json.dumps({"error": str(e)}, ensure_ascii=False))
+        sys.exit(1)
+    print(json.dumps(data, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    main()

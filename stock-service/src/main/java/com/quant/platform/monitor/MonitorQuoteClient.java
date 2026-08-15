@@ -25,6 +25,8 @@ public class MonitorQuoteClient {
     /** 最新实时价格缓存: stockCode -> price（供SSE推送和手动查询用） */
     private final Map<String, Double> latestPrices = new ConcurrentHashMap<>();
     private final Map<String, Double> latestChangePct = new ConcurrentHashMap<>();
+    /** 最新成交额缓存: stockCode -> 成交额(亿元) */
+    private final Map<String, Double> latestAmount = new ConcurrentHashMap<>();
     /** 指数实时行情缓存: code -> {name, price, changePct, changeAmount, time} */
     private final Map<String, Map<String, Object>> indexQuoteCache = new ConcurrentHashMap<>();
     /** 指数代码到名称映射 */
@@ -123,6 +125,14 @@ public class MonitorQuoteClient {
                             log.debug("[MonitorQuoteClient] 解析涨跌幅失败: {}", stockCode);
                         }
                     }
+                    // fields[37] = 成交额(万元) → 转亿元
+                    if (fields.length > 37 && !fields[37].isEmpty()) {
+                        try {
+                            latestAmount.put(stockCode, Double.parseDouble(fields[37]) / 1e4);
+                        } catch (NumberFormatException ignored) {
+                            log.debug("[MonitorQuoteClient] 解析成交额失败: {}", stockCode);
+                        }
+                    }
                 }
             } catch (Exception ignored) {
                 log.error("[MonitorQuoteClient] 捕获到未处理异常", ignored);
@@ -219,6 +229,11 @@ public class MonitorQuoteClient {
     /** 获取最新涨跌幅缓存（供Controller查询） */
     public Map<String, Double> getLatestChangePct() {
         return Collections.unmodifiableMap(latestChangePct);
+    }
+
+    /** 获取最新成交额缓存（亿元，供Controller查询） */
+    public Map<String, Double> getLatestAmount() {
+        return Collections.unmodifiableMap(latestAmount);
     }
 
     // ── 交易日判断（与 IntradayMonitorService 同实现，避免反向依赖） ──

@@ -208,6 +208,14 @@ public class DataUpdateExecutionService {
         return targetDir.toAbsolutePath().toString();
     }
 
+    /**
+     * 解析后的脚本目录（jar 模式为 ~/.quant-platform/scripts，IDE 模式为 classpath 目录）。
+     * 供盘中资金流等模块复用同一脚本目录，避免重复解析。
+     */
+    public String getResolvedScriptDir() {
+        return resolvedScriptDir != null ? resolvedScriptDir : scriptDir;
+    }
+
     private void verifyScripts() {
         String[] scripts = {"update_stock_data.py", "update_stock_daily_baostock.py",
                 "update_bj_stock_daily_qq.py", "update_index_daily_baostock.py",

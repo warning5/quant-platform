@@ -1,6 +1,7 @@
 package com.quant.platform.monitor.controller;
 
 import com.quant.platform.monitor.IntradayMonitorService;
+import com.quant.platform.monitor.IntradayMoneyFlowService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
@@ -54,9 +55,10 @@ public class MonitorController {
         Map<String, Object> result = new HashMap<>();
         List<Map<String, Object>> targetPrices = new ArrayList<>();
 
-        // 获取缓存的实时价格和涨跌幅
+        // 获取缓存的实时价格、涨跌幅和成交额
         Map<String, Double> latestPrices = intradayMonitorService.getLatestPrices();
         Map<String, Double> latestChangePct = intradayMonitorService.getLatestChangePct();
+        Map<String, Double> latestAmount = intradayMonitorService.getLatestAmount();
 
         intradayMonitorService.getTargetPriceCache().forEach((k, v) -> {
             Map<String, Object> m = new HashMap<>();
@@ -75,6 +77,11 @@ public class MonitorController {
                 m.put("currentPrice", currentPrice);
                 if (changePct != null) {
                     m.put("changePct", changePct);
+                }
+                // 附加盘中成交额(亿元)
+                Double amount = latestAmount.get(k);
+                if (amount != null) {
+                    m.put("amount", amount);
                 }
                 // 快速信号状态判断（纯价格，无需K线）
                 String signalStatus;
@@ -115,6 +122,18 @@ public class MonitorController {
             } else {
                 m.put("signalStatus", "NO_PRICE");
                 m.put("signalMessage", "暂无实时价格");
+            }
+
+            // 附加盘中主力资金流快照（若有）
+            IntradayMoneyFlowService.MoneyFlowSnapshot mf = intradayMonitorService.getIntradayMoneyFlowCache().get(k);
+            if (mf != null) {
+                Map<String, Object> mfMap = new HashMap<>();
+                mfMap.put("netMain", mf.getNetMain());
+                mfMap.put("netMainPct", mf.getNetMainPct());
+                mfMap.put("netHuge", mf.getNetHuge());
+                mfMap.put("netBig", mf.getNetBig());
+                mfMap.put("updatedAt", mf.getUpdatedAt());
+                m.put("moneyFlow", mfMap);
             }
 
             targetPrices.add(m);
