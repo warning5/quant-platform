@@ -1,6 +1,6 @@
 import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Link, useLocation, useParams, useNavigate } from 'react-router-dom';
-import { App as AntApp, Layout, Menu, Typography, Space, Badge, Button, Tooltip, Spin, Drawer, Switch, ConfigProvider, theme, Dropdown, Avatar } from 'antd';
+import { App as AntApp, Layout, Menu, Typography, Space, Badge, Button, Tooltip, Spin, Drawer, Switch, ConfigProvider, theme, Dropdown, Avatar, Segmented } from 'antd';
 import {
   BarChartOutlined,
   MenuFoldOutlined, MenuUnfoldOutlined,
@@ -117,6 +117,10 @@ const { Title } = Typography;
 
 function AppLayout({ isDark, setIsDark }) {
   const [collapsed, setCollapsed] = useState(false);
+  // 菜单布局模式：'side' 左侧（默认） | 'top' 顶部。持久化到 localStorage，刷新后保留。
+  const [menuLayout, setMenuLayout] = useState(() => {
+    try { return localStorage.getItem('menu-layout') || 'side'; } catch { return 'side'; }
+  });
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const location = useLocation();
   const isMobile = window.innerWidth < 768;
@@ -154,8 +158,8 @@ function AppLayout({ isDark, setIsDark }) {
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
-      {/* ── 桌面端：固定侧边栏 ── */}
-      {!isMobile && (
+      {/* ── 桌面端：固定侧边栏（仅侧边模式） ── */}
+      {!isMobile && menuLayout === 'side' && (
         <Sider
           className="desktop-sider"
           collapsible
@@ -163,7 +167,7 @@ function AppLayout({ isDark, setIsDark }) {
           onCollapse={setCollapsed}
           trigger={null}
           style={{
-            background: '#001529',
+            background: '#fff',
             transition: 'width 0.2s',
             overflow: 'hidden',
           }}
@@ -177,7 +181,7 @@ function AppLayout({ isDark, setIsDark }) {
           alignItems: 'center',
           justifyContent: collapsed ? 'center' : 'flex-start',
           padding: collapsed ? 0 : '0 20px',
-          borderBottom: '1px solid rgba(255,255,255,0.08)',
+          borderBottom: '1px solid rgba(0,0,0,0.06)',
           overflow: 'hidden',
           whiteSpace: 'nowrap',
           transition: 'padding 0.2s',
@@ -185,7 +189,7 @@ function AppLayout({ isDark, setIsDark }) {
           <BarChartOutlined style={{ color: '#1677ff', fontSize: 20, flexShrink: 0 }} />
           {!collapsed && (
             <Title level={5} style={{
-              color: '#fff', margin: '0 0 0 10px', fontSize: 15,
+              color: isDark ? '#e8e8e8' : '#1a1a1a', margin: '0 0 0 10px', fontSize: 15,
               opacity: collapsed ? 0 : 1, transition: 'opacity 0.2s',
             }}>
               量化因子平台
@@ -194,7 +198,7 @@ function AppLayout({ isDark, setIsDark }) {
         </div>
 
         <Menu
-          theme="dark"
+          theme="light"
           mode="inline"
           selectedKeys={selectedKeys}
           openKeys={openKeys}
@@ -203,7 +207,7 @@ function AppLayout({ isDark, setIsDark }) {
             setOpenKeys(keys.length > openKeys.length ? [keys[keys.length - 1]] : []);
           }}
           items={fullMenuItems}
-          style={{ marginTop: 4, borderRight: 0 }}
+          style={{ marginTop: 4, borderRight: 0, background: 'transparent' }}
           inlineCollapsed={collapsed}
         />
       </Sider>
@@ -251,7 +255,7 @@ function AppLayout({ isDark, setIsDark }) {
               onClick={() => setMobileDrawerOpen(true)}
               style={{ width: 48, height: 48, fontSize: 16, borderRadius: 0 }}
             />
-          ) : (
+          ) : menuLayout === 'side' ? (
             <Tooltip title={collapsed ? '展开菜单' : '收起菜单'} placement="right">
               <Button
                 type="text"
@@ -265,13 +269,20 @@ function AppLayout({ isDark, setIsDark }) {
                 }}
               />
             </Tooltip>
+          ) : (
+            /* 顶部模式：左上角显示 logo */
+            <div style={{
+              display: 'flex', alignItems: 'center',
+              marginLeft: 16,
+            }}>
+              <BarChartOutlined style={{ color: '#1677ff', fontSize: 20 }} />
+              <Typography.Text strong style={{ fontSize: 15, marginLeft: 10, color: isDark ? '#e8e8e8' : '#1a1a1a' }}>
+                量化因子平台
+              </Typography.Text>
+            </div>
           )}
 
-          <Space style={{ marginRight: 8 }}>
-            <Badge status="processing" text="系统运行正常" />
-            <Typography.Text type="secondary" style={{ fontSize: 12, marginLeft: 16 }}>
-              Quant Platform v1.0 · Java 21 + Spring Boot 3
-            </Typography.Text>
+          <Space style={{ marginRight: 8, marginLeft: 'auto' }}>
             {/* ── 暗黑模式切换 ── */}
             <Switch
               checked={isDark}
@@ -280,6 +291,21 @@ function AppLayout({ isDark, setIsDark }) {
               unCheckedChildren={<SunOutlined />}
               style={{ marginLeft: 12 }}
             />
+            {/* ── 菜单布局切换：侧边 / 顶部（仅桌面端，放最右侧） ── */}
+            {!isMobile && (
+              <Segmented
+                size="small"
+                value={menuLayout}
+                onChange={(v) => {
+                  setMenuLayout(v);
+                  try { localStorage.setItem('menu-layout', v); } catch { /* ignore */ }
+                }}
+                options={[
+                  { label: '侧边', value: 'side' },
+                  { label: '顶部', value: 'top' },
+                ]}
+              />
+            )}
             {/* ── 用户区 ── */}
             {user && (
               <Dropdown
@@ -313,6 +339,17 @@ function AppLayout({ isDark, setIsDark }) {
             )}
           </Space>
         </Header>
+
+        {/* ── 顶部模式：横向菜单条（桌面端，替代侧边栏，与侧边栏同色系） ── */}
+        {!isMobile && menuLayout === 'top' && (
+          <Menu
+            theme="light"
+            mode="horizontal"
+            selectedKeys={selectedKeys}
+            items={fullMenuItems}
+            style={{ lineHeight: '46px', borderBottom: 0, background: '#fff' }}
+          />
+        )}
 
         <Content style={{ margin: 16, minHeight: 280 }}>
           <Suspense fallback={<PageLoading />}>
