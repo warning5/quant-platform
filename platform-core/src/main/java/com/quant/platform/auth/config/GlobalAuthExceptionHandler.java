@@ -5,6 +5,8 @@ import cn.dev33.satoken.exception.NotPermissionException;
 import cn.dev33.satoken.exception.NotRoleException;
 import cn.dev33.satoken.exception.SaTokenException;
 import com.quant.platform.common.dto.ApiResponse;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
@@ -21,16 +23,27 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 public class GlobalAuthExceptionHandler {
 
     @ExceptionHandler(SaTokenException.class)
-    public ResponseEntity<ApiResponse<Void>> handleSaToken(SaTokenException e) {
+    public ResponseEntity<ApiResponse<Void>> handleSaToken(
+            SaTokenException e, HttpServletRequest request, HttpServletResponse response) {
+        int status;
+        String msg;
         if (e instanceof NotLoginException) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(ApiResponse.error(401, "登录已过期或未登录"));
+            status = HttpStatus.UNAUTHORIZED.value();
+            msg = "登录已过期或未登录";
+        } else if (e instanceof NotPermissionException || e instanceof NotRoleException) {
+            status = HttpStatus.FORBIDDEN.value();
+            msg = "无权限访问：" + e.getMessage();
+        } else {
+            status = HttpStatus.FORBIDDEN.value();
+            msg = e.getMessage();
         }
-        if (e instanceof NotPermissionException || e instanceof NotRoleException) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(ApiResponse.error(403, "无权限访问：" + e.getMessage()));
+        // SSE / 已提交响应：无法回写 JSON body，仅设置状态码，避免 HttpMessageNotWritableException -> 500
+        String accept = request.getHeader("Accept");
+        boolean isStream = (accept != null && accept.contains("text/event-stream")) || response.isCommitted();
+        if (isStream) {
+            response.setStatus(status);
+            return null;
         }
-        return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                .body(ApiResponse.error(403, e.getMessage()));
+        return ResponseEntity.status(status).body(ApiResponse.error(status, msg));
     }
 }

@@ -2,10 +2,34 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Card, Table, Button, Tag, Space, Alert, Typography, Tooltip, Modal, Input, InputNumber, Form, Popover, Switch, Dropdown, Row, Col, theme } from 'antd';
 import { message, notification } from '../../utils/messageUtil';
 import { ReloadOutlined, PlayCircleOutlined, EyeOutlined, ThunderboltOutlined, QuestionCircleOutlined, PlusOutlined, DeleteOutlined, EditOutlined, BellOutlined, MoreOutlined, FundOutlined } from '@ant-design/icons';
-import api, { silentConfig } from '../../api';
+import api, { silentConfig, calendarApi } from '../../api';
 import { useAuthStore } from '../../stores/authStore';
 
 const { Text } = Typography;
+
+// 交易日历缓存（模块级，由组件加载后填充）：'YYYY-MM-DD' -> isTrading(boolean)
+// getByYear 只返回例外日（节假日 isTrading=false），普通工作日为 undefined → 回退周末判断
+let tradingCalendarCache = {};
+
+/** 本地日期转 YYYY-MM-DD（避免 toISOString 的 UTC 偏移） */
+const toDateStr = (d) => {
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+};
+
+/** 是否在 A 股交易时段内（周一至周五 9:30-11:30 / 13:00-15:00，且非法定节假日休市） */
+const isTradingNow = () => {
+  const now = new Date();
+  const day = now.getDay(); // 0=周日, 6=周六
+  if (day === 0 || day === 6) return false;
+  // 法定节假日（工作日但休市）由交易日历标记，排除
+  if (tradingCalendarCache[toDateStr(now)] === false) return false;
+  const h = now.getHours();
+  const m = now.getMinutes();
+  const morning = (h === 9 && m >= 30) || h === 10 || (h === 11 && m < 30);
+  const afternoon = h === 13 || h === 14;
+  return morning || afternoon;
+};
 
 /** 播放信号提示音（Web Audio API，无需外部文件） */
 const playAlertSound = (type) => {
@@ -113,8 +137,9 @@ export default function MonitorPage() {
     }
   }, []);
 
-  // 拉取大盘指数实时行情（每5秒）
+  // 拉取大盘指数实时行情（每5秒，仅交易时段）
   const fetchIndices = useCallback(async () => {
+    if (!isTradingNow()) return; // 非交易时段不轮询，避免无效请求与控制台 500 噪音
     try {
       const data = await api.get('/monitor/indices');
       setIndexQuotes(data || []);
@@ -127,6 +152,17 @@ export default function MonitorPage() {
   useEffect(() => {
     fetchStatus();
   }, [fetchStatus]);
+
+  // 加载交易日历（例外日），让指数轮询守卫能排除法定节假日休市
+  useEffect(() => {
+    calendarApi.getByYear(new Date().getFullYear())
+      .then((data) => {
+        const map = {};
+        (data || []).forEach((item) => { map[item.tradeDate] = item.isTrading; });
+        tradingCalendarCache = map;
+      })
+      .catch(() => { /* 日历加载失败不阻塞，回退周末判断 */ });
+  }, []);
 
   // 指数实时行情：每5秒拉取一次
   useEffect(() => {
