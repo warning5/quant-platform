@@ -196,9 +196,13 @@ public class RecommendationQueryService {
         List<Map<String, Object>> result = new java.util.ArrayList<>(ids.size());
         for (Long sid : ids) {
             StrategyDefinition s = strategyDefinitionMapper.selectById(sid);
+            // 跳过没有策略定义（多为历史残留）的策略，避免下拉框出现"策略73"这类兜底文案
+            if (s == null) {
+                continue;
+            }
             Map<String, Object> m = new java.util.LinkedHashMap<>();
             m.put("id", sid);
-            m.put("strategyName", s != null ? s.getStrategyName() : "策略" + sid);
+            m.put("strategyName", s.getStrategyName());
             result.add(m);
         }
         return result;
