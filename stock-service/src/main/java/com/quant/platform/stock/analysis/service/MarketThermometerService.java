@@ -104,9 +104,11 @@ public class MarketThermometerService {
         // PE分位越高=估值越贵=越恐慌，故反转: 100 - pePct
         double peScore = 100.0 - pePct;
         double pbScore = 100.0 - pbPct;
+        // QVIX 越高=预期波动越大=越恐慌=越低估(越贪婪)，故反转成贪婪分: 100 - qvixScore
+        double qvixGreedScore = 100.0 - qvixScore;
         // PE×25% + PB×15% + 均线×25% + 股债×20% + QVIX×15%
         double fearGreed = peScore * 0.25 + pbScore * 0.15 + maScore * 0.25
-                         + bondScore * 0.20 + qvixScore * 0.15;
+                         + bondScore * 0.20 + qvixGreedScore * 0.15;
         result.put("fearGreedIndex", Math.round(fearGreed * 10) / 10.0);
         result.put("fearGreedLabel", getFearGreedLabel(fearGreed));
         result.put("bondScore", Math.round(bondScore * 10) / 10.0);

@@ -66,8 +66,8 @@ public class SectorAnalysisService {
                         si.industry,
                         COUNT(*) as stockCount,
                         AVG(sd.change_percent) as avgChangePct,
-                        analysisCommon.median(sd.pe_ttm) as medianPe,
-                        analysisCommon.median(sd.pb) as medianPb
+                        median(sd.pe_ttm) as medianPe,
+                        median(sd.pb) as medianPb
                     FROM stock.stock_info si
                       INNER JOIN (
                         SELECT code, change_percent, pe_ttm, pb FROM stock.stock_daily FINAL
@@ -83,14 +83,15 @@ public class SectorAnalysisService {
                 for (Map<String, Object> row : rows) {
                     Map<String, Object> m = new LinkedHashMap<>();
                     m.put("industry", row.get("industry"));
-                    m.put("stockCount", row.get("stockcount"));
-                    Object avgChg = row.get("avgchangepct");
+                    // ClickHouse JDBC 返回的列名保持别名大小写（stockCount/avgChangePct...），须按原 key 取
+                    m.put("stockCount", row.get("stockCount"));
+                    Object avgChg = row.get("avgChangePct");
                     m.put("avgChangePct", avgChg instanceof Number ?
                             BigDecimal.valueOf(((Number) avgChg).doubleValue()).setScale(2, RoundingMode.HALF_UP) : null);
-                    Object medPe = row.get("medianpe");
+                    Object medPe = row.get("medianPe");
                     m.put("medianPe", medPe instanceof Number ?
                             BigDecimal.valueOf(((Number) medPe).doubleValue()).setScale(1, RoundingMode.HALF_UP) : null);
-                    Object medPb = row.get("medianpb");
+                    Object medPb = row.get("medianPb");
                     m.put("medianPb", medPb instanceof Number ?
                             BigDecimal.valueOf(((Number) medPb).doubleValue()).setScale(2, RoundingMode.HALF_UP) : null);
                     industryList.add(m);
@@ -540,8 +541,8 @@ public class SectorAnalysisService {
                     SELECT
                         COUNT(*) as stockCount,
                         AVG(sd.change_percent) as avgChange,
-                        analysisCommon.median(sd.pe_ttm) as medianPe,
-                        analysisCommon.median(sd.pb) as medianPb,
+                        median(sd.pe_ttm) as medianPe,
+                        median(sd.pb) as medianPb,
                         SUM(si.total_market_cap) as totalCap
                     FROM stock.stock_daily sd FINAL
                     JOIN stock.stock_info si ON sd.code = si.code

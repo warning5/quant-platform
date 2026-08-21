@@ -90,24 +90,21 @@ public class EntrySignalAnalyzer {
         // 拉取m5 K线
         List<KlineBar> klineBars = fetchM5Kline(stockCode);
         if (klineBars == null || klineBars.size() < 10) {
-            // K线获取失败，降级为纯价格判断
-            return fallbackPriceOnly(currentPrice, target, stockCode);
+            // K线真正未取到（网络/解析失败），降级为纯价格判断
+            return fallbackPriceOnly(currentPrice, target, stockCode, false);
         }
 
-        // 1. 突破确认评分 (0~35)
-        int breakoutScore = scoreBreakout(klineBars, buyHigh, currentPrice);
+        // 1~4 维评分：任一分项抛异常仅该维归零，不整只票降级
+        int breakoutScore = safeScore(() -> scoreBreakout(klineBars, buyHigh, currentPrice), "breakout", stockCode);
         signal.setBreakoutScore(breakoutScore);
 
-        // 2. 均线排列评分 (0~20)
-        int maScore = scoreMA(klineBars);
+        int maScore = safeScore(() -> scoreMA(klineBars), "ma", stockCode);
         signal.setMaScore(maScore);
 
-        // 3. 量价配合评分 (0~25)
-        int volumeScore = scoreVolume(klineBars);
+        int volumeScore = safeScore(() -> scoreVolume(klineBars), "volume", stockCode);
         signal.setVolumeScore(volumeScore);
 
-        // 4. 回踩确认评分 (0~20)
-        int pullbackScore = scorePullback(klineBars, buyLow, buyHigh, currentPrice);
+        int pullbackScore = safeScore(() -> scorePullback(klineBars, buyLow, buyHigh, currentPrice), "pullback", stockCode);
         signal.setPullbackScore(pullbackScore);
 
         int total = breakoutScore + maScore + volumeScore + pullbackScore;
@@ -224,9 +221,15 @@ public class EntrySignalAnalyzer {
     }
 
     /**
-     * 纯价格降级判断（K线获取失败时）
+     * 纯价格降级判断（K线未取到或分析异常时）
+     * @param fromAnalysisError true=K线已取到但分析抛异常降级；false=K线本身未取到
      */
     public BreakoutSignal fallbackPriceOnly(double currentPrice, IntradayMonitorService.TargetPriceInfo target, String stockCode) {
+        return fallbackPriceOnly(currentPrice, target, stockCode, false);
+    }
+
+    public BreakoutSignal fallbackPriceOnly(double currentPrice, IntradayMonitorService.TargetPriceInfo target, String stockCode, boolean fromAnalysisError) {
+        String prefix = fromAnalysisError ? "K线分析异常，降级纯价格判断" : "K线获取失败，降级纯价格判断";
         BreakoutSignal signal = new BreakoutSignal();
         signal.setStockCode(stockCode);
         signal.setStockName(target.getStockName());
@@ -241,18 +244,30 @@ public class EntrySignalAnalyzer {
             signal.setBreakoutScore(W_BREAKOUT);
             signal.setTotalScore(60);
             signal.setSignalType("BUY_FALLBACK");
-            signal.setReason("K线获取失败，降级纯价格判断：价格在买入区间内");
+            signal.setReason(prefix + "：价格在买入区间内");
         } else if (currentPrice >= buyLow * 0.98) {
             signal.setTotalScore(40);
             signal.setSignalType("WATCH_FALLBACK");
-            signal.setReason("K线获取失败，降级纯价格判断：价格接近买入区间下沿");
+            signal.setReason(prefix + "：价格接近买入区间下沿");
         } else {
             signal.setTotalScore(0);
             signal.setSignalType("NONE");
-            signal.setReason("K线获取失败，价格不在触发区间附近");
+            signal.setReason(prefix + "：价格不在触发区间附近");
         }
 
         return signal;
+    }
+
+    /**
+     * 单维评分保护：分项错误仅该维归零，避免整只票信号因边角异常而降级。
+     */
+    private int safeScore(java.util.function.IntSupplier scorer, String dim, String stockCode) {
+        try {
+            return scorer.getAsInt();
+        } catch (Exception e) {
+            log.warn("[EntrySignal] 评分维度[{}]异常→记0分: code={}, error={}", dim, stockCode, e.getMessage());
+            return 0;
+        }
     }
 
     /**

@@ -356,7 +356,7 @@ public class IntradayMonitorService {
                     }
                 } catch (Exception e) {
                     // K线分析异常时走降级逻辑（价格已在触发区间内）
-                    EntrySignalAnalyzer.BreakoutSignal fallback = signalAnalyzer.fallbackPriceOnly(currentPrice, target, code);
+                    EntrySignalAnalyzer.BreakoutSignal fallback = signalAnalyzer.fallbackPriceOnly(currentPrice, target, code, true);
                     if (fallback.isActionable()) {
                         signalPublisher.pushBuySignal(code, target, currentPrice, fallback);
                         markPushed(code + "_BUY");
@@ -365,7 +365,7 @@ public class IntradayMonitorService {
                         log.info("[IntradayMonitor] 观察(降级): {}({}) 现价{} 评分{}/100",
                                 target.getStockName(), code, currentPrice, fallback.getTotalScore());
                     }
-                    log.warn("[IntradayMonitor] K线分析异常→降级: {} - {}", code, e.getMessage());
+                    log.warn("[IntradayMonitor] K线分析异常→降级: {} - {}", code, e.getMessage(), e);
                 }
             }, klinePool);
 
@@ -717,7 +717,7 @@ public class IntradayMonitorService {
                         }
                     } catch (Exception e) {
                         // K线分析异常时走降级逻辑
-                        EntrySignalAnalyzer.BreakoutSignal fallback = signalAnalyzer.fallbackPriceOnly(currentPrice, target, code);
+                        EntrySignalAnalyzer.BreakoutSignal fallback = signalAnalyzer.fallbackPriceOnly(currentPrice, target, code, true);
                         stockInfo.setScore(fallback.getTotalScore());
                         stockInfo.setSignalType(fallback.getSignalType());
                         stockInfo.setMessage(fallback.toPushMessage());

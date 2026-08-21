@@ -391,7 +391,8 @@ export default function SectorRanking() {
             const catStats = {};
             hotSectors.forEach(s => {
               const cat = dictMap[s.conceptName]?.dictLabel ?? '其他';
-              if (!catStats[cat]) catStats[cat] = { count: 0, up: 0, down: 0 };
+              const color = dictMap[s.conceptName]?.color ?? '#999';
+              if (!catStats[cat]) catStats[cat] = { count: 0, up: 0, down: 0, color };
               catStats[cat].count++;
               const chg = s.avgChange != null ? +s.avgChange : 0;
               if (chg > 0) catStats[cat].up++; else catStats[cat].down++;
@@ -400,7 +401,7 @@ export default function SectorRanking() {
               <Row gutter={12} style={{ marginBottom: 16 }}>
                 {Object.entries(catStats).map(([cat, stat]) => (
                   <Col key={cat}>
-                    <Tag color={dictMap[s.conceptName]?.color ?? '#999'} style={{ fontSize: 13, padding: '4px 12px' }}>
+                    <Tag color={stat.color} style={{ fontSize: 13, padding: '4px 12px' }}>
                       {cat}：{stat.count}板块 <ArrowUpOutlined style={{ color: '#fff' }} />{stat.up} <ArrowDownOutlined style={{ color: '#fff' }} />{stat.down}
                     </Tag>
                   </Col>
