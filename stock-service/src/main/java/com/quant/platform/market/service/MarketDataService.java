@@ -20,6 +20,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
@@ -60,6 +61,8 @@ public class MarketDataService {
      * 数据源：启动时从 index_daily 加载（DB 为唯一真相源），新增指数无需改代码。
      */
     private volatile Map<String, String> indexNameMap = new ConcurrentHashMap<>();
+    /** 非指数 code 负缓存：map 回查未命中后记录，避免每次 getBarsInRange 都打一次 index_daily 查询 */
+    private final Set<String> nonIndexCodes = ConcurrentHashMap.newKeySet();
 
     public MarketDataService(ClickHouseStockService clickHouseStockService,
                              StockInfoMapper stockInfoMapper,
@@ -335,7 +338,7 @@ public class MarketDataService {
     public List<MarketDailyBar> getBarsInRange(String symbol, LocalDate startDate, LocalDate endDate) {
         String code = parseCode(symbol);
         String market = parseMarket(symbol);
-        String indexName = indexNameMap.get(code);
+        String indexName = resolveIndexName(code);
 
         if (indexName != null) {
             // 指数：直接查 index_daily 表（纯股票数据，无 code 冲突）
@@ -354,6 +357,35 @@ public class MarketDataService {
         return dailies.stream()
                 .map(sd -> toMarketBar(sd, market))
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * 解析指数名称：优先用启动时装载的 indexNameMap；
+     * 若 miss（典型为启动时 ClickHouse 未就绪导致装载失败、map 永久空置），运行时按需回查 index_daily，
+     * 命中则缓存进 indexNameMap 并当作指数处理，未命中则记入非指数负缓存（避免重复查询）。
+     * 仅当 code 在 index_daily 真实存在时才认作指数，保持与现有"指数优先"语义一致（如 000001→上证指数）。
+     */
+    private String resolveIndexName(String code) {
+        String name = indexNameMap.get(code);
+        if (name != null) {
+            return name;
+        }
+        if (nonIndexCodes.contains(code)) {
+            return null;
+        }
+        try {
+            String looked = clickHouseStockService.getIndexNameByCode(code);
+            if (looked != null) {
+                indexNameMap.put(code, looked);
+                return looked;
+            }
+            // 仅“查到但 index_daily 确实无此 code”时记负缓存，避免重复回查
+            nonIndexCodes.add(code);
+        } catch (Exception e) {
+            // CH 暂不可用等查询异常：不记负缓存，下次查询自动重试，避免 CH 晚启动被永久误判为非指数
+            log.debug("[resolveIndexName] 回查 index_daily 失败 code={}，下次重试: {}", code, e.getMessage());
+        }
+        return null;
     }
 
     /**

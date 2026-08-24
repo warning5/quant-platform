@@ -62,6 +62,27 @@ public class ClickHouseStockService {
     }
 
     /**
+     * 按 code 回查 index_daily 中的指数名称（运行时兜底用，配合 MarketDataService.resolveIndexName）。
+     * 仅当 code 全为数字时才查询，防止 SQL 注入；未命中或异常均返回 null。
+     */
+    public String getIndexNameByCode(String code) {
+        if (!clickHouseConfig.isEnabled() || code == null || !code.matches("\\d+")) {
+            return null;
+        }
+        try {
+            List<Map<String, Object>> rows = chJdbcClient.queryForList(
+                    "SELECT name FROM index_daily WHERE code = '" + code + "' LIMIT 1");
+            if (!rows.isEmpty()) {
+                Object name = rows.get(0).get("name");
+                return name != null ? String.valueOf(name) : null;
+            }
+        } catch (Exception e) {
+            log.warn("[ClickHouse] 回查指数名称失败 code={}: {}", code, e.getMessage());
+        }
+        return null;
+    }
+
+    /**
      * 从 index_daily 加载全量 指数代码→名称 映射。
      * DB 为唯一真相源，取代硬编码 INDEX_NAME_MAP：新增指数（如国证价值399371/国证成长399370）无需改代码。
      */
