@@ -1,0 +1,21 @@
+[Unit]
+Description=Quant Platform - backend-mp (mini-program backend)
+After=network.target mysql.service
+
+[Service]
+Type=simple
+User=quant
+Group=quant
+WorkingDirectory=/opt/quant-platform/backend-mp
+ExecStart=/usr/bin/java -jar /opt/quant-platform/backend-mp/target/backend-mp-1.0.0.jar --spring.profiles.active=prod
+# backend-mp 的 MySQL 连接硬编码在 application-prod.yml（127.0.0.1:3306/stock, admin/Hanlu@123）
+# 如需覆盖账号/小程序令牌，用下方 Environment 行（环境变量优先级高于 yml 字面值）
+Environment=MP_TOKEN=quant-mp-2026-secret
+# Environment=WECHAT_MINI_APPID=wxd5f4ca3ae962f049
+# Environment=WECHAT_MINI_SECRET=xxxx
+SuccessExitStatus=143
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

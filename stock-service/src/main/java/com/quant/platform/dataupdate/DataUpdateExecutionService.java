@@ -78,6 +78,12 @@ public class DataUpdateExecutionService {
      * 正在运行的任务
      */
     private final Map<String, DataUpdateTask> activeTasks = new ConcurrentHashMap<>();
+
+    /** 僵尸任务判定：超过该分钟数无心跳仍标记为 RUNNING，自动回收（线程存活但无进度的情况） */
+    private static final int ZOMBIE_STALE_MINUTES = 30;
+    /** 回收扫描限流间隔（秒），避免高频轮询反复扫库 */
+    private static final int REAP_THROTTLE_SECONDS = 30;
+    private volatile LocalDateTime lastReapTime = null;
     /**
      * 各类型最近完成的任务（页面刷新后恢复状态用）
      */
@@ -245,26 +251,32 @@ public class DataUpdateExecutionService {
      * 提交数据更新任务（有单任务互斥锁，用于数据更新UI页面）
      */
     public synchronized DataUpdateTask submitTask(DataUpdateRequest request) {
-        // 检查是否有任务正在运行
-        if (activeTasks.values().stream().anyMatch(DataUpdateTask::isRunning)) {
-            throw new IllegalStateException("已有任务正在运行，请等待完成或取消");
+        reapStaleTasks();
+        // 仅手动任务之间互斥；定时/依赖任务并发执行，不阻塞手动提交
+        DataUpdateTask blocker = activeTasks.values().stream()
+                .filter(t -> t.isRunning() && t.isManual())
+                .findFirst().orElse(null);
+        if (blocker != null) {
+            throw new IllegalStateException(buildBlockMessage(blocker));
         }
 
-        return doSubmit(request);
+        return doSubmit(request, true);
     }
 
     /**
      * 提交数据更新任务（无单任务限制，支持并发，用于定时调度）
-     * 定时任务场景下多个任务可同时执行
+     * 定时任务场景下多个任务可同时执行，且不会阻塞 UI 手动提交
      */
     public synchronized DataUpdateTask submitTaskConcurrent(DataUpdateRequest request) {
-        return doSubmit(request);
+        reapStaleTasks();
+        return doSubmit(request, false);
     }
 
     /**
      * 内部统一提交逻辑
+     * @param manual 是否手动提交（UI 页面）；false 表示定时/依赖调度
      */
-    private DataUpdateTask doSubmit(DataUpdateRequest request) {
+    private DataUpdateTask doSubmit(DataUpdateRequest request, boolean manual) {
         String taskId = "TASK-" + System.currentTimeMillis();
         DataUpdateTask task = new DataUpdateTask();
         task.setTaskId(taskId);
@@ -272,6 +284,7 @@ public class DataUpdateExecutionService {
         task.setStatus(JobStatus.RUNNING);
         task.setStartTime(LocalDateTime.now());
         task.setCurrentStep("准备启动...");
+        task.setManual(manual);
         activeTasks.put(taskId, task);
         // 记录 updateType 映射（即使任务从 activeTasks 移除后仍可查到，确保日志分流正确）
         if (request.getUpdateType() != null) {
@@ -301,9 +314,86 @@ public class DataUpdateExecutionService {
         // 在新线程中执行
         Thread worker = new Thread(() -> executeTask(taskId, request), "data-update-" + taskId);
         worker.setDaemon(true);
+        task.setWorkerThread(worker);
         worker.start();
 
         return task;
+    }
+
+    /**
+     * 回收僵尸任务：worker 线程已死、或超过阈值无心跳仍标记为 RUNNING 的任务。
+     * 这类任务会永久占用互斥锁，导致手动提交被错误拒绝。回收后状态置 INTERRUPTED 并从内存移除。
+     * 限流：两次扫描间隔不小于 REAP_THROTTLE_SECONDS，避免高频轮询反复扫库。
+     */
+    private synchronized void reapStaleTasks() {
+        LocalDateTime now = LocalDateTime.now();
+        if (lastReapTime != null
+                && java.time.Duration.between(lastReapTime, now).getSeconds() < REAP_THROTTLE_SECONDS) {
+            return;
+        }
+        lastReapTime = now;
+
+        List<DataUpdateTask> zombies = new ArrayList<>();
+        for (DataUpdateTask t : activeTasks.values()) {
+            if (!t.isRunning()) continue;
+            boolean threadDead = t.getWorkerThread() != null && !t.getWorkerThread().isAlive();
+            boolean stale = t.getLastHeartbeat() != null
+                    && java.time.Duration.between(t.getLastHeartbeat(), now).toMinutes() > ZOMBIE_STALE_MINUTES;
+            if (threadDead || stale) {
+                zombies.add(t);
+            }
+        }
+        for (DataUpdateTask z : zombies) {
+            boolean alive = z.getWorkerThread() != null && z.getWorkerThread().isAlive();
+            log.warn("[DataUpdate] 回收僵尸任务: taskId={}, updateType={}, manual={}, startTime={}, lastHeartbeat={}, threadAlive={}",
+                    z.getTaskId(),
+                    z.getRequest() != null ? z.getRequest().getUpdateType() : null,
+                    z.isManual(), z.getStartTime(), z.getLastHeartbeat(), alive);
+            z.setStatus(JobStatus.FAILED);
+            z.setEndTime(now);
+            z.setCurrentStep("任务无心跳/线程已死，已自动回收");
+            String ut = z.getRequest() != null ? z.getRequest().getUpdateType() : null;
+            if (ut != null && !ut.isEmpty()) {
+                recentFinishedTasks.put(ut, z);
+            }
+            activeTasks.remove(z.getTaskId());
+            // 回写执行历史
+            if (taskRunHistoryService != null && z.getHistoryId() != null && z.getHistoryId() > 0) {
+                try {
+                    taskRunHistoryService.finish(z.getHistoryId(), JobStatus.FAILED, null,
+                            "自动回收：线程已死或无心跳超过 " + ZOMBIE_STALE_MINUTES + " 分钟");
+                } catch (Exception e) {
+                    log.warn("[DataUpdate] 回收时回写执行历史失败: {}", e.getMessage());
+                }
+            }
+            // 回写 data_schedule_config（仅当仍标记 RUNNING 时，避免误覆盖已翻篇的状态）
+            String dbKey = resolveDbTaskKey(z.getRequest());
+            if (dbKey != null && !dbKey.isEmpty()) {
+                try {
+                    int rows = jdbcTemplate.update(
+                        "UPDATE data_schedule_config SET last_run_status='FAILED', updated_at=? " +
+                        "WHERE task_key=? AND last_run_status='RUNNING'",
+                        now, dbKey);
+                    if (rows > 0) {
+                        log.info("[DataUpdate] 回收僵尸任务回写 DB: task_key={}", dbKey);
+                    }
+                } catch (Exception e) {
+                    log.warn("[DataUpdate] 回收僵尸任务回写 DB 失败: {}", e.getMessage());
+                }
+            }
+        }
+    }
+
+    /**
+     * 构造"已有任务正在运行"的拒绝信息，附带阻塞任务的身份，便于定位（对应"查一下是哪个任务"）。
+     */
+    private String buildBlockMessage(DataUpdateTask blocker) {
+        String ut = blocker.getRequest() != null ? blocker.getRequest().getUpdateType() : "?";
+        String tk = blocker.getRequest() != null ? blocker.getRequest().getTaskKey() : "?";
+        boolean alive = blocker.getWorkerThread() != null && blocker.getWorkerThread().isAlive();
+        return String.format(
+                "已有任务正在运行，请等待完成或取消 [taskId=%s, type=%s, key=%s, startTime=%s, lastHeartbeat=%s, threadAlive=%s]",
+                blocker.getTaskId(), ut, tk, blocker.getStartTime(), blocker.getLastHeartbeat(), alive);
     }
 
     /**
@@ -314,6 +404,7 @@ public class DataUpdateExecutionService {
     }
 
     public DataUpdateTask getCurrentTask() {
+        reapStaleTasks();
         return activeTasks.values().stream()
                 .filter(DataUpdateTask::isRunning)
                 .findFirst()
@@ -1317,6 +1408,7 @@ public class DataUpdateExecutionService {
      * 广播任务状态
      */
     private void broadcastStatus(DataUpdateTask task) {
+        task.touchHeartbeat();
         try {
             Map<String, Object> msg = new HashMap<>();
             msg.put("type", "DATA_UPDATE_STATUS");
@@ -1386,6 +1478,9 @@ public class DataUpdateExecutionService {
             // 附带 updateType 让前端按类型分流日志
             // 优先从 activeTasks 取，取不到则从 taskUpdateTypes 兜底（任务结束后仍可分流）
             DataUpdateTask task = activeTasks.get(taskId);
+            if (task != null) {
+                task.touchHeartbeat();
+            }
             if (task != null && task.getRequest() != null) {
                 msg.put("updateType", task.getRequest().getUpdateType());
             } else {

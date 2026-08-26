@@ -1,0 +1,20 @@
+[Unit]
+Description=Quant Platform - stock-service (main backend)
+After=network.target mysql.service clickhouse-server.service
+Wants=mysql.service clickhouse-server.service
+
+[Service]
+Type=simple
+User=quant
+Group=quant
+WorkingDirectory=/opt/quant-platform/stock-service
+ExecStart=/usr/bin/java -jar /opt/quant-platform/stock-service/target/stock-service-1.0.0.jar --spring.profiles.active=prod
+EnvironmentFile=/opt/quant-platform/stock-service/quant-platform.env
+# JVM 调优可按机器内存调整
+Environment=JAVA_OPTS=-Xms512m -Xmx2g -XX:+UseG1GC -Dfile.encoding=UTF-8
+SuccessExitStatus=143
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

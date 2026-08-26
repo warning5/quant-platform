@@ -1117,10 +1117,11 @@ def validate_financial_data(conn, years):
               ON a.code = b.code
              AND LEFT(b.report_date,4) = LEFT(a.report_date,4) - 1
              AND b.report_type = a.report_type
-            WHERE LEFT(a.report_date,4) >= YEAR(CURDATE()) - 3
-              AND a.report_type IN (1, 2, 4)
-              AND a.{field} IS NOT NULL AND b.{field} IS NOT NULL
-              AND ABS(a.{field} / NULLIF(b.{field}, 0)) > 5
+        WHERE LEFT(a.report_date,4) >= YEAR(CURDATE()) - 3
+          AND a.report_type IN (1, 2, 4)
+          AND a.{field} IS NOT NULL AND b.{field} IS NOT NULL
+          AND ABS(b.{field}) >= 1
+          AND ABS(a.{field} / NULLIF(b.{field}, 0)) > 5
             ORDER BY ABS(a.{field} / NULLIF(b.{field}, 0)) DESC
             LIMIT 8
         """)
@@ -1133,31 +1134,40 @@ def validate_financial_data(conn, years):
                       f"{r['cur_val']:>10.2f} {r['prev_val']:>10.2f}")
             total_anomalies += len(anomalies)
 
-    # 经营现金流/净利润异常（比率 < -5 或 > 20）
-    print("\n  [经营现金流/净利润比] 异常检测（比率 < -5 或 > 20，或净利正但OCF为负）:")
+    # 经营现金流/净利润异常（比率 = 经营CF / 净利润绝对值；比率 < -5 或 > 20，或净利>0但OCF<0）
+    # 注意：比率必须用绝对值（元）相除，不能用 net_profit_yoy（那是同比增长率%，单位不匹配）
+    print("\n  [经营现金流/净利润比] 异常检测（比率=经营CF/净利润绝对值，比率 < -5 或 > 20，或净利>0但OCF<0）:")
     cursor.execute("""
         SELECT a.code, LEFT(a.report_date,4) as report_year, a.report_type,
-               c.net_operate_cf as ocf, a.net_profit_yoy as np_yoy
+               c.net_operate_cf as ocf,
+               COALESCE(i.net_profit, i.np_parent_company_owners) as net_profit
         FROM stock_financial_indicator a
         LEFT JOIN stock_cashflow c
           ON a.code = c.code AND a.report_date = c.report_date AND a.report_type = c.report_type
+        LEFT JOIN stock_income i
+          ON a.code = i.code AND a.report_date = i.report_date AND a.report_type = i.report_type
         WHERE LEFT(a.report_date,4) >= YEAR(CURDATE()) - 3
           AND a.report_type IN (1, 2, 4)
           AND c.net_operate_cf IS NOT NULL
-          AND a.net_profit_yoy IS NOT NULL AND a.net_profit_yoy > 0
-          AND (c.net_operate_cf < 0
-               OR c.net_operate_cf / NULLIF(a.net_profit_yoy, 0) > 20
-               OR c.net_operate_cf / NULLIF(a.net_profit_yoy, 0) < -5)
+          AND COALESCE(i.net_profit, i.np_parent_company_owners) IS NOT NULL
+          AND COALESCE(i.net_profit, i.np_parent_company_owners) != 0
+          AND ( (c.net_operate_cf < 0 AND COALESCE(i.net_profit, i.np_parent_company_owners) > 0)
+               OR c.net_operate_cf / NULLIF(COALESCE(i.net_profit, i.np_parent_company_owners), 0) > 20
+               OR c.net_operate_cf / NULLIF(COALESCE(i.net_profit, i.np_parent_company_owners), 0) < -5 )
         ORDER BY a.code, a.report_date DESC
         LIMIT 10
     """)
     cf_anomalies = cursor.fetchall()
     if cf_anomalies:
-        print(f"  {'代码':<10} {'年份':<6} {'类型':<4} {'经营CF':>12} {'净利':>12}  备注")
+        print(f"  {'代码':<10} {'年份':<6} {'类型':<4} {'经营CF':>14} {'净利':>14}  备注")
         for r in cf_anomalies:
-            note = "OCF为负" if (r['ocf'] or 0) < 0 else "比率异常"
+            np = r['net_profit'] or 0
+            ocf = r['ocf'] or 0
+            ratio = (ocf / np) if np != 0 else None
+            note = "OCF为负(净利正)" if (ocf < 0 and np > 0) else "比率异常"
+            ratio_str = f"  ratio={ratio:.2f}" if ratio is not None else ""
             print(f"  {r['code']:<10} {r['report_year']:<6} {r['report_type']:<4} "
-                  f"{r['ocf']:>12.0f} {r['np_yoy']:>12.2f}  {note}")
+                  f"{ocf:>14.0f} {np:>14.0f}  {note}{ratio_str}")
         total_anomalies += len(cf_anomalies)
 
     if total_anomalies == 0:

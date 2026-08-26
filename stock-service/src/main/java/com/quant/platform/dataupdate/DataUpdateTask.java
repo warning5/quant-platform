@@ -97,6 +97,30 @@ public class DataUpdateTask {
     private LocalDateTime createTime = LocalDateTime.now();
 
     /**
+     * 最近心跳时间（进度/状态广播时刷新）。超过阈值无心跳视为僵尸任务，由执行服务自动回收。
+     */
+    @JsonIgnore
+    private transient LocalDateTime lastHeartbeat = LocalDateTime.now();
+
+    /**
+     * 执行该任务的 worker 线程引用，用于检测线程是否仍存活（判断僵尸）。
+     */
+    @JsonIgnore
+    private transient Thread workerThread;
+
+    /**
+     * 是否手动提交（UI 页面提交=true；定时/依赖调度=false）。
+     * 手动任务之间互斥；定时任务并发执行，不阻塞手动提交。
+     */
+    @JsonIgnore
+    private transient boolean manual = false;
+
+    /** 刷新心跳时间 */
+    public void touchHeartbeat() {
+        this.lastHeartbeat = LocalDateTime.now();
+    }
+
+    /**
      * 当前任务关联的 Python 子进程（用于取消时精确杀进程）
      * 每个任务独立持有，解决多任务并发时共享变量被覆盖导致杀错进程的 bug
      */
