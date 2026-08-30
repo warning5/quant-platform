@@ -16,6 +16,7 @@ import { BidAskPanel } from './BidAskPanel';
 import { InstitutionCoverageTab } from './InstitutionCoverageTab';
 import { StockPerformanceTab } from './StockPerformanceTab';
 import { ShareholderStructureTab } from './ShareholderStructureTab';
+import { CyqDistribution } from './CyqDistribution';
 import { TriggerDashboard } from './TriggerDashboard';
 import { message } from '../../utils/messageUtil';
 import { useDict } from '../../utils/useDict';
@@ -550,6 +551,11 @@ export default function StockAnalysis() {
       key: 'shareholder-structure',
       label: tabLabel('股东结构', '股东人数趋势反映筹码集中度变化；基金持仓明细展示机构资金流向。股东户数减少=筹码集中，通常利好。'),
       children: <ShareholderStructureTab data={shareholderData} code={overview.code} />,
+    },
+    {
+      key: 'cyq',
+      label: tabLabel('筹码分布', '基于未复权日线计算的持仓成本分布(CYQ)。支持按日期回看，最多同时对比10天，红色=获利盘、绿色=套牢盘。'),
+      children: <CyqDistribution code={overview.code} />,
     },
     {
       key: 'research',

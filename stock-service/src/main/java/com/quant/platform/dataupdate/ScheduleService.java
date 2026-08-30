@@ -876,7 +876,31 @@ public class ScheduleService implements SchedulingConfigurer {
             case "DIVIDEND"      -> { req.setUpdateType("DIVIDEND");      yield req; }
             case "FINANCIAL"     -> { req.setUpdateType("FINANCIAL");     yield req; }
             case "BIDASK"        -> { req.setUpdateType("BIDASK");        yield req; }
-            case "SENTIMENT"     -> { req.setUpdateType("SENTIMENT");     yield req; }
+            case "SENTIMENT"     -> {
+                req.setUpdateType("SENTIMENT");
+                // 通用 SENTIMENT：启用全部情绪模块（含一致预期/业绩快报/QVIX）
+                // 修复：data_schedule_config 中无 SENTIMENT 行，但历史孤儿任务/前端 updateType=SENTIMENT
+                // 走此分支时若不显式开启 14 个 fetch 字段，全部默认 false → 前端 tag 不显示、Python
+                // 子脚本（consensus_estimate/earnings_report/collect_qvix）也不启动。
+                // 这里与 SENTIMENT_OTHER 对齐并额外开启资金流向，跑全套避免静默空跑。
+                req.setFetchLhb(true);
+                req.setFetchMargin(true);
+                req.setFetchSurvey(true);
+                req.setFetchBlockTrade(true);
+                req.setFetchActivity(true);
+                req.setFetchZtPool(true);
+                req.setFetchMoneyflow(true);
+                req.setFetchNotice(true);
+                req.setFetchFundHolder(true);
+                req.setFetchShareholder(true);
+                req.setFetchNews(true);
+                req.setFetchBondYield(true);
+                req.setFetchShenwanIndex(true);
+                req.setFetchConsensusEstimate(true);
+                req.setFetchEarningsReport(true);
+                req.setFetchQvix(true);
+                yield req;
+            }
             case "SENTIMENT_MF"  -> {
                 req.setUpdateType("SENTIMENT");
                 // 从 extra_config 读取 moneyflowSource，默认 WESTOCK
@@ -929,6 +953,7 @@ public class ScheduleService implements SchedulingConfigurer {
             case "RECOMMENDATION_TRACK" -> { /* P1-4: 已在executeTask中特殊处理 */ yield null; }
             case "DAILY_RECOMMENDATION" -> { /* Phase 2: 已在executeTask中特殊处理 */ yield null; }
             case "FACTOR_HEALTH_CHECK"  -> { /* P3-11: 已在executeTask中特殊处理 */ yield null; }
+            case "CYQ"           -> { req.setUpdateType("CYQ");              yield req; }
             default -> throw new IllegalArgumentException("未知任务类型: " + taskKey);
         };
     }

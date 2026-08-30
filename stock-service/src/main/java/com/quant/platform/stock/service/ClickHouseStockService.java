@@ -528,6 +528,99 @@ public class ClickHouseStockService {
         return queryForListFromMySQL(sql, params);
     }
 
+    // ==================== 筹码分布 CYQ 查询 ====================
+
+    private static final com.fasterxml.jackson.databind.ObjectMapper CYQ_OM =
+            new com.fasterxml.jackson.databind.ObjectMapper();
+
+    /** 把 cyq_json 列解析为 {price, value} 列表, 并组装成展示用 Map */
+    private Map<String, Object> buildCyqView(Map<String, Object> row) {
+        Map<String, Object> view = new LinkedHashMap<>(row);
+        Object json = row.get("cyq_json");
+        List<Map<String, Object>> dist = new ArrayList<>();
+        if (json != null && json instanceof String && !((String) json).isEmpty()) {
+            try {
+                Map<?, ?> obj = CYQ_OM.readValue((String) json, Map.class);
+                List<?> yr = (List<?>) obj.get("yrange");
+                List<?> xs = (List<?>) obj.get("x");
+                if (yr != null && xs != null) {
+                    for (int i = 0; i < yr.size(); i++) {
+                        if (xs.get(i) == null) continue;
+                        double v = ((Number) xs.get(i)).doubleValue();
+                        if (v <= 0) continue;
+                        Map<String, Object> p = new LinkedHashMap<>();
+                        p.put("price", yr.get(i));
+                        p.put("value", v);
+                        dist.add(p);
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("[CYQ] cyq_json 解析失败: {}", e.getMessage());
+            }
+        }
+        view.put("distribution", dist);
+        view.remove("cyq_json");
+        return view;
+    }
+
+    /** 最新筹码快照: 来自 stock_cyq_daily 最新一行(单表设计, 实时快照即 daily 最新) */
+    public Map<String, Object> getCyqLatest(String code) {
+        if (!clickHouseConfig.isEnabled()) return null;
+        try {
+            List<Map<String, Object>> rows = queryForListFromClickHouse(
+                "SELECT trade_date, close_price, avg_cost, benefit, c90_lo, c90_hi, c90_conc, " +
+                "c70_lo, c70_hi, c70_conc, main_cost, main_cost_lo, main_cost_hi, main_cost_conf, cyq_json FROM stock.stock_cyq_daily FINAL " +
+                "WHERE code=? ORDER BY trade_date DESC LIMIT 1", code);
+            if (rows.isEmpty()) return null;
+            return buildCyqView(rows.get(0));
+        } catch (Exception e) {
+            log.warn("[CYQ] 最新快照查询失败 {}: {}", code, e.getMessage());
+            return null;
+        }
+    }
+
+    /** 指定交易日筹码: 来自 stock_cyq_daily(历史回看) */
+    public Map<String, Object> getCyqByDate(String code, LocalDate date) {
+        if (!clickHouseConfig.isEnabled()) return null;
+        try {
+            List<Map<String, Object>> rows = queryForListFromClickHouse(
+                "SELECT trade_date, close_price, avg_cost, benefit, c90_lo, c90_hi, c90_conc, " +
+                "c70_lo, c70_hi, c70_conc, main_cost, main_cost_lo, main_cost_hi, main_cost_conf, cyq_json FROM stock.stock_cyq_daily FINAL " +
+                "WHERE code=? AND trade_date=? LIMIT 1", code, date);
+            if (rows.isEmpty()) return null;
+            return buildCyqView(rows.get(0));
+        } catch (Exception e) {
+            log.warn("[CYQ] 按日查询失败 {} {}: {}", code, date, e.getMessage());
+            return null;
+        }
+    }
+
+    /** 多日筹码(最多 10 天): 按日期升序返回列表, 用于前端叠加对比 */
+    public List<Map<String, Object>> getCyqMulti(String code, List<LocalDate> dates) {
+        if (!clickHouseConfig.isEnabled() || dates == null || dates.isEmpty()) return List.of();
+        try {
+            StringBuilder sb = new StringBuilder(
+                "SELECT trade_date, close_price, avg_cost, benefit, c90_lo, c90_hi, c90_conc, " +
+                "c70_lo, c70_hi, c70_conc, main_cost, main_cost_lo, main_cost_hi, main_cost_conf, cyq_json FROM stock.stock_cyq_daily FINAL " +
+                "WHERE code=? AND trade_date IN (");
+            Object[] params = new Object[dates.size() + 1];
+            params[0] = code;
+            for (int i = 0; i < dates.size(); i++) {
+                if (i > 0) sb.append(",");
+                sb.append("?");
+                params[i + 1] = dates.get(i);
+            }
+            sb.append(") ORDER BY trade_date");
+            List<Map<String, Object>> rows = queryForListFromClickHouse(sb.toString(), params);
+            List<Map<String, Object>> out = new ArrayList<>();
+            for (Map<String, Object> r : rows) out.add(buildCyqView(r));
+            return out;
+        } catch (Exception e) {
+            log.warn("[CYQ] 多日查询失败 {} {}: {}", code, dates, e.getMessage());
+            return List.of();
+        }
+    }
+
     /**
      * 执行通用 SQL 查询单值
      */

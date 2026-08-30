@@ -332,6 +332,14 @@ public class DataUpdateScriptService {
             return cmd;
         }
 
+        // 筹码分布增量更新(方案C): 日线更新后自动追算(读 stock_cyq_daily 最新快照, 仅推进新交易日)
+        if ("CYQ".equals(request.getUpdateType())) {
+            cmd.add("cyq_service.py");
+            cmd.add("--incremental");
+            // 不传 --end-date: Python 默认取 stock_daily 最新交易日, 保证追到最新数据
+            return cmd;
+        }
+
         // 股票日线
         if ("TENCENT_ALL".equals(request.getSource())) {
             // 腾讯全市场（沪深+北交所），使用统一 data_provider 模块
@@ -393,6 +401,8 @@ public class DataUpdateScriptService {
         } else if ("BAOSTOCK".equals(request.getSource())) {
             wrapper.in(StockInfo::getMarket, "SH", "SZ");
         } else if ("TENCENT_ALL".equals(request.getSource())) {
+            wrapper.in(StockInfo::getMarket, "SH", "SZ", "BJ");
+        } else if ("CYQ".equals(request.getUpdateType())) {
             wrapper.in(StockInfo::getMarket, "SH", "SZ", "BJ");
         } else if ("TENCENT".equals(request.getSource()) || "BJ".equals(request.getMarket())) {
         } else if (!"ALL".equals(request.getMarket())) {

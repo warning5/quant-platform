@@ -194,6 +194,10 @@ def build_daily_rows(db, code, name, market, rows, snapshot=None):
             "close_price": close_p,
             "high_price": to_float(row[3]),
             "low_price": to_float(row[4]),
+            "open_unadj": to_float(row[1]),   # 腾讯源本就未复权, 直接复制
+            "high_unadj": to_float(row[3]),
+            "low_unadj": to_float(row[4]),
+            "close_unadj": close_p,
             "pre_close": None,  # 后续由 field_completer 补全
             "volume": to_int(row[5]),
             "amount": amount,
@@ -236,6 +240,10 @@ def build_daily_rows(db, code, name, market, rows, snapshot=None):
             "close_price": close_p,
             "high_price": to_float(row[3]),
             "low_price": to_float(row[4]),
+            "open_unadj": to_float(row[1]),   # 腾讯源本就未复权, 直接复制
+            "high_unadj": to_float(row[3]),
+            "low_unadj": to_float(row[4]),
+            "close_unadj": close_p,
             "pre_close": prev_close,
             "volume": to_int(row[5]),
             "amount": amount,

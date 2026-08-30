@@ -23,6 +23,13 @@ from contextlib import contextmanager
 
 import baostock as bs
 
+# 复用 cyq_core 的未复权价拉取(adjustflag=3)，用于补全 stock_daily.unadj 4列
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    from cyq_core import fetch_baostock_unadj
+except Exception:
+    fetch_baostock_unadj = None
+
 
 @contextmanager
 def suppress_stdout():
@@ -153,6 +160,21 @@ def fetch_stock_history(code, name, market, start_date, end_date, max_retries=2,
 
 # to_float / to_int 已从 db_helper 导入，不再本地定义
 
+def _unadj(u, col, fallback):
+    """取未复权价; u 为 adjustflag=3 行(Series)或 None; 缺未复权列/值为NaN则用前复权价兜底,
+    绝不返回 None/NaN(避免 ReplacingMergeTree 整行覆盖清掉历史值, 也避免 NaN 污染 CYQ 的 coalesce)"""
+    if u is not None:
+        raw = u[col]
+        try:
+            f = float(raw)
+        except (TypeError, ValueError):
+            f = None
+        if f is not None and f == f:  # f == f 排除 NaN(nan != nan)
+            return f
+    fb = to_float(fallback)
+    return fb
+
+
 def build_daily_rows(db, code, name, market, df):
     """
     将 Baostock DataFrame 转换为 db_helper.upsert_daily() 需要的 row list。
@@ -168,6 +190,19 @@ def build_daily_rows(db, code, name, market, df):
     # 获取第一条记录的前收盘
     first_date = df.iloc[0]['date']
     prev_close = db.get_prev_close(code, first_date)
+
+    # ── 未复权价补全(unadj 4列) ──
+    # 拉 Baostock adjustflag=3 精确未复权; 失败/缺失则以前复权价兜底
+    # (前复权锚定最新日, 增量更新 newest 日未复权==前复权, 精确; 历史日近似但不写 NULL 以免清掉 backfill 已补值)
+    unadj_map = {}
+    if fetch_baostock_unadj is not None:
+        try:
+            sd = str(df['date'].min()); ed = str(df['date'].max())
+            udf = fetch_baostock_unadj(code, sd, ed)
+            if len(udf):
+                unadj_map = {str(r['date']): r for _, r in udf.iterrows()}
+        except Exception:
+            unadj_map = {}  # 拉取失败 -> 全部用前复权兜底
 
     rows = []
     for _, row in df.iterrows():
@@ -212,8 +247,12 @@ def build_daily_rows(db, code, name, market, df):
             "open_price": to_float(row['open']),
             "close_price": close_price,
             "high_price": to_float(row['high']),
-            "low_price": to_float(row['low']),
-            "pre_close": pre_close_val,
+                "low_price": to_float(row['low']),
+                "open_unadj": _unadj(u, "open", row['open']),
+                "high_unadj": _unadj(u, "high", row['high']),
+                "low_unadj": _unadj(u, "low", row['low']),
+                "close_unadj": _unadj(u, "close", row['close']),
+                "pre_close": pre_close_val,
             "volume": to_int(row['volume']),
             "amount": to_float(row['amount']),
             "change_percent": change_percent,

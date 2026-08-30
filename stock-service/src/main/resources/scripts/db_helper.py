@@ -172,6 +172,10 @@ class StockDailyDB:
         "close_price",     # 收盘价
         "high_price",      # 最高价
         "low_price",       # 最低价
+        "open_unadj",     # 开盘价(未复权, adjustflag=3)
+        "high_unadj",     # 最高价(未复权)
+        "low_unadj",      # 最低价(未复权)
+        "close_unadj",    # 收盘价(未复权)
         "pre_close",       # 昨收价
         "volume",          # 成交量（手/股）
         "amount",          # 成交额（元）
@@ -187,7 +191,7 @@ class StockDailyDB:
 
     # ─── index_daily 字段（18列，不含 data_source）────────────
     # 指数只有 Baostock 单一数据源，无需 data_source 标记
-    INDEX_DAILY_COLUMNS = [c for c in DAILY_COLUMNS if c != "data_source"]
+    INDEX_DAILY_COLUMNS = [c for c in DAILY_COLUMNS if c not in ("data_source", "open_unadj", "high_unadj", "low_unadj", "close_unadj")]
 
     def __init__(self):
         self.backend = DB_BACKEND
