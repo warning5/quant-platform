@@ -200,7 +200,7 @@ def build_daily_rows(db, code, name, market, df):
             sd = str(df['date'].min()); ed = str(df['date'].max())
             udf = fetch_baostock_unadj(code, sd, ed)
             if len(udf):
-                unadj_map = {str(r['date']): r for _, r in udf.iterrows()}
+                unadj_map = {str(r['date'])[:10]: r for _, r in udf.iterrows()}
         except Exception:
             unadj_map = {}  # 拉取失败 -> 全部用前复权兜底
 
@@ -248,10 +248,10 @@ def build_daily_rows(db, code, name, market, df):
             "close_price": close_price,
             "high_price": to_float(row['high']),
                 "low_price": to_float(row['low']),
-                "open_unadj": _unadj(u, "open", row['open']),
-                "high_unadj": _unadj(u, "high", row['high']),
-                "low_unadj": _unadj(u, "low", row['low']),
-                "close_unadj": _unadj(u, "close", row['close']),
+                "open_unadj": _unadj(unadj_map.get(str(row['date'])[:10]), "open", row['open']),
+                "high_unadj": _unadj(unadj_map.get(str(row['date'])[:10]), "high", row['high']),
+                "low_unadj": _unadj(unadj_map.get(str(row['date'])[:10]), "low", row['low']),
+                "close_unadj": _unadj(unadj_map.get(str(row['date'])[:10]), "close", row['close']),
                 "pre_close": pre_close_val,
             "volume": to_int(row['volume']),
             "amount": to_float(row['amount']),
@@ -304,7 +304,7 @@ def _run_sequential(stocks, start_date, end_date, force, inter_stock_delay,
 
                 if df is not None and len(df) > 0:
                     rows = build_daily_rows(db, code, name, market, df)
-                    n = db.upsert_daily(rows, force=force)
+                    n = db.upsert_daily(rows, force=force, refresh_version=True)
                     stats["success"] += n
                     stats["skipped"] += len(df) - n
                     stats["processed"].append((code, market))
@@ -423,7 +423,7 @@ def _mp_worker_process_chunk(args, progress_queue=None):
 
                 if df is not None and len(df) > 0:
                     rows = build_daily_rows(db, code, name, market, df)
-                    n = db.upsert_daily(rows, force=force)
+                    n = db.upsert_daily(rows, force=force, refresh_version=True)
                     stats["success"] += n
                     stats["skipped"] += len(df) - n
                     stats["processed"].append((code, market))
@@ -783,7 +783,7 @@ def main():
 
                     if df is not None and len(df) > 0:
                         rows = build_daily_rows(db, code, name, market, df)
-                        n = db.upsert_daily(rows, force=args.force)
+                        n = db.upsert_daily(rows, force=args.force, refresh_version=True)
                         total_success += n
                         total_skipped += len(df) - n
                         processed_codes.append((code, market))

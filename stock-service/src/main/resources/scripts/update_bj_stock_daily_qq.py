@@ -365,7 +365,7 @@ def main():
                 # 直接从预取好的快照映射中取（无需逐只请求腾讯接口）
                 snapshot = all_snapshots.get(code, {})
                 daily_rows = build_daily_rows(db, code, name, market, rows, snapshot=snapshot)
-                n = db.upsert_daily(daily_rows, force=args.force)
+                n = db.upsert_daily(daily_rows, force=args.force, refresh_version=True)
                 total_success += n
                 total_skipped += len(daily_rows) - n
                 if i % 10 == 0 or i <= 5:
