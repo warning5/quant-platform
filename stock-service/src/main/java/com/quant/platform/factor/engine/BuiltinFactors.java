@@ -14,6 +14,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * 内置因子实现集合（ACTIVE 状态）
@@ -737,6 +738,21 @@ public class BuiltinFactors {
     // ====================================================================
     // 形态伪因子（P1-5）— PATTERN策略信号强度作为因子参与ICW
     // 每个形态类型对应一个因子，值=score/100.0（0~1范围）
+    /**
+     * 过滤掉 OHLCV 任一字段为 null 的日线（缺采/脏数据）。
+     * 形态因子依赖连续的价格/成交量序列，history 中只要有一根 bar 的某个字段为 null，
+     * 直接 mapToDouble(b -> b.getVol().doubleValue()) 就会 NPE（见 PatternSmallSwing/BottomConfirmed）。
+     * 这里统一剔除 null bar，由调用方在剔除后不足阈值时 return null。
+     */
+    private static List<MarketDailyBar> nonNullBars(List<MarketDailyBar> history) {
+        return history.stream()
+                .filter(b -> b != null
+                        && b.getHigh() != null && b.getLow() != null
+                        && b.getOpen() != null && b.getClose() != null
+                        && b.getVol() != null)
+                .collect(Collectors.toList());
+    }
+
     // PATTERN_STRENGTH = 最强形态得分（综合信号强度）
     // ====================================================================
 
@@ -751,12 +767,13 @@ public class BuiltinFactors {
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
                                 List<MarketDailyBar> history, Map<String, Object> context) {
-            if (history.size() < 60) return null;
-            double[] high = history.stream().mapToDouble(b -> b.getHigh().doubleValue()).toArray();
-            double[] low = history.stream().mapToDouble(b -> b.getLow().doubleValue()).toArray();
-            double[] open = history.stream().mapToDouble(b -> b.getOpen().doubleValue()).toArray();
-            double[] close = history.stream().mapToDouble(b -> b.getClose().doubleValue()).toArray();
-            double[] volume = history.stream().mapToDouble(b -> b.getVol().doubleValue()).toArray();
+            List<MarketDailyBar> valid = nonNullBars(history);
+            if (valid.size() < 60) return null;
+            double[] high = valid.stream().mapToDouble(b -> b.getHigh().doubleValue()).toArray();
+            double[] low = valid.stream().mapToDouble(b -> b.getLow().doubleValue()).toArray();
+            double[] open = valid.stream().mapToDouble(b -> b.getOpen().doubleValue()).toArray();
+            double[] close = valid.stream().mapToDouble(b -> b.getClose().doubleValue()).toArray();
+            double[] volume = valid.stream().mapToDouble(b -> b.getVol().doubleValue()).toArray();
 
             PatternDetector.PatternResult strongest = PatternDetector.getStrongestPattern(high, low, open, close, volume);
             if (strongest == null) return BigDecimal.ZERO;
@@ -776,12 +793,13 @@ public class BuiltinFactors {
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
                                 List<MarketDailyBar> history, Map<String, Object> context) {
-            if (history.size() < 60) return null;
-            double[] high = history.stream().mapToDouble(b -> b.getHigh().doubleValue()).toArray();
-            double[] low = history.stream().mapToDouble(b -> b.getLow().doubleValue()).toArray();
-            double[] open = history.stream().mapToDouble(b -> b.getOpen().doubleValue()).toArray();
-            double[] close = history.stream().mapToDouble(b -> b.getClose().doubleValue()).toArray();
-            double[] volume = history.stream().mapToDouble(b -> b.getVol().doubleValue()).toArray();
+            List<MarketDailyBar> valid = nonNullBars(history);
+            if (valid.size() < 60) return null;
+            double[] high = valid.stream().mapToDouble(b -> b.getHigh().doubleValue()).toArray();
+            double[] low = valid.stream().mapToDouble(b -> b.getLow().doubleValue()).toArray();
+            double[] open = valid.stream().mapToDouble(b -> b.getOpen().doubleValue()).toArray();
+            double[] close = valid.stream().mapToDouble(b -> b.getClose().doubleValue()).toArray();
+            double[] volume = valid.stream().mapToDouble(b -> b.getVol().doubleValue()).toArray();
 
             PatternDetector.PatternResult r = PatternDetector.detect(
                     PatternDetector.PatternType.BOTTOM_REVERSAL, high, low, open, close, volume);
@@ -802,12 +820,13 @@ public class BuiltinFactors {
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
                                 List<MarketDailyBar> history, Map<String, Object> context) {
-            if (history.size() < 60) return null;
-            double[] high = history.stream().mapToDouble(b -> b.getHigh().doubleValue()).toArray();
-            double[] low = history.stream().mapToDouble(b -> b.getLow().doubleValue()).toArray();
-            double[] open = history.stream().mapToDouble(b -> b.getOpen().doubleValue()).toArray();
-            double[] close = history.stream().mapToDouble(b -> b.getClose().doubleValue()).toArray();
-            double[] volume = history.stream().mapToDouble(b -> b.getVol().doubleValue()).toArray();
+            List<MarketDailyBar> valid = nonNullBars(history);
+            if (valid.size() < 60) return null;
+            double[] high = valid.stream().mapToDouble(b -> b.getHigh().doubleValue()).toArray();
+            double[] low = valid.stream().mapToDouble(b -> b.getLow().doubleValue()).toArray();
+            double[] open = valid.stream().mapToDouble(b -> b.getOpen().doubleValue()).toArray();
+            double[] close = valid.stream().mapToDouble(b -> b.getClose().doubleValue()).toArray();
+            double[] volume = valid.stream().mapToDouble(b -> b.getVol().doubleValue()).toArray();
 
             PatternDetector.PatternResult r = PatternDetector.detect(
                     PatternDetector.PatternType.MAIN_TREND, high, low, open, close, volume);
@@ -828,12 +847,13 @@ public class BuiltinFactors {
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
                                 List<MarketDailyBar> history, Map<String, Object> context) {
-            if (history.size() < 30) return null;
-            double[] high = history.stream().mapToDouble(b -> b.getHigh().doubleValue()).toArray();
-            double[] low = history.stream().mapToDouble(b -> b.getLow().doubleValue()).toArray();
-            double[] open = history.stream().mapToDouble(b -> b.getOpen().doubleValue()).toArray();
-            double[] close = history.stream().mapToDouble(b -> b.getClose().doubleValue()).toArray();
-            double[] volume = history.stream().mapToDouble(b -> b.getVol().doubleValue()).toArray();
+            List<MarketDailyBar> valid = nonNullBars(history);
+            if (valid.size() < 30) return null;
+            double[] high = valid.stream().mapToDouble(b -> b.getHigh().doubleValue()).toArray();
+            double[] low = valid.stream().mapToDouble(b -> b.getLow().doubleValue()).toArray();
+            double[] open = valid.stream().mapToDouble(b -> b.getOpen().doubleValue()).toArray();
+            double[] close = valid.stream().mapToDouble(b -> b.getClose().doubleValue()).toArray();
+            double[] volume = valid.stream().mapToDouble(b -> b.getVol().doubleValue()).toArray();
 
             PatternDetector.PatternResult r = PatternDetector.detect(
                     PatternDetector.PatternType.BREAKOUT, high, low, open, close, volume);
@@ -854,12 +874,13 @@ public class BuiltinFactors {
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
                                 List<MarketDailyBar> history, Map<String, Object> context) {
-            if (history.size() < 30) return null;
-            double[] high = history.stream().mapToDouble(b -> b.getHigh().doubleValue()).toArray();
-            double[] low = history.stream().mapToDouble(b -> b.getLow().doubleValue()).toArray();
-            double[] open = history.stream().mapToDouble(b -> b.getOpen().doubleValue()).toArray();
-            double[] close = history.stream().mapToDouble(b -> b.getClose().doubleValue()).toArray();
-            double[] volume = history.stream().mapToDouble(b -> b.getVol().doubleValue()).toArray();
+            List<MarketDailyBar> valid = nonNullBars(history);
+            if (valid.size() < 30) return null;
+            double[] high = valid.stream().mapToDouble(b -> b.getHigh().doubleValue()).toArray();
+            double[] low = valid.stream().mapToDouble(b -> b.getLow().doubleValue()).toArray();
+            double[] open = valid.stream().mapToDouble(b -> b.getOpen().doubleValue()).toArray();
+            double[] close = valid.stream().mapToDouble(b -> b.getClose().doubleValue()).toArray();
+            double[] volume = valid.stream().mapToDouble(b -> b.getVol().doubleValue()).toArray();
 
             PatternDetector.PatternResult r = PatternDetector.detect(
                     PatternDetector.PatternType.SMALL_SWING, high, low, open, close, volume);
@@ -880,12 +901,13 @@ public class BuiltinFactors {
         @Override
         public BigDecimal calculate(String symbol, LocalDate calcDate,
                                 List<MarketDailyBar> history, Map<String, Object> context) {
-            if (history.size() < 30) return null;
-            double[] high = history.stream().mapToDouble(b -> b.getHigh().doubleValue()).toArray();
-            double[] low = history.stream().mapToDouble(b -> b.getLow().doubleValue()).toArray();
-            double[] open = history.stream().mapToDouble(b -> b.getOpen().doubleValue()).toArray();
-            double[] close = history.stream().mapToDouble(b -> b.getClose().doubleValue()).toArray();
-            double[] volume = history.stream().mapToDouble(b -> b.getVol().doubleValue()).toArray();
+            List<MarketDailyBar> valid = nonNullBars(history);
+            if (valid.size() < 30) return null;
+            double[] high = valid.stream().mapToDouble(b -> b.getHigh().doubleValue()).toArray();
+            double[] low = valid.stream().mapToDouble(b -> b.getLow().doubleValue()).toArray();
+            double[] open = valid.stream().mapToDouble(b -> b.getOpen().doubleValue()).toArray();
+            double[] close = valid.stream().mapToDouble(b -> b.getClose().doubleValue()).toArray();
+            double[] volume = valid.stream().mapToDouble(b -> b.getVol().doubleValue()).toArray();
 
             PatternDetector.PatternResult r = PatternDetector.detect(
                     PatternDetector.PatternType.BOTTOM_CONFIRMED, high, low, open, close, volume);

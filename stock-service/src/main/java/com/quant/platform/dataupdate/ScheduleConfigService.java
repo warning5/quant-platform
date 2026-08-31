@@ -343,6 +343,7 @@ public class ScheduleConfigService {
             case "RECOMMENDATION_TRACK" -> { /* P1-4: 已在 ScheduleService 中特殊处理 */ }
             case "DAILY_RECOMMENDATION" -> { /* Phase 2: 已在 ScheduleService 中特殊处理 */ }
             case "FACTOR_HEALTH_CHECK" -> { /* P3-11: 已在 ScheduleService 中特殊处理 */ }
+            case "CYQ" -> req.setUpdateType("CYQ");
             default -> throw new IllegalArgumentException("未知的任务类型: " + taskKey);
         }
 
