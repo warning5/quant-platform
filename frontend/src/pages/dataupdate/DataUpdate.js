@@ -2606,6 +2606,15 @@ function DataUpdate() {
               ))}
             </Row>
           )}
+          {bidaskCoverage?.missingTradingDays?.length > 0 && (
+            <Alert
+              type="warning"
+              showIcon
+              style={{ marginTop: 12 }}
+              message={`近期缺失交易日（源不可回溯）：${bidaskCoverage.missingTradingDays.join('、')}`}
+              description={bidaskCoverage.sourceNote}
+            />
+          )}
         </Card>
 
         {/* 参数配置 */}

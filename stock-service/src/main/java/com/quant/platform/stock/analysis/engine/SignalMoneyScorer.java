@@ -14,26 +14,32 @@ import static com.quant.platform.stock.analysis.engine.SignalScoreConstants.*;
 
 /**
  * 资金面打分器（满分 25）
- * 主力净流入（绝对额/占比）、量比、换手率偏离的评分与明细项构建。
+ * 主力净流入（绝对额/占比）、融资余额、股东人数、量比、换手率偏离、内外盘比的评分与明细项构建。
+ *
+ * <p>⚠️ 各子项理论满分之和必须等于 MONEY_WEIGHT(25)，否则末尾的 Math.min 会静默截掉超出部分，
+ * 使高分样本失去区分度。当前配置：5+5+3+3+2+2+3+2 = 25。
  */
 @Slf4j
 @Component
 public class SignalMoneyScorer {
 
+    /** 主力净流入满分。由 6 下调为 5 以配平总分到 25（该档满分率仅 0.2%，对实际打分影响≈0） */
+    private static final int NET_MAIN_MAX = 5;
+
     /**
      * 计算资金面得分（满分25）
-     * 权重：主力净流入(6分) + 主力净流入占比(5分) + 融资余额变化(3分)
-     *   + 5日累计主力净流入(3分) + 股东人数变化(2分) + 量比(3分) + 换手率偏离(3分)
+     * 权重：主力净流入(5分) + 主力净流入占比(5分) + 融资余额变化(3分)
+     *   + 5日累计主力净流入(3分) + 股东人数变化(2分) + 量比(2分) + 换手率偏离(3分) + 内外盘比(2分)
      */
     public int calcMoneyScore(MoneyFlowSignal money) {
         if (money == null) return 0;
         int score = 0;
 
-        // 1. 主力净流入（6分）
+        // 1. 主力净流入（5分）
         if (money.getNetMain() != null) {
             double nm = money.getNetMain().doubleValue();
             if (nm >= NET_MAIN_HIGH) {
-                score += 6;
+                score += NET_MAIN_MAX;
             } else if (nm >= NET_MAIN_MED) {
                 score += 4;
             } else if (nm > 0) {
@@ -129,25 +135,25 @@ public class SignalMoneyScorer {
     public List<ScoreDetail.ScoreItem> buildMoneyItems(MoneyFlowSignal money) {
         List<ScoreDetail.ScoreItem> items = new ArrayList<>();
 
-        // 1. 主力净流入（6分）
+        // 1. 主力净流入（5分）
         BigDecimal nm = money != null ? money.getNetMain() : null;
         double nmVal = nm != null ? nm.doubleValue() : 0;
         int nmScore = 0;
         if (nm != null) {
-            if (nmVal >= NET_MAIN_HIGH) nmScore = 6;
+            if (nmVal >= NET_MAIN_HIGH) nmScore = NET_MAIN_MAX;
             else if (nmVal >= NET_MAIN_MED) nmScore = 4;
             else if (nmVal > 0) nmScore = 3;
             else if (nmVal > NET_MAIN_LOW) nmScore = 1;
         }
         String nmColor = nmVal > 0 ? "red" : nmVal < 0 ? "green" : "default";
         items.add(buildItem("主力净流入", nm != null ? formatMoneyFlow(nm) : "暂无数据",
-                nmScore, 6,
+                nmScore, NET_MAIN_MAX,
                 "【指标定义】主力净流入 = 大单(20~100万) + 超大单(>100万)当日净流入额，反映大资金当日净买卖方向。" +
                 "正值 = 大资金净买入（做多）；负值 = 大资金净卖出（做空）。" +
                 "【为什么用它】主力净流入是判断大资金态度最直接的指标——它回答'今天谁在买、谁在卖'。" +
                 "散户交易呈现随机分布，而主力操作会集中体现在大单/超大单上。该指标源自东财真实逐笔成交数据，" +
                 "经席位分类统计得出，比传统技术指标更能反映真实资金流向。" +
-                "【评分逻辑】净流入≥5亿=6分（机构级别强力做多）；≥1亿=4分（大资金积极介入）；" +
+                "【评分逻辑】净流入≥5亿=5分（机构级别强力做多）；≥1亿=4分（大资金积极介入）；" +
                 ">0=3分（资金小幅流入）；>-1亿=1分（资金小幅流出，但抛压可控）；≤-1亿=0分（资金明显撤离）。" +
                 "【注意】单日报应结合5日累计看趋势，单日净流入可能受消息脉冲影响。",
                 false, nmColor));

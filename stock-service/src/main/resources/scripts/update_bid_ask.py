@@ -29,7 +29,7 @@ import argparse
 import requests
 import pymysql
 import signal
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ─── SIGINT/SIGTERM 处理 ──────────────────────────────────────────
@@ -292,6 +292,31 @@ def _market_tag(code):
     return "OTHER"
 
 
+def _is_trading_day(conn, d):
+    """交易日判断：周末直接非交易；工作日查 trade_calendar 例外（节假日）"""
+    wd = d.weekday()
+    if wd == 5 or wd == 6:
+        return False
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT is_trading FROM trade_calendar WHERE trade_date=%s", (d,))
+            row = cur.fetchone()
+            if row is not None:
+                return bool(row[0])
+    except Exception:
+        pass
+    return True
+
+
+def _latest_trading_day_from(conn, d):
+    """从 d 往前找最近交易日（含周末+节假日判断）"""
+    for i in range(30):
+        cand = d - timedelta(days=i)
+        if _is_trading_day(conn, cand):
+            return cand
+    return d
+
+
 def batch_update(codes, trade_date, conn, check_only=False):
     """批量采集并写入（批量请求模式：每批60只，8线程并发）"""
     total = len(codes)
@@ -419,36 +444,48 @@ def main():
     global CHECK_MODE
     CHECK_MODE = args.check
 
-    def _latest_trading_day():
-        """返回最近交易日：当前<15:00或周末返回上一交易日，>=15:00返回今天。"""
+    def _latest_trading_day(conn=None):
+        """返回最近交易日：有数据库连接时用交易日历精确定位，否则仅按周末粗略判断。"""
         today = datetime.now().date()
         now = datetime.now()
+        if conn is not None:
+            return _latest_trading_day_from(conn, today)
         wd = today.weekday()
         if wd == 5:          # Saturday
-            return today - __import__('datetime').timedelta(days=1)
+            return today - timedelta(days=1)
         if wd == 6:          # Sunday
-            return today - __import__('datetime').timedelta(days=2)
+            return today - timedelta(days=2)
         if now.hour < 15:    # 收市前 → 昨天（或上周五）
             if wd == 0:      # Monday <15:00
-                return today - __import__('datetime').timedelta(days=3)
-            return today - __import__('datetime').timedelta(days=1)
+                return today - timedelta(days=3)
+            return today - timedelta(days=1)
         return today         # >=15:00 当天数据已可获取
 
     if args.date:
         try:
-            trade_date = datetime.strptime(args.date, '%Y-%m-%d').date()
+            raw_date = datetime.strptime(args.date, '%Y-%m-%d').date()
         except ValueError:
             print(f"[ERROR] 日期格式错误: {args.date}，应为 YYYY-MM-DD")
             sys.exit(1)
     else:
-        trade_date = _latest_trading_day()
+        raw_date = None
+
+    conn = get_mysql_conn()
+    ensure_table(conn)
+
+    # 交易日校验：--date 落在周末/节假日则回退到最近交易日，避免错标
+    if raw_date is not None:
+        if _is_trading_day(conn, raw_date):
+            trade_date = raw_date
+        else:
+            trade_date = _latest_trading_day_from(conn, raw_date)
+            print(f"[WARN] {raw_date} 非交易日，回退到最近交易日 {trade_date}")
+    else:
+        trade_date = _latest_trading_day(conn)
 
     print(f"=== 内外盘比数据采集 ===")
     print(f"  目标日期: {trade_date}")
     print(f"  模式: {'仅检查' if CHECK_MODE else '写入数据库'}")
-
-    conn = get_mysql_conn()
-    ensure_table(conn)
 
     if args.code:
         # 单只测试

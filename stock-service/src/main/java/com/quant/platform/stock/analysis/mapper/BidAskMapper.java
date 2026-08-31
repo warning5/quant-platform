@@ -22,8 +22,17 @@ public interface BidAskMapper {
 
     /**
      * 获取指定股票近N日内外盘比历史
+     * ⚠️ 按记录数取（LIMIT days），缺失交易日会被静默跳过，导致前端趋势图断档不可见。
+     * 仅作为交易日历不可用时的兜底，正常路径请用 {@link #selectBidAskByDates}。
      */
     List<Map<String, Object>> selectBidAskHistory(@Param("code") String code, @Param("days") int days);
+
+    /**
+     * 按交易日列表精确取内外盘数据（只返回有数据的行）
+     *
+     * @param dates 交易日列表（java.time.LocalDate）
+     */
+    List<Map<String, Object>> selectBidAskByDates(@Param("code") String code, @Param("dates") List<LocalDate> dates);
 
     /**
      * 获取指定日期的内外盘数据

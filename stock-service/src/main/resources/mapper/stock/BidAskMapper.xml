@@ -24,7 +24,7 @@
         LIMIT 1
     </select>
 
-    <!-- 近N日内外盘比历史 -->
+    <!-- 近N日内外盘比历史（按记录数取，缺失交易日会被静默跳过，仅作兜底） -->
     <select id="selectBidAskHistory" resultType="java.util.Map">
         SELECT
             DATE_FORMAT(trade_date, '%Y-%m-%d') as trade_date,
@@ -38,6 +38,25 @@
         WHERE code = #{code}
         ORDER BY trade_date DESC
         LIMIT #{days}
+    </select>
+
+    <!-- 按交易日列表精确取内外盘数据（缺失交易日不会污染条数，由调用方按轴补空） -->
+    <select id="selectBidAskByDates" resultType="java.util.Map">
+        SELECT
+            DATE_FORMAT(trade_date, '%Y-%m-%d') as trade_date,
+            outer_vol,
+            inner_vol,
+            ratio,
+            latest_price,
+            turnover_rate,
+            change_pct
+        FROM stock_bid_ask
+        WHERE code = #{code}
+          AND trade_date IN
+        <foreach collection="dates" item="d" open="(" separator="," close=")">
+            #{d}
+        </foreach>
+        ORDER BY trade_date DESC
     </select>
 
     <!-- 指定日期内外盘数据 -->

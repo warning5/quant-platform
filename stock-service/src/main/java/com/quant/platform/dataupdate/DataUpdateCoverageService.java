@@ -35,6 +35,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import com.quant.platform.common.enums.JobStatus;
 @Slf4j
 @Service
@@ -305,6 +306,33 @@ public class DataUpdateCoverageService {
                 "ORDER BY market"
         );
         result.put("marketStats", marketStats);
+
+        // 近期缺失交易日（源不可回溯）：最近30个自然日内、属交易日历但无数据的日期
+        try {
+            Object maxObj = dateRange.get("max_date");
+            if (maxObj != null && tradeCalendarService != null) {
+                LocalDate maxD = ((java.sql.Date) maxObj).toLocalDate();
+                LocalDate startD = maxD.minusDays(30);
+                List<LocalDate> tds = tradeCalendarService.getTradingDaysBetween(startD, maxD);
+                if (!tds.isEmpty()) {
+                    String placeholders = tds.stream()
+                            .map(d -> "'" + d + "'")
+                            .collect(Collectors.joining(","));
+                    List<String> present = jdbcTemplate.queryForList(
+                            "SELECT DISTINCT trade_date FROM stock_bid_ask WHERE trade_date IN (" + placeholders + ")",
+                            String.class);
+                    Set<String> presentSet = new HashSet<>(present);
+                    List<String> missing = tds.stream()
+                            .map(String::valueOf)
+                            .filter(d -> !presentSet.contains(d))
+                            .collect(Collectors.toList());
+                    result.put("missingTradingDays", missing);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[getBidaskCoverage] 计算近期缺失交易日失败: {}", e.getMessage());
+        }
+        result.put("sourceNote", "内外盘依赖腾讯实时盘口，仅含交易日当日累计值；历史上未采集的交易日无法回溯补采。");
 
         return result;
     }

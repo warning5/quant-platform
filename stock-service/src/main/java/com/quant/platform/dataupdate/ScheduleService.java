@@ -101,6 +101,24 @@ public class ScheduleService implements SchedulingConfigurer {
         }
     }
 
+    /** 安全回退到最近交易日（用交易日历；获取失败兜底只看周末） */
+    private LocalDate latestTradingDaySafe(LocalDate date) {
+        if (date == null) {
+            date = LocalDate.now();
+        }
+        try {
+            return getTradeCalendarService().getLatestTradingDay(date);
+        } catch (Exception e) {
+            // 兜底：周末回退
+            LocalDate d = date;
+            while (d.getDayOfWeek() == java.time.DayOfWeek.SATURDAY
+                    || d.getDayOfWeek() == java.time.DayOfWeek.SUNDAY) {
+                d = d.minusDays(1);
+            }
+            return d;
+        }
+    }
+
     /**
      * Spring 启动后回调：注册所有 enabled 的任务
      */
@@ -847,21 +865,26 @@ public class ScheduleService implements SchedulingConfigurer {
         } else {
             switch (dateMode) {
                 case "today" -> {
-                    req.setStartDate(today.toString());
-                    req.setEndDate(today.toString());
+                    LocalDate d = latestTradingDaySafe(today);
+                    req.setStartDate(d.toString());
+                    req.setEndDate(d.toString());
                 }
                 case "recent_1" -> {
-                    req.setStartDate(today.minusDays(1).toString());
-                    req.setEndDate(today.minusDays(1).toString());
+                    LocalDate d = latestTradingDaySafe(today.minusDays(1));
+                    req.setStartDate(d.toString());
+                    req.setEndDate(d.toString());
                 }
                 case "recent_3" -> {
-                    req.setStartDate(today.minusDays(3).toString());
-                    req.setEndDate(today.minusDays(1).toString());
+                    LocalDate start = latestTradingDaySafe(today.minusDays(3));
+                    LocalDate end = latestTradingDaySafe(today.minusDays(1));
+                    req.setStartDate(start.toString());
+                    req.setEndDate(end.toString());
                 }
                 default -> {
-                    // 默认当天
-                    req.setStartDate(today.toString());
-                    req.setEndDate(today.toString());
+                    // 默认当天，但回退到最近交易日（避免周末/节假日被当成交易日写入）
+                    LocalDate d = latestTradingDaySafe(today);
+                    req.setStartDate(d.toString());
+                    req.setEndDate(d.toString());
                 }
             }
         }

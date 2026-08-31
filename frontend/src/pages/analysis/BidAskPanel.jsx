@@ -60,6 +60,10 @@ export function BidAskPanel({ data }) {
   const trendLabel_ = data.trendLabel || trendLabel(trend);
   const avgRatio = data.avgRatio5d;
   const history5d = data.history5d || [];
+  // 优先用交易日历补齐后的轴（缺失日显式留空），老接口无此字段时回退到原始列表
+  const axis = data.historyAxis && data.historyAxis.length > 0 ? data.historyAxis : history5d;
+  const missingDays = data.missingDays || [];
+  const hasDataCount = axis.filter((h) => !h.missing).length;
 
   // 计算外内盘占比（百分比）
   const outerVol = latest.outer_vol;
@@ -177,27 +181,45 @@ export function BidAskPanel({ data }) {
         </>
       )}
 
-      {/* 近5日历史 */}
-      {history5d.length > 0 && (
+      {/* 近5个交易日历史（按交易日历补齐，缺失日显式留空） */}
+      {axis.length > 0 && (
         <>
           <Divider style={{ margin: '10px 0 8px' }} />
           <div style={{ fontSize: 12, color: '#666' }}>
-            近{history5d.length}日内外盘比：
-            {history5d.map((h, i) => (
-              <Tag
-                key={i}
-                color={
-                  parseFloat(h.ratio) > 1.2 ? 'red'
-                  : parseFloat(h.ratio) > 1 ? 'orange'
-                  : parseFloat(h.ratio) >= 0.85 ? 'blue'
-                  : 'green'
-                }
-                style={{ marginRight: 4 }}
-              >
-                {h.trade_date?.slice(5)} {parseFloat(h.ratio).toFixed(2)}
-              </Tag>
-            ))}
+            近{axis.length}个交易日内外盘比：
+            {axis.map((h, i) =>
+              h.missing ? (
+                <Tooltip
+                  key={i}
+                  title="该交易日未采集到内外盘数据。内外盘依赖腾讯实时盘口快照（仅当日累计值），历史无法回溯补采。"
+                >
+                  <Tag color="default" style={{ marginRight: 4, opacity: 0.55, borderStyle: 'dashed' }}>
+                    {h.trade_date?.slice(5)} 无数据
+                  </Tag>
+                </Tooltip>
+              ) : (
+                <Tag
+                  key={i}
+                  color={
+                    parseFloat(h.ratio) > 1.2 ? 'red'
+                    : parseFloat(h.ratio) > 1 ? 'orange'
+                    : parseFloat(h.ratio) >= 0.85 ? 'blue'
+                    : 'green'
+                  }
+                  style={{ marginRight: 4 }}
+                >
+                  {h.trade_date?.slice(5)} {parseFloat(h.ratio).toFixed(2)}
+                </Tag>
+              )
+            )}
           </div>
+
+          {missingDays.length > 0 && (
+            <div style={{ fontSize: 11, color: '#d46b08', marginTop: 6 }}>
+              ⚠ 其中 {missingDays.length} 个交易日无数据（{missingDays.map((d) => d.slice(5)).join('、')}）
+              ，均值仅按 {hasDataCount} 个有效交易日计算。缺失日为源不可回溯，不做插值补齐。
+            </div>
+          )}
         </>
       )}
 
