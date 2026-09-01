@@ -89,6 +89,7 @@ export default function StockAnalysis() {
   const [stockPerformanceData, setStockPerformanceData] = useState(null);
   const [bullBearData, setBullBearData] = useState(null);
   const [klineData, setKlineData] = useState(null);
+  const [linkedDate, setLinkedDate] = useState(null); // K线选中日 -> 联动筹码分布
   const [shareholderData, setShareholderData] = useState(null);
   const [error, setError] = useState(null);
   const [rulesVisible, setRulesVisible] = useState(false);
@@ -554,8 +555,24 @@ export default function StockAnalysis() {
     },
     {
       key: 'cyq',
-      label: tabLabel('筹码分布', '基于未复权日线计算的持仓成本分布(CYQ)。支持按日期回看，最多同时对比10天，红色=获利盘、绿色=套牢盘。'),
-      children: <CyqDistribution code={overview.code} />,
+      label: tabLabel('筹码分布', '基于未复权日线计算的持仓成本分布(CYQ)。支持按日期回看，最多同时对比10天，红色=获利盘、蓝色=套牢盘。'),
+      children: (
+        <ResizableSplit
+          defaultLeft={50}
+          left={
+            <Card size="small" title="K线">
+              {klineData && klineData.length > 0 ? (
+                <KLineChart data={klineData} onSelectDate={setLinkedDate} />
+              ) : (
+                <Alert type="info" message="暂无K线数据" showIcon />
+              )}
+            </Card>
+          }
+          right={
+            <CyqDistribution code={overview.code} tradeDate={linkedDate} onClearLink={() => setLinkedDate(null)} />
+          }
+        />
+      ),
     },
     {
       key: 'research',
@@ -1554,7 +1571,7 @@ function ScoreRadarChart({ scoreDetails }) {
 }
 
 // ── K线图 ────────────────────────────────────────────────────────────────────
-function KLineChart({ data }) {
+function KLineChart({ data, onSelectDate }) {
   const { token } = theme.useToken();
   if (!data || data.length === 0) return null;
 
@@ -1599,7 +1616,7 @@ function KLineChart({ data }) {
           ${vol ? `<br/>成交量：${(d.volume / 10000).toFixed(0)}万` : ''}`;
       },
     },
-    legend: { data: ['K线', 'MA5', 'MA10', 'MA20', 'MA60'], bottom: -5, type: 'scroll', itemGap: 16, textStyle: { color: token.colorTextSecondary } },
+    legend: { data: ['K线', 'MA5', 'MA10', 'MA20', 'MA60'], bottom: 26, left: 'center', type: 'scroll', itemGap: 16, textStyle: { color: token.colorTextSecondary } },
     grid: [{ left: 60, right: 20, top: 20, height: '52%', bottom: '28%' }, { left: 60, right: 20, top: '72%', height: '12%', bottom: '14%' }],
     xAxis: [
       { type: 'category', data: dates, gridIndex: 0, boundaryGap: false, axisLine: { lineStyle: { color: token.colorBorderSecondary } }, axisLabel: { show: false } },
@@ -1609,12 +1626,13 @@ function KLineChart({ data }) {
       { scale: true, gridIndex: 0, axisLine: { lineStyle: { color: token.colorBorderSecondary } }, axisLabel: { fontSize: 10, color: token.colorTextTertiary } },
       { scale: true, gridIndex: 1, axisLine: { lineStyle: { color: token.colorBorderSecondary } }, axisLabel: { fontSize: 10, color: token.colorTextTertiary, formatter: v => (v / 10000).toFixed(0) + '万' } },
     ],
-    dataZoom: [{ type: 'inside', xAxisIndex: [0, 1], start: 0, end: 100 }, { type: 'slider', xAxisIndex: [0, 1], start: 0, end: 100 }],
+    dataZoom: [{ type: 'inside', xAxisIndex: [0, 1], start: 0, end: 100 }, { type: 'slider', xAxisIndex: [0, 1], start: 0, end: 100, bottom: 2, height: 16 }],
     series: [
       {
         type: 'candlestick',
         name: 'K线',
         data: ohlc,
+        triggerEvent: true,
         itemStyle: { color: '#ef5350', color0: '#26a69a', borderColor: '#ef5350', borderColor0: '#26a69a' },
         xAxisIndex: 0, yAxisIndex: 0,
       },
@@ -1630,7 +1648,80 @@ function KLineChart({ data }) {
     ],
   };
 
-  return <ReactECharts option={option} style={{ height: 420 }} notMerge lazyUpdate />;
+  const onEvents = {
+    click: (params) => {
+      if (params?.seriesType === 'candlestick' && onSelectDate) {
+        const d = displayData[params.dataIndex];
+        if (d) onSelectDate(d.date);
+      }
+    },
+  };
+  return <ReactECharts option={option} style={{ height: 420 }} notMerge lazyUpdate onEvents={onEvents} />;
+}
+
+// ── 左右可拖拽调整宽度的分栏容器 ──────────────────────────────────────────
+function ResizableSplit({ left, right, defaultLeft = 50, min = 28, max = 72 }) {
+  const [leftPct, setLeftPct] = useState(defaultLeft);
+  const containerRef = useRef(null);
+  const draggingRef = useRef(false);
+  const rafRef = useRef(0);
+
+  const onMouseDown = (e) => {
+    e.preventDefault();
+    draggingRef.current = true;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  };
+
+  useEffect(() => {
+    const onMove = (e) => {
+      if (!draggingRef.current || !containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      let pct = ((e.clientX - rect.left) / rect.width) * 100;
+      pct = Math.min(max, Math.max(min, pct));
+      if (window.cancelAnimationFrame) cancelAnimationFrame(rafRef.current);
+      rafRef.current = window.requestAnimationFrame(() => {
+        setLeftPct(pct);
+        // 容器宽度变化后通知 ECharts 跟随重绘
+        window.dispatchEvent(new Event('resize'));
+      });
+    };
+    const onUp = () => {
+      if (draggingRef.current) {
+        draggingRef.current = false;
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+      }
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [min, max]);
+
+  return (
+    <div ref={containerRef} style={{ display: 'flex', alignItems: 'stretch', width: '100%' }}>
+      <div style={{ width: `${leftPct}%`, flex: '0 0 auto', minWidth: 0 }}>
+        {left}
+      </div>
+      <div
+        onMouseDown={onMouseDown}
+        title="拖动调整左右宽度"
+        style={{
+          width: 8, flex: '0 0 auto', cursor: 'col-resize',
+          background: '#f1f5f9', borderLeft: '1px solid #e2e8f0', borderRight: '1px solid #e2e8f0',
+          position: 'relative',
+        }}
+      >
+        <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: 2, height: 30, background: '#94a3b8', borderRadius: 2 }} />
+      </div>
+      <div style={{ width: `${100 - leftPct}%`, flex: '0 0 auto', minWidth: 0 }}>
+        {right}
+      </div>
+    </div>
+  );
 }
 
 // ── 多空论点对比图 ──────────────────────────────────────────────────────────

@@ -24,7 +24,7 @@ function mainCostTag(conf) {
   return <Tag>置信 低</Tag>;
 }
 
-export function CyqDistribution({ code }) {
+export function CyqDistribution({ code, tradeDate, onClearLink }) {
   const [mode, setMode] = useState('latest'); // latest | history
   const [dates, setDates] = useState([]); // 历史模式选中的日期(dayjs[])
   const [loading, setLoading] = useState(false);
@@ -32,6 +32,7 @@ export function CyqDistribution({ code }) {
   const [multi, setMulti] = useState([]); // 多日列表
   const [missingDays, setMissingDays] = useState([]); // 多选时后端缺失(无数据)的日期
   const [errMsg, setErrMsg] = useState('');
+  const [pinnedDay, setPinnedDay] = useState(null); // K线联动选中的单日快照
 
   // 实时页: 默认拉最新快照
   const fetchLatest = useCallback(async () => {
@@ -81,10 +82,29 @@ export function CyqDistribution({ code }) {
     if (mode === 'latest') fetchLatest();
   }, [mode, fetchLatest]);
 
+  // K线联动：选中某日 -> 拉该日筹码分布(复用 /cyq/multi 单日)
+  const isLinked = !!tradeDate;
+  useEffect(() => {
+    if (!tradeDate || !code) { setPinnedDay(null); return; }
+    let cancelled = false;
+    setLoading(true); setErrMsg('');
+    api.get('/cyq/multi', { params: { code, dates: tradeDate } })
+      .then((res) => {
+        if (cancelled) return;
+        const items = res?.items || [];
+        setPinnedDay(items[0] || null);
+        if (!items.length) setErrMsg('所选日期无筹码数据');
+      })
+      .catch((e) => { if (!cancelled) setErrMsg('查询失败: ' + (e?.response?.data?.message || e.message)); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [tradeDate, code]);
+
   const days = useMemo(() => {
+    if (isLinked) return pinnedDay ? [pinnedDay] : [];
     if (mode === 'latest') return latest ? [latest] : [];
     return multi;
-  }, [mode, latest, multi]);
+  }, [isLinked, pinnedDay, mode, latest, multi]);
 
   const option = useMemo(() => {
     if (!days.length) return null;
@@ -145,7 +165,15 @@ export function CyqDistribution({ code }) {
             symbol: 'none',
             data: [{
               yAxis: close,
-              label: { formatter: `收盘价 ${close.toFixed(2)}`, position: 'start', fontSize: 10 },
+              label: {
+                formatter: `收盘价 ${close.toFixed(2)}`,
+                position: 'end',
+                fontSize: 10,
+                color: '#b45309',
+                backgroundColor: 'rgba(254,243,199,0.9)',
+                padding: [2, 4],
+                borderRadius: 3,
+              },
             }],
             lineStyle: { color: '#f59e0b', type: 'dashed', width: 1 },
           },
@@ -343,19 +371,37 @@ export function CyqDistribution({ code }) {
       size="small"
       title="筹码分布 (CYQ)"
       extra={
-        <Space>
-          <Segmented
-            value={mode}
-            onChange={setMode}
-            options={[
-              { label: '最新', value: 'latest' },
-              { label: '历史对比', value: 'history' },
-            ]}
-          />
-        </Space>
+        isLinked ? (
+          <Tag color="blue">联动 K线选中日</Tag>
+        ) : (
+          <Space>
+            <Segmented
+              value={mode}
+              onChange={setMode}
+              options={[
+                { label: '最新', value: 'latest' },
+                { label: '历史对比', value: 'history' },
+              ]}
+            />
+          </Space>
+        )
       }
     >
-      {mode === 'history' && (
+      {isLinked && (
+        <Alert
+          type="info"
+          showIcon
+          message={`已联动 K线选中日 ${tradeDate} 的筹码分布`}
+          action={
+            <Button size="small" onClick={onClearLink}>
+              恢复最新
+            </Button>
+          }
+          style={{ marginBottom: 12 }}
+        />
+      )}
+
+      {!isLinked && mode === 'history' && (
         <Space wrap style={{ marginBottom: 12 }}>
           <DatePicker
             multiple
@@ -387,9 +433,18 @@ export function CyqDistribution({ code }) {
 
       <Spin spinning={loading}>
         {!days.length ? (
-          <Empty description={mode === 'latest' ? '暂无最新筹码数据' : '请选择日期查询'} />
+          <Empty description={isLinked ? '所选日期无筹码数据' : mode === 'latest' ? '暂无最新筹码数据' : '请选择日期查询'} />
         ) : (
           <>
+            {days.length > 0 && (
+              <div style={{ marginBottom: 8, fontSize: 12, color: '#64748b' }}>
+                数据日期：
+                <Tag color="geekblue">
+                  {days.length === 1 ? days[0].trade_date : `${days[0].trade_date} ~ ${days[days.length - 1].trade_date}`}
+                </Tag>
+                {isLinked && <span style={{ color: '#1677ff' }}>（联动 K线选中日）</span>}
+              </div>
+            )}
             <ReactECharts option={option} style={{ height: 420, width: '100%' }} notMerge lazyUpdate />
             {renderSingleMetrics()}
             {days.length > 1 && (
