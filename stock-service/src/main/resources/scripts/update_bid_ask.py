@@ -483,6 +483,11 @@ def main():
     else:
         trade_date = _latest_trading_day(conn)
 
+    # 防御未来日期：数据源不可能存在未来快照，拒绝写入避免污染 max_date / 缺失日统计
+    if trade_date > datetime.now().date():
+        print(f"[ERROR] 目标日期 {trade_date} 是未来日期，拒绝采集")
+        sys.exit(1)
+
     print(f"=== 内外盘比数据采集 ===")
     print(f"  目标日期: {trade_date}")
     print(f"  模式: {'仅检查' if CHECK_MODE else '写入数据库'}")

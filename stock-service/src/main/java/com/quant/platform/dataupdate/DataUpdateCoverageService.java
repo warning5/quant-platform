@@ -285,11 +285,21 @@ public class DataUpdateCoverageService {
                 "SELECT COUNT(DISTINCT code) FROM stock_bid_ask", Long.class);
         result.put("coveredStocks", distinctCodes);
 
-        // 时间范围
+        // 时间范围（max_date 不应展示未来源数据）
         Map<String, Object> dateRange = jdbcTemplate.queryForMap(
                 "SELECT MIN(trade_date) as min_date, MAX(trade_date) as max_date FROM stock_bid_ask");
         result.put("minDate", dateRange.get("min_date"));
-        result.put("maxDate", dateRange.get("max_date"));
+        Object rawMax = dateRange.get("max_date");
+        if (rawMax != null) {
+            LocalDate maxDay = ((java.sql.Date) rawMax).toLocalDate();
+            LocalDate today = LocalDate.now();
+            if (maxDay.isAfter(today)) {
+                maxDay = today;
+            }
+            result.put("maxDate", java.sql.Date.valueOf(maxDay));
+        } else {
+            result.put("maxDate", null);
+        }
 
         // 各市场统计
         List<Map<String, Object>> marketStats = jdbcTemplate.queryForList(
@@ -312,6 +322,11 @@ public class DataUpdateCoverageService {
             Object maxObj = dateRange.get("max_date");
             if (maxObj != null && tradeCalendarService != null) {
                 LocalDate maxD = ((java.sql.Date) maxObj).toLocalDate();
+                LocalDate today = LocalDate.now();
+                // 缺失交易日只统计到当天，尚未到来的日期不展示
+                if (maxD.isAfter(today)) {
+                    maxD = today;
+                }
                 LocalDate startD = maxD.minusDays(30);
                 List<LocalDate> tds = tradeCalendarService.getTradingDaysBetween(startD, maxD);
                 if (!tds.isEmpty()) {
