@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { Card, Table, Button, Tag, Select, Space, Statistic, Row, Col, Typography, Tooltip, Spin, Progress, DatePicker, Divider, Modal, Popconfirm, Switch, Dropdown, Collapse, Checkbox, Alert } from 'antd';
+import { Card, Table, Button, Tag, Select, Space, Statistic, Row, Col, Typography, Tooltip, Spin, Progress, DatePicker, Divider, Modal, Popconfirm, Switch, Dropdown, Collapse, Checkbox, Alert, theme } from 'antd';
 import { message } from '../../utils/messageUtil';
 import dayjs from 'dayjs';
 import { ThunderboltOutlined, ReloadOutlined, LineChartOutlined, StockOutlined, RiseOutlined, FallOutlined, MinusOutlined, QuestionCircleOutlined, RadarChartOutlined, StopOutlined, UnlockOutlined, DownloadOutlined, SettingOutlined } from '@ant-design/icons';
@@ -73,6 +73,9 @@ export default function RecommendationList() {
   const { dictList: neutralList } = useDict('SCREEN_NEUTRAL');
   const { dictList: orthogonalList } = useDict('SCREEN_ORTHOGONAL');
   useEffect(() => { loadFactorMeta(); }, [loadFactorMeta]);
+  // 暗黑模式适配：token 随 ConfigProvider 的 darkAlgorithm 自动重算，
+  // 所有图表/内联背景/分隔线颜色都从这里派生，避免硬编码亮色在暗模式下不可见。
+  const { token } = theme.useToken();
   const [recommendations, setRecommendations] = useState([]);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -752,7 +755,7 @@ export default function RecommendationList() {
             <div>资金: {rec.capitalScore ?? '-'}/25</div>
             <div>事件: {rec.eventScore ?? '-'}/25</div>
             <div>基本面: {rec.fundamentalScore ?? '-'}/29</div>
-            <div style={{ borderTop: '1px solid #434343', marginTop: 2, paddingTop: 2 }}>风险: {rec.riskScore ?? '-'}/15</div>
+            <div style={{ borderTop: `1px solid ${token.colorBorderSecondary}`, marginTop: 2, paddingTop: 2 }}>风险: {rec.riskScore ?? '-'}/15</div>
             <div>流动性: {rec.liquidityScore ?? '-'}/10</div>
           </div>
         );
@@ -995,7 +998,7 @@ export default function RecommendationList() {
   ];
 
   return (
-    <div style={{ padding: '0 0 24px' }}>
+    <div style={{ padding: '0 0 24px', color: token.colorText }}>
       {/* 头部 */}
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Space>
@@ -1015,20 +1018,20 @@ export default function RecommendationList() {
                     &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→ ❺ <b>Regime-Adaptive 动态融合</b>（环境自适应权重）<br />
                     &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→ ❻ <b>行业分散化</b>（动态上限 + 相关性分组）→ 输出
                   </div>
-                  <div style={{ fontWeight: 'bold', marginBottom: 4, fontSize: 13, borderTop: '1px solid #444', paddingTop: 6 }}>❶ 行业排除 + 黑名单</div>
+                  <div style={{ fontWeight: 'bold', marginBottom: 4, fontSize: 13, borderTop: `1px solid ${token.colorBorderSecondary}`, paddingTop: 6 }}>❶ 行业排除 + 黑名单</div>
                   <div style={{ marginBottom: 4 }}>
                     策略配置的排除行业（如新质生产力排除金融/地产/周期）→ 个股黑名单过滤 → 剩余候选股进入筛选
                   </div>
-                  <div style={{ fontWeight: 'bold', marginBottom: 4, fontSize: 13, borderTop: '1px solid #444', paddingTop: 6 }}>❷ 多因子筛选</div>
+                  <div style={{ fontWeight: 'bold', marginBottom: 4, fontSize: 13, borderTop: `1px solid ${token.colorBorderSecondary}`, paddingTop: 6 }}>❷ 多因子筛选</div>
                   <div style={{ marginBottom: 4 }}>
                     按策略因子配置（factorConfigJson）加权排序，取 Top 50。因子方向决定排序：direction=1 正向（越大越好），direction=-1 反向（越小越好）
                   </div>
-                  <div style={{ fontWeight: 'bold', marginBottom: 4, fontSize: 13, borderTop: '1px solid #444', paddingTop: 6 }}>❸ 市场环境识别（Regime Detection）</div>
+                  <div style={{ fontWeight: 'bold', marginBottom: 4, fontSize: 13, borderTop: `1px solid ${token.colorBorderSecondary}`, paddingTop: 6 }}>❸ 市场环境识别（Regime Detection）</div>
                   <div style={{ marginBottom: 2 }}>三维度综合判断市场状态：</div>
                   <div style={{ marginLeft: 8, marginBottom: 2 }}>• 指数趋势：沪深300 MA20/MA60 排列</div>
                   <div style={{ marginLeft: 8, marginBottom: 2 }}>• 波动率体制：ATR20 历史分位数（高波动 Risk-off，低波动 Risk-on）</div>
                   <div style={{ marginLeft: 8, marginBottom: 4 }}>• 市场宽度：涨跌家数比（扩散好 Risk-on，极端分化 Risk-off）</div>
-                  <div style={{ fontWeight: 'bold', marginBottom: 4, fontSize: 13, borderTop: '1px solid #444', paddingTop: 6 }}>❹ 个股深度分析</div>
+                  <div style={{ fontWeight: 'bold', marginBottom: 4, fontSize: 13, borderTop: `1px solid ${token.colorBorderSecondary}`, paddingTop: 6 }}>❹ 个股深度分析</div>
                   <div style={{ marginBottom: 2 }}>六维度评分（134分制，归一化到 0~1）：</div>
                   <div style={{ marginLeft: 8, marginBottom: 2 }}>• 技术面（30分）：RSI、MACD、趋势信号、近高近低</div>
                   <div style={{ marginLeft: 8, marginBottom: 2 }}>• 资金面（25分）：主力净流入、换手率</div>
@@ -1036,7 +1039,7 @@ export default function RecommendationList() {
                   <div style={{ marginLeft: 8, marginBottom: 2 }}>• 基本面（29分）：盈利增速、估值、分红</div>
                   <div style={{ marginLeft: 8, marginBottom: 2 }}>• 风险（15分）：最大回撤、波动率、ATR</div>
                   <div style={{ marginLeft: 8, marginBottom: 4 }}>• 流动性（10分）：成交额、换手率适中度</div>
-                  <div style={{ fontWeight: 'bold', marginBottom: 4, fontSize: 13, borderTop: '1px solid #444', paddingTop: 6 }}>❺ Regime-Adaptive 动态融合</div>
+                  <div style={{ fontWeight: 'bold', marginBottom: 4, fontSize: 13, borderTop: `1px solid ${token.colorBorderSecondary}`, paddingTop: 6 }}>❺ Regime-Adaptive 动态融合</div>
                   <div style={{ marginBottom: 4 }}>
                     <b>finalScore = wFactor × 因子得分 + wAnalysis × 分析得分 + 行业加分</b>
                   </div>
@@ -1050,7 +1053,7 @@ export default function RecommendationList() {
                   <div style={{ marginLeft: 8, marginBottom: 2 }}>• 行业轮动加分：强势行业 +0.06，弱势行业 -0.06</div>
                   <div style={{ marginLeft: 8, marginBottom: 2 }}>• 利率环境：利率下行加技术/资金权重，上行加基本面/风险权重</div>
                   <div style={{ marginLeft: 8, marginBottom: 4 }}>• 市值风格：小盘风格时因子权重 +0.05</div>
-                  <div style={{ fontWeight: 'bold', marginBottom: 4, fontSize: 13, borderTop: '1px solid #444', paddingTop: 6 }}>❻ 行业分散化（动态上限 + 相关性分组）</div>
+                  <div style={{ fontWeight: 'bold', marginBottom: 4, fontSize: 13, borderTop: `1px solid ${token.colorBorderSecondary}`, paddingTop: 6 }}>❻ 行业分散化（动态上限 + 相关性分组）</div>
                   <div style={{ marginBottom: 2 }}>防止推荐集中在少数行业：</div>
                   <div style={{ marginLeft: 8, marginBottom: 2 }}>• 动态上限：强势行业 ≤6 只，中等 ≤3 只，弱势 ≤1 只</div>
                   <div style={{ marginLeft: 8, marginBottom: 2 }}>• 相关性分组：高相关行业（如银行+证券）共享名额，避免"伪分散"</div>
@@ -1290,7 +1293,7 @@ export default function RecommendationList() {
                       <div style={{ fontWeight: 'bold', marginBottom: 4 }}>各市场环境权重分配</div>
                       <table style={{ borderCollapse: 'collapse', width: '100%' }}>
                         <thead>
-                          <tr style={{ borderBottom: '1px solid #434343' }}>
+                          <tr style={{ borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
                             <th style={{ padding: '2px 8px', textAlign: 'left' }}>环境</th>
                             <th style={{ padding: '2px 8px', textAlign: 'center' }}>因子</th>
                             <th style={{ padding: '2px 8px', textAlign: 'center' }}>分析</th>
@@ -1322,10 +1325,10 @@ export default function RecommendationList() {
                         综合得分 = 因子得分 × {weightInfo.factorWeight != null ? (weightInfo.factorWeight * 100).toFixed(0) : '?'}% + 分析得分 × {weightInfo.analysisWeight != null ? (weightInfo.analysisWeight * 100).toFixed(0) : '?'}%
                       </div>
 
-                      <div style={{ fontWeight: 'bold', marginTop: 10, marginBottom: 4, borderTop: '1px solid #555', paddingTop: 8 }}>分析得分六维度权重分配</div>
+                      <div style={{ fontWeight: 'bold', marginTop: 10, marginBottom: 4, borderTop: `1px solid ${token.colorBorderSecondary}`, paddingTop: 8 }}>分析得分六维度权重分配</div>
                       <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 11 }}>
                         <thead>
-                          <tr style={{ borderBottom: '1px solid #434343' }}>
+                          <tr style={{ borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
                             <th style={{ padding: '2px 4px', textAlign: 'left' }}>环境</th>
                             <th style={{ padding: '2px 4px', textAlign: 'center' }}>技术面</th>
                             <th style={{ padding: '2px 4px', textAlign: 'center' }}>资金面</th>
@@ -1470,7 +1473,7 @@ export default function RecommendationList() {
                               计算因子权重时，近期的IC值权重更高，越远期的权重越低。<br/>
                               <b>半衰期{halflifeDays}天</b>表示{halflifeDays}天前的IC值按50%权重参与计算。
                             </div>
-                            <div style={{ marginTop:8, borderTop:'1px solid #eee', paddingTop:6, color:'#888', fontSize:11 }}>
+                            <div style={{ marginTop:8, borderTop:`1px solid ${token.colorBorderSecondary}`, paddingTop:6, color:'#888', fontSize:11 }}>
                               半衰期由沪深300波动率自适应决定：高波动→10天 / 中波动→20天 / 低波动→30天。当前为中波动市场，取默认值{halflifeDays}天。
                             </div>
                           </div>
@@ -1492,7 +1495,7 @@ export default function RecommendationList() {
                   </div>
                   <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12 }}>
                     <thead>
-                      <tr style={{ borderBottom: '1px solid #f0f0f0', color: '#8c8c8c' }}>
+                      <tr style={{ borderBottom: `1px solid ${token.colorBorderSecondary}`, color: '#8c8c8c' }}>
                         <th style={{ textAlign: 'left', padding: '4px 8px', width: 100 }}>因子代码</th>
                         <th style={{ textAlign: 'left', padding: '4px 8px', width: 70 }}>分类</th>
                         <th style={{ textAlign: 'right', padding: '4px 8px', width: 80 }}>IC均值</th>
@@ -1503,7 +1506,7 @@ export default function RecommendationList() {
                     </thead>
                     <tbody>
                       {kept.map((d, i) => (
-                        <tr key={i} style={{ borderBottom: '1px solid #fafafa' }}>
+                        <tr key={i} style={{ borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
                           <td style={{ padding: '4px 8px', fontFamily: 'monospace' }}>{d.factorCode}</td>
                           <td style={{ padding: '4px 8px' }}>{factorMeta[d.factorCode]?.cat || '-'}</td>
                           <td style={{ padding: '4px 8px', textAlign: 'right', color: '#52c41a' }}>{(d.icMean).toFixed(4)}</td>
@@ -1521,7 +1524,7 @@ export default function RecommendationList() {
               {diagExpanded && abnormalCount > 0 && (
                 <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12 }}>
                   <thead>
-                    <tr style={{ borderBottom: '1px solid #f0f0f0', color: '#8c8c8c' }}>
+                    <tr style={{ borderBottom: `1px solid ${token.colorBorderSecondary}`, color: '#8c8c8c' }}>
                       <th style={{ textAlign: 'left', padding: '4px 8px', width: 100 }}>因子代码</th>
                       <th style={{ textAlign: 'left', padding: '4px 8px', width: 70 }}>分类</th>
                       <th style={{ textAlign: 'right', padding: '4px 8px', width: 80 }}>IC均值</th>
@@ -1534,7 +1537,7 @@ export default function RecommendationList() {
                     {[...dropped, ...reversed, ...noData].map((d, i) => {
                       const cfg = DIAG_CONFIG[d.action] || {};
                       return (
-                        <tr key={i} style={{ borderBottom: '1px solid #fafafa' }}>
+                        <tr key={i} style={{ borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
                           <td style={{ padding: '4px 8px', fontFamily: 'monospace' }}>{d.factorCode}</td>
                           <td style={{ padding: '4px 8px' }}>{factorMeta[d.factorCode]?.cat || '-'}</td>
                           <td style={{ padding: '4px 8px', textAlign: 'right', color: (d.icMean || 0) < 0 ? '#ff4d4f' : '#8c8c8c' }}>{(d.icMean || 0).toFixed(4)}</td>
@@ -1698,8 +1701,8 @@ export default function RecommendationList() {
           {confidenceData && confidenceData.level === 'UNTRAINED' && (
             <div style={{
               padding: '6px 12px',
-              background: '#fafafa',
-              borderBottom: '1px solid #d9d9d9',
+              background: token.colorBgContainer,
+              borderBottom: `1px solid ${token.colorBorderSecondary}`,
               textAlign: 'center',
             }}>
               <Text type="secondary" style={{ fontSize: 11 }}>
@@ -1734,10 +1737,12 @@ export default function RecommendationList() {
                   radar: {
                     indicator: dims.map(d => ({ name: `${d.name}\n(${d.max}分)`, max: d.max })),
                     shape: 'circle',
+    axisLine: { lineStyle: { color: token.colorBorderSecondary } },
+    splitLine: { lineStyle: { color: token.colorBorderSecondary } },
                     center: ['50%', '55%'],
                     radius: '65%',
-                    axisName: { color: '#666', fontSize: 11 },
-                    splitArea: { areaStyle: { color: ['rgba(114,46,209,0.02)', 'rgba(114,46,209,0.02)', 'rgba(114,46,209,0.04)', 'rgba(114,46,209,0.04)', 'rgba(114,46,209,0.06)', 'rgba(114,46,209,0.06)'] } },
+                    axisName: { color: token.colorTextSecondary, fontSize: 11 },
+                    splitArea: { areaStyle: { color: token.colorFillQuaternary } },
                   },
                   series: [{
                     type: 'radar',
@@ -1754,7 +1759,7 @@ export default function RecommendationList() {
                 };
                 const total6d = dims.reduce((s, d) => s + d.val, 0);
                 return (
-                  <div style={{ padding: '8px 16px', background: '#fafafa' }}>
+                  <div style={{ padding: '8px 16px', background: token.colorBgContainer }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
                     <ReactECharts option={radarOption} style={{ width: 280, height: 220 }} />
                     <div style={{ flex: 1, fontSize: 13 }}>
@@ -1776,7 +1781,7 @@ export default function RecommendationList() {
                           );
                         })}
                       </Row>
-                      <div style={{ marginTop: 12, padding: '6px 12px', background: '#fff', borderRadius: 4, border: '1px solid #f0f0f0' }}>
+                      <div style={{ marginTop: 12, padding: '6px 12px', background: token.colorBgContainer, borderRadius: 4, border: `1px solid ${token.colorBorderSecondary}` }}>
                         <Text type="secondary" style={{ fontSize: 12 }}>
                           六维度总分: <Text strong>{total6d}</Text>/134
                           {rec.riskScore > 0 && <span style={{ marginLeft: 12 }}>🔻 风险: {rec.riskScore}/15（回撤/波动率/ATR）</span>}
@@ -1787,7 +1792,7 @@ export default function RecommendationList() {
                   </div>
                   {/* 交易计划 */}
                   {rec.suggestedStopLoss != null && (
-                    <div style={{ marginTop: 12, padding: '10px 16px', background: '#fff', borderRadius: 8, border: '1px solid #e8e8e8' }}>
+                    <div style={{ marginTop: 12, padding: '10px 16px', background: token.colorBgContainer, borderRadius: 8, border: `1px solid ${token.colorBorderSecondary}` }}>
                       <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
                         <span style={{ color: '#722ed1' }}>交易计划</span>
                         <Divider type="vertical" style={{ margin: 0 }} />
@@ -1834,7 +1839,7 @@ export default function RecommendationList() {
                         </div>
                         <Divider type="vertical" style={{ height: 40 }} />
                         {/* 建议仓位 */}
-                        <div style={{ textAlign: 'center', padding: '6px 14px', background: rec.suggestedPositionPct >= 0.08 ? '#fff1f0' : rec.suggestedPositionPct >= 0.05 ? '#fff7e6' : '#f0f0f0', borderRadius: 6, border: '1px solid #d9d9d9' }}>
+                        <div style={{ textAlign: 'center', padding: '6px 14px', background: rec.suggestedPositionPct >= 0.08 ? '#fff1f0' : rec.suggestedPositionPct >= 0.05 ? '#fff7e6' : '#f0f0f0', borderRadius: 6, border: `1px solid ${token.colorBorderSecondary}` }}>
                           <Text type="secondary" style={{ fontSize: 11 }}>建议仓位</Text>
                           <div style={{ fontWeight: 600, color: rec.suggestedPositionPct >= 0.08 ? '#cf1322' : rec.suggestedPositionPct >= 0.05 ? '#fa8c16' : '#595959', fontSize: 16 }}>
                             {rec.suggestedPositionPct != null ? (rec.suggestedPositionPct * 100).toFixed(1) + '%' : '-'}
@@ -1901,22 +1906,22 @@ export default function RecommendationList() {
           xAxis: {
             type: 'category',
             data: batchHistory.map(b => b.recommendDate),
-            axisLabel: { fontSize: 10, rotate: 30 },
+            axisLabel: { fontSize: 10, rotate: 30, color: token.colorTextSecondary },
           },
           yAxis: [
             {
               type: 'value',
               name: '命中率',
               position: 'left',
-              axisLabel: { formatter: v => (v * 100).toFixed(0) + '%' },
-              splitLine: { lineStyle: { color: '#f0f0f0', type: 'dashed' } },
+              axisLabel: { formatter: v => (v * 100).toFixed(0) + '%', color: token.colorTextSecondary },
+              splitLine: { lineStyle: { color: token.colorBorderSecondary, type: 'dashed' } },
             },
             {
               type: 'value',
               name: '次日均收益',
               position: 'right',
               nameGap: 30,
-              axisLabel: { formatter: v => v.toFixed(1) + '%' },
+              axisLabel: { formatter: v => v.toFixed(1) + '%', color: token.colorTextSecondary },
               splitLine: { show: false },
             },
           ],
@@ -1935,7 +1940,7 @@ export default function RecommendationList() {
               type: 'bar',
               data: batchHistory.map(b => b.hitRate != null ? +(b.hitRate).toFixed(3) : null),
               barWidth: '40%',
-              label: { show: true, position: 'top', fontSize: 10, color: '#595959', formatter: p => p.value != null ? (p.value * 100).toFixed(0) + '%' : '-' },
+              label: { show: true, position: 'top', fontSize: 10, color: token.colorTextSecondary, formatter: p => p.value != null ? (p.value * 100).toFixed(0) + '%' : '-' },
               itemStyle: { borderRadius: [4, 4, 0, 0] },
             },
             {
@@ -2095,21 +2100,21 @@ export default function RecommendationList() {
                           <div style={{ fontWeight: 'bold', marginBottom: 6, fontSize: 13 }}>图表指标说明</div>
                           <table style={{ borderCollapse: 'collapse', width: '100%', marginBottom: 10 }}>
                             <thead>
-                              <tr style={{ borderBottom: '1px solid #555' }}>
+                              <tr style={{ borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
                                 <th style={{ textAlign: 'left', padding: '2px 6px', fontWeight: 'bold' }}>指标</th>
                                 <th style={{ textAlign: 'left', padding: '2px 6px', fontWeight: 'bold' }}>含义</th>
                               </tr>
                             </thead>
                             <tbody>
-                              <tr style={{ borderBottom: '1px solid #434343' }}>
+                              <tr style={{ borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
                                 <td style={{ padding: '2px 6px', whiteSpace: 'nowrap' }}>次日命中率</td>
                                 <td style={{ padding: '2px 6px' }}>推荐日 T 的名单中，T+1 当天收益为正的股票占比</td>
                               </tr>
-                              <tr style={{ borderBottom: '1px solid #434343' }}>
+                              <tr style={{ borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
                                 <td style={{ padding: '2px 6px', whiteSpace: 'nowrap' }}>次日均收益</td>
                                 <td style={{ padding: '2px 6px' }}>推荐日 T 名单的所有股票，T+1 当天的平均涨跌幅</td>
                               </tr>
-                              <tr style={{ borderBottom: '1px solid #434343' }}>
+                              <tr style={{ borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
                                 <td style={{ padding: '2px 6px', whiteSpace: 'nowrap' }}>一周收益</td>
                                 <td style={{ padding: '2px 6px' }}>推荐日 T 名单，T+1 到 T+5（约一周）的平均持有收益</td>
                               </tr>
@@ -2167,7 +2172,7 @@ export default function RecommendationList() {
                     {topBottom.best3 && topBottom.best3.length > 0 ? (
                       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                         <thead>
-                          <tr style={{ borderBottom: '1px solid #f0f0f0', color: '#8c8c8c' }}>
+                          <tr style={{ borderBottom: `1px solid ${token.colorBorderSecondary}`, color: '#8c8c8c' }}>
                             <th style={{ textAlign: 'left', padding: '4px 8px' }}>股票</th>
                             <th style={{ textAlign: 'left', padding: '4px 8px' }}>行业</th>
                             <th style={{ textAlign: 'right', padding: '4px 8px' }}>次日收益</th>
@@ -2178,7 +2183,7 @@ export default function RecommendationList() {
                         </thead>
                         <tbody>
                           {topBottom.best3.map((r, i) => (
-                            <tr key={i} style={{ borderBottom: '1px solid #fafafa' }}>
+                            <tr key={i} style={{ borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
                               <td style={{ padding: '4px 8px' }}>
                                 <Text strong>{r.stockName}</Text>
                                 <Text type="secondary" style={{ marginLeft: 4, fontSize: 11 }}>{r.stockCode}</Text>
@@ -2209,7 +2214,7 @@ export default function RecommendationList() {
                     {topBottom.worst3 && topBottom.worst3.length > 0 ? (
                       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                         <thead>
-                          <tr style={{ borderBottom: '1px solid #f0f0f0', color: '#8c8c8c' }}>
+                          <tr style={{ borderBottom: `1px solid ${token.colorBorderSecondary}`, color: '#8c8c8c' }}>
                             <th style={{ textAlign: 'left', padding: '4px 8px' }}>股票</th>
                             <th style={{ textAlign: 'left', padding: '4px 8px' }}>行业</th>
                             <th style={{ textAlign: 'right', padding: '4px 8px' }}>次日收益</th>
@@ -2220,7 +2225,7 @@ export default function RecommendationList() {
                         </thead>
                         <tbody>
                           {topBottom.worst3.map((r, i) => (
-                            <tr key={i} style={{ borderBottom: '1px solid #fafafa' }}>
+                            <tr key={i} style={{ borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
                               <td style={{ padding: '4px 8px' }}>
                                 <Text strong>{r.stockName}</Text>
                                 <Text type="secondary" style={{ marginLeft: 4, fontSize: 11 }}>{r.stockCode}</Text>
@@ -2248,7 +2253,7 @@ export default function RecommendationList() {
 
                 {/* 深度归因分析 */}
                 {topBottom.analysis && (
-                  <div style={{ marginTop: 16, padding: '12px 16px', background: '#fafafa', borderRadius: 4, border: '1px solid #f0f0f0' }}>
+                  <div style={{ marginTop: 16, padding: '12px 16px', background: token.colorBgContainer, borderRadius: 4, border: `1px solid ${token.colorBorderSecondary}` }}>
                     <div style={{ fontWeight: 600, marginBottom: 10, fontSize: 13 }}>
                       🔍 深度归因分析 — 最佳 vs 最差差异来源
                     </div>
@@ -2455,7 +2460,7 @@ export default function RecommendationList() {
         </Spin>
 
         {/* 黑名单规则说明 */}
-        <Divider style={{ margin: '12px 0 6px', borderColor: '#333' }} />
+        <Divider style={{ margin: '12px 0 6px', borderColor: token.colorBorderSecondary }} />
         <div style={{ fontSize: 11, color: '#8c8c8c', lineHeight: '18px' }}>
           <Text strong style={{ color: '#b37feb' }}>自动规则：</Text>
           <Tag color="orange" style={{ fontSize: 10 }}>连续失利</Tag> 连续3次推荐次日收益为负 → 拉黑30天 |&nbsp;
