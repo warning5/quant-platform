@@ -137,7 +137,9 @@ public class IntradayMoneyFlowService {
         return result;
     }
 
-    /** 平台代码(600519.SH) -> westock 代码(sh600519)；已是 westock 格式则直接返回。 */
+    /** 平台代码(600519.SH) -> westock 代码(sh600519)；已是 westock 格式则直接返回。
+     *  兼容纯数字代码（监控列表主要来源 stock_recommendation.stock_code 为 6 位纯数字）：
+     *  按首位判断市场 —— 6=沪，0/3=深，4/8/9=北。 */
     private String toWestockCode(String platformCode) {
         if (platformCode == null) return null;
         String s = platformCode.trim().toUpperCase();
@@ -147,6 +149,12 @@ public class IntradayMoneyFlowService {
         Matcher m = PLATFORM_CODE.matcher(s);
         if (m.find()) {
             return m.group(2).toLowerCase() + m.group(1);
+        }
+        // 纯数字 6 位：按首位推断交易所
+        if (s.matches("^\\d{6}$")) {
+            char c = s.charAt(0);
+            String market = (c == '6') ? "sh" : (c == '0' || c == '3') ? "sz" : "bj";
+            return market + s;
         }
         return null;
     }

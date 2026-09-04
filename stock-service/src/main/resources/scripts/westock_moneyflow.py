@@ -727,7 +727,9 @@ def main():
     ap.add_argument("--codes", required=True, help="逗号分隔 westock 代码, 如 sh600519,sz000001")
     ap.add_argument("--date", required=True, help="YYYY-MM-DD")
     args = ap.parse_args()
-    codes = [c.strip().upper() for c in args.codes.split(",") if c.strip()]
+    # 注意：westock-data CLI 只认小写代码（SZ000612 会返回"数据为空"），
+    # 统一转小写；输出 key 由解析层 .upper() 归一化，不影响调用方匹配。
+    codes = [c.strip().lower() for c in args.codes.split(",") if c.strip()]
     if not codes:
         print(json.dumps({"error": "empty codes"}, ensure_ascii=False))
         sys.exit(1)
