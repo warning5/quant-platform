@@ -152,11 +152,14 @@ def main():
     ap.add_argument("--codes", help="逗号分隔代码, 不填则全市场")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--limit", type=int, default=0, help="仅前 N 只(试运行)")
+    ap.add_argument("--offset", type=int, default=0, help="跳过前 N 只(断点续跑)")
     args = ap.parse_args()
 
     dates = dates_in_range(args.start, args.end)
     print(f"[配置] 重算日期={dates} dry_run={args.dry_run}", flush=True)
     codes = get_code_list(args)
+    if args.offset:
+        codes = codes[args.offset:]
     if args.limit:
         codes = codes[:args.limit]
     print(f"[配置] 待处理股票={len(codes)}", flush=True)

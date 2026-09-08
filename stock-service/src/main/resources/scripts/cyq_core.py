@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 import numpy as np
 import pandas as pd
 import baostock as bs
-import urllib.request, urllib.parse
+import urllib.request, urllib.parse, urllib.error, http.client
 
 FACTOR = 150  # 价格桶数(与东财/akshare 一致)
 
@@ -399,14 +399,43 @@ def cyq_to_json(yr, x):
                       ensure_ascii=False, separators=(",", ":"))
 
 # ---------------- ClickHouse 写入 ----------------
+_ch_conn = None
+
+def _get_conn():
+    """复用单个持久连接, 避免每只股票多次短连导致本地临时端口耗尽(WinError 10048)。"""
+    global _ch_conn
+    if _ch_conn is None:
+        _ch_conn = http.client.HTTPConnection(CH_HOST, int(CH_PORT), timeout=30)
+    return _ch_conn
+
 def _ch_request(sql, data=None, timeout=30):
     # CH 只读模式: GET 仅可读, 写操作(INSERT/CREATE/DROP)必须 POST -> 始终用 POST(空 body 亦可)
-    url = f"http://{CH_HOST}:{CH_PORT}/?query=" + urllib.parse.quote(sql)
-    req = urllib.request.Request(url, data=(data if data is not None else b""))
-    if CH_USER:
-        req.add_header("Authorization", "Basic " + base64.b64encode(f"{CH_USER}:{CH_PW}".encode()).decode())
-    req.add_header("Content-Type", "text/plain")
-    return urllib.request.urlopen(req, timeout=timeout).read().decode()
+    last_err = None
+    for attempt in range(6):
+        try:
+            conn = _get_conn()
+            path = "/?query=" + urllib.parse.quote(sql)
+            headers = {"Content-Type": "text/plain"}
+            if CH_USER:
+                headers["Authorization"] = "Basic " + base64.b64encode(f"{CH_USER}:{CH_PW}".encode()).decode()
+            conn.request("POST", path, body=(data if data is not None else b""), headers=headers)
+            resp = conn.getresponse()
+            body = resp.read().decode("utf-8", "replace")
+            if resp.status != 200:
+                raise RuntimeError(f"CH HTTP {resp.status}: {body[:300]}")
+            return body
+        except (http.client.HTTPException, OSError, urllib.error.URLError) as e:
+            last_err = e
+            # 连接可能已失效(端口耗尽/服务端关闭), 关闭并重建
+            try:
+                if _ch_conn is not None:
+                    _ch_conn.close()
+            except Exception:
+                pass
+            _ch_conn = None
+            # 端口耗尽(WinError 10048)/断连等临时错误 -> 退避重试等待 TIME_WAIT 端口回收
+            time.sleep(min(2 ** attempt, 16))
+    raise last_err
 
 def write_cyq_ch(rows, table="stock_cyq", chunk_bytes=1024*1024):
     """批量写入筹码快照。rows: list[dict] 字段与 stock_cyq 表一致。按真实字节 1MB 分块。"""
