@@ -102,6 +102,12 @@ public class DataUpdateRequest {
     private boolean force = false;
 
     /**
+     * CYQ 定点续算模式：以真实前一日分布为种子重算指定日期段，不污染其它日。
+     * 仅对 updateType=CYQ 生效；为 true 时 buildCommand 路由到 recompute_cyq_range.py。
+     */
+    private boolean recompute = false;
+
+    /**
      * 情绪数据：采集龙虎榜（默认 true）
      */
     private boolean fetchLhb = true;

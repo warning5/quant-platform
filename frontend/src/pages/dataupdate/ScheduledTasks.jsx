@@ -179,6 +179,7 @@ function parseExtraConfig(raw) {
     }
     return {
       incremental: obj.incremental !== false,  // 未配置时默认增量模式
+      recompute: Boolean(obj.recompute),        // CYQ 定点续算模式
       dateMode: obj.dateMode || 'today',
       startDate: obj.startDate || null,
       endDate: obj.endDate || null,
@@ -189,7 +190,7 @@ function parseExtraConfig(raw) {
       enableConfidenceControl: obj.enableConfidenceControl !== false,
     };
   } catch {
-    return { incremental: true, dateMode: 'today', startDate: null, endDate: null, strategyIds: [], weightModes: ['ICW'], weightMode: 'ICW', topN: 15, enableConfidenceControl: true };
+    return { incremental: true, recompute: false, dateMode: 'today', startDate: null, endDate: null, strategyIds: [], weightModes: ['ICW'], weightMode: 'ICW', topN: 15, enableConfidenceControl: true };
   }
 }
 
@@ -197,6 +198,7 @@ function parseExtraConfig(raw) {
 function stringifyExtraConfig(config) {
   const result = {
     incremental: config.incremental,
+    recompute: Boolean(config.recompute),
     dateMode: config.dateMode,
     startDate: config.startDate,
     endDate: config.endDate,
@@ -510,6 +512,7 @@ function CronVisualEditor({ open, initialValue, initialExtraConfig, taskKey, onO
 
   // --- 任务配置 state ---
   const [incremental, setIncremental] = useState(true);
+  const [recompute, setRecompute] = useState(false); // CYQ 定点续算模式
   const [dateMode, setDateMode] = useState('today');
   const [customDates, setCustomDates] = useState(null); // [dayjs, dayjs]
   // --- 推荐任务专属 state ---
@@ -530,6 +533,7 @@ function CronVisualEditor({ open, initialValue, initialExtraConfig, taskKey, onO
       // 解析已有配置
       const ec = parseExtraConfig(initialExtraConfig);
       setIncremental(ec.incremental);
+      setRecompute(ec.recompute);
       setDateMode(ec.dateMode || 'today');
       if (ec.startDate && ec.endDate) {
         setCustomDates([dayjs(ec.startDate), dayjs(ec.endDate)]);
@@ -715,23 +719,49 @@ function CronVisualEditor({ open, initialValue, initialExtraConfig, taskKey, onO
   // ========== Tab 内容渲染函数（内联，不用 useMemo 避免数组重建导致卡切换） ==========
   const renderConfigTab = () => (
     <div style={{ padding: '16px 0' }}>
-      {/* 增量/全量 — 推荐任务不需要 */}
+      {/* 更新模式 — 推荐任务不需要；CYQ 额外提供「定点续算」 */}
       {taskKey !== 'DAILY_RECOMMENDATION' && (
       <div style={{ marginBottom: 20 }}>
         <Text strong style={{ fontSize: 13, display: 'block', marginBottom: 8 }}>更新模式</Text>
-        <Space align="center">
-          <Switch
-            checked={incremental}
-            onChange={setIncremental}
-            checkedChildren="增量"
-            unCheckedChildren="全量"
-          />
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            {incremental
-              ? '增量模式：仅更新新增/变更的数据（不使用 --force）'
-              : '全量模式：强制重新写入覆盖已有数据（使用 --force）'}
-          </Text>
-        </Space>
+        {taskKey === 'CYQ' ? (
+          <Space direction="vertical" size={6} style={{ width: '100%' }}>
+            <Select
+              value={recompute ? 'recompute' : (incremental ? 'incremental' : 'full')}
+              onChange={(v) => {
+                if (v === 'recompute') { setRecompute(true); setIncremental(true); }
+                else if (v === 'full') { setRecompute(false); setIncremental(false); }
+                else { setRecompute(false); setIncremental(true); }
+              }}
+              style={{ width: 260 }}
+              options={[
+                { value: 'incremental', label: '增量（仅补齐缺失）' },
+                { value: 'full', label: '全量（--force 覆盖）' },
+                { value: 'recompute', label: '定点续算（干净重算）' },
+              ]}
+            />
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              {recompute
+                ? '定点续算：以真实前一日分布为种子重算所选日期，不污染其它交易日（修复脏数据推荐）'
+                : incremental
+                  ? '增量模式：仅更新新增/变更的数据（不使用 --force）'
+                  : '全量模式：强制覆盖已有数据（使用 --force；CYQ 会从单日假种子重算，可能污染分布）'}
+            </Text>
+          </Space>
+        ) : (
+          <Space align="center">
+            <Switch
+              checked={incremental}
+              onChange={setIncremental}
+              checkedChildren="增量"
+              unCheckedChildren="全量"
+            />
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              {incremental
+                ? '增量模式：仅更新新增/变更的数据（不使用 --force）'
+                : '全量模式：强制重新写入覆盖已有数据（使用 --force）'}
+            </Text>
+          </Space>
+        )}
       </div>
       )}
 
@@ -1154,6 +1184,7 @@ function CronVisualEditor({ open, initialValue, initialExtraConfig, taskKey, onO
     }
     return stringifyExtraConfig({
       incremental,
+      recompute,
       dateMode,
       startDate: sd,
       endDate: ed,
@@ -1162,7 +1193,7 @@ function CronVisualEditor({ open, initialValue, initialExtraConfig, taskKey, onO
       topN,
       enableConfidenceControl,
     });
-  }, [incremental, dateMode, customDates, strategyIds, weightModes, topN, enableConfidenceControl]);
+  }, [incremental, recompute, dateMode, customDates, strategyIds, weightModes, topN, enableConfidenceControl]);
 
   return (
     <Modal

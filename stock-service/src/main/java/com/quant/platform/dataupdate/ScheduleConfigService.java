@@ -270,6 +270,7 @@ public class ScheduleConfigService {
         String upper = taskKey.toUpperCase();
 
         boolean incremental = false;
+        boolean recompute = false;
         String dateMode = "today";
         String customStartDate = null;
         String customEndDate = null;
@@ -281,6 +282,7 @@ public class ScheduleConfigService {
                 Map<String, Object> ec = objectMapper.readValue(extraConfigJson, Map.class);
                 if (ec != null) {
                     incremental = !Boolean.FALSE.equals(ec.get("incremental"));
+                    recompute = Boolean.TRUE.equals(ec.get("recompute"));
                     dateMode = ec.get("dateMode") != null ? ec.get("dateMode").toString() : "today";
                     customStartDate = ec.get("startDate") != null ? ec.get("startDate").toString() : null;
                     customEndDate = ec.get("endDate") != null ? ec.get("endDate").toString() : null;
@@ -307,6 +309,13 @@ public class ScheduleConfigService {
 
         req.setForce(!incremental);
         if (incremental) req.setResume(true);
+
+        // CYQ 定点续算：以真实前一日分布为种子重算，不使用 --force（避免污染后续分布）
+        if (recompute) {
+            req.setRecompute(true);
+            req.setForce(false);
+            req.setResume(false);
+        }
 
         switch (upper) {
             case "DAILY" -> req.setUpdateType("DAILY");

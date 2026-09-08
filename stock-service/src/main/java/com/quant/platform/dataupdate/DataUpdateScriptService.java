@@ -332,11 +332,49 @@ public class DataUpdateScriptService {
             return cmd;
         }
 
-        // 筹码分布增量更新(方案C): 日线更新后自动追算(读 stock_cyq_daily 最新快照, 仅推进新交易日)
+        // 筹码分布更新(方案C)
         if ("CYQ".equals(request.getUpdateType())) {
+            String startDate = request.getStartDate();
+            String endDate = request.getEndDate();
+            String singleCode = request.getSingleCode();
+
+            if (request.isRecompute()) {
+                // 定点续算：以真实前一日分布为种子逐日重算，数学等价于正常增量，绝不污染其它日。
+                // 路由到 recompute_cyq_range.py，不使用 cyq_service.py 的 --force
+                // （后者会从单日K线假种子重算、污染后续分布）。
+                cmd.add("recompute_cyq_range.py");
+                if (startDate != null && !startDate.isEmpty() && endDate != null && !endDate.isEmpty()) {
+                    cmd.add("--start");
+                    cmd.add(startDate);
+                    cmd.add("--end");
+                    cmd.add(endDate);
+                }
+                if (singleCode != null && !singleCode.isEmpty()) {
+                    cmd.add("--codes");
+                    cmd.add(singleCode);
+                }
+                return cmd;
+            }
+
             cmd.add("cyq_service.py");
-            cmd.add("--incremental");
-            // 不传 --end-date: Python 默认取 stock_daily 最新交易日, 保证追到最新数据
+            if (startDate != null && !startDate.isEmpty() && endDate != null && !endDate.isEmpty()) {
+                // 自定义日期段：按日期范围逐日重算；UI 的全量/增量通过 --force 控制
+                cmd.add("--daily");
+                cmd.add("--start");
+                cmd.add(startDate);
+                cmd.add("--end");
+                cmd.add(endDate);
+            } else {
+                // 无日期范围：保持原增量行为，从 stock_cyq_daily 最新快照追到最新交易日
+                cmd.add("--incremental");
+            }
+            if (request.isForce()) {
+                cmd.add("--force");
+            }
+            if (singleCode != null && !singleCode.isEmpty()) {
+                cmd.add("--codes");
+                cmd.add(singleCode);
+            }
             return cmd;
         }
 

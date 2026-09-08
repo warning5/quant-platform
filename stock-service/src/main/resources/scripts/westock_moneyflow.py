@@ -61,6 +61,7 @@ WESTOCK_CLI_PKG = os.environ.get("WESTOCK_CLI_PKG", "westock-data-clawhub@1.0.4"
 CLI_MAX_DAYS = int(os.environ.get("WESTOCK_CLI_MAX_DAYS", "45"))   # 区间交易日数超过则降级 MCP
 CLI_SUBBATCH = int(os.environ.get("WESTOCK_CLI_SUBBATCH", "30"))  # 单次 asfund 最多 codes 数
 CLI_TIMEOUT = int(os.environ.get("WESTOCK_CLI_TIMEOUT", "120"))   # 单次 CLI 调用超时（秒）
+CLI_INTERVAL = float(os.environ.get("WESTOCK_CLI_INTERVAL", "0.3"))  # 两次 asfund 调用间最小间隔（秒），压低请求速率避免触发滚动限流
 
 
 class WestockMcpError(Exception):
@@ -95,6 +96,27 @@ def _parse_date(s):
 
 def _looks_like_code(k: str) -> bool:
     return bool(re.match(r"^[a-zA-Z]{2}\d{6}$", k or ""))
+
+
+# 接口限流/空返回的响应指纹（非表格正文）。命中即视为瞬时限流，应退避重试。
+_RATE_LIMIT_HINTS = (
+    "频繁", "限流", "请求过快", "请求过于频繁", "too many requests",
+    "429", "503", "502", "service unavailable", "请稍后", "稍后再试",
+    "数据为空", "无数据", "<html", "error code", "try again",
+)
+
+
+def _looks_like_rate_limit(text: str) -> bool:
+    if not text or not text.strip():
+        return True   # 空响应视为限流/空返回，交给调用方退避重试
+    # 关键修复：含有效数据表头(MainNetFlow/BlockNetFlow)即视为成功响应，绝不算限流。
+    # 此前用裸子串 "429"/"503" 匹配，会把正常行情数值（价格/排名/资金流里恰好含这些数字）
+    # 误判成限流，导致所有响应被丢弃、数据彻底写不进库。真正的限流响应是"非表格"提示
+    # （_cli_fetch_day 抛的正是"响应非表格"），不可能带数据表头。
+    if "MainNetFlow" in text or "BlockNetFlow" in text:
+        return False
+    low = text.lower()
+    return any(h in low for h in _RATE_LIMIT_HINTS)
 
 
 # ── Token 读取与刷新 ────────────────────────────────────────────
@@ -435,10 +457,15 @@ def query_westock(codes: list, start_str: str, end_str: str) -> dict:
     if cli:
         try:
             return _query_cli(codes, start, end, cli)
-        except WestockMcpError as e:
-            print("  [westock] CLI 全部失败，降级 MCP: %s" % e)
         except Exception as e:
-            print("  [westock] CLI 异常，降级 MCP: %s" % e)
+            # 仅在已配置 westock-mcp token 时才降级 MCP；
+            # 纯 CLI 零鉴权环境下 CLI 取数失败应向上抛（交给调用方退避重试），
+            # 而非误报"未找到可用的 westock token"。
+            try:
+                _load_token()
+            except Exception:
+                raise e   # 无 token：保留 CLI 原始错误向上抛，交调用方退避重试（不误报 token）
+            print("  [westock] CLI 全部失败，降级 MCP: %s" % e)
     return _query_mcp(codes, start, end)
 
 
@@ -483,6 +510,10 @@ def extract_westock_moneyflow(md_text):
 # ── westock-data CLI 实现（零鉴权，直连腾讯自选股）──────────────
 class _CliError(Exception):
     """westock-data CLI 单次调用层面的错误（区别于网络瞬时错误）"""
+
+
+class _RateLimitError(_CliError):
+    """westock 接口限流（请求过于频繁 / 返回空或非表格）。属瞬时错误，调用方应退避后重试。"""
 
 
 _CLI_CACHE = None  # (node_exe, npx_js) 或 None
@@ -680,7 +711,12 @@ def _cli_fetch_day(codes, day, cli) -> dict:
     if proc.returncode != 0:
         err_txt = (err or out or b"").decode("utf-8", "replace")[:500]
         raise _CliError("asfund 退出码 %d: %s" % (proc.returncode, err_txt))
-    return _parse_asfund_md(out.decode("utf-8", "replace"))
+    text = out.decode("utf-8", "replace")
+    # 限流/空返回：CLI 退出码为 0 但正文是非表格的限流提示或错误页，
+    # 静默解析成 {} 会被上游误判为"无数据"。显式抛限流异常，交给调用方退避。
+    if _looks_like_rate_limit(text):
+        raise _RateLimitError("asfund 命中限流/空返回（响应非表格）: %s" % text[:120])
+    return _parse_asfund_md(text)
 
 
 def _query_cli(codes, start, end, cli) -> dict:
@@ -690,6 +726,7 @@ def _query_cli(codes, start, end, cli) -> dict:
     merged = {}
     total = 0
     err_days = 0
+    rl_days = 0
     groups = [codes[i:i + CLI_SUBBATCH] for i in range(0, len(codes), CLI_SUBBATCH)] or [codes]
     cur = start
     while cur <= end:
@@ -697,18 +734,42 @@ def _query_cli(codes, start, end, cli) -> dict:
             cur += timedelta(days=1)
             continue
         total += 1
-        day_err = 0
+        day_rl_only = True   # 整天失败是否纯限流（遇非限流错误则否定）
+        day_failed_groups = 0
         for g in groups:
-            try:
-                part = _cli_fetch_day(g, cur, cli)
-                for k, v in part.items():
-                    merged.setdefault(k, {}).update(v)
-            except _CliError as e:
-                day_err += 1
-                print("  [westock CLI] %s 取数失败: %s" % (cur, e))
-        if day_err >= len(groups):
+            g_ok = False
+            for attempt in range(3):   # 单个 sub-batch 限流则退避重试（限流是瞬时的）
+                try:
+                    part = _cli_fetch_day(g, cur, cli)
+                    for k, v in part.items():
+                        merged.setdefault(k, {}).update(v)
+                    g_ok = True
+                    break
+                except _RateLimitError as e:
+                    print("  [westock CLI] %s 限流(第%d次): %s" % (cur, attempt + 1, e))
+                    if CLI_INTERVAL > 0:
+                        time.sleep(CLI_INTERVAL * (attempt + 1))
+                except _CliError as e:
+                    day_rl_only = False
+                    print("  [westock CLI] %s 取数失败: %s" % (cur, e))
+                    break
+            if not g_ok:
+                day_failed_groups += 1
+            # 请求速率平滑：两次 asfund 之间最小间隔，压低速率避免触发滚动限流
+            if CLI_INTERVAL > 0:
+                time.sleep(CLI_INTERVAL)
+        if day_failed_groups >= len(groups):
             err_days += 1
+            if day_rl_only:
+                rl_days += 1
         cur += timedelta(days=1)
+    # 根因修复：只要"任一交易日整窗被限流"(rl_days>0) 就抛 _RateLimitError，
+    # 让 query_westock 在无 token 时向上抛、让 _query_batch 触发全局冷却闸门退避重试。
+    # 旧逻辑仅在"全部交易日都限流"(err_days==total) 才抛，导致仅个别日期限流(如 09-07)
+    # 时静默返回部分数据，上层判 success、冷却闸门永不触发，全管线满速把 API 顶在限流墙上、
+    # 该日数据永远缺失（表现就是日志刷"限流"但数据不落库）。
+    if rl_days > 0:
+        raise _RateLimitError("westock-data CLI 在 %d/%d 个交易日内被限流" % (rl_days, total))
     if total > 0 and err_days == total:
         raise WestockMcpError("westock-data CLI 在 %d 个交易日内全部取数失败" % total)
     return merged

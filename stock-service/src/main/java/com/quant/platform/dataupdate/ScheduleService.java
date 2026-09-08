@@ -825,6 +825,7 @@ public class ScheduleService implements SchedulingConfigurer {
 
         // 解析 extra_config
         boolean incremental = false;
+        boolean recompute = false;
         String dateMode = "today";
         String customStartDate = null;
         String customEndDate = null;
@@ -839,6 +840,7 @@ public class ScheduleService implements SchedulingConfigurer {
                 if (ec != null) {
                     // 默认增量模式（未配 incremental 时为 true）；显式配 false 才走全量
                     incremental = !Boolean.FALSE.equals(ec.get("incremental"));
+                    recompute = Boolean.TRUE.equals(ec.get("recompute"));
                     dateMode = ec.get("dateMode") != null ? ec.get("dateMode").toString() : "today";
                     customStartDate = ec.get("startDate") != null ? ec.get("startDate").toString() : null;
                     customEndDate = ec.get("endDate") != null ? ec.get("endDate").toString() : null;
@@ -892,6 +894,13 @@ public class ScheduleService implements SchedulingConfigurer {
         // 增量模式：不使用 force；全量模式：使用 force
         req.setForce(!incremental);
         if (incremental) req.setResume(true);
+
+        // CYQ 定点续算：以真实前一日分布为种子重算，不使用 --force（避免污染后续分布）
+        if (recompute) {
+            req.setRecompute(true);
+            req.setForce(false);
+            req.setResume(false);
+        }
 
         return switch (upper) {
             case "DAILY"         -> { req.setUpdateType("DAILY");         yield req; }

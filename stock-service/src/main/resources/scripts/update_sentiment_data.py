@@ -1484,7 +1484,7 @@ def run_westock_moneyflow(args):
     - CLI 不可用或区间过大时降级 westock-mcp data_fund_flow（需 token）。
     纯 westock 源，不走东财。
     """
-    from westock_moneyflow import _load_token, WestockMcpError, westock_cli_supported
+    from westock_moneyflow import _load_token, WestockMcpError, westock_cli_supported, _RateLimitError
     CLI_MODE = westock_cli_supported()
     # CLI 可用时（本机有 node + westock-data 包）跳过 MCP token 硬拦截，零鉴权直接跑；
     # CLI 不可用时仍需 MCP token（连 westock-mcp 连接器 / 方式B OAuth）。
@@ -1642,12 +1642,24 @@ def run_westock_moneyflow(args):
 
     # ── 阶段 1：并行查询（带重试）──
     retry_rescued = 0  # 被重试救回来的批次数
+    # 全局冷却闸门：某批撞上限流/空结果，暂停整个并行管线 COOLDOWN_SECS 秒，
+    # 让另一条并行批也跟着等，冷却过了再继续 —— 把"连续硬失败"变成"短暂降速自愈"。
+    import threading as _threading
+    _cooldown_until = {'t': 0.0}
+    _cooldown_lock = _threading.Lock()
+    COOLDOWN_SECS = 25
+
     def _query_batch(batch_stocks, batch_label, batch_idx):
-        """单个批次的 API 查询，带 3 次重试（含指数退避）"""
+        """单个批次的 API 查询，带 3 次重试 + 全局冷却退避。"""
         import time as _time
         nonlocal retry_rescued
         last_err = None
         for attempt in range(3):
+            # 冷却门控：若全局处于冷却期，先睡到冷却结束再发请求（避免叠加放大限流）
+            with _cooldown_lock:
+                wait_until = _cooldown_until['t']
+            if wait_until > _time.time():
+                _time.sleep(wait_until - _time.time() + 0.5)
             try:
                 result = _fetch_batch_moneyflow(batch_stocks, batch_label)
                 if result:
@@ -1660,11 +1672,18 @@ def run_westock_moneyflow(args):
                     last_err = "全空结果"
                 else:
                     last_err = "空返回"
+            except _RateLimitError as e:
+                last_err = "限流: %s" % e
             except Exception as e:
                 last_err = str(e)
+            # 限流/空结果：触发全局冷却，让所有并行批次一起退避
+            trigger = (last_err == "全空结果" or last_err == "空返回" or last_err.startswith("限流"))
+            if trigger:
+                with _cooldown_lock:
+                    _cooldown_until['t'] = max(_cooldown_until['t'], _time.time() + COOLDOWN_SECS)
             if attempt < 2:
-                wait = 2 ** attempt  # 1s, 2s
-                _time.sleep(wait)
+                backoff = 3 * (2 ** attempt)  # 3s, 6s
+                _time.sleep(backoff)
         raise RuntimeError(f"重试3次仍失败: {last_err}")
 
     all_results = {}  # batch_idx -> {code: rows_list}
