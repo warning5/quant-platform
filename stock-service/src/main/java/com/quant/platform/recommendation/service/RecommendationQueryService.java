@@ -326,7 +326,7 @@ public class RecommendationQueryService {
      * @return { best3: [...], worst3: [...], analysis: { industryDiff, marketCapDiff, scoreDiff, failurePatterns } }
      */
     public Map<String, Object> getBatchTopBottom(Long strategyId, LocalDate recommendDate) {
-        List<StockRecommendation> recs = recommendationMapper.findByStrategyAndDate(strategyId, recommendDate);
+        List<StockRecommendation> recs = recommendationMapper.findByStrategyAndDateAndMode(strategyId, recommendDate, "ICW");
         Map<String, Object> result = new HashMap<>();
 
         // 只取有次日收益的

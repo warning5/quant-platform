@@ -12,13 +12,13 @@ export const recommendationApi = {
   getDatesByStrategy: (strategyId, days = 30) =>
     request({ url: '/mp/recommendations/dates', data: { strategyId, days } }),
 
-  /** 获取指定策略+日期的推荐列表 */
-  getByStrategyAndDate: (strategyId, date) =>
-    request({ url: `/mp/recommendations/strategy/${strategyId}/date/${date}` }),
+  /** 获取指定策略+日期的推荐列表（默认 ICW 模式，与 PC 端一致） */
+  getByStrategyAndDate: (strategyId, date, weightMode = 'ICW') =>
+    request({ url: `/mp/recommendations/strategy/${strategyId}/date/${date}`, data: { weightMode } }),
 
-  /** 获取最新推荐列表（可选传 strategyId） */
-  getLatest: (strategyId) =>
-    request({ url: '/mp/recommendations/latest', data: { strategyId } }),
+  /** 获取最新推荐列表（默认 ICW 模式，与 PC 端一致） */
+  getLatest: (strategyId, weightMode = 'ICW') =>
+    request({ url: '/mp/recommendations/latest', data: { strategyId, weightMode } }),
 
   /** 获取批次历史表现汇总 */
   getBatchHistory: (limit = 20, strategyId) =>

@@ -48,14 +48,20 @@ public class MpRecommendationController {
     }
 
     /**
-     * 按策略+日期获取推荐（精简字段）
+     * 按策略+日期获取推荐（精简字段）。
+     * 默认按 ICW 权重模式过滤，与 PC 端智能推荐保持一致；若该模式无数据则回退全量，避免空屏。
      */
     @GetMapping("/strategy/{strategyId}/date/{date}")
     public ApiResponse<List<Map<String, Object>>> getByStrategyAndDate(
             @PathVariable Long strategyId,
-            @PathVariable String date) {
-        List<StockRecommendation> recs = recommendationMapper.findByStrategyAndDate(
-                strategyId, LocalDate.parse(date));
+            @PathVariable String date,
+            @RequestParam(required = false, defaultValue = "ICW") String weightMode) {
+        LocalDate d = LocalDate.parse(date);
+        List<StockRecommendation> recs = recommendationMapper.findByStrategyAndDateAndMode(
+                strategyId, d, weightMode);
+        if (recs == null || recs.isEmpty()) {
+            recs = recommendationMapper.findByStrategyAndDate(strategyId, d);
+        }
         List<Map<String, Object>> result = recs.stream()
                 .map(this::toSimplified)
                 .collect(Collectors.toList());
@@ -63,18 +69,25 @@ public class MpRecommendationController {
     }
 
     /**
-     * 获取最新推荐列表（精简版）
+     * 获取最新推荐列表（精简版）。
+     * 默认按 ICW 权重模式过滤，与 PC 端智能推荐保持一致；若该模式无数据则回退全量，避免空屏。
      */
     @GetMapping("/latest")
     public ApiResponse<List<Map<String, Object>>> getLatest(
-            @RequestParam Long strategyId) {
+            @RequestParam Long strategyId,
+            @RequestParam(required = false, defaultValue = "ICW") String weightMode) {
         // 取该策略最新日期
         List<LocalDate> dates = recommendationMapper.findDatesByStrategyId(strategyId, 1);
         if (dates == null || dates.isEmpty()) {
             return ApiResponse.success(Collections.emptyList());
         }
         LocalDate latestDate = dates.get(0);
-        List<StockRecommendation> recs = recommendationMapper.findByStrategyAndDate(strategyId, latestDate);
+        List<StockRecommendation> recs = recommendationMapper.findByStrategyAndDateAndMode(
+                strategyId, latestDate, weightMode);
+        if (recs == null || recs.isEmpty()) {
+            // 回退：该策略/日期只有 STATIC 等其它模式时，返回全量，避免空白
+            recs = recommendationMapper.findByStrategyAndDate(strategyId, latestDate);
+        }
         List<Map<String, Object>> result = recs.stream()
                 .map(this::toSimplified)
                 .collect(Collectors.toList());
@@ -222,8 +235,11 @@ public class MpRecommendationController {
 
     private StockRecommendation resolveRecommendation(String stockCode, Long strategyId, String date) {
         if (strategyId != null && date != null) {
-            List<StockRecommendation> list = recommendationMapper.findByStrategyAndDate(
-                    strategyId, LocalDate.parse(date));
+            List<StockRecommendation> list = recommendationMapper.findByStrategyAndDateAndMode(
+                    strategyId, LocalDate.parse(date), "ICW");
+            if (list == null || list.isEmpty()) {
+                list = recommendationMapper.findByStrategyAndDate(strategyId, LocalDate.parse(date));
+            }
             return list.stream()
                     .filter(r -> stockCode.equals(r.getStockCode()))
                     .findFirst().orElse(null);
