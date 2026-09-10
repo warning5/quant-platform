@@ -63,11 +63,17 @@ public class RecommendationService {
     private static final int ANALYSIS_PARALLELISM = 5;
 
     /**
-     * 高置信门槛：回测验证(7633条历史) final_score∈[0.7,0.9] 档次日超额 +0.71%/胜率57.5%，
-     * 而 0.5~0.7 档为噪声/负收益区(占推荐61%)。仅发出达门槛的推荐，砍掉拖后腿的平庸票。
+     * 高置信过滤：相对门槛 —— 取当日候选池 final_score 的前 30%（按分数降序的分位值）。
+     *
+     * <p>背景：原实现是固定门槛 0.70（依据回测 7633 条历史：final_score∈[0.7,0.9] 档次日超额
+     * +0.71%/胜率 57.5%，0.5~0.7 为噪声区）。但实测 final_score 由
+     * {@code wFactor*因子分 + wAnalysis*分析六维分位} 合成，分析侧六维分位长期只有 0.30~0.37，
+     * 导致实际分数集中在 0.62~0.75，达 0.70 的常年 0~2 只 —— 永远落到"保底取前 5"分支，
+     * topN 配置（15/20）形同虚设。改用相对门槛后，强信号期取到的是当日真正最强的一档，
+     * 弱信号期也不会退化成恒定 5 只。
      */
-    private static final double HIGH_CONVICTION_FINAL_SCORE = 0.70;
-    /** 高置信档不足时保底保留的 topN（避免低信号期策略无票） */
+    private static final double HIGH_CONVICTION_RELATIVE_RATIO = 0.30;
+    /** 高置信档少于该数量时视为过滤失效，走保底逻辑 */
     private static final int MIN_HIGH_CONVICTION_PICKS = 5;
     /**
      * 优化④：连续 BEAR 暂停生成（离散开关）。
@@ -586,22 +592,27 @@ public class RecommendationService {
                 .collect(Collectors.toList());
         int sellFiltered = beforeFilter - recommendations.size();
 
-        // Step 5.6: 高置信过滤（回测验证：仅 final_score>=门槛的档位次日真能跑赢，
-        // 0.5~0.7 噪声/负收益区占推荐61%应剔除）
-        List<StockRecommendation> highConv = recommendations.stream()
-                .filter(r -> r.getFinalScore() != null && r.getFinalScore() >= HIGH_CONVICTION_FINAL_SCORE)
+        // Step 5.6: 高置信过滤（相对门槛：候选池 final_score 前 30%）
+        // 固定 0.70 门槛实际常年只筛出 0~2 只，导致恒定落到"保底 5 只"，topN 配置失效。
+        List<StockRecommendation> sortedByScore = recommendations.stream()
+                .sorted((a, b) -> Double.compare(b.getFinalScore() == null ? 0 : b.getFinalScore(),
+                        a.getFinalScore() == null ? 0 : a.getFinalScore()))
+                .collect(Collectors.toList());
+        double relativeThreshold = relativeThreshold(sortedByScore, HIGH_CONVICTION_RELATIVE_RATIO);
+        List<StockRecommendation> highConv = sortedByScore.stream()
+                .filter(r -> r.getFinalScore() != null && r.getFinalScore() >= relativeThreshold)
                 .collect(Collectors.toList());
         if (highConv.size() >= MIN_HIGH_CONVICTION_PICKS) {
             recommendations = highConv;
-            log.info("[Recommendation] 高置信过滤生效: 保留{}条 (final_score>={})",
-                    recommendations.size(), HIGH_CONVICTION_FINAL_SCORE);
+            log.info("[Recommendation] 高置信过滤生效: 保留{}条 (相对门槛 final_score>={}, 候选池前{}%)",
+                    recommendations.size(), String.format("%.4f", relativeThreshold),
+                    (int) Math.round(HIGH_CONVICTION_RELATIVE_RATIO * 100));
         } else {
+            // 保底不再固定 5 只，改为按 topN 截断（topN 已含置信度/命中率动态调整）
             log.warn("[Recommendation] 高置信档不足({}/{}), 保底保留按final_score排序的top{}",
-                    highConv.size(), MIN_HIGH_CONVICTION_PICKS, MIN_HIGH_CONVICTION_PICKS);
-            recommendations = recommendations.stream()
-                    .sorted((a, b) -> Double.compare(b.getFinalScore() == null ? 0 : b.getFinalScore(),
-                            a.getFinalScore() == null ? 0 : a.getFinalScore()))
-                    .limit(MIN_HIGH_CONVICTION_PICKS)
+                    highConv.size(), MIN_HIGH_CONVICTION_PICKS, topN);
+            recommendations = sortedByScore.stream()
+                    .limit(Math.max(MIN_HIGH_CONVICTION_PICKS, topN))
                     .collect(Collectors.toList());
         }
 
@@ -645,6 +656,24 @@ public class RecommendationService {
 
         log.info("[Recommendation] 推荐列表生成完成: strategyId={} date={} count={}", strategyId, actualDate, recommendations.size());
         return recommendations;
+    }
+
+    /**
+     * 计算相对门槛：把候选池按 final_score 降序后，取前 ratio 比例位置的分数值。
+     * 例如 ratio=0.30 表示取前 30%，返回排名第 ceil(n*0.30) 位的分数。
+     * 分数并列时实际保留数会略多于比例值。
+     *
+     * @param sortedDesc 已按 final_score 降序排列的候选（允许含 null 分数）
+     * @param ratio      保留比例 (0,1]
+     */
+    private double relativeThreshold(List<StockRecommendation> sortedDesc, double ratio) {
+        if (sortedDesc == null || sortedDesc.isEmpty()) {
+            return 0.0;
+        }
+        int idx = (int) Math.ceil(sortedDesc.size() * ratio) - 1;
+        idx = Math.max(0, Math.min(idx, sortedDesc.size() - 1));
+        Double v = sortedDesc.get(idx).getFinalScore();
+        return v == null ? 0.0 : v;
     }
 
     /**

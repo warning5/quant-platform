@@ -86,9 +86,17 @@
   .back-to-top:active { transform: translateY(-1px); }
 
   @media (max-width: 768px) { .sidebar { display: none; } .main { margin-left: 0; width: 100%; padding: 16px; } .toc-body { grid-template-columns: 1fr; } .back-to-top { right: 16px; bottom: 16px; } }
+
+  /* 站点版注入：返回官网首页 */
+  .home-fab { position: fixed; top: 12px; right: 16px; z-index: 1200; display: inline-flex; align-items: center; gap: 6px;
+    padding: 7px 15px; border-radius: 999px; background: #fff; border: 1px solid #d9e2ec;
+    box-shadow: 0 4px 14px rgba(16,40,80,.14); color: #1677ff; font-size: 13.5px; font-weight: 600; text-decoration: none; }
+  .home-fab:hover { background: #1677ff; color: #fff; border-color: #1677ff; }
 </style>
 </head>
 <body>
+<a class="home-fab" href="index.html">← 返回首页</a>
+
 <div class="layout">
 <nav class="sidebar" id="sidebar">
 <div class="nav-group"><a class="nav-main" href="#part0">零、平台基础</a>

@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-page-node-id="ifADEm7ouIA6yysz1k5TID">
+<head data-page-node-id="xvU1UXVbMaLY2sqLGBD3yq">
+<meta charset="UTF-8" data-page-node-id="AHpXDCF4j3z5imxJ5PS2sP">
+<meta name="viewport" content="width=device-width, initial-scale=1.0" data-page-node-id="U7QzJ7gG5Gs1PxO4r4jJvH">
+<title>Quant Platform · 智能量化因子策略平台</title>
+<meta name="description" content="从因子挖掘到 AI 辅助决策，一站式 A 股量化投研平台。覆盖 5000+ 全市场股票、35+ 精选因子、14 套策略与 P1-P6 智能推荐管线。" data-page-node-id="6mUXZPMwHf94ctuABBEQkj">
+<style>
+  :root{
+    --brand:#1677ff; --brand-dark:#0958d9; --brand-soft:#e6f4ff;
+    --ink:#141414; --ink-2:#30363d; --muted:#5b6672;
+    --line:#e8ecf1; --bg:#ffffff; --bg-soft:#f6f8fb;
+    --radius:14px; --maxw:1160px;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue","PingFang SC","Microsoft YaHei",sans-serif;
+    color:var(--ink-2);background:var(--bg);line-height:1.7;-webkit-font-smoothing:antialiased;
+  }
+  a{color:inherit;text-decoration:none}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 24px}
+  .muted{color:var(--muted)}
+
+  /* ---------- nav ---------- */
+  .nav{position:sticky;top:0;z-index:50;background:rgba(255,255,255,.86);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
+  .nav-in{display:flex;align-items:center;justify-content:space-between;height:62px}
+  .logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:17px;color:var(--ink);letter-spacing:.2px}
+  .logo svg{width:26px;height:26px;flex:none}
+  .nav-links{display:flex;gap:26px;font-size:14.5px;color:var(--muted)}
+  .nav-links a{position:relative;padding:4px 0;transition:color .2s}
+  .nav-links a:hover,.nav-links a.on{color:var(--brand)}
+  .nav-links a.on::after{content:"";position:absolute;left:0;right:0;bottom:-2px;height:2px;background:var(--brand);border-radius:2px}
+  .btn{display:inline-flex;align-items:center;gap:7px;padding:9px 18px;border-radius:8px;font-size:14.5px;font-weight:600;border:1px solid transparent;transition:all .2s;cursor:pointer}
+  .btn-primary{background:var(--brand);color:#fff;box-shadow:0 4px 14px rgba(22,119,255,.28)}
+  .btn-primary:hover{background:var(--brand-dark);transform:translateY(-1px);box-shadow:0 6px 18px rgba(22,119,255,.34)}
+  .btn-ghost{background:#fff;color:var(--ink-2);border-color:var(--line)}
+  .btn-ghost:hover{border-color:var(--brand);color:var(--brand)}
+  .btn-lg{padding:12px 26px;font-size:15.5px}
+
+  /* ---------- hero ---------- */
+  .hero{position:relative;overflow:hidden;background:
+      radial-gradient(900px 460px at 78% -8%, #e6f4ff 0%, rgba(230,244,255,0) 62%),
+      radial-gradient(700px 400px at 6% 6%, #f0f6ff 0%, rgba(240,246,255,0) 60%),
+      #fff;}
+  .hero-in{display:grid;grid-template-columns:1.05fr .95fr;gap:48px;align-items:center;padding:76px 0 60px}
+  .badge{display:inline-flex;align-items:center;gap:8px;padding:5px 12px;border-radius:999px;background:var(--brand-soft);color:var(--brand-dark);font-size:13px;font-weight:600;border:1px solid #cfe5ff}
+  .dot{width:6px;height:6px;border-radius:50%;background:var(--brand)}
+  h1{font-size:44px;line-height:1.25;font-weight:800;color:var(--ink);letter-spacing:-.5px;margin:18px 0 16px}
+  h1 .accent{color:var(--brand)}
+  .lead{font-size:17px;color:var(--muted);max-width:520px}
+  .cta{display:flex;gap:12px;margin-top:28px;flex-wrap:wrap}
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:44px;padding-top:26px;border-top:1px solid var(--line)}
+  .stat b{display:block;font-size:26px;font-weight:800;color:var(--ink);letter-spacing:-.4px}
+  .stat span{font-size:13px;color:var(--muted)}
+  .shot{position:relative;border-radius:var(--radius);overflow:hidden;border:1px solid var(--line);box-shadow:0 18px 46px rgba(16,40,80,.14);background:#fff}
+  .shot img{display:block;width:100%}
+  .shot-bar{display:flex;gap:6px;padding:9px 12px;background:#fafbfc;border-bottom:1px solid var(--line)}
+  .shot-bar i{width:9px;height:9px;border-radius:50%;background:#dfe4ea;display:block}
+
+  /* ---------- section ---------- */
+  section{padding:80px 0}
+  .sec-soft{background:var(--bg-soft);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+  .sec-head{max-width:660px;margin-bottom:40px}
+  .sec-head .kicker{font-size:13px;font-weight:700;color:var(--brand);letter-spacing:1.4px;text-transform:uppercase}
+  .sec-head h2{font-size:31px;font-weight:800;color:var(--ink);margin:8px 0 10px;letter-spacing:-.4px}
+  .sec-head p{color:var(--muted);font-size:16px}
+
+  /* ---------- features ---------- */
+  .grid{display:grid;gap:18px}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  .g4{grid-template-columns:repeat(4,1fr)}
+  .card{background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:22px;transition:all .22s}
+  .card:hover{border-color:#c9dcf7;box-shadow:0 10px 26px rgba(16,40,80,.08);transform:translateY(-2px)}
+  .ico{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;background:var(--brand-soft);margin-bottom:14px}
+  .card h3{font-size:16.5px;color:var(--ink);margin-bottom:7px;font-weight:700}
+  .card p{font-size:14.2px;color:var(--muted)}
+  .tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+  .tag{font-size:12px;padding:2px 9px;border-radius:5px;background:#f2f5f9;color:#5b6672}
+
+  /* ---------- pipeline ---------- */
+  .pipe{display:grid;grid-template-columns:repeat(6,1fr);gap:12px}
+  .step{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px 14px;position:relative}
+  .step b{display:block;font-size:12.5px;color:var(--brand);letter-spacing:.6px;margin-bottom:6px}
+  .step h4{font-size:15px;color:var(--ink);margin-bottom:5px}
+  .step p{font-size:13px;color:var(--muted);line-height:1.6}
+  .step::after{content:"→";position:absolute;right:-11px;top:50%;transform:translateY(-50%);color:#c2ccd8;font-size:15px}
+  .step:last-child::after{display:none}
+
+  /* ---------- architecture ---------- */
+  .arch{display:grid;gap:14px}
+  .layer{background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:20px 22px}
+  .layer .lt{font-size:12.5px;font-weight:700;color:var(--muted);letter-spacing:1px;margin-bottom:12px}
+  .chips{display:flex;flex-wrap:wrap;gap:8px}
+  .chip{padding:7px 13px;border-radius:9px;font-size:13.5px;background:var(--bg-soft);border:1px solid var(--line);color:var(--ink-2)}
+  .chip.blue{background:var(--brand-soft);border-color:#cfe5ff;color:var(--brand-dark);font-weight:600}
+  .arrowdown{text-align:center;color:#c2ccd8;font-size:18px;line-height:1}
+
+  /* ---------- extensibility ---------- */
+  .g2{grid-template-columns:repeat(2,1fr)}
+  .ext{position:relative;overflow:hidden}
+  .ext .no{position:absolute;right:18px;top:14px;font-size:32px;font-weight:800;color:#eef2f7;letter-spacing:-1px}
+  .ext h3{margin-bottom:6px}
+  .ext .desc{font-size:14.2px;color:var(--muted)}
+  .ext ul{list-style:none;margin:14px 0 0;padding-top:6px;border-top:1px dashed var(--line)}
+  .ext li{display:flex;gap:10px;padding-top:7px;font-size:13.4px;line-height:1.65}
+  .ext li b{flex:none;width:66px;color:var(--ink);font-weight:600}
+  .ext li span{color:var(--muted)}
+  .ext pre{margin:14px 0 0;padding:13px 16px;font-size:12.6px;line-height:1.7;border-radius:10px}
+  .kb{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}
+
+  /* ---------- gallery ---------- */
+  .gal{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+  .gal figure{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#fff;transition:all .22s}
+  .gal figure:hover{box-shadow:0 12px 30px rgba(16,40,80,.12);transform:translateY(-3px)}
+  .gal img{display:block;width:100%;border-bottom:1px solid var(--line)}
+  .gal figcaption{padding:11px 14px;font-size:13.5px;color:var(--muted)}
+
+  /* ---------- audience ---------- */
+  table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;font-size:14.5px}
+  th,td{padding:14px 18px;text-align:left;border-bottom:1px solid var(--line)}
+  th{background:#fafbfc;font-weight:700;color:var(--ink);font-size:14px}
+  tr:last-child td{border-bottom:none}
+  td:first-child{font-weight:600;color:var(--ink);white-space:nowrap}
+
+  /* ---------- quickstart ---------- */
+  .qs{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;counter-reset:s}
+  .qs .q{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px;counter-increment:s}
+  .qs .q::before{content:"0" counter(s);display:inline-block;font-size:12.5px;font-weight:700;color:var(--brand);background:var(--brand-soft);border-radius:6px;padding:1px 8px;margin-bottom:10px}
+  .qs h4{font-size:15px;color:var(--ink);margin-bottom:6px}
+  .qs p{font-size:13.4px;color:var(--muted)}
+  code{font-family:"SF Mono",Consolas,Menlo,monospace;font-size:12.8px;background:#f2f5f9;padding:2px 6px;border-radius:4px;color:#c41d7f}
+  pre{background:#1f2430;color:#e6e6e6;border-radius:12px;padding:18px 20px;margin-top:22px;overflow-x:auto;font-size:13.2px;line-height:1.75}
+  pre code{background:transparent;color:inherit;padding:0;font-size:13.2px}
+  pre .c{color:#7d8798}
+
+  /* ---------- cta ---------- */
+  .cta-band{background:linear-gradient(115deg,#0b3d91 0%,#1677ff 62%,#3d9bff 100%);border-radius:20px;padding:52px 48px;text-align:center;color:#fff}
+  .cta-band h2{font-size:29px;font-weight:800;margin-bottom:10px;letter-spacing:-.3px}
+  .cta-band p{opacity:.9;margin-bottom:26px;font-size:16px}
+  .cta-band .btn-primary{background:#fff;color:var(--brand-dark);box-shadow:0 6px 20px rgba(0,0,0,.16)}
+  .cta-band .btn-primary:hover{background:#f2f7ff}
+  .cta-band .btn-ghost{background:transparent;color:#fff;border-color:rgba(255,255,255,.55)}
+  .cta-band .btn-ghost:hover{border-color:#fff;background:rgba(255,255,255,.12);color:#fff}
+
+  /* ---------- footer ---------- */
+  footer{padding:44px 0 52px;border-top:1px solid var(--line);font-size:14px;color:var(--muted)}
+  .foot{display:flex;justify-content:space-between;gap:28px;flex-wrap:wrap;align-items:flex-start}
+  .foot a:hover{color:var(--brand)}
+  .disc{margin-top:26px;padding-top:18px;border-top:1px solid var(--line);font-size:13px;line-height:1.7}
+
+  /* ---------- reveal ---------- */
+  .rv{opacity:0;transform:translateY(14px);transition:opacity .55s ease,transform .55s ease}
+  .rv.in{opacity:1;transform:none}
+
+  @media(max-width:960px){
+    .hero-in{grid-template-columns:1fr;padding:52px 0 40px;gap:34px}
+    h1{font-size:33px}
+    .g4,.g3,.g2,.gal,.qs{grid-template-columns:repeat(2,1fr)}
+    .pipe{grid-template-columns:repeat(2,1fr)}
+    .step::after{display:none}
+    .nav-links{display:none}
+    section{padding:60px 0}
+  }
+  @media(max-width:600px){
+    .g4,.g3,.g2,.gal,.qs,.pipe,.stats{grid-template-columns:1fr}
+    .cta-band{padding:36px 22px}
+    h1{font-size:28px}
+  }
+</style>
+</head>
+<body data-page-node-id="6DTuhWaJkgZi5AkTD4S0sa">
+
+<nav class="nav" data-page-node-id="iecOIsa5QpFwrIJN3lsM4i">
+  <div class="wrap nav-in" data-page-node-id="vTskrteURHF1lYYcNnn9OO">
+    <div class="logo" data-page-node-id="YXrOI6kLQGzoLFfRoQeudS">
+      <svg viewBox="0 0 32 32" fill="none" data-page-node-id="6aqCUHuIxZDNKiiPYqBH18"><rect x="2" y="2" width="28" height="28" rx="8" fill="#1677ff" data-page-node-id="cuK5jEBIIVUoJdr7xW73VH"/><path d="M8 21.5l5-6 4 3.5 7-9" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" data-page-node-id="YvmjlTTetKlao9CFbFnbMM"/><circle cx="23" cy="10" r="2" fill="#fff" data-page-node-id="oKmO1D72WtWV9HL6HtjV70"/></svg>
+      Quant&nbsp;Platform
+    </div>
+    <div class="nav-links" data-page-node-id="RbKJ313yvBpHVW5gMEpl54">
+      <a href="#features" data-page-node-id="mWUzm4RMkBQtwXfD744lgF">核心能力</a>
+      <a href="#pipeline" data-page-node-id="BBD1hCZGEJBmS6El94cCC3">推荐管线</a>
+      <a href="#arch" data-page-node-id="1FS6mwiETA1PVc6u3TRm6d">技术架构</a>
+      <a href="#extend">扩展能力</a>
+      <a href="#gallery" data-page-node-id="1afJm3HDIYsWC3KVE06jVQ">界面预览</a>
+      <a href="#start" data-page-node-id="FtCtvj6TzHIoQCil4ZSMec">快速开始</a>
+    </div>
+    <a class="btn btn-primary" href="manual.html" target="_blank" rel="noopener" data-page-node-id="2pXO9F6npjQKmHBCLQN2f4">📖 使用手册</a>
+  </div>
+</nav>
+
+<header class="hero" data-page-node-id="fDcyfaHGjk7B5K8FGqAz38">
+  <div class="wrap hero-in" data-page-node-id="uDunQzwUSNzhrfRQ5CXiup">
+    <div data-page-node-id="lERoXULqL8EfQDo60XjyFu">
+      <span class="badge" data-page-node-id="0pjmHx0udcCrLjgcOCluIA"><i class="dot" data-page-node-id="rl8BzbhsEbCCyW6zwGQz2n"></i>A 股量化投研一体化平台</span>
+      <h1 data-page-node-id="6QQCYuJ9cpwUEEL3iiVSoi">从因子挖掘到 AI 决策<br data-page-node-id="gOxPsbWBWPrP5wpO4D3qq4"><span class="accent" data-page-node-id="eyWET505pkxO6CPGXUeDur">一站式</span>量化投研平台</h1>
+      <p class="lead" data-page-node-id="tTWdE2ka6BYirdxYoMe4RM">打通数据采集、因子计算、策略构建、回测归因、智能推荐与模拟交易全链路。你给策略，它给答案——覆盖 5000+ 全市场股票的每日选股产出。</p>
+      <div class="cta" data-page-node-id="vJX8Yft6qhF1vUDFVzjBeV">
+        <a class="btn btn-primary btn-lg" href="manual.html" target="_blank" rel="noopener" data-page-node-id="lTGlFRKDooPr8TkmNJxxsu">📖 阅读使用手册</a>
+        <a class="btn btn-ghost btn-lg" href="https://gitee.com/warning5/quant-platform" target="_blank" rel="noopener" data-page-node-id="CiOjxJJs2WZqADUAG7Ann3">获取源码</a>
+      </div>
+      <div class="stats" data-page-node-id="BDhKGHZLDl84pf01vB0QPC">
+        <div class="stat" data-page-node-id="LOvsi90vMz7mUZJVlKgTUC"><b data-page-node-id="qO2dQRyqNtsZIKy4E70ChR">5000+</b><span data-page-node-id="glLeqMtaW2Yl9iiiEjFTkP">全市场股票</span></div>
+        <div class="stat" data-page-node-id="sCnP26clLs2vV8EzKQkqRA"><b data-page-node-id="5vjGSPW2tkQb2f13oQKmGk">35+</b><span data-page-node-id="mns94tvGlXaYo2iH8LX26q">精选因子</span></div>
+        <div class="stat" data-page-node-id="irMlf4nEUFbiKKAEGD9VFq"><b data-page-node-id="r6Ri4gq9U9jDrgsJsYMmWm">14</b><span data-page-node-id="XwH0ScSuejFbHCJxQbydP7">套实战策略</span></div>
+        <div class="stat" data-page-node-id="FCVjaLmecGi4nDOXIwQJve"><b data-page-node-id="I3QpkgDE2eJYTwofxUpd21">5</b><span data-page-node-id="fQJAA1EyGDV73r14bKIKnG">大数据源</span></div>
+      </div>
+    </div>
+    <div class="shot rv" data-page-node-id="wWNv9BePMkY4zd0JBNOhDt">
+      <div class="shot-bar" data-page-node-id="lLGHXkXpDh8w0cj8so4Lhe"><i data-page-node-id="mXVMRDvUBKO1ZzAtrEKEys"></i><i data-page-node-id="5oZnAbbUc888tSf81Hy6Pc"></i><i data-page-node-id="nUjJMFyk4G3pT3JRB149lr"></i></div>
+      <img src="assets/01-dashboard.png" alt="Quant Platform 系统总览界面" data-page-node-id="6djnyvAmw9bJbzLrKfkP9G">
+    </div>
+  </div>
+</header>
+
+<section id="features" data-page-node-id="tPa2EeA9WyJZe5UyhRfGwk">
+  <div class="wrap" data-page-node-id="B7fwyZDOPoUhjuZ55DRYK8">
+    <div class="sec-head rv" data-page-node-id="KX4wXQi0Fob76H3I53IBu0">
+      <div class="kicker" data-page-node-id="lIv9W07y0bo5u6lRxsfCOc">CORE CAPABILITIES</div>
+      <h2 data-page-node-id="48FN939baZGElPJynCScb5">八大能力域，一条完整投研链路</h2>
+      <p data-page-node-id="AiAo8pjdtP7JfFDmgHqaYq">不是只能回测的工具箱，而是从原始行情到每日推荐产出的端到端系统。</p>
+    </div>
+    <div class="grid g4" data-page-node-id="BzTxKtI5dMMe06Qb3qS5gJ">
+      <div class="card rv" data-page-node-id="oBmUSnmxUDAcHdOvGWbVDg"><div class="ico" data-page-node-id="3cuoCctq0vkKX0faHeglud">🔬</div><h3 data-page-node-id="HzswHzbeocjrQU6nGQMbWn">因子研究</h3><p data-page-node-id="yAh88HKLBOxFHIyUNyA4jn">动量、价值、质量、情绪、资金、形态六大类因子，支持 IC 分析、衰减检测与相关性去冗余。</p><div class="tags" data-page-node-id="hZ2VaskDCYscgNnfGKgXUe"><span class="tag" data-page-node-id="SSsX6QVE5gTMA0gKlA3vhK">IC / ICIR</span><span class="tag" data-page-node-id="SSIq1jrWXI7VU8PBB3BUtK">半衰期</span><span class="tag" data-page-node-id="eNTESp7yFnE15qHrqtu0cr">权重优化</span></div></div>
+      <div class="card rv" data-page-node-id="2VScCYeJWlVMENXIyl6pdW"><div class="ico" data-page-node-id="h1swZUeAOXPbnXkLcSsd1g">🎯</div><h3 data-page-node-id="8pSbbsIF1RiBE25e2ZiShf">策略构建</h3><p data-page-node-id="fcpHqpjfvaJOCICNI2HikV">多因子选股、动量、均值回归、形态识别与自定义脚本，置信度 P0-P3 冷启动保护。</p><div class="tags" data-page-node-id="KDs6f65xFiSDKYf194YVG7"><span class="tag" data-page-node-id="v1MEF93Dz1RIIRIGzYcArl">Groovy 脚本</span><span class="tag" data-page-node-id="87RnagsOZcPZtNI9R1rLB9">形态识别</span><span class="tag" data-page-node-id="8AuYf130mldVsDBtVC1BOZ">参数网格</span></div></div>
+      <div class="card rv" data-page-node-id="svGsniwVqiOI17Gw0RyXJ8"><div class="ico" data-page-node-id="C66KFZvn7LCuTmeoQWvGXY">📊</div><h3 data-page-node-id="2gvmiUIelJpUbP1C45f2j8">回测验证</h3><p data-page-node-id="uGrGWImw1EN0R6K02D3tfg">事件驱动模拟，Brinson 归因 + Fama-French 三因子 + 蒙特卡洛 VaR/CVaR，Walk-Forward 防过拟合。</p><div class="tags" data-page-node-id="C1pa3qhgnHbmT8vkHfthfL"><span class="tag" data-page-node-id="LPxcEmw1V6Gc51Bm6pZsSg">Brinson</span><span class="tag" data-page-node-id="PsDlXTZAV5tDVyuliEMaoX">FF3</span><span class="tag" data-page-node-id="RExLOqFOz0wGZfs0YjKz4s">Monte Carlo</span></div></div>
+      <div class="card rv" data-page-node-id="ioiCy51t9qAzejtQmSSTW1"><div class="ico" data-page-node-id="sQ7xcqxnmugT7HEQlbDSsc">🤖</div><h3 data-page-node-id="DaN5de8yk9c0vF6EJ6WWZ0">AI 智能分析</h3><p data-page-node-id="yA51kPTDhWCuy2BAHq0xsg">DeepSeek 大模型驱动，个股因子画像、财务诊断、风险预警与同行业横向对比一键生成。</p><div class="tags" data-page-node-id="QkHMCAo8bA86B34lCAZcIr"><span class="tag" data-page-node-id="s6MpeCUmXCPpGsLd1eemNO">因子画像</span><span class="tag" data-page-node-id="OueQ0S4evEchIH279qgfb2">财务诊断</span><span class="tag" data-page-node-id="QT7RF4FzoZl1GYFeSdc3Cg">风险提示</span></div></div>
+      <div class="card rv" data-page-node-id="40DkJgpKVYCYuEqRJ6qDMB"><div class="ico" data-page-node-id="Ws4D3M4cPPu2REtZJNXp6F">⚡</div><h3 data-page-node-id="MiGI92WwiaCIaIbkRf2dWL">智能推荐</h3><p data-page-node-id="zihtdH3dRUGSYbSsUT3vq9">P1-P6 六阶管线自动产出每日推荐，IC 加权融合上限 35%，有害因子自动反向。</p><div class="tags" data-page-node-id="cjNAJp8lISCTHFuiFluDZw"><span class="tag" data-page-node-id="PdviMJcYMm0Xfqb8M4laQD">P1-P6</span><span class="tag" data-page-node-id="jNurFEKJTSCBwvRhpwqAAR">ICW 融合</span><span class="tag" data-page-node-id="gzsrCkKAJwZ7MpbBQH8bjS">每日自动</span></div></div>
+      <div class="card rv" data-page-node-id="N0JzRKnoac2ZcS8MdMO1t8"><div class="ico" data-page-node-id="Imj8VcGmxF6HooTM8bM0NP">🛡️</div><h3 data-page-node-id="FbsNLICyRAZGx9b8KFro2N">组合风控</h3><p data-page-node-id="9PKjEnPmPmtUG3QsJZ0wG7">跨策略个股去重、SW2 行业集中度硬上限、回撤监控与 Regime 市场状态自适应。</p><div class="tags" data-page-node-id="qT5riduT1p9YGELLWQUfdZ"><span class="tag" data-page-node-id="6OJYFJczeiEVnj7f8ATVFa">行业集中度</span><span class="tag" data-page-node-id="DknWeIpYHozfmtx5vLR07V">Regime</span><span class="tag" data-page-node-id="pdNm6syCKcF58dFPwyhm23">黑名单</span></div></div>
+      <div class="card rv" data-page-node-id="JYn2MH1iIJy6cp5XKx3N1w"><div class="ico" data-page-node-id="q2DVX4EqjitxWGYgCUI8uA">💹</div><h3 data-page-node-id="J6dbtLwjEN5lJc8elM5pnd">模拟交易</h3><p data-page-node-id="9DHiao6H8duBnawh0DAVMH">信号生成 → 执行 → 风控 → 预警完整闭环，盘中实时监控，SSE 实时价格推送。</p><div class="tags" data-page-node-id="Gs5wjFkEGAbhCAVVIANNZa"><span class="tag" data-page-node-id="hsSH5GGlv5oCNHff4gMv5s">条件单</span><span class="tag" data-page-node-id="VNu7IGG5YWAjYZuv7otiIN">实时预警</span><span class="tag" data-page-node-id="Ns5GXjQjYohvfe7VtDCCDe">SSE 推送</span></div></div>
+      <div class="card rv" data-page-node-id="B3Pl1vcukkbzTBgLLoIR89"><div class="ico" data-page-node-id="AcvFyqdLA3shACjJQFdVCH">🗄️</div><h3 data-page-node-id="qO9LNMDNJwFLFQrnhNb9Dd">数据工程</h3><p data-page-node-id="YVnIQNoDPcAiGPty0HxCig">五源采集（Baostock / 腾讯 / AKShare / 东方财富 / 同花顺），ClickHouse 列存加速，前复权自动刷新。</p><div class="tags" data-page-node-id="0hY55D9SXQorlWC7iUKPYn"><span class="tag" data-page-node-id="dB6WN9q3UKbujPH6QCGBJv">5 源采集</span><span class="tag" data-page-node-id="DY591U98a09jkAm3HDtzTH">列存加速</span><span class="tag" data-page-node-id="z443pg83PXYFlFGpYa39mx">前复权</span></div></div>
+    </div>
+  </div>
+</section>
+
+<section id="pipeline" class="sec-soft" data-page-node-id="iWeZA5nLu66U9qFqTp9Ray">
+  <div class="wrap" data-page-node-id="LCOF53bL4xQiOs9zhKZJyk">
+    <div class="sec-head rv" data-page-node-id="4t0ELJFDG6Jvs7jaewvkx7">
+      <div class="kicker" data-page-node-id="eTJzE07fs2VOnhPiaHP29a">RECOMMENDATION PIPELINE</div>
+      <h2 data-page-node-id="u0u6Q16ZdgAG1XW20o9hcn">P1-P6 推荐管线：让选股有据可依</h2>
+      <p data-page-node-id="tSoKzfAD45SsSzhppg7HRS">每一阶都是一道过滤器，噪声因子与拥挤风险在进入组合前就被拦下。</p>
+    </div>
+    <div class="pipe rv" data-page-node-id="DYyONLxBNfBd6d9CVISe29">
+      <div class="step" data-page-node-id="4RuDeGGYZYiksljUOkSSHk"><b data-page-node-id="3JR6bfB5UU01jx6eqCVhgc">P1</b><h4 data-page-node-id="pu27nrp8ECMCZdZ8q8uyyE">IC 筛选</h4><p data-page-node-id="9mqziV0mRu9pz0R2fhSlmh">剔除噪声因子<br data-page-node-id="4UviZJK7LquuSBl4jTVvAI">|IC| &lt; 0.015</p></div>
+      <div class="step" data-page-node-id="M9l5F4r2tQIl7C5BaFbycz"><b data-page-node-id="ndhrMKHea1ZRM6CDMpayNc">P2</b><h4 data-page-node-id="aZwdyXPAuK7PXXDlMAxUQE">半衰期</h4><p data-page-node-id="2WUJX4AjZdAmWhxIoxJOZn">预测能力持续性评估</p></div>
+      <div class="step" data-page-node-id="SJAuGi3OhDNiEnoZ0TS3Ja"><b data-page-node-id="XDOgv2YGlpNH9KyGrxeaxN">P3</b><h4 data-page-node-id="5TXiUqDVS0uisNTA52kXjg">拥挤度</h4><p data-page-node-id="prkpFSVJ4EnjgOyeDZNPJN">因子拥挤风险预警</p></div>
+      <div class="step" data-page-node-id="Ae6YCmOZHYrk7GlZu6uaGi"><b data-page-node-id="xeMgDk9FtUZfyqEfN9KlHW">P4</b><h4 data-page-node-id="AHIywSjLxyPfyiTHMnNBF9">季频校正</h4><p data-page-node-id="ZCA6SzrBepfjgVa23VFlqD">财报季因子表现调整</p></div>
+      <div class="step" data-page-node-id="JcHAiBx327hrFhnPu8qIUS"><b data-page-node-id="i2Tzt5GXapiQV8VnEftEOf">P5</b><h4 data-page-node-id="pX0EwJz0gWMKOpv37tUvEd">一致性</h4><p data-page-node-id="3sPkB2SP6qERjDJV0r5YQt">多周期信号一致性验证</p></div>
+      <div class="step" data-page-node-id="kQ65XZBTRmLn3BZjjrdwBx"><b data-page-node-id="ZAhFd9M1cBN5Xv2G9t98Ea">P6</b><h4 data-page-node-id="lCtoDBSjW1HEHzCTvS0pq3">ICW 融合</h4><p data-page-node-id="IOQUNO9jisBpShTb5w5qQY">IC 加权，上限 35%<br data-page-node-id="dQRV1BtPGyQCZlrNy4yEe9">反转有害因子</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="arch" data-page-node-id="uEN1GvbBccz9vMBzHpoTNe">
+  <div class="wrap" data-page-node-id="36inykLGRIeBLNN3BJlECM">
+    <div class="sec-head rv" data-page-node-id="wzqQZFHXoFsxjZFnUTMBsT">
+      <div class="kicker" data-page-node-id="lBeHJtDxG49uPUCATJD9sY">ARCHITECTURE</div>
+      <h2 data-page-node-id="xtKqLhSaNmgJbEsamxVx9C">分层清晰，模块可插拔</h2>
+      <p data-page-node-id="BqdSUjM3L3f24ZqErAJUpf">React 18 前端 + Spring Boot 3 后端 + MySQL / ClickHouse 双数据源，Python 脚本负责采集。</p>
+    </div>
+    <div class="arch rv" data-page-node-id="v7RmRSLGkrYwfi4X0cQT7R">
+      <div class="layer" data-page-node-id="oFdNuHCb4p8ECGxWGkMcYn">
+        <div class="lt" data-page-node-id="10nBFuSouw4SKztqV705GV">接入层</div>
+        <div class="chips" data-page-node-id="bz9tZBKLHAFSztxKQw8YIB">
+          <span class="chip blue" data-page-node-id="fHGC7crlFJ0yV9dpPHHQH8">React 18 + Ant Design</span><span class="chip" data-page-node-id="ody923tbTc97GqfVxNjZgS">系统总览</span><span class="chip" data-page-node-id="b9FlPGOteuaGd7Xhs7CTO8">因子管理</span><span class="chip" data-page-node-id="PvGZedZx12M3le2kpIzbmw">策略管理</span><span class="chip" data-page-node-id="9Ez7FHzI6uGRMmk3CSR1nb">回测分析</span><span class="chip" data-page-node-id="QYdoh9u2Tu3cDlKEvkp8ph">AI 分析</span><span class="chip" data-page-node-id="MK1UcEM47hTPDPNaQ2ZhnS">每日推荐</span><span class="chip" data-page-node-id="cLI73YCsf9quLCodQxpU9a">选股器</span><span class="chip" data-page-node-id="6NF1r3zWXrBKu9khvWLP8c">监控大盘</span>
+        </div>
+      </div>
+      <div class="arrowdown" data-page-node-id="ECbRzXfwGzGwgLkHLbJyxD">↓</div>
+      <div class="layer" data-page-node-id="ouRhX3DFY5hpww4qRsJwlt">
+        <div class="lt" data-page-node-id="sFVsP4U8aDRLmhjdT2Apu0">服务层 · Spring Boot 3.2</div>
+        <div class="chips" data-page-node-id="P1yjd4cC37EHUScpXYcvwG">
+          <span class="chip blue" data-page-node-id="WRBdLnu6iCfEgC5NSQqcT7">因子引擎</span><span class="chip blue" data-page-node-id="fwgfoNYHaGHwmbafG6AD7g">策略引擎</span><span class="chip blue" data-page-node-id="mG80XbjWJvdqHUurATcvbF">回测引擎</span><span class="chip blue" data-page-node-id="HyNx2hvjrGKoN2hr95nGGE">推荐引擎</span><span class="chip blue" data-page-node-id="12IqRCGHsPNPJB8dQ8XC7y">LLM 分析</span><span class="chip" data-page-node-id="XHJlhJdnbTu4C4W8Yg9pe8">行情服务</span><span class="chip" data-page-node-id="BAagE3cANND9EFgRw3oMoS">选股引擎</span><span class="chip" data-page-node-id="WWXWWHcRLyX4b4qq3o9KW6">模拟交易</span><span class="chip" data-page-node-id="5JwcGytWJHENeCt50CWrEv">研报财务</span><span class="chip" data-page-node-id="mfXpCpa9PCLtxSoXC5swDR">交易日历</span><span class="chip" data-page-node-id="hmoOcwBxWGVIqEqNZxCqew">调度编排</span>
+        </div>
+      </div>
+      <div class="arrowdown" data-page-node-id="FRCNoFBOeuPNWQbqgUTHrz">↓</div>
+      <div class="layer" data-page-node-id="mysRWVRUJAfq6jldqIejsl">
+        <div class="lt" data-page-node-id="MGMSbPxLLwkGguwC91iudM">数据层</div>
+        <div class="chips" data-page-node-id="DWT0c5K5GaxEUt7KYMvUSK">
+          <span class="chip blue" data-page-node-id="qzHHhYB2CQyAxKEnKqvqnt">MySQL 8</span><span class="chip" data-page-node-id="IOhXK15IRV2ufntMBPbJ5W">元数据 / 策略配置</span><span class="chip blue" data-page-node-id="Hq9ZGvGEPdZETc6QPKRJJj">ClickHouse</span><span class="chip" data-page-node-id="ZqsH8q3XQ4HkHIUTSSFnYw">因子值 / 日线 / 资金流</span><span class="chip blue" data-page-node-id="DHgbiLVSLkfryxS0n5nhaq">Python 脚本</span><span class="chip" data-page-node-id="EnnCVbRKIeQ9i27fVvU19m">Baostock · 腾讯 · AKShare · 东财 · 同花顺</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="extend" style="border-top:1px solid var(--line)">
+  <div class="wrap">
+    <div class="sec-head rv">
+      <div class="kicker">EXTENSIBILITY</div>
+      <h2>不是黑盒，扩展点全部开放</h2>
+      <p>因子、策略、数据源、归因四类能力都有明确的扩展契约：写一段脚本或加一条配置即可接入，不必改动主干代码。</p>
+    </div>
+    <div class="grid g2">
+
+      <div class="card ext rv">
+        <div class="no">01</div>
+        <div class="ico">🧩</div>
+        <h3>因子扩展 · 四种类型</h3>
+        <p class="desc">内置 Java 因子之外，脚本因子、组合因子、形态因子都能在系统里直接新增，页面上配完即可参与计算。</p>
+        <ul>
+          <li><b>类型</b><span><code>BUILTIN</code> 内置 · <code>SCRIPTED</code> 脚本 · <code>COMPOSITE</code> 组合 · <code>PATTERN</code> 形态</span></li>
+          <li><b>承载</b><span>脚本文本存于 <code>factor_definition.script_code</code>，组合因子用 <code>factor_config_json</code> 复用既有因子</span></li>
+          <li><b>引擎</b><span><code>ScriptedFactorEngine</code> 执行，由 <code>FactorComputeEngine</code> 统一分发</span></li>
+          <li><b>安全</b><span>Groovy 沙箱：源码预检 + AST 白名单 + 30 秒超时熔断</span></li>
+        </ul>
+      </div>
+
+      <div class="card ext rv">
+        <div class="no">02</div>
+        <div class="ico">🧠</div>
+        <h3>策略扩展 · Groovy 即策略</h3>
+        <p class="desc">策略不是写死的参数组合，而是一段可读、可调、可直接回测的脚本，在线编辑后立刻验证。</p>
+        <ul>
+          <li><b>契约</b><span>返回 <code>Map&lt;String,Number&gt;</code>，股票代码 → 目标权重</span></li>
+          <li><b>上下文</b><span><code>bars</code> · <code>symbols</code> · <code>factorValues</code> · <code>indexBars</code> · <code>industryMap</code></span></li>
+          <li><b>执行</b><span><code>BacktestScoring</code> 注入绑定变量后调用，60 秒沙箱超时</span></li>
+          <li><b>入口</b><span>策略编辑页在线编写，脚本存于 <code>strategy_definition.script_code</code></span></li>
+        </ul>
+        <pre><code><span class="c">// symbols: 候选股票列表  factorValues: 因子值</span>
+return symbols.findAll { factorValues.get(it)?.get("<span class="c">VAL_PB</span>") &lt; 2 }
+              .collectEntries { [(it): 1.0d / symbols.size()] }</code></pre>
+      </div>
+
+      <div class="card ext rv">
+        <div class="no">03</div>
+        <div class="ico">🔌</div>
+        <h3>数据接入 · 脚本与调度解耦</h3>
+        <p class="desc">采集脚本与调度规则分离，接一个新数据源只需加脚本 + 配一条 cron，主链路零改动。</p>
+        <ul>
+          <li><b>脚本</b><span><code>update_*.py</code> 命名统一，数据源抽在 <code>data_provider/</code> 抽象层</span></li>
+          <li><b>调度</b><span><code>data_schedule_config</code> 支持自定义 <code>cron_expression</code>，<code>category=CUSTOM</code></span></li>
+          <li><b>编排</b><span><code>data_task_dependency</code> 声明上下游与延迟秒数，支持多上游门控</span></li>
+          <li><b>触发</b><span><code>ScheduleService</code> 自动装载 cron，页面可启停与手动执行</span></li>
+        </ul>
+      </div>
+
+      <div class="card ext rv">
+        <div class="no">04</div>
+        <div class="ico">🔗</div>
+        <h3>归因与外部集成</h3>
+        <p class="desc">归因实现是独立 Service，API 层开箱可用；推荐结果可被外部系统按 token 直接消费。</p>
+        <ul>
+          <li><b>归因</b><span><code>BrinsonAttributionService</code> · <code>FactorStyleAttributionService</code>（含 FF3）</span></li>
+          <li><b>扩展</b><span>新增一种归因：加 <code>compute*</code> 方法 + 一个 Controller 端点</span></li>
+          <li><b>接口</b><span>OpenAPI 文档 <code>/api/swagger-ui.html</code>，<code>/api/v3/api-docs</code></span></li>
+          <li><b>推送</b><span>STOMP WebSocket <code>/ws</code> 与 <code>/ws-native</code>，回测进度实时推送</span></li>
+          <li><b>取数</b><span><code>GET /recommendations/latest</code> 拉取每日推荐结果</span></li>
+        </ul>
+      </div>
+
+    </div>
+    <div class="kb rv">
+      <span class="chip blue">Groovy 沙箱白名单</span>
+      <span class="chip">脚本热加载，无需重启</span>
+      <span class="chip">cron 自定义任务</span>
+      <span class="chip">springdoc OpenAPI</span>
+      <span class="chip">Sa-Token 权限控制</span>
+      <span class="chip">MySQL / ClickHouse 双数据源</span>
+    </div>
+  </div>
+</section>
+
+<section id="gallery" class="sec-soft" data-page-node-id="7FbUZUwgZFYOpTiU8BoXEP">
+  <div class="wrap" data-page-node-id="IC3lUClTeH5R1eRwm9OBCh">
+    <div class="sec-head rv" data-page-node-id="7YmGj6CjyNSzgiGOeBzMIw">
+      <div class="kicker" data-page-node-id="92dofY4YYZz2KkkgfPBHcY">SCREENSHOTS</div>
+      <h2 data-page-node-id="LPnTD3TpIA4CghzaZVLq3c">界面一览</h2>
+      <p data-page-node-id="5fuK0KnevqKHqod3R7nDlE">完整的操作步骤与字段说明，请查阅使用手册。</p>
+    </div>
+    <div class="gal" data-page-node-id="mI9ng8ivx9wGYChZHEff4a">
+      <figure class="rv" data-page-node-id="QNVVZBDgy8wQTAVmQSxwrW"><img src="assets/01-dashboard.png" alt="系统总览" data-page-node-id="GxG6XaRAKlG1vVeT7L3MEz"><figcaption data-page-node-id="XVgpN4bYW9CgEvzlTzwjeC">Dashboard · 系统总览</figcaption></figure>
+      <figure class="rv" data-page-node-id="kSOOWdrmEjX4oiivsTtb7j"><img src="assets/02-factor-list.png" alt="因子列表" data-page-node-id="A71BBr4zXT53ETRw4nQWiu"><figcaption data-page-node-id="QwdObklB0HrcOoBFkpBDVo">因子管理 · 因子列表与状态</figcaption></figure>
+      <figure class="rv" data-page-node-id="8Oe51A0vCk9Q4xnHbHTzQu"><img src="assets/03-factor-ic.png" alt="因子 IC 分析" data-page-node-id="rWBCL7ovQV7PslgoQeHpdT"><figcaption data-page-node-id="OX5QrFqwFtg2eZhta219p9">因子 IC 分析 · 衰减与分层</figcaption></figure>
+      <figure class="rv" data-page-node-id="edujVuyUO0rw9a2Ugwrws5"><img src="assets/05-backtest.png" alt="回测报告" data-page-node-id="NZwOHI4QFJcHU4BoxR6Fdi"><figcaption data-page-node-id="B64AD5uSvC3MxOnqM4H0hs">回测分析 · 绩效与归因</figcaption></figure>
+      <figure class="rv" data-page-node-id="88aBL1UYGQKzfcrVVkDiok"><img src="assets/06-llm.png" alt="AI 智能分析" data-page-node-id="To0CFhPKEXInDYXT3uEYJo"><figcaption data-page-node-id="op1VA7BuT4YiMmJnv6fEQx">AI 分析 · 个股画像与诊断</figcaption></figure>
+      <figure class="rv" data-page-node-id="GEmpnlAnhmniyepRF47yOq"><img src="assets/07-screen.png" alt="智能选股器" data-page-node-id="S9r7r1LM440xj81C0TwcVj"><figcaption data-page-node-id="hzwG9BoJpdsHROQt9Dz99x">选股器 · 多条件筛选</figcaption></figure>
+    </div>
+  </div>
+</section>
+
+<section data-page-node-id="piJ2FKvs5BoWoQigCDr49c">
+  <div class="wrap" data-page-node-id="CE9QUtTjBEF5Ti9H2PQKTO">
+    <div class="sec-head rv" data-page-node-id="MjmGpaUn7Okzw5X7gHlLDR">
+      <div class="kicker" data-page-node-id="WDOtMmbjVlNz9owX8UwbtL">WHO IT'S FOR</div>
+      <h2 data-page-node-id="hXpibs0Heb5yaWz04SIX45">谁在用这套平台</h2>
+    </div>
+    <div class="rv" data-page-node-id="RIqNtGwZ9rG602SdbBlkxP">
+      <table data-page-node-id="fhwhI3QQOHTZDWTIAWsvTr">
+        <thead data-page-node-id="d2NPOIm93thMDt2IswpbHy"><tr data-page-node-id="ZCwz6sCUtMxwmx7J6xmLk5"><th data-page-node-id="XNuwHplWGGPXj2qDRYUtVd">用户群体</th><th data-page-node-id="YnC8A0LgoYhDNLD4ZI3hvK">核心痛点</th><th data-page-node-id="lrhkiTAxCdBZolNZCUEEi3">平台价值</th></tr></thead>
+        <tbody data-page-node-id="6CDKhuWV9aiMzEoH43kX4D">
+          <tr data-page-node-id="zDgVMvD7QKDsAeTWtfHJgp"><td data-page-node-id="IGBf0jPSIpkOZivdD11yb3">个人量化投资者</td><td data-page-node-id="EU9RciBcMADyY3XboIxo8d">因子库匮乏、回测工具单一、无法系统评估策略</td><td data-page-node-id="6QsIJK5YG2o87NIRSCecMD">开箱即用的 35+ 因子与企业级回测引擎，降低量化门槛</td></tr>
+          <tr data-page-node-id="X4v2QBcvPLeTdPTcnE6iMn"><td data-page-node-id="4a8fWbGysN1weFDb8tTqZW">量化研究团队</td><td data-page-node-id="0DR89HipeiupeNDeOmRTo9">因子管理混乱、策略迭代慢、缺乏健康监控体系</td><td data-page-node-id="ZKcdYiSxlzXvndbti58vLR">因子全生命周期管理 + 衰减自动检测，研究效率倍增</td></tr>
+          <tr data-page-node-id="TztruDbjRyj8S46Xwk9IRf"><td data-page-node-id="wUA6enRMgw00rxxp7WYgBx">金融科技公司</td><td data-page-node-id="M4AcftoJqXJO8mL0ejtSGn">从零搭建成本高、数据管道维护难</td><td data-page-node-id="f0mDodvLW3LY5UFQScSJ2Y">完整数据工程链路 + 可扩展因子引擎，缩短产品化周期</td></tr>
+          <tr data-page-node-id="oCCEcfJfSqoUpAC2DWEMdy"><td data-page-node-id="3DjGjJmb7C5yLGCHgEKDvz">量化学习者</td><td data-page-node-id="Uafd73UsHvcVc1YBCXOGp1">理论与实践脱节，缺乏可运行的真实系统</td><td data-page-node-id="wDwsgCFi8ECyzCrqhDflrm">完整开源代码 + 策略文档，从阅读到实操无缝衔接</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section id="start" class="sec-soft" data-page-node-id="20F1IidSy7xhxCF146xrxq">
+  <div class="wrap" data-page-node-id="lB0eonREDslWVbdFIhIeaR">
+    <div class="sec-head rv" data-page-node-id="sZl0s8Wrj9Y0yXhLLG3LBb">
+      <div class="kicker" data-page-node-id="2J5jwLJnyeG99x0xQb9xzi">QUICK START</div>
+      <h2 data-page-node-id="ZXnvS913bjDxtNWUlOikVZ">四步跑起来</h2>
+      <p data-page-node-id="oxvqrjA0nBLyCZSumFvSyJ">详细的每一步说明、参数含义与排错指南，见<a href="manual.html" target="_blank" rel="noopener" style="color:var(--brand);font-weight:600" data-page-node-id="BZYu7qgRmHF98o0NxArfXn">《使用手册》</a>与仓库 <code data-page-node-id="MrZTNArixONKQz2J7fk4Mp">docs/quickstart.md</code>。</p>
+    </div>
+    <div class="qs" data-page-node-id="Hw9LqY0echGD0FBp016LP3">
+      <div class="q rv" data-page-node-id="XbzINqaHPOEmgB3WOHVKWG"><h4 data-page-node-id="5UFIfo3aWSTW397bCVNvnX">初始化数据库</h4><p data-page-node-id="GXeTpcEAhNQXFsX3JAUtpw">导入 <code data-page-node-id="Z04hzJxfB7Tpfg1MjDoQ8D">stock-service/sql/stock.sql</code>（MySQL）与 <code data-page-node-id="Xl4UCamRzdQzTWcGVY1nzX">ch.sql</code>（ClickHouse），应用启动不执行 DDL。</p></div>
+      <div class="q rv" data-page-node-id="trjrDDCwOeVoeofHCcfXrc"><h4 data-page-node-id="WC7lgfig1KDICfuc9a9t6K">启动后端</h4><p data-page-node-id="TWwkLhk5EgKfolf6HhZrZa">JDK 21 + Maven 3.8 打包后运行 stock-service，接口前缀 <code data-page-node-id="ow5KTajPIdS6M2VrW2B4Df">/api</code>，端口 8080。</p></div>
+      <div class="q rv" data-page-node-id="Oj5reispLe4xcD6gSvEaEf"><h4 data-page-node-id="BLHZAScwQgUBk05AiRb5WG">启动前端</h4><p data-page-node-id="KnkYlAwecuMcTT8Q223JBb">Node 18+，<code data-page-node-id="af3w95dt3hAKzlNbI6kfNH">npm install && npm start</code>，访问 <code data-page-node-id="QKnGEVKdFuhDHACCdbTHHT">http://localhost:3000</code>。</p></div>
+      <div class="q rv" data-page-node-id="AFeDaIU5ZkHU05t4zjtmJq"><h4 data-page-node-id="DdbYOXiyCIJlhlqyIeeEx6">采集数据并计算</h4><p data-page-node-id="wXtKQ9NOX3Ji6AhrrdGYEP">在「数据更新」页采集行情，再执行因子计算与推荐任务，即可看到每日选股结果。</p></div>
+    </div>
+    <pre data-page-node-id="sQSUaFk5HaJQSnWzwZDV5K"><code data-page-node-id="xDvpKgcsvt4zz4gjUD4iH4"><span class="c" data-page-node-id="h5KsUclR7lYZUfBFO8FENW"># 1. 后端</span>
+mvn clean package -DskipTests
+java -jar stock-service/target/stock-service-1.0.0.jar
+
+<span class="c" data-page-node-id="keqHLbtGdvS11zZnR1K3WH"># 2. 前端</span>
+cd frontend &amp;&amp; npm install &amp;&amp; npm start
+
+<span class="c" data-page-node-id="OkGHixdILxP5Xda83t6AQT"># 3. 数据库（仅结构，不含数据）</span>
+mysql -u root -p stock &lt; stock-service/sql/stock.sql</code></pre>
+  </div>
+</section>
+
+<section data-page-node-id="3oOrDjSbabCR0yNtlQqfr4">
+  <div class="wrap" data-page-node-id="1eD696jZcKCZNW4FjChMc7">
+    <div class="cta-band rv" data-page-node-id="q0dJIarJwO7hKAjhzozO0C">
+      <h2 data-page-node-id="taXJnzulDB1BYFILEIP9LY">准备好把策略变成收益曲线了吗？</h2>
+      <p data-page-node-id="eKF6jCENJCwxogNcG8dZOT">使用手册覆盖全部页面、字段与常见问题，照着做即可上手。</p>
+      <div class="cta" style="justify-content:center" data-page-node-id="GdzqYljHem89fxpsGguOro">
+        <a class="btn btn-primary btn-lg" href="manual.html" target="_blank" rel="noopener" data-page-node-id="2Fev1Pu25ioaCVDCUK2nyl">📖 打开使用手册</a>
+        <a class="btn btn-ghost btn-lg" href="https://gitee.com/warning5/quant-platform" target="_blank" rel="noopener" data-page-node-id="wsds3inhy6bcR50Im5BrNM">Gitee 仓库</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer data-page-node-id="oES39teRfYEkhyjrki3mZT">
+  <div class="wrap" data-page-node-id="myETivgd5REfUt05elGp3x">
+    <div class="foot" data-page-node-id="67hWxhgRp4Ckt7zgZEA7jl">
+      <div data-page-node-id="LX1gDHanhOKpKojL8AKcF1">
+        <div class="logo" style="margin-bottom:10px" data-page-node-id="AbR00tFHFxeyAXGxpn3WH4">
+          <svg viewBox="0 0 32 32" fill="none" data-page-node-id="ZpeOEjYt27QoarymkbRwJT"><rect x="2" y="2" width="28" height="28" rx="8" fill="#1677ff" data-page-node-id="7aRgNPiUde6FOGSNGBWhr3"/><path d="M8 21.5l5-6 4 3.5 7-9" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" data-page-node-id="JayBGyESn4iWrF2IlPgKvZ"/><circle cx="23" cy="10" r="2" fill="#fff" data-page-node-id="YDHsVpgyqzqN4t6cuYGWV1"/></svg>
+          Quant&nbsp;Platform
+        </div>
+        <p style="max-width:420px" data-page-node-id="ZZOWa879Y2rqsAweU23lel">Build. Test. Trade. Smarter.<br data-page-node-id="afdMuExqZNrGr6TFfIVsOB">从因子挖掘到 AI 辅助决策的 A 股量化投研平台。</p>
+      </div>
+      <div data-page-node-id="514C9gbLIT5nPC0esWnJ3Z">
+        <div style="font-weight:700;color:var(--ink);margin-bottom:8px" data-page-node-id="0V1q0azqdkTPWPutX4R1s5">文档</div>
+        <div data-page-node-id="dT4UpyrFHaHkGRj9SYtHqz"><a href="manual.html" target="_blank" rel="noopener" data-page-node-id="YPm3v8vUMWi3ZGEmH0qWOK">使用手册（完整版）</a></div>
+        <div data-page-node-id="4pRzMh5Wml3E09QfIkYrf8"><a href="https://gitee.com/warning5/quant-platform" target="_blank" rel="noopener" data-page-node-id="ugGCE3rTYYKSw22fBYIVCt">Gitee 源码仓库</a></div>
+        <div data-page-node-id="LKDA8JwA1xJmok2njyP16m"><a href="https://gitee.com/warning5/quant-platform/blob/master/README.md" target="_blank" rel="noopener" data-page-node-id="AqhEEMWgLwLBkOAOQ6FWIH">README · 技术架构</a></div>
+      </div>
+      <div data-page-node-id="JkOhPoIVJPq3l332w7ENbz">
+        <div style="font-weight:700;color:var(--ink);margin-bottom:8px" data-page-node-id="aniNyjtxc8MxILSjZ8wDFL">技术栈</div>
+        <div data-page-node-id="2hdZf7MiK1WR6pFjmShZ1j">Spring Boot 3.2 · MyBatis-Plus</div>
+        <div data-page-node-id="iWiKfmogtFamK2x35IA9gQ">MySQL 8 · ClickHouse</div>
+        <div data-page-node-id="JUt3h5L64Q0VU99q1mKzBW">React 18 · Ant Design · ECharts</div>
+        <div data-page-node-id="osJWZmXGBHZGiZkLlzJl7s">Python 3 · DeepSeek</div>
+      </div>
+    </div>
+    <div class="disc" data-page-node-id="MnvMOhrTsQ2kpgQYDu9yAN">
+      <strong data-page-node-id="AES7yZbNW3NDcfjFskjdr3">免责声明：</strong>本平台仅供量化投资研究与学习使用，不构成任何投资建议。所有回测结果均为历史数据模拟，不代表未来表现。投资有风险，入市需谨慎。
+    </div>
+  </div>
+</footer>
+
+<script>
+  // 滚动淡入
+  var io = new IntersectionObserver(function(es){
+    es.forEach(function(e){ if(e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target);} });
+  },{threshold:.12});
+  document.querySelectorAll('.rv').forEach(function(el){ io.observe(el); });
+
+  // 导航高亮
+  var secs = ['features','pipeline','arch','extend','gallery','start'].map(function(id){return document.getElementById(id);});
+  var links = Array.prototype.slice.call(document.querySelectorAll('.nav-links a'));
+  window.addEventListener('scroll', function(){
+    var y = window.scrollY + 120, cur = null;
+    secs.forEach(function(s){ if(s && s.offsetTop <= y) cur = s.id; });
+    links.forEach(function(a){ a.classList.toggle('on', a.getAttribute('href') === '#' + cur); });
+  }, {passive:true});
+</script>
+</body>
+</html>
