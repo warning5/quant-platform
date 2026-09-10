@@ -1573,10 +1573,34 @@ function ScoreRadarChart({ scoreDetails }) {
 // ── K线图 ────────────────────────────────────────────────────────────────────
 function KLineChart({ data, onSelectDate }) {
   const { token } = theme.useToken();
-  if (!data || data.length === 0) return null;
+  const chartRef = useRef(null);
+  const pickRef = useRef({ displayData: [], onSelectDate: null });
 
   // 展示最近60日（但完整传入数据保留前N日用于MA60计算）
-  const displayData = data.slice(-60);
+  const displayData = (data || []).slice(-60);
+  pickRef.current = { displayData, onSelectDate };
+
+  // 点击图表任意位置都能选中对应交易日：按像素反查类目索引。
+  // （原先只在 seriesType==='candlestick' 时响应，点到影线/蜡烛间隙/日期轴标签都会被静默吞掉）
+  useEffect(() => {
+    const inst = chartRef.current?.getEchartsInstance?.();
+    if (!inst) return;
+    const zr = inst.getZr();
+    const handler = (e) => {
+      if (e?.offsetY > inst.getHeight() - 40) return; // 底部 dataZoom/图例区不算选日期
+      const pt = [e.offsetX, e.offsetY];
+      let idx = null;
+      if (inst.containPixel({ gridIndex: 0 }, pt)) idx = inst.convertFromPixel({ gridIndex: 0 }, pt)[0];
+      else if (inst.containPixel({ gridIndex: 1 }, pt)) idx = inst.convertFromPixel({ gridIndex: 1 }, pt)[0];
+      else idx = inst.convertFromPixel({ gridIndex: 0 }, pt)[0]; // 轴标签等外围：按 x 外推
+      if (!Number.isFinite(idx)) return;
+      const { displayData: dd, onSelectDate: cb } = pickRef.current;
+      const d = dd[Math.round(idx)];
+      if (d && cb) cb(d.date);
+    };
+    zr.on('click', handler);
+    return () => zr.off('click', handler);
+  }, [displayData]);
   const dates = displayData.map(d => d.date);
   const ohlc = displayData.map(d => [d.open, d.close, d.low, d.high]);
   const volumes = displayData.map(d => d.volume || 0);
@@ -1648,15 +1672,8 @@ function KLineChart({ data, onSelectDate }) {
     ],
   };
 
-  const onEvents = {
-    click: (params) => {
-      if (params?.seriesType === 'candlestick' && onSelectDate) {
-        const d = displayData[params.dataIndex];
-        if (d) onSelectDate(d.date);
-      }
-    },
-  };
-  return <ReactECharts option={option} style={{ height: 420 }} notMerge lazyUpdate onEvents={onEvents} />;
+  if (!displayData.length) return null;
+  return <ReactECharts ref={chartRef} option={option} style={{ height: 420 }} notMerge lazyUpdate />;
 }
 
 // ── 左右可拖拽调整宽度的分栏容器 ──────────────────────────────────────────

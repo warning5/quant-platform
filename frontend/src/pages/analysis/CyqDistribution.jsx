@@ -12,6 +12,25 @@ function normalize(distribution) {
   return distribution.map((p) => ({ price: Number(p.price), pct: (p.value / total) * 100 }));
 }
 
+// 筹码聚焦区间：累计占比覆盖 coverage(默认98%)的价格范围。
+// 分布数据的 yrange 往往覆盖历史全部价格区间（如 7.4~21.8），而筹码集中在现价附近，
+// 直接用全区间作 y 轴会把图形挤成一条线。此函数裁掉两端的零星档位。
+// 返回 [lo, hi]；数据异常时返回 null。
+function focusRange(dist, coverage = 0.98) {
+  if (!dist || !dist.length) return null;
+  const total = dist.reduce((s, p) => s + p.pct, 0);
+  if (!(total > 0)) return null;
+  const tail = (total * (1 - coverage)) / 2;
+  let acc = 0, lo = null, hi = null;
+  for (const p of dist) {
+    acc += p.pct;
+    if (lo === null && acc >= tail) lo = p.price;
+    if (acc <= total - tail) hi = p.price;
+  }
+  if (lo === null || hi === null || hi <= lo) return null;
+  return [lo, hi];
+}
+
 // 截图风格：红色=获利盘(价格低于收盘价)，蓝色=套牢盘(价格高于收盘价)
 const RED = '#ef4444';
 const BLUE = '#3b82f6';
@@ -122,10 +141,19 @@ export function CyqDistribution({ code, tradeDate, onClearLink }) {
       const step = prices.length > 1 ? prices[1] - prices[0] : 0.01;
       const half = step / 2;
 
+      // y 轴聚焦到筹码集中区，而不是 yrange 全区间（全区间会把图形挤成一条线）
       let pMin = Math.min(...prices), pMax = Math.max(...prices);
+      const focus = focusRange(norm, 0.98);
+      if (focus) {
+        const anchors = [focus[0], focus[1]];
+        if (hasClose) anchors.push(close);
+        if (hasMc) anchors.push(mc);
+        pMin = Math.min(...anchors);
+        pMax = Math.max(...anchors);
+      }
       const span = (pMax - pMin) || 1;
-      pMin -= span * 0.02;
-      pMax += span * 0.02;
+      pMin -= span * 0.08;
+      pMax += span * 0.08;
 
       const renderItem = (params, api) => {
         const price = api.value(0);
@@ -231,18 +259,21 @@ export function CyqDistribution({ code, tradeDate, onClearLink }) {
       };
     }
 
-    // 多日视图：纵向叠加对比
+    // 多日视图：纵向叠加对比（y 轴取各日筹码聚焦区间的并集，避免全历史区间挤成一条线）
     let pMin = Infinity, pMax = -Infinity;
+    const anchors = [];
     days.forEach((d) => {
-      (d.distribution || []).forEach((p) => {
-        const pr = Number(p.price);
-        if (pr < pMin) pMin = pr;
-        if (pr > pMax) pMax = pr;
-      });
+      const f = focusRange(normalize(d.distribution), 0.98);
+      if (f) anchors.push(f[0], f[1]);
+      const dc = Number(d.close_price);
+      if (Number.isFinite(dc) && dc > 0) anchors.push(dc);
+      const m = Number(d.main_cost);
+      if (Number.isFinite(m) && m > 0) anchors.push(m);
     });
+    if (anchors.length) { pMin = Math.min(...anchors); pMax = Math.max(...anchors); }
     if (!isFinite(pMin)) { pMin = 0; pMax = 1; }
     const span = (pMax - pMin) || 1;
-    pMin = pMin - span * 0.02; pMax = pMax + span * 0.02;
+    pMin = pMin - span * 0.08; pMax = pMax + span * 0.08;
 
     const series = days.map((d, i) => {
       const norm = normalize(d.distribution);

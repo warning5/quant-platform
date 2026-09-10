@@ -121,8 +121,9 @@ def get_code_list(args):
 # ---------------- 读取已有快照 ----------------
 def get_existing(code):
     try:
-        # ReplacingMergeTree 在 merge 前可能保留多个版本, 必须按 updated_at 取最新
-        r = query_ch(f"SELECT trade_date, cyq_json FROM {CH_DB}.{TABLE_D} WHERE code='{code}' ORDER BY trade_date DESC LIMIT 1")
+        # ReplacingMergeTree 在 merge 前可能保留多个版本, 必须加 FINAL 取 updated_at 最新版
+        # （原实现只有 ORDER BY trade_date DESC, 同日多版本时会随机取到旧版的退化分布作种子 -> 档位坍缩扩散）
+        r = query_ch(f"SELECT trade_date, cyq_json FROM {CH_DB}.{TABLE_D} FINAL WHERE code='{code}' ORDER BY trade_date DESC LIMIT 1")
         if not r.strip(): return None
         line = r.strip().split("\n")[0]
         # trade_date \t cyq_json
@@ -188,6 +189,133 @@ def get_existing_daily_max(code):
     except Exception:
         return None
 
+# 种子健康度阈值: 健康分布有效档数(nz)应接近满档(约148); 退化(旧 ×100 腐蚀残留)会坍缩到几十以下。
+# 退化分布作增量种子会逐日污染后续每日, 故低于此阈值即判定为坏种子, 自动切长窗口重算。
+CYQ_MIN_VALID_NZ = 100
+
+def _seed_healthy(seed):
+    """判断一张存储的筹码分布是否健康(可作增量续算种子)。
+    seed = (yrange_array, x_array)。健康: 有效档数接近满档 且 总量在合理区间。
+    返回 (ok:bool, nz:int, xsum:float) 便于日志。"""
+    if seed is None:
+        return False, 0, 0.0
+    yp, xp = seed
+    if xp is None or len(xp) == 0:
+        return False, 0, 0.0
+    nz = int(np.count_nonzero(xp > 1e-6))
+    xsum = float(xp.sum())
+    # x_sum 算法固有常数约 0.16~15(茅台低换手低, 活跃股高); 退化时 ×100 污染会让总量飙到 25+ 或塌到近 0
+    if nz < CYQ_MIN_VALID_NZ or xsum > 25 or xsum < 0.05:
+        return False, nz, xsum
+    return True, nz, xsum
+
+def recompute_from_long_window(code, sd, end, adj_fallback=False):
+    """种子退化/价格越界时的安全回退: 抓 sd 前 250 日长窗口, compute_cyq_daily 一次算到 end,
+    过滤出增量区间 [sd,end] 返回 rows。数学等价于 force-snap(从 250 日历史新鲜计算), 不读任何
+    存储分布, 故不会继承旧腐蚀。仅返回 [sd,end] 的行, 供 process_one_daily 增量写库。"""
+    sd_long = (datetime.strptime(sd, "%Y-%m-%d") - timedelta(days=250)).strftime("%Y-%m-%d")
+    try:
+        df, _ = get_unadj(code, sd_long, end, adj_fallback=adj_fallback)
+    except Exception:
+        return None
+    if df is None or df.empty:
+        return None
+    df["turn"] = normalize_turnover(df["turn"].values)
+    kl = list(zip(df["date"], df["open"], df["high"], df["low"], df["close"], df["turn"]))
+    snaps = compute_cyq_daily(kl)
+    if not snaps:
+        return None
+    window = [s for s in snaps if sd <= s["date"] <= end]
+    if not window:
+        return None
+    compute_main_cost_for_snaps(window, code, sd, end)
+    rows = []
+    for s in window:
+        yr = np.asarray(s["yrange"], float); x = np.asarray(s["x"], float)
+        m = metrics(yr, x, s["close"])
+        rows.append(dict(
+            code=code, trade_date=s["date"], close_price=round(float(s["close"]), 4),
+            avg_cost=round(m["avg_cost"], 4), benefit=round(float(m["benefit"]), 6),
+            c90_lo=round(m["c90_lo"], 4), c90_hi=round(m["c90_hi"], 4), c90_conc=round(m["c90_conc"], 6),
+            c70_lo=round(m["c70_lo"], 4), c70_hi=round(m["c70_hi"], 4), c70_conc=round(m["c70_conc"], 6),
+            main_cost=round(s["main_cost"], 4), main_cost_lo=round(s["main_cost_lo"], 4),
+            main_cost_hi=round(s["main_cost_hi"], 4), main_cost_conf=s["main_cost_conf"],
+            cyq_json=cyq_to_json(s["yrange"], s["x"]),
+        ))
+    return rows
+
+def continue_rows_from_seed(code, seed_date, sd, end, adj_fallback=False):
+    """以 seed_date 那天的真实分布作种子, 对 [sd,end] 的新交易日逐日续算成 row。
+
+    存在的意义: 下面的 process_one_daily 若直接把「仅有的新交易日K线」喂给 compute_cyq_daily,
+    累加器会把首日单根K线当种子 -> 产出三角形假分布(总量==当日换手率)。日常推进每次只多1天,
+    恰好必然踩中。故必须走 continue 路径。
+
+    任一日续算失败(价格超出旧区间/无K线/种子缺失) -> 返回 None, 由调用方回退长窗口全量。
+    """
+    seed = None
+    try:
+        raw = query_ch(f"SELECT cyq_json FROM {CH_DB}.{TABLE_D} FINAL "
+                       f"WHERE code='{code}' AND trade_date='{seed_date}'")
+        if raw.strip():
+            prev = json.loads(raw.strip().split("\n")[0])
+            seed = (np.array(prev["yrange"], float), np.array(prev["x"], float))
+    except Exception:
+        seed = None
+    if seed is None:
+        return None
+    # 种子健康度保护: 退化分布(旧 ×100 腐蚀残留等)作种子会逐日污染后续每日;
+    # 判定异常则自动切 250 日长窗口重算(从 250 日历史新鲜计算, 不读存储分布), 自愈而不传染。
+    ok, nz, xsum = _seed_healthy(seed)
+    if not ok:
+        log("  [%s] 种子 %s 退化(nz=%d xsum=%.2f<阈值%d), 自动切长窗口重算 [%s,%s]"
+            % (code, seed_date, nz, xsum, CYQ_MIN_VALID_NZ, sd, end))
+        try:
+            return recompute_from_long_window(code, sd, end, adj_fallback=adj_fallback)
+        except Exception as e:
+            log("  [%s] 长窗口重算失败(种子退化回退): %s" % (code, repr(e)[:120]))
+            return None
+
+    df, _ = get_unadj(code, sd, end, adj_fallback=adj_fallback)
+    if df is None or df.empty:
+        return None
+    df["turn"] = normalize_turnover(df["turn"].values)
+    kl = list(zip(df["date"], df["open"], df["high"], df["low"], df["close"], df["turn"]))
+
+    yp, xp = seed
+    snaps = []
+    for (d0, o, h, l, c, t) in kl:
+        res = compute_cyq_continue(yp, xp, [(o, h, l, c, t)])
+        if res is None:
+            # 价格越界(当日成交突破历史区间): 续算链不可信, 自动切长窗口重算自愈, 而非把坏传下去
+            log("  [%s] %s 续算价格越界, 自动切长窗口重算 [%s,%s]" % (code, d0, sd, end))
+            try:
+                return recompute_from_long_window(code, sd, end, adj_fallback=adj_fallback)
+            except Exception:
+                return None
+        yr, x = res
+        m = metrics(yr, x, float(c))
+        snaps.append({"date": d0, "yrange": yr, "x": x, "close": float(c),
+                      "c70_lo": m["c70_lo"], "c70_hi": m["c70_hi"]})
+        yp, xp = yr, x
+    if not snaps:
+        return None
+
+    compute_main_cost_for_snaps(snaps, code, sd, end)
+    rows = []
+    for s in snaps:
+        m = metrics(s["yrange"], s["x"], s["close"])
+        rows.append(dict(
+            code=code, trade_date=s["date"], close_price=round(s["close"], 4),
+            avg_cost=round(m["avg_cost"], 4), benefit=round(float(m["benefit"]), 6),
+            c90_lo=round(m["c90_lo"], 4), c90_hi=round(m["c90_hi"], 4), c90_conc=round(m["c90_conc"], 6),
+            c70_lo=round(m["c70_lo"], 4), c70_hi=round(m["c70_hi"], 4), c70_conc=round(m["c70_conc"], 6),
+            main_cost=round(s["main_cost"], 4), main_cost_lo=round(s["main_cost_lo"], 4),
+            main_cost_hi=round(s["main_cost_hi"], 4), main_cost_conf=s["main_cost_conf"],
+            cyq_json=cyq_to_json(s["yrange"], s["x"]),
+        ))
+    return rows
+
 def process_one_daily(code, start, end, force=False, adj_fallback=False):
     """方案C: 计算 [start,end] 逐日筹码, 写 stock_cyq_daily(单表; 实时快照即 daily 最新行)。
        返回 (n_daily, last_row_or_None, status)。
@@ -197,6 +325,23 @@ def process_one_daily(code, start, end, force=False, adj_fallback=False):
     if last and last >= end:
         return 0, None, "skip-up-to-date"
     sd = start if (force or not last) else (datetime.strptime(last, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+
+    # 增量推进(日常形态, 每次只多1天): 先尝试以前一日真实分布作种子续算。
+    # 不能直接走下面的 compute_cyq_daily —— 它把窗口首日K线当种子, 单日窗口会产出三角形假分布。
+    if last and sd > last:
+        try:
+            rows = continue_rows_from_seed(code, last, sd, end, adj_fallback=adj_fallback)
+        except Exception:
+            rows = None
+        if rows:
+            try:
+                write_cyq_ch(rows, table=TABLE_D)
+            except Exception as e:
+                log("  [%s] 逐日落库失败(续算): %s" % (code, repr(e)[:160]))
+                return 0, None, "write-err"
+            return len(rows), rows[-1], "ok-continue"
+        # 续算不可用 -> 落到下面原有的长窗口回退路径
+
     df, src = get_unadj(code, sd, end, adj_fallback=adj_fallback)
     if df is None or df.empty:
         # 若 CH 无未复权, 尝试更早起点(全历史)以收敛分布
@@ -230,9 +375,10 @@ def process_one_daily(code, start, end, force=False, adj_fallback=False):
 
 # ---------------- 增量更新(方案C日常: 仅推进新交易日) ----------------
 def get_existing_daily_latest(code):
-    """取 stock_cyq_daily 最新一行(含完整分布), 作为增量种子。无则返回 None。"""
+    """取 stock_cyq_daily 最新一行(含完整分布), 作为增量种子。无则返回 None。
+    ReplacingMergeTree 需 FINAL 保证同日多版本时取 updated_at 最新版。"""
     try:
-        r = query_ch(f"SELECT trade_date, cyq_json FROM {CH_DB}.{TABLE_D} "
+        r = query_ch(f"SELECT trade_date, cyq_json FROM {CH_DB}.{TABLE_D} FINAL "
                      f"WHERE code='{code}' ORDER BY trade_date DESC LIMIT 1")
         if not r.strip(): return None
         line = r.strip().split("\n")[0]

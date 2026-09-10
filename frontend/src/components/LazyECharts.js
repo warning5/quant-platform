@@ -34,7 +34,9 @@ function useResponsiveHeight(style, mobileHeight) {
   }, [currentHeight, mobileHeight, isMobile]);
 }
 
-export default function LazyECharts({ style, mobileHeight, ...rest }) {
+// 用 forwardRef 暴露底层 EChartsReactCore 实例，便于调用方通过 ref.current.getEchartsInstance()
+// 直接操作图表（如 zr 事件绑定、convertFromPixel 像素反查等）
+const LazyECharts = React.forwardRef(function LazyECharts({ style, mobileHeight, ...rest }, ref) {
   const responsiveHeight = useResponsiveHeight(style, mobileHeight);
 
   const mergedStyle = useMemo(() => ({
@@ -42,5 +44,7 @@ export default function LazyECharts({ style, mobileHeight, ...rest }) {
     height: responsiveHeight,
   }), [style, responsiveHeight]);
 
-  return <ReactEChartsCore echarts={echarts} style={mergedStyle} {...rest} />;
-}
+  return <ReactEChartsCore ref={ref} echarts={echarts} style={mergedStyle} {...rest} />;
+});
+
+export default LazyECharts;

@@ -27,14 +27,18 @@ CH_PW   = os.environ.get("CH_PW", "123456")
 
 # ---------------- 换手率量纲归一 ----------------
 def normalize_turnover(turn_array):
-    """把换手率统一成百分比(与 Baostock/Eastmoney 口径一致):
-       - 单源列内部一致; 整列 max<=1.0 视为小数(0.0314) -> x100 得 3.14
-       - 否则视为百分比原样返回
-       窄带风险(某票全历史换手率恰在 0.7%~1.5%): 极罕见, 实际 A 股各源分母均为流通股本,
-       实测 Baostock vs 新浪 相对差 <=1.5%, 故可放心。"""
+    """把换手率统一成百分比数值(与 Baostock/Eastmoney/CH stock_daily.turnover_rate 一致)。
+
+    ⚠️ 历史 BUG(2026-09-10 修复): 判据原为「整列 max<=1.0 视为小数」，但 recompute/cyq_service
+    的续算路径是**逐日**调用的(数组只有 1 个元素)，判据退化成「这一天的值是否 <=1」——
+    于是换手率 0.9659% 被误判为小数形式 x100 得 96.59, t=0.966 -> x*=(1-t)=x*0.034,
+    历史筹码被一天清零, 分布坍缩到只剩当日新加的几档(表现为"退化"/"大方块")。
+    实测全市场 30 日 12.5 万条 turnover_rate 最小 0.0454, 无一 <=0.01,
+    故判据收紧为 <=0.01: 既能兜住真的小数形式(0.000454), 又不会误伤低换手个股/低换手日。
+    """
     a = np.asarray(turn_array, dtype=float)
     a = np.where(np.isnan(a), 0.0, a)
-    if np.nanmax(a) <= 1.0:
+    if a.size and np.nanmax(a) <= 0.01:
         return a * 100.0
     return a
 
