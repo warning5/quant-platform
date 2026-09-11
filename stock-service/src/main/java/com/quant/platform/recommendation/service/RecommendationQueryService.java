@@ -189,6 +189,44 @@ public class RecommendationQueryService {
     }
 
     /**
+     * 每日推荐数统计（定时任务「统计」按钮用）。
+     * 只返回「有推荐数据」的日期，无推荐的交易日由前端按交易日历补齐并标红。
+     *
+     * @param strategyIds 为空=不过滤策略（全部）
+     * @param weightMode  为空/ALL=不过滤权重模式（按股票去重，不会重复计数）
+     */
+    public List<Map<String, Object>> getDailyStats(LocalDate startDate, LocalDate endDate,
+                                                   List<Long> strategyIds, String weightMode) {
+        if (startDate == null || endDate == null || startDate.isAfter(endDate)) {
+            return List.of();
+        }
+        List<Long> ids = (strategyIds == null || strategyIds.isEmpty()) ? null : strategyIds;
+        String mode = (weightMode == null || weightMode.isBlank() || "ALL".equalsIgnoreCase(weightMode))
+                ? null : weightMode.trim();
+        List<Map<String, Object>> rows = recommendationMapper.countDailyInRange(startDate, endDate, ids, mode);
+        List<Map<String, Object>> result = new ArrayList<>(rows.size());
+        for (Map<String, Object> row : rows) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("date", row.get("date") == null ? null : row.get("date").toString());
+            m.put("stockCount", toIntValue(row.get("stockCount")));
+            m.put("strategyCount", toIntValue(row.get("strategyCount")));
+            m.put("recordCount", toIntValue(row.get("recordCount")));
+            result.add(m);
+        }
+        return result;
+    }
+
+    private static int toIntValue(Object v) {
+        if (v == null) return 0;
+        if (v instanceof Number n) return n.intValue();
+        try {
+            return Integer.parseInt(v.toString());
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    /**
      * 获取所有有推荐记录的策略列表（id + name）
      */
     public List<Map<String, Object>> strategiesWithData() {

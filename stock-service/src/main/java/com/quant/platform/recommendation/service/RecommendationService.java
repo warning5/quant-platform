@@ -747,6 +747,14 @@ public class RecommendationService {
     }
 
     /**
+     * 每日推荐数统计（定时任务「统计」按钮用）
+     */
+    public List<Map<String, Object>> getDailyStats(LocalDate startDate, LocalDate endDate,
+                                                   List<Long> strategyIds, String weightMode) {
+        return queryService.getDailyStats(startDate, endDate, strategyIds, weightMode);
+    }
+
+    /**
      * 获取指定策略在最近 days 天内有推荐数据的日期列表（倒序）
      */
     public List<String> getDatesByStrategy(Long strategyId, int days) {

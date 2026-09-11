@@ -5,6 +5,7 @@ import com.quant.platform.stock.service.ClickHouseStockService;
 import cn.dev33.satoken.annotation.SaCheckPermission;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
@@ -92,5 +93,18 @@ public class CyqController {
                 "count", rows.size(),
                 "items", rows
         ));
+    }
+
+    /**
+     * 筹码分布每日覆盖统计（用于「定时任务 - CYQ 增量更新」的「统计」按钮）
+     * GET /api/cyq/daily-count?startDate=2026-08-12&endDate=2026-09-11
+     * 返回区间内每日有筹码分布的股票数（缺失交易日不会出现在结果中，由前端按交易日历补 0 并红标）。
+     */
+    @GetMapping("/daily-count")
+    @SaCheckPermission("stock:view")
+    public ApiResponse<List<Map<String, Object>>> getCyqDailyCount(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+        return ApiResponse.success(clickHouseStockService.getCyqDailyCount(startDate, endDate));
     }
 }

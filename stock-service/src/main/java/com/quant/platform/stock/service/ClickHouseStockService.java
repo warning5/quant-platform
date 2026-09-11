@@ -622,6 +622,37 @@ public class ClickHouseStockService {
     }
 
     /**
+     * 筹码分布每日覆盖统计：统计区间内每个交易日有多少只股票生成了筹码分布。
+     * 用于「定时任务 - CYQ 增量更新」的「统计」按钮；缺失交易日（0 只）即当日未更新。
+     * 使用 FINAL 去重（ReplacingMergeTree 同一 (code,trade_date) 可能有多版本）。
+     */
+    public List<Map<String, Object>> getCyqDailyCount(LocalDate startDate, LocalDate endDate) {
+        if (!clickHouseConfig.isEnabled() || startDate == null || endDate == null || startDate.isAfter(endDate)) {
+            return List.of();
+        }
+        try {
+            List<Map<String, Object>> rows = queryForListFromClickHouse(
+                "SELECT trade_date, COUNT(DISTINCT code) AS stockCount " +
+                "FROM stock.stock_cyq_daily FINAL " +
+                "WHERE trade_date >= ? AND trade_date <= ? " +
+                "GROUP BY trade_date ORDER BY trade_date DESC", startDate, endDate);
+            List<Map<String, Object>> out = new ArrayList<>(rows.size());
+            for (Map<String, Object> r : rows) {
+                Map<String, Object> m = new LinkedHashMap<>();
+                Object td = r.get("trade_date");
+                m.put("date", td != null ? td.toString() : null);
+                Object sc = r.get("stockCount");
+                m.put("stockCount", sc != null ? ((Number) sc).intValue() : 0);
+                out.add(m);
+            }
+            return out;
+        } catch (Exception e) {
+            log.warn("[CYQ] 每日覆盖统计失败 {}~{}: {}", startDate, endDate, e.getMessage());
+            return List.of();
+        }
+    }
+
+    /**
      * 执行通用 SQL 查询单值
      */
     public Object queryForObject(String sql, Object... params) {

@@ -7,10 +7,10 @@ import {
   CheckCircleOutlined, CloseCircleOutlined, SyncOutlined,
   ThunderboltOutlined, GlobalOutlined, HistoryOutlined,
   ReloadOutlined, StopOutlined, DeleteOutlined,
-  EditOutlined, CheckOutlined, ClearOutlined, SettingOutlined, LoadingOutlined, LinkOutlined, ApartmentOutlined
+  EditOutlined, CheckOutlined, ClearOutlined, SettingOutlined, LoadingOutlined, LinkOutlined, ApartmentOutlined, BarChartOutlined
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import api, { scheduleApi } from '../../api/index';
+import api, { scheduleApi, recommendationApi, calendarApi, cyqApi } from '../../api/index';
 
 const { Text } = Typography;
 const { RangePicker } = DatePicker;
@@ -1321,6 +1321,375 @@ function CronPicker({ value, onChange }) {
   );
 }
 
+// ========== 每日推荐统计弹窗 ==========
+/**
+ * 按日期跨度统计每日推荐数量。
+ * 无推荐的日期同样展示：交易日无推荐=红色标记，非交易日=灰色（不计入缺失）。
+ */
+function DailyRecommendStatsModal({ open, taskRecord, onCancel }) {
+  const [range, setRange] = useState(null);
+  const [strategyIds, setStrategyIds] = useState([]);
+  const [weightMode, setWeightMode] = useState(''); // '' = 全部权重模式
+  const [allStrategies, setAllStrategies] = useState([]);
+  const [rows, setRows] = useState([]);
+  const [tradingDates, setTradingDates] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  // 打开时初始化：默认最近 30 天 + 任务配置里已选的策略
+  useEffect(() => {
+    if (!open) return;
+    const ec = parseExtraConfig(taskRecord?.extra_config);
+    setStrategyIds(Array.isArray(ec.strategyIds) ? ec.strategyIds : []);
+    const end = dayjs().startOf('day');
+    setRange([end.subtract(29, 'day'), end]);
+    api.get('/strategies?size=100').then(res => {
+      const records = res?.records;
+      setAllStrategies(Array.isArray(records) ? records : (Array.isArray(res) ? res : []));
+    }).catch(() => {});
+  }, [open, taskRecord?.task_key, taskRecord?.extra_config]);
+
+  // 拉取统计数据 + 交易日历
+  useEffect(() => {
+    if (!open || !range?.[0] || !range?.[1]) return;
+    const s = range[0].format('YYYY-MM-DD');
+    const e = range[1].format('YYYY-MM-DD');
+    setLoading(true);
+    Promise.all([
+      recommendationApi.getDailyCount(s, e, strategyIds, weightMode).catch(() => []),
+      calendarApi.getTradingDatesBetween(s, e).catch(() => null),
+    ]).then(([countRows, calRes]) => {
+      setRows(Array.isArray(countRows) ? countRows : []);
+      const dates = calRes?.dates;
+      setTradingDates(Array.isArray(dates) ? dates.map(d => String(d).slice(0, 10)) : null);
+    }).finally(() => setLoading(false));
+  }, [open, range, strategyIds, weightMode]);
+
+  // 按日期逐天铺开（区间内每一天都展示，倒序）
+  const dayRows = useMemo(() => {
+    if (!range?.[0] || !range?.[1]) return [];
+    const countMap = new Map(rows.map(r => [String(r.date).slice(0, 10), r]));
+    const tradingSet = tradingDates ? new Set(tradingDates) : null;
+    const today = dayjs().format('YYYY-MM-DD');
+    const list = [];
+    let cursor = range[1].startOf('day');
+    const first = range[0].startOf('day');
+    while (!cursor.isBefore(first)) {
+      const d = cursor.format('YYYY-MM-DD');
+      const hit = countMap.get(d);
+      const stockCount = hit ? (hit.stockCount || 0) : 0;
+      // 交易日以交易日历为准；日历接口不可用时回退到「周一~周五」
+      const isTrading = tradingSet ? tradingSet.has(d) : (cursor.day() !== 0 && cursor.day() !== 6);
+      // 当天任务尚未到执行时间（默认 21:00 后跑），不算缺失
+      const pending = isTrading && stockCount === 0 && d === today;
+      list.push({
+        key: d,
+        date: d,
+        weekday: '日一二三四五六'[cursor.day()],
+        stockCount,
+        strategyCount: hit ? (hit.strategyCount || 0) : 0,
+        isTrading,
+        pending,
+        missing: isTrading && stockCount === 0 && !pending,
+      });
+      cursor = cursor.subtract(1, 'day');
+    }
+    return list;
+  }, [rows, range, tradingDates]);
+
+  const summary = useMemo(() => {
+    const trading = dayRows.filter(r => r.isTrading);
+    return {
+      totalDays: dayRows.length,
+      tradingDays: trading.length,
+      missingDays: trading.filter(r => r.missing).length,
+    };
+  }, [dayRows]);
+
+  // 跨度上限 1 个月
+  const handleRangeChange = (dates) => {
+    if (!dates || !dates[0] || !dates[1]) { setRange(dates); return; }
+    if (dates[1].diff(dates[0], 'day') > 30) {
+      message.warning('统计跨度最多支持 1 个月（31 天）');
+      return;
+    }
+    setRange(dates);
+  };
+
+  const columns = [
+    {
+      title: '日期', dataIndex: 'date', width: 140,
+      render: (v, r) => (
+        <Space size={4}>
+          <Text style={{
+            fontSize: 12,
+            color: r.missing ? '#f5222d' : undefined,
+            fontWeight: r.missing ? 600 : 400,
+          }}>{v}</Text>
+          <Text type="secondary" style={{ fontSize: 11 }}>周{r.weekday}</Text>
+        </Space>
+      ),
+    },
+    {
+      title: '推荐股票数', dataIndex: 'stockCount', width: 110, align: 'right',
+      render: (v, r) => {
+        if (!r.isTrading) return <Text type="secondary">—</Text>;
+        if (r.missing) return <Text style={{ color: '#f5222d', fontWeight: 600 }}>{v}</Text>;
+        return <Text style={{ color: r.pending ? undefined : '#52c41a', fontWeight: 600 }}>{v}</Text>;
+      },
+    },
+    {
+      title: '覆盖策略数', dataIndex: 'strategyCount', width: 110, align: 'right',
+      render: (v, r) => (r.isTrading ? <Text>{v}</Text> : <Text type="secondary">—</Text>),
+    },
+    {
+      title: '状态', key: 'status', width: 100,
+      render: (_, r) => {
+        if (!r.isTrading) return <Tag>非交易日</Tag>;
+        if (r.pending) return <Tag color="processing">待执行</Tag>;
+        return r.missing ? <Tag color="error">无推荐</Tag> : <Tag color="success">正常</Tag>;
+      },
+    },
+  ];
+
+  return (
+    <Modal
+      title={<Space><BarChartOutlined /> 每日推荐统计</Space>}
+      open={open}
+      onCancel={onCancel}
+      footer={<Button onClick={onCancel}>关闭</Button>}
+      width={660}
+      destroyOnHidden
+    >
+      <Space wrap size={8} style={{ marginBottom: 12 }}>
+        <RangePicker
+          value={range}
+          onChange={handleRangeChange}
+          format="YYYY-MM-DD"
+          allowClear={false}
+          disabledDate={(d) => d && d.isAfter(dayjs(), 'day')}
+        />
+        <Select
+          value={weightMode}
+          onChange={setWeightMode}
+          style={{ width: 200 }}
+          options={[
+            { value: '', label: '全部权重模式' },
+            { value: 'ICW', label: 'IC动态加权' },
+            { value: 'STATIC', label: '固定等权' },
+            { value: 'EQUAL', label: '简单等权' },
+          ]}
+        />
+        <Select
+          mode="multiple"
+          value={strategyIds}
+          onChange={setStrategyIds}
+          placeholder="全部策略"
+          style={{ minWidth: 240 }}
+          maxTagCount={2}
+          allowClear
+          options={allStrategies.map(s => ({ value: s.id, label: `${s.strategyName}（#${s.id}）` }))}
+        />
+      </Space>
+
+      <div style={{
+        padding: '8px 12px', background: '#fafafa', borderRadius: 6,
+        border: '1px solid #f0f0f0', marginBottom: 12, fontSize: 12,
+      }}>
+        <Space size={16} wrap>
+          <Text type="secondary">区间 {summary.totalDays} 天</Text>
+          <Text type="secondary">交易日 {summary.tradingDays} 天</Text>
+          <Text style={{ color: summary.missingDays > 0 ? '#f5222d' : '#52c41a', fontWeight: 600 }}>
+            缺失 {summary.missingDays} 天
+          </Text>
+          <Text type="secondary">策略范围：{strategyIds.length > 0 ? `${strategyIds.length} 个` : '全部'}</Text>
+          <Text type="secondary">权重：{weightMode ? weightMode : '全部'}</Text>
+        </Space>
+      </div>
+
+      <Table
+        columns={columns}
+        dataSource={dayRows}
+        rowKey="key"
+        size="small"
+        loading={loading}
+        pagination={false}
+        scroll={{ y: 360 }}
+        onRow={(r) => ({ style: r.missing ? { background: '#fff1f0' } : undefined })}
+      />
+      <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 8 }}>
+        红色 = 该交易日无推荐记录（可能需要补跑）；「非交易日」不参与缺失统计；当天任务未到执行时间显示为「待执行」。
+      </Text>
+    </Modal>
+  );
+}
+
+// ========== 筹码分布(CYQ)每日覆盖统计弹窗 ==========
+/**
+ * 按日期跨度统计每日生成筹码分布的股票数。
+ * 无覆盖的交易日同样展示：交易日 0 只=红色标记，非交易日=灰色（不计入缺失）。
+ */
+function CyqStatsModal({ open, taskRecord, onCancel }) {
+  const [range, setRange] = useState(null);
+  const [rows, setRows] = useState([]);
+  const [tradingDates, setTradingDates] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  // 打开时初始化：默认最近 30 天
+  useEffect(() => {
+    if (!open) return;
+    const end = dayjs().startOf('day');
+    setRange([end.subtract(29, 'day'), end]);
+  }, [open]);
+
+  // 拉取统计数据 + 交易日历
+  useEffect(() => {
+    if (!open || !range?.[0] || !range?.[1]) return;
+    const s = range[0].format('YYYY-MM-DD');
+    const e = range[1].format('YYYY-MM-DD');
+    setLoading(true);
+    Promise.all([
+      cyqApi.getDailyCount(s, e).catch(() => []),
+      calendarApi.getTradingDatesBetween(s, e).catch(() => null),
+    ]).then(([countRows, calRes]) => {
+      setRows(Array.isArray(countRows) ? countRows : []);
+      const dates = calRes?.dates;
+      setTradingDates(Array.isArray(dates) ? dates.map(d => String(d).slice(0, 10)) : null);
+    }).finally(() => setLoading(false));
+  }, [open, range]);
+
+  // 按日期逐天铺开（区间内每一天都展示，倒序）
+  const dayRows = useMemo(() => {
+    if (!range?.[0] || !range?.[1]) return [];
+    const countMap = new Map(rows.map(r => [String(r.date).slice(0, 10), r]));
+    const tradingSet = tradingDates ? new Set(tradingDates) : null;
+    const today = dayjs().format('YYYY-MM-DD');
+    const list = [];
+    let cursor = range[1].startOf('day');
+    const first = range[0].startOf('day');
+    while (!cursor.isBefore(first)) {
+      const d = cursor.format('YYYY-MM-DD');
+      const hit = countMap.get(d);
+      const stockCount = hit ? (hit.stockCount || 0) : 0;
+      const isTrading = tradingSet ? tradingSet.has(d) : (cursor.day() !== 0 && cursor.day() !== 6);
+      const pending = isTrading && stockCount === 0 && d === today;
+      list.push({
+        key: d,
+        date: d,
+        weekday: '日一二三四五六'[cursor.day()],
+        stockCount,
+        isTrading,
+        pending,
+        missing: isTrading && stockCount === 0 && !pending,
+      });
+      cursor = cursor.subtract(1, 'day');
+    }
+    return list;
+  }, [rows, range, tradingDates]);
+
+  const summary = useMemo(() => {
+    const trading = dayRows.filter(r => r.isTrading);
+    return {
+      totalDays: dayRows.length,
+      tradingDays: trading.length,
+      missingDays: trading.filter(r => r.missing).length,
+      covered: trading.filter(r => !r.missing && !r.pending).length,
+    };
+  }, [dayRows]);
+
+  // 跨度上限 1 个月
+  const handleRangeChange = (dates) => {
+    if (!dates || !dates[0] || !dates[1]) { setRange(dates); return; }
+    if (dates[1].diff(dates[0], 'day') > 30) {
+      message.warning('统计跨度最多支持 1 个月（31 天）');
+      return;
+    }
+    setRange(dates);
+  };
+
+  const columns = [
+    {
+      title: '日期', dataIndex: 'date', width: 140,
+      render: (v, r) => (
+        <Space size={4}>
+          <Text style={{
+            fontSize: 12,
+            color: r.missing ? '#f5222d' : undefined,
+            fontWeight: r.missing ? 600 : 400,
+          }}>{v}</Text>
+          <Text type="secondary" style={{ fontSize: 11 }}>周{r.weekday}</Text>
+        </Space>
+      ),
+    },
+    {
+      title: '筹码分布股票数', dataIndex: 'stockCount', width: 140, align: 'right',
+      render: (v, r) => {
+        if (!r.isTrading) return <Text type="secondary">—</Text>;
+        if (r.missing) return <Text style={{ color: '#f5222d', fontWeight: 600 }}>{v}</Text>;
+        return <Text style={{ color: r.pending ? undefined : '#52c41a', fontWeight: 600 }}>{v}</Text>;
+      },
+    },
+    {
+      title: '状态', key: 'status', width: 100,
+      render: (_, r) => {
+        if (!r.isTrading) return <Tag>非交易日</Tag>;
+        if (r.pending) return <Tag color="processing">待执行</Tag>;
+        return r.missing ? <Tag color="error">无覆盖</Tag> : <Tag color="success">正常</Tag>;
+      },
+    },
+  ];
+
+  return (
+    <Modal
+      title={<Space><BarChartOutlined /> 筹码分布每日覆盖统计</Space>}
+      open={open}
+      onCancel={onCancel}
+      footer={<Button onClick={onCancel}>关闭</Button>}
+      width={620}
+      destroyOnHidden
+    >
+      <Space wrap size={8} style={{ marginBottom: 12 }}>
+        <RangePicker
+          value={range}
+          onChange={handleRangeChange}
+          format="YYYY-MM-DD"
+          allowClear={false}
+          disabledDate={(d) => d && d.isAfter(dayjs(), 'day')}
+        />
+      </Space>
+
+      <div style={{
+        padding: '8px 12px', background: '#fafafa', borderRadius: 6,
+        border: '1px solid #f0f0f0', marginBottom: 12, fontSize: 12,
+      }}>
+        <Space size={16} wrap>
+          <Text type="secondary">区间 {summary.totalDays} 天</Text>
+          <Text type="secondary">交易日 {summary.tradingDays} 天</Text>
+          <Text style={{ color: summary.covered === summary.tradingDays && summary.tradingDays > 0 ? '#52c41a' : '#1677ff', fontWeight: 600 }}>
+            已覆盖 {summary.covered} 天
+          </Text>
+          <Text style={{ color: summary.missingDays > 0 ? '#f5222d' : '#52c41a', fontWeight: 600 }}>
+            缺失 {summary.missingDays} 天
+          </Text>
+        </Space>
+      </div>
+
+      <Table
+        columns={columns}
+        dataSource={dayRows}
+        rowKey="key"
+        size="small"
+        loading={loading}
+        pagination={false}
+        scroll={{ y: 360 }}
+        onRow={(r) => ({ style: r.missing ? { background: '#fff1f0' } : undefined })}
+      />
+      <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 8 }}>
+        红色 = 该交易日未生成筹码分布（可能需要补跑增量更新）；「非交易日」不参与缺失统计；当天任务未到执行时间（默认 18:30）显示为「待执行」。
+      </Text>
+    </Modal>
+  );
+}
+
 // ========== 主组件 ==========
 export default function ScheduledTasks() {
   const canEdit = useAuthStore((s) => s.hasPermission('data:edit'));
@@ -1338,6 +1707,14 @@ export default function ScheduledTasks() {
   const [graphOpen, setGraphOpen] = useState(false);
   const [graphDeps, setGraphDeps] = useState([]);
   const [graphLoading, setGraphLoading] = useState(false);
+
+  // 每日推荐统计弹窗
+  const [statsOpen, setStatsOpen] = useState(false);
+  const [statsTarget, setStatsTarget] = useState(null);
+
+  // 筹码分布(CYQ)每日覆盖统计弹窗
+  const [cyqStatsOpen, setCyqStatsOpen] = useState(false);
+  const [cyqStatsTarget, setCyqStatsTarget] = useState(null);
 
   const loadGraphDeps = useCallback(async () => {
     setGraphLoading(true);
@@ -1655,7 +2032,7 @@ export default function ScheduledTasks() {
     {
       title: '操作',
       key: 'action',
-      width: 220,
+      width: 290,
       align: 'center',
       render: (_, record) => {
         const isCustom = record.task_key?.startsWith('CUSTOM_');
@@ -1676,6 +2053,26 @@ export default function ScheduledTasks() {
             >
               修改
             </Button>
+            {/* 每日推荐：按日期跨度统计每日推荐数 */}
+            {record.task_key === 'DAILY_RECOMMENDATION' && (
+              <Button
+                size="small"
+                icon={<BarChartOutlined />}
+                onClick={() => { setStatsTarget(record); setStatsOpen(true); }}
+              >
+                统计
+              </Button>
+            )}
+            {/* 筹码分布增量更新：按日期跨度统计每日覆盖股票数 */}
+            {record.task_key === 'CYQ' && (
+              <Button
+                size="small"
+                icon={<BarChartOutlined />}
+                onClick={() => { setCyqStatsTarget(record); setCyqStatsOpen(true); }}
+              >
+                统计
+              </Button>
+            )}
             {!isRunning ? (
               <Button
                 type="primary"
@@ -1840,6 +2237,20 @@ export default function ScheduledTasks() {
       >
         <TaskDependencyGraph deps={graphDeps} loading={graphLoading} taskItems={TASK_ITEMS} />
       </Modal>
+
+      {/* 每日推荐统计弹窗 */}
+      <DailyRecommendStatsModal
+        open={statsOpen}
+        taskRecord={statsTarget}
+        onCancel={() => { setStatsOpen(false); setStatsTarget(null); }}
+      />
+
+      {/* 筹码分布每日覆盖统计弹窗 */}
+      <CyqStatsModal
+        open={cyqStatsOpen}
+        taskRecord={cyqStatsTarget}
+        onCancel={() => { setCyqStatsOpen(false); setCyqStatsTarget(null); }}
+      />
     </div>
   );
 }

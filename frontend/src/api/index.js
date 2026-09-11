@@ -491,6 +491,23 @@ export const recommendationApi = {
   trackPerformance: () => api.post('/recommendations/track'),
   /** 获取指定策略+日期的最佳/最差股票（推荐复盘） */
   getBatchTopBottom: (strategyId, recommendDate) => api.get('/recommendations/top-bottom', { params: { strategyId, recommendDate } }),
+  /** 每日推荐数统计（按日期区间，跨度最长 1 个月）。strategyIds 为空=全部策略 */
+  getDailyCount: (startDate, endDate, strategyIds, weightMode) => api.get('/recommendations/daily-count', {
+    params: {
+      startDate,
+      endDate,
+      strategyIds: (strategyIds && strategyIds.length > 0) ? strategyIds.join(',') : undefined,
+      weightMode: weightMode || undefined,
+    },
+  }),
+};
+
+/** 筹码分布(CYQ) API */
+export const cyqApi = {
+  /** 每日覆盖统计（按日期区间，跨度最长 1 个月）。返回每日有筹码分布的股票数 */
+  getDailyCount: (startDate, endDate) => api.get('/cyq/daily-count', {
+    params: { startDate, endDate },
+  }),
 };
 
 /** 方案B: 个股黑名单 API */

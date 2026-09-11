@@ -11,6 +11,7 @@ import com.fasterxml.jackson.annotation.JsonFormat;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
@@ -169,6 +170,22 @@ public class RecommendationController {
             @RequestParam Long strategyId,
             @RequestParam(defaultValue = "30") int days) {
         return ApiResponse.success(recommendationService.getDatesByStrategy(strategyId, days));
+    }
+
+    /**
+     * 每日推荐数统计（按日期区间，跨度上限 1 个月）。
+     * 只返回有推荐数据的日期，无推荐的交易日由前端按交易日历补显并标红。
+     *
+     * @param strategyIds 可选，逗号分隔的策略 ID；不传=全部策略
+     * @param weightMode  可选，权重模式；不传=全部模式（按股票去重计数）
+     */
+    @GetMapping("/daily-count")
+    public ApiResponse<List<Map<String, Object>>> getDailyCount(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @RequestParam(required = false) List<Long> strategyIds,
+            @RequestParam(required = false) String weightMode) {
+        return ApiResponse.success(recommendationService.getDailyStats(startDate, endDate, strategyIds, weightMode));
     }
 
     /**

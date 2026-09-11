@@ -103,6 +103,32 @@ public interface RecommendationMapper extends BaseMapper<StockRecommendation> {
     List<LocalDate> findDatesByStrategyId(@Param("strategyId") Long strategyId, @Param("limit") int limit);
 
     /**
+     * 按日期区间统计每日推荐数量（定时任务「统计」按钮用）。
+     * 只返回「有推荐数据」的日期；无推荐的交易日由前端按交易日历补齐后标红。
+     * stockCount 用 COUNT(DISTINCT stock_code)：多种 weight_mode 并存时不会重复计数。
+     */
+    @Select("<script>" +
+            "SELECT DATE_FORMAT(recommend_date, '%Y-%m-%d') AS date, " +
+            "  COUNT(DISTINCT stock_code) AS stockCount, " +
+            "  COUNT(DISTINCT strategy_id) AS strategyCount, " +
+            "  COUNT(*) AS recordCount " +
+            "FROM stock_recommendation " +
+            "WHERE recommend_date BETWEEN #{startDate} AND #{endDate} " +
+            "<if test='strategyIds != null and strategyIds.size() > 0'>" +
+            "  AND strategy_id IN <foreach collection='strategyIds' item='sid' open='(' separator=',' close=')'>#{sid}</foreach> " +
+            "</if>" +
+            "<if test='weightMode != null and weightMode != \"\"'>" +
+            "  AND weight_mode = #{weightMode} " +
+            "</if>" +
+            "GROUP BY recommend_date " +
+            "ORDER BY recommend_date DESC" +
+            "</script>")
+    List<Map<String, Object>> countDailyInRange(@Param("startDate") LocalDate startDate,
+                                                @Param("endDate") LocalDate endDate,
+                                                @Param("strategyIds") List<Long> strategyIds,
+                                                @Param("weightMode") String weightMode);
+
+    /**
      * 获取指定策略+日期的所有模式列表（用于前端模式筛选）
      */
     @Select("SELECT DISTINCT weight_mode FROM stock_recommendation WHERE strategy_id = #{strategyId} AND recommend_date = #{recommendDate} AND weight_mode IS NOT NULL")
