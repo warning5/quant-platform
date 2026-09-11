@@ -76,7 +76,7 @@ public class RecommendationService {
      * 改用更干净的离散防御：最近 N 个交易日(含当日) detectRegime 全部判为 BEAR 时，
      * 直接暂停当日生成（return 空列表），规避下行，而非在噪声中调参。
      */
-    private static final int CONSECUTIVE_BEAR_STOP_DAYS = 3;
+    static final int CONSECUTIVE_BEAR_STOP_DAYS = 3;
     private final AnalysisService analysisService;
     private final MarketDataService marketDataService;
     private final ClickHouseStockService clickHouseStockService;

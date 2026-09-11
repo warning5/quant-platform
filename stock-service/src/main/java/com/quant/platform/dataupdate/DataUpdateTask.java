@@ -110,7 +110,7 @@ public class DataUpdateTask {
 
     /**
      * 是否手动提交（UI 页面提交=true；定时/依赖调度=false）。
-     * 手动任务之间互斥；定时任务并发执行，不阻塞手动提交。
+     * 仅用于标识来源/展示，不再作为互斥条件——所有数据更新任务均可并发执行。
      */
     @JsonIgnore
     private transient boolean manual = false;

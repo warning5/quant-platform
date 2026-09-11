@@ -1379,8 +1379,10 @@ function DailyRecommendStatsModal({ open, taskRecord, onCancel }) {
       const stockCount = hit ? (hit.stockCount || 0) : 0;
       // 交易日以交易日历为准；日历接口不可用时回退到「周一~周五」
       const isTrading = tradingSet ? tradingSet.has(d) : (cursor.day() !== 0 && cursor.day() !== 6);
+      // 连续 BEAR 时推荐链路会主动暂停生成，后端回传原因；这种「0 条」不是漏跑，不算缺失
+      const pauseReason = hit?.pauseReason || null;
       // 当天任务尚未到执行时间（默认 21:00 后跑），不算缺失
-      const pending = isTrading && stockCount === 0 && d === today;
+      const pending = isTrading && stockCount === 0 && d === today && !pauseReason;
       list.push({
         key: d,
         date: d,
@@ -1389,7 +1391,10 @@ function DailyRecommendStatsModal({ open, taskRecord, onCancel }) {
         strategyCount: hit ? (hit.strategyCount || 0) : 0,
         isTrading,
         pending,
-        missing: isTrading && stockCount === 0 && !pending,
+        pauseReason,
+        pauseDetail: hit?.pauseDetail || null,
+        paused: isTrading && stockCount === 0 && !!pauseReason,
+        missing: isTrading && stockCount === 0 && !pending && !pauseReason,
       });
       cursor = cursor.subtract(1, 'day');
     }
@@ -1433,6 +1438,7 @@ function DailyRecommendStatsModal({ open, taskRecord, onCancel }) {
       title: '推荐股票数', dataIndex: 'stockCount', width: 110, align: 'right',
       render: (v, r) => {
         if (!r.isTrading) return <Text type="secondary">—</Text>;
+        if (r.paused) return <Text style={{ color: '#fa8c16', fontWeight: 600 }}>{v}</Text>;
         if (r.missing) return <Text style={{ color: '#f5222d', fontWeight: 600 }}>{v}</Text>;
         return <Text style={{ color: r.pending ? undefined : '#52c41a', fontWeight: 600 }}>{v}</Text>;
       },
@@ -1446,6 +1452,13 @@ function DailyRecommendStatsModal({ open, taskRecord, onCancel }) {
       render: (_, r) => {
         if (!r.isTrading) return <Tag>非交易日</Tag>;
         if (r.pending) return <Tag color="processing">待执行</Tag>;
+        if (r.paused) {
+          return (
+            <Tooltip title={r.pauseDetail || r.pauseReason}>
+              <Tag color="warning">{r.pauseReason}</Tag>
+            </Tooltip>
+          );
+        }
         return r.missing ? <Tag color="error">无推荐</Tag> : <Tag color="success">正常</Tag>;
       },
     },
@@ -1501,6 +1514,11 @@ function DailyRecommendStatsModal({ open, taskRecord, onCancel }) {
           <Text style={{ color: summary.missingDays > 0 ? '#f5222d' : '#52c41a', fontWeight: 600 }}>
             缺失 {summary.missingDays} 天
           </Text>
+          {summary.pausedDays > 0 && (
+            <Text style={{ color: '#fa8c16', fontWeight: 600 }}>
+              熊市暂停 {summary.pausedDays} 天
+            </Text>
+          )}
           <Text type="secondary">策略范围：{strategyIds.length > 0 ? `${strategyIds.length} 个` : '全部'}</Text>
           <Text type="secondary">权重：{weightMode ? weightMode : '全部'}</Text>
         </Space>
@@ -1514,10 +1532,14 @@ function DailyRecommendStatsModal({ open, taskRecord, onCancel }) {
         loading={loading}
         pagination={false}
         scroll={{ y: 360 }}
-        onRow={(r) => ({ style: r.missing ? { background: '#fff1f0' } : undefined })}
+        onRow={(r) => ({
+          style: r.missing
+            ? { background: '#fff1f0' }
+            : (r.paused ? { background: '#fffbe6' } : undefined),
+        })}
       />
       <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 8 }}>
-        红色 = 该交易日无推荐记录（可能需要补跑）；「非交易日」不参与缺失统计；当天任务未到执行时间显示为「待执行」。
+        红色 = 该交易日无推荐记录（可能需要补跑）；橙色 = 连续熊市（BEAR）主动暂停生成，属预期行为，无需补跑；「非交易日」不参与缺失统计；当天任务未到执行时间显示为「待执行」。
       </Text>
     </Modal>
   );

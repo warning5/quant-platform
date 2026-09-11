@@ -246,18 +246,11 @@ public class DataUpdateExecutionService {
     }
 
     /**
-     * 提交数据更新任务（有单任务互斥锁，用于数据更新UI页面）
+     * 提交数据更新任务（用于数据更新UI页面，手动提交；不再设互斥锁，可与其他任务并发执行）
      */
     public synchronized DataUpdateTask submitTask(DataUpdateRequest request) {
         reapStaleTasks();
-        // 仅手动任务之间互斥；定时/依赖任务并发执行，不阻塞手动提交
-        DataUpdateTask blocker = activeTasks.values().stream()
-                .filter(t -> t.isRunning() && t.isManual())
-                .findFirst().orElse(null);
-        if (blocker != null) {
-            throw new IllegalStateException(buildBlockMessage(blocker));
-        }
-
+        // 数据更新任务不再互相排斥：手动/定时/依赖任务均可并发提交执行
         return doSubmit(request, true);
     }
 
@@ -380,18 +373,6 @@ public class DataUpdateExecutionService {
                 }
             }
         }
-    }
-
-    /**
-     * 构造"已有任务正在运行"的拒绝信息，附带阻塞任务的身份，便于定位（对应"查一下是哪个任务"）。
-     */
-    private String buildBlockMessage(DataUpdateTask blocker) {
-        String ut = blocker.getRequest() != null ? blocker.getRequest().getUpdateType() : "?";
-        String tk = blocker.getRequest() != null ? blocker.getRequest().getTaskKey() : "?";
-        boolean alive = blocker.getWorkerThread() != null && blocker.getWorkerThread().isAlive();
-        return String.format(
-                "已有任务正在运行，请等待完成或取消 [taskId=%s, type=%s, key=%s, startTime=%s, lastHeartbeat=%s, threadAlive=%s]",
-                blocker.getTaskId(), ut, tk, blocker.getStartTime(), blocker.getLastHeartbeat(), alive);
     }
 
     /**
@@ -1079,17 +1060,19 @@ public class DataUpdateExecutionService {
             if (!indexOk) allSuccess = false;
         }
 
-        // ─── 自动执行 OPTIMIZE TABLE FINAL 去重 ─────────────────────
-        if (JobStatus.CANCELLED != task.getStatus()) {
-            optimizeClickHouseTable(taskId);
-        }
-
-        broadcastLog(taskId, "\n========== 全部完成 ==========");
+        // ─── 先翻终态：数据脚本已落盘，不让 OPTIMIZE 阻塞状态翻转 ───────
         if (JobStatus.CANCELLED != task.getStatus()) {
             task.setStatus(allSuccess ? JobStatus.SUCCESS : JobStatus.FAILED);
             task.setProgress(100);
             task.setCurrentStep(allSuccess ? "全部完成" : "部分失败");
         }
+
+        // ─── 自动执行 OPTIMIZE TABLE FINAL 去重（尽力而为，超时/失败不影响终态）──
+        if (JobStatus.CANCELLED != task.getStatus()) {
+            optimizeClickHouseTable(taskId);
+        }
+
+        broadcastLog(taskId, "\n========== 全部完成 ==========");
     }
 
     /**
@@ -1097,20 +1080,22 @@ public class DataUpdateExecutionService {
      * 通过 Python clickhouse_connect 库执行（比 curl 更可靠，正确传递 receive_timeout/max_execution_time）
      */
     private void optimizeClickHouseTable(String taskId) {
-        broadcastLog(taskId, "\n[OPTIMIZE] 开始合并去重（可能需要几分钟）...");
+        broadcastLog(taskId, "\n[OPTIMIZE] 开始合并去重（尽力而为，超时不影响任务终态）...");
+        // 独立超时，避免 OPTIMIZE TABLE FINAL 在超大表上挂死导致任务永久 RUNNING
+        long optimizeTimeoutMinutes = 30;
         try {
             List<String> cmd = new ArrayList<>();
             cmd.add(pythonPath);
             cmd.add("-u");
             cmd.add("-c");
             cmd.add("from field_completer import run_optimize_stock_daily; run_optimize_stock_daily()");
-            
+
             ProcessBuilder pb = new ProcessBuilder(cmd);
             pb.directory(new File(resolvedScriptDir));
             pb.redirectErrorStream(true);
             scriptService.configurePythonEnv(pb);
             Process proc = pb.start();
-            
+
             try (BufferedReader reader = new BufferedReader(
                     new InputStreamReader(proc.getInputStream(), StandardCharsets.UTF_8))) {
                 String line;
@@ -1118,8 +1103,23 @@ public class DataUpdateExecutionService {
                     broadcastLog(taskId, line);
                 }
             }
-            
-            int exitCode = proc.waitFor();
+
+            boolean finished;
+            try {
+                finished = proc.waitFor(optimizeTimeoutMinutes, java.util.concurrent.TimeUnit.MINUTES);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                finished = false;
+            }
+            if (!finished) {
+                // 超时：强杀，避免永久挂起；OPTIMIZE 失败不影响已写入的数据终态
+                try { proc.destroyForcibly(); } catch (Exception ignore) { /* noop */ }
+                broadcastLog(taskId, "[OPTIMIZE] ⚠️ 合并超过 " + optimizeTimeoutMinutes +
+                    " 分钟仍未完成，已强制终止（数据写入不受影响，可稍后手动 OPTIMIZE）");
+                log.warn("[DataUpdate] OPTIMIZE TABLE stock_daily FINAL 超时({}分钟)已终止", optimizeTimeoutMinutes);
+                return;
+            }
+            int exitCode = proc.exitValue();
             if (exitCode == 0) {
                 broadcastLog(taskId, "[OPTIMIZE] ✅ 合并去重完成");
                 log.info("[DataUpdate] OPTIMIZE TABLE stock_daily FINAL 完成");

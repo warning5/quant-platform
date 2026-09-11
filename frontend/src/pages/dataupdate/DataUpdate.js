@@ -1102,14 +1102,7 @@ function DataUpdate() {
 
   // ========== 提交任务 ==========
   const handleSubmit = async (updateType) => {
-    // 检查是否已有其它任务在运行
-    const runningTask = [dailyTask, indexTask, dividendTask, financialTask, sentimentTask, bidaskTask, researchTask, qfqTask]
-      .find(t => t?.status === 'RUNNING');
-    if (runningTask) {
-      message.warning('已有数据更新任务正在运行，请等待完成后再启动新任务');
-      return;
-    }
-
+    // 各类型任务可并发执行：同类型重复提交已由各自按钮的 disabled（本任务 RUNNING）拦住，此处不再跨类型互斥
     try {
       const currentForm = updateType === 'INDEX' ? indexForm
         : updateType === 'DIVIDEND' ? dividendForm

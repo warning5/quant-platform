@@ -26,13 +26,19 @@ public class RecommendationQueryService {
     private final RecommendationMapper recommendationMapper;
     private final StrategyDefinitionMapper strategyDefinitionMapper;
     private final StockInfoMapper stockInfoMapper;
+    private final com.quant.platform.calendar.service.TradeCalendarService tradeCalendarService;
+    private final com.quant.platform.factor.regime.MarketRegimeCalendarService regimeCalendarService;
 
     public RecommendationQueryService(RecommendationMapper recommendationMapper,
                                       StrategyDefinitionMapper strategyDefinitionMapper,
-                                      StockInfoMapper stockInfoMapper) {
+                                      StockInfoMapper stockInfoMapper,
+                                      com.quant.platform.calendar.service.TradeCalendarService tradeCalendarService,
+                                      com.quant.platform.factor.regime.MarketRegimeCalendarService regimeCalendarService) {
         this.recommendationMapper = recommendationMapper;
         this.strategyDefinitionMapper = strategyDefinitionMapper;
         this.stockInfoMapper = stockInfoMapper;
+        this.tradeCalendarService = tradeCalendarService;
+        this.regimeCalendarService = regimeCalendarService;
     }
 
     /**
@@ -192,6 +198,11 @@ public class RecommendationQueryService {
      * 每日推荐数统计（定时任务「统计」按钮用）。
      * 只返回「有推荐数据」的日期，无推荐的交易日由前端按交易日历补齐并标红。
      *
+     * <p>额外：对「过去的交易日 + 无任何推荐记录 + 连续 N 日 BEAR」的日期，
+     * 会补一条 stockCount=0 且带 {@code pauseReason} 的记录，供前端直接展示拦停原因
+     * （推荐链路在连续 BEAR 时会主动暂停生成，见 RecommendationService 优化④），
+     * 避免把「主动暂停」误呈现成「任务漏跑」。</p>
+     *
      * @param strategyIds 为空=不过滤策略（全部）
      * @param weightMode  为空/ALL=不过滤权重模式（按股票去重，不会重复计数）
      */
@@ -213,7 +224,46 @@ public class RecommendationQueryService {
             m.put("recordCount", toIntValue(row.get("recordCount")));
             result.add(m);
         }
+        appendBearPausedDays(result, startDate, endDate);
         return result;
+    }
+
+    /**
+     * 为空缺的「过去交易日」补上连续 BEAR 暂停原因。
+     * <p>只针对严格早于今天的交易日（当天任务可能尚未到执行时间，不臆断原因）；</p>
+     * <p>regime 取自 market_regime_calendar（带缓存），不会重复触发 detector 重算。</p>
+     */
+    private void appendBearPausedDays(List<Map<String, Object>> result, LocalDate startDate, LocalDate endDate) {
+        try {
+            Set<String> hasData = result.stream()
+                    .map(m -> String.valueOf(m.get("date")))
+                    .collect(Collectors.toSet());
+            LocalDate today = LocalDate.now();
+            int stopDays = RecommendationService.CONSECUTIVE_BEAR_STOP_DAYS;
+            List<Map<String, Object>> appended = new ArrayList<>();
+            for (LocalDate d : tradeCalendarService.getTradingDaysBetween(startDate, endDate)) {
+                if (d == null || !d.isBefore(today) || hasData.contains(d.toString())) {
+                    continue;
+                }
+                if (!regimeCalendarService.isConsecutiveBear(d, stopDays)) {
+                    continue;
+                }
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("date", d.toString());
+                m.put("stockCount", 0);
+                m.put("strategyCount", 0);
+                m.put("recordCount", 0);
+                m.put("pauseReason", "熊市暂停");
+                m.put("pauseDetail", "连续 " + stopDays + " 个交易日处于 BEAR 环境，主动暂停生成以规避下行");
+                appended.add(m);
+            }
+            if (!appended.isEmpty()) {
+                result.addAll(appended);
+                result.sort((a, b) -> String.valueOf(b.get("date")).compareTo(String.valueOf(a.get("date"))));
+            }
+        } catch (Exception e) {
+            log.warn("[Recommendation] 补充「熊市暂停」原因失败（不影响统计主数据）: {}", e.getMessage());
+        }
     }
 
     private static int toIntValue(Object v) {

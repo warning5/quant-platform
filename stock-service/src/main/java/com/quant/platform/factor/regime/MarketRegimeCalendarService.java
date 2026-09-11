@@ -61,6 +61,23 @@ public class MarketRegimeCalendarService {
         return r;
     }
 
+    /**
+     * 最近 days 个日历日（含 date 当日）是否全部为 BEAR。
+     *
+     * <p>用于在统计界面向用户说明「当日无推荐」的原因：连续 BEAR 时推荐链路会主动暂停生成。
+     * 走本服务的缓存/落库读取，不会重复调用 detector 重算；detector 未注入时退化为
+     * SIDEWAYS（保守判为非 BEAR，不会误报暂停原因）。</p>
+     */
+    public boolean isConsecutiveBear(LocalDate date, int days) {
+        if (date == null || days <= 0) return false;
+        for (int k = 0; k < days; k++) {
+            if (!"BEAR".equals(getRegime(date.minusDays(k)))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     /** 显式写入（detectRegime 在主链路已算出 regime 时直接落库，省去一次懒计算） */
     public void upsert(LocalDate date, String regime) {
         if (date == null || regime == null || regime.isBlank()) return;
