@@ -984,47 +984,49 @@ function DataUpdate() {
     }
   }, [dividendTask?.status, fetchDividendCoverage]);
 
-  useEffect(() => {
-    // 初始化时恢复各Tab最近的任务状态 + 历史日志
+  // 与后端同步"正在运行/最近"的任务状态：解决「任务在后端跑但当前标签页看不到、也无法取消」的问题
+  // （任务可能在其它标签页/会话启动，或在本标签页挂载之后才启动；仅挂载时恢复一次会漏掉这些情况）
+  const syncRunningTasks = useCallback((includeLogs) => {
     dataUpdateApi.getRecentTasks().then(res => {
-      if (res && Array.isArray(res)) {
-        for (const t of res) {
-          // 从 request 对象中获取 updateType，默认为 DAILY
-          const ut = t.request?.updateType || 'DAILY';
-          // 只恢复非 IDLE 状态且非 CANCELLED 状态的任务
-          if (t.status && t.status !== 'IDLE' && t.status !== 'CANCELLED') {
-            getTaskUpdater(ut)(prev => {
-              const merged = { ...prev, ...t, updateType: ut };
-              applyTaskFields(t.request, merged);
-              return merged;
-            });
-            // 同时补拉历史日志（刷新页面后日志丢失的根本原因）
-            if (t.taskId) {
-              dataUpdateApi.getTaskLogs(t.taskId).then(logs => {
-                const logUpdater = getLogUpdater(ut);
-                if (logs && logs.length > 0) {
-                  logUpdater(prev => {
-                    // 去重：按 text 内容去重，避免和实时推送重复
-                    const existingTexts = new Set(prev.map(l => l.text));
-                    const newEntries = logs
-                      .filter(l => !existingTexts.has(l.line))
-                      .map(l => ({ id: ++logIdCounter.current, time: l.time || '', text: l.line || '' }));
-                    return newEntries.length > 0 ? [...prev, ...newEntries] : prev;
-                  });
-                } else if (t.status === 'RUNNING') {
-                  // 后端重启后日志缓存清空，给用户一个提示
-                  logUpdater(prev => [...prev, {
-                    id: Date.now(),
-                    time: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
-                    text: `[系统] 任务正在运行(后端重启后日志缓存已清空，后续日志会实时推送)`,
-                  }]);
-                }
-              }).catch(() => {});
+      if (!res || !Array.isArray(res)) return;
+      for (const t of res) {
+        const ut = t.request?.updateType || 'DAILY';
+        if (!t.status || t.status === 'IDLE') continue;
+        getTaskUpdater(ut)(prev => {
+          const merged = { ...prev, ...t, updateType: ut };
+          applyTaskFields(t.request, merged);
+          return merged;
+        });
+        if (includeLogs && t.taskId) {
+          dataUpdateApi.getTaskLogs(t.taskId).then(logs => {
+            const logUpdater = getLogUpdater(ut);
+            if (logs && logs.length > 0) {
+              logUpdater(prev => {
+                const existingTexts = new Set(prev.map(l => l.text));
+                const newEntries = logs
+                  .filter(l => !existingTexts.has(l.line))
+                  .map(l => ({ id: ++logIdCounter.current, time: l.time || '', text: l.line || '' }));
+                return newEntries.length > 0 ? [...prev, ...newEntries] : prev;
+              });
+            } else if (t.status === 'RUNNING') {
+              logUpdater(prev => [...prev, {
+                id: Date.now(),
+                time: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
+                text: `[系统] 任务正在运行(后端重启后日志缓存已清空，后续日志会实时推送)`,
+              }]);
             }
-          }
+          }).catch(() => {});
         }
       }
     }).catch(() => {});
+  }, [getTaskUpdater, getLogUpdater, applyTaskFields]);
+
+  useEffect(() => {
+    // 初始化时恢复各Tab最近的任务状态 + 历史日志
+    syncRunningTasks(true);
+
+    // 周期同步（10s）：确保后端正在运行的任务（即使由其它标签页/会话启动）始终可见且可取消
+    const syncTimer = setInterval(() => syncRunningTasks(false), 10000);
 
     // 检测 DB 中孤儿 RUNNING 定时任务（进程已死但状态卡在 RUNNING）
     dataUpdateApi.getScheduledRunningTasks().then(orphanTasks => {
@@ -1074,7 +1076,9 @@ function DataUpdate() {
         });
       }
     }).catch(() => {});
-  }, []);
+
+    return () => clearInterval(syncTimer);
+  }, [syncRunningTasks]);
 
   // 日志自动滚动
   useEffect(() => {
