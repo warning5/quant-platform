@@ -645,15 +645,6 @@ public class BrinsonAttributionService {
         return summary;
     }
 
-    @SuppressWarnings("unchecked")
-    private List<Map<String, Object>> parseJsonList(String json) {
-        try {
-            return objectMapper.readValue(json != null ? json : "[]", List.class);
-        } catch (Exception e) {
-            return Collections.emptyList();
-        }
-    }
-
     private double round4(double v) {
         if (Double.isNaN(v) || Double.isInfinite(v)) return 0;
         return BigDecimal.valueOf(v).setScale(4, RoundingMode.HALF_UP).doubleValue();

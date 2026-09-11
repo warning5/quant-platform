@@ -1,14 +1,7 @@
 package com.quant.platform.strategy.paper;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.quant.platform.common.enums.ResourceType;
-import com.quant.platform.dataperm.service.DataPermissionService;
-import com.quant.platform.factor.service.FactorService;
 import com.quant.platform.recommendation.mapper.RecommendationMapper;
-import com.quant.platform.stock.analysis.engine.SellSignalEngine;
-import com.quant.platform.stock.analysis.service.MarketThermometerService;
-import com.quant.platform.calendar.service.TradeCalendarService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,9 +14,10 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.*;
-import java.util.stream.Collectors;
-import com.quant.platform.common.enums.JobStatus;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
  * 模拟盘订单执行服务

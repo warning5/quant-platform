@@ -1,6 +1,8 @@
 package com.quant.platform.strategy.paper;
 
 import com.baomidou.mybatisplus.annotation.*;
+import com.quant.platform.common.annotation.ResourceMeta;
+import com.quant.platform.common.enums.ResourceType;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -8,9 +10,6 @@ import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
-
-import com.quant.platform.common.annotation.ResourceMeta;
-import com.quant.platform.common.enums.ResourceType;
 
 @Data
 @TableName("paper_trading")

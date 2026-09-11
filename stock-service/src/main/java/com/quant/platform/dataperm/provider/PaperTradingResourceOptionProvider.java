@@ -2,10 +2,10 @@ package com.quant.platform.dataperm.provider;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.quant.platform.common.enums.ResourceType;
-import com.quant.spi.ResourceOptionVO;
-import com.quant.spi.ResourceOptionProvider;
 import com.quant.platform.strategy.paper.PaperTrading;
 import com.quant.platform.strategy.paper.PaperTradingMapper;
+import com.quant.spi.ResourceOptionProvider;
+import com.quant.spi.ResourceOptionVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 

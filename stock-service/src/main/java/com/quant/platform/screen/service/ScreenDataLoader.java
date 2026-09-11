@@ -2,6 +2,7 @@ package com.quant.platform.screen.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.quant.platform.factor.domain.FactorDefinition;
+import com.quant.platform.factor.domain.FactorDefinition.FactorStatus;
 import com.quant.platform.factor.domain.FactorValue;
 import com.quant.platform.factor.mapper.FactorDefinitionMapper;
 import com.quant.platform.factor.service.ClickHouseFactorValueService;
@@ -19,7 +20,6 @@ import java.sql.ResultSet;
 import java.time.LocalDate;
 import java.util.*;
 import java.util.stream.Collectors;
-import com.quant.platform.factor.domain.FactorDefinition.FactorStatus;
 
 /**
  * 选股数据加载服务

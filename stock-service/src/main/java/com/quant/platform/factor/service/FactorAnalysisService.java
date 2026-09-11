@@ -1,27 +1,18 @@
 package com.quant.platform.factor.service;
 
-import com.quant.platform.factor.regime.MarketRegimeCalendarService;
-import static com.quant.platform.factor.service.FactorIcMath.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.math3.distribution.TDistribution;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
-import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.util.*;
-import java.util.stream.Collectors;
+import java.util.List;
+import java.util.Map;
 
 /**
  * 因子有效性分析服务
  * 计算 IC (Information Coefficient) / IR (Information Ratio) 等指标
  * IC = Spearman秩相关系数(因子值, 下期收益率)
  * IR = IC均值 / IC标准差
- *
  * 安全：所有接受 factorCode/factorCodes 的方法均通过白名单校验（字母/数字/下划线/横线）
  */
 @Slf4j

@@ -1,29 +1,18 @@
 package com.quant.platform.strategy.paper;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.quant.platform.common.enums.ResourceType;
-import com.quant.platform.dataperm.service.DataPermissionService;
-import com.quant.platform.factor.service.FactorService;
-import com.quant.platform.recommendation.mapper.RecommendationMapper;
-import com.quant.platform.stock.analysis.engine.SellSignalEngine;
-import com.quant.platform.stock.analysis.service.MarketThermometerService;
-import com.quant.platform.calendar.service.TradeCalendarService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
-import com.quant.platform.common.enums.JobStatus;
 
 /**
  * 模拟盘资金账户服务

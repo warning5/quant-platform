@@ -8,6 +8,7 @@ import com.quant.platform.backtest.mapper.BacktestReportMapper;
 import com.quant.platform.backtest.mapper.BacktestTaskMapper;
 import com.quant.platform.backtest.mapper.EquityCurveMapper;
 import com.quant.platform.backtest.mapper.RebalanceRecordMapper;
+import com.quant.platform.common.enums.JobStatus;
 import com.quant.platform.factor.domain.FactorValue;
 import com.quant.platform.factor.ic.service.FactorIcService;
 import com.quant.platform.factor.mapper.FactorValueMapper;
@@ -32,7 +33,6 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
-import com.quant.platform.common.enums.JobStatus;
 /**
  * 核心回测引擎
  * 基于事件驱动的历史模拟框架，支持因子选股策略回测

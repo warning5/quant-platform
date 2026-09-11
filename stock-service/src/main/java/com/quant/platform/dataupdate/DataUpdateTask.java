@@ -1,6 +1,7 @@
 package com.quant.platform.dataupdate;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.quant.platform.common.enums.JobStatus;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -8,7 +9,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import com.quant.platform.common.enums.JobStatus;
 /**
  * 数据更新任务状态（可序列化推送给前端）
  */

@@ -6,17 +6,17 @@ import com.quant.platform.factor.regime.MarketRegimeCalendarService;
 import com.quant.platform.factor.service.FactorAnalysisService;
 import com.quant.platform.factor.service.FactorCorrelationService;
 import com.quant.platform.factor.service.QuarterlyFactorAnalysisService;
-import com.quant.platform.market.domain.MarketDailyBar;
 import com.quant.platform.market.service.MarketDataService;
 import com.quant.platform.screen.dto.ScreenRequest;
 import com.quant.platform.strategy.domain.StrategyDefinition;
 import com.quant.platform.strategy.mapper.StrategyDefinitionMapper;
-import java.time.LocalDate;
-import java.util.*;
-import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+
+import java.time.LocalDate;
+import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * 因子权重解析：动态 IC 加权、权重上限、拥挤度过滤、季度/一致性 IC 校正。

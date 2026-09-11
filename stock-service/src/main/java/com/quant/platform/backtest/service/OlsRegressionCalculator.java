@@ -2,8 +2,11 @@ package com.quant.platform.backtest.service;
 
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.math3.stat.regression.OLSMultipleLinearRegression;
+
+import java.util.Arrays;
+import java.util.List;
+
 import static com.quant.platform.backtest.service.FactorStyleAttributionService.*;
-import java.util.*;
 
 @Slf4j
 public final class OlsRegressionCalculator {

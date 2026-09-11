@@ -1,9 +1,9 @@
 package com.quant.platform.dataupdate;
 
+import com.quant.platform.common.enums.JobStatus;
 import lombok.Data;
 
 import java.time.LocalDateTime;
-import com.quant.platform.common.enums.JobStatus;
 
 /**
  * 定时任务执行历史记录（对应表 task_run_history）

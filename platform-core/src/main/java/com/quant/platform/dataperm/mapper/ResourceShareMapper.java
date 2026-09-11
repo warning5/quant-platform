@@ -2,10 +2,10 @@ package com.quant.platform.dataperm.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.quant.platform.dataperm.domain.ResourceShareDO;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
-import org.apache.ibatis.annotations.Delete;
 
 import java.util.List;
 

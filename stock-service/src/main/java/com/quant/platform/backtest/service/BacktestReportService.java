@@ -1,13 +1,10 @@
 package com.quant.platform.backtest.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.quant.platform.backtest.domain.BacktestReport;
-import com.quant.platform.backtest.domain.BacktestTask;
-import com.quant.platform.backtest.domain.EquityCurve;
-import com.quant.platform.backtest.domain.ParamOptimizeReport;
-import com.quant.platform.backtest.domain.WalkForwardResult;
+import com.quant.platform.backtest.domain.*;
 import com.quant.platform.backtest.mapper.ParamOptimizeReportMapper;
 import com.quant.platform.common.dto.ApiResponse;
+import com.quant.platform.common.enums.JobStatus;
 import com.quant.platform.screen.dto.ScreenRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.SneakyThrows;
@@ -16,7 +13,6 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
 import java.util.*;
-import com.quant.platform.common.enums.JobStatus;
 /**
  * 回测报告/曲线的组装与归因方案推荐。
  * 承载原 BacktestController 内联的业务计算逻辑，让 Controller 退化为

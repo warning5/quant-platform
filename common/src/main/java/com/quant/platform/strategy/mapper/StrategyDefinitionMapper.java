@@ -2,7 +2,9 @@ package com.quant.platform.strategy.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.quant.platform.strategy.domain.StrategyDefinition;
-import org.apache.ibatis.annotations.*;
+import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 
 import java.util.List;
 

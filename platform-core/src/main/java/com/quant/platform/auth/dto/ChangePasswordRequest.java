@@ -1,8 +1,7 @@
 package com.quant.platform.auth.dto;
 
-import lombok.Data;
-
 import jakarta.validation.constraints.NotBlank;
+import lombok.Data;
 
 /**
  * 自助改密请求（登录用户修改自己的密码）

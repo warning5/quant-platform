@@ -1,6 +1,7 @@
 package com.quant.platform.stock.analysis.engine;
 
-import com.quant.platform.stock.analysis.domain.*;
+import com.quant.platform.stock.analysis.domain.ScoreDetail;
+import com.quant.platform.stock.analysis.domain.SentimentSignal;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -8,8 +9,9 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 
-import static com.quant.platform.stock.analysis.engine.SignalItemFactory.*;
-import static com.quant.platform.stock.analysis.engine.SignalScoreConstants.*;
+import static com.quant.platform.stock.analysis.engine.SignalItemFactory.buildItem;
+import static com.quant.platform.stock.analysis.engine.SignalItemFactory.formatMoneyFlow;
+import static com.quant.platform.stock.analysis.engine.SignalScoreConstants.SENTIMENT_WEIGHT;
 
 /**
  * 事件面打分器（满分 25）

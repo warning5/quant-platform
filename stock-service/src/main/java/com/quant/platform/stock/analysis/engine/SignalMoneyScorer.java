@@ -1,6 +1,7 @@
 package com.quant.platform.stock.analysis.engine;
 
-import com.quant.platform.stock.analysis.domain.*;
+import com.quant.platform.stock.analysis.domain.MoneyFlowSignal;
+import com.quant.platform.stock.analysis.domain.ScoreDetail;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -9,7 +10,8 @@ import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.List;
 
-import static com.quant.platform.stock.analysis.engine.SignalItemFactory.*;
+import static com.quant.platform.stock.analysis.engine.SignalItemFactory.buildItem;
+import static com.quant.platform.stock.analysis.engine.SignalItemFactory.formatMoneyFlow;
 import static com.quant.platform.stock.analysis.engine.SignalScoreConstants.*;
 
 /**

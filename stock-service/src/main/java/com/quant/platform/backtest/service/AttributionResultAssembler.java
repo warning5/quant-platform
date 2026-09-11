@@ -1,10 +1,12 @@
 package com.quant.platform.backtest.service;
 
 import lombok.extern.slf4j.Slf4j;
-import static com.quant.platform.backtest.service.OlsRegressionCalculator.*;
-import static com.quant.platform.backtest.service.FactorStyleAttributionService.*;
-import java.util.*;
+
 import java.time.LocalDate;
+import java.util.*;
+
+import static com.quant.platform.backtest.service.FactorStyleAttributionService.*;
+import static com.quant.platform.backtest.service.OlsRegressionCalculator.round4;
 
 @Slf4j
 public final class AttributionResultAssembler {

@@ -2,15 +2,14 @@ package com.quant.platform.llm;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.quant.platform.credential.service.CredentialService;
+import com.quant.platform.system.configcenter.ConfigService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
-
-import com.quant.platform.credential.service.CredentialService;
-import com.quant.platform.system.configcenter.ConfigService;
 
 import java.util.*;
 

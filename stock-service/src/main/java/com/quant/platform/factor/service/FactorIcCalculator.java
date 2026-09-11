@@ -1,7 +1,7 @@
 package com.quant.platform.factor.service;
 
 import com.quant.platform.factor.regime.MarketRegimeCalendarService;
-import static com.quant.platform.factor.service.FactorIcMath.*;
+import com.quant.platform.factor.service.FactorAnalysisService.FactorIcSnapshot;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.math3.distribution.TDistribution;
@@ -15,7 +15,8 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.*;
 import java.util.stream.Collectors;
-import com.quant.platform.factor.service.FactorAnalysisService.FactorIcSnapshot;
+
+import static com.quant.platform.factor.service.FactorIcMath.*;
 
 /**
  * 因子 IC/IR 计算引擎（有状态：行业/市值缓存 + DB 访问）。

@@ -1,8 +1,7 @@
 package com.quant.platform.auth.dto;
 
-import lombok.Data;
-
 import jakarta.validation.constraints.NotBlank;
+import lombok.Data;
 
 /**
  * 账号密码登录请求

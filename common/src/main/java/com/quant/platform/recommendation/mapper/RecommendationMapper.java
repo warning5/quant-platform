@@ -2,7 +2,10 @@ package com.quant.platform.recommendation.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.quant.platform.recommendation.domain.StockRecommendation;
-import org.apache.ibatis.annotations.*;
+import org.apache.ibatis.annotations.Delete;
+import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;

@@ -1,17 +1,11 @@
 package com.quant.platform.stock.controller;
 
+import com.quant.platform.common.dto.ApiResponse;
+import com.quant.platform.factor.engine.PatternDetector;
 import com.quant.platform.stock.analysis.domain.AnalysisOverview;
 import com.quant.platform.stock.analysis.engine.SellSignalEngine;
 import com.quant.platform.stock.analysis.engine.TradingSignalEngine;
-import com.quant.platform.stock.analysis.service.AnalysisService;
-import com.quant.platform.stock.analysis.service.BidAskService;
-import com.quant.platform.stock.analysis.service.EventSignalService;
-import com.quant.platform.stock.analysis.service.InstitutionCoverageService;
-import com.quant.platform.stock.analysis.service.MarketThermometerService;
-import com.quant.platform.stock.analysis.service.NewsEventParser;
-import com.quant.platform.stock.analysis.service.NewsService;
-import com.quant.platform.stock.analysis.service.WorkflowReportService;
-import com.quant.platform.factor.engine.PatternDetector;
+import com.quant.platform.stock.analysis.service.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,7 +22,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import com.quant.platform.common.dto.ApiResponse;
 
 /**
  * 个股分析 Controller

@@ -1,5 +1,6 @@
 package com.quant.platform.dataupdate;
 
+import com.quant.platform.common.enums.JobStatus;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -14,7 +15,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import com.quant.platform.common.enums.JobStatus;
 /**
  * 定时任务执行历史服务
  * 封装 task_run_history 表的写入、查询与聚合统计（供监控页展示）。

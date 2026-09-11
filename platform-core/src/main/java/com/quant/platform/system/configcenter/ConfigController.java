@@ -2,10 +2,9 @@ package com.quant.platform.system.configcenter;
 
 import cn.dev33.satoken.annotation.SaCheckPermission;
 import com.quant.platform.common.dto.ApiResponse;
+import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
-
-import jakarta.validation.Valid;
 
 import java.util.List;
 

@@ -1,10 +1,6 @@
 package com.quant.platform.stock.analysis.service;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.quant.platform.factor.engine.chan.ChanTheoryCalculator;
-import com.quant.platform.factor.engine.chan.ChanTheoryResult;
-import com.quant.platform.market.domain.MarketDailyBar;
 import com.quant.platform.stock.analysis.domain.*;
 import com.quant.platform.stock.analysis.engine.TradingSignalEngine;
 import com.quant.platform.stock.analysis.mapper.AnalysisChMapper;
@@ -22,9 +18,8 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.time.LocalDate;
-import java.util.*;
-import java.util.stream.Collectors;
+import java.util.List;
+import java.util.Map;
 
 /**
  * 个股分析服务

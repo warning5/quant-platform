@@ -2,7 +2,6 @@ package com.quant.platform.mp;
 
 import com.quant.platform.common.exception.GlobalExceptionHandler;
 import com.quant.platform.common.exception.GlobalResponseMaskAdvice;
-import com.quant.platform.mp.config.DataSourceConfig;
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;

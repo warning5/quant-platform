@@ -1,6 +1,9 @@
 package com.quant.platform.factor.domain;
 
 import com.baomidou.mybatisplus.annotation.*;
+import com.quant.platform.common.annotation.ResourceMeta;
+import com.quant.platform.common.enums.ResourceType;
+import jakarta.validation.constraints.NotBlank;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -9,11 +12,6 @@ import lombok.NoArgsConstructor;
 import java.io.Serial;
 import java.io.Serializable;
 import java.time.LocalDateTime;
-
-import com.quant.platform.common.annotation.ResourceMeta;
-import com.quant.platform.common.enums.ResourceType;
-
-import jakarta.validation.constraints.NotBlank;
 
 /**
  * 因子定义实体

@@ -1,6 +1,7 @@
 package com.quant.platform.stock.analysis.engine;
 
-import com.quant.platform.stock.analysis.domain.*;
+import com.quant.platform.stock.analysis.domain.ScoreDetail;
+import com.quant.platform.stock.analysis.domain.TechSignal;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -9,8 +10,8 @@ import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.List;
 
-import static com.quant.platform.stock.analysis.engine.SignalItemFactory.*;
-import static com.quant.platform.stock.analysis.engine.SignalScoreConstants.*;
+import static com.quant.platform.stock.analysis.engine.SignalItemFactory.buildItem;
+import static com.quant.platform.stock.analysis.engine.SignalScoreConstants.TECH_WEIGHT;
 
 /**
  * 技术面打分器（满分 50）

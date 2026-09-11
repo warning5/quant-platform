@@ -1,7 +1,6 @@
 package com.quant.platform.common.exception;
 
 import com.quant.platform.common.dto.ApiResponse;
-import com.quant.platform.common.exception.RateLimitExceededException;
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;

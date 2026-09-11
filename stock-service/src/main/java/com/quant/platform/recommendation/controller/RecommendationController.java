@@ -1,13 +1,13 @@
 package com.quant.platform.recommendation.controller;
 
-import com.quant.platform.common.ratelimit.RateLimit;
+import com.fasterxml.jackson.annotation.JsonFormat;
 import com.quant.platform.common.dto.ApiResponse;
+import com.quant.platform.common.ratelimit.RateLimit;
 import com.quant.platform.factor.ic.domain.FactorIcRecord;
 import com.quant.platform.factor.ic.service.FactorIcService;
 import com.quant.platform.monitor.IntradayMonitorService;
 import com.quant.platform.recommendation.domain.StockRecommendation;
 import com.quant.platform.recommendation.service.RecommendationService;
-import com.fasterxml.jackson.annotation.JsonFormat;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -16,11 +16,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 

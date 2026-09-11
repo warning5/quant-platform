@@ -3,11 +3,12 @@ package com.quant.platform.factor.health.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.quant.platform.config.ClickHouseConfig;
 import com.quant.platform.factor.domain.FactorDefinition;
+import com.quant.platform.factor.domain.FactorDefinition.FactorStatus;
+import com.quant.platform.factor.health.domain.FactorHealthLog;
+import com.quant.platform.factor.health.mapper.FactorHealthLogMapper;
 import com.quant.platform.factor.ic.domain.FactorIcRecord;
 import com.quant.platform.factor.ic.mapper.FactorIcRecordMapper;
 import com.quant.platform.factor.mapper.FactorDefinitionMapper;
-import com.quant.platform.factor.health.domain.FactorHealthLog;
-import com.quant.platform.factor.health.mapper.FactorHealthLogMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -18,9 +19,10 @@ import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.*;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
-import com.quant.platform.factor.domain.FactorDefinition.FactorStatus;
 /**
  * 因子健康监控服务（P3-11）
  * 全生命周期管理：ACTIVE → 监控 → 预警 → 降权(DEGRADED) → 复活(ACTIVE)

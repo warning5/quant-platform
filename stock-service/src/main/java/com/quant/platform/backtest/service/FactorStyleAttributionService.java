@@ -14,9 +14,12 @@ import java.sql.Statement;
 import java.time.LocalDate;
 import java.util.*;
 import java.util.stream.Collectors;
-import static com.quant.platform.backtest.service.OlsRegressionCalculator.*;
+
 import static com.quant.platform.backtest.service.AttributionResultAssembler.*;
-import static com.quant.platform.backtest.service.RollingWindowMonitor.*;
+import static com.quant.platform.backtest.service.OlsRegressionCalculator.round4;
+import static com.quant.platform.backtest.service.OlsRegressionCalculator.runOLS;
+import static com.quant.platform.backtest.service.RollingWindowMonitor.computeRollingAlphaForWindows;
+import static com.quant.platform.backtest.service.RollingWindowMonitor.detectStyleDrift;
 
 /**
  * 因子风格归因服务（Factor-Based Style Attribution）
@@ -71,11 +74,6 @@ public class FactorStyleAttributionService {
      * 因子定义
      */
     record FactorDef(String code, String name, String description) {}
-
-    /**
-     * 单日因子收益（多空组合）
-     */
-    private record FactorDailyReturn(LocalDate date, Map<String, Double> factorReturns) {}
 
     /**
      * 策略特征（用于前端自动匹配归因方案）
@@ -322,16 +320,6 @@ public class FactorStyleAttributionService {
             double fStatistic,
             double alphaTStat,     // Alpha 的 t 统计量 (A2)
             double alphaPValue     // Alpha 的 p 值 (A2, 双尾)
-    ) {}
-
-    private record FF3AttributionResult(
-            double marketBeta, double marketTStat, boolean marketSig,
-            double sizeBeta, double sizeTStat, boolean sizeSig,
-            double valueBeta, double valueTStat, boolean valueSig,
-            double alpha, double alphaTStat, double alphaPValue,
-            double rSquared, double adjRSquared, double fStatistic,
-            double totalExcess, double totalFactorContrib, double residual,
-            double explanationRatio
     ) {}
 
     // ──── 监控相关记录 ────

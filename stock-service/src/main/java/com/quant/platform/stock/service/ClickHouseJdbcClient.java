@@ -1,7 +1,5 @@
 package com.quant.platform.stock.service;
 
-import static com.quant.platform.stock.service.StockDailySqlSupport.*;
-
 import com.quant.platform.config.ClickHouseConfig;
 import com.quant.platform.stock.entity.StockDaily;
 import lombok.RequiredArgsConstructor;
@@ -10,7 +8,12 @@ import org.springframework.stereotype.Service;
 
 import java.sql.*;
 import java.time.LocalDate;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+import static com.quant.platform.stock.service.StockDailySqlSupport.convertResultSet;
 
 /**
  * ClickHouse JDBC 底座（从 ClickHouseStockService 逐字搬出，no-behavior-change）。

@@ -1,11 +1,11 @@
 package com.quant.platform.dataperm.provider;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
-import com.quant.platform.common.enums.ResourceType;
-import com.quant.spi.ResourceOptionVO;
-import com.quant.spi.ResourceOptionProvider;
 import com.quant.platform.backtest.domain.BacktestTask;
 import com.quant.platform.backtest.mapper.BacktestTaskMapper;
+import com.quant.platform.common.enums.ResourceType;
+import com.quant.spi.ResourceOptionProvider;
+import com.quant.spi.ResourceOptionVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 

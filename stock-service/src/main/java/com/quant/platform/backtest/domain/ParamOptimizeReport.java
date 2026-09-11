@@ -1,6 +1,7 @@
 package com.quant.platform.backtest.domain;
 
 import com.baomidou.mybatisplus.annotation.*;
+import com.quant.platform.common.enums.JobStatus;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -10,7 +11,6 @@ import java.io.Serial;
 import java.io.Serializable;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
-import com.quant.platform.common.enums.JobStatus;
 
 /**
  * 参数优化报告实体

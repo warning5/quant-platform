@@ -1,17 +1,18 @@
 package com.quant.platform.strategy.domain;
 
 import com.baomidou.mybatisplus.annotation.*;
-import lombok.*;
-
+import com.quant.platform.common.annotation.ResourceMeta;
+import com.quant.platform.common.enums.ResourceType;
 import jakarta.validation.constraints.NotBlank;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 
 import java.io.Serial;
 import java.io.Serializable;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
-
-import com.quant.platform.common.annotation.ResourceMeta;
-import com.quant.platform.common.enums.ResourceType;
 
 /**
  * 策略定义实体（共享，backend 和 backend-mp 共用）

@@ -1,10 +1,15 @@
 package com.quant.platform.backtest.service;
 
 import lombok.extern.slf4j.Slf4j;
-import static com.quant.platform.backtest.service.OlsRegressionCalculator.*;
-import static com.quant.platform.backtest.service.FactorStyleAttributionService.*;
-import java.util.*;
+
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+
+import static com.quant.platform.backtest.service.FactorStyleAttributionService.*;
+import static com.quant.platform.backtest.service.OlsRegressionCalculator.*;
 
 @Slf4j
 public final class RollingWindowMonitor {

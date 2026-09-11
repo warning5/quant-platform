@@ -1,13 +1,13 @@
 package com.quant.platform.screen.service;
 
+import com.quant.platform.common.utils.MathUtils;
 import com.quant.platform.factor.domain.FactorDefinition.FactorCategory;
-import com.quant.platform.factor.domain.FactorValue;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.util.*;
+import java.util.List;
 import java.util.stream.Collectors;
 
 /**
@@ -274,18 +274,8 @@ public class ScreenMathService {
     }
 
     public double pearsonCorrelation(double[] x, double[] y) {
-        int n = x.length;
-        double sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0, sumY2 = 0;
-        for (int i = 0; i < n; i++) {
-            sumX += x[i];
-            sumY += y[i];
-            sumXY += x[i] * y[i];
-            sumX2 += x[i] * x[i];
-            sumY2 += y[i] * y[i];
-        }
-        double num = n * sumXY - sumX * sumY;
-        double den = Math.sqrt((n * sumX2 - sumX * sumX) * (n * sumY2 - sumY * sumY));
-        return den == 0 ? 0 : num / den;
+        double r = MathUtils.pearson(x, y);
+        return Double.isNaN(r) ? 0 : r;
     }
 
     /**

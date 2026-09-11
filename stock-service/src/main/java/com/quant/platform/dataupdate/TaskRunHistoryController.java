@@ -1,6 +1,7 @@
 package com.quant.platform.dataupdate;
 
 import com.quant.platform.common.dto.ApiResponse;
+import com.quant.platform.common.enums.JobStatus;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -10,7 +11,6 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Map;
-import com.quant.platform.common.enums.JobStatus;
 /**
  * 定时任务执行历史 / 监控告警查询接口
  */

@@ -1,6 +1,11 @@
 package com.quant.platform.backtest.domain;
 
 import com.baomidou.mybatisplus.annotation.*;
+import com.quant.platform.common.annotation.ResourceMeta;
+import com.quant.platform.common.enums.JobStatus;
+import com.quant.platform.common.enums.ResourceType;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -11,13 +16,6 @@ import java.io.Serializable;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-
-import com.quant.platform.common.annotation.ResourceMeta;
-import com.quant.platform.common.enums.JobStatus;
-import com.quant.platform.common.enums.ResourceType;
-
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 
 /**
  * 回测任务实体

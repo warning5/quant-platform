@@ -1,6 +1,5 @@
 package com.quant.platform.backtest.dto;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quant.platform.screen.dto.ScreenRequest;
 import lombok.Data;

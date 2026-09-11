@@ -1,5 +1,6 @@
 package com.quant.platform.factor.service;
 
+import com.quant.platform.common.utils.MathUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -121,24 +122,8 @@ public class FactorCorrelationService {
      * 计算Pearson相关系数
      */
     private double pearsonCorrelation(List<Double> x, List<Double> y) {
-        int n = x.size();
-        double sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0, sumY2 = 0;
-
-        for (int i = 0; i < n; i++) {
-            double xi = x.get(i);
-            double yi = y.get(i);
-            sumX += xi;
-            sumY += yi;
-            sumXY += xi * yi;
-            sumX2 += xi * xi;
-            sumY2 += yi * yi;
-        }
-
-        double numerator = n * sumXY - sumX * sumY;
-        double denominator = Math.sqrt((n * sumX2 - sumX * sumX) * (n * sumY2 - sumY * sumY));
-
-        if (denominator == 0) return 0;
-        return numerator / denominator;
+        double r = MathUtils.pearson(x, y);
+        return Double.isNaN(r) ? 0 : r;
     }
 
     // ================================================================

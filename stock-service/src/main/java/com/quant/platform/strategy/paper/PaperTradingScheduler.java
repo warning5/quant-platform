@@ -9,7 +9,6 @@ import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
 import java.util.List;
-import com.quant.platform.common.enums.JobStatus;
 /**
  * 模拟盘定时调度器
  * 每个交易日收盘后自动：

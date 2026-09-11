@@ -1,7 +1,7 @@
 package com.quant.platform.factor.service;
 
-import com.quant.platform.factor.mapper.FactorDefinitionMapper;
 import com.quant.platform.factor.domain.FactorDefinition;
+import com.quant.platform.factor.mapper.FactorDefinitionMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;

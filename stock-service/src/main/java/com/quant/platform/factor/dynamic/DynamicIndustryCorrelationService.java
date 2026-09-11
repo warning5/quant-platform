@@ -1,10 +1,10 @@
 package com.quant.platform.factor.dynamic;
 
-import lombok.Data;
+import com.quant.platform.common.utils.MathUtils;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
-import lombok.RequiredArgsConstructor;
 
 import java.time.LocalDate;
 import java.util.*;
@@ -206,21 +206,9 @@ public class DynamicIndustryCorrelationService {
      * 皮尔逊相关系数
      */
     private double pearsonCorr(List<Double> x, List<Double> y) {
-        int n = Math.min(x.size(), y.size());
-        if (n < 5) return 0;
-
-        double sumX = 0, sumY = 0;
-        for (int i = 0; i < n; i++) { sumX += x.get(i); sumY += y.get(i); }
-        double meanX = sumX / n, meanY = sumY / n;
-
-        double cov = 0, varX = 0, varY = 0;
-        for (int i = 0; i < n; i++) {
-            double dx = x.get(i) - meanX, dy = y.get(i) - meanY;
-            cov += dx * dy; varX += dx * dx; varY += dy * dy;
-        }
-
-        double denom = Math.sqrt(varX * varY);
-        return denom > 0 ? cov / denom : 0;
+        if (Math.min(x.size(), y.size()) < 5) return 0;
+        double r = MathUtils.pearson(x, y);
+        return Double.isNaN(r) ? 0 : r;
     }
 
     /**

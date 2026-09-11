@@ -1,7 +1,7 @@
 package com.quant.platform.common.event;
 
-import org.springframework.context.ApplicationEvent;
 import com.quant.platform.factor.domain.FactorDefinition.FactorStatus;
+import org.springframework.context.ApplicationEvent;
 /**
  * 因子状态变更事件（P3-12 服务解耦）
  *

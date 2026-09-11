@@ -605,59 +605,6 @@ public class FactorComputeEngine {
     }
 
     /**
-     * 计算单个交易日所有股票的因子值（在线程池中执行）
-     */
-    private List<FactorValue> computeOneDate(FactorDefinition factor, LocalDate date, List<String> symbols) {
-        String factorCode = factor.getFactorCode();
-
-        // 财务因子走单独的计算路径（基于财务报表数据，非行情K线）
-        if (factorFinancialService.isFinancialFactor(factorCode)) {
-            return factorFinancialService.computeOneDateFinancial(factorCode, date, symbols);
-        }
-
-        LocalDate histStart = date.minusDays(400); // 预留足够历史窗口
-        LocalDateTime now = LocalDateTime.now();
-
-        // 批量查询：一次 DB 调用替代 N 次单只查询（修复 5490 只股票串行查询卡死问题）
-        Map<String, List<MarketDailyBar>> batchData = marketDataService.getBarsBatch(symbols, histStart, date);
-
-        // 特殊因子需要预构建context
-        Map<String, Object> context = new HashMap<>();
-        if ("BETA_60D".equals(factorCode)) {
-            context.putAll(factorContextBuilder.buildIndexReturnsContext(date, null));
-            if (context.isEmpty()) return List.of();
-        } else if ("MARGIN_BUY_RATIO".equals(factorCode)) {
-            context.putAll(factorContextBuilder.buildMarginContext(date));
-            if (context.isEmpty()) return List.of();
-        } else if ("EARNINGS_SURPRISE".equals(factorCode)) {
-            context.putAll(factorContextBuilder.buildEarningsContext(date));
-            if (context.isEmpty()) return List.of();
-        } else if ("LHB_INST_NET".equals(factorCode)) {
-            context.putAll(factorContextBuilder.buildLhbContext(date));
-            if (context.isEmpty()) return List.of();
-        } else if ("INST_RESEARCH".equals(factorCode)) {
-            context.putAll(factorContextBuilder.buildResearchContext(date));
-            if (context.isEmpty()) return List.of();
-        }
-
-        List<FactorValue> results = new ArrayList<>(symbols.size());
-        for (String symbol : symbols) {
-            try {
-                List<MarketDailyBar> history = batchData.getOrDefault(symbol, List.of());
-                BigDecimal value = computeSingleValue(factor, symbol, date, history, context);
-                if (value != null) {
-                    String code = factorContextBuilder.parseCode(symbol);
-                    FactorValue fv = FactorValue.builder().factorCode(factor.getFactorCode()).symbol(code).calcDate(date).factorVal(value).createdAt(now).build();
-                    results.add(fv);
-                }
-            } catch (Exception ignored) {
-                log.error("[FactorComputeEngine] 捕获到未处理异常", ignored);
-            }
-        }
-        return results;
-    }
-
-    /**
      * 计算单个交易日所有股票的因子值（使用预加载的K线数据，不再查DB）
      * 优化：线程安全（只读），多线程可并行执行；用二分查找截取历史K线替代 stream filter
      */

@@ -3,7 +3,6 @@ package com.quant.platform.stock.analysis.service;
 import com.quant.platform.stock.analysis.domain.*;
 import freemarker.template.Configuration;
 import freemarker.template.Template;
-import freemarker.template.TemplateException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -11,7 +10,10 @@ import org.springframework.stereotype.Service;
 import java.io.StringWriter;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
  * Workflow A 综合分析报告服务（档一：轻量版报告模板填充）

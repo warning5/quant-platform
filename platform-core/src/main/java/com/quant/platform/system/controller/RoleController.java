@@ -3,12 +3,12 @@ package com.quant.platform.system.controller;
 import cn.dev33.satoken.annotation.SaCheckPermission;
 import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.core.metadata.IPage;
-import jakarta.validation.Valid;
 import com.quant.platform.common.dto.ApiResponse;
 import com.quant.platform.common.dto.PageRequest;
 import com.quant.platform.system.dto.RoleRequest;
 import com.quant.platform.system.entity.SysRole;
 import com.quant.platform.system.service.RoleService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 

@@ -1,12 +1,7 @@
 package com.quant.platform.auth.controller;
 
 import cn.dev33.satoken.stp.StpUtil;
-import com.quant.platform.auth.dto.ChangePasswordRequest;
-import com.quant.platform.auth.dto.LoginRequest;
-import com.quant.platform.auth.dto.LoginVO;
-import com.quant.platform.auth.dto.ProfileVO;
-import com.quant.platform.auth.dto.UpdateProfileRequest;
-import com.quant.platform.auth.dto.WechatMiniLoginRequest;
+import com.quant.platform.auth.dto.*;
 import com.quant.platform.auth.service.AuthService;
 import com.quant.platform.auth.service.LoginSecurityService;
 import com.quant.platform.auth.service.RefreshTokenService;
@@ -22,13 +17,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.PutMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 /**
  * 认证接口（公开，无需登录）

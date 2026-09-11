@@ -2,10 +2,10 @@ package com.quant.platform.dataperm.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.quant.platform.dataperm.domain.ResourceMetaDO;
+import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
-import org.apache.ibatis.annotations.Delete;
 
 /**
  * resource_meta 访问。INSERT IGNORE 保证 (resource_type, resource_id) 唯一键幂等，

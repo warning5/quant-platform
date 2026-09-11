@@ -2,7 +2,6 @@ package com.quant.platform.system.controller;
 
 import cn.dev33.satoken.annotation.SaCheckPermission;
 import com.baomidou.mybatisplus.core.metadata.IPage;
-import jakarta.validation.Valid;
 import com.quant.platform.common.dto.ApiResponse;
 import com.quant.platform.common.dto.PageRequest;
 import com.quant.platform.system.dto.CreateUserRequest;
@@ -10,6 +9,7 @@ import com.quant.platform.system.dto.ResetPasswordRequest;
 import com.quant.platform.system.dto.UpdateUserRequest;
 import com.quant.platform.system.entity.SysUser;
 import com.quant.platform.system.service.UserService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 

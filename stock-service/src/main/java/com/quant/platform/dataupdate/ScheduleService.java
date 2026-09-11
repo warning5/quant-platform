@@ -1,5 +1,9 @@
 package com.quant.platform.dataupdate;
 
+import com.quant.platform.calendar.service.TradeCalendarService;
+import com.quant.platform.common.enums.JobStatus;
+import com.quant.platform.notification.NotificationService;
+import com.quant.platform.recommendation.service.RecommendationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationContext;
@@ -12,17 +16,12 @@ import org.springframework.scheduling.config.ScheduledTaskRegistrar;
 import org.springframework.scheduling.support.CronTrigger;
 import org.springframework.stereotype.Service;
 
-import com.quant.platform.calendar.service.TradeCalendarService;
-import com.quant.platform.notification.NotificationService;
-import com.quant.platform.recommendation.service.RecommendationService;
-
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
-import com.quant.platform.common.enums.JobStatus;
 /**
  * 定时调度服务
  * - 启动时从 DB 加载所有 enabled=1 的配置，按 cron 注册调度任务

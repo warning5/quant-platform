@@ -8,6 +8,7 @@ import com.quant.platform.backtest.engine.BacktestEngine;
 import com.quant.platform.backtest.mapper.BacktestReportMapper;
 import com.quant.platform.backtest.mapper.BacktestTaskMapper;
 import com.quant.platform.backtest.mapper.ParamOptimizeReportMapper;
+import com.quant.platform.common.enums.JobStatus;
 import com.quant.platform.strategy.domain.StrategyDefinition;
 import com.quant.platform.strategy.service.StrategyService;
 import lombok.extern.slf4j.Slf4j;
@@ -23,7 +24,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
-import com.quant.platform.common.enums.JobStatus;
 /**
  * 参数优化服务 —— 网格搜索（Grid Search）
  * <p>

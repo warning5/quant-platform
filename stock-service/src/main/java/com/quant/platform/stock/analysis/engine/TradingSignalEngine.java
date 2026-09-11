@@ -10,7 +10,6 @@ import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.List;
 
-import static com.quant.platform.stock.analysis.engine.SignalItemFactory.*;
 import static com.quant.platform.stock.analysis.engine.SignalScoreConstants.*;
 
 /**

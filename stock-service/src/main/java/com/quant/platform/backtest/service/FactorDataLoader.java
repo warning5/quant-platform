@@ -1,21 +1,26 @@
 package com.quant.platform.backtest.service;
 
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Service;
-import static com.quant.platform.backtest.service.OlsRegressionCalculator.*;
-import static com.quant.platform.backtest.service.FactorStyleAttributionService.*;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.quant.platform.common.exception.BusinessException;
 import com.quant.platform.config.ClickHouseConfig;
 import com.quant.platform.strategy.domain.StrategyDefinition;
 import com.quant.platform.strategy.mapper.StrategyDefinitionMapper;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
-import java.sql.*;
+import org.springframework.stereotype.Service;
+
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.Statement;
+import java.time.LocalDate;
 import java.util.*;
 import java.util.stream.Collectors;
-import java.time.LocalDate;
+
+import static com.quant.platform.backtest.service.FactorStyleAttributionService.*;
+import static com.quant.platform.backtest.service.OlsRegressionCalculator.round4;
 
 @Slf4j
 @Service

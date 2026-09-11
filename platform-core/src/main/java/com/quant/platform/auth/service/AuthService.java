@@ -7,7 +7,6 @@ import com.quant.platform.auth.dto.ChangePasswordRequest;
 import com.quant.platform.auth.dto.LoginVO;
 import com.quant.platform.auth.dto.ProfileVO;
 import com.quant.platform.auth.dto.UpdateProfileRequest;
-import com.quant.platform.auth.service.LoginSecurityService;
 import com.quant.platform.common.exception.BusinessException;
 import com.quant.platform.system.entity.SysDepartment;
 import com.quant.platform.system.entity.SysMenu;

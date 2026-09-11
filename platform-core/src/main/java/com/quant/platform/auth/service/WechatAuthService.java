@@ -1,6 +1,5 @@
 package com.quant.platform.auth.service;
 
-import cn.dev33.satoken.stp.StpUtil;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.quant.platform.auth.config.WechatProperties;
 import com.quant.platform.auth.dto.LoginVO;

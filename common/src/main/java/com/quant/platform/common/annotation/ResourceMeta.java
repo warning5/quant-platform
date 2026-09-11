@@ -2,11 +2,7 @@ package com.quant.platform.common.annotation;
 
 import com.quant.platform.common.enums.ResourceType;
 
-import java.lang.annotation.Documented;
-import java.lang.annotation.ElementType;
-import java.lang.annotation.Retention;
-import java.lang.annotation.RetentionPolicy;
-import java.lang.annotation.Target;
+import java.lang.annotation.*;
 
 /**
  * 标记在受数据权限管控的实体类上。ResourceMetaInsertInterceptor 据此在插入时

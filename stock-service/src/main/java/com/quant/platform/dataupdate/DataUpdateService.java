@@ -1,41 +1,12 @@
 package com.quant.platform.dataupdate;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.quant.platform.stock.entity.StockInfo;
-import com.quant.platform.stock.mapper.StockInfoMapper;
-import com.quant.platform.stock.service.ClickHouseStockService;
-import com.quant.platform.calendar.service.TradeCalendarService;
-import com.quant.platform.factor.domain.FactorDefinition;
-import com.quant.platform.factor.mapper.FactorDefinitionMapper;
-import com.quant.platform.factor.service.FactorService;
-import jakarta.annotation.PostConstruct;
-import jakarta.annotation.PreDestroy;
-import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-import com.quant.platform.common.enums.JobStatus;
+import java.util.List;
+import java.util.Map;
 /**
  * 数据更新服务
  * 通过 ProcessBuilder 调用 Python 脚本，解析 stdout 实时推送进度

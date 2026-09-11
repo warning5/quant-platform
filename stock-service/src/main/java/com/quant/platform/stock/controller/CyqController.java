@@ -1,12 +1,15 @@
 package com.quant.platform.stock.controller;
 
+import cn.dev33.satoken.annotation.SaCheckPermission;
 import com.quant.platform.common.dto.ApiResponse;
 import com.quant.platform.stock.service.ClickHouseStockService;
-import cn.dev33.satoken.annotation.SaCheckPermission;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.format.annotation.DateTimeFormat;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;

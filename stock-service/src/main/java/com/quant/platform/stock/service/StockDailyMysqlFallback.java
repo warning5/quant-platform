@@ -1,7 +1,5 @@
 package com.quant.platform.stock.service;
 
-import static com.quant.platform.stock.service.StockDailySqlSupport.*;
-
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.quant.platform.stock.entity.StockDaily;
 import com.quant.platform.stock.mapper.StockDailyMapper;
@@ -11,7 +9,8 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
 import java.util.*;
-import java.util.stream.Collectors;
+
+import static com.quant.platform.stock.service.StockDailySqlSupport.buildOrderByClause;
 
 /**
  * MySQL 日线兜底层（从 ClickHouseStockService 逐字搬出，no-behavior-change）。

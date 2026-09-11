@@ -1,5 +1,6 @@
 package com.quant.platform.system.service;
 
+import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -13,7 +14,6 @@ import com.quant.platform.system.mapper.SysRoleMapper;
 import com.quant.platform.system.mapper.SysUserMapper;
 import com.quant.platform.system.mapper.SysUserRoleMapper;
 import lombok.RequiredArgsConstructor;
-import cn.dev33.satoken.stp.StpUtil;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;

@@ -1,17 +1,19 @@
 package com.quant.platform.stock.service;
 
-import static com.quant.platform.stock.service.StockDailySqlSupport.*;
-
 import com.quant.platform.config.ClickHouseConfig;
 import com.quant.platform.stock.entity.StockDaily;
-import com.quant.platform.stock.service.ClickHouseJdbcClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
-import java.sql.*;
-import java.util.*;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
+import java.util.List;
+
+import static com.quant.platform.stock.service.StockDailySqlSupport.setLongParam;
+import static com.quant.platform.stock.service.StockDailySqlSupport.setParam;
 
 /**
  * ClickHouse 日线写入器（从 ClickHouseStockService 逐字搬出，no-behavior-change）。

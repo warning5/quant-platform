@@ -6,8 +6,6 @@ import com.quant.platform.common.enums.JobStatus;
 import com.quant.platform.factor.domain.FactorDefinition;
 import com.quant.platform.factor.mapper.FactorDefinitionMapper;
 import com.quant.platform.factor.service.FactorService;
-import com.quant.platform.stock.mapper.StockInfoMapper;
-import com.quant.platform.stock.service.ClickHouseStockService;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.Getter;
