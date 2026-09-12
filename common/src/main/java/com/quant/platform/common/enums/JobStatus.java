@@ -24,6 +24,8 @@ public enum JobStatus {
     CANCELLED,
     SUCCESS,
     PARTIAL,
+    SKIPPED,
+    PAUSED,
     DONE,
     TEST_DONE,
     TIMEOUT;
@@ -48,7 +50,8 @@ public enum JobStatus {
     public boolean isTerminal() {
         return this == COMPLETED || this == FAILED || this == CANCELLED
                 || this == SUCCESS || this == DONE || this == TEST_DONE
-                || this == TIMEOUT || this == PARTIAL;
+                || this == TIMEOUT || this == PARTIAL
+                || this == SKIPPED || this == PAUSED;
     }
 
     /** 按字符串反查枚举，忽略大小写；无匹配返回 null。 */

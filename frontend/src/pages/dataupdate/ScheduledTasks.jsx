@@ -4,7 +4,7 @@ import { message } from '../../utils/messageUtil';
 import { useAuthStore } from '../../stores/authStore';
 import {
   PlayCircleOutlined, ClockCircleOutlined,
-  CheckCircleOutlined, CloseCircleOutlined, SyncOutlined,
+  CheckCircleOutlined, CloseCircleOutlined, SyncOutlined, PauseCircleOutlined,
   ThunderboltOutlined, GlobalOutlined, HistoryOutlined,
   ReloadOutlined, StopOutlined, DeleteOutlined,
   EditOutlined, CheckOutlined, ClearOutlined, SettingOutlined, LoadingOutlined, LinkOutlined, ApartmentOutlined, BarChartOutlined
@@ -1945,6 +1945,7 @@ export default function ScheduledTasks() {
       return <Text type="secondary">—</Text>;
     switch (status) {
       case 'SUCCESS': return <Tag icon={<CheckCircleOutlined />} color="success">成功</Tag>;
+      case 'PAUSED': return <Tag icon={<PauseCircleOutlined />} color="warning">熊市暂停</Tag>;
       case 'FAILED': return <Tag icon={<CloseCircleOutlined />} color="error">失败</Tag>;
       case 'CANCELLED': return <Tag icon={<StopOutlined />} color="warning">已取消</Tag>;
       case 'RUNNING': return <Tag icon={<SyncOutlined spin />} color="processing">执行中</Tag>;

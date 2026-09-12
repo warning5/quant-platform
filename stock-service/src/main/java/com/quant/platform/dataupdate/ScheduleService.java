@@ -18,8 +18,11 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
 /**
@@ -657,10 +660,41 @@ public class ScheduleService implements SchedulingConfigurer {
         }
     }
 
-    /** 失败后5分钟自动重试一次（同一天同一任务只重试一次） */
+    /**
+     * EOD 任务集合：这些任务会写入"当日日线"，盘中失败重试会拉起日线任务、
+     * 把"未收盘"的半日快照当收盘写库（2026-09-11 09:32 重试污染事故的同类根因）。
+     * 其失败重试不应在盘中(15:00 前)触发，须延后到收盘后。
+     */
+    private static final Set<String> EOD_TASK_KEYS = Set.of(
+        "DAILY", "INDEX", "DAILY_RECOMMENDATION", "DIVIDEND", "FINANCIAL",
+        "BIDASK", "RESEARCH", "SENTIMENT_MF", "SENTIMENT_OTHER", "QFQ_REFRESH");
+
+    private boolean isEodTask(String taskKey) {
+        return EOD_TASK_KEYS.contains(taskKey);
+    }
+
+    /** 失败后自动重试一次（同一天同一任务只重试一次） */
     private void scheduleRetry(String taskKey) {
         String retryKey = taskKey + ":" + LocalDate.now();
         if (retryTracker.putIfAbsent(retryKey, true) == null) {
+            // C-防呆：EOD 任务盘中失败 → 重试延后到收盘后 15:30，避免写入半日快照
+            LocalDateTime now = LocalDateTime.now();
+            if (isEodTask(taskKey) && isTradingDaySafe(now.toLocalDate())
+                    && now.toLocalTime().isBefore(LocalTime.of(15, 0))) {
+                LocalDateTime afterClose = now.toLocalDate().atTime(15, 30);
+                log.warn("[ScheduleService] EOD任务[{}]盘中失败，重试延后至收盘后: {}", taskKey, afterClose);
+                taskScheduler.schedule(
+                    () -> {
+                        try {
+                            log.info("[ScheduleService] 重试执行: {}", taskKey);
+                            executeTask(taskKey, "CRON");
+                        } catch (Exception retryEx) {
+                            log.error("[ScheduleService] 重试仍然失败: {}", taskKey, retryEx);
+                        }
+                    },
+                    java.util.Date.from(afterClose.atZone(ZoneId.systemDefault()).toInstant()));
+                return;
+            }
             log.info("[ScheduleService] 5分钟后自动重试: {}", taskKey);
             taskScheduler.schedule(
                 () -> {
@@ -1115,6 +1149,7 @@ public class ScheduleService implements SchedulingConfigurer {
         // 逐日期 × 策略 × 权重模式 三层循环，每种组合分别生成独立快照
         java.util.List<com.quant.platform.recommendation.domain.StockRecommendation> allRecommendations = new java.util.ArrayList<>();
         boolean allSuccess = true;
+        int pausedDates = 0;
 
         // 如果 extra_config 未指定 strategyIds，则自动查询所有 ACTIVE 策略
         if (strategyIds.isEmpty()) {
@@ -1138,6 +1173,16 @@ public class ScheduleService implements SchedulingConfigurer {
 
         for (LocalDate runDate : runDates) {
             log.info("[ScheduleService] 开始处理日期: {} (共{}个日期)", runDate, runDates.size());
+
+            // 优化④：连续 BEAR 暂停（滚动窗口）。每天只回看一次 regime，命中则整日跳过生成，
+            // 既让状态能区分"主动暂停(PAUSED)"与"成功(SUCCESS)"，又避免逐策略重复回看白耗。
+            if (recommendationService.isBearPaused(runDate)) {
+                log.warn("[ScheduleService] 优化④触发: 日期{} 连续{}日BEAR, 暂停每日推荐生成(规避下行)",
+                        runDate, com.quant.platform.recommendation.service.RecommendationService.CONSECUTIVE_BEAR_STOP_DAYS);
+                pausedDates++;
+                continue;
+            }
+
             for (Long strategyId : strategyIds) {
                 for (String wm : weightModes) {
                     try {
@@ -1185,12 +1230,23 @@ public class ScheduleService implements SchedulingConfigurer {
 
         // 更新调度状态
         long durationSec = (System.currentTimeMillis() - startTime) / 1000;
+        // 优化④：若全部待执行日期都因连续 BEAR 被主动暂停，则状态记为 PAUSED（而非 SUCCESS），
+        // 让 UI/调用方明确这是"预期内的主动暂停"，而非"成功生成 0 条"。
+        boolean allPaused = !runDates.isEmpty() && pausedDates == runDates.size();
+        JobStatus finalStatus;
+        if (allPaused) {
+            finalStatus = JobStatus.PAUSED;
+        } else if (!allSuccess) {
+            finalStatus = JobStatus.PARTIAL;
+        } else {
+            finalStatus = JobStatus.SUCCESS;
+        }
         jdbcTemplate.update(
             "UPDATE data_schedule_config SET last_run_time = ?, last_run_status = ?, last_run_duration_sec = ? " +
             "WHERE task_key = 'DAILY_RECOMMENDATION'",
-            LocalDateTime.now(), allSuccess ? JobStatus.SUCCESS.name() : JobStatus.PARTIAL.name(), durationSec);
-        log.info("[ScheduleService] 每日自动推荐完成: 策略数={}, 推荐总数={}, 耗时={}s, 状态={}",
-            strategyIds.size(), allRecommendations.size(), durationSec, allSuccess ? JobStatus.SUCCESS.name() : JobStatus.PARTIAL.name());
+            LocalDateTime.now(), finalStatus.name(), durationSec);
+        log.info("[ScheduleService] 每日自动推荐完成: 策略数={}, 推荐总数={}, 暂停日期数={}, 耗时={}s, 状态={}",
+            strategyIds.size(), allRecommendations.size(), pausedDates, durationSec, finalStatus);
 
         // P3-12: 发布推荐生成完成事件
         if (eventPublisher != null) {

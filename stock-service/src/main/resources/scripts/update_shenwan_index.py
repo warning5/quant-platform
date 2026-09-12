@@ -141,7 +141,7 @@ def fetch_industry_hist(symbol, start_date, end_date, max_retries=3):
                 return []
 
 
-def process_industry(db, code, name_en, name_zh, start_date, end_date, force=False):
+def process_industry(db, code, name_en, name_zh, start_date, end_date, force=False, refresh_version=False):
     """Fetch + write a single industry index into index_daily."""
 
     # Step 1: decide start_date from DB latest (unless --force)
@@ -174,11 +174,26 @@ def process_industry(db, code, name_en, name_zh, start_date, end_date, force=Fal
         print(f"  [{code}] {name_zh} | no new data from akshare")
         return 0, 0
 
-    # Step 3: fill name + compute change_percent / change_amount
+    # 盘中快照守卫：未收盘当日(<%H:%M)的 bar 视为无效，跳过写入，
+    # 防 2026-09-11 09:32 重试事件把半日快照当收盘污染 index_daily（与 update_index_daily_baostock.py 同款守卫）。
+    now = datetime.now()
+    today_str = now.strftime("%Y-%m-%d")
+    if now.hour < 15:
+        before = len(rows)
+        rows = [r for r in rows if r["trade_date"] != today_str]
+        if before != len(rows):
+            print(f"  [{code}] {name_zh} | 盘中快照守卫跳过 {before - len(rows)} 行(当日未收盘)")
+    if not rows:
+        print(f"  [{code}] {name_zh} | 无有效数据(当日未收盘已跳过)")
+        return 0, 0
+
+    # Step 3: fill name + compute change_percent / change_amount / pre_close
     prev_close = None
     for r in rows:
         r["name"] = name_zh
         cur_close = r["close_price"]
+        # pre_close 由序列前一日收盘推导（akshare index_hist_sw 不直接提供该列）
+        r["pre_close"] = prev_close
         if prev_close and cur_close:
             r["change_amount"] = round(cur_close - prev_close, 2)
             if prev_close != 0:
@@ -187,7 +202,9 @@ def process_industry(db, code, name_en, name_zh, start_date, end_date, force=Fal
 
     # Step 4: upsert into index_daily
     try:
-        inserted = db.upsert_daily(rows, table="index")
+        # force/refresh_version 必须透传：否则 upsert 预过滤发现已存在就跳过，
+        # 脏行(如盘中快照)将永远覆盖不了（与 update_index_daily_baostock.py 旧 bug 同源）。
+        inserted = db.upsert_daily(rows, table="index", force=force, refresh_version=refresh_version)
         print(f"  [{code}] {name_zh} | inserted/updated {inserted} rows (fetched {len(rows)})")
         return inserted, len(rows)
     except Exception as e:
@@ -252,6 +269,8 @@ def main():
                         help="Only update specified codes, comma-separated (e.g. 801030,801080)")
     parser.add_argument("--force",      action="store_true",
                         help="Force full re-fetch (ignore incremental check)")
+    parser.add_argument("--refresh-version", action="store_true",
+                        help="用 NOW() 作为版本号覆盖写入（订正脏数据时配合 --force 使用）")
     parser.add_argument("--summary",   action="store_true",
                         help="Only show data summary, do not update")
     args = parser.parse_args()
@@ -289,7 +308,8 @@ def main():
             print(f"  [{i}/{len(indices)}] Processing: {code} {name_zh}")
             start = args.start_date or default_start
             inserted, fetched = process_industry(
-                db, code, name_en, name_zh, start, end_date, force=args.force
+                db, code, name_en, name_zh, start, end_date,
+                force=args.force, refresh_version=args.refresh_version
             )
             total_inserted += inserted
             total_fetched += fetched

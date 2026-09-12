@@ -95,6 +95,7 @@ public class DataUpdateExecutionService {
      */
     private final ConcurrentHashMap<String, String> taskUpdateTypes = new ConcurrentHashMap<>();
     @Value("${quant.data-update.python-path:python}")
+    @Getter
     private String pythonPath;
     @Value("${quant.data-update.script-dir:scripts}")
     private String scriptDir;

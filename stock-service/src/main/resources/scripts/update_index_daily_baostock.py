@@ -120,14 +120,24 @@ def split_date_ranges_qq(start_date, end_date, months=6):
 
 
 def fetch_index_history_qq(code, market, start_date, end_date):
-    """使用腾讯证券接口获取指数日线数据（Baostock 备用数据源）
-    
-    返回格式与 fetch_index_history 相同:
-    [[date, open, high, low, close, volume, amount, preclose, turn, pctChg], ...]
+    """使用腾讯证券接口获取指数日线数据（Baostock 备用数据源）。
+
+    腾讯 day kline 数组形态（已验证，指数与个股一致）:
+        [date, open, close, high, low, volume(手), {}, turnover_rate, amount(万元), ""]
+    注意:
+        - row[7] 是换手率/换手，不是涨跌幅；腾讯对指数不提供涨跌幅字段。
+        - amount 单位为万元，需 ×10000 转成元以与 Baostock 路径一致。
+        - volume 单位为手(100股)，需 ×100 转成股以与 Baostock 路径一致。
+        - 无 pre_close 字段，需由序列中前一交易日收盘价推导。
+    因此本函数自行计算 pre_close / change_percent / change_amount，
+    避免把换手率当成涨跌幅写库（2026-09-11 事故根因）。
     """
+    from datetime import timedelta as _td
+    # 多取一天前的数据，作为首日 pre_close 的来源
+    req_start = (datetime.strptime(start_date, "%Y-%m-%d") - _td(days=1)).strftime("%Y-%m-%d")
     qq_code = code_to_qq(code, market)
-    ranges = split_date_ranges_qq(start_date, end_date)
-    all_rows = []
+    ranges = split_date_ranges_qq(req_start, end_date)
+    raw = []
 
     for seg_start, seg_end in ranges:
         params = {
@@ -150,27 +160,48 @@ def fetch_index_history_qq(code, market, start_date, end_date):
             rows = stock_data.get('day') or stock_data.get('qfqday') or []
 
             for row in rows:
-                # 腾讯 day 格式: [date, open, close, high, low, volume, {}, pctChg, amount, ...]
-                if not row or not row[0] or not row[2]:
+                # 腾讯 day 格式: [date, open, close, high, low, volume(手), {}, turnover, amount(万元), ...]
+                if not row or len(row) < 9 or not row[0] or not row[2]:
                     continue
-                trade_date = row[0]
-                open_price = row[1]
-                close_price = row[2]
-                high_price = row[3]
-                low_price = row[4]
-                volume = row[5]
-                pct_chg = row[7] if len(row) > 7 and row[7] else ""
-                amount = row[8] if len(row) > 8 and row[8] else "0"
-                # 腾讯接口对指数不提供换手率
-                turn = ""
-
-                all_rows.append([trade_date, open_price, high_price, low_price, close_price,
-                                 volume, amount, "", turn, pct_chg])
+                raw.append({
+                    "trade_date": row[0],
+                    "open": to_float(row[1]),
+                    "close": to_float(row[2]),
+                    "high": to_float(row[3]),
+                    "low": to_float(row[4]),
+                    "volume_hand": to_int(row[5]) or 0,      # 手
+                    "amount_wan": to_float(row[8]) or 0.0,  # 万元
+                    "turn": to_float(row[7]) if len(row) > 7 else None,  # 换手率
+                })
         except Exception as e:
             print(f"    [WARN] 腾讯接口请求失败 {seg_start}~{seg_end}: {e}")
             continue
 
-    return all_rows
+    if not raw:
+        return []
+
+    # 按日期升序排序，便于推导 pre_close
+    raw.sort(key=lambda x: x["trade_date"])
+
+    # 推导 pre_close，并自算 change_percent / change_amount
+    out = []
+    prev_close = None
+    for i, r in enumerate(raw):
+        # 用上一行收盘作为当日 pre_close
+        if i > 0:
+            prev_close = raw[i - 1]["close"]
+        close = r["close"]
+        pre_close = prev_close
+        change_percent = round((close - pre_close) / pre_close * 100, 2) if (pre_close not in (None, 0)) else None
+        volume = r["volume_hand"] * 100           # 手 → 股
+        amount = r["amount_wan"] * 10000.0        # 万元 → 元
+        out.append([r["trade_date"], r["open"], r["high"], r["low"], close,
+                    volume, amount, pre_close, r["turn"], change_percent])
+        prev_close = close
+
+    # 仅返回落在请求区间内的日期（去掉多取的前一天 padding）
+    out = [row for row in out if row[0] >= start_date]
+    return out
 
 
 def fetch_index_history(bs_code, start_date, end_date, max_retries=3):
@@ -248,7 +279,26 @@ def build_row_dict(code, name, market, row):
     }
 
 
-def process_index(db, code, start_date, end_date, force=False):
+def is_unclosed_today(trade_date_str):
+    """判断 trade_date 是否为「当天且尚未收盘」。
+
+    用于防御：在盘中(15:00 前)触发的数据更新会把「盘中快照」当成收盘写库，
+    造成指数/个股日线被污染（本平台 2026-09-11 指数污染事故根因）。
+
+    返回 True 表示该 bar 不应被写入。
+    """
+    try:
+        td = datetime.strptime(trade_date_str, "%Y-%m-%d").date()
+    except Exception:
+        return False
+    today = datetime.now().date()
+    if td != today:
+        return False
+    # 15:00 前视为未收盘
+    return datetime.now().hour < 15
+
+
+def process_index(db, code, start_date, end_date, force=False, refresh_version=False):
     """处理单个指数的数据更新（使用 db_helper）"""
     info = INDEX_MAP.get(code)
     if not info:
@@ -292,10 +342,17 @@ def process_index(db, code, start_date, end_date, force=False):
         print(f"  [{code}] {name} | 无新增数据")
         return 0, 0
 
+    # 防御: 不在盘中写入「当天未收盘」的快照（避免把盘中 bar 当收盘写库）
+    before = len(rows)
+    rows = [r for r in rows if not is_unclosed_today(r[0])]
+    skipped = before - len(rows)
+    if skipped:
+        print(f"  [{code}] {name} | 跳过 {skipped} 条「当天未收盘」的盘中快照")
+
     # 构建 dict 列表，通过 db_helper 写入 index_daily 表（分表存储）
     row_dicts = [build_row_dict(code, name, market, r) for r in rows]
     try:
-        inserted = db.upsert_daily(row_dicts, table="index")
+        inserted = db.upsert_daily(row_dicts, table="index", force=force, refresh_version=refresh_version)
     except Exception as e:
         print(f"    [ERROR] 写入失败: {e}")
         return 0, len(rows)
@@ -394,6 +451,8 @@ def main():
                         help="只更新指定指数代码, 逗号分隔 (如: 000300,000905)")
     parser.add_argument("--force", action="store_true",
                         help="强制全量更新（忽略增量检测，从 --start-date 重新拉取）")
+    parser.add_argument("--refresh-version", action="store_true",
+                        help="用当前时间戳作为版本号写入，确保覆盖旧快照（数据订正/补数时使用）")
     parser.add_argument("--summary", action="store_true",
                         help="只显示指数数据概况, 不执行更新")
 
@@ -449,7 +508,8 @@ def main():
             info = INDEX_MAP[code]
             print(f"  [{i}/{len(codes)}] 处理: {code}.{info[2]} {info[1]}")
 
-            inserted, fetched = process_index(db, code, start_date, end_date, force=args.force)
+            inserted, fetched = process_index(db, code, start_date, end_date,
+                                              force=args.force, refresh_version=args.refresh_version)
             total_inserted += inserted
             total_fetched += fetched
 

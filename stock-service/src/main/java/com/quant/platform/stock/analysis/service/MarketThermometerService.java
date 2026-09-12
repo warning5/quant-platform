@@ -1,5 +1,6 @@
 package com.quant.platform.stock.analysis.service;
 
+import com.quant.platform.dataupdate.DataUpdateExecutionService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -48,6 +49,10 @@ public class MarketThermometerService {
 
     @Value("${quant.data-update.script-dir:scripts}")
     private String scriptDir;
+
+    /** 复用 DataUpdate 统一的脚本目录解析（IDE classpath / jar 提取 ~/.quant-platform/scripts） */
+    @Autowired(required = false)
+    private DataUpdateExecutionService dataUpdateExecutionService;
 
     private String resolvedScriptDir;
 
@@ -392,31 +397,81 @@ public class MarketThermometerService {
             return cachedBondYield;
         }
         try {
-            // 调用专用脚本，完全规避命令行列名编码问题
-            java.io.File scriptFile = new java.io.File(scriptDir, "get_bond_yield_10y.py");
-            if (!scriptFile.isAbsolute()) {
-                scriptFile = java.nio.file.Paths.get(System.getProperty("user.dir"), scriptDir, "get_bond_yield_10y.py").toFile();
+            String scriptPath = resolveBondScriptPath();
+            if (scriptPath == null) {
+                log.warn("国债收益率脚本未找到（已检查 DataUpdate 脚本目录与 classpath），使用缓存/兜底值");
+                return cachedBondYield;
             }
-            ProcessBuilder pb = new ProcessBuilder("python", scriptFile.getAbsolutePath());
+            String pythonBin = (dataUpdateExecutionService != null)
+                    ? dataUpdateExecutionService.getPythonPath() : "python";
+            // 调用专用脚本，完全规避命令行列名编码问题
+            ProcessBuilder pb = new ProcessBuilder(pythonBin, scriptPath);
             pb.environment().put("PYTHONIOENCODING", "utf-8");
             pb.redirectErrorStream(true);
             Process p = pb.start();
-            String output = new String(p.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8).trim();
-            p.waitFor();
-            if (!output.isEmpty() && !output.startsWith("ERROR") && !output.equals("N/A")) {
-                Double val = Double.parseDouble(output);
-                cachedBondYield = val;
-                cachedBondYieldTime = now;
-                log.info("10年国债收益率已缓存: {}%", val);
-                return val;
+            String output = new String(p.getInputStream().readAllBytes(),
+                    java.nio.charset.StandardCharsets.UTF_8).trim();
+            int exitCode = p.waitFor();
+            if (exitCode != 0) {
+                log.warn("国债收益率脚本异常退出(exit={}): {}", exitCode, output);
+                return cachedBondYield;
             }
-            log.warn("国债收益率返回异常: {}", output);
+            if (output.isEmpty() || output.startsWith("ERROR") || output.equals("N/A")) {
+                log.warn("国债收益率返回异常: {}", output);
+                return cachedBondYield;
+            }
+            // 防御性解析：只有纯数字才解析，避免脚本报错文本触发 NumberFormatException
+            // （如 "python: can't open file ..." 被误当数值）
+            if (!output.matches("-?\\d+(\\.\\d+)?")) {
+                log.warn("国债收益率脚本输出非预期数值: {}", output);
+                return cachedBondYield;
+            }
+            Double val = Double.parseDouble(output);
+            // 10年国债收益率历史合理区间约 0.5%~5%，越界直接忽略
+            if (val <= 0 || val > 10) {
+                log.warn("国债收益率取值越界，忽略: {}", val);
+                return cachedBondYield;
+            }
+            cachedBondYield = val;
+            cachedBondYieldTime = now;
+            log.info("10年国债收益率已缓存: {}%", val);
+            return val;
         } catch (Exception e) {
             log.warn("国债收益率获取失败: {}", e.getMessage());
         }
         // 网络失败时保留旧缓存值
         return cachedBondYield;
     }
+
+    /**
+     * 解析 get_bond_yield_10y.py 的绝对路径。
+     * 优先复用 DataUpdateExecutionService 已解析的脚本目录（IDE 模式指向
+     * target/classes/scripts，jar 模式指向 ~/.quant-platform/scripts）；
+     * 缺失时回退到 classpath 资源；最后兜底到 script-dir 配置路径（便于排查）。
+     */
+    private String resolveBondScriptPath() {
+        if (dataUpdateExecutionService != null) {
+            String resolvedDir = dataUpdateExecutionService.getResolvedScriptDir();
+            if (resolvedDir != null) {
+                java.io.File f = new java.io.File(resolvedDir, "get_bond_yield_10y.py");
+                if (f.exists()) {
+                    return f.getAbsolutePath();
+                }
+            }
+        }
+        // classpath 回退（src/main/resources/scripts 或 jar 内）
+        try {
+            var res = getClass().getClassLoader().getResource("scripts/get_bond_yield_10y.py");
+            if (res != null && "file".equals(res.getProtocol())) {
+                return new java.io.File(res.getPath()).getAbsolutePath();
+            }
+        } catch (Exception ignored) {
+            // 回退到配置路径
+        }
+        java.io.File fallback = new java.io.File(scriptDir, "get_bond_yield_10y.py");
+        return fallback.getAbsolutePath();
+    }
+
 
     // ─── 融资余额变化计算 ───────────────────────────────────────────
 

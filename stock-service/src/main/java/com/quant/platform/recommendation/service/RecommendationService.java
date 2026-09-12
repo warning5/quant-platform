@@ -76,7 +76,7 @@ public class RecommendationService {
      * 改用更干净的离散防御：最近 N 个交易日(含当日) detectRegime 全部判为 BEAR 时，
      * 直接暂停当日生成（return 空列表），规避下行，而非在噪声中调参。
      */
-    static final int CONSECUTIVE_BEAR_STOP_DAYS = 3;
+    public static final int CONSECUTIVE_BEAR_STOP_DAYS = 3;
     private final AnalysisService analysisService;
     private final MarketDataService marketDataService;
     private final ClickHouseStockService clickHouseStockService;
@@ -808,6 +808,15 @@ public class RecommendationService {
      */
     private boolean isConsecutiveBear(LocalDate date, int consecutiveDays) {
         return marketRegimeDetector.isConsecutiveBear(date, consecutiveDays);
+    }
+
+    /**
+     * 优化④：连续 BEAR 暂停判断（对外暴露）。
+     * <p>供 {@code ScheduleService} 在每日推荐三层循环之前按日期一次性短路，
+     * 既让 UI/状态能区分"主动暂停"与"成功"，又避免逐策略重复回看 regime 白耗。</p>
+     */
+    public boolean isBearPaused(LocalDate date) {
+        return isConsecutiveBear(date, CONSECUTIVE_BEAR_STOP_DAYS);
     }
 
 
