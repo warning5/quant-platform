@@ -179,8 +179,8 @@ public class ClickHouseSentimentService {
                 // 白名单校验：SQL 拼接前确认表名和日期列名合法
                 validateTableAndColumn(table, getDateColumn(table));
 
-                // 查询记录数
-                String countSql = "SELECT COUNT(*) as cnt FROM " + table;
+                // 查询记录数（FINAL：ReplacingMergeTree 重复执行会累积多版本，取逻辑唯一行）
+                String countSql = "SELECT COUNT(*) as cnt FROM " + table + " FINAL";
                 long count = 0L;
                 try (Connection conn = getConnection();
                      PreparedStatement stmt = conn.prepareStatement(countSql);
@@ -396,8 +396,8 @@ public class ClickHouseSentimentService {
         // 白名单校验
         validateTableAndColumn(table, dateCol);
 
-        // 记录数
-        String countSql = "SELECT COUNT(*) as cnt FROM " + table;
+        // 记录数（FINAL：ReplacingMergeTree 取逻辑唯一行，避免重复执行的版本被重复计数）
+        String countSql = "SELECT COUNT(*) as cnt FROM " + table + " FINAL";
         try (Connection conn = getConnection();
              PreparedStatement stmt = conn.prepareStatement(countSql);
              ResultSet rs = stmt.executeQuery()) {
@@ -422,7 +422,7 @@ public class ClickHouseSentimentService {
         }
 
         // 按日期分布（最近30天）- ClickHouse 语法
-        String dateDistSql = "SELECT toString(" + dateCol + ") as trade_date, COUNT(*) as cnt FROM " + table +
+        String dateDistSql = "SELECT toString(" + dateCol + ") as trade_date, COUNT(*) as cnt FROM " + table + " FINAL" +
                 " WHERE " + dateCol + " >= today() - 30" +
                 " GROUP BY " + dateCol + " ORDER BY " + dateCol + " DESC LIMIT 30";
         try {
@@ -559,8 +559,8 @@ public class ClickHouseSentimentService {
             String dateCol = getDateColumn(table);
             String dateRangeCondition = buildDateRangeCondition(dateCol, startDate, endDate);
 
-            // 记录数（按日期范围）
-            String countSql = "SELECT COUNT(*) as cnt FROM " + table + dateRangeCondition;
+            // 记录数（按日期范围，FINAL 取逻辑唯一行）
+            String countSql = "SELECT COUNT(*) as cnt FROM " + table + " FINAL" + dateRangeCondition;
             Long count = 0L;
             try (Connection conn = getConnection();
                  PreparedStatement stmt = conn.prepareStatement(countSql);
@@ -572,7 +572,7 @@ public class ClickHouseSentimentService {
             // 空值检查（按日期范围）
             List<Map<String, Object>> nullChecks = new ArrayList<>();
             try {
-                String nullCheckSql = "SELECT SUM(CASE WHEN code IS NULL OR code = '' THEN 1 ELSE 0 END) as null_count FROM " + table + dateRangeCondition;
+                String nullCheckSql = "SELECT SUM(CASE WHEN code IS NULL OR code = '' THEN 1 ELSE 0 END) as null_count FROM " + table + " FINAL" + dateRangeCondition;
                 try (Connection conn = getConnection();
                      PreparedStatement stmt = conn.prepareStatement(nullCheckSql);
                      ResultSet rs = stmt.executeQuery()) {
@@ -853,7 +853,7 @@ public class ClickHouseSentimentService {
             String dateRangeCondition = buildDateRangeCondition(dateCol, startDate, endDate);
 
             Map<String, DailyRow> rows = new LinkedHashMap<>();
-            String countSql = "SELECT toString(toDate(" + dateCol + ")) as d, COUNT(*) as cnt FROM " + table +
+            String countSql = "SELECT toString(toDate(" + dateCol + ")) as d, COUNT(*) as cnt FROM " + table + " FINAL" +
                     dateRangeCondition + " GROUP BY toDate(" + dateCol + ") ORDER BY d";
             try (Connection conn = getConnection();
                  PreparedStatement stmt = conn.prepareStatement(countSql);
@@ -868,7 +868,7 @@ public class ClickHouseSentimentService {
 
             try {
                 String nullSql = "SELECT toString(toDate(" + dateCol + ")) as d, " +
-                        "SUM(CASE WHEN code IS NULL OR code = '' THEN 1 ELSE 0 END) as null_count FROM " + table +
+                        "SUM(CASE WHEN code IS NULL OR code = '' THEN 1 ELSE 0 END) as null_count FROM " + table + " FINAL" +
                         dateRangeCondition + " GROUP BY toDate(" + dateCol + ") ORDER BY d";
                 try (Connection conn = getConnection();
                      PreparedStatement stmt = conn.prepareStatement(nullSql);
