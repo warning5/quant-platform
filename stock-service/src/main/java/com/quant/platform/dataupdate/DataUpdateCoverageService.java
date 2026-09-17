@@ -182,7 +182,7 @@ public class DataUpdateCoverageService {
     }
 
     public List<Map<String, Object>> getMissingIndices(LocalDate date) {
-        // 全部 10 个指数，index_daily 中 code 为纯数字格式
+        // 全部 12 个指数（宽基 + 国证2000/成长/价值），index_daily 中 code 为纯数字格式
         List<Map<String, String>> allIndices = List.of(
                 Map.of("code", "000001", "name", "上证指数"),
                 Map.of("code", "000016", "name", "上证50"),
@@ -193,7 +193,9 @@ public class DataUpdateCoverageService {
                 Map.of("code", "000905", "name", "中证500"),
                 Map.of("code", "399001", "name", "深证成指"),
                 Map.of("code", "399006", "name", "创业板指"),
-                Map.of("code", "399303", "name", "国证2000")
+                Map.of("code", "399303", "name", "国证2000"),
+                Map.of("code", "399370", "name", "国证成长"),
+                Map.of("code", "399371", "name", "国证价值")
         );
 
         // 查该日期有数据的指数 code（index_daily 表）

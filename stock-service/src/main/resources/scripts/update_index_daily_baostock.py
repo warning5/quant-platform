@@ -81,6 +81,8 @@ BUILTIN_INDICES = [
     ("399001", "深证成指",     "SZ", "sz.399001"),
     ("399006", "创业板指",     "SZ", "sz.399006"),
     ("399303", "国证2000",     "SZ", "sz.399303"),
+    ("399370", "国证成长",     "SZ", "sz.399370"),
+    ("399371", "国证价值",     "SZ", "sz.399371"),
 ]
 
 # 构建 code -> info 的映射
@@ -204,8 +206,14 @@ def fetch_index_history_qq(code, market, start_date, end_date):
     return out
 
 
-def fetch_index_history(bs_code, start_date, end_date, max_retries=3):
-    """使用 Baostock 获取单个指数的历史行情"""
+def fetch_index_history(bs_code, start_date, end_date, max_retries=3, baostock_ok=True):
+    """使用 Baostock 获取单个指数的历史行情。
+
+    baostock_ok=False 时直接返回空列表，交由调用方走腾讯证券回退，
+    避免 Baostock 被限流/拉黑时仍做无谓重试、拖垮整脚本。
+    """
+    if not baostock_ok:
+        return []
     for attempt in range(1, max_retries + 1):
         try:
             rs = bs.query_history_k_data_plus(
@@ -298,7 +306,7 @@ def is_unclosed_today(trade_date_str):
     return datetime.now().hour < 15
 
 
-def process_index(db, code, start_date, end_date, force=False, refresh_version=False):
+def process_index(db, code, start_date, end_date, force=False, refresh_version=False, baostock_ok=True):
     """处理单个指数的数据更新（使用 db_helper）"""
     info = INDEX_MAP.get(code)
     if not info:
@@ -329,7 +337,7 @@ def process_index(db, code, start_date, end_date, force=False, refresh_version=F
         print(f"  [{code}] {name} | 强制全量, 从 {start_date} 开始")
 
     # 拉取数据
-    rows = fetch_index_history(bs_code, start_date, end_date)
+    rows = fetch_index_history(bs_code, start_date, end_date, baostock_ok=baostock_ok)
     source = "Baostock"
 
     # Baostock 无数据时，尝试腾讯证券接口
@@ -491,12 +499,13 @@ def main():
     print(f"  指数数量: {len(codes)} 个")
     print(f"{'=' * 70}\n")
 
-    # 登录 Baostock
+    # 登录 Baostock（失败不致命：降级到腾讯证券接口，不中断整体更新）
     lg = bs.login()
-    if lg.error_code != "0":
-        print(f"[ERROR] Baostock 登录失败: {lg.error_msg}")
-        return 1
-    print(f"  Baostock 登录成功\n")
+    baostock_ok = (lg.error_code == "0")
+    if baostock_ok:
+        print(f"  Baostock 登录成功\n")
+    else:
+        print(f"[WARN] Baostock 登录失败 ({lg.error_msg})，将降级使用腾讯证券接口作为数据源\n")
 
     db = StockDailyDB()
     total_start = time.time()
@@ -509,7 +518,8 @@ def main():
             print(f"  [{i}/{len(codes)}] 处理: {code}.{info[2]} {info[1]}")
 
             inserted, fetched = process_index(db, code, start_date, end_date,
-                                              force=args.force, refresh_version=args.refresh_version)
+                                              force=args.force, refresh_version=args.refresh_version,
+                                              baostock_ok=baostock_ok)
             total_inserted += inserted
             total_fetched += fetched
 
@@ -519,7 +529,11 @@ def main():
 
     finally:
         db.close()
-        bs.logout()
+        if baostock_ok:
+            try:
+                bs.logout()
+            except Exception:
+                pass
 
     elapsed = time.time() - total_start
     print(f"\n{'=' * 70}")

@@ -117,32 +117,41 @@ def get_baostock_code(code, market):
 def _fetch_single_query(code, market, start_date, end_date, timeout=30):
     """
     单次 Baostock 查询（带超时控制和重登录重试）。
-    返回: DataFrame 或 None
+    同时拉取前复权(adjustflag=2)与不复权(adjustflag=3)两套数据，
+    用于刷新 qfq 价格列的同时保留/补全 unadj 列（避免整行覆盖清空 unadj）。
+    返回: (qfq_df, unadj_df) 或 (None, None)
     """
     import pandas as pd
 
     bs_code = get_baostock_code(code, market)
     if not bs_code:
-        return None
+        return None, None
 
     start_str = start_date.strftime("%Y-%m-%d")
     end_str = end_date.strftime("%Y-%m-%d")
+    FIELDS = "date,code,open,high,low,close,preclose,volume,amount,adjustflag,turn,tradestatus,pctChg,isST,peTTM,pbMRQ"
 
-    def _do_query():
+    def _do_query(adjust):
         rs = bs.query_history_k_data_plus(
             bs_code,
-            "date,code,open,high,low,close,preclose,volume,amount,adjustflag,turn,tradestatus,pctChg,isST,peTTM,pbMRQ",
+            FIELDS,
             start_date=start_str,
             end_date=end_str,
             frequency="d",
-            adjustflag="2",  # 2: 前复权
+            adjustflag=adjust,
         )
         data_list = []
         while (rs.error_code == '0') and rs.next():
             data_list.append(rs.get_row_data())
         return data_list, rs.fields
 
-    max_attempts = 2  # 最多尝试2次（1次正常 + 1次重登录后重试）
+    # 最多尝试 max_attempts 次：覆盖限流空结果 / 超时 / 连接异常。
+    # 关键修复：Baostock 高频查询会静默返回空 DataFrame（不报错），
+    # 旧逻辑直接 return None 当成"无数据"跳过且不重试 → 雪崩式跳过。
+    # 现空结果也纳入重试：退避等待让限流窗口过去后再试（不重登，避免再触发封禁）。
+    max_attempts = 4
+    backoff = [10, 30, 60]  # 第1~3次重试前的退避秒数（拉长以让 Baostock 限流窗口过去）
+
     for attempt in range(max_attempts):
         try:
             result_holder = [None]
@@ -150,7 +159,10 @@ def _fetch_single_query(code, market, start_date, end_date, timeout=30):
 
             def _worker():
                 try:
-                    result_holder[0] = _do_query()
+                    # 前复权(2) + 不复权(3) 一并拉取
+                    qfq_res = _do_query("2")
+                    unadj_res = _do_query("3")
+                    result_holder[0] = (qfq_res, unadj_res)
                 except Exception as e:
                     error_holder[0] = e
 
@@ -161,24 +173,41 @@ def _fetch_single_query(code, market, start_date, end_date, timeout=30):
             if t.is_alive():
                 # 超时：线程仍在后台运行（无法杀掉），必须 re-login
                 if attempt < max_attempts - 1:
-                    print(f"      [TIMEOUT] {code} {start_str}~{end_str} 超时({timeout}s)，重新登录...")
+                    wait = backoff[min(attempt, len(backoff) - 1)]
+                    print(f"      [TIMEOUT] {code} {start_str}~{end_str} 超时({timeout}s)，退避{wait}s后重新登录...")
                     bs_relogin()
+                    time.sleep(wait)
                     continue
                 else:
                     print(f"      [SKIP] {code} {start_str}~{end_str} 超时，跳过此段")
-                    return None
+                    return None, None
 
             if error_holder[0]:
                 raise error_holder[0]
 
-            data_list, fields = result_holder[0]
-            if len(data_list) == 0:
-                return None
+            (qfq_list, qfq_fields), (unadj_list, unadj_fields) = result_holder[0]
+            if len(qfq_list) == 0:
+                # 限流静默返回空：退避等待后重试，不轻易判定为"无数据"
+                if attempt < max_attempts - 1:
+                    wait = backoff[min(attempt, len(backoff) - 1)]
+                    print(f"      [EMPTY] {code} {start_str}~{end_str} 返回空(疑似限流)，退避{wait}s后重试({attempt+1}/{max_attempts})...")
+                    time.sleep(wait)
+                    continue
+                else:
+                    print(f"      [EMPTY] {code} {start_str}~{end_str} 多次为空，判定为无数据")
+                    return None, None
 
-            df = pd.DataFrame(data_list, columns=fields)
-            df['date'] = pd.to_datetime(df['date']).dt.date
-            df = df[df['tradestatus'] == '1']
-            return df
+            qfq_df = pd.DataFrame(qfq_list, columns=qfq_fields)
+            qfq_df['date'] = pd.to_datetime(qfq_df['date']).dt.date
+            qfq_df = qfq_df[qfq_df['tradestatus'] == '1']
+
+            unadj_df = pd.DataFrame(unadj_list, columns=unadj_fields)
+            if len(unadj_df) > 0:
+                unadj_df['date'] = pd.to_datetime(unadj_df['date']).dt.date
+            else:
+                unadj_df = None
+
+            return qfq_df, unadj_df
 
         except Exception as e:
             err_msg = str(e)
@@ -189,20 +218,23 @@ def _fetch_single_query(code, market, start_date, end_date, timeout=30):
                 "has no attribute" in err_msg or
                 "10054" in err_msg or
                 "10060" in err_msg or
+                "10057" in err_msg or
                 "10053" in err_msg or
                 "Connection" in err_msg or
                 "reset" in err_msg.lower()
             )
 
             if should_relogin and attempt < max_attempts - 1:
-                print(f"      [RETRY] {code} {start_str}~{end_str} Baostock错误({err_msg[:40]})，重新登录...")
+                wait = backoff[min(attempt, len(backoff) - 1)]
+                print(f"      [RETRY] {code} {start_str}~{end_str} Baostock错误({err_msg[:40]})，退避{wait}s后重新登录...")
                 bs_relogin()
+                time.sleep(wait)
                 continue
             else:
                 print(f"      [SKIP] {code} {start_str}~{end_str} 失败: {err_msg[:40]}")
-                return None
+                return None, None
 
-    return None
+    return None, None
 
 
 def fetch_stock_history(code, market, start_date, end_date, timeout=30, chunk_years=3):
@@ -229,28 +261,44 @@ def fetch_stock_history(code, market, start_date, end_date, timeout=30, chunk_ye
 
     print(f"    [CHUNK] {code} 分 {len(chunks)} 块拉取 ({start_date} ~ {end_date})")
 
-    all_dfs = []
+    all_qfq, all_unadj = [], []
     for i, (chunk_start, chunk_end) in enumerate(chunks):
-        df = _fetch_single_query(code, market, chunk_start, chunk_end, timeout)
-        if df is not None and len(df) > 0:
-            all_dfs.append(df)
+        qdf, udf = _fetch_single_query(code, market, chunk_start, chunk_end, timeout)
+        if qdf is not None and len(qdf) > 0:
+            all_qfq.append(qdf)
+        if udf is not None and len(udf) > 0:
+            all_unadj.append(udf)
         if i < len(chunks) - 1:
-            time.sleep(0.1)  # 块间延迟
+            time.sleep(1.0)  # 块间延迟（降频避免触发 Baostock 限流）
 
-    if not all_dfs:
-        return None
+    if not all_qfq:
+        return None, None
 
-    result = pd.concat(all_dfs, ignore_index=True)
-    failed_chunks = len(chunks) - len(all_dfs)
+    qfq_result = pd.concat(all_qfq, ignore_index=True)
+    unadj_result = pd.concat(all_unadj, ignore_index=True) if all_unadj else None
+    failed_chunks = len(chunks) - len(all_qfq)
     if failed_chunks > 0:
-        print(f"    [CHUNK] {code} {len(chunks)}块中成功{len(all_dfs)}块失败{failed_chunks}块，共{len(result)}条")
-    return result
+        print(f"    [CHUNK] {code} {len(chunks)}块中成功{len(all_qfq)}块失败{failed_chunks}块，共{len(qfq_result)}条")
+    return qfq_result, unadj_result
 
 
-def build_daily_rows(db, code, name, market, df):
-    """将 Baostock DataFrame 转换为 upsert_daily 需要的 row list。"""
+def build_daily_rows(db, code, name, market, df, unadj_df=None):
+    """将 Baostock DataFrame 转换为 upsert_daily 需要的 row list。
+    unadj_df: 不复权(adjustflag=3) 数据，用于补全 unadj 四列，避免整行覆盖清空。"""
     if df is None or len(df) == 0:
         return []
+
+    # 不复权价按日期建索引：date -> (open, high, low, close)
+    unadj_map = {}
+    if unadj_df is not None and len(unadj_df) > 0:
+        for _, u in unadj_df.iterrows():
+            ud = u['date']
+            unadj_map[ud] = (
+                to_float(u['open']),
+                to_float(u['high']),
+                to_float(u['low']),
+                to_float(u['close']),
+            )
 
     first_date = df.iloc[0]['date']
     prev_close = db.get_prev_close(code, first_date)
@@ -282,6 +330,13 @@ def build_daily_rows(db, code, name, market, df):
         else:
             change_amount = None
 
+        # 不复权价（按日期匹配；不匹配则留空，交由 CH 已有值兜底）
+        u = unadj_map.get(row['date'])
+        open_unadj = u[0] if u else None
+        high_unadj = u[1] if u else None
+        low_unadj = u[2] if u else None
+        close_unadj = u[3] if u else None
+
         rows.append({
             "code": code,
             "name": name,
@@ -290,6 +345,10 @@ def build_daily_rows(db, code, name, market, df):
             "close_price": close_price,
             "high_price": to_float(row['high']),
             "low_price": to_float(row['low']),
+            "open_unadj": open_unadj,
+            "high_unadj": high_unadj,
+            "low_unadj": low_unadj,
+            "close_unadj": close_unadj,
             "pre_close": pre_close_val,
             "volume": to_int(row['volume']),
             "amount": to_float(row['amount']),
@@ -352,20 +411,37 @@ def get_stock_info(db, code):
         return None
 
 
+def read_code_file(path):
+    """读取代码清单文件：支持每行一个纯代码，或 CSV(含 'code' 列)。"""
+    import csv
+    with open(path, "r", encoding="utf-8") as f:
+        lines = [ln.strip() for ln in f.read().splitlines() if ln.strip()]
+    if not lines:
+        return []
+    if lines[0].lower().startswith("code"):
+        reader = csv.DictReader(lines)
+        codes = [(row.get("code") or "").strip() for row in reader]
+    else:
+        codes = lines
+    return [c for c in codes if c]
+
+
 def main():
     parser = argparse.ArgumentParser(description="前复权因子刷新: 重新拉取除权股票的历史qfq数据")
     parser.add_argument("--days", type=int, default=7,
                        help="查找最近N天内除权除息的股票 (默认: 7)")
     parser.add_argument("--code", type=str,
                        help="只刷新指定股票 (测试用, 格式: 纯数字代码)")
+    parser.add_argument("--code-file", type=str,
+                       help="从文件读取代码清单批量刷新 (每行一个code, 或CSV含'code'列; 自动跳过非沪深)")
     parser.add_argument("--start-date", type=str, default=None,
                        help="历史数据起始日期 (默认: 股票上市日)")
     parser.add_argument("--end-date", type=str, default=None,
                        help="历史数据结束日期 (默认: 今天)")
     parser.add_argument("--max-stocks", type=int, default=None,
                        help="单次最多处理股票数 (默认: 无限制)")
-    parser.add_argument("--delay", type=float, default=0.1,
-                       help="股票间延迟秒数 (默认: 0.1)")
+    parser.add_argument("--delay", type=float, default=0.5,
+                       help="股票间延迟秒数 (默认: 0.5，降频避免触发 Baostock 限流)")
     parser.add_argument("--timeout", type=int, default=30,
                        help="单只股票单次请求超时秒数 (默认: 30)")
     parser.add_argument("--chunk-years", type=int, default=3,
@@ -398,6 +474,11 @@ def main():
                 print(f"[ERROR] {args.code} 市场={market}, Baostock仅支持沪深")
                 return
             stocks_to_refresh = [(args.code, info.get('name', ''), market, None)]
+        elif args.code_file:
+            # 代码清单批量模式
+            codes = read_code_file(args.code_file)
+            print(f"\n[1/3] 从文件读取到 {len(codes)} 个代码，开始批量刷新 (自动跳过非沪深)...")
+            stocks_to_refresh = [(c, '', '', None) for c in codes]
         else:
             # 查询近期除权除息股票
             print(f"\n[1/3] 查询最近 {args.days} 天内除权除息的股票...")
@@ -420,11 +501,16 @@ def main():
             print("[ERROR] Baostock 登录失败")
             return
         print("Baostock 登录成功")
+        print("  静默 30s 等待 Baostock 限流窗口冷却...")
+        time.sleep(30)
 
         total = len(stocks_to_refresh)
         total_refreshed = 0
         total_failed = 0
         failed_stocks = []
+        consecutive_fail = 0  # 连续失败计数：达阈值强制重新登录 Baostock（修复 socket 掉线后无限 skip）
+        success_since_login = 0  # 距上次登录的成功计数：达阈值主动重连保活
+        RELOGIN_EVERY = 20  # 卫生级主动重连（socket 实际约7次查询后才死，主要靠看门狗自愈，降低频繁重登触发封禁的风险）
 
         for i, (code, name, market, ex_date) in enumerate(stocks_to_refresh):
             pct = (i + 1) * 100 // total
@@ -435,6 +521,16 @@ def main():
             else:
                 eta_str = "ETA --"
             print(f"\n  [{i+1}/{total}] ({pct}%) {code} {name} (ex_date={ex_date}) [{eta_str}]")
+
+            # code-file 模式下 market 为空，需查库补全；非沪深则跳过
+            if not market:
+                _info = get_stock_info(db, code)
+                market = _info.get('market', '') if _info else ''
+            if market not in ('SH', 'SZ'):
+                print(f"    [SKIP] {code} 市场={market} 非沪深, Baostock不支持, 跳过")
+                total_failed += 1
+                failed_stocks.append(code)
+                continue
 
             # 确定起始日期：从上市日开始拉取（qfq因子是retroactive全量更新的）
             if explicit_start:
@@ -452,33 +548,60 @@ def main():
                     fetch_start = date(1990, 1, 1)
 
             try:
-                df = fetch_stock_history(code, market, fetch_start, end_date,
+                df, unadj_df = fetch_stock_history(code, market, fetch_start, end_date,
                                          timeout=args.timeout, chunk_years=args.chunk_years)
                 if df is None or len(df) == 0:
                     print(f"    [WARN] 未获取到数据，跳过")
                     total_failed += 1
                     failed_stocks.append(code)
+                    consecutive_fail += 1
+                    if consecutive_fail >= 3:
+                        print(f"    [WATCHDOG] 连续 {consecutive_fail} 次失败，强制重新登录 Baostock 以恢复断线...")
+                        bs_relogin()
+                        consecutive_fail = 0
                     continue
 
-                rows = build_daily_rows(db, code, name, market, df)
+                rows = build_daily_rows(db, code, name, market, df, unadj_df)
                 if not rows:
                     print(f"    [WARN] 转换后无数据，跳过")
                     total_failed += 1
                     failed_stocks.append(code)
+                    consecutive_fail += 1
+                    if consecutive_fail >= 3:
+                        print(f"    [WATCHDOG] 连续 {consecutive_fail} 次失败，强制重新登录 Baostock 以恢复断线...")
+                        bs_relogin()
+                        consecutive_fail = 0
                     continue
 
                 inserted = db.upsert_daily(rows, force=True, refresh_version=True)
                 total_refreshed += inserted
                 print(f"    [OK] 刷新 {inserted} 条历史记录 (date: {rows[0]['trade_date']} ~ {rows[-1]['trade_date']})")
+                consecutive_fail = 0  # 成功即清零连续失败计数
+                success_since_login += 1
+                if success_since_login >= RELOGIN_EVERY:
+                    print(f"    [KEEPALIVE] 已成功 {success_since_login} 只，主动重新登录 Baostock 保持连接...")
+                    bs_relogin()
+                    success_since_login = 0
+                consecutive_fail = 0
 
             except TimeoutError:
                 print(f"    [ERROR] 请求超时，跳过")
                 total_failed += 1
                 failed_stocks.append(code)
+                consecutive_fail += 1
+                if consecutive_fail >= 3:
+                    print(f"    [WATCHDOG] 连续 {consecutive_fail} 次失败，强制重新登录 Baostock 以恢复断线...")
+                    bs_relogin()
+                    consecutive_fail = 0
             except Exception as e:
                 print(f"    [ERROR] 刷新失败: {e}")
                 total_failed += 1
                 failed_stocks.append(code)
+                consecutive_fail += 1
+                if consecutive_fail >= 3:
+                    print(f"    [WATCHDOG] 连续 {consecutive_fail} 次失败，强制重新登录 Baostock 以恢复断线...")
+                    bs_relogin()
+                    consecutive_fail = 0
 
             if args.delay > 0 and i < len(stocks_to_refresh) - 1:
                 time.sleep(args.delay)

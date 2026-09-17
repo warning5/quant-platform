@@ -1481,7 +1481,7 @@ function DataUpdate() {
             <Col span={4}>
               <Statistic title="指数数量"
                 value={indexCoverage?.indexCount || 0}
-                suffix={`/ 10`}
+                suffix={`/ 42`}
                 valueStyle={{ fontSize: 16, color: '#1677ff' }}
                 prefix={<LineChartOutlined />} />
             </Col>
@@ -1496,7 +1496,7 @@ function DataUpdate() {
             </Col>
             <Col span={7}>
               <Statistic title="数据来源"
-                formatter={() => <Text style={{ fontSize: 13 }}>Baostock</Text>}
+                formatter={() => <Text style={{ fontSize: 13 }}>宽基/国证 Baostock(降级腾讯) + 申万 AKShare</Text>}
                 valueStyle={{ fontSize: 13 }} />
             </Col>
             {isRunning && (
@@ -1537,7 +1537,7 @@ function DataUpdate() {
               <Col>
                 <span style={{ lineHeight: '32px', color: 'var(--text-secondary)', fontSize: 13 }}>
                   <PieChartOutlined style={{ marginRight: 4 }} />
-                  更新沪深300、上证50、中证500等 10 个主要指数日线数据
+                  默认更新全部 42 个指数：12 个宽基/国证（沪深300、上证50、中证500、国证成长/价值等）+ 30 个申万行业；不选日期 = 自动增量（按各指数最新日期续接）
                 </span>
               </Col>
             </Row>

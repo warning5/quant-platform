@@ -12,7 +12,7 @@ DB 反查 / 相邻行推导 preclose / pctChg / tradestatus。
 特点:
     - 无需登录，无 IP 黑名单风险
     - 覆盖沪深 + 北交所全市场
-    - 前复权数据有 640 交易日上限（~2.5年），不支持全历史回刷
+    - 前复权单次请求有 640 交易日上限（~2.5年），已通过向前分块回溯支持更长区间
     - PE/PB 仅有当前快照值，不支持历史每日序列
     - 支持多进程并行（无全局 socket 限制）
     - 科创板 688/689 volume 单位为"股"，其余为"手"需×100
@@ -57,6 +57,14 @@ def _qq_parse_float(s):
     try:
         v = float(s)
         return v if v != 0.0 else None
+    except (ValueError, TypeError):
+        return None
+
+
+def _parse_date_str(s) -> Optional[date]:
+    """把腾讯日期字符串 'YYYY-MM-DD' 解析为 date，失败返回 None。"""
+    try:
+        return datetime.strptime(s, "%Y-%m-%d").date()
     except (ValueError, TypeError):
         return None
 
@@ -152,14 +160,38 @@ class TencentDataProvider(DataProvider):
         """
         查询历史日线数据，返回标准化 DataFrame。
 
-        腾讯接口限制:
-            - 最多返回 640 个交易日（~2.5年）
-            - 如果 start_date 超出 640 天范围，只返回可用的部分
+        腾讯接口限制与处理:
+            - 单次请求最多返回 640 个交易日（~2.5年），且以 end_date 为锚点向前取
+            - 若请求区间超过 640 交易日，本方法会向前分块回溯（每块 ≤640 日），
+              拼接覆盖完整区间，避免早期数据被静默截断
             - PE/PB 仅有当前快照值，所有日期填同一个值
         """
-        raw_rows = self._fetch_kline(code, market, start_date, end_date, adjustflag)
+        # 腾讯单次请求只返回"截至 end_date 的最近 640 个交易日"，忽略起始日期。
+        # 对超长区间向前分块回溯，拼接覆盖完整范围，避免早期数据被截断。
+        raw_rows = []
+        _seen = set()
+        _cursor_end = end_date
+        for _ in range(20):  # 上限 20 块 ≈ 12800 交易日，远超任何股票历史
+            _chunk = self._fetch_kline(code, market, start_date, _cursor_end, adjustflag)
+            if not _chunk:
+                break
+            _chunk_min = None
+            for _r in _chunk:
+                _ds = _r[0]
+                if _ds in _seen:
+                    continue
+                _seen.add(_ds)
+                raw_rows.append(_r)
+                _dd = _parse_date_str(_ds)
+                if _dd is not None and (_chunk_min is None or _dd < _chunk_min):
+                    _chunk_min = _dd
+            if _chunk_min is None or _chunk_min <= start_date:
+                break
+            _cursor_end = _chunk_min - timedelta(days=1)
+            time.sleep(0.1)
         if not raw_rows:
             return None
+        raw_rows.sort(key=lambda r: _parse_date_str(r[0]) or date.min)
 
         # 转为 DataFrame（腾讯返回列数可能不同：通常10列，部分股票11列）
         # 已知列位置: 0=date, 1=open, 2=close, 3=high, 4=low,
@@ -183,12 +215,13 @@ class TencentDataProvider(DataProvider):
         if len(df) == 0:
             return None
 
-        # ── 检查是否超出 640 天限制 ──
+        # ── 检查是否仍有缺口（已分块回溯，仅真实大缺口才告警，避免周末等非交易日起始日误报）──
         oldest_available = df['date'].min()
-        if oldest_available > start_date:
+        gap_days = (oldest_available - start_date).days
+        if gap_days > 7:
             warnings.warn(
-                f"[Tencent] {code} 请求起始 {start_date} 超出腾讯640日上限，"
-                f"实际最早 {oldest_available}（缺少 {start_date} ~ {oldest_available} 数据）"
+                f"[Tencent] {code} 请求起始 {start_date} 实际最早 {oldest_available}"
+                f"（缺少约 {gap_days} 天数据，可能超出腾讯可回溯范围或该股票当时未上市）"
             )
 
         # ── 构造标准化列 ──

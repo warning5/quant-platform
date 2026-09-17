@@ -201,7 +201,11 @@ class StockDailyDB:
 
         if self.backend == "clickhouse":
             import clickhouse_connect
-            self.ch_client = clickhouse_connect.get_client(**CLICKHOUSE_CONFIG)
+            import urllib3
+            # 禁用 HTTP 连接复用：clickhouse_connect 1.8.x + CH 26.5.1 在 keep-alive
+            # 复用连接上发第二条请求会返回 404 (There is no handle)，每条请求新建连接即可规避
+            _pool = urllib3.PoolManager(maxsize=0)
+            self.ch_client = clickhouse_connect.get_client(**CLICKHOUSE_CONFIG, pool_mgr=_pool)
         else:
             import pymysql
             self.mysql_conn = pymysql.connect(

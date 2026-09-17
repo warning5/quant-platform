@@ -70,7 +70,7 @@ SHENWAN_L1 = [
     ("801260", "DefenseMilitary", "国防军工",  True),
     ("801270", "Computer",       "计算机",    True),
     ("801280", "Media",          "传媒",      True),
-    ("801300", "Telecom",        "通信",      False),  # moved to 801770
+    ("801300", "Telecom",        "通信",      True),   # akshare 仍持续提供 801300（实测 2026-09-17 有数据）
     ("801330", "Automobile",     "汽车",      False),  # moved to 801880
     # ---- New codes (2021 Shenwan revision) ----
     ("801710", "BuildingMaterials", "建筑材料", True),

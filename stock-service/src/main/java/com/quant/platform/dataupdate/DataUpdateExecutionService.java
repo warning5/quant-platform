@@ -559,15 +559,33 @@ public class DataUpdateExecutionService {
             List<String> cmd = scriptService.buildCommand(request);
 
             if ("INDEX".equals(updateType)) {
-                // 指数日线：单次执行 update_index_daily_baostock.py
-                task.setTotalStocks(10); // 10个指数
+                // 指数日线：先跑宽基/国证(update_index_daily_baostock.py, Baostock 失效自动降级腾讯, 含 399370/399371)，
+                // 再串申万行业指数(update_shenwan_index.py, akshare, 含 801300)，覆盖全部指数日线
+                task.setTotalStocks(42);
                 task.setCurrentStep("指数日线");
                 broadcastStatus(task);
                 boolean indexOk = runSingleScript(taskId, task, cmd, "指数日线");
+                if (JobStatus.CANCELLED == task.getStatus()) return;
+
+                List<String> swCmd = new ArrayList<>();
+                swCmd.add(pythonPath);
+                swCmd.add("-u");
+                swCmd.add("update_shenwan_index.py");
+                String idxS1 = request.getStartDate();
+                String idxE1 = request.getEndDate();
+                if (idxS1 != null && !idxS1.isEmpty()) { swCmd.add("--start-date"); swCmd.add(idxS1); }
+                if (idxE1 != null && !idxE1.isEmpty()) { swCmd.add("--end-date"); swCmd.add(idxE1); }
+                if (request.isForce()) swCmd.add("--force");
+                task.setCurrentStep("指数日线 · 申万行业指数");
+                broadcastStatus(task);
+                boolean swOk = runSingleScript(taskId, task, swCmd, "申万行业指数");
+                if (JobStatus.CANCELLED == task.getStatus()) return;
+
                 if (JobStatus.CANCELLED != task.getStatus()) {
-                    task.setStatus(indexOk ? JobStatus.SUCCESS : JobStatus.FAILED);
+                    boolean ok = indexOk && swOk;
+                    task.setStatus(ok ? JobStatus.SUCCESS : JobStatus.FAILED);
                     task.setProgress(100);
-                    task.setCurrentStep(indexOk ? "更新完成" : "更新失败");
+                    task.setCurrentStep(ok ? "更新完成" : "更新失败");
                 }
             } else if ("DIVIDEND".equals(updateType)) {
                 // 分红除权：单次执行 update_dividend_baostock.py
@@ -1030,7 +1048,7 @@ public class DataUpdateExecutionService {
             broadcastLog(taskId, "\n========== 指数日线 ==========");
             task.setCurrentStep("指数日线");
             task.setProcessedStocks(0);
-            task.setTotalStocks(10); // 10个指数
+            task.setTotalStocks(42); // 宽基/国证 + 申万行业, 约 42 个指数
             task.setProgress(0);
             broadcastStatus(task);
 
@@ -1059,6 +1077,19 @@ public class DataUpdateExecutionService {
 
             boolean indexOk = runSingleScript(taskId, task, indexCmd, "指数日线");
             if (!indexOk) allSuccess = false;
+
+            // 串申万行业指数(含 801300 等申万一级), 与宽基/国证合并即为"全部指数日线"
+            List<String> swCmd = new ArrayList<>();
+            swCmd.add(pythonPath);
+            swCmd.add("-u");
+            swCmd.add("update_shenwan_index.py");
+            if (idxStart != null && !idxStart.isEmpty()) { swCmd.add("--start-date"); swCmd.add(idxStart); }
+            if (idxEnd != null && !idxEnd.isEmpty()) { swCmd.add("--end-date"); swCmd.add(idxEnd); }
+            if (request.isForce()) swCmd.add("--force");
+            task.setCurrentStep("指数日线 · 申万行业指数");
+            broadcastStatus(task);
+            boolean swOk = runSingleScript(taskId, task, swCmd, "申万行业指数");
+            if (!swOk) allSuccess = false;
         }
 
         // ─── 先翻终态：数据脚本已落盘，不让 OPTIMIZE 阻塞状态翻转 ───────
