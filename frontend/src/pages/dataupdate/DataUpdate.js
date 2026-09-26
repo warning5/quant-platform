@@ -502,6 +502,10 @@ function DataUpdate() {
   const [missingIndexLoading, setMissingIndexLoading] = useState(false);
 
   const handleCheckMissingIndices = async () => {
+    if (missingIndexDate && !isTradingDay(missingIndexDate)) {
+      message.warning(`${missingIndexDate.format('YYYY-MM-DD')} 是非交易日（节假日/周末），无指数日线数据`);
+      return;
+    }
     setMissingIndexLoading(true);
     try {
       const dateStr = missingIndexDate.format('YYYY-MM-DD');
@@ -547,6 +551,10 @@ function DataUpdate() {
   const [missingPageSize, setMissingPageSize] = useState(50);
 
   const handleCheckMissing = async () => {
+    if (missingDate && !isTradingDay(missingDate)) {
+      message.warning(`${missingDate.format('YYYY-MM-DD')} 是非交易日（节假日/周末），无日线数据`);
+      return;
+    }
     setMissingLoading(true);
     try {
       const dateStr = missingDate.format('YYYY-MM-DD');
@@ -1297,6 +1305,7 @@ function DataUpdate() {
 
   const isTradingDay = (date) => {
     if (!date || !date.isValid()) return true;
+    if (sentimentTradingDates.length === 0) return true; // 日历未加载时不拦截
     return sentimentTradingDates.includes(date.format('YYYY-MM-DD'));
   };
 
@@ -1335,17 +1344,28 @@ function DataUpdate() {
     if (activeTab === 'BIDASK') fetchBidaskCoverage();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 加载交易日历，并默认最近7个交易日
+  // 加载交易日历（完整性检查等 Tab 也需要判断交易日），并默认最近7个交易日
   useEffect(() => {
-    if (activeTab !== 'SENTIMENT') return;
     const loadTradingDates = async () => {
       setSentimentTradingDatesLoading(true);
       try {
         const end = dayjs().add(1, 'year');
-        const start = dayjs().subtract(3, 'year');
+        const start = dayjs().subtract(10, 'year');
         const res = await calendarApi.getTradingDatesBetween(start.format('YYYY-MM-DD'), end.format('YYYY-MM-DD'));
         const dates = (res?.dates || []).map(d => d.toString());
         setSentimentTradingDates(dates);
+        // 默认检查日期：18:00 后且今天是交易日→今天，否则最近一个已收盘交易日（以日历为准，兜底工作日猜测）
+        if (dates.length > 0) {
+          const todayStr = dayjs().format('YYYY-MM-DD');
+          const after18 = dayjs().hour() >= 18;
+          const def = (after18 && dates.includes(todayStr))
+            ? todayStr
+            : [...dates].reverse().find(d => d < todayStr);
+          if (def) {
+            setMissingDate(dayjs(def));
+            setMissingIndexDate(dayjs(def));
+          }
+        }
         if (dates.length > 0 && !sentimentValidateDateRange?.[0]) {
           const last7 = dates.slice(-7);
           if (last7.length >= 2) {
@@ -1361,7 +1381,7 @@ function DataUpdate() {
       }
     };
     loadTradingDates();
-  }, [activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 情绪数据校验面板默认自动加载一次
   useEffect(() => {
@@ -1411,7 +1431,11 @@ function DataUpdate() {
               </Col>
               <Col>
                 <Form.Item name="dateRange" label="日期范围" tooltip="不选则默认更新最近3天">
-                  <RangePicker placeholder={['开始日期', '结束日期']} />
+                  <RangePicker placeholder={['开始日期', '结束日期']}
+                    disabledDate={(current) => {
+                      if (!current || current.isAfter(dayjs().endOf('day'))) return true;
+                      return !isTradingDay(current);
+                    }} />
                 </Form.Item>
               </Col>
             </Row>
@@ -1531,7 +1555,11 @@ function DataUpdate() {
             <Row gutter={[16, 12]} style={{ width: '100%' }}>
               <Col>
                 <Form.Item name="dateRange" label="日期范围" tooltip="不选则自动检测起始日期">
-                  <RangePicker placeholder={['开始日期', '结束日期']} />
+                  <RangePicker placeholder={['开始日期', '结束日期']}
+                    disabledDate={(current) => {
+                      if (!current || current.isAfter(dayjs().endOf('day'))) return true;
+                      return !isTradingDay(current);
+                    }} />
                 </Form.Item>
               </Col>
               <Col>
@@ -2142,7 +2170,11 @@ function DataUpdate() {
             <Row gutter={[16, 12]} style={{ width: '100%' }} align="middle">
               <Col>
                 <Form.Item name="dateRange" label="日期范围" tooltip="不选则默认最近7天">
-                  <RangePicker placeholder={['开始日期', '结束日期']} />
+                  <RangePicker placeholder={['开始日期', '结束日期']}
+                    disabledDate={(current) => {
+                      if (!current || current.isAfter(dayjs().endOf('day'))) return true;
+                      return !isTradingDay(current);
+                    }} />
                 </Form.Item>
               </Col>
               <Col>
@@ -2490,7 +2522,10 @@ function DataUpdate() {
               setSentimentValidateDateRange(dates);
               setSentimentValidateQuickDate('custom');
             }}
-            disabledDate={(date) => !isTradingDay(date)}
+            disabledDate={(date) => {
+              if (!date || date.isAfter(dayjs().endOf('day'))) return true;
+              return !isTradingDay(date);
+            }}
             placeholder={['开始日期', '结束日期']}
             style={{ width: 240 }}
           />
@@ -2622,7 +2657,11 @@ function DataUpdate() {
             <Row gutter={[12, 12]} style={{ width: '100%' }}>
               <Col>
                 <Form.Item name="dateRange" label="日期范围">
-                  <RangePicker size="small" />
+                  <RangePicker size="small"
+                    disabledDate={(current) => {
+                      if (!current || current.isAfter(dayjs().endOf('day'))) return true;
+                      return !isTradingDay(current);
+                    }} />
                 </Form.Item>
               </Col>
               <Col>
@@ -2767,7 +2806,8 @@ function DataUpdate() {
             <Row gutter={[16, 12]} style={{ width: '100%' }}>
               <Col>
                 <Form.Item name="dateRange" label="日期范围">
-                  <RangePicker size="small" />
+                  <RangePicker size="small"
+                    disabledDate={(current) => current && current.isAfter(dayjs().endOf('day'))} />
                 </Form.Item>
               </Col>
               <Col>
@@ -2971,8 +3011,8 @@ function DataUpdate() {
           <Text>检查日期:</Text>
           <DatePicker value={missingIndexDate} onChange={d => setMissingIndexDate(d)}
             disabledDate={(current) => {
-              // 只限制不能选未来日期，不限制必须是交易日
-              return current && current.isAfter(dayjs().endOf('day'));
+              if (!current || current.isAfter(dayjs().endOf('day'))) return true;
+              return !isTradingDay(current);
             }}
             allowClear={false} style={{ marginLeft: 8, width: 140 }} />
         </Col>
@@ -3012,8 +3052,9 @@ function DataUpdate() {
           <Text>检查日期:</Text>
           <DatePicker value={missingDate} onChange={d => setMissingDate(d)}
             disabledDate={(current) => {
-              // 只限制不能选未来日期
-              return current && current.isAfter(dayjs().endOf('day'));
+              // 不能选未来日期；交易日历已加载时同时禁用非交易日
+              if (!current || current.isAfter(dayjs().endOf('day'))) return true;
+              return !isTradingDay(current);
             }}
             allowClear={false} style={{ marginLeft: 8, width: 140 }} />
         </Col>
@@ -3083,7 +3124,10 @@ function DataUpdate() {
         <Col>
           <Text>日期跨度:</Text>
           <RangePicker value={missingRange} onChange={d => setMissingRange(d)}
-            disabledDate={(current) => current && current.isAfter(dayjs().endOf('day'))}
+            disabledDate={(current) => {
+              if (!current || current.isAfter(dayjs().endOf('day'))) return true;
+              return !isTradingDay(current);
+            }}
             style={{ marginLeft: 8 }} />
         </Col>
         <Col>
